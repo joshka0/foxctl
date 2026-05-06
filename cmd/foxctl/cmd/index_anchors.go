@@ -158,6 +158,7 @@ type anchorOccurrenceReport struct {
 	EvidenceAuthority      string                                 `json:"evidence_authority"`
 	PermittedUse           []string                               `json:"permitted_use"`
 	InstructionEligible    bool                                   `json:"instruction_eligible"`
+	IndexingNote           string                                 `json:"indexing_note,omitempty"`
 	Findings               []semanticanchors.Finding              `json:"findings,omitempty"`
 }
 
@@ -209,8 +210,19 @@ func explainAnchorOccurrence(ctx context.Context, policy semanticanchors.AnchorP
 		EvidenceAuthority:      "evidence_only",
 		PermittedUse:           []string{"retrieval_ranking", "review_signal"},
 		InstructionEligible:    false,
+		IndexingNote:           anchorIndexingNote(occ, res),
 		Findings:               occ.Findings,
 	}
+}
+
+func anchorIndexingNote(occ semanticanchors.AnchorOccurrence, res semanticanchors.AnchorResolution) string {
+	if occ.Type == semanticanchors.AnchorTypeBeacon {
+		return "beacon anchors are advisory recall hints and are not indexed as semantic graph edges"
+	}
+	if res.EdgeAction == semanticanchors.AnchorEdgeNone && occ.OwnerBinding.OwnerNodeID == "" {
+		return "semantic graph edge not emitted because the anchor owner is unbound"
+	}
+	return ""
 }
 
 func anchorSourcePaths(workspace, onlyPath string) ([]string, error) {

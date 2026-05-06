@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/codefilter"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/semanticanchors"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
 	"github.com/joshka0/foxctl/internal/storage"
 )
@@ -329,6 +331,63 @@ func TestBuildCodeDocumentsCanIncludeCoChangeInEmbeddingTextExplicitly(t *testin
 	}
 	if len(provider.requests) != 1 || !provider.requests[0].IncludeCoChangeNeighborsInEnvelope {
 		t.Fatalf("provider did not receive explicit cochange flag: %#v", provider.requests)
+	}
+}
+
+func TestSemanticEnvelopeDigestTracksStableAnchorContractParts(t *testing.T) {
+	base := SemanticEnvelopeBits{
+		ProviderVersion: "semantic-anchors-v1",
+		TextSections: []EnvelopeSection{
+			{Name: "test_target", Text: "internal/intelligence/searchindex/build_code_test.go#TestBuildCodeDocumentsAppliesSemanticEnvelopeProvider"},
+			{Name: "doc_target", Text: "docs/plans/features/semantic-code-anchors.md#Remaining Work"},
+		},
+		DigestParts: []string{
+			"anchor:repo:protocol:semantic-envelope-retrieval-evidence",
+			"IMPLEMENTS_PROTOCOL",
+			"cap:include_cochange_text=false",
+		},
+	}
+	doc := applySemanticEnvelope(Document{SearchText: "base"}, base, BuildCodeOptions{})
+	envelope, ok := doc.Metadata[metadataKeySemanticEnvelope].(map[string]any)
+	if !ok {
+		t.Fatalf("missing semantic envelope metadata: %#v", doc.Metadata)
+	}
+	digest, _ := envelope["digest"].(string)
+	if !strings.HasPrefix(digest, "sha256:") {
+		t.Fatalf("digest=%q", digest)
+	}
+	if envelope["provider_version"] != "semantic-anchors-v1" {
+		t.Fatalf("provider_version=%#v", envelope["provider_version"])
+	}
+	if envelope["include_cochange_text"] != false || envelope["cochange_metadata_only"] != true {
+		t.Fatalf("unexpected cochange flags: %#v", envelope)
+	}
+	if sections := envelopeTextSectionsFromMetadata(doc.Metadata); len(sections) != 2 {
+		t.Fatalf("sections=%#v want doc/test sections", sections)
+	}
+
+	changedProvider := base
+	changedProvider.ProviderVersion = "semantic-anchors-v2"
+	changedDoc := applySemanticEnvelope(Document{SearchText: "base"}, changedProvider, BuildCodeOptions{})
+	changedEnvelope := changedDoc.Metadata[metadataKeySemanticEnvelope].(map[string]any)
+	if changedEnvelope["digest"] == digest {
+		t.Fatal("digest did not change after provider version changed")
+	}
+
+	changedCap := base
+	withCoChange := applySemanticEnvelope(Document{SearchText: "base"}, changedCap, BuildCodeOptions{IncludeCoChangeNeighborsInEnvelope: true})
+	withCoChangeEnvelope := withCoChange.Metadata[metadataKeySemanticEnvelope].(map[string]any)
+	if withCoChangeEnvelope["digest"] == digest {
+		t.Fatal("digest did not change after co-change text cap changed")
+	}
+}
+
+func TestSemanticSourceAnchorsDoNotAliasRecallAnchors(t *testing.T) {
+	if reflect.TypeOf(Anchor{}) == reflect.TypeOf(semanticanchors.AnchorOccurrence{}) {
+		t.Fatal("semantic anchor occurrence aliases searchindex recall Anchor")
+	}
+	if reflect.TypeOf(AnchorType("")) == reflect.TypeOf(semanticanchors.AnchorType("")) {
+		t.Fatal("semantic anchor type aliases searchindex AnchorType")
 	}
 }
 

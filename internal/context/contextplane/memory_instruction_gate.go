@@ -38,6 +38,9 @@ func (e MemoryInstructionGateError) Error() string {
 	return "memory instruction gate failed: " + string(e.Reason)
 }
 
+// [[invariant:instruction-authority-requires-reviewed-memory]]
+// [[doc:docs/plans/features/semantic-code-anchors.md#Four-Plane Model]]
+// [[test:internal/context/contextplane/memory_instruction_gate_test.go#TestValidateMemoryRecordForInstructionAcceptsActiveReviewedPolicyRule]]
 func ValidateMemoryRecordForInstruction(record memorycore.Record, surface evidence.RenderSurface, now time.Time) error {
 	if err := evidence.ValidateRenderSurface(instructionEvidenceMetaForMemoryRecord(record), surface); err != nil {
 		return MemoryInstructionGateError{Reason: MemoryInstructionGateInvalidInstructionSurface}

@@ -235,6 +235,9 @@ func (q *QueryEngine) expandWeighted(ctx context.Context, seeds []ScoredNode, re
 	return nodes, edges, nil
 }
 
+// [[invariant:semantic-anchors-explicit-traversal]]
+// [[doc:docs/plans/features/semantic-code-anchors.md#Remaining Work]]
+// [[test:internal/intelligence/indexing/repoindex/edge_normalization_test.go#TestDAGGrepIncludeSemanticAnchorsSeparateFromOwnerContainers]]
 func NormalizeDAGGrepRequest(req DAGGrepRequest) DAGGrepRequest {
 	req.Query = strings.TrimSpace(req.Query)
 	req.Mode = strings.ToLower(strings.TrimSpace(req.Mode))

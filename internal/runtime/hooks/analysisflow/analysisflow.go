@@ -43,10 +43,22 @@ type Response struct {
 }
 
 type SemanticAnchorResponse struct {
-	Decision string   `json:"decision"`
-	Context  string   `json:"context,omitempty"`
-	FilePath string   `json:"file_path,omitempty"`
-	Warnings []string `json:"warnings,omitempty"`
+	Decision      string                         `json:"decision"`
+	Context       string                         `json:"context,omitempty"`
+	FilePath      string                         `json:"file_path,omitempty"`
+	Warnings      []string                       `json:"warnings,omitempty"`
+	TestContracts []string                       `json:"test_contracts,omitempty"`
+	GraphDiff     []SemanticAnchorGraphDiffEntry `json:"graph_diff,omitempty"`
+}
+
+type SemanticAnchorGraphDiffEntry struct {
+	OwnerNodeID    string `json:"owner_node_id,omitempty"`
+	OwnerStableKey string `json:"owner_stable_key,omitempty"`
+	Anchor         string `json:"anchor"`
+	TargetID       string `json:"target_id,omitempty"`
+	Relation       string `json:"relation,omitempty"`
+	LineStart      int    `json:"line_start,omitempty"`
+	WouldEmit      bool   `json:"would_emit"`
 }
 
 type complexityEnvelope struct {
@@ -158,7 +170,7 @@ func AnalyzeSemanticAnchors(ctx context.Context, req Request) (SemanticAnchorRes
 	body, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(relPath)))
 	if err != nil {
 		response.Warnings = append(response.Warnings, "semantic anchors: unable to read touched file: "+err.Error())
-		response.Context = buildSemanticAnchorContext(nil, response.Warnings, nil, nil)
+		response.Context = buildSemanticAnchorContext(nil, response.Warnings, nil, nil, nil)
 		return response, nil
 	}
 
@@ -166,17 +178,24 @@ func AnalyzeSemanticAnchors(ctx context.Context, req Request) (SemanticAnchorRes
 	extracted, err := semanticanchors.ExtractAnchorsFromSource(ctx, policy, hookAnchorOwnerResolver{}, relPath, body)
 	if err != nil {
 		response.Warnings = append(response.Warnings, "semantic anchors: unable to parse touched file: "+err.Error())
-		response.Context = buildSemanticAnchorContext(nil, response.Warnings, nil, nil)
+		response.Context = buildSemanticAnchorContext(nil, response.Warnings, nil, nil, nil)
 		return response, nil
 	}
 	warnings := semanticAnchorWarnings(extracted)
 	testContracts := linkedSemanticAnchorTestContracts(target, extracted.Occurrences)
+	if semanticAnchorTrustCriticalWithoutTests(extracted.Occurrences, testContracts) {
+		warnings = append(warnings, "semantic anchors: trust-critical anchors changed without linked test contracts")
+		sort.Strings(warnings)
+	}
+	graphDiff := semanticAnchorGraphDiff(policy, extracted.Occurrences)
 	neighbors := semanticAnchorCoChangeNeighbors(ctx, target, relPath)
-	if len(extracted.Occurrences) == 0 && len(warnings) == 0 && len(testContracts) == 0 && len(neighbors) == 0 {
+	if len(extracted.Occurrences) == 0 && len(warnings) == 0 && len(testContracts) == 0 && len(graphDiff) == 0 && len(neighbors) == 0 {
 		return response, nil
 	}
 	response.Warnings = warnings
-	response.Context = buildSemanticAnchorContext(extracted.Occurrences, warnings, testContracts, neighbors)
+	response.TestContracts = testContracts
+	response.GraphDiff = graphDiff
+	response.Context = buildSemanticAnchorContext(extracted.Occurrences, warnings, testContracts, graphDiff, neighbors)
 	return response, nil
 }
 
@@ -279,14 +298,86 @@ func semanticAnchorWarnings(extracted semanticanchors.ExtractionResult) []string
 	for _, occ := range extracted.Occurrences {
 		for _, finding := range occ.Findings {
 			prefix := "semantic anchors"
-			if occ.DisplaySyntax != "" {
-				prefix += " " + occ.DisplaySyntax
+			if display := safeSemanticAnchorDisplay(occ); display != "" {
+				prefix += " " + display
 			}
 			add(prefix+": ", finding)
 		}
 	}
 	sort.Strings(warnings)
 	return warnings
+}
+
+func semanticAnchorGraphDiff(policy semanticanchors.AnchorPolicy, occurrences []semanticanchors.AnchorOccurrence) []SemanticAnchorGraphDiffEntry {
+	if len(occurrences) == 0 {
+		return nil
+	}
+	out := make([]SemanticAnchorGraphDiffEntry, 0, len(occurrences))
+	for _, occ := range occurrences {
+		typePolicy := policy.TypePolicies[occ.Type]
+		out = append(out, SemanticAnchorGraphDiffEntry{
+			OwnerNodeID:    occ.OwnerBinding.OwnerNodeID,
+			OwnerStableKey: occ.OwnerBinding.OwnerStableKey,
+			Anchor:         safeSemanticAnchorDisplay(occ),
+			TargetID:       string(occ.TargetID),
+			Relation:       string(typePolicy.Relation),
+			LineStart:      occ.Span.LineStart,
+			WouldEmit:      typePolicy.Indexable && occ.OwnerBinding.OwnerNodeID != "" && !semanticAnchorHasError(occ.Findings),
+		})
+	}
+	return out
+}
+
+func semanticAnchorTrustCriticalWithoutTests(occurrences []semanticanchors.AnchorOccurrence, testContracts []string) bool {
+	if len(testContracts) > 0 {
+		return false
+	}
+	hasTrustCritical := false
+	for _, occ := range occurrences {
+		switch occ.Type {
+		case semanticanchors.AnchorTypeTest, semanticanchors.AnchorTypeTestContract:
+			return false
+		case semanticanchors.AnchorTypeInvariant, semanticanchors.AnchorTypeRisk, semanticanchors.AnchorTypeProtocol, semanticanchors.AnchorTypeDecision:
+			hasTrustCritical = true
+		}
+	}
+	return hasTrustCritical
+}
+
+func safeSemanticAnchorDisplay(occ semanticanchors.AnchorOccurrence) string {
+	for _, finding := range occ.Findings {
+		switch finding.Reason {
+		case semanticanchors.AnchorFindingUnsafeURL,
+			semanticanchors.AnchorFindingAbsolutePath,
+			semanticanchors.AnchorFindingPathTraversal,
+			semanticanchors.AnchorFindingBackslashPath,
+			semanticanchors.AnchorFindingControlChar,
+			semanticanchors.AnchorFindingEnvVarExpansion,
+			semanticanchors.AnchorFindingSecretLike,
+			semanticanchors.AnchorFindingSessionLike,
+			semanticanchors.AnchorFindingPIILike:
+			return "[[redacted:" + string(finding.Reason) + "]]"
+		}
+	}
+	return occ.DisplaySyntax
+}
+
+func semanticAnchorHasError(findings []semanticanchors.Finding) bool {
+	for _, finding := range findings {
+		if finding.Severity == semanticanchors.AnchorFindingError {
+			return true
+		}
+	}
+	return false
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func linkedSemanticAnchorTestContracts(workspacePath string, occurrences []semanticanchors.AnchorOccurrence) []string {
@@ -345,7 +436,7 @@ func semanticAnchorCoChangeNeighbors(ctx context.Context, workspacePath, relPath
 	return out
 }
 
-func buildSemanticAnchorContext(occurrences []semanticanchors.AnchorOccurrence, warnings, testContracts, neighbors []string) string {
+func buildSemanticAnchorContext(occurrences []semanticanchors.AnchorOccurrence, warnings, testContracts []string, graphDiff []SemanticAnchorGraphDiffEntry, neighbors []string) string {
 	var parts []string
 	if len(occurrences) > 0 {
 		lines := []string{fmt.Sprintf("**Semantic anchors:** %d anchor(s) in touched file", len(occurrences))}
@@ -354,11 +445,23 @@ func buildSemanticAnchorContext(occurrences []semanticanchors.AnchorOccurrence, 
 				lines = append(lines, fmt.Sprintf("- ...and %d more", len(occurrences)-i))
 				break
 			}
-			line := fmt.Sprintf("- `%s` line %d", occ.DisplaySyntax, occ.Span.LineStart)
+			line := fmt.Sprintf("- `%s` line %d", safeSemanticAnchorDisplay(occ), occ.Span.LineStart)
 			if occ.ValidationStatus != "" {
 				line += " (" + string(occ.ValidationStatus) + ")"
 			}
 			lines = append(lines, line)
+		}
+		parts = append(parts, strings.Join(lines, "\n"))
+	}
+	if len(graphDiff) > 0 {
+		lines := []string{"**Semantic anchor graph diff:**"}
+		for _, entry := range graphDiff {
+			state := "review-only"
+			if entry.WouldEmit {
+				state = "would-emit"
+			}
+			owner := firstNonEmpty(entry.OwnerStableKey, entry.OwnerNodeID, "unbound")
+			lines = append(lines, fmt.Sprintf("- `%s` --%s--> `%s` (%s, line %d)", owner, entry.Relation, entry.TargetID, state, entry.LineStart))
 		}
 		parts = append(parts, strings.Join(lines, "\n"))
 	}

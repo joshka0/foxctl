@@ -61,6 +61,50 @@ func TestRecordRetrievalProposalDedupes(t *testing.T) {
 	}
 }
 
+func TestRecordRetrievalProposalDedupesSemanticAnchorPatchReviewWork(t *testing.T) {
+	store := NewWorkspaceStore(t.TempDir())
+	generatedAt := time.Now().UTC()
+	inspection := RetrievalInspection{
+		Query:          "read before write enforced",
+		ExpectedPaths:  []string{"internal/runtime/terminal/tmuxbridge/client.go"},
+		RetrievedPaths: []string{"internal/runtime/terminal/tmuxbridge/bridge.go"},
+		Classification: "missing_semantic_anchor",
+		Observation: Observation{
+			Statement:  "ACA retrieval missed a semantic anchor for read-before-write.",
+			Confidence: 0.8,
+			Count:      1,
+			Project:    "foxctl",
+			Area:       "semantic-anchors",
+			FirstSeen:  generatedAt,
+			LastSeen:   generatedAt,
+		},
+		Proposal: RetrievalCorrectionAction{
+			Kind:              "semantic_anchor_patch",
+			Summary:           "Review a semantic anchor patch for read-before-write.",
+			ExpectedRepoPaths: []string{"internal/runtime/terminal/tmuxbridge/client.go"},
+		},
+		GeneratedAt: generatedAt,
+	}
+
+	first, err := store.RecordRetrievalProposal(context.Background(), inspection)
+	if err != nil {
+		t.Fatalf("RecordRetrievalProposal first: %v", err)
+	}
+	second, err := store.RecordRetrievalProposal(context.Background(), inspection)
+	if err != nil {
+		t.Fatalf("RecordRetrievalProposal second: %v", err)
+	}
+	if first.ID != second.ID {
+		t.Fatalf("proposal IDs differ: %s vs %s", first.ID, second.ID)
+	}
+	if second.Count != 2 {
+		t.Fatalf("proposal count=%d want 2", second.Count)
+	}
+	if second.Kind != PolicyKindSemanticAnchorPatch || !second.ReviewRequired || second.ApplyStatus != "pending" {
+		t.Fatalf("semantic anchor proposal governance changed: %+v", second)
+	}
+}
+
 func TestApplyAndRejectMemoryProposal(t *testing.T) {
 	store := NewWorkspaceStore(t.TempDir())
 	proposal, err := store.RecordMemoryProposal(context.Background(), MemoryProposal{

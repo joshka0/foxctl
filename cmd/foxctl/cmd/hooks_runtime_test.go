@@ -108,9 +108,13 @@ func Build() {}
 		Command string `json:"command"`
 		Data    struct {
 			Response struct {
-				Decision string `json:"decision"`
-				Context  string `json:"context"`
-				FilePath string `json:"file_path"`
+				Decision  string `json:"decision"`
+				Context   string `json:"context"`
+				FilePath  string `json:"file_path"`
+				GraphDiff []struct {
+					Relation  string `json:"relation"`
+					WouldEmit bool   `json:"would_emit"`
+				} `json:"graph_diff"`
 			} `json:"response"`
 		} `json:"data"`
 		Meta map[string]any `json:"meta"`
@@ -126,6 +130,9 @@ func Build() {}
 	}
 	if !strings.Contains(env.Data.Response.Context, "Semantic anchors") {
 		t.Fatalf("expected semantic anchor context, got %q", env.Data.Response.Context)
+	}
+	if len(env.Data.Response.GraphDiff) == 0 || env.Data.Response.GraphDiff[0].Relation != "VERIFIED_BY" || !env.Data.Response.GraphDiff[0].WouldEmit {
+		t.Fatalf("unexpected graph diff: %+v", env.Data.Response.GraphDiff)
 	}
 }
 

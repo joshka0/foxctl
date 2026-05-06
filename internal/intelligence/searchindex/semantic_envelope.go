@@ -45,6 +45,9 @@ type EnvelopeSection struct {
 	Text string `json:"text"`
 }
 
+// [[protocol:semantic-envelope-retrieval-evidence]]
+// [[doc:docs/plans/features/semantic-code-anchors.md#Remaining Work]]
+// [[test:internal/intelligence/searchindex/build_code_test.go#TestBuildCodeDocumentsAppliesSemanticEnvelopeProvider]]
 func applySemanticEnvelope(doc Document, bits SemanticEnvelopeBits, opts BuildCodeOptions) Document {
 	bits = normalizeSemanticEnvelopeBits(bits)
 	if isEmptySemanticEnvelope(bits) {

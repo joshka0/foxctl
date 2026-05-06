@@ -144,6 +144,9 @@ func BuildSymbolContentDigest(input SymbolDigestInput) string {
 // BuildSemanticEnvelopeContentDigest returns a stable digest for semantic
 // envelope content. It intentionally excludes volatile line numbers,
 // timestamps, commit hashes, scores, and freshness values.
+// [[invariant:semantic-envelope-digest-excludes-volatile-metadata]]
+// [[doc:docs/plans/features/semantic-code-anchors.md#Remaining Work]]
+// [[test:internal/intelligence/indexing/embeddingtext/digest_test.go#TestBuildSemanticEnvelopeContentDigestStableAndMeaningful]]
 func BuildSemanticEnvelopeContentDigest(input SemanticEnvelopeDigestInput) string {
 	var builder strings.Builder
 	builder.Grow(256)

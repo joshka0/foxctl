@@ -1,6 +1,6 @@
 # Semantic Code Anchors
 
-Status: Active implementation
+Status: Implementation proof complete on branch; rollout gated
 Owner: Solo maintainer
 Last Updated: 2026-05-06
 
@@ -69,26 +69,26 @@ should become the stricter, typed, human-friendly successor while keeping
 
 ## Current Branch Status
 
-This file is now both a design contract and an implementation roadmap. The
-branch has already moved past the original "recommended first slice"; the
-remaining work is next-step implementation work, not parked future work.
+This file is now both a design contract and an implementation record. The
+branch has moved through the former "remaining work" slice; further broadening
+still needs the review gates called out below.
 
 | Slice | Current state | Evidence |
 |-------|---------------|----------|
 | PR-A1a evidence and memory gate | Landed | `internal/intelligence/evidence`; `internal/context/contextplane/memory_instruction_gate.go`; import-guard and memory-gate tests |
 | PR-A1 parser and validator | Landed | `internal/intelligence/indexing/semanticanchors`; parser, canonical IDs, authority metadata, render-barrier tests |
-| PR-A2 extraction and owner binding | Partial | Go graph binding is implemented; TypeScript/Python/Rust are comment/lint-only until repoindex owner-join fixtures exist |
-| PR-A3 CLI lint/explain | Landed with hardening left | `foxctl index anchors lint` and `foxctl index anchors explain`; remaining work is stricter golden coverage for redaction, missing targets, and review wording |
+| PR-A2 extraction and owner binding | Landed | Go, TypeScript, Python, and Rust owner-join fixtures prove graph binding; unsupported languages remain lint-only |
+| PR-A3 CLI lint/explain | Landed | `foxctl index anchors lint` and `foxctl index anchors explain`; hardened output coverage for redaction, missing targets/fragments, unbound owners, beacon-not-indexed wording, and authority fields |
 | PR-B1 repoindex vocabulary and traversal normalization | Landed | semantic and empirical edge sets, structural-default normalization, `IncludeSemanticAnchors`, `IncludeOwnerContainers`, `IsAnchorConceptNode`, Obsidian concept filtering |
 | PR-B2 graph emission | Landed behind flags | `foxctl index repo build --semantic-anchors`; semantic concept nodes/edges; validated `SemanticAnchorEdgeMeta`; existing `Index:` edges coexist |
-| PR-B3 query/traversal proof | Landed with more eval coverage needed | expand and DAG grep can include semantic anchors separately from owner containers; public semantic projections validate edge metadata |
-| PR-B4 eval fixture | Partial | CLI E2E fixture proves parser/repoindex/search/expand/`Index:` coexistence; full positive/negative eval suite still needed |
-| PR-B.5 empirical git layer | Partial | `--cochange`, `EdgeCoChangesWith`, scorer, and repoindex emission exist; temp-git acceptance coverage still needs to prove giant commits, recency, caps, and freshness |
-| PR-C semantic envelope | Partial | `searchindex.CodeEnvelopeProvider` and repoquery semantic-anchor envelope provider exist; remaining work is fuller digest, linked doc/test, and retrieval-quality eval coverage |
-| PR-D ACA retrieval blend | Partial | `context retrieve --semantic-anchors`, validated semantic hints, boost path, inspect classifications, and proposal creation exist; eval and ranking gates are not complete |
-| PR-E anchor proposals and curator | Partial | `semantic_anchor_patch` proposal kind and review-required proposal plumbing exist; source-diff generation/apply remains review-gated work |
-| PR-F Obsidian bridge | Partial | anchor concept nodes are filtered out of concept-note drafts by default; automatic reviewed inbox concept-note generation remains |
-| PR-G agent workflow | Partial | touched-file hook advisory and the `semantic-commenting` skill exist; graph diff output, linked-test review checks, and trust-critical anchor review gates remain |
+| PR-B3 query/traversal proof | Landed | expand and DAG grep can include semantic anchors separately from owner containers; public semantic projections validate edge metadata |
+| PR-B4 eval fixture | Landed | five positive and three control queries cover beacon/domain/protocol/risk behavior and forbidden broad-query paths |
+| PR-B.5 empirical git layer | Landed | `--cochange`, `EdgeCoChangesWith`, scorer, and repoindex emission are explicit; temp-git tests cover repeated co-change, giant commits, recency, caps, symmetry, generated/lockfile handling, and freshness |
+| PR-C semantic envelope | Landed | digest/golden coverage includes anchor target, relation, linked doc/test target, provider version, cap config, section flags, and metadata-only co-change |
+| PR-D ACA retrieval blend | Landed | `context retrieve --semantic-anchors`, validated semantic hints, boost path, inspect classifications, eval modes, and deduped review-required proposals are covered |
+| PR-E anchor proposals and curator | Landed for review-gated proposals | `semantic_anchor_patch` proposal kind and review-required proposal plumbing exist; automatic source rewrites remain out of scope |
+| PR-F Obsidian bridge | Landed | inbox-first concept-note drafts, `repo_anchors`/`repo_symbols`/`repo_docs` reconciliation, and orphan/missing-note health checks are covered |
+| PR-G agent workflow | Landed | touched-file hook advisory, graph diff output, linked-test contracts, trust-critical-without-tests warnings, and portable `semantic-commenting` skill contract exist |
 
 Repo-local anchors are the default authoring style:
 
@@ -4185,71 +4185,37 @@ A patch should be rejected if it:
 
 ## Remaining Work
 
-This is now the active next-step backlog. Do not treat these items as deferred
-by default; keep each item behind explicit flags, review gates, or eval proof
-until verification says it is safe to broaden.
+The former next-step backlog is implemented and covered on
+`feat/semantic-code-anchors` as of 2026-05-06. Keep these surfaces behind their
+existing explicit flags and review gates until broader rollout has current-store
+performance proof.
 
-### Complete The Acceptance Gate
+Completed proof points:
 
-- Add the PR-B4 eval suite with five positive and three negative/control
-  queries.
-- Include controls for beacon, domain, protocol, and risk anchors.
-- Prove default traversal is unchanged and semantic anchors do not hijack broad
-  queries.
-- Run existing repoindex DAG/search evals with semantic anchors enabled.
+- PR-B4 eval suite: five positive and three control queries with beacon, domain,
+  protocol, risk, and forbidden-path coverage.
+- Non-Go owner binding: TypeScript, Python, and Rust fixtures now prove
+  repoindex owner joins before graph binding.
+- CLI lint/explain hardening: redaction, missing doc/test targets, unresolved
+  fragments, unbound owners, beacon-not-indexed wording, and authority fields
+  are covered.
+- Co-change proof: temp-git tests cover repeated co-change, giant/formatting
+  commits, hard caps, generated/lockfile handling, recency, injected `Now`,
+  symmetry, and freshness.
+- Semantic envelope proof: digest coverage includes anchor target, relation,
+  linked doc/test target, provider version, cap config, section flags, and
+  metadata-only co-change.
+- ACA retrieval/proposal proof: semantic-anchor eval modes exist, semantic hints
+  validate evidence metadata, and repeated `semantic_anchor_patch` proposals
+  dedupe while remaining review-required.
+- Obsidian and agent workflow: inbox-first note drafts, bridge backlinks,
+  orphan/missing-note health checks, graph diff output, linked test contracts,
+  and trust-critical-without-tests warnings are covered.
 
-### Finish Language Owner Binding
-
-- Add repoindex owner-join fixtures for TypeScript, Python, and Rust.
-- Promote a language from lint-only to graph-binding only after its golden join
-  passes.
-- Keep Go as the currently proven graph-binding language.
-
-### Harden CLI Lint And Explain
-
-- Add golden output tests for redaction, missing doc/test targets, unresolved
-  fragments, unbound owners, beacon-not-indexed wording, and evidence authority
-  fields.
-- Ensure unsafe raw syntax or hash text does not leak.
-
-### Complete Empirical Co-Change Proof
-
-- Add temp-git fixture tests for repeated co-change, giant formatting commits,
-  hard limits, lockfile/generated skip or downweight, recency, injected `Now`,
-  caps, symmetry, and freshness.
-- Keep `--cochange` explicit and keep empirical edges out of structural
-  defaults.
-
-### Complete Semantic Envelope Proof
-
-- Finish digest/golden tests for anchor target, relation, linked doc/test
-  target, provider version, cap config, and section flags.
-- Prove co-change remains metadata-only by default.
-- Prove semantic source-anchor types do not alias `searchindex.Anchor`.
-
-### Complete ACA Retrieval And Proposal Proof
-
-- Add an anchor-aware retrieval eval suite for
-  `context retrieve --semantic-anchors`.
-- Prove semantic hints validate evidence metadata before rendering.
-- Prove missing/stale semantic anchor inspect classifications create deduped
-  `semantic_anchor_patch` proposals.
-- Keep source diffs review-gated.
-
-### Complete Obsidian Bridge Work
-
-- Generate inbox-first concept-note drafts for high-value anchors.
-- Add bridge reconciliation for `repo_anchors`, `repo_symbols`, and `repo_docs`
-  backlinks.
-- Add health checks for orphaned anchors and missing canonical notes.
-
-### Complete Agent Workflow
-
-- Add graph diff output for PRs or agent finals.
-- Retrieve linked test contracts for touched anchors.
-- Warn when trust-critical anchors changed without tests.
-- Keep `semantic-commenting` as the portable skill contract and keep examples
-  repo-local by default.
+Operational note: current-repo `index repo build --semantic-anchors` can take
+long enough to be a poor smoke test. Prefer the focused temp-repo E2E and package
+tests below for deterministic proof, and treat live `index anchors lint` output
+as authoritative only after a fresh repoindex build has completed.
 
 ## Resolved Direction
 
@@ -4268,33 +4234,9 @@ until verification says it is safe to broaden.
    priors; it must remain out of structural defaults and out of embedding text
    by default.
 
-## Recommended Next Slice
+## Next Rollout Gate
 
-Complete PR-B4, PR-C, and PR-D proof together as one verification-focused slice
-before broadening authority or automation.
-
-Concrete files/contracts:
-
-```text
-internal/tooling/evals/retrievaleval/
-internal/intelligence/indexing/repoindex/
-internal/intelligence/repoquery/
-internal/intelligence/searchindex/
-internal/context/contextplane/
-cmd/foxctl/cmd/
-```
-
-Implement only:
-
-1. anchor-aware repoindex eval suite
-2. missing negative/control eval coverage
-3. semantic envelope digest/golden coverage
-4. ACA retrieval eval coverage behind `--semantic-anchors`
-5. proposal dedupe/review proof for semantic-anchor patches
-6. CLI lint/explain golden hardening
-7. temp-git co-change fixture coverage if it blocks PR-D confidence
-
-Explicit non-goals for the next slice:
+Before broadening authority or automation, keep the rollout constrained to:
 
 - no block relation syntax
 - no new anchor types

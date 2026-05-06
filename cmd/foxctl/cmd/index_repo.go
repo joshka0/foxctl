@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
@@ -50,7 +52,7 @@ func newIndexRepoBuildCommand() *cobra.Command {
 	var includeShell bool
 	var includeTests bool
 	var dryRun bool
-	var progress bool
+	progress := true
 	var incremental bool
 	var includeSemanticAnchors bool
 	var includeCoChange bool
@@ -76,7 +78,7 @@ func newIndexRepoBuildCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&includeShell, "shell", false, "Include shell scripts as file/command graph components")
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Include test files")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Build without writing to the index")
-	cmd.Flags().BoolVar(&progress, "progress", false, "Write coarse build progress logs to stderr")
+	cmd.Flags().BoolVar(&progress, "progress", true, "Write coarse build progress logs to stderr")
 	cmd.Flags().BoolVar(&incremental, "incremental", false, "Skip rebuild when stored per-file state and current workspace have no delta")
 	cmd.Flags().BoolVar(&includeSemanticAnchors, "semantic-anchors", false, "Include semantic anchor concept nodes and edges")
 	cmd.Flags().BoolVar(&includeCoChange, "cochange", false, "Include empirical git co-change file edges")
@@ -265,15 +267,13 @@ func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, 
 	symbolSummaryProvider := &memorySymbolSummaryProvider{store: memStore, workspace: absWorkspace}
 	builder := repoindex.NewBuilder(store, absWorkspace)
 	var progressFn func(repoindex.BuildProgress)
+	var progressLogger *repoIndexBuildProgressLogger
+	var stopProgressHeartbeat func()
 	if progress {
-		progressFn = func(progress repoindex.BuildProgress) {
-			payload, err := json.Marshal(progress)
-			if err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "repoindex progress: phase=%s message=%s files=%d symbols=%d nodes=%d edges=%d\n", progress.Phase, progress.Message, progress.Result.Files, progress.Result.Symbols, progress.Result.Nodes, progress.Result.Edges)
-				return
-			}
-			fmt.Fprintf(cmd.ErrOrStderr(), "repoindex progress: %s\n", payload)
-		}
+		progressLogger = newRepoIndexBuildProgressLogger(cmd.ErrOrStderr(), start)
+		progressFn = progressLogger.Report
+		stopProgressHeartbeat = progressLogger.StartHeartbeat(ctx, 15*time.Second)
+		defer stopProgressHeartbeat()
 	}
 	buildOpts := repoindex.BuildOptions{
 		RepoRoot:               absWorkspace,
@@ -341,6 +341,123 @@ func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, 
 
 	env := protocol.OK("index.repo.build", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	return protocol.Write(cmd.OutOrStdout(), env)
+}
+
+type repoIndexBuildProgressLogger struct {
+	mu      sync.Mutex
+	writer  io.Writer
+	start   time.Time
+	last    repoindex.BuildProgress
+	lastAt  time.Time
+	written bool
+}
+
+func newRepoIndexBuildProgressLogger(writer io.Writer, start time.Time) *repoIndexBuildProgressLogger {
+	if writer == nil {
+		writer = io.Discard
+	}
+	if start.IsZero() {
+		start = time.Now()
+	}
+	return &repoIndexBuildProgressLogger{writer: writer, start: start}
+}
+
+func (l *repoIndexBuildProgressLogger) Report(progress repoindex.BuildProgress) {
+	if l == nil {
+		return
+	}
+	line := formatRepoIndexBuildProgress(l.start, progress)
+	l.mu.Lock()
+	l.last = progress
+	l.lastAt = time.Now()
+	l.written = true
+	fmt.Fprintln(l.writer, line)
+	l.mu.Unlock()
+}
+
+func (l *repoIndexBuildProgressLogger) StartHeartbeat(ctx context.Context, interval time.Duration) func() {
+	if l == nil || interval <= 0 {
+		return func() {}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				l.writeHeartbeat(interval)
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
+}
+
+func (l *repoIndexBuildProgressLogger) writeHeartbeat(interval time.Duration) {
+	l.mu.Lock()
+	if !l.written {
+		l.mu.Unlock()
+		return
+	}
+	last := l.last
+	lastAt := l.lastAt
+	start := l.start
+	if time.Since(lastAt) < interval {
+		l.mu.Unlock()
+		return
+	}
+	fmt.Fprintln(l.writer, formatRepoIndexBuildHeartbeat(start, last))
+	l.mu.Unlock()
+}
+
+func formatRepoIndexBuildProgress(start time.Time, progress repoindex.BuildProgress) string {
+	return fmt.Sprintf("repoindex build: %s phase=%s %s%s",
+		repoIndexProgressElapsed(start, progress.ElapsedMs),
+		emptyFallback(progress.Phase, "unknown"),
+		strings.TrimSpace(progress.Message),
+		formatRepoIndexBuildCounts(progress.Result),
+	)
+}
+
+func formatRepoIndexBuildHeartbeat(start time.Time, progress repoindex.BuildProgress) string {
+	message := strings.TrimSpace(progress.Message)
+	if message != "" {
+		message = " last=\"" + message + "\""
+	}
+	return fmt.Sprintf("repoindex build: %s still running phase=%s%s%s",
+		repoIndexProgressElapsed(start, progress.ElapsedMs),
+		emptyFallback(progress.Phase, "unknown"),
+		message,
+		formatRepoIndexBuildCounts(progress.Result),
+	)
+}
+
+func repoIndexProgressElapsed(start time.Time, elapsedMs int64) time.Duration {
+	if elapsedMs > 0 {
+		return (time.Duration(elapsedMs) * time.Millisecond).Round(time.Millisecond)
+	}
+	if start.IsZero() {
+		return 0
+	}
+	return time.Since(start).Round(time.Millisecond)
+}
+
+func formatRepoIndexBuildCounts(result repoindex.BuildResult) string {
+	return fmt.Sprintf(" (packages=%d files=%d symbols=%d nodes=%d edges=%d)", result.Packages, result.Files, result.Symbols, result.Nodes, result.Edges)
+}
+
+func emptyFallback(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return strings.TrimSpace(value)
 }
 
 func runIndexRepoStatus(cmd *cobra.Command, workspace string) error {

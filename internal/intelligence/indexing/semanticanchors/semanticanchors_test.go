@@ -438,24 +438,25 @@ func Guard() {}
 	}
 }
 
-func TestExtractAnchorsCommentsOnlyAndLintOnlyLanguages(t *testing.T) {
+func TestExtractAnchorsCommentsOnlyAndNonGoLanguages(t *testing.T) {
 	policy := DefaultAnchorPolicy("foxctl", nil)
 	tests := []struct {
-		path string
-		src  string
+		path      string
+		src       string
+		ownerName string
 	}{
 		{"src/app.ts", `const s = "[[foxctl:invariant/string-literal]]";
 // [[foxctl:invariant/comment-only]]
 function run() {}
-`},
+`, "run"},
 		{"src/app.py", `s = "[[foxctl:invariant/string-literal]]"
 # [[foxctl:invariant/comment-only]]
 def run(): pass
-`},
+`, "run"},
 		{"src/app.rs", `let s = "[[foxctl:invariant/string-literal]]";
 // [[foxctl:invariant/comment-only]]
 fn run() {}
-`},
+`, "run"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.path, func(t *testing.T) {
@@ -463,14 +464,65 @@ fn run() {}
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.Support != AnchorSupportLintOnly {
+			if result.Support != AnchorSupportGraphBinding {
 				t.Fatalf("support = %q", result.Support)
 			}
 			if len(result.Occurrences) != 1 || result.Occurrences[0].Target != "comment-only" {
 				t.Fatalf("occurrences = %+v", result.Occurrences)
 			}
-			if !hasFinding(result.Occurrences[0].Findings, AnchorFindingUnsupportedOwner) {
-				t.Fatalf("missing lint-only unsupported owner finding: %+v", result.Occurrences[0].Findings)
+			if got := result.Occurrences[0].OwnerBinding.OwnerStableKey; !strings.Contains(got, ":"+tc.path+":"+tc.ownerName) {
+				t.Fatalf("owner stable key = %q, want %s owner", got, tc.ownerName)
+			}
+		})
+	}
+}
+
+func TestExtractNonGoAnchorsBindOnlyAttachedOwners(t *testing.T) {
+	policy := DefaultAnchorPolicy("foxctl", nil)
+	tests := []struct {
+		name string
+		path string
+		src  string
+	}{
+		{
+			name: "typescript code between",
+			path: "src/app.ts",
+			src: `// [[foxctl:invariant/no-send-without-read]]
+const unrelated = 1
+function run() {}
+`,
+		},
+		{
+			name: "python over gap",
+			path: "src/app.py",
+			src: `# [[foxctl:invariant/no-send-without-read]]
+
+
+def run(): pass
+`,
+		},
+		{
+			name: "rust backward",
+			path: "src/app.rs",
+			src: `fn run() {}
+// [[foxctl:invariant/no-send-without-read]]
+`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := ExtractAnchorsFromSource(context.Background(), policy, ownerResolverStub{}, tc.path, []byte(tc.src))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Occurrences) != 1 {
+				t.Fatalf("occurrences = %+v", result.Occurrences)
+			}
+			if result.Occurrences[0].OwnerBinding.OwnerNodeID != "" {
+				t.Fatalf("unexpected owner = %+v", result.Occurrences[0].OwnerBinding)
+			}
+			if !hasFinding(result.Occurrences[0].Findings, AnchorFindingUnboundOwner) && !hasFinding(result.Findings, AnchorFindingUnboundOwner) {
+				t.Fatalf("missing unbound finding: occ=%+v result=%+v", result.Occurrences[0].Findings, result.Findings)
 			}
 		})
 	}

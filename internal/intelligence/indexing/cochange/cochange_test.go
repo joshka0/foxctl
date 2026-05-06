@@ -158,6 +158,99 @@ func TestCollectGitCommitsMarksWhitespaceOnlyAndIgnoresWorktree(t *testing.T) {
 	}
 }
 
+func TestCollectGitCommitsScoresRepeatedCoChangeFromTempGitHistory(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	repo := t.TempDir()
+	runGit(t, repo, "init")
+
+	writeFile(t, repo, "README.md", "fixture\n")
+	runGit(t, repo, "add", ".")
+	commitGitAt(t, repo, now.AddDate(0, 0, -30), "initial")
+
+	writeFile(t, repo, "a.go", "package fixture\nfunc A() int { return 1 }\n")
+	writeFile(t, repo, "b.go", "package fixture\nfunc B() int { return A() }\n")
+	runGit(t, repo, "add", ".")
+	commitGitAt(t, repo, now.AddDate(0, 0, -10), "pair one")
+
+	writeFile(t, repo, "a.go", "package fixture\nfunc A() int { return 2 }\n")
+	writeFile(t, repo, "b.go", "package fixture\nfunc B() int { return A() + 1 }\n")
+	runGit(t, repo, "add", ".")
+	commitGitAt(t, repo, now.AddDate(0, 0, -5), "pair two")
+
+	writeFile(t, repo, "a.go", "package fixture\nfunc A() int { return 3 }\n")
+	writeFile(t, repo, "c.go", "package fixture\nfunc C() int { return A() }\n")
+	runGit(t, repo, "add", ".")
+	commitGitAt(t, repo, now.AddDate(0, 0, -4), "competing pair")
+
+	writeFile(t, repo, "a.go", "package fixture\nfunc A() int { return 4 }\n")
+	writeFile(t, repo, "d.go", "package fixture\nfunc D() {}\n")
+	writeFile(t, repo, "e.go", "package fixture\nfunc E() {}\n")
+	writeFile(t, repo, "f.go", "package fixture\nfunc F() {}\n")
+	runGit(t, repo, "add", ".")
+	commitGitAt(t, repo, now.AddDate(0, 0, -3), "wide generated noise")
+
+	writeFile(t, repo, "a.go", "package fixture\nfunc A() int { return 5 }\n")
+	writeFile(t, repo, "pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
+	writeFile(t, repo, "service.pb.go", "package fixture\nfunc Generated() {}\n")
+	runGit(t, repo, "add", ".")
+	commitGitAt(t, repo, now.AddDate(0, 0, -2), "lock and generated noise")
+
+	writeFile(t, repo, "a.go", "package fixture\n\nfunc A() int { return 5 }\n")
+	writeFile(t, repo, "b.go", "package fixture\n\nfunc B() int { return A() + 1 }\n")
+	runGit(t, repo, "add", ".")
+	commitGitAt(t, repo, now.AddDate(0, 0, -1), "format pair")
+
+	commits, err := CollectGitCommits(ctx, repo, nil, Config{CommitLimit: 20})
+	if err != nil {
+		t.Fatalf("CollectGitCommits: %v", err)
+	}
+	if !hasFormattingOnlyCommit(commits) {
+		t.Fatalf("expected collected history to mark the whitespace-only commit: %+v", commits)
+	}
+
+	got := Score(commits, Config{
+		Now:                  now,
+		MaxFilesPerCommit:    3,
+		HalfLifeDays:         30,
+		TopKPerFile:          2,
+		SkipGenerated:        true,
+		SkipLockfiles:        true,
+		GiantCommitSoftLimit: 3,
+		GiantCommitHardLimit: 3,
+		FormattingMultiplier: 0.1,
+	})
+	aToB := findNeighbor(t, got["a.go"], "b.go")
+	aToC := findNeighbor(t, got["a.go"], "c.go")
+	bToA := findNeighbor(t, got["b.go"], "a.go")
+	if aToB.Count != 3 {
+		t.Fatalf("a.go->b.go count=%d want 3 from repeated empirical co-change", aToB.Count)
+	}
+	if aToC.Count != 1 {
+		t.Fatalf("a.go->c.go count=%d want 1", aToC.Count)
+	}
+	if aToB.WeightedCount <= aToC.WeightedCount {
+		t.Fatalf("repeated co-change weight=%f want above competing pair %f", aToB.WeightedCount, aToC.WeightedCount)
+	}
+	if bToA.Count != aToB.Count || bToA.WeightedCount != aToB.WeightedCount {
+		t.Fatalf("symmetry mismatch a->b=%+v b->a=%+v", aToB, bToA)
+	}
+	if aToB.LastSeenAt != now.AddDate(0, 0, -1) {
+		t.Fatalf("last seen=%s want latest formatting commit time", aToB.LastSeenAt)
+	}
+	if aToB.Freshness <= aToC.Freshness {
+		t.Fatalf("freshness a->b=%f want above older a->c=%f", aToB.Freshness, aToC.Freshness)
+	}
+	for _, noisy := range []string{"pnpm-lock.yaml", "service.pb.go", "d.go", "e.go", "f.go"} {
+		if _, ok := got[noisy]; ok {
+			t.Fatalf("noisy path %s should not emit co-change neighbors: %+v", noisy, got[noisy])
+		}
+		if hasNeighbor(got["a.go"], noisy) {
+			t.Fatalf("a.go should not include noisy neighbor %s: %+v", noisy, got["a.go"])
+		}
+	}
+}
+
 func TestParseGitLogNameOnlyIgnoresUncommittedStateShape(t *testing.T) {
 	output := "abc\x1f1778068800\nb.go\na.go\n\nxyz\x1f1777982400\na.go\nc.go\n"
 	got := ParseGitLogNameOnly(output)
@@ -169,6 +262,35 @@ func TestParseGitLogNameOnlyIgnoresUncommittedStateShape(t *testing.T) {
 	}
 }
 
+func hasFormattingOnlyCommit(commits []Commit) bool {
+	for _, commit := range commits {
+		if commit.FormattingOnly {
+			return true
+		}
+	}
+	return false
+}
+
+func findNeighbor(t *testing.T, neighbors []Neighbor, path string) Neighbor {
+	t.Helper()
+	for _, neighbor := range neighbors {
+		if neighbor.Path == path {
+			return neighbor
+		}
+	}
+	t.Fatalf("neighbor %s not found in %+v", path, neighbors)
+	return Neighbor{}
+}
+
+func hasNeighbor(neighbors []Neighbor, path string) bool {
+	for _, neighbor := range neighbors {
+		if neighbor.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
 func writeFile(t *testing.T, root, rel, body string) {
 	t.Helper()
 	path := filepath.Join(root, rel)
@@ -177,6 +299,19 @@ func writeFile(t *testing.T, root, rel, body string) {
 	}
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatalf("write %s: %v", rel, err)
+	}
+}
+
+func commitGitAt(t *testing.T, root string, at time.Time, message string) {
+	t.Helper()
+	cmd := exec.Command("git", "-C", root, "-c", "user.name=Foxctl Test", "-c", "user.email=foxctl@example.invalid", "commit", "-m", message)
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_DATE="+at.Format(time.RFC3339),
+		"GIT_COMMITTER_DATE="+at.Format(time.RFC3339),
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git commit %q: %v\n%s", message, err, string(out))
 	}
 }
 

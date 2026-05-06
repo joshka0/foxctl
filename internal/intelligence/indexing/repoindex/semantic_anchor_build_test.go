@@ -131,6 +131,81 @@ func TestBuilderSkipsSemanticAnchorEdgesOnFileLevelLintError(t *testing.T) {
 	}
 }
 
+func TestBuilderEmitsTypeScriptSemanticAnchorEdgesBehindFlag(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+	writeTypeScriptSemanticAnchorFixture(t, workspace)
+
+	store, err := Open(ctx, storageRoot, workspace)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	builder := NewBuilder(store, workspace)
+	if _, err := builder.Build(ctx, BuildOptions{
+		RepoRoot:               workspace,
+		IncludeGo:              false,
+		IncludeTypescript:      true,
+		IncludeSemanticAnchors: true,
+	}); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	assertSemanticAnchorEdgeForSymbol(t, store, "GuardTs", EdgeEnforces)
+}
+
+func TestBuilderEmitsPythonSemanticAnchorEdgesBehindFlag(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+	writePythonSemanticAnchorFixture(t, workspace)
+
+	store, err := Open(ctx, storageRoot, workspace)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	builder := NewBuilder(store, workspace)
+	if _, err := builder.Build(ctx, BuildOptions{
+		RepoRoot:               workspace,
+		IncludeGo:              false,
+		IncludePython:          true,
+		IncludeSemanticAnchors: true,
+	}); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	assertSemanticAnchorEdgeForSymbol(t, store, "guard_py", EdgeEnforces)
+}
+
+func TestBuilderEmitsRustSemanticAnchorEdgesBehindFlag(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+	writeRustSemanticAnchorFixture(t, workspace)
+
+	store, err := Open(ctx, storageRoot, workspace)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	builder := NewBuilder(store, workspace)
+	if _, err := builder.Build(ctx, BuildOptions{
+		RepoRoot:               workspace,
+		IncludeGo:              false,
+		IncludeRust:            true,
+		IncludeSemanticAnchors: true,
+	}); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	assertSemanticAnchorEdgeForSymbol(t, store, "guard_rs", EdgeEnforces)
+}
+
 func writeSemanticAnchorFixture(t *testing.T, workspace string) {
 	t.Helper()
 	mustWriteFile(t, filepath.Join(workspace, "go.mod"), "module example.com/anchors\n\ngo 1.22\n")
@@ -159,6 +234,35 @@ func writeDuplicateSemanticAnchorFixture(t *testing.T, workspace string) {
 // [[invariant:no-send-without-read]]
 // [[invariant:no-send-without-read]]
 func Guard() {}
+`)
+}
+
+func writeTypeScriptSemanticAnchorFixture(t *testing.T, workspace string) {
+	t.Helper()
+	mustWriteFile(t, filepath.Join(workspace, "package.json"), "{}\n")
+	mustWriteFile(t, filepath.Join(workspace, "src", "anchor.ts"), `const literal = "[[foxctl:invariant/string-literal]]";
+// [[invariant:ts-owner-binding]]
+export function GuardTs() {
+  return literal
+}
+`)
+}
+
+func writePythonSemanticAnchorFixture(t *testing.T, workspace string) {
+	t.Helper()
+	mustWriteFile(t, filepath.Join(workspace, "src", "anchor.py"), `literal = "[[foxctl:invariant/string-literal]]"
+# [[invariant:python-owner-binding]]
+def guard_py():
+    return literal
+`)
+}
+
+func writeRustSemanticAnchorFixture(t *testing.T, workspace string) {
+	t.Helper()
+	mustWriteFile(t, filepath.Join(workspace, "src", "anchor.rs"), `let literal = "[[foxctl:invariant/string-literal]]";
+// [[invariant:rust-owner-binding]]
+fn guard_rs() {
+}
 `)
 }
 
@@ -218,4 +322,14 @@ func assertEdgeTypePresent(t *testing.T, edges []Edge, want EdgeType) {
 		}
 	}
 	t.Fatalf("missing edge type %s in %+v", want, edges)
+}
+
+func assertSemanticAnchorEdgeForSymbol(t *testing.T, store *Store, symbolName string, edgeType EdgeType) {
+	t.Helper()
+	owner := findNodeByName(t, store, NodeSymbol, symbolName)
+	semantic, err := store.GetOutgoingEdges(context.Background(), owner.ID, EdgeSetSemanticAnchors, 20)
+	if err != nil {
+		t.Fatalf("get semantic edges: %v", err)
+	}
+	assertEdgeTypePresent(t, semantic, edgeType)
 }

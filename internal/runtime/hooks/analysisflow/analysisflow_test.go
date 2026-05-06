@@ -131,6 +131,44 @@ func Build() {}
 	if !strings.Contains(resp.Context, "Linked test contracts") || !strings.Contains(resp.Context, "internal/demo_test.go") {
 		t.Fatalf("expected linked test contract, got %q", resp.Context)
 	}
+	if len(resp.TestContracts) != 1 || resp.TestContracts[0] != "internal/demo_test.go" {
+		t.Fatalf("test contracts=%v want internal/demo_test.go", resp.TestContracts)
+	}
+	if len(resp.GraphDiff) == 0 {
+		t.Fatalf("expected graph diff entries")
+	}
+}
+
+func TestAnalyzeSemanticAnchorsWarnsTrustCriticalAnchorWithoutLinkedTests(t *testing.T) {
+	t.Setenv("FOXCTL_SEMANTIC_ANCHORS_HOOK", "1")
+	workspace := t.TempDir()
+	writeFile(t, workspace, "internal/demo.go", `package demo
+
+// [[invariant:no-write-before-read]]
+func Build() {}
+`)
+
+	resp, err := AnalyzeSemanticAnchors(context.Background(), Request{
+		Workspace: workspace,
+		Payload: Payload{ToolInput: struct {
+			FilePath string `json:"file_path,omitempty"`
+		}{FilePath: "internal/demo.go"}},
+	})
+	if err != nil {
+		t.Fatalf("AnalyzeSemanticAnchors: %v", err)
+	}
+	if !strings.Contains(strings.Join(resp.Warnings, "\n"), "trust-critical anchors changed without linked test contracts") {
+		t.Fatalf("expected trust-critical warning, got %v", resp.Warnings)
+	}
+	if len(resp.GraphDiff) != 1 {
+		t.Fatalf("graph diff entries=%d want 1: %+v", len(resp.GraphDiff), resp.GraphDiff)
+	}
+	if resp.GraphDiff[0].Relation != "ENFORCES" || !resp.GraphDiff[0].WouldEmit {
+		t.Fatalf("unexpected graph diff entry: %+v", resp.GraphDiff[0])
+	}
+	if !strings.Contains(resp.Context, "Semantic anchor graph diff") {
+		t.Fatalf("expected graph diff context, got %q", resp.Context)
+	}
 }
 
 func TestAnalyzeSemanticAnchorsInvalidAnchorWarnsWithoutBlocking(t *testing.T) {
@@ -139,6 +177,7 @@ func TestAnalyzeSemanticAnchorsInvalidAnchorWarnsWithoutBlocking(t *testing.T) {
 	writeFile(t, workspace, "internal/demo.go", `package demo
 
 // [[test:../secret_test.go]]
+// [[doc:https://example.com/raw?token=ghp_abcdef123456]]
 func Build() {}
 `)
 
@@ -156,6 +195,12 @@ func Build() {}
 	}
 	if len(resp.Warnings) == 0 {
 		t.Fatalf("expected warnings, got none; context=%q", resp.Context)
+	}
+	if strings.Contains(resp.Context, "https://example.com") || strings.Contains(resp.Context, "ghp_") {
+		t.Fatalf("unsafe raw anchor leaked into context: %q", resp.Context)
+	}
+	if !strings.Contains(resp.Context, "[[redacted:unsafe_url]]") {
+		t.Fatalf("expected redacted unsafe URL, got %q", resp.Context)
 	}
 	if !strings.Contains(resp.Context, "Semantic anchor warnings") {
 		t.Fatalf("expected warning context, got %q", resp.Context)
