@@ -219,12 +219,13 @@ func DefaultServiceConfig() ServiceConfig {
 // Service is constructed per-request).
 //
 // Index:
-// - Purpose: Configure companion service defaults and optional conversation memory
-// - Flow: normalize config → init memory/summarizer → return service
-// - SideEffects: initializes memory store; may create embedder
-// - FailureModes: memory initialization errors logged as warnings
-// - Related: NewConversationMemory, NewLLMSummarizer
-// - Keywords: companion_service, memory, summarizer, embedder, config
+//
+//	Purpose: Configure companion service defaults and optional conversation memory
+//	Flow: normalize config → init memory/summarizer → return service
+//	Related: NewConversationMemory, NewLLMSummarizer
+//	Keywords: companion_service, memory, summarizer, embedder, config
+//
+// [[domain:companion-service-initialization]]
 func NewService(store contextvar.Store, cfg ServiceConfig, turnLock Locker) *Service {
 	if cfg.MaxIterations <= 0 {
 		cfg.MaxIterations = 20
@@ -610,12 +611,14 @@ type TokenUsage struct {
 // Chat executes a single companion chat request.
 //
 // Index:
-// - Purpose: Execute a companion chat turn and return structured response
-// - Flow: validate request → resolve exec mode/engine → build prompt → run engine → store turns → generate presence
-// - SideEffects: LLM calls; memory reads/writes; optional presence generation
-// - FailureModes: validation errors, engine errors, memory errors
-// - Related: chatWithLLMChat, chatWithStoryLoop, storeConversationTurns
-// - Keywords: companion_chat, conversation_id, exec_mode, engine_type, presence, tools_used
+//
+//	Purpose: Execute a companion chat turn and return structured response
+//	Flow: validate request → resolve exec mode/engine → build prompt → run engine → store turns → generate presence
+//	Related: chatWithLLMChat, chatWithStoryLoop, storeConversationTurns
+//	Keywords: companion_chat, conversation_id, exec_mode, engine_type, presence, tools_used
+//
+// [[protocol:companion-chat-turn]]
+// [[domain:dialogue-orchestration]]
 func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	start := time.Now()
 
@@ -800,12 +803,14 @@ func (s *Service) ChatStreaming(ctx context.Context, req ChatRequest, callbacks 
 // The systemPrompt parameter is the full system prompt for this turn.
 //
 // Index:
-// - Purpose: Execute the LLMChatEngine path for a companion chat turn
-// - Flow: build engine config → set hook/tool context → run engine → assemble response/tool details
-// - SideEffects: LLM calls; tool execution; hook dispatch
-// - FailureModes: engine init errors, engine run errors
-// - Related: engine.NewLLMChatEngine, engine.LLMChatEngine.Run, buildTooling
-// - Keywords: llmchat, provider, model, tool_calls, conversation_id, tools_used
+//
+//	Purpose: Execute the LLMChatEngine path for a companion chat turn
+//	Flow: build engine config → set hook/tool context → run engine → assemble response/tool details
+//	Related: engine.NewLLMChatEngine, engine.LLMChatEngine.Run, buildTooling
+//	Keywords: llmchat, provider, model, tool_calls, conversation_id, tools_used
+//
+// [[protocol:llmchat-engine-path]]
+// [[domain:companion-engine-execution]]
 func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, frame conversationContextFrame, rlmExecutor *engine.RLMToolExecutor, systemPrompt string, promptMeta memoryPromptMetadata, start time.Time, stream *ChatStreamCallbacks) (*ChatResponse, error) {
 	systemPrompt, controllerPlan, controllerTokens, subcallResult := s.prepareCompanionSystemPrompt(ctx, req, frame, systemPrompt)
 	eng, input, toolExecutor, toolDefs, usesRLM, engineCfg, err := s.buildCompanionExecutionEngine(ctx, req, frame, rlmExecutor, systemPrompt, promptMeta, controllerPlan)
@@ -1944,12 +1949,14 @@ func applyRequestedOutputFormat(text string, mode requestedOutputFormatMode) str
 // history from companion memory (when enabled), followed by the current user message.
 //
 // Index:
-// - Purpose: Provide the LLM with L0 conversation continuity via real message history
-// - Flow: resolve history limit → load turns → map to engine messages → append current user msg
-// - SideEffects: queries the companion memory database
-// - FailureModes: memory query errors or scan issues yield best-effort/no history injection
-// - Related: ConversationMemory.GetConversationMessages
-// - Keywords: history_injection, max_history_turns, companion_turns
+//
+//	Purpose: Provide the LLM with L0 conversation continuity via real message history
+//	Flow: resolve history limit → load turns → map to engine messages → append current user msg
+//	Related: ConversationMemory.GetConversationMessages
+//	Keywords: history_injection, max_history_turns, companion_turns
+//
+// [[domain:conversation-history-injection]]
+// [[domain:conversation-memory-context]]
 func (s *Service) buildChatMessages(ctx context.Context, req ChatRequest) ([]engine.Message, string, bool) {
 	frame := s.buildConversationContextFrame(ctx, req)
 	return frame.Messages, frame.HistoryRecap, frame.HasHistory
@@ -2407,12 +2414,14 @@ type continuityControllerPlan struct {
 // chatWithStoryLoop runs the story-mode gather + dialogue loop.
 //
 // Index:
-// - Purpose: Produce story-mode responses by gathering context then generating dialogue
-// - Flow: resolve models → run gather pass → parse context → run dialogue pass → assemble response
-// - SideEffects: LLM calls; tool execution during gather phase
-// - FailureModes: gather/dialogue errors, response format parsing failures
-// - Related: runLLMChatWithResponseFormatFallback, parseStoryContextBundle, parseDialogueEnvelope
-// - Keywords: story_mode, gather_model, dialogue_model, response_format, tools_used, conversation_id
+//
+//	Purpose: Produce story-mode responses by gathering context then generating dialogue
+//	Flow: resolve models → run gather pass → parse context → run dialogue pass → assemble response
+//	Related: runLLMChatWithResponseFormatFallback, parseStoryContextBundle, parseDialogueEnvelope
+//	Keywords: story_mode, gather_model, dialogue_model, response_format, tools_used, conversation_id
+//
+// [[protocol:story-mode-chat]]
+// [[domain:multi-pass-dialogue]]
 func (s *Service) chatWithStoryLoop(ctx context.Context, req ChatRequest, frame conversationContextFrame, rlmExecutor *engine.RLMToolExecutor, systemPrompt string, promptMeta memoryPromptMetadata, start time.Time) (*ChatResponse, error) {
 	if strings.TrimSpace(frame.HistoryRecap) != "" {
 		systemPrompt = systemPrompt + "\n\n# Conversation State (Machine Generated)\n" + buildStructuredConversationState(frame)
@@ -2916,12 +2925,14 @@ func continuityControllerResponseFormat() json.RawMessage {
 // buildSystemPrompt constructs the system prompt with personality, hybrid memory context, and agent identity.
 //
 // Index:
-// - Purpose: Assemble system prompt from personality + memory + request context
-// - Flow: load personality → build evolving prompt → inject hybrid memory context → inject request context via formatRequestContext
-// - SideEffects: reads contextvar store and conversation memory
-// - FailureModes: personality/memory errors yield partial prompt with defaults
-// - Related: EvolvingPersonality.BuildSystemPrompt, ConversationMemory.GetHybridContext, formatRequestContext
-// - Keywords: system_prompt, personality, memory_context, request_context, agent_identity
+//
+//	Purpose: Assemble system prompt from personality + memory + request context
+//	Flow: load personality → build evolving prompt → inject hybrid memory context → inject request context via formatRequestContext
+//	Related: EvolvingPersonality.BuildSystemPrompt, ConversationMemory.GetHybridContext, formatRequestContext
+//	Keywords: system_prompt, personality, memory_context, request_context, agent_identity
+//
+// [[domain:system-prompt-assembly]]
+// [[domain:hybrid-memory-context]]
 func (s *Service) buildSystemPrompt(ctx context.Context, req ChatRequest) (string, memoryPromptMetadata, error) {
 	return s.buildSystemPromptWithFrame(ctx, req, s.buildConversationContextFrame(ctx, req))
 }
@@ -3454,12 +3465,13 @@ func (s *Service) shouldAutoCompress(ctx context.Context, conversationID string)
 // autoCompress triggers in-process hybrid memory processing for a conversation.
 //
 // Index:
-// - Purpose: Keep hybrid layers current after each companion chat turn
-// - Flow: de-dupe per conversation → ensure mode → process events/context
-// - SideEffects: writes hybrid artifacts/tables; may invoke episode summarizer
-// - FailureModes: context cancellation/timeouts; DB/LLM errors (logged, best-effort)
-// - Related: ConversationMemory.EnsureHybridMode, ConversationMemory.BuildHybridContextLayers
-// - Keywords: companion_memory, auto_compress, hybrid, context_layers
+//
+//	Purpose: Keep hybrid layers current after each companion chat turn
+//	Flow: de-dupe per conversation → ensure mode → process events/context
+//	Related: ConversationMemory.EnsureHybridMode, ConversationMemory.BuildHybridContextLayers
+//	Keywords: companion_memory, auto_compress, hybrid, context_layers
+//
+// [[domain:hybrid-memory-compression]]
 func (s *Service) autoCompress(ctx context.Context, conversationID string) {
 	s.logger.Debug().Str("conversation_id", conversationID).Bool("memory_set", s.memory != nil).Msg("autoCompress called")
 	if s.memory == nil {

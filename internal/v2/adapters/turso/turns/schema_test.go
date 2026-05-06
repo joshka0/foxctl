@@ -62,7 +62,7 @@ func TestMigrateSchema_UpgradesLegacyArtifactConstraintForNarrative(t *testing.T
 			summary TEXT,
 			content_json TEXT NOT NULL DEFAULT '{}',
 			metadata_json TEXT NOT NULL DEFAULT '{}',
-			embedding F32_BLOB(1024),
+			embedding BLOB,
 			embedding_json TEXT NOT NULL DEFAULT '[]',
 			embedding_model TEXT,
 			created_at TEXT NOT NULL,

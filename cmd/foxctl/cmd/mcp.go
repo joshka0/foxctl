@@ -1268,11 +1268,22 @@ func registerTools(s *server.MCPServer) {
 			mcp.WithBoolean("include_shell", mcp.Description("Include shell scripts (default: false)")),
 			mcp.WithBoolean("include_tests", mcp.Description("Include test files (default: false)")),
 			mcp.WithBoolean("include_semantic_anchors", mcp.Description("Include semantic anchor concept nodes and edges (default: false)")),
+			mcp.WithBoolean("include_cochange", mcp.Description("Include empirical git co-change file edges (default: false)")),
 			mcp.WithBoolean("dry_run", mcp.Description("Build without writing to the index (default: false)")),
 			mcp.WithBoolean("progress", mcp.Description("Emit coarse build progress logs to stderr (default: false)")),
-			mcp.WithBoolean("incremental", mcp.Description("Skip rebuild when stored file state is current (default: false)")),
+			mcp.WithBoolean("incremental", mcp.Description("Skip rebuild when stored file state is current (default: true)")),
 		),
 		handleRepoIndexBuild,
+	)
+
+	// repo_index_enrich_summaries - Attach existing summaries to repo graph nodes
+	s.AddTool(
+		mcp.NewTool("repo_index_enrich_summaries",
+			mcp.WithDescription("Attach stored file and symbol summaries to an existing repo graph index."),
+			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
+			mcp.WithBoolean("dry_run", mcp.Description("Report summary updates without writing to the index (default: false)")),
+		),
+		handleRepoIndexEnrichSummaries,
 	)
 
 	// repo_index_status - Index status
@@ -1405,6 +1416,7 @@ func registerOptimizedRetrievalTools(s *server.MCPServer) {
 		mcp.NewTool("repo_index_build",
 			mcp.WithDescription("Build or refresh the repo graph index."),
 			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
+			mcp.WithArray("go_pattern", mcp.Description("Go package patterns to index (default: ./...)"), mcp.WithStringItems()),
 			mcp.WithBoolean("include_go", mcp.Description("Include Go sources (default: true)")),
 			mcp.WithBoolean("include_python", mcp.Description("Include Python sources (default: false)")),
 			mcp.WithBoolean("include_rust", mcp.Description("Include Rust sources (default: false)")),
@@ -1416,11 +1428,21 @@ func registerOptimizedRetrievalTools(s *server.MCPServer) {
 			mcp.WithBoolean("include_shell", mcp.Description("Include shell scripts (default: false)")),
 			mcp.WithBoolean("include_tests", mcp.Description("Include test files (default: false)")),
 			mcp.WithBoolean("include_semantic_anchors", mcp.Description("Include semantic anchor concept nodes and edges (default: false)")),
+			mcp.WithBoolean("include_cochange", mcp.Description("Include empirical git co-change file edges (default: false)")),
 			mcp.WithBoolean("dry_run", mcp.Description("Build without writing to the index (default: false)")),
 			mcp.WithBoolean("progress", mcp.Description("Emit coarse build progress logs to stderr (default: false)")),
-			mcp.WithBoolean("incremental", mcp.Description("Skip rebuild when stored file state is current (default: false)")),
+			mcp.WithBoolean("incremental", mcp.Description("Skip rebuild when stored file state is current (default: true)")),
 		),
 		handleRepoIndexBuild,
+	)
+
+	s.AddTool(
+		mcp.NewTool("repo_index_enrich_summaries",
+			mcp.WithDescription("Attach stored file and symbol summaries to an existing repo graph index."),
+			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
+			mcp.WithBoolean("dry_run", mcp.Description("Report summary updates without writing to the index (default: false)")),
+		),
+		handleRepoIndexEnrichSummaries,
 	)
 
 	s.AddTool(
@@ -3283,8 +3305,17 @@ func executeMCPPipeSource(ctx context.Context, toolName string, args map[string]
 				getBoolArg(args, "include_tests", false),
 				getBoolArg(args, "dry_run", false),
 				getBoolArg(args, "progress", false),
-				getBoolArg(args, "incremental", false),
+				getBoolArg(args, "incremental", true),
 				getBoolArg(args, "include_semantic_anchors", false),
+				getBoolArg(args, "include_cochange", false),
+			)
+		})
+	case "repo_index_enrich_summaries":
+		return runEnvelopeCommandForPipe(ctx, "repo_index_enrich_summaries", func(cmd *cobra.Command) error {
+			return runIndexRepoEnrichSummaries(
+				cmd,
+				getStringArg(args, "workspace", "."),
+				getBoolArg(args, "dry_run", false),
 			)
 		})
 	case "repo_index_status":
@@ -4439,12 +4470,22 @@ func handleRepoIndexBuild(ctx context.Context, req mcp.CallToolRequest) (*mcp.Ca
 	includeTests := getBoolArg(args, "include_tests", false)
 	dryRun := getBoolArg(args, "dry_run", false)
 	includeSemanticAnchors := getBoolArg(args, "include_semantic_anchors", false)
+	includeCoChange := getBoolArg(args, "include_cochange", false)
 
 	progress := getBoolArg(args, "progress", false)
-	incremental := getBoolArg(args, "incremental", false)
+	incremental := getBoolArg(args, "incremental", true)
 
 	return runRepoIndexCommand(ctx, func(cmd *cobra.Command) error {
-		return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includePython, includeRust, includeCSharp, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun, progress, incremental, includeSemanticAnchors)
+		return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includePython, includeRust, includeCSharp, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun, progress, incremental, includeSemanticAnchors, includeCoChange)
+	})
+}
+
+func handleRepoIndexEnrichSummaries(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	workspace := getStringArg(args, "workspace", ".")
+	dryRun := getBoolArg(args, "dry_run", false)
+	return runRepoIndexCommand(ctx, func(cmd *cobra.Command) error {
+		return runIndexRepoEnrichSummaries(cmd, workspace, dryRun)
 	})
 }
 

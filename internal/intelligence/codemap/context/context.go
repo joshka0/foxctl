@@ -154,10 +154,15 @@ func WithWorkspace(workspace string) GathererOption {
 // NewGatherer creates a context gatherer with optional dependencies.
 //
 // Index:
-// - Purpose: Initialize a codemap context gatherer
-// - Flow: apply options → return gatherer
-// - Related: Gatherer.GatherAll
-// - Keywords: codemap_context, gatherer, graph_store, skill_resolver, workspace
+//   Purpose: Initialize a codemap context gatherer
+//   Keywords: codemap_context, gatherer, graph_store, skill_resolver, workspace
+//   Related: Gatherer.GatherAll
+//   Flow: apply options → return gatherer
+//   Resources: graph store, skill resolver
+//   Events: none
+//   OutputFields: Gatherer
+//
+// [[protocol:codemap-context-gatherer-init]]
 func NewGatherer(opts ...GathererOption) *Gatherer {
 	g := &Gatherer{
 		skillResolver: skill.NewResolver(),
@@ -173,12 +178,16 @@ func NewGatherer(opts ...GathererOption) *Gatherer {
 // GatherAll collects graph, symbol, semantic, and pattern context in parallel.
 //
 // Index:
-// - Purpose: Gather codemap context from multiple sources
-// - Flow: extract terms → run graph/symbol/semantic/pattern gatherers → merge context
-// - SideEffects: queries graph store; runs skills; writes warnings to stderr
-// - FailureModes: gather errors return partial context where possible
-// - Related: gatherGraphContext, gatherSymbolContext, gatherSemanticContext, gatherPatternContext
-// - Keywords: codemap_context, graph, symbols, semantic_search, patterns, errgroup
+//   Purpose: Gather codemap context from multiple sources
+//   Keywords: codemap_context, graph, symbols, semantic_search, patterns, errgroup
+//   Related: gatherGraphContext, gatherSymbolContext, gatherSemanticContext, gatherPatternContext
+//   Flow: extract terms → run graph/symbol/semantic/pattern gatherers → merge context
+//   Resources: graph store, skill resolver, LLM provider
+//   Events: codemap-context-gathered
+//   OutputFields: Context
+//
+// [[protocol:codemap-context-gather-all]]
+// [[invariant:partial-context-on-gather-failure]]
 func (g *Gatherer) GatherAll(ctx context.Context, query, workspace string) (*Context, error) {
 	if workspace == "" {
 		workspace = g.workspace

@@ -66,13 +66,15 @@ func main() {
 // run orchestrates session capture from Claude Code and Codex with metadata extraction and storage.
 //
 // Index:
-// - Purpose: Extract and store conversation sessions from Claude Code and Codex with metadata, statistics, and high-signal content
-// - Flow: resolve workspace → detect source → locate session files → parse messages → extract metadata → save to store → emit results
-// - SideEffects: reads provider session files; writes to session store; processes large JSONL files; extracts conversation metadata
-// - FailureModes: missing session files, parse errors, storage failures, workspace detection issues, file access problems
-// - Observability: emits capture statistics, session metadata, message counts, tool usage, token counts, and high-signal content previews
-// - Related: findSessionFile, extractSession, extractHighSignal, scanCodexSessions, claudejsonl.OpenReader
-// - Keywords: session/capture, conversation_extraction, claude_code, codex, metadata_extraction, session_storage
+//   Purpose: Extract and store conversation sessions from Claude Code and Codex with metadata, statistics, and high-signal content
+//   Keywords: session/capture, conversation_extraction, claude_code, codex, metadata_extraction, session_storage
+//   Related: findSessionFile, extractSession, extractHighSignal, scanCodexSessions, claudejsonl.OpenReader
+//   Flow: resolve workspace → detect source → locate session files → parse messages → extract metadata → save to store → emit results
+//   Resources: session store, Claude/Codex JSONL files
+//   Events: session capture events
+//   OutputFields: session_id, workspace_path, message_count, user_turns, tool_invocations, high_signal
+// [[domain:session-capture-from-provider]]
+// [[protocol:claude-codex-jsonl-parsing]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Default workspace
 	in.Workspace = workspaceutil.Resolve(in.Workspace, "", rc.Workspace)

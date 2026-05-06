@@ -99,13 +99,16 @@ func main() {
 // run orchestrates mailbox management with message passing and file reservation capabilities.
 //
 // Index:
-// - Purpose: Manage workspace coordination through message passing and file reservations
-// - Flow: open board store → validate operation → route to handler → execute operation → emit results
-// - SideEffects: message delivery; inbox management; acknowledgments; file reservations; conflict detection
-// - FailureModes: invalid operations, missing required fields, store access failures, team lookup failures
-// - Observability: emits operation results, message counts, reservation status, and delivery summaries
-// - Related: blackboard.OpenBoardStore, teams.Open, agent.BoardMessage, agent.FileReservation
-// - Keywords: mailbox/manage, message_passing, file_reservations, workspace_coordination, team_messaging
+//   Purpose: Manage workspace coordination through message passing and file reservations
+//   Keywords: mailbox/manage, message_passing, file_reservations, workspace_coordination, team_messaging
+//   Related: blackboard.OpenBoardStore, teams.Open, agent.BoardMessage, agent.FileReservation
+//   Flow: open board store → validate operation → route to handler → execute operation → emit results
+//   Resources: blackboard store (SQLite); teams store
+//   Events: message-sent, inbox-retrieved, reservation-created, reservation-released
+//   OutputFields: message_id, messages, count, granted, conflicts, summary
+//
+// [[domain:mailbox-management]]
+// [[protocol:workspace-coordination]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	store, err := blackboard.OpenBoardStore(ctx, rc.Config.Storage.Root)
 	if err != nil {

@@ -47,12 +47,17 @@ type Store struct {
 // repository index, or an error if opening, migration, or setup fails.
 //
 // Index:
-// - Purpose: Open a repoindex store for a repo root with schema migration and pragmas
-// - Flow: resolve repo root → compute key → migrate legacy path → open db → set pragmas
-// - SideEffects: filesystem access; SQLite schema migrations; PRAGMA writes
-// - FailureModes: path resolution errors, open/migrate errors, pragma errors
-// - Related: repoKey, migrate, sqliteutil.OpenDBShared
-// - Keywords: repoindex, repo_key, sqlite, schema_version, OpenDBShared, PRAGMA, repo_root
+//
+//	Purpose: Open a repoindex store for a repo root with schema migration and pragmas
+//	Keywords: repoindex, repo_key, sqlite, schema_version, OpenDBShared, PRAGMA, repo_root
+//	Related: repoKey, migrate, dbutil.OpenSQLiteDBShared
+//	Flow: resolve repo root → compute key → migrate legacy path → open db → set pragmas
+//	Resources: repoindex SQLite database, filesystem
+//	Events: repoindex-open
+//	OutputFields: Store
+//
+// [[protocol:repoindex-store-open]]
+// [[invariant:schema-version-matches-on-open]]
 func Open(ctx context.Context, storageRoot, repoRoot string) (*Store, error) {
 	if repoRoot == "" {
 		return nil, fmt.Errorf("repoindex: repo root is required")
@@ -303,12 +308,17 @@ func (s *Store) GetMeta(ctx context.Context) (IndexMeta, error) {
 // ReplaceAll replaces the entire graph with the provided nodes and edges.
 //
 // Index:
-// - Purpose: Replace the full repo graph atomically in SQLite
-// - Flow: begin tx → delete existing nodes/edges → insert nodes → insert edges → commit
-// - SideEffects: SQLite writes within a transaction
-// - FailureModes: insert failures, transaction errors
-// - Related: Store.SetMeta, Store.Stats
-// - Keywords: repoindex, ReplaceAll, nodes, edges, transaction, sqlite
+//
+//	Purpose: Replace the full repo graph atomically in SQLite
+//	Keywords: repoindex, ReplaceAll, nodes, edges, transaction, sqlite
+//	Related: Store.SetMeta, Store.Stats
+//	Flow: begin tx → delete existing nodes/edges → insert nodes → insert edges → commit
+//	Resources: repoindex SQLite nodes/edges tables
+//	Events: repoindex-replace-all
+//	OutputFields: none
+//
+// [[invariant:atomic-graph-replacement]]
+// [[risk:transaction-rollback-on-error]]
 func (s *Store) ReplaceAll(ctx context.Context, nodes []Node, edges []Edge) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -697,6 +707,45 @@ func (s *Store) ListNodesByKind(ctx context.Context, kind NodeKind, limit int) (
 	}
 	defer rows.Close()
 	return scanNodes(rows)
+}
+
+// ListAllNodesByKind returns all repo nodes of a specific kind ordered by package, file, and name.
+func (s *Store) ListAllNodesByKind(ctx context.Context, kind NodeKind) ([]Node, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, kind, pkg, file, name, signature, span_start, span_end, exported, doc, summary, meta_json, hash, updated_at
+		FROM nodes
+		WHERE repo_key = ? AND kind = ?
+		ORDER BY COALESCE(pkg, ''), COALESCE(file, ''), COALESCE(name, ''), id
+	`, s.repoKey, string(kind))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanNodes(rows)
+}
+
+// UpdateNodeSummary updates a node summary. FTS maintenance is handled by node update triggers.
+func (s *Store) UpdateNodeSummary(ctx context.Context, id, summary string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return fmt.Errorf("repoindex: node id is required")
+	}
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE nodes
+		SET summary = ?, updated_at = ?
+		WHERE id = ? AND repo_key = ?
+	`, nullIfEmpty(strings.TrimSpace(summary)), time.Now().UTC().Unix(), id, s.repoKey)
+	if err != nil {
+		return err
+	}
+	count, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // GetOutgoingEdges returns outgoing edges for a node.

@@ -34,13 +34,15 @@ func main() {
 // run orchestrates subagent cleanup with reservation release and lifecycle logging.
 //
 // Index:
-// - Purpose: Handle SubagentStop events to release reservations and emit lifecycle observability events
-// - Flow: parse payload → extract subagent info → release reservations → log completion → emit approve output
-// - SideEffects: reservation cleanup; lifecycle logging; observability events
-// - FailureModes: payload parsing errors, reservation release failures (non-fatal)
-// - Observability: emits subagent name, exit code, and reservation release counts
-// - Related: (future) releaseReservations function when reservation system is integrated
-// - Keywords: hooks/subagent_stop, subagent_lifecycle, reservation_cleanup, lifecycle_logging
+//   Purpose: Handle SubagentStop events to release reservations and emit lifecycle observability events
+//   Keywords: hooks/subagent_stop, subagent_lifecycle, reservation_cleanup, lifecycle_logging
+//   Related: (future) releaseReservations function when reservation system is integrated
+//   Flow: parse payload → extract subagent info → release reservations → log completion → emit approve output
+//   Resources: logger
+//   Events: subagent-stopped
+//   OutputFields: subagent_name, agent_id, exit_code, reservations_released
+//
+// [[domain:subagent-lifecycle]]
 func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	// Parse subagent payload from tool input
 	var payload SubagentStopPayload

@@ -38,13 +38,17 @@ func main() {
 // run orchestrates task-centric model enforcement with auto-creation and graph edge creation.
 //
 // Index:
-// - Purpose: Enforce task-centric model by ensuring an active task exists before allowing write operations
-// - Flow: validate write operation → determine mode → resolve workspace → open task store → ensure/dirty task → create graph edges → emit results
-// - SideEffects: task creation/updates; graph edge creation; task status management
-// - FailureModes: store access failures, workspace resolution errors
-// - Observability: emits task info, creation status, and graph edge creation results
-// - Related: deriveTaskTitle, createModifiedEdge, toolutil.IsWriteOperation
-// - Keywords: hooks/task_guard, task_centric, write_operations, task_creation, graph_edges
+//
+//	Purpose: Enforce task-centric model by ensuring an active task exists before allowing write operations
+//	Keywords: hooks/task_guard, task_centric, write_operations, task_creation, graph_edges
+//	Related: deriveTaskTitle, createModifiedEdge, toolutil.IsWriteOperation
+//	Flow: validate write operation → determine mode → resolve workspace → open task store → ensure/dirty task → create graph edges → emit results
+//	Resources: task store; graph store
+//	Events: task-auto-created, task-dirtied, file-modified-edge-created
+//	OutputFields: task_id, task_title, task_status, created, dirtied
+//
+// [[invariant:active-work-item-for-writes]]
+// [[domain:work-item-centric-model]]
 func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	paths := sessionkit.ResolvePaths(rc.Config)
 

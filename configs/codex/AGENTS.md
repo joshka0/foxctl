@@ -118,7 +118,7 @@ For common workflows, use skill packs instead of individual skills:
 |------|----------|
 | `$foxctl-all` | Combined entrypoint (when unsure) |
 | `$foxctl-core` | File ops + fast search |
-| `$foxctl-code` | Code analysis + semantic search |
+| `$foxctl-code` | Code analysis, semantic search, repo graph build/query/enrichment |
 | `$foxctl-dev` | Tests + CI + verification |
 | `$foxctl-orchestrate` | Tasks + sessions + inbox |
 | `$foxctl-room` | Durable room chat, room loop, room tasks |

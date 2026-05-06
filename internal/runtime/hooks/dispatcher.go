@@ -115,10 +115,13 @@ type dispatcher struct {
 // NewDispatcher builds a hook dispatcher with the provided config and runner.
 //
 // Index:
-// - Purpose: Initialize a dispatcher for hook execution
-// - Flow: store config/runner → return dispatcher
-// - Related: dispatcher.Dispatch, NewDispatcherWithRegistry
-// - Keywords: hook_dispatcher, hook_config, hook_runner, dispatch
+//   Purpose: Initialize a dispatcher for hook execution
+//   Keywords: hook_dispatcher, hook_config, hook_runner, dispatch
+//   Related: dispatcher.Dispatch, NewDispatcherWithRegistry
+//   Flow: store config/runner → return dispatcher
+//   Resources: hooks.Config, hooks.HookRunner
+//   Events: none
+//   OutputFields: Dispatcher
 func NewDispatcher(cfg *Config, runner HookRunner) Dispatcher {
 	return &dispatcher{
 		config: cfg,
@@ -130,13 +133,16 @@ func NewDispatcher(cfg *Config, runner HookRunner) Dispatcher {
 // Dispatch runs matching hooks and merges their outputs.
 //
 // Index:
-// - Purpose: Execute matching hooks and merge outputs into a decision
-// - Flow: resolve hooks → filter matchers → run hooks with timeouts → emit events → merge outputs
-// - SideEffects: executes hook skills/scripts; emits observability events
-// - FailureModes: hook execution errors, runner failures
-// - Observability: emits OpHookExecute events
-// - Related: MatchesInput, Merge, HookRunner.Run
-// - Keywords: hook_dispatch, hook_execute, timeout_ms, fail_open, OpHookExecute
+//   Purpose: Execute matching hooks and merge outputs into a decision
+//   Keywords: hook_dispatch, hook_execute, timeout_ms, fail_open, OpHookExecute
+//   Related: MatchesInput, Merge, HookRunner.Run
+//   Flow: resolve hooks → filter matchers → run hooks with timeouts → emit events → merge outputs
+//   Resources: hooks.Config, observability
+//   Events: OpHookExecute
+//   OutputFields: Result
+//
+// [[invariant:hook-timeout-enforced]]
+// [[protocol:hook-dispatch]]
 func (d *dispatcher) Dispatch(ctx context.Context, input Input) (Result, error) {
 	start := time.Now()
 	result := Result{

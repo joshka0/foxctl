@@ -59,13 +59,15 @@ func main() {
 // run orchestrates session deep-dive operations with archive validation, chunk retrieval, and detailed metadata assembly.
 //
 // Index:
-// - Purpose: Retrieve raw content and detailed metadata from session archives with flexible chunk selection
-// - Flow: validate input → open sessions store → get archive path → determine target chunks → read archive → assemble details → emit results
-// - SideEffects: reads session archives; accesses session metadata; processes large data files; handles archive format variations
-// - FailureModes: missing session IDs, non-existent archives, file access errors, chunk retrieval failures, archive corruption
-// - Observability: emits chunk details, content previews, error tracking, file usage statistics, and comprehensive archive analysis
-// - Related: archive.ReadChunksFromArchive, sessionkit.OpenSessions, sessions.SessionChunk
-// - Keywords: session/deep-dive, archive_retrieval, chunk_analysis, session_metadata, raw_content_access
+//   Purpose: Retrieve raw content and detailed metadata from session archives with flexible chunk selection
+//   Keywords: session/deep-dive, archive_retrieval, chunk_analysis, session_metadata, raw_content_access
+//   Related: archive.ReadChunksFromArchive, sessionkit.OpenSessions, sessions.SessionChunk
+//   Flow: validate input → open sessions store → get archive path → determine target chunks → read archive → assemble details → emit results
+//   Resources: session store, compressed archive files
+//   Events: deep-dive retrieval events
+//   OutputFields: session_id, archive_path, chunks, total_found
+// [[domain:session-archive-deep-dive]]
+// [[protocol:archive-chunk-retrieval]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if in.SessionID == "" {
 		return skillerr.Arg("session_id is required")

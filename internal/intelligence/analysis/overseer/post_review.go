@@ -47,10 +47,15 @@ type PostReviewHandlerConfig struct {
 // NewPostReviewHandler creates a post-review handler with configured dependencies.
 //
 // Index:
-// - Purpose: Initialize post-review processing pipeline
-// - Flow: create producer -> capture indexer handler/config -> return handler
-// - Related: PostReviewHandler.HandleReviewApproved
-// - Keywords: post_review, producer, indexer_handler, review_event
+//   Purpose: Initialize post-review processing pipeline
+//   Keywords: post_review, producer, indexer_handler, review_event
+//   Related: PostReviewHandler.HandleReviewApproved
+//   Flow: create producer -> capture indexer handler/config -> return handler
+//   Resources: event store, indexer handler
+//   Events: none
+//   OutputFields: PostReviewHandler
+//
+// [[protocol:overseer-post-review-init]]
 func NewPostReviewHandler(cfg PostReviewHandlerConfig) *PostReviewHandler {
 	return &PostReviewHandler{
 		producer:       postreview.NewProducer(cfg.EventStore),
@@ -66,12 +71,16 @@ func NewPostReviewHandler(cfg PostReviewHandlerConfig) *PostReviewHandler {
 // If files is nil/empty, indexer fanout is skipped (see deferred.md D1).
 //
 // Index:
-// - Purpose: Persist an approved review event and trigger indexer fanout
-// - Flow: validate artifact status -> produce event -> capture trajectory (optional) -> test hook -> fanout (optional) -> return result
-// - SideEffects: persists post-review event; optional trajectory capture; indexer writes
-// - FailureModes: invalid artifact status, event production errors, indexer handler errors
-// - Related: postreview.Producer.Produce, trajectorycapture.CaptureReviewOutcome, indexing.PostReviewHandler.Handle
-// - Keywords: post_review, review_id, workspace_id, task_id, postreview.Producer.Produce, indexing.PostReviewHandler.Handle
+//   Purpose: Persist an approved review event and trigger indexer fanout
+//   Keywords: post_review, review_id, workspace_id, task_id, postreview.Producer.Produce, indexing.PostReviewHandler.Handle
+//   Related: postreview.Producer.Produce, trajectorycapture.CaptureReviewOutcome, indexing.PostReviewHandler.Handle
+//   Flow: validate artifact status -> produce event -> capture trajectory (optional) -> test hook -> fanout (optional) -> return result
+//   Resources: event store, indexer handler, trajectory storage
+//   Events: post-review-approved-handled
+//   OutputFields: PostReviewResult
+//
+// [[protocol:overseer-post-review-approved]]
+// [[invariant:artifact-status-must-be-ok]]
 func (h *PostReviewHandler) HandleReviewApproved(
 	ctx context.Context,
 	artifact agent.ReviewArtifact,

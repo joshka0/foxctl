@@ -600,7 +600,7 @@ func TestBuildToolDefsForRole_SemanticScout(t *testing.T) {
 func TestBuildToolDefsForRole_DAGScout(t *testing.T) {
 	names := toolNamesForRole(types.RoleDAGScout)
 
-	for _, want := range []string{"think", "repo_index_search", "repo_index_expand", "repo_index_open", "repo_index_dag_grep"} {
+	for _, want := range []string{"think", "repo_index_build", "repo_index_enrich_summaries", "repo_index_search", "repo_index_expand", "repo_index_open", "repo_index_dag_grep"} {
 		if !hasToolName(names, want) {
 			t.Errorf("dag_scout should have %q, got %v", want, names)
 		}
@@ -699,7 +699,7 @@ func TestBuildToolDefsForRole_ResearcherUnchanged(t *testing.T) {
 	names := toolNamesForRole(types.RoleResearcher)
 
 	// Researcher must still have base tools + foxctl tools
-	for _, want := range []string{"fs_read_file", "code_search", "think", "shell", "context_search", "semantic_search_code", "semantic_search_sessions", "semantic_search_memories", "semantic_search_context", "smart_search", "refactor_scout", "code_search_ensemble", "context_grep", "code_symbols", "repo_index_search", "annotation_recall", "context_show", "context_retrieve", "obsidian_index_search", "obsidian_read", "obsidian_related"} {
+	for _, want := range []string{"fs_read_file", "code_search", "think", "shell", "context_search", "semantic_search_code", "semantic_search_sessions", "semantic_search_memories", "semantic_search_context", "smart_search", "refactor_scout", "code_search_ensemble", "context_grep", "code_symbols", "repo_index_build", "repo_index_enrich_summaries", "repo_index_search", "annotation_recall", "context_show", "context_retrieve", "obsidian_index_search", "obsidian_read", "obsidian_related"} {
 		if !hasToolName(names, want) {
 			t.Errorf("researcher should still have %q, got %v", want, names)
 		}
@@ -709,7 +709,7 @@ func TestBuildToolDefsForRole_ResearcherUnchanged(t *testing.T) {
 func TestBuildToolDefsForRole_SubcallWorker(t *testing.T) {
 	names := toolNamesForRole(types.RoleSubcallWorker)
 
-	for _, want := range []string{"fs_read_file", "code_search", "think", "shell", "context_search", "smart_search", "refactor_scout", "code_search_ensemble", "context_grep", "code_symbols", "repo_index_search", "memory_query", "session_recall", "context_show", "context_retrieve"} {
+	for _, want := range []string{"fs_read_file", "code_search", "think", "shell", "context_search", "smart_search", "refactor_scout", "code_search_ensemble", "context_grep", "code_symbols", "repo_index_build", "repo_index_enrich_summaries", "repo_index_search", "memory_query", "session_recall", "context_show", "context_retrieve"} {
 		if !hasToolName(names, want) {
 			t.Errorf("subcall_worker should have %q, got %v", want, names)
 		}

@@ -23,12 +23,17 @@ import (
 // - Never fails Open(); errors are logged and ignored.
 //
 // Index:
-// - Purpose: Auto-repair legacy path-keyed trajectory rows so exports/queries work across machines/users
-// - Flow: detect path-like workspace IDs -> compute stable target IDs -> copy/move tables in a FK-safe transaction -> log results
-// - SideEffects: updates trajectory.db workspace_id values; may drop conflicting rows via INSERT OR IGNORE
-// - FailureModes: query failures, tx failures, FK constraint errors (logged; does not fail Open)
-// - Related: ws.CanonicalID, ws.ID, (*sqlStore).migrateWorkspace, trajectory.Open
-// - Keywords: workspace_id, migration, repair, trajectories, trajectory_events, user_requests
+//
+//	Purpose: Auto-repair legacy path-keyed trajectory rows so exports/queries work across machines/users
+//	Keywords: workspace_id, migration, repair, trajectories, trajectory_events, user_requests
+//	Related: ws.CanonicalID, ws.ID, (*sqlStore).migrateWorkspace, trajectory.Open
+//	Flow: detect path-like workspace IDs -> compute stable target IDs -> copy/move tables in a FK-safe transaction -> log results
+//	Resources: trajectory.db, trajectories, trajectory_events, user_requests
+//	Events: none
+//	OutputFields: none
+//
+// [[invariant:workspace-migration-atomic]]
+// [[domain:workspace-stable-identity]]
 func (s *sqlStore) repairWorkspaceIDs(ctx context.Context) {
 	if s == nil || s.db == nil {
 		return
@@ -84,12 +89,17 @@ func (s *sqlStore) repairWorkspaceIDs(ctx context.Context) {
 // updates trajectory_events.workspace_id, keeping foreign key constraints satisfied.
 //
 // Index:
-// - Purpose: Make legacy workspace IDs queryable under a stable workspace key
-// - Flow: begin tx -> copy parent rows -> update events -> delete old parents -> commit
-// - SideEffects: database writes; may ignore duplicates if target already has rows
-// - FailureModes: tx errors, exec errors, FK errors
-// - Related: (*sqlStore).repairWorkspaceIDs
-// - Keywords: migrate, transaction, foreign_keys, workspace_id
+//
+//	Purpose: Make legacy workspace IDs queryable under a stable workspace key
+//	Keywords: migrate, transaction, foreign_keys, workspace_id
+//	Related: (*sqlStore).repairWorkspaceIDs
+//	Flow: begin tx -> copy parent rows -> update events -> delete old parents -> commit
+//	Resources: trajectory.db
+//	Events: none
+//	OutputFields: none
+//
+// [[invariant:workspace-migration-atomic]]
+// [[domain:workspace-stable-identity]]
 func (s *sqlStore) migrateWorkspace(ctx context.Context, from, to string) error {
 	from = strings.TrimSpace(from)
 	to = strings.TrimSpace(to)

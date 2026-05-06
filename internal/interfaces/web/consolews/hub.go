@@ -202,13 +202,14 @@ type Client struct {
 // HandleWebSocket handles WebSocket connections at /ws/console/:sessionID.
 //
 // Index:
-// - Purpose: Accept console websocket connections and attach them to sessions
-// - Flow: parse session ID → get/create session → upgrade to websocket → spawn pumps
-// - SideEffects: upgrades HTTP to WebSocket; spawns goroutines
-// - FailureModes: invalid session ID, websocket accept failures
-// - Observability: emits consolews.accept_failed
-// - Related: Hub.GetSession, Hub.CreateSession, Client.readPump
-// - Keywords: consolews, websocket, session_id, accept_failed
+//
+//	Purpose: Accept console websocket connections and attach them to sessions
+//	Flow: parse session ID → get/create session → upgrade to websocket → spawn pumps
+//	Related: Hub.GetSession, Hub.CreateSession, Client.readPump
+//	Keywords: consolews, websocket, session_id, accept_failed
+//
+// [[protocol:console-websocket]]
+// [[domain:console-pty-transport]]
 func HandleWebSocket(hub *Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract session ID from path: /ws/console/{sessionID}

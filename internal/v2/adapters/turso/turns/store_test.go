@@ -141,34 +141,6 @@ func TestDefaultV2TurnsVectorDimensions_Precedence(t *testing.T) {
 	}
 }
 
-func TestDetectArtifactVectorDimensions(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, filepath.Join(t.TempDir(), "dims.db"), nil)
-	if err != nil {
-		t.Fatalf("open sqlite db: %v", err)
-	}
-	t.Cleanup(func() { _ = closeFn() })
-
-	if _, err := db.ExecContext(ctx, `
-		CREATE TABLE v2_turn_artifacts (
-			turn_id TEXT NOT NULL,
-			artifact_type TEXT NOT NULL,
-			artifact_version TEXT NOT NULL,
-			ref TEXT NOT NULL,
-			embedding F32_BLOB(321),
-			PRIMARY KEY(turn_id, artifact_type, artifact_version)
-		)
-	`); err != nil {
-		t.Fatalf("create v2_turn_artifacts: %v", err)
-	}
-
-	if got := detectArtifactVectorDimensions(ctx, db, 999); got != 321 {
-		t.Fatalf("detectArtifactVectorDimensions() = %d, want 321", got)
-	}
-}
-
 func TestTurnStore_SaveTurn_ReplacesPriorLineage(t *testing.T) {
 	t.Parallel()
 
@@ -571,8 +543,6 @@ func TestTurnStore_SaveArtifact_IdempotentAndStableRefLookup(t *testing.T) {
 	}
 
 	store := NewStore(db, db.Close)
-	// Force vector path in sqlite test to verify graceful fallback to non-vector writes.
-	store.vectorEnabled.Store(true)
 	store.vectorDimensions = 3
 
 	if err := store.SaveTurn(ctx, run.TurnRecord{ID: "turn-003", SessionID: "run-003"}); err != nil {
@@ -926,21 +896,29 @@ func TestTurnStore_GetNarrative_PrefersCanonicalFirstTurnArtifact(t *testing.T) 
 	}
 }
 
-func TestTurnStore_SearchArtifactsByEmbedding_FallbackAndFilters(t *testing.T) {
-	t.Parallel()
-
+func TestTurnStore_SearchArtifactsByEmbedding_VectorAndFilters(t *testing.T) {
 	ctx := context.Background()
-	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, filepath.Join(t.TempDir(), "turn_artifact_search.db"), nil)
+	storageRoot := t.TempDir()
+	requireNative := requireNativeVectorSQL()
+
+	t.Setenv("FOXCTL_V2_TURNS_DB_DRIVER", "turso")
+	t.Setenv("FOXCTL_V2_TURNS_DB_PATH", filepath.Join(storageRoot, "turn_artifact_search.turso"))
+	t.Setenv("FOXCTL_V2_TURNS_VECTOR_SEARCH", "1")
+	t.Setenv("FOXCTL_V2_TURNS_VECTOR_DIMS", "3")
+	t.Setenv("FOXCTL_VECTOR_DIMS", "3")
+
+	store, err := Open(ctx, storageRoot)
 	if err != nil {
-		t.Fatalf("open sqlite db: %v", err)
+		t.Fatalf("Open(turso) error = %v", err)
 	}
-	t.Cleanup(func() { _ = closeFn() })
-	if err := MigrateSchema(ctx, db); err != nil {
-		t.Fatalf("migrate schema: %v", err)
+	t.Cleanup(func() { _ = store.Close() })
+	if !store.vectorEnabled.Load() {
+		if requireNative {
+			t.Fatal("native vector SQL required, but store initialized without vector capability")
+		}
+		t.Skip("skipping: turso vector capability unavailable in this test environment")
 	}
 
-	store := NewStore(db, db.Close)
-	store.vectorDimensions = 3
 	base := time.Date(2026, 2, 19, 12, 0, 0, 0, time.UTC)
 	store.SetNowForTest(func() time.Time { return base })
 
@@ -982,9 +960,6 @@ func TestTurnStore_SearchArtifactsByEmbedding_FallbackAndFilters(t *testing.T) {
 		t.Fatalf("SaveArtifact(turn-s2-a embedding) error = %v", err)
 	}
 
-	// Force vector-query path on sqlite to verify graceful downgrade and fallback search.
-	store.vectorEnabled.Store(true)
-
 	results, err := store.SearchArtifactsByEmbedding(ctx, []float32{1.0, 0.0, 0.0}, run.ArtifactSearchOptions{
 		SessionID: "run-s1",
 		Limit:     5,
@@ -992,14 +967,11 @@ func TestTurnStore_SearchArtifactsByEmbedding_FallbackAndFilters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SearchArtifactsByEmbedding() error = %v", err)
 	}
-	if results.SearchPath != run.ArtifactSearchPathFallback {
-		t.Fatalf("search path=%q want %q", results.SearchPath, run.ArtifactSearchPathFallback)
+	if results.SearchPath != run.ArtifactSearchPathVector {
+		t.Fatalf("search path=%q want %q", results.SearchPath, run.ArtifactSearchPathVector)
 	}
-	if results.VectorCapability != run.ArtifactVectorCapabilityDisabled {
-		t.Fatalf("vector capability=%q want %q", results.VectorCapability, run.ArtifactVectorCapabilityDisabled)
-	}
-	if store.vectorEnabled.Load() {
-		t.Fatal("vectorEnabled should be disabled after unsupported vector search fallback")
+	if results.VectorCapability != run.ArtifactVectorCapabilityEnabled {
+		t.Fatalf("vector capability=%q want %q", results.VectorCapability, run.ArtifactVectorCapabilityEnabled)
 	}
 	if len(results.Hits) != 2 {
 		t.Fatalf("results len=%d want 2", len(results.Hits))
@@ -1038,21 +1010,27 @@ func TestTurnStore_SearchArtifactsByEmbedding_FallbackAndFilters(t *testing.T) {
 }
 
 func TestTurnStore_SearchArtifactsByEmbedding_WorkingContextFallbackLadder(t *testing.T) {
-	t.Parallel()
-
 	ctx := context.Background()
-	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, filepath.Join(t.TempDir(), "turn_artifact_working_context.db"), nil)
-	if err != nil {
-		t.Fatalf("open sqlite db: %v", err)
-	}
-	t.Cleanup(func() { _ = closeFn() })
-	if err := MigrateSchema(ctx, db); err != nil {
-		t.Fatalf("migrate schema: %v", err)
-	}
+	storageRoot := t.TempDir()
+	requireNative := requireNativeVectorSQL()
 
-	store := NewStore(db, db.Close)
-	store.vectorEnabled.Store(false) // deterministic fallback path for tests
-	store.vectorDimensions = 3
+	t.Setenv("FOXCTL_V2_TURNS_DB_DRIVER", "turso")
+	t.Setenv("FOXCTL_V2_TURNS_DB_PATH", filepath.Join(storageRoot, "turn_artifact_working_context.turso"))
+	t.Setenv("FOXCTL_V2_TURNS_VECTOR_SEARCH", "1")
+	t.Setenv("FOXCTL_V2_TURNS_VECTOR_DIMS", "3")
+	t.Setenv("FOXCTL_VECTOR_DIMS", "3")
+
+	store, err := Open(ctx, storageRoot)
+	if err != nil {
+		t.Fatalf("Open(turso) error = %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	if !store.vectorEnabled.Load() {
+		if requireNative {
+			t.Fatal("native vector SQL required, but store initialized without vector capability")
+		}
+		t.Skip("skipping: turso vector capability unavailable in this test environment")
+	}
 
 	for _, turn := range []run.TurnRecord{
 		{ID: "turn-wc-1", SessionID: "run-wc"},
@@ -1220,8 +1198,8 @@ func TestTurnStore_SaveArtifact_EmbeddingDimensionsPolicy(t *testing.T) {
 		t.Fatalf("SaveArtifact() error=%v want ErrInvalidEmbeddingDimensions", err)
 	}
 
-	// When vector mode is disabled we preserve embedding_json for fallback mode and
-	// do not enforce strict vector dimensions.
+	// When vector mode is disabled, embeddings remain available through embedding_json
+	// and strict vector dimensions are not enforced.
 	store.vectorEnabled.Store(false)
 	if err := store.SaveArtifact(ctx, Artifact{
 		TurnID:          "turn-dims",

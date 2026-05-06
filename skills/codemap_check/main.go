@@ -69,13 +69,16 @@ func main() {
 // run orchestrates codemap staleness detection with optional regeneration.
 //
 // Index:
-// - Purpose: Determine if a codemap needs updating by checking if referenced files have changed since creation
-// - Flow: validate input → load codemap → extract file paths → check git/mtime changes → calculate staleness → optionally regenerate
-// - SideEffects: database queries; git log execution; file system stat calls; subprocess execution (regeneration)
-// - FailureModes: invalid codemap ID, load failures, git errors, regeneration failures
-// - Observability: emits comprehensive staleness analysis with changed files, recommendations, and regeneration status
-// - Related: checkStaleness, loadCodemap, extractFilePaths, checkGitChanges, checkMtimeChanges, regenerateCodemap
-// - Keywords: codemap/check, staleness, git, mtime, regeneration, recommendations
+//   Purpose: Determine if a codemap needs updating by checking if referenced files have changed since creation
+//   Flow: validate input → load codemap → extract file paths → check git/mtime changes → calculate staleness → optionally regenerate
+//   SideEffects: database queries; git log execution; file system stat calls; subprocess execution (regeneration)
+//   FailureModes: invalid codemap ID, load failures, git errors, regeneration failures
+//   Observability: emits comprehensive staleness analysis with changed files, recommendations, and regeneration status
+//   Related: checkStaleness, loadCodemap, extractFilePaths, checkGitChanges, checkMtimeChanges, regenerateCodemap
+//   Keywords: codemap/check, staleness, git, mtime, regeneration, recommendations
+//
+// [[domain:codemap-staleness-detection]]
+// [[protocol:codemap-regeneration]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	if in.CodemapID == "" {
 		return skillerr.Arg("codemap_id is required", skillerr.WithHint("Provide a codemap_id from codemap/list."))

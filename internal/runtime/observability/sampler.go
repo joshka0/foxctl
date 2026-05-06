@@ -63,11 +63,13 @@ var (
 // DefaultSampler returns a shared TailSampler configured from environment variables.
 //
 // Index:
-// - Purpose: Provide a singleton sampler configured from environment values
-// - Flow: sync.Once init → read env → build TailSampler
-// - SideEffects: reads environment variables
-// - Related: NewTailSamplerFromEnv, TailSampler.ShouldSample
-// - Keywords: sampler, tail_sampler, env, singleton, observability
+//   Purpose: Provide a singleton sampler configured from environment values
+//   Flow: sync.Once init → read env → build TailSampler
+//   Related: NewTailSamplerFromEnv, TailSampler.ShouldSample
+//   Keywords: sampler, tail_sampler, env, singleton, observability
+//
+// [[invariant:singleton-once-init]]
+// [[domain:observability-sampling]]
 func DefaultSampler() *TailSampler {
 	defaultSamplerOnce.Do(func() {
 		defaultSampler = NewTailSamplerFromEnv()
@@ -78,10 +80,13 @@ func DefaultSampler() *TailSampler {
 // NewTailSampler creates a TailSampler with explicit configuration.
 //
 // Index:
-// - Purpose: Construct a TailSampler with validated configuration
-// - Flow: clamp rate → populate struct → return sampler
-// - Related: TailSampler.ShouldSample
-// - Keywords: tail_sampler, sample_errors, slow_threshold_ms, sample_rate
+//   Purpose: Construct a TailSampler with validated configuration
+//   Flow: clamp rate → populate struct → return sampler
+//   Related: TailSampler.ShouldSample
+//   Keywords: tail_sampler, sample_errors, slow_threshold_ms, sample_rate
+//
+// [[invariant:rate-clamped-0-to-1]]
+// [[domain:observability-sampling]]
 func NewTailSampler(sampleErrors bool, slowThresholdMS int64, randomRate float64) *TailSampler {
 	if randomRate < 0 {
 		randomRate = 0
@@ -99,12 +104,13 @@ func NewTailSampler(sampleErrors bool, slowThresholdMS int64, randomRate float64
 // NewTailSamplerFromEnv creates a TailSampler from environment variables.
 //
 // Index:
-// - Purpose: Build a TailSampler from environment configuration
-// - Flow: read env → parse values → apply defaults → construct sampler
-// - SideEffects: reads environment variables
-// - FailureModes: invalid env values fall back to defaults
-// - Related: DefaultSampler, NewTailSampler
-// - Keywords: tail_sampler, env, sample_rate, slow_threshold_ms, sample_errors
+//   Purpose: Build a TailSampler from environment configuration
+//   Flow: read env → parse values → apply defaults → construct sampler
+//   Related: DefaultSampler, NewTailSampler
+//   Keywords: tail_sampler, env, sample_rate, slow_threshold_ms, sample_errors
+//
+// [[domain:observability-sampling]]
+// [[decision:env-fallback-defaults]]
 func NewTailSamplerFromEnv() *TailSampler {
 	sampleErrors := DefaultSampleErrors
 	if v := os.Getenv(EnvSampleErrors); v != "" {
@@ -137,10 +143,13 @@ func NewTailSamplerFromEnv() *TailSampler {
 // ShouldSample implements Sampler interface.
 //
 // Index:
-// - Purpose: Decide whether to sample a Event based on tail-sampling rules
-// - Flow: check nil → evaluate error/canceled → evaluate slow → random sample → drop
-// - Related: TailSampler, SampleDecision
-// - Keywords: should_sample, status, duration_ms, random_rate, tail_sampling
+//   Purpose: Decide whether to sample a Event based on tail-sampling rules
+//   Flow: check nil → evaluate error/canceled → evaluate slow → random sample → drop
+//   Related: TailSampler, SampleDecision
+//   Keywords: should_sample, status, duration_ms, random_rate, tail_sampling
+//
+// [[protocol:tail-sampling-rules]]
+// [[domain:observability-sampling]]
 func (s *TailSampler) ShouldSample(event *Event) SampleDecision {
 	if event == nil {
 		return Drop

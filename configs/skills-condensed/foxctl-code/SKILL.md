@@ -29,11 +29,19 @@ foxctl run code/imports --input '{"path": "internal/", "recursive": true}'
 foxctl run code/smart_search --input '{"query": "error handling", "files": ["handler.go"]}'
 
 # Repo graph index
+# Builds are incremental by default; use `--incremental=false` for a full rebuild.
 # For TS/Elixir-only repos, add `--go=false` (otherwise Go indexing may fail).
 foxctl index repo build --dry-run --workspace . --go --typescript --elixir
 foxctl index repo build --workspace . --go --typescript --elixir
+foxctl run repo/index_build --input '{"workspace": ".", "include_go": true, "include_typescript": true}'
 foxctl index repo search --workspace . --query "Supervisor"
 foxctl index repo expand --workspace . --seed "<node-id>" --edge CALLS --edge REFERS_TO
+
+# Separate summary enrichment
+foxctl index file-summaries --workspace .
+foxctl index symbol-summaries --workspace .
+foxctl index repo enrich summaries --workspace .
+foxctl run repo/index_enrich_summaries --input '{"workspace": "."}'
 
 # DAG grep (explanation subgraph from repoindex)
 foxctl run code/dag_grep --input '{"query":"repoindex builder","render":"tree","edge_sets":["structural"],"depth":2,"budget":80,"k":5}'

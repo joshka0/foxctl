@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 // These tests focus on the stability and invariants of the semantic index
@@ -85,12 +86,17 @@ func TestChunkingConfigHash_SensitivityToRelevantFields(t *testing.T) {
 
 	baseHash := base.ChunkingConfigHash()
 	sameHash := same.ChunkingConfigHash()
+	delayOnly := base
+	delayOnly.ChunkDelay = 5 * time.Second
 
 	if baseHash == "" {
 		t.Fatal("expected non-empty hash for non-zero ChunkBytes")
 	}
 	if baseHash != sameHash {
 		t.Fatalf("expected identical configs to have the same hash, got %q and %q", baseHash, sameHash)
+	}
+	if delayOnly.ChunkingConfigHash() != baseHash {
+		t.Fatalf("chunk delay should not affect chunk boundary hash, got %q and %q", delayOnly.ChunkingConfigHash(), baseHash)
 	}
 
 	cases := []struct {

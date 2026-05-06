@@ -52,11 +52,13 @@ type CompanionActorConfig struct {
 // NewCompanionActor creates a companion actor with mailbox configuration.
 //
 // Index:
-// - Purpose: Build a companion actor backed by a companion service
-// - Flow: validate config → build actor config → return actor
-// - FailureModes: missing namespace/service/board store
-// - Related: CompanionActor.OnMailReceived, CompanionActor.Start
-// - Keywords: companion_actor, mailbox, namespace, service, board_store
+//
+//	Purpose: Build a companion actor backed by a companion service
+//	Flow: validate config → build actor config → return actor
+//	Related: CompanionActor.OnMailReceived, CompanionActor.Start
+//	Keywords: companion_actor, mailbox, namespace, service, board_store
+//
+// [[protocol:companion-actor-creation]]
 func NewCompanionActor(cfg CompanionActorConfig) (*CompanionActor, error) {
 	if cfg.Namespace == "" {
 		return nil, fmt.Errorf("namespace is required")
@@ -156,12 +158,14 @@ type MailboxMessage struct {
 // OnMailReceived handles mailbox messages and replies with companion output.
 //
 // Index:
-// - Purpose: Process mailbox messages and respond via blackboard
-// - Flow: parse payload → build chat request → call service → post response
-// - SideEffects: calls companion service; posts to blackboard
-// - FailureModes: parse errors, chat errors, response post errors
-// - Related: Service.Chat, CompanionActor.postResponse
-// - Keywords: companion_mail, mailbox, chat_request, blackboard, response
+//
+//	Purpose: Process mailbox messages and respond via blackboard
+//	Flow: parse payload → build chat request → call service → post response
+//	Related: Service.Chat, CompanionActor.postResponse
+//	Keywords: companion_mail, mailbox, chat_request, blackboard, response
+//
+// [[protocol:companion-mail-handler]]
+// [[domain:mailbox-to-chat-bridge]]
 func (a *CompanionActor) OnMailReceived(ctx context.Context, msg *actor.Message) error {
 	a.SetState(actor.StateProcessing)
 	defer a.SetState(actor.StateIdle)

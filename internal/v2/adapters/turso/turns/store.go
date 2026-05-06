@@ -20,7 +20,6 @@ import (
 
 	"github.com/joshka0/foxctl/internal/storage/dbdriver"
 	"github.com/joshka0/foxctl/internal/storage/sqlutil"
-	"github.com/joshka0/foxctl/internal/storage/vector"
 	"github.com/joshka0/foxctl/internal/v2/core/run"
 )
 
@@ -36,10 +35,7 @@ const (
 	// FOXCTL_VECTOR_DIMS for provider-specific dimensions (e.g. Voyage).
 	defaultV2TurnsVectorDims = 768
 
-	defaultArtifactVersion        = "v1"
-	artifactVectorIndexName       = "idx_v2_turn_artifacts_embedding_vec"
-	artifactVectorCandidateFactor = 12
-	artifactVectorCandidateCap    = 500
+	defaultArtifactVersion = "v1"
 )
 
 var (
@@ -57,9 +53,7 @@ var (
 	// ErrInvalidNarrativeClaims indicates narrative artifacts without evidence.
 	ErrInvalidNarrativeClaims = errors.New("v2 turns: invalid narrative claims")
 
-	artifactRefPattern = regexp.MustCompile(`^turn/([^/#]+)/artifact/([^/#]+)/([^/#]+)$`)
-	vectorDimsPattern  = regexp.MustCompile(`(?i)f32_blob\s*\(\s*(\d+)\s*\)`)
-
+	artifactRefPattern   = regexp.MustCompile(`^turn/([^/#]+)/artifact/([^/#]+)/([^/#]+)$`)
 	allowedArtifactTypes = map[string]struct{}{
 		ArtifactTypeEmbedding:      {},
 		ArtifactTypeAnnotation:     {},
@@ -176,7 +170,7 @@ func Open(ctx context.Context, storageRoot string) (*Store, error) {
 
 	store := NewStore(db, closeFn)
 	store.vectorEnabled.Store(driverType == dbdriver.DriverTurso)
-	store.vectorDimensions = detectArtifactVectorDimensions(ctx, db, vectorDims)
+	store.vectorDimensions = vectorDims
 	return store, nil
 }
 
@@ -834,14 +828,7 @@ func (s *Store) SaveArtifact(ctx context.Context, artifact Artifact) error {
 		return err
 	}
 	if s.vectorEnabled.Load() && len(normalized.Embedding) > 0 {
-		if err := s.insertArtifactWithVector(ctx, normalized); err == nil {
-			return nil
-		} else if !isVectorUnsupported(err) {
-			return err
-		}
-		// Disable vector writes after first unsupported error to avoid repeated
-		// failing vector() attempts on fallback drivers.
-		s.vectorEnabled.Store(false)
+		return s.insertArtifactWithVector(ctx, normalized)
 	}
 	return s.insertArtifactWithoutVector(ctx, normalized)
 }
@@ -1126,8 +1113,7 @@ func (s *Store) GetNarrative(ctx context.Context, sessionID, artifactVersion str
 }
 
 // SearchArtifactsByEmbedding returns top artifacts by embedding similarity.
-// It prefers native Turso vector functions and falls back to in-process cosine
-// scoring when vector SQL is unavailable.
+// Turso vector search uses exact distance functions over BLOB embeddings.
 func (s *Store) SearchArtifactsByEmbedding(
 	ctx context.Context,
 	queryEmbedding []float32,
@@ -1221,34 +1207,17 @@ func (s *Store) searchArtifactsByEmbeddingOnce(
 		}, nil
 	}
 
-	if s.vectorEnabled.Load() {
-		candidates, err := s.searchArtifactCandidatesVector(ctx, queryEmbedding, opts)
-		if err == nil {
-			hits, loadErr := s.loadScoredArtifacts(ctx, candidates)
-			if loadErr != nil {
-				return run.ArtifactSearchResult{}, loadErr
-			}
-			if workingApplied {
-				hits = rerankWorkingContextHits(hits, opts.Working)
-			}
-			return run.ArtifactSearchResult{
-				Hits:             hits,
-				SearchPath:       run.ArtifactSearchPathVector,
-				VectorCapability: run.ArtifactVectorCapabilityEnabled,
-				WorkingApplied:   workingApplied,
-				FallbackLevel:    fallbackLevel,
-				EligibleCount:    eligibleCount,
-			}, nil
-		}
-		if !isVectorUnsupported(err) {
-			return run.ArtifactSearchResult{}, err
-		}
-		// Disable vector search after first unsupported query to avoid repeated
-		// expensive failures on fallback drivers.
-		s.vectorEnabled.Store(false)
+	if !s.vectorEnabled.Load() {
+		return run.ArtifactSearchResult{
+			SearchPath:       run.ArtifactSearchPathDisabled,
+			VectorCapability: s.vectorCapability(),
+			WorkingApplied:   workingApplied,
+			FallbackLevel:    fallbackLevel,
+			EligibleCount:    eligibleCount,
+		}, nil
 	}
 
-	candidates, err := s.searchArtifactCandidatesFallback(ctx, queryEmbedding, opts)
+	candidates, err := s.searchArtifactCandidatesVector(ctx, queryEmbedding, opts)
 	if err != nil {
 		return run.ArtifactSearchResult{}, err
 	}
@@ -1261,8 +1230,8 @@ func (s *Store) searchArtifactsByEmbeddingOnce(
 	}
 	return run.ArtifactSearchResult{
 		Hits:             hits,
-		SearchPath:       run.ArtifactSearchPathFallback,
-		VectorCapability: s.vectorCapability(),
+		SearchPath:       run.ArtifactSearchPathVector,
+		VectorCapability: run.ArtifactVectorCapabilityEnabled,
 		WorkingApplied:   workingApplied,
 		FallbackLevel:    fallbackLevel,
 		EligibleCount:    eligibleCount,
@@ -1366,9 +1335,7 @@ func (s *Store) searchArtifactCandidatesVector(
 	opts run.ArtifactSearchOptions,
 ) ([]artifactSimilarityCandidate, error) {
 	vectorStr := float32sToVectorString(queryEmbedding)
-	vectorTopKExpr := vectorTopKExpression(artifactVectorIndexName, vectorStr, vectorCandidateLimit(opts))
-
-	where, args, err := buildArtifactSearchWhere(opts, true)
+	where, args, err := buildArtifactSearchWhere(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -1380,14 +1347,13 @@ func (s *Store) searchArtifactCandidatesVector(
 			a.artifact_type,
 			a.artifact_version,
 			COALESCE(a.updated_at, ''),
-			vector_distance_cos(a.embedding, vector('%s')) AS distance
-		FROM %s vt
-		JOIN v2_turn_artifacts a ON a.rowid = vt.id
+			vector_distance_cos(a.embedding, vector32('%s')) AS distance
+		FROM v2_turn_artifacts a
 		JOIN v2_turns t ON t.id = a.turn_id
 		WHERE %s
 		ORDER BY distance ASC, a.updated_at DESC, a.turn_id ASC, a.artifact_type ASC, a.artifact_version ASC
 		LIMIT $%d
-	`, vectorStr, vectorTopKExpr, strings.Join(where, " AND "), len(args))
+	`, vectorStr, strings.Join(where, " AND "), len(args))
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -1428,110 +1394,11 @@ func (s *Store) searchArtifactCandidatesVector(
 	return out, nil
 }
 
-func (s *Store) searchArtifactCandidatesFallback(
-	ctx context.Context,
-	queryEmbedding []float32,
-	opts run.ArtifactSearchOptions,
-) ([]artifactSimilarityCandidate, error) {
-	where, args, err := buildArtifactSearchWhere(opts, false)
-	if err != nil {
-		return nil, err
-	}
-	candidateLimit := opts.Limit * 12
-	if candidateLimit < opts.Limit {
-		candidateLimit = opts.Limit
-	}
-	if candidateLimit > 500 {
-		candidateLimit = 500
-	}
-	args = append(args, candidateLimit)
-
-	query := fmt.Sprintf(`
-		SELECT
-			a.turn_id,
-			a.artifact_type,
-			a.artifact_version,
-			COALESCE(a.embedding_json, '[]'),
-			COALESCE(a.updated_at, '')
-		FROM v2_turn_artifacts a
-		JOIN v2_turns t ON t.id = a.turn_id
-		WHERE %s
-		ORDER BY a.updated_at DESC, a.turn_id ASC, a.artifact_type ASC, a.artifact_version ASC
-		LIMIT $%d
-	`, strings.Join(where, " AND "), len(args))
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("query artifact fallback candidates: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	candidates := make([]artifactSimilarityCandidate, 0, candidateLimit)
-	for rows.Next() {
-		var (
-			candidate   artifactSimilarityCandidate
-			embeddingJS string
-			updatedAt   string
-			embedding   []float32
-		)
-		if err := rows.Scan(
-			&candidate.TurnID,
-			&candidate.ArtifactType,
-			&candidate.ArtifactVersion,
-			&embeddingJS,
-			&updatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan artifact fallback candidate: %w", err)
-		}
-		if err := json.Unmarshal([]byte(strings.TrimSpace(embeddingJS)), &embedding); err != nil {
-			continue
-		}
-		if len(embedding) == 0 || len(embedding) != len(queryEmbedding) {
-			continue
-		}
-		candidate.Similarity = vector.Cosine(queryEmbedding, embedding)
-		if candidate.Similarity < opts.MinSimilarity {
-			continue
-		}
-		candidate.Distance = 1.0 - candidate.Similarity
-		candidate.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt)
-		candidates = append(candidates, candidate)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate artifact fallback candidates: %w", err)
-	}
-
-	sort.SliceStable(candidates, func(i, j int) bool {
-		left := candidates[i]
-		right := candidates[j]
-		if left.Similarity != right.Similarity {
-			return left.Similarity > right.Similarity
-		}
-		if !left.UpdatedAt.Equal(right.UpdatedAt) {
-			return left.UpdatedAt.After(right.UpdatedAt)
-		}
-		if left.TurnID != right.TurnID {
-			return left.TurnID < right.TurnID
-		}
-		if left.ArtifactType != right.ArtifactType {
-			return left.ArtifactType < right.ArtifactType
-		}
-		return left.ArtifactVersion < right.ArtifactVersion
-	})
-
-	if len(candidates) > opts.Limit {
-		candidates = candidates[:opts.Limit]
-	}
-	return candidates, nil
-}
-
 func (s *Store) countEligibleArtifacts(ctx context.Context, opts run.ArtifactSearchOptions) (int, error) {
-	where, args, err := buildArtifactSearchWhere(opts, false)
+	where, args, err := buildArtifactSearchWhere(opts)
 	if err != nil {
 		return 0, err
 	}
-	// Eligible means "has embedding payload available for semantic retrieval".
-	where = append(where, "(a.embedding IS NOT NULL OR COALESCE(a.embedding_json, '[]') <> '[]')")
 
 	query := fmt.Sprintf(`
 		SELECT COUNT(1)
@@ -1547,13 +1414,9 @@ func (s *Store) countEligibleArtifacts(ctx context.Context, opts run.ArtifactSea
 	return count, nil
 }
 
-func buildArtifactSearchWhere(opts run.ArtifactSearchOptions, vectorOnly bool) ([]string, []any, error) {
+func buildArtifactSearchWhere(opts run.ArtifactSearchOptions) ([]string, []any, error) {
 	where := make([]string, 0, 16)
-	if vectorOnly {
-		where = append(where, "a.embedding IS NOT NULL")
-	} else {
-		where = append(where, "COALESCE(a.embedding_json, '[]') <> '[]'")
-	}
+	where = append(where, "a.embedding IS NOT NULL")
 
 	args := make([]any, 0, 24)
 	if opts.SessionID != "" {
@@ -2150,7 +2013,7 @@ func (s *Store) insertArtifactWithVector(ctx context.Context, artifact Artifact)
 		INSERT INTO v2_turn_artifacts (
 			turn_id, artifact_type, artifact_version, ref, summary,
 			content_json, metadata_json, embedding, embedding_json, embedding_model, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, vector('%s'), $8, $9, $10, $11)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, vector32('%s'), $8, $9, $10, $11)
 		ON CONFLICT(turn_id, artifact_type, artifact_version) DO UPDATE SET
 			ref = excluded.ref,
 			summary = excluded.summary,
@@ -2281,29 +2144,6 @@ func boolToInt(v bool) int {
 	return 0
 }
 
-func vectorTopKExpression(indexName string, vectorString string, k int) string {
-	return fmt.Sprintf("vector_top_k('%s', '%s', %d)", indexName, vectorString, k)
-}
-
-func vectorCandidateLimit(opts run.ArtifactSearchOptions) int {
-	limit := opts.Limit
-	if limit <= 0 {
-		limit = 10
-	}
-	// Use a wider candidate pool when post-filtering is likely (session/type filters
-	// or similarity threshold) to reduce false negatives from preselection.
-	if opts.MinSimilarity > 0 || opts.SessionID != "" || len(opts.ArtifactTypes) > 0 {
-		limit *= artifactVectorCandidateFactor
-	}
-	if limit > artifactVectorCandidateCap {
-		limit = artifactVectorCandidateCap
-	}
-	if limit < 1 {
-		limit = 1
-	}
-	return limit
-}
-
 func resolveVectorDimensions(cfg dbdriver.Config) int {
 	dims := defaultV2TurnsVectorDimensions()
 	switch cfg.Driver {
@@ -2339,44 +2179,6 @@ func envPositiveInt(name string) (int, bool) {
 		return 0, false
 	}
 	return value, true
-}
-
-func detectArtifactVectorDimensions(ctx context.Context, db *sql.DB, fallback int) int {
-	if db == nil {
-		return fallback
-	}
-
-	var tableSQL string
-	err := db.QueryRowContext(
-		ctx,
-		`SELECT sql FROM sqlite_master WHERE type='table' AND name='v2_turn_artifacts'`,
-	).Scan(&tableSQL)
-	if err != nil {
-		return fallback
-	}
-
-	match := vectorDimsPattern.FindStringSubmatch(tableSQL)
-	if len(match) != 2 {
-		return fallback
-	}
-	dims, err := strconv.Atoi(match[1])
-	if err != nil || dims <= 0 {
-		return fallback
-	}
-	return dims
-}
-
-func isVectorUnsupported(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "no such function") ||
-		strings.Contains(msg, "unknown function") ||
-		strings.Contains(msg, "vector(") ||
-		strings.Contains(msg, "libsql_vector_idx") ||
-		strings.Contains(msg, "vector_top_k") ||
-		strings.Contains(msg, artifactVectorIndexName)
 }
 
 var (

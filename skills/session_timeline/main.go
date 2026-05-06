@@ -140,13 +140,17 @@ func main() {
 // run orchestrates timeline retrieval with anchor resolution, chunk collection, and learning aggregation.
 //
 // Index:
-// - Purpose: Retrieve session timeline with flexible anchoring, chunk summaries, learnings, and rollup analysis
-// - Flow: validate input → open session store → resolve anchor → collect chunk summaries → fetch learnings → build rollup → emit results
-// - SideEffects: reads session metadata; accesses chunk summaries; queries memory store; aggregates timeline data
-// - FailureModes: session not found, anchor resolution errors, store access failures, time parsing errors
-// - Observability: emits timeline anchor, chunk summaries, learning items, rollup data, and truncation status
-// - Related: resolveAnchor, collectChunkSummariesUpTo, fetchLearningItems, buildRollup
-// - Keywords: session/timeline, anchor_resolution, chunk_summaries, learning_extraction, timeline_rollup
+//
+//	Purpose: Retrieve session timeline with flexible anchoring, chunk summaries, learnings, and rollup analysis
+//	Keywords: session/timeline, anchor_resolution, chunk_summaries, learning_extraction, timeline_rollup
+//	Related: resolveAnchor, collectChunkSummariesUpTo, fetchLearningItems, buildRollup
+//	Flow: validate input → open session store → resolve anchor → collect chunk summaries → fetch learnings → build rollup → emit results
+//	Resources: session store, memory store
+//	Events: timeline retrieval events
+//	OutputFields: session_id, anchor, chunk_summaries, learnings, rollup, truncated
+//
+// [[domain:run-timeline-retrieval]]
+// [[protocol:anchor-based-chunk-collection]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if strings.TrimSpace(in.SessionID) == "" {
 		return skillerr.Arg("session_id is required")

@@ -90,20 +90,21 @@ func (vs *VectorStore) SearchSimilar(
 		return nil, fmt.Errorf("invalid query embedding: %w", err)
 	}
 
-	// Use vector index for search
+	similarityExpr := vs.vectorHelper.CosineSimilarityScore("t.embedding", queryEmbedding)
 	query := fmt.Sprintf(`
 		SELECT
 			t.id, t.name, t.type, t.workspace, t.summary,
 			t.result, t.digests, t.created_at, t.updated_at,
 			t.last_accessed, t.access_count,
 			%s as similarity
-		FROM vector_top_k('idx_memory_vector', '%s', ?) vt
-		JOIN named_memory t ON t.rowid = vt.id
+		FROM named_memory t
 		WHERE t.workspace = ?
+			AND t.embedding IS NOT NULL
 		ORDER BY similarity DESC
-	`, vs.vectorHelper.CosineSimilarityScore("t.embedding", queryEmbedding), queryEmbedding.String())
+		LIMIT ?
+	`, similarityExpr)
 
-	rows, err := vs.db.QueryContext(ctx, query, limit, workspace)
+	rows, err := vs.db.QueryContext(ctx, query, workspace, limit)
 	if err != nil {
 		return nil, fmt.Errorf("vector search failed: %w", err)
 	}

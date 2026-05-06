@@ -5,12 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"regexp"
-	"strconv"
 	"strings"
 )
-
-var schemaVectorDimsPattern = regexp.MustCompile(`(?i)f32_blob\s*\(\s*(\d+)\s*\)`)
 
 // MigrateSchema creates turn lineage and artifact tables.
 func MigrateSchema(ctx context.Context, db *sql.DB) error {
@@ -18,7 +14,6 @@ func MigrateSchema(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("v2 turns migrate: nil db")
 	}
 
-	vectorDims := defaultV2TurnsVectorDimensions()
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS v2_turns (
 			id TEXT PRIMARY KEY,
@@ -108,25 +103,23 @@ func MigrateSchema(ctx context.Context, db *sql.DB) error {
 			ON v2_episodes(start_turn_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_v2_episodes_end_turn
 			ON v2_episodes(end_turn_id)`,
-		fmt.Sprintf(`
-			CREATE TABLE IF NOT EXISTS v2_turn_artifacts (
-				turn_id TEXT NOT NULL,
-				artifact_type TEXT NOT NULL,
-				artifact_version TEXT NOT NULL,
-				ref TEXT NOT NULL,
-				summary TEXT,
-				content_json TEXT NOT NULL DEFAULT '{}',
-				metadata_json TEXT NOT NULL DEFAULT '{}',
-				embedding F32_BLOB(%d),
-				embedding_json TEXT NOT NULL DEFAULT '[]',
-				embedding_model TEXT,
-				created_at TEXT NOT NULL,
-				updated_at TEXT NOT NULL,
-				PRIMARY KEY(turn_id, artifact_type, artifact_version),
-				FOREIGN KEY(turn_id) REFERENCES v2_turns(id) ON DELETE CASCADE,
-				CHECK (artifact_type IN ('embedding', 'annotation', 'classification', 'learning', 'narrative'))
-			)
-		`, vectorDims),
+		`CREATE TABLE IF NOT EXISTS v2_turn_artifacts (
+			turn_id TEXT NOT NULL,
+			artifact_type TEXT NOT NULL,
+			artifact_version TEXT NOT NULL,
+			ref TEXT NOT NULL,
+			summary TEXT,
+			content_json TEXT NOT NULL DEFAULT '{}',
+			metadata_json TEXT NOT NULL DEFAULT '{}',
+			embedding BLOB,
+			embedding_json TEXT NOT NULL DEFAULT '[]',
+			embedding_model TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY(turn_id, artifact_type, artifact_version),
+			FOREIGN KEY(turn_id) REFERENCES v2_turns(id) ON DELETE CASCADE,
+			CHECK (artifact_type IN ('embedding', 'annotation', 'classification', 'learning', 'narrative'))
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_v2_turn_artifacts_ref
 			ON v2_turn_artifacts(ref)`,
 		`CREATE INDEX IF NOT EXISTS idx_v2_turn_artifacts_turn_type_time
@@ -141,35 +134,14 @@ func MigrateSchema(ctx context.Context, db *sql.DB) error {
 		}
 	}
 
-	if err := ensureNarrativeArtifactTypeSupport(ctx, db, vectorDims); err != nil {
+	if err := ensureNarrativeArtifactTypeSupport(ctx, db); err != nil {
 		return fmt.Errorf("v2 turns migrate narrative support: %w", err)
-	}
-
-	// Best-effort vector index for Turso deployments. SQLite builds do not
-	// have libsql_vector_idx and should continue without failing.
-	_, err := db.ExecContext(ctx, fmt.Sprintf(`
-		CREATE INDEX IF NOT EXISTS %s
-		ON v2_turn_artifacts(libsql_vector_idx(embedding))
-	`, artifactVectorIndexName))
-	if err != nil && !isVectorIndexUnsupported(err) {
-		return fmt.Errorf("v2 turns migrate vector index: %w", err)
 	}
 
 	return nil
 }
 
-func isVectorIndexUnsupported(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "no such function") ||
-		strings.Contains(msg, "unknown function") ||
-		strings.Contains(msg, "syntax error") ||
-		strings.Contains(msg, "invalid expression")
-}
-
-func ensureNarrativeArtifactTypeSupport(ctx context.Context, db *sql.DB, fallbackVectorDims int) error {
+func ensureNarrativeArtifactTypeSupport(ctx context.Context, db *sql.DB) error {
 	var tableSQL string
 	err := db.QueryRowContext(ctx, `SELECT sql FROM sqlite_master WHERE type='table' AND name='v2_turn_artifacts'`).Scan(&tableSQL)
 	if err != nil {
@@ -182,23 +154,13 @@ func ensureNarrativeArtifactTypeSupport(ctx context.Context, db *sql.DB, fallbac
 		return nil
 	}
 
-	vectorDims := fallbackVectorDims
-	if matches := schemaVectorDimsPattern.FindStringSubmatch(tableSQL); len(matches) == 2 {
-		if parsed, convErr := strconv.Atoi(matches[1]); convErr == nil && parsed > 0 {
-			vectorDims = parsed
-		}
-	}
-	if vectorDims <= 0 {
-		vectorDims = defaultV2TurnsVectorDimensions()
-	}
-
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	createNew := fmt.Sprintf(`
+	createNew := `
 		CREATE TABLE v2_turn_artifacts_new (
 			turn_id TEXT NOT NULL,
 			artifact_type TEXT NOT NULL,
@@ -207,7 +169,7 @@ func ensureNarrativeArtifactTypeSupport(ctx context.Context, db *sql.DB, fallbac
 			summary TEXT,
 			content_json TEXT NOT NULL DEFAULT '{}',
 			metadata_json TEXT NOT NULL DEFAULT '{}',
-			embedding F32_BLOB(%d),
+			embedding BLOB,
 			embedding_json TEXT NOT NULL DEFAULT '[]',
 			embedding_model TEXT,
 			created_at TEXT NOT NULL,
@@ -216,7 +178,7 @@ func ensureNarrativeArtifactTypeSupport(ctx context.Context, db *sql.DB, fallbac
 			FOREIGN KEY(turn_id) REFERENCES v2_turns(id) ON DELETE CASCADE,
 			CHECK (artifact_type IN ('embedding', 'annotation', 'classification', 'learning', 'narrative'))
 		)
-	`, vectorDims)
+	`
 	if _, err := tx.ExecContext(ctx, createNew); err != nil {
 		return fmt.Errorf("create new artifacts table: %w", err)
 	}
@@ -247,14 +209,6 @@ func ensureNarrativeArtifactTypeSupport(ctx context.Context, db *sql.DB, fallbac
 	if _, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_v2_turn_artifacts_type_time ON v2_turn_artifacts(artifact_type, updated_at)`); err != nil {
 		return fmt.Errorf("create idx_v2_turn_artifacts_type_time: %w", err)
 	}
-	_, vecErr := tx.ExecContext(ctx, fmt.Sprintf(`
-		CREATE INDEX IF NOT EXISTS %s
-		ON v2_turn_artifacts(libsql_vector_idx(embedding))
-	`, artifactVectorIndexName))
-	if vecErr != nil && !isVectorIndexUnsupported(vecErr) {
-		return fmt.Errorf("create %s: %w", artifactVectorIndexName, vecErr)
-	}
-
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit artifacts table migration: %w", err)
 	}

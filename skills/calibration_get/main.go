@@ -37,13 +37,17 @@ func main() {
 // run orchestrates calibration profile retrieval with multiple output formats and hook integration.
 //
 // Index:
-// - Purpose: Retrieve calibration profiles with compact/detailed formatting and hook output for context injection
-// - Flow: resolve workspace → open memory store → load profile → format based on requested output → emit results
-// - SideEffects: profile loading; format conversion; hook output generation; context preparation
-// - FailureModes: workspace resolution failures, memory store access errors, missing profiles
-// - Observability: emits profile availability, formatted outputs, and hook-compatible context data
-// - Related: calibration.LoadProfile, calibration.FormatCompact, calibration.FormatDetailed, calibration.FormatForInjection
-// - Keywords: calibration/get, profile_retrieval, calibration_data, context_injection, hook_integration
+//
+//	Purpose: Retrieve calibration profiles with compact/detailed formatting and hook output for context injection
+//	Flow: resolve workspace → open memory store → load profile → format based on requested output → emit results
+//	SideEffects: profile loading; format conversion; hook output generation; context preparation
+//	FailureModes: workspace resolution failures, memory store access errors, missing profiles
+//	Observability: emits profile availability, formatted outputs, and hook-compatible context data
+//	Related: calibration.LoadProfile, calibration.FormatCompact, calibration.FormatDetailed, calibration.FormatForInjection
+//	Keywords: calibration/get, profile_retrieval, calibration_data, context_injection, hook_integration
+//
+// [[domain:user-calibration-profile]]
+// [[doc:docs/general/memory.md#Skill/Runtime integration]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Resolve workspace
 	workspace := workspaceutil.Resolve(in.Workspace, "", rc.Workspace)

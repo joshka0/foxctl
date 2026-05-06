@@ -131,12 +131,12 @@ func TestTursoVectorHelper(t *testing.T) {
 
 	// Create test table
 	_, err = db.ExecContext(ctx, `
-		CREATE TABLE IF NOT EXISTS vector_test (
-			id INTEGER PRIMARY KEY,
-			name TEXT NOT NULL,
-			embedding F32_BLOB(4)
-		)
-	`)
+			CREATE TABLE IF NOT EXISTS vector_test (
+				id INTEGER PRIMARY KEY,
+				name TEXT NOT NULL,
+				embedding BLOB
+			)
+		`)
 	if err != nil {
 		t.Fatalf("Failed to create test table: %v", err)
 	}
@@ -232,15 +232,15 @@ func TestTursoLocalConnection(t *testing.T) {
 		t.Fatalf("GetDriverType() = %q, want %q", got, DriverTurso)
 	}
 
-	if _, err := db.ExecContext(ctx, `CREATE TABLE items (id INTEGER PRIMARY KEY, embedding F32_BLOB(4))`); err != nil {
+	if _, err := db.ExecContext(ctx, `CREATE TABLE items (id INTEGER PRIMARY KEY, embedding BLOB)`); err != nil {
 		t.Fatalf("create table: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO items (id, embedding) VALUES (1, vector('[0.1,0.2,0.3,0.4]'))`); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO items (id, embedding) VALUES (1, vector32('[0.1,0.2,0.3,0.4]'))`); err != nil {
 		t.Fatalf("insert vector: %v", err)
 	}
 
 	var distance float64
-	if err := db.QueryRowContext(ctx, `SELECT vector_distance_cos(embedding, vector('[0.1,0.2,0.3,0.4]')) FROM items WHERE id = 1`).Scan(&distance); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT vector_distance_cos(embedding, vector32('[0.1,0.2,0.3,0.4]')) FROM items WHERE id = 1`).Scan(&distance); err != nil {
 		t.Fatalf("query vector distance: %v", err)
 	}
 	if distance > 0.01 {

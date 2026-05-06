@@ -8,12 +8,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/rerank"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/semanticanchors"
 	"github.com/joshka0/foxctl/internal/storage/memory"
 	"github.com/joshka0/foxctl/internal/storage/obsidianindex"
 )
@@ -566,6 +568,134 @@ func TestRetrieveWithOptions_CoChangePriorBoostsRelatedRepoPaths(t *testing.T) {
 	}
 }
 
+func TestRetrieveWithOptionsSemanticAnchorsExposeValidatedHintsAndBoost(t *testing.T) {
+	ctx := context.Background()
+	workspace := filepath.Join(t.TempDir(), "foxctl")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	storageRoot := t.TempDir()
+	store := NewWorkspaceStore(workspace)
+	if _, err := store.SaveTopOfMind(TopOfMind{
+		WorkspaceID: "ws-test",
+		Objective:   "Terminal safety",
+		Phase:       "design",
+		UpdatedAt:   time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("SaveTopOfMind: %v", err)
+	}
+
+	ownerPath := "internal/runtime/terminal/tmuxbridge/client.go"
+	vaultRoot := t.TempDir()
+	candidateNote := firstPackageNoteCandidate(filepath.Base(workspace), []string{ownerPath})
+	writeVaultNote(t, filepath.Join(vaultRoot, candidateNote), `---
+title: Terminal Bridge Safety
+type: map
+trust: canonical
+paths:
+  - internal/runtime/terminal/tmuxbridge/client.go
+symbols:
+  - Bridge.Type
+---
+# Terminal Bridge Safety
+
+Read before write enforced.
+`)
+	index, err := obsidianindex.Open(ctx, storageRoot, vaultRoot)
+	if err != nil {
+		t.Fatalf("Open index: %v", err)
+	}
+	defer index.Close()
+	if _, err := index.Rebuild(ctx, vaultRoot); err != nil {
+		t.Fatalf("Rebuild vault: %v", err)
+	}
+
+	repo, err := repoindex.Open(ctx, storageRoot, workspace)
+	if err != nil {
+		t.Fatalf("Open repo index: %v", err)
+	}
+	defer repo.Close()
+	owner := semanticanchors.AnchorOwner{
+		NodeID:    repoindex.SymbolID(repo.RepoKey(), "internal/runtime/terminal/tmuxbridge", "Bridge.Type"),
+		Kind:      string(repoindex.NodeSymbol),
+		StableKey: "Bridge.Type",
+	}
+	edge := semanticAnchorRetrievalTestEdge(t, owner, "[[foxctl:invariant/no-send-without-read]]")
+	nodes := []repoindex.Node{
+		{
+			ID:        repoindex.FileID(repo.RepoKey(), "internal/runtime/terminal/tmuxbridge", ownerPath),
+			Kind:      repoindex.NodeFile,
+			Pkg:       "internal/runtime/terminal/tmuxbridge",
+			File:      ownerPath,
+			Name:      "client.go",
+			UpdatedAt: time.Now().UTC(),
+		},
+		{
+			ID:        owner.NodeID,
+			Kind:      repoindex.NodeSymbol,
+			Pkg:       "internal/runtime/terminal/tmuxbridge",
+			File:      ownerPath,
+			Name:      "Bridge.Type",
+			Signature: "func (b *Bridge) Type(...) error",
+			UpdatedAt: time.Now().UTC(),
+		},
+		{
+			ID:        edge.Dst,
+			Kind:      repoindex.NodeConcept,
+			Name:      "no-send-without-read",
+			Summary:   "read before write enforced",
+			UpdatedAt: time.Now().UTC(),
+		},
+	}
+	if err := repo.ReplaceAll(ctx, nodes, []repoindex.Edge{edge}); err != nil {
+		t.Fatalf("ReplaceAll repo index: %v", err)
+	}
+
+	opts := RetrievalOptions{
+		IncludeVaultHits:       true,
+		UseSemanticVaultSearch: false,
+		UsePackageNoteFallback: true,
+		UseSemanticAnchors:     false,
+	}
+	base, err := store.RetrieveWithOptions(ctx, index, repo, nil, "read before write enforced", 5, opts)
+	if err != nil {
+		t.Fatalf("RetrieveWithOptions base: %v", err)
+	}
+	opts.UseSemanticAnchors = true
+	withAnchors, err := store.RetrieveWithOptions(ctx, index, repo, nil, "read before write enforced", 5, opts)
+	if err != nil {
+		t.Fatalf("RetrieveWithOptions semantic anchors: %v", err)
+	}
+	if withAnchors.SemanticAnchorHints == nil || len(withAnchors.SemanticAnchorHints.Evidence) != 1 {
+		t.Fatalf("semantic hints=%+v want one validated edge", withAnchors.SemanticAnchorHints)
+	}
+	if got := withAnchors.SemanticAnchorHints.Paths; !containsString(got, ownerPath) {
+		t.Fatalf("semantic hint paths=%v want %s", got, ownerPath)
+	}
+	baseScores := map[string]int{}
+	for _, hit := range base.VaultHits {
+		baseScores[hit.Path] = hit.Score
+	}
+	boostedScores := map[string]int{}
+	for _, hit := range withAnchors.VaultHits {
+		boostedScores[hit.Path] = hit.Score
+	}
+	if boostedScores[candidateNote] <= baseScores[candidateNote] {
+		t.Fatalf("expected semantic anchor boost for %s: base=%d boosted=%d", candidateNote, baseScores[candidateNote], boostedScores[candidateNote])
+	}
+	pack := withAnchors.ToEvidencePack()
+	foundSemanticNode := false
+	for _, node := range pack.Nodes {
+		if node.NodeType == contextengine.EvidenceNodeTypeCode && strings.HasPrefix(node.ID, "semantic_anchor_") {
+			foundSemanticNode = true
+			break
+		}
+	}
+	if !foundSemanticNode {
+		t.Fatalf("semantic anchor evidence was not rendered into evidence pack: %+v", pack.Nodes)
+	}
+}
+
 func TestDetectContradictions(t *testing.T) {
 	ctx := context.Background()
 	workspace := t.TempDir()
@@ -730,6 +860,29 @@ func initCoChangeGitRepo(t *testing.T, workspace string) {
 	writeFile("internal/other/other.go", "package other\n\nvar OtherSeed = 2\n")
 	runGit("add", "internal/other/other.go")
 	runGit("commit", "-m", "touch unrelated file")
+}
+
+func semanticAnchorRetrievalTestEdge(t *testing.T, owner semanticanchors.AnchorOwner, syntax string) repoindex.Edge {
+	t.Helper()
+	policy := semanticanchors.DefaultAnchorPolicy("foxctl", nil)
+	occ, findings := semanticanchors.ParseInlineAnchor(policy, syntax)
+	if len(findings) != 0 {
+		t.Fatalf("ParseInlineAnchor findings=%+v", findings)
+	}
+	occ.OwnerBinding = semanticanchors.AnchorOwnerBinding{
+		OwnerNodeID:    owner.NodeID,
+		OwnerKind:      owner.Kind,
+		OwnerStableKey: owner.StableKey,
+	}
+	res, err := semanticanchors.ResolveAnchorOccurrence(context.Background(), policy, occ, nil)
+	if err != nil {
+		t.Fatalf("ResolveAnchorOccurrence: %v", err)
+	}
+	edge, err := repoindex.NewSemanticAnchorEdge(res, owner)
+	if err != nil {
+		t.Fatalf("NewSemanticAnchorEdge: %v", err)
+	}
+	return edge
 }
 
 type fakeReranker struct {

@@ -44,13 +44,16 @@ func main() {
 // run orchestrates context-aware ripgrep searches with code block expansion and artifact storage.
 //
 // Index:
-// - Purpose: Perform ripgrep searches and expand matches to surrounding code blocks using language-specific heuristics
-// - Flow: validate input → check ripgrep availability → resolve path → execute search → expand matches → emit results
-// - SideEffects: file system searching; code block extraction; artifact storage; preview generation
-// - FailureModes: ripgrep unavailable, invalid paths, search execution failures, code block expansion errors
-// - Observability: emits match counts, block counts, file statistics, and expanded code context
-// - Related: codeblocks.ExpandMatches, rgutil.Normalize, emitEmptyResult, parseInput
-// - Keywords: code/context_ripgrep, ripgrep_search, code_blocks, context_expansion, pattern_matching
+//   Purpose: Perform ripgrep searches and expand matches to surrounding code blocks using language-specific heuristics
+//   Flow: validate input → check ripgrep availability → resolve path → execute search → expand matches → emit results
+//   SideEffects: file system searching; code block extraction; artifact storage; preview generation
+//   FailureModes: ripgrep unavailable, invalid paths, search execution failures, code block expansion errors
+//   Observability: emits match counts, block counts, file statistics, and expanded code context
+//   Related: codeblocks.ExpandMatches, rgutil.Normalize, emitEmptyResult, parseInput
+//   Keywords: code/context_ripgrep, ripgrep_search, code_blocks, context_expansion, pattern_matching
+//
+// [[domain:code-context-search]]
+// [[protocol:ripgrep-block-expansion]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Apply defaults
 	if in.MaxBlocks <= 0 {

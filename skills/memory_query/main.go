@@ -95,13 +95,16 @@ func main() {
 // run orchestrates memory query operations with validation, normalization, and result formatting.
 //
 // Index:
-// - Purpose: Query memory records with filtering, search, and pagination capabilities
-// - Flow: validate input → normalize parameters → execute query → format results → emit output
-// - SideEffects: opens memory store connection; performs vector search; reads memory records
-// - FailureModes: invalid input, memory store access failures, search errors, timeout issues
-// - Observability: emits query results, pagination metadata, search statistics, and performance metrics
-// - Related: normalizeInput, query, searchWithEmbeddings, isFileAssociated, extractFileFromEntry
-// - Keywords: memory/query, memory_search, vector_search, filtering, pagination
+//   Purpose: Query memory records with filtering, search, and pagination capabilities
+//   Keywords: memory/query, memory_search, vector_search, filtering, pagination
+//   Related: normalizeInput, query, searchWithEmbeddings, isFileAssociated, extractFileFromEntry
+//   Flow: validate input → normalize parameters → execute query → format results → emit output
+//   Resources: memory store (SQLite); embedding service
+//   Events: memory-queried
+//   OutputFields: records, pagination, stats
+//
+// [[domain:memory-query]]
+// [[protocol:vector-search]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Validate: at least one search criteria must be provided
 	if in.Query == "" && in.File == "" && in.Kinds == "" && in.LifecycleStates == "" {

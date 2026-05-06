@@ -27,13 +27,17 @@ func main() {
 // run generates an agent handbook briefing for the specified profile.
 //
 // Index:
-// - Purpose: Generate capability briefings for agent profiles with allowed skills and rules
-// - Flow: validate profile → get profile config → generate briefing markdown → emit response
-// - SideEffects: None (read-only operation)
-// - FailureModes: invalid profile name, missing profile configuration
-// - Observability: emits profile/title/description/briefing/allowed_skills/rules/summary
-// - Related: agentpolicy.Profile, agentpolicy.GetProfileConfig, generateBriefing, skillout.Emit
-// - Keywords: agent/handbook, profile, allowed_skills, briefing, rules, agentpolicy.Profile
+//
+//	Purpose: Generate capability briefings for agent profiles with allowed skills and rules
+//	Flow: validate profile → get profile config → generate briefing markdown → emit response
+//	SideEffects: None (read-only operation)
+//	FailureModes: invalid profile name, missing profile configuration
+//	Observability: emits profile/title/description/briefing/allowed_skills/rules/summary
+//	Related: agentpolicy.Profile, agentpolicy.GetProfileConfig, generateBriefing, skillout.Emit
+//	Keywords: agent/handbook, profile, allowed_skills, briefing, rules, agentpolicy.Profile
+//
+// [[domain:agent-profile-briefing]]
+// [[doc:docs/spec/v1/agent_profile_v1.md#Agent Profile v1]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate and parse profile
 	profile := agentpolicy.Profile(in.Profile)

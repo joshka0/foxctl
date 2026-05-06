@@ -36,10 +36,13 @@ func ExtractAnchorsFromSource(ctx context.Context, policy AnchorPolicy, resolver
 		comments, symbols, packageLine, err = extractGoCommentsAndSymbols(path, src)
 	case "typescript":
 		comments = scanLineAndBlockComments(path, string(src), "//", "/*", "*/")
+		symbols = extractTypeScriptSymbols(src)
 	case "python":
 		comments = scanPythonComments(path, string(src))
+		symbols = extractPythonSymbols(src)
 	case "rust":
 		comments = scanLineAndBlockComments(path, string(src), "//", "/*", "*/")
+		symbols = extractRustSymbols(src)
 	default:
 		return result, nil
 	}
@@ -47,14 +50,16 @@ func ExtractAnchorsFromSource(ctx context.Context, policy AnchorPolicy, resolver
 		return result, err
 	}
 	result.Comments = comments
+	var generatedFinding *Finding
 	if isGeneratedOrVendor(path, string(src)) {
-		result.Findings = append(result.Findings, newFinding(AnchorFindingGeneratedOrVendor, AnchorFindingError))
+		finding := newFinding(AnchorFindingGeneratedOrVendor, AnchorFindingError)
+		generatedFinding = &finding
 	}
 	for _, comment := range comments {
 		anchors := anchorsFromComment(policy, comment)
 		for _, occ := range anchors {
-			if len(result.Findings) > 0 && result.Findings[0].Reason == AnchorFindingGeneratedOrVendor {
-				occ.Findings = append(occ.Findings, result.Findings[0])
+			if generatedFinding != nil {
+				occ.Findings = append(occ.Findings, *generatedFinding)
 			}
 			if hasErrorFinding(occ.Findings) {
 				occ.ValidationStatus = AnchorValidationLintError
@@ -62,13 +67,16 @@ func ExtractAnchorsFromSource(ctx context.Context, policy AnchorPolicy, resolver
 				continue
 			}
 			if support == AnchorSupportGraphBinding {
-				occ = bindOccurrence(policy, resolver, packageLine, symbols, comment, occ, src)
+				occ = bindOccurrence(policy, resolver, lang, packageLine, symbols, comment, occ, src)
 			} else {
 				occ.ValidationStatus = AnchorValidationLintError
 				occ.Findings = append(occ.Findings, newFinding(AnchorFindingUnsupportedOwner, AnchorFindingWarning))
 			}
 			result.Occurrences = append(result.Occurrences, occ)
 		}
+	}
+	if generatedFinding != nil && len(result.Occurrences) > 0 {
+		result.Findings = append(result.Findings, *generatedFinding)
 	}
 	result.Findings = append(result.Findings, ValidateOccurrenceSet(policy, result.Occurrences)...)
 	_ = ctx
@@ -160,17 +168,34 @@ func extractGoCommentsAndSymbols(path string, src []byte) ([]CommentSpan, []symb
 	}
 	var symbols []symbolDecl
 	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok {
-			continue
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			start := fset.Position(d.Pos())
+			end := fset.Position(d.End())
+			name := d.Name.Name
+			if d.Recv != nil && len(d.Recv.List) > 0 {
+				name = receiverName(d.Recv.List[0].Type) + "." + name
+			}
+			symbols = append(symbols, symbolDecl{span: Span{LineStart: start.Line, LineEnd: end.Line, ColStart: start.Column, ColEnd: end.Column}, name: name})
+		case *ast.GenDecl:
+			for _, spec := range d.Specs {
+				switch s := spec.(type) {
+				case *ast.TypeSpec:
+					start := fset.Position(s.Pos())
+					end := fset.Position(s.End())
+					symbols = append(symbols, symbolDecl{span: Span{LineStart: start.Line, LineEnd: end.Line, ColStart: start.Column, ColEnd: end.Column}, name: s.Name.Name})
+				case *ast.ValueSpec:
+					for _, ident := range s.Names {
+						if ident.Name == "_" {
+							continue
+						}
+						start := fset.Position(ident.Pos())
+						end := fset.Position(s.End())
+						symbols = append(symbols, symbolDecl{span: Span{LineStart: start.Line, LineEnd: end.Line, ColStart: start.Column, ColEnd: end.Column}, name: ident.Name})
+					}
+				}
+			}
 		}
-		start := fset.Position(fn.Pos())
-		end := fset.Position(fn.End())
-		name := fn.Name.Name
-		if fn.Recv != nil && len(fn.Recv.List) > 0 {
-			name = receiverName(fn.Recv.List[0].Type) + "." + name
-		}
-		symbols = append(symbols, symbolDecl{span: Span{LineStart: start.Line, LineEnd: end.Line, ColStart: start.Column, ColEnd: end.Column}, name: name})
 	}
 	sort.Slice(symbols, func(i, j int) bool { return symbols[i].span.LineStart < symbols[j].span.LineStart })
 	return comments, symbols, fset.Position(file.Package).Line, nil
@@ -191,11 +216,11 @@ func receiverName(expr ast.Expr) string {
 	}
 }
 
-func bindOccurrence(policy AnchorPolicy, resolver OwnerResolver, packageLine int, symbols []symbolDecl, comment CommentSpan, occ AnchorOccurrence, src []byte) AnchorOccurrence {
+func bindOccurrence(policy AnchorPolicy, resolver OwnerResolver, lang string, packageLine int, symbols []symbolDecl, comment CommentSpan, occ AnchorOccurrence, src []byte) AnchorOccurrence {
 	typePolicy := policy.TypePolicies[occ.Type]
 	if symbol, ok := nearestFollowingSymbol(policy, symbols, comment, src); ok {
 		if resolver != nil {
-			if owner, ok := resolver.ResolveSymbolOwner(occ.Span.Path, "go", symbol.span, symbol.name); ok {
+			if owner, ok := resolver.ResolveSymbolOwner(occ.Span.Path, lang, symbol.span, symbol.name); ok {
 				occ.OwnerBinding = bindingFromOwner(owner)
 				return occ
 			}
@@ -269,14 +294,153 @@ func languageSupport(path string) (string, LanguageAnchorSupport) {
 	case ".go":
 		return "go", AnchorSupportGraphBinding
 	case ".ts", ".tsx", ".js", ".jsx":
-		return "typescript", AnchorSupportLintOnly
+		return "typescript", AnchorSupportGraphBinding
 	case ".py":
-		return "python", AnchorSupportLintOnly
+		return "python", AnchorSupportGraphBinding
 	case ".rs":
-		return "rust", AnchorSupportLintOnly
+		return "rust", AnchorSupportGraphBinding
 	default:
 		return "", ""
 	}
+}
+
+func extractTypeScriptSymbols(src []byte) []symbolDecl {
+	var symbols []symbolDecl
+	for i, line := range strings.Split(string(src), "\n") {
+		name, ok := parseTypeScriptOwnerLine(line)
+		if !ok {
+			continue
+		}
+		lineNo := i + 1
+		symbols = append(symbols, symbolDecl{span: Span{LineStart: lineNo, LineEnd: lineNo}, name: name})
+	}
+	return symbols
+}
+
+func parseTypeScriptOwnerLine(line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || strings.HasPrefix(trimmed, "//") {
+		return "", false
+	}
+	for {
+		next := strings.TrimSpace(trimmed)
+		switch {
+		case strings.HasPrefix(next, "export "):
+			trimmed = strings.TrimSpace(strings.TrimPrefix(next, "export "))
+		case strings.HasPrefix(next, "default "):
+			trimmed = strings.TrimSpace(strings.TrimPrefix(next, "default "))
+		case strings.HasPrefix(next, "declare "):
+			trimmed = strings.TrimSpace(strings.TrimPrefix(next, "declare "))
+		case strings.HasPrefix(next, "abstract "):
+			trimmed = strings.TrimSpace(strings.TrimPrefix(next, "abstract "))
+		case strings.HasPrefix(next, "async "):
+			trimmed = strings.TrimSpace(strings.TrimPrefix(next, "async "))
+		default:
+			trimmed = next
+			goto parsedPrefixes
+		}
+	}
+
+parsedPrefixes:
+	for _, prefix := range []string{"function ", "class ", "interface ", "type ", "enum "} {
+		if strings.HasPrefix(trimmed, prefix) {
+			return identifierAfter(strings.TrimPrefix(trimmed, prefix))
+		}
+	}
+	for _, prefix := range []string{"const ", "let ", "var "} {
+		if !strings.HasPrefix(trimmed, prefix) || !typeScriptVariableLooksCallable(trimmed) {
+			continue
+		}
+		return identifierAfter(strings.TrimPrefix(trimmed, prefix))
+	}
+	return "", false
+}
+
+func typeScriptVariableLooksCallable(line string) bool {
+	return strings.Contains(line, "=>") || strings.Contains(line, "function(") || strings.Contains(line, "function ")
+}
+
+func extractPythonSymbols(src []byte) []symbolDecl {
+	var symbols []symbolDecl
+	for i, line := range strings.Split(string(src), "\n") {
+		name, ok := parsePythonOwnerLine(line)
+		if !ok {
+			continue
+		}
+		lineNo := i + 1
+		symbols = append(symbols, symbolDecl{span: Span{LineStart: lineNo, LineEnd: lineNo}, name: name})
+	}
+	return symbols
+}
+
+func parsePythonOwnerLine(line string) (string, bool) {
+	if leadingWhitespace(line) != 0 {
+		return "", false
+	}
+	trimmed := strings.TrimSpace(line)
+	if strings.HasPrefix(trimmed, "async def ") {
+		trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "async "))
+	}
+	for _, prefix := range []string{"def ", "class "} {
+		if strings.HasPrefix(trimmed, prefix) {
+			return identifierAfter(strings.TrimPrefix(trimmed, prefix))
+		}
+	}
+	return "", false
+}
+
+func extractRustSymbols(src []byte) []symbolDecl {
+	var symbols []symbolDecl
+	for i, line := range strings.Split(string(src), "\n") {
+		name, ok := parseRustOwnerLine(line)
+		if !ok {
+			continue
+		}
+		lineNo := i + 1
+		symbols = append(symbols, symbolDecl{span: Span{LineStart: lineNo, LineEnd: lineNo}, name: name})
+	}
+	return symbols
+}
+
+func parseRustOwnerLine(line string) (string, bool) {
+	trimmed := strings.TrimSpace(stripRustLineComment(line))
+	if trimmed == "" {
+		return "", false
+	}
+	for {
+		next := strings.TrimSpace(trimmed)
+		switch {
+		case strings.HasPrefix(next, "pub("):
+			end := strings.Index(next, ")")
+			if end < 0 {
+				return "", false
+			}
+			trimmed = strings.TrimSpace(next[end+1:])
+		case strings.HasPrefix(next, "pub "):
+			trimmed = strings.TrimSpace(strings.TrimPrefix(next, "pub "))
+		case strings.HasPrefix(next, "default "):
+			trimmed = strings.TrimSpace(strings.TrimPrefix(next, "default "))
+		case strings.HasPrefix(next, "async "):
+			trimmed = strings.TrimSpace(strings.TrimPrefix(next, "async "))
+		case strings.HasPrefix(next, "const "):
+			trimmed = strings.TrimSpace(strings.TrimPrefix(next, "const "))
+		case strings.HasPrefix(next, "unsafe "):
+			trimmed = strings.TrimSpace(strings.TrimPrefix(next, "unsafe "))
+		case strings.HasPrefix(next, "extern "):
+			trimmed = strings.TrimSpace(strings.TrimPrefix(next, "extern "))
+		default:
+			trimmed = next
+			goto parsedPrefixes
+		}
+	}
+
+parsedPrefixes:
+	for _, prefix := range []string{"fn ", "struct ", "enum ", "trait "} {
+		if strings.HasPrefix(trimmed, prefix) {
+			return identifierAfter(strings.TrimPrefix(trimmed, prefix))
+		}
+	}
+	return "", false
 }
 
 func scanPythonComments(path, src string) []CommentSpan {
@@ -333,7 +497,7 @@ func hasNonCommentCodeBetween(src []byte, startLine, endLine int) bool {
 	lines := strings.Split(string(src), "\n")
 	for lineNo := startLine; lineNo <= endLine && lineNo <= len(lines); lineNo++ {
 		line := strings.TrimSpace(lines[lineNo-1])
-		if line == "" || strings.HasPrefix(line, "//") || strings.HasPrefix(line, "/*") || strings.HasPrefix(line, "*") || strings.HasPrefix(line, "*/") {
+		if line == "" || strings.HasPrefix(line, "//") || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "/*") || strings.HasPrefix(line, "*") || strings.HasPrefix(line, "*/") {
 			continue
 		}
 		return true
@@ -456,6 +620,54 @@ func commentIndexOutsideStrings(line, marker string) int {
 		}
 	}
 	return -1
+}
+
+func identifierAfter(input string) (string, bool) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return "", false
+	}
+	for i, r := range input {
+		if i == 0 {
+			if isIdentStart(r) {
+				continue
+			}
+			return "", false
+		}
+		if !isIdentPart(r) {
+			return input[:i], true
+		}
+	}
+	return input, true
+}
+
+func isIdentStart(r rune) bool {
+	return r == '_' || r == '$' || ('A' <= r && r <= 'Z') || ('a' <= r && r <= 'z')
+}
+
+func isIdentPart(r rune) bool {
+	return isIdentStart(r) || ('0' <= r && r <= '9')
+}
+
+func leadingWhitespace(line string) int {
+	count := 0
+	for i := 0; i < len(line); i++ {
+		switch line[i] {
+		case ' ', '\t':
+			count++
+		default:
+			return count
+		}
+	}
+	return count
+}
+
+func stripRustLineComment(line string) string {
+	idx := commentIndexOutsideStrings(line, "//")
+	if idx < 0 {
+		return line
+	}
+	return line[:idx]
 }
 
 var inlineAnchorRE = regexp.MustCompile(`\[\[[^\]\n\r]+:[^\]\n\r]+\]\]`)

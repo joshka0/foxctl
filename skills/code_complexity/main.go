@@ -65,13 +65,17 @@ func main() {
 // run orchestrates code complexity analysis across files and directories.
 //
 // Index:
-// - Purpose: Analyze code complexity metrics (cyclomatic, cognitive) for functions across multiple languages
-// - Flow: resolve path → detect file type → analyze files (Go AST, Python/JS regex) → filter by mode/threshold → calculate statistics → emit results
-// - SideEffects: file system traversal; AST parsing; artifact persistence for large result sets
-// - FailureModes: invalid path, unsupported file types, parse errors, file system errors
-// - Observability: emits analysis_mode/metric/threshold/result_count/results/statistics/artifact
-// - Related: analyzeDirectory, analyzeFile, analyzeGoFile, analyzePythonFile, analyzeJSFile, calculateStats
-// - Keywords: code/complexity, cyclomatic, cognitive, nesting, function_length, hotspots, overview, threshold
+//
+//	Purpose: Analyze code complexity metrics (cyclomatic, cognitive) for functions across multiple languages
+//	Flow: resolve path → detect file type → analyze files (Go AST, Python/JS regex) → filter by mode/threshold → calculate statistics → emit results
+//	SideEffects: file system traversal; AST parsing; artifact persistence for large result sets
+//	FailureModes: invalid path, unsupported file types, parse errors, file system errors
+//	Observability: emits analysis_mode/metric/threshold/result_count/results/statistics/artifact
+//	Related: analyzeDirectory, analyzeFile, analyzeGoFile, analyzePythonFile, analyzeJSFile, calculateStats
+//	Keywords: code/complexity, cyclomatic, cognitive, nesting, function_length, hotspots, overview, threshold
+//
+// [[domain:code-complexity-analysis]]
+// [[doc:docs/general/skills.md#Running Skills]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply defaults
 	if in.AnalysisMode == "" {

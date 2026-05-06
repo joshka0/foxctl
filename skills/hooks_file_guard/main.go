@@ -45,13 +45,16 @@ func main() {
 // run orchestrates file reservation management to prevent edit conflicts between agents.
 //
 // Index:
-// - Purpose: Manage file reservations to prevent edit conflicts between agents with advisory/strict modes
-// - Flow: detect write operations → resolve workspace/actor → extract file path → check conflicts → create reservation → emit decision
-// - SideEffects: file reservation creation; conflict detection; workspace isolation
-// - FailureModes: store access failures, path validation errors, reservation conflicts
-// - Observability: emits reservation status, conflict warnings, and file context
-// - Related: getTaskContext, formatConflicts, emitOutput
-// - Keywords: hooks/file_guard, file_reservations, conflict_prevention, agent_coordination
+//   Purpose: Manage file reservations to prevent edit conflicts between agents with advisory/strict modes
+//   Keywords: hooks/file_guard, file_reservations, conflict_prevention, agent_coordination
+//   Related: getTaskContext, formatConflicts, emitOutput
+//   Flow: detect write operations → resolve workspace/actor → extract file path → check conflicts → create reservation → emit decision
+//   Resources: blackboard store (SQLite); task store
+//   Events: file-reserved, file-conflict-detected
+//   OutputFields: decision, reservation_id, conflicts, workspace_id, actor_id
+//
+// [[invariant:exclusive-file-reservation]]
+// [[risk:concurrent-edit-conflict]]
 func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	paths := sessionkit.ResolvePaths(rc.Config)
 
@@ -215,15 +218,6 @@ func getTaskContext(ctx context.Context, taskStore tasks.Store, workspaceID, too
 }
 
 // formatConflicts creates a warning message for conflicts with context about the other agent's work.
-//
-// Index:
-// - Purpose: Format conflict warnings with context about other agents' work
-// - Flow: iterate conflicts → build warning message with conflict details
-// - SideEffects: none
-// - FailureModes: none
-// - Observability: emits conflict warnings
-// - Related: agent.ReservationConflict, conflict.Path, conflict.Holder, conflict.Mode
-// - Keywords: conflict warnings, reservation conflicts, agent coordination
 func formatConflicts(conflicts []agent.ReservationConflict) string {
 	var sb strings.Builder
 	sb.WriteString("## File Reservation Conflict\n\n")

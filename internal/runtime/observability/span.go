@@ -170,11 +170,13 @@ func WithSpanPersistenceFile(name string) SpanOpt {
 //	span.WithData("files", count)
 //
 // Index:
-// - Purpose: Start a new span and return a completion callback
-// - Flow: call StartSpanAt with time.Now → return context, done, builder
-// - SideEffects: reads clock for start time
-// - Related: StartSpanAt, EventBuilder
-// - Keywords: start_span, trace_id, event, done_callback, event_builder
+//   Purpose: Start a new span and return a completion callback
+//   Flow: call StartSpanAt with time.Now → return context, done, builder
+//   Related: StartSpanAt, EventBuilder
+//   Keywords: start_span, trace_id, event, done_callback, event_builder
+//
+// [[protocol:span-lifecycle]]
+// [[domain:observability-tracing]]
 func StartSpan(ctx context.Context, op string, opts ...SpanOpt) (context.Context, func(error), *EventBuilder) {
 	return StartSpanAt(ctx, time.Now(), op, opts...)
 }
@@ -183,13 +185,13 @@ func StartSpan(ctx context.Context, op string, opts ...SpanOpt) (context.Context
 // This is useful when you already captured a start time for other reasons.
 //
 // Index:
-// - Purpose: Start a span with a caller-provided start time
-// - Flow: apply options → ensure trace → build event → enrich context → return done func
-// - SideEffects: reads env/context; emits Event on done
-// - FailureModes: none (errors captured in emitted event)
-// - Observability: emits Event via EmitWithConfig
-// - Related: StartSpan, EmitWithConfig, EnsureTraceID
-// - Keywords: start_span_at, trace_id, emit, event, persist_config
+//   Purpose: Start a span with a caller-provided start time
+//   Flow: apply options → ensure trace → build event → enrich context → return done func
+//   Related: StartSpan, EmitWithConfig, EnsureTraceID
+//   Keywords: start_span_at, trace_id, emit, event, persist_config
+//
+// [[protocol:span-lifecycle]]
+// [[domain:observability-tracing]]
 func StartSpanAt(ctx context.Context, startedAt time.Time, op string, opts ...SpanOpt) (context.Context, func(error), *EventBuilder) {
 	var o spanOpts
 	for _, opt := range opts {

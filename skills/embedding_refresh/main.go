@@ -60,13 +60,16 @@ func main() {
 // run orchestrates embedding refresh for memories, symbols, and sessions.
 //
 // Index:
-// - Purpose: Regenerate embeddings for specific items with content formatting and storage routing
-// - Flow: validate input → get content → generate embedding → store based on scope → emit results
-// - SideEffects: embedding API calls; database updates; content formatting; dimension validation
-// - FailureModes: missing API keys, item not found, no content, embedding failures, storage errors
-// - Observability: emits refresh status with dimensions, timing, and detailed error messages
-// - Related: getMemoryContent, getSymbolContent, getSessionContent, formatMemoryContent, formatSessionContent
-// - Keywords: embedding/refresh, regeneration, memories, symbols, sessions, vector_search
+//   Purpose: Regenerate embeddings for specific items with content formatting and storage routing
+//   Flow: validate input → get content → generate embedding → store based on scope → emit results
+//   SideEffects: embedding API calls; database updates; content formatting; dimension validation
+//   FailureModes: missing API keys, item not found, no content, embedding failures, storage errors
+//   Observability: emits refresh status with dimensions, timing, and detailed error messages
+//   Related: getMemoryContent, getSymbolContent, getSessionContent, formatMemoryContent, formatSessionContent
+//   Keywords: embedding/refresh, regeneration, memories, symbols, sessions, vector_search
+//
+// [[domain:embedding-regeneration]]
+// [[protocol:scope-aware-embedding-storage]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Set default workspace
 	in.Workspace = workspaceutil.Resolve(in.Workspace, "", rc.Workspace)

@@ -111,13 +111,16 @@ func main() {
 // run orchestrates graph database operations with workspace isolation and validation.
 //
 // Index:
-// - Purpose: Execute graph database operations (nodes, edges, queries, stats, cleanup) with workspace isolation
-// - Flow: validate operation → open store → dispatch to handler → emit results
-// - SideEffects: graph database modifications; node/edge creation/deletion; statistics updates
-// - FailureModes: invalid operations, database errors, validation failures
-// - Observability: emits operation results, statistics, and error context
-// - Related: handleAddNode, handleAddEdge, handleQuery, handleNeighbors, handleTopNodes, handleDeleteNode, handleDeleteEdge, handleStats, handleCleanup
-// - Keywords: graph, graph_database, dependency_graph, node_management, edge_management
+//   Purpose: Execute graph database operations (nodes, edges, queries, stats, cleanup) with workspace isolation
+//   Keywords: graph, graph_database, dependency_graph, node_management, edge_management
+//   Related: handleAddNode, handleAddEdge, handleQuery, handleNeighbors, handleTopNodes, handleDeleteNode, handleDeleteEdge, handleStats, handleCleanup
+//   Flow: validate operation → open store → dispatch to handler → emit results
+//   Resources: graph database (SQLite); workspace-scoped node/edge storage
+//   Events: graph-node-added, graph-edge-added, graph-query, graph-cleanup
+//   OutputFields: node_id, edge_id, edges, neighbors, nodes, stats
+//
+// [[domain:graph-database]]
+// [[protocol:skill-dispatch]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	op := oputil.Op(in.Operation)
 	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOps, ", "))

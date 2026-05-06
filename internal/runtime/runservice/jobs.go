@@ -62,12 +62,16 @@ func (e *Executor) ensureJobStore() (err error) {
 // PrepareJob finds or creates a job for the given input.
 //
 // Index:
-// - Purpose: Find or create a job and initialize trajectory capture context
-// - Flow: ensure job store -> prepare job -> persist workspace -> set correlation ID -> start capture -> capture hook call
-// - SideEffects: writes job store; starts trajectory capture; may update workspace metadata
-// - FailureModes: job store errors, workspace persistence errors (warned), capture start errors (ignored)
-// - Related: jobs.Store.FindOrPrepareSkillJob, trajectorycapture.Start, Executor.ExecuteSync
-// - Keywords: prepare_job, dedupe, workspace, correlation_id, trajectorycapture, job_store, hooks
+//   Purpose: Find or create a job and initialize trajectory capture context
+//   Keywords: prepare_job, dedupe, workspace, correlation_id, trajectorycapture, job_store, hooks
+//   Related: jobs.Store.FindOrPrepareSkillJob, trajectorycapture.Start, Executor.ExecuteSync
+//   Flow: ensure job store -> prepare job -> persist workspace -> set correlation ID -> start capture -> capture hook call
+//   Resources: jobs.Store, trajectorycapture
+//   Events: job.recover
+//   OutputFields: jobs.Job, bool, error
+//
+// [[protocol:job-lifecycle]]
+// [[invariant:correlation-id-propagation]]
 func (e *Executor) PrepareJob(input []byte) (jobs.Job, bool, error) {
 	if err := e.ensureJobStore(); err != nil {
 		return jobs.Job{}, false, err
@@ -164,12 +168,16 @@ func (e *Executor) SubmitAsync(job jobs.Job) error {
 // ExecuteSync runs the skill synchronously and applies persistence side effects.
 //
 // Index:
-// - Purpose: Execute a job synchronously and persist results
-// - Flow: ensure env → execute prepared skill → fetch job → handle result
-// - SideEffects: executes skill; updates job store; may write envelopes
-// - FailureModes: execution errors, job store errors, result handling errors
-// - Related: Executor.HandleResult, jobs.Store.ExecutePreparedSkill
-// - Keywords: execute_sync, jobs_store, result_path, correlation_id
+//   Purpose: Execute a job synchronously and persist results
+//   Keywords: execute_sync, jobs_store, result_path, correlation_id
+//   Related: Executor.HandleResult, jobs.Store.ExecutePreparedSkill
+//   Flow: ensure env → execute prepared skill → fetch job → handle result
+//   Resources: jobs.Store, os.Setenv
+//   Events: none
+//   OutputFields: error
+//
+// [[protocol:job-execution]]
+// [[risk:cas-race-condition]]
 func (e *Executor) ExecuteSync(job jobs.Job) error {
 	// Set no-CAS mode in environment if requested (disables output truncation)
 	//

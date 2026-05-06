@@ -324,12 +324,15 @@ func (s *sqlStore) FindDuplicateJob(ctx context.Context, argsHash string) (types
 // FindOrInsertJob returns an existing job by args hash or inserts a new job.
 //
 // Index:
-// - Purpose: Deduplicate jobs by args hash while inserting atomically
-// - Flow: begin tx → lookup by args_hash → return existing or insert new → commit
-// - SideEffects: database transaction; job table insert
-// - FailureModes: tx errors, scan errors, insert errors
-// - Related: FindDuplicateJob, types.Job
-// - Keywords: jobs_find_or_insert, args_hash, transaction, dedupe
+//   Purpose: Deduplicate jobs by args hash while inserting atomically
+//   Keywords: jobs_find_or_insert, args_hash, transaction, dedupe
+//   Related: FindDuplicateJob, types.Job
+//   Flow: begin tx → lookup by args_hash → return existing or insert new → commit
+//   Resources: jobs table, sqlutil, ulid
+//   Events: none
+//   OutputFields: types.Job, bool (wasFound)
+// [[invariant:args-hash-uniqueness-dedupes-identical-jobs]]
+// [[protocol:job-state-machine]]
 func (s *sqlStore) FindOrInsertJob(ctx context.Context, job types.Job) (types.Job, bool, error) {
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {

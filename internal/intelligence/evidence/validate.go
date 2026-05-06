@@ -53,6 +53,9 @@ func ValidateEvidenceMeta(meta EvidenceMeta) error {
 	return nil
 }
 
+// [[invariant:evidence-only-is-not-instruction]]
+// [[doc:docs/plans/features/semantic-code-anchors.md#Four-Plane Model]]
+// [[test:internal/intelligence/evidence/validate_test.go#TestValidateRenderSurface]]
 func ValidateRenderSurface(meta EvidenceMeta, surface RenderSurface) error {
 	if err := ValidateEvidenceMeta(meta); err != nil {
 		return err

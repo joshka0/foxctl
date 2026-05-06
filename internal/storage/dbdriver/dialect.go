@@ -33,8 +33,7 @@ type Dialect interface {
 
 	// VectorType returns the column type for vector embeddings of the given dimensions.
 	// SQLite: "BLOB"   PostgreSQL: "vector(dims)"
-	// Note: Turso uses F32_BLOB(dims) through VectorHelper rather than the
-	// generic dialect abstraction.
+	// Turso stores vectors as BLOB values created by vector32()/vector64().
 	VectorType(dims int) string
 
 	// AutoIncrement returns the column type for auto-incrementing primary keys.

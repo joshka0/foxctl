@@ -43,12 +43,15 @@ func NewService(cfg config.Config) *Service {
 // Create creates a new backup archive.
 //
 // Index:
-// - Purpose: Build a backup archive and manifest for selected components
-// - Flow: resolve components/exclusions → determine output path → collect files → write tar.gz + manifest → compute stats
-// - SideEffects: reads files; creates directories; writes backup archive
-// - FailureModes: no files found, file IO errors, manifest marshal errors
-// - Related: Service.collectFiles, Service.addFileToArchive
-// - Keywords: backup_create, components, exclude_components, output_path, manifest, files_processed, bytes_processed
+//   Purpose: Build a backup archive and manifest for selected components
+//   Keywords: backup_create, components, exclude_components, output_path, manifest, files_processed, bytes_processed
+//   Related: Service.collectFiles, Service.addFileToArchive
+//   Flow: resolve components/exclusions → determine output path → collect files → write tar.gz + manifest → compute stats
+//   Resources: internal/domain/backup, internal/platform/buildinfo
+//   Events: none
+//   OutputFields: backup.Result.Path, backup.Result.Manifest, backup.Result.FilesProcessed, backup.Result.BytesProcessed
+// [[protocol:backup.archive_v1]]
+// [[risk:io-failure-during-archive-write]]
 func (s *Service) Create(ctx context.Context, opts backup.CreateOptions) (*backup.Result, error) {
 	startTime := time.Now()
 	result := &backup.Result{}
@@ -277,12 +280,15 @@ func (s *Service) GetManifest(ctx context.Context, path string) (*backup.Manifes
 // Restore restores data from a backup archive.
 //
 // Index:
-// - Purpose: Restore selected components from a backup archive to disk
-// - Flow: read manifest → choose components → iterate archive entries → write files (unless dry_run) → restore metadata
-// - SideEffects: reads archive; creates directories; writes files; chmod/chtimes
-// - FailureModes: manifest read errors, archive read errors, file IO errors, permission errors
-// - Related: Service.GetManifest
-// - Keywords: backup_restore, components, dry_run, force, manifest, files_processed, bytes_processed
+//   Purpose: Restore selected components from a backup archive to disk
+//   Keywords: backup_restore, components, dry_run, force, manifest, files_processed, bytes_processed
+//   Related: Service.GetManifest
+//   Flow: read manifest → choose components → iterate archive entries → write files (unless dry_run) → restore metadata
+//   Resources: internal/domain/backup
+//   Events: none
+//   OutputFields: backup.Result.Path, backup.Result.FilesProcessed, backup.Result.BytesProcessed
+// [[protocol:backup.archive_v1]]
+// [[risk:overwrite-existing-files-without-force]]
 func (s *Service) Restore(ctx context.Context, path string, opts backup.RestoreOptions) (*backup.Result, error) {
 	startTime := time.Now()
 	result := &backup.Result{Path: path}

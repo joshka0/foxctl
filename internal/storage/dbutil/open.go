@@ -19,12 +19,15 @@ import (
 // The returned closer releases any driver resources (pool lease, embedded replica connector, temp dirs).
 //
 // Index:
-// - Purpose: Centralize store DB opening behind a driver-agnostic facade (sqlite/turso/postgres)
-// - Flow: load dbdriver.Config from env → open via sqlite shared pool or dbdriver compat → return (*sql.DB, closeFn)
-// - SideEffects: may create local replica directories/files; may run migrations
-// - FailureModes: invalid config, filesystem permissions, network/auth errors for remote sync, migration errors
-// - Related: dbdriver.ConfigLoader.LoadConfig, sqliteutil.OpenDBShared, dbdriver.OpenDBCompatWithCloser
-// - Keywords: dbutil, dbdriver, store_db, turso, sqlite, postgres
+//   Purpose: Centralize store DB opening behind a driver-agnostic facade (sqlite/turso/postgres)
+//   Keywords: dbutil, dbdriver, store_db, turso, sqlite, postgres
+//   Related: dbdriver.ConfigLoader.LoadConfig, sqliteutil.OpenDBShared, dbdriver.OpenDBCompatWithCloser
+//   Flow: load dbdriver.Config from env → open via sqlite shared pool or dbdriver compat → return (*sql.DB, closeFn)
+//   Resources: storageRoot directory, dbdriver config
+//   Events: none
+//   OutputFields: *sql.DB, closeFn
+// [[protocol:store-driver-abstraction]]
+// [[risk:network-auth-failure-for-remote-sync]]
 func OpenStoreDB(
 	ctx context.Context,
 	storageRoot string,

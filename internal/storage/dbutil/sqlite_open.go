@@ -13,12 +13,15 @@ import (
 // database-opening behavior behind dbutil.
 //
 // Index:
-// - Purpose: Provide a dbutil-owned facade for opening pooled SQLite databases by path
-// - Flow: delegate to sqliteutil.OpenDBShared
-// - SideEffects: may create parent directories; may run migrations; may configure WAL/busy timeout (sqliteutil behavior)
-// - FailureModes: filesystem permissions, migration errors, SQLite open errors
-// - Related: OpenStoreDB, sqliteutil.OpenDBShared
-// - Keywords: sqlite, open, pooled, dbutil_facade
+//   Purpose: Provide a dbutil-owned facade for opening pooled SQLite databases by path
+//   Keywords: sqlite, open, pooled, dbutil_facade
+//   Related: OpenStoreDB, sqliteutil.OpenDBShared
+//   Flow: delegate to sqliteutil.OpenDBShared
+//   Resources: filesystem path
+//   Events: none
+//   OutputFields: *sql.DB, closeFn
+// [[protocol:store-driver-abstraction]]
+// [[risk:filesystem-permission-denied]]
 func OpenSQLiteDBShared(ctx context.Context, path string, migrate func(context.Context, *sql.DB) error) (*sql.DB, func() error, error) {
 	return sqliteutil.OpenDBShared(ctx, path, migrate)
 }
@@ -28,12 +31,15 @@ func OpenSQLiteDBShared(ctx context.Context, path string, migrate func(context.C
 // This is primarily intended for sandbox/read-only environments and deterministic tests.
 //
 // Index:
-// - Purpose: Provide a dbutil-owned facade for opening an in-memory SQLite database
-// - Flow: delegate to sqliteutil.OpenInMemory
-// - SideEffects: allocates an in-memory SQLite DB; may run migrations
-// - FailureModes: migration errors, SQLite open errors
-// - Related: sqliteutil.OpenInMemory
-// - Keywords: sqlite, in_memory, dbutil_facade, sandbox
+//   Purpose: Provide a dbutil-owned facade for opening an in-memory SQLite database
+//   Keywords: sqlite, in_memory, dbutil_facade, sandbox
+//   Related: sqliteutil.OpenInMemory
+//   Flow: delegate to sqliteutil.OpenInMemory
+//   Resources: in-memory SQLite
+//   Events: none
+//   OutputFields: *sql.DB
+// [[protocol:store-driver-abstraction]]
+// [[test-contract:in-memory-db-is-deterministic]]
 func OpenSQLiteInMemory(ctx context.Context, migrate func(context.Context, *sql.DB) error) (*sql.DB, error) {
 	return sqliteutil.OpenInMemory(ctx, migrate)
 }

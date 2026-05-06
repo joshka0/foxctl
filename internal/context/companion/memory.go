@@ -128,12 +128,13 @@ type ConversationTurn struct {
 // NewConversationMemory initializes conversation memory storage and schema.
 //
 // Index:
-// - Purpose: Create a conversation memory store with configured options
-// - Flow: apply options → ensure schema → return memory
-// - SideEffects: creates/updates SQLite schema
-// - FailureModes: schema creation errors
-// - Related: DefaultMemoryConfig, ConversationMemory.ensureSchema
-// - Keywords: conversation_memory, schema, options, sqlite, summaries
+//
+//	Purpose: Create a conversation memory store with configured options
+//	Flow: apply options → ensure schema → return memory
+//	Related: DefaultMemoryConfig, ConversationMemory.ensureSchema
+//	Keywords: conversation_memory, schema, options, sqlite, summaries
+//
+// [[domain:conversation-memory-store]]
 func NewConversationMemory(db *sql.DB, opts ...MemoryOption) (*ConversationMemory, error) {
 	m := &ConversationMemory{
 		db:           db,
@@ -674,12 +675,14 @@ func (m *ConversationMemory) migrateTimestamps(ctx context.Context) error {
 // AppendTurn stores a conversation turn and emits a hybrid event.
 //
 // Index:
-// - Purpose: Persist a conversation turn and update totals
-// - Flow: normalize turn → insert turn → insert hybrid event
-// - SideEffects: writes to companion_turns + companion_events(+derived hybrid tables)
-// - FailureModes: insert errors, hybrid bridge errors (logged)
-// - Related: ConversationMemory.GetHybridContext
-// - Keywords: append_turn, conversation_id, token_count, hybrid_event, tool_calls
+//
+//	Purpose: Persist a conversation turn and update totals
+//	Flow: normalize turn → insert turn → insert hybrid event
+//	Related: ConversationMemory.GetHybridContext
+//	Keywords: append_turn, conversation_id, token_count, hybrid_event, tool_calls
+//
+// [[invariant:turn-id-and-timestamp-normalized]]
+// [[domain:conversation-turn-persistence]]
 func (m *ConversationMemory) AppendTurn(ctx context.Context, turn ConversationTurn) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1119,12 +1122,11 @@ func (m *ConversationMemory) Clear(ctx context.Context, conversationID string) e
 // newID returns a new stable identifier for companion memory rows.
 //
 // Index:
-// - Purpose: Centralize ID generation for deterministic tests and consistent formatting
-// - Flow: call injected idGenerator
-// - SideEffects: increments internal sequence when using default generator
-// - FailureModes: none
-// - Related: WithIDGenerator, ConversationMemory.AppendTurn
-// - Keywords: id, deterministic, testing
+//
+//	Purpose: Centralize ID generation for deterministic tests and consistent formatting
+//	Flow: call injected idGenerator
+//	Related: WithIDGenerator, ConversationMemory.AppendTurn
+//	Keywords: id, deterministic, testing
 func (m *ConversationMemory) newID() string {
 	return m.idGenerator()
 }
@@ -2479,12 +2481,13 @@ func (m *ConversationMemory) RenameConversation(ctx context.Context, conversatio
 // Supports many-to-one: multiple conversations can link to the same agent.
 //
 // Index:
-// - Purpose: Set agent_id on companion_conversation_titles for many-to-one linking
-// - Flow: upsert conversation_titles row with agent_id
-// - SideEffects: writes companion_conversation_titles
-// - FailureModes: DB errors
-// - Related: ConversationMemory.RenameConversation, ConversationMemory.ListConversations
-// - Keywords: agent_id, conversation_titles, link, many_to_one
+//
+//	Purpose: Set agent_id on companion_conversation_titles for many-to-one linking
+//	Flow: upsert conversation_titles row with agent_id
+//	Related: ConversationMemory.RenameConversation, ConversationMemory.ListConversations
+//	Keywords: agent_id, conversation_titles, link, many_to_one
+//
+// [[domain:conversation-agent-linking]]
 func (m *ConversationMemory) LinkConversationAgent(ctx context.Context, conversationID, agentID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

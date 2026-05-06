@@ -269,9 +269,7 @@ func (e AnchorError) Error() string {
 }
 
 func DefaultAnchorPolicy(repoKey string, configuredScopes []AnchorScope) AnchorPolicy {
-	scopes := map[AnchorScope]struct{}{
-		"foxctl": {},
-	}
+	scopes := map[AnchorScope]struct{}{}
 	if slug := repoKeySlug(repoKey); slug != "" {
 		scopes[AnchorScope(slug)] = struct{}{}
 	}

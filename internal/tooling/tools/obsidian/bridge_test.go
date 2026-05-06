@@ -31,6 +31,10 @@ func TestReconcileDocsBridge(t *testing.T) {
 
 	docBody := `---
 title: AgentCTL Context Architecture
+repo_anchors:
+  - anchor:repo:invariant/no-send-without-read
+repo_symbols:
+  - internal/context/contextplane.WorkspaceStore
 ---
 
 # AgentCTL Context Architecture
@@ -108,6 +112,15 @@ This note covers semantic indexing package behavior and storage memory.
 	text := string(draftBody)
 	if !strings.Contains(text, "repo_docs:") || !strings.Contains(text, "vault_refs:") {
 		t.Fatalf("expected bridge metadata in draft note:\n%s", text)
+	}
+	if !strings.Contains(text, "repo_anchors:") || !strings.Contains(text, "anchor:repo:invariant/no-send-without-read") {
+		t.Fatalf("expected repo anchor suggestions in draft note:\n%s", text)
+	}
+	if !strings.Contains(text, "repo_symbols:") || !strings.Contains(text, "internal/context/contextplane.WorkspaceStore") {
+		t.Fatalf("expected repo symbol suggestions in draft note:\n%s", text)
+	}
+	if !strings.Contains(text, "orphaned_anchor:anchor:repo:invariant/no-send-without-read") {
+		t.Fatalf("expected orphaned anchor health finding in draft note:\n%s", text)
 	}
 	if !strings.Contains(text, "docs/architecture/context-architecture.md") {
 		t.Fatalf("expected repo doc path in draft note:\n%s", text)
@@ -235,6 +248,10 @@ status: draft
 trust: raw
 repo_docs:
   - docs/general/memory.md
+repo_anchors:
+  - anchor:repo:invariant/no-send-without-read
+repo_symbols:
+  - internal/context/contextplane.WorkspaceStore
 vault_refs:
 suggested_vault_refs:
   - notes/repo/foxctl/semantic-and-memory.md
@@ -277,6 +294,12 @@ updated: 2026-03-11
 	}
 	if !strings.Contains(string(updatedVaultNote), "repo_docs:") || !strings.Contains(string(updatedVaultNote), "docs/general/memory.md") {
 		t.Fatalf("expected vault note repo_docs patch:\n%s", string(updatedVaultNote))
+	}
+	if !strings.Contains(string(updatedVaultNote), "repo_anchors:") || !strings.Contains(string(updatedVaultNote), "anchor:repo:invariant/no-send-without-read") {
+		t.Fatalf("expected vault note repo_anchors patch:\n%s", string(updatedVaultNote))
+	}
+	if !strings.Contains(string(updatedVaultNote), "repo_symbols:") || !strings.Contains(string(updatedVaultNote), "internal/context/contextplane.WorkspaceStore") {
+		t.Fatalf("expected vault note repo_symbols patch:\n%s", string(updatedVaultNote))
 	}
 }
 

@@ -61,6 +61,21 @@ func TestParseInlineAnchorValidForms(t *testing.T) {
 	}
 }
 
+func TestDefaultAnchorPolicyDoesNotHardcodeFoxctlScope(t *testing.T) {
+	policy := DefaultAnchorPolicy("example.com/acme/project", nil)
+	if _, findings := ParseInlineAnchor(policy, "[[foxctl:invariant/no-send-without-read]]"); len(findings) != 1 || findings[0].Reason != AnchorFindingUnknownScope {
+		t.Fatalf("foxctl scope findings=%+v, want unknown_scope for unrelated repo", findings)
+	}
+	if _, findings := ParseInlineAnchor(policy, "[[project:invariant/no-send-without-read]]"); len(findings) != 0 {
+		t.Fatalf("repo key slug scope findings=%+v, want accepted", findings)
+	}
+
+	configured := DefaultAnchorPolicy("example.com/acme/project", []AnchorScope{"acme"})
+	if _, findings := ParseInlineAnchor(configured, "[[acme:protocol/read-guard]]"); len(findings) != 0 {
+		t.Fatalf("configured scope findings=%+v, want accepted", findings)
+	}
+}
+
 func TestParseInlineAnchorRejectsInvalidForms(t *testing.T) {
 	policy := DefaultAnchorPolicy("foxctl", nil)
 	tests := []struct {
@@ -353,6 +368,33 @@ func (b *Bridge) Type() {}
 	}
 }
 
+func TestExtractGoAnchorsBindTypesConstsAndVars(t *testing.T) {
+	policy := DefaultAnchorPolicy("foxctl", nil)
+	src := []byte(`package demo
+
+// [[foxctl:domain/type-owner]]
+type Config struct{}
+
+// [[foxctl:invariant/const-owner]]
+const DefaultLimit = 10
+
+// [[foxctl:risk/var-owner]]
+var GlobalState = map[string]string{}
+`)
+	result, err := ExtractAnchorsFromSource(context.Background(), policy, ownerResolverStub{}, "internal/demo.go", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Support != AnchorSupportGraphBinding || len(result.Occurrences) != 3 {
+		t.Fatalf("result = %+v", result)
+	}
+	for idx, want := range []string{":Config", ":DefaultLimit", ":GlobalState"} {
+		if got := result.Occurrences[idx].OwnerBinding.OwnerStableKey; !strings.Contains(got, want) {
+			t.Fatalf("owner[%d] = %q, want %s", idx, got, want)
+		}
+	}
+}
+
 func TestExtractGoAnchorsFileLevelFallback(t *testing.T) {
 	policy := DefaultAnchorPolicy("foxctl", nil)
 	src := []byte(`// [[doc:docs/general/anchors.md#overview]]
@@ -410,7 +452,7 @@ func Guard() {}
 			name: "code between",
 			src: `package demo
 // [[foxctl:invariant/no-send-without-read]]
-var x = 1
+var _ = 1
 func Guard() {}
 `,
 		},
@@ -441,24 +483,25 @@ func Guard() {}
 	}
 }
 
-func TestExtractAnchorsCommentsOnlyAndLintOnlyLanguages(t *testing.T) {
+func TestExtractAnchorsCommentsOnlyAndNonGoLanguages(t *testing.T) {
 	policy := DefaultAnchorPolicy("foxctl", nil)
 	tests := []struct {
-		path string
-		src  string
+		path      string
+		src       string
+		ownerName string
 	}{
 		{"src/app.ts", `const s = "[[foxctl:invariant/string-literal]]";
 // [[foxctl:invariant/comment-only]]
 function run() {}
-`},
+`, "run"},
 		{"src/app.py", `s = "[[foxctl:invariant/string-literal]]"
 # [[foxctl:invariant/comment-only]]
 def run(): pass
-`},
+`, "run"},
 		{"src/app.rs", `let s = "[[foxctl:invariant/string-literal]]";
 // [[foxctl:invariant/comment-only]]
 fn run() {}
-`},
+`, "run"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.path, func(t *testing.T) {
@@ -466,14 +509,65 @@ fn run() {}
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.Support != AnchorSupportLintOnly {
+			if result.Support != AnchorSupportGraphBinding {
 				t.Fatalf("support = %q", result.Support)
 			}
 			if len(result.Occurrences) != 1 || result.Occurrences[0].Target != "comment-only" {
 				t.Fatalf("occurrences = %+v", result.Occurrences)
 			}
-			if !hasFinding(result.Occurrences[0].Findings, AnchorFindingUnsupportedOwner) {
-				t.Fatalf("missing lint-only unsupported owner finding: %+v", result.Occurrences[0].Findings)
+			if got := result.Occurrences[0].OwnerBinding.OwnerStableKey; !strings.Contains(got, ":"+tc.path+":"+tc.ownerName) {
+				t.Fatalf("owner stable key = %q, want %s owner", got, tc.ownerName)
+			}
+		})
+	}
+}
+
+func TestExtractNonGoAnchorsBindOnlyAttachedOwners(t *testing.T) {
+	policy := DefaultAnchorPolicy("foxctl", nil)
+	tests := []struct {
+		name string
+		path string
+		src  string
+	}{
+		{
+			name: "typescript code between",
+			path: "src/app.ts",
+			src: `// [[foxctl:invariant/no-send-without-read]]
+const unrelated = 1
+function run() {}
+`,
+		},
+		{
+			name: "python over gap",
+			path: "src/app.py",
+			src: `# [[foxctl:invariant/no-send-without-read]]
+
+
+def run(): pass
+`,
+		},
+		{
+			name: "rust backward",
+			path: "src/app.rs",
+			src: `fn run() {}
+// [[foxctl:invariant/no-send-without-read]]
+`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := ExtractAnchorsFromSource(context.Background(), policy, ownerResolverStub{}, tc.path, []byte(tc.src))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Occurrences) != 1 {
+				t.Fatalf("occurrences = %+v", result.Occurrences)
+			}
+			if result.Occurrences[0].OwnerBinding.OwnerNodeID != "" {
+				t.Fatalf("unexpected owner = %+v", result.Occurrences[0].OwnerBinding)
+			}
+			if !hasFinding(result.Occurrences[0].Findings, AnchorFindingUnboundOwner) && !hasFinding(result.Findings, AnchorFindingUnboundOwner) {
+				t.Fatalf("missing unbound finding: occ=%+v result=%+v", result.Occurrences[0].Findings, result.Findings)
 			}
 		})
 	}
@@ -509,6 +603,17 @@ func TestValidateOccurrenceSetFindings(t *testing.T) {
 
 func TestGeneratedVendorAndAnchorDocStripping(t *testing.T) {
 	policy := DefaultAnchorPolicy("foxctl", nil)
+	cleanGenerated, err := ExtractAnchorsFromSource(context.Background(), policy, ownerResolverStub{}, "internal/generated.go", []byte(`// Code generated by tool. DO NOT EDIT.
+package demo
+
+func Guard() {}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasFinding(cleanGenerated.Findings, AnchorFindingGeneratedOrVendor) {
+		t.Fatalf("generated file without anchors should not be reported: %+v", cleanGenerated.Findings)
+	}
 	result, err := ExtractAnchorsFromSource(context.Background(), policy, ownerResolverStub{}, "vendor/demo.go", []byte(`// Code generated by tool. DO NOT EDIT.
 package demo
 // [[foxctl:invariant/a]]

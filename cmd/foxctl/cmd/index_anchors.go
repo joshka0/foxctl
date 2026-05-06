@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -26,14 +27,16 @@ func newIndexAnchorsCommand() *cobra.Command {
 
 func newIndexAnchorsLintCommand() *cobra.Command {
 	var workspace string
+	var summaryOnly bool
 	cmd := &cobra.Command{
 		Use:   "lint",
 		Short: "Lint semantic anchors in source-code comments",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runIndexAnchors(cmd, workspace, "")
+			return runIndexAnchors(cmd, workspace, "", anchorReportOptions{SummaryOnly: summaryOnly})
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root directory")
+	cmd.Flags().BoolVar(&summaryOnly, "summary", false, "Emit counts and findings without per-file occurrence details")
 	return cmd
 }
 
@@ -44,7 +47,7 @@ func newIndexAnchorsExplainCommand() *cobra.Command {
 		Use:   "explain",
 		Short: "Explain semantic anchors for one source file",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runIndexAnchors(cmd, workspace, path)
+			return runIndexAnchors(cmd, workspace, path, anchorReportOptions{})
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root directory")
@@ -53,7 +56,11 @@ func newIndexAnchorsExplainCommand() *cobra.Command {
 	return cmd
 }
 
-func runIndexAnchors(cmd *cobra.Command, workspace, onlyPath string) error {
+type anchorReportOptions struct {
+	SummaryOnly bool
+}
+
+func runIndexAnchors(cmd *cobra.Command, workspace, onlyPath string, opts anchorReportOptions) error {
 	ctx := cmd.Context()
 	absWorkspace, err := filepath.Abs(workspace)
 	if err != nil {
@@ -81,7 +88,8 @@ func runIndexAnchors(cmd *cobra.Command, workspace, onlyPath string) error {
 	}
 
 	files := make([]anchorFileReport, 0, len(paths))
-	totalFindings := 0
+	findingSummary := newAnchorFindingSummary()
+	bindingSummary := anchorOwnerBindingSummary{}
 	for _, relPath := range paths {
 		src, err := os.ReadFile(filepath.Join(absWorkspace, filepath.FromSlash(relPath)))
 		if err != nil {
@@ -91,19 +99,25 @@ func runIndexAnchors(cmd *cobra.Command, workspace, onlyPath string) error {
 		if err != nil {
 			return fmt.Errorf("extract anchors from %s: %w", relPath, err)
 		}
-		report := anchorFileReport{
-			Path:     relPath,
-			Language: extracted.Language,
-			Support:  extracted.Support,
-			Findings: extracted.Findings,
+		var report anchorFileReport
+		if !opts.SummaryOnly {
+			report = anchorFileReport{
+				Path:     relPath,
+				Language: extracted.Language,
+				Support:  extracted.Support,
+				Findings: extracted.Findings,
+			}
 		}
-		totalFindings += len(extracted.Findings)
+		findingSummary.AddAll(extracted.Findings)
 		for _, occ := range extracted.Occurrences {
 			item := explainAnchorOccurrence(ctx, policy, targets, occ)
-			report.Occurrences = append(report.Occurrences, item)
-			totalFindings += len(item.Findings)
+			if !opts.SummaryOnly {
+				report.Occurrences = append(report.Occurrences, item)
+			}
+			findingSummary.AddAll(item.Findings)
+			bindingSummary.Add(item)
 		}
-		if len(report.Occurrences) > 0 || len(report.Findings) > 0 || onlyPath != "" {
+		if !opts.SummaryOnly && (len(report.Occurrences) > 0 || len(report.Findings) > 0 || onlyPath != "") {
 			files = append(files, report)
 		}
 	}
@@ -113,16 +127,21 @@ func runIndexAnchors(cmd *cobra.Command, workspace, onlyPath string) error {
 		command = "index.anchors.explain"
 	}
 	data := map[string]any{
-		"workspace":            absWorkspace,
-		"files":                files,
-		"file_count":           len(files),
-		"finding_count":        totalFindings,
-		"evidence_authority":   "evidence_only",
-		"permitted_use":        []string{"retrieval_ranking", "review_signal"},
-		"instruction_eligible": false,
+		"workspace":             absWorkspace,
+		"files":                 files,
+		"file_count":            len(files),
+		"scanned_file_count":    len(paths),
+		"finding_count":         findingSummary.Total,
+		"finding_summary":       findingSummary,
+		"owner_index":           resolver.Summary(store),
+		"owner_binding_summary": bindingSummary,
+		"evidence_authority":    "evidence_only",
+		"permitted_use":         []string{"retrieval_ranking", "review_signal"},
+		"instruction_eligible":  false,
+		"summary_only":          opts.SummaryOnly,
 	}
 	if onlyPath != "" {
-		data["path"] = filepath.ToSlash(onlyPath)
+		data["path"] = paths[0]
 	}
 	env := protocol.OK(command, data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	return protocol.Write(cmd.OutOrStdout(), env)
@@ -158,7 +177,55 @@ type anchorOccurrenceReport struct {
 	EvidenceAuthority      string                                 `json:"evidence_authority"`
 	PermittedUse           []string                               `json:"permitted_use"`
 	InstructionEligible    bool                                   `json:"instruction_eligible"`
+	IndexingNote           string                                 `json:"indexing_note,omitempty"`
 	Findings               []semanticanchors.Finding              `json:"findings,omitempty"`
+}
+
+type anchorFindingSummary struct {
+	Total      int            `json:"total"`
+	ByReason   map[string]int `json:"by_reason,omitempty"`
+	BySeverity map[string]int `json:"by_severity,omitempty"`
+}
+
+func newAnchorFindingSummary() anchorFindingSummary {
+	return anchorFindingSummary{
+		ByReason:   map[string]int{},
+		BySeverity: map[string]int{},
+	}
+}
+
+func (s *anchorFindingSummary) AddAll(findings []semanticanchors.Finding) {
+	for _, finding := range findings {
+		s.Total++
+		if finding.Reason != "" {
+			s.ByReason[string(finding.Reason)]++
+		}
+		if finding.Severity != "" {
+			s.BySeverity[string(finding.Severity)]++
+		}
+	}
+}
+
+type anchorOwnerBindingSummary struct {
+	OccurrenceCount        int `json:"occurrence_count"`
+	BoundOccurrenceCount   int `json:"bound_occurrence_count"`
+	UnboundOccurrenceCount int `json:"unbound_occurrence_count"`
+	UnsupportedOwnerCount  int `json:"unsupported_owner_count"`
+}
+
+func (s *anchorOwnerBindingSummary) Add(item anchorOccurrenceReport) {
+	s.OccurrenceCount++
+	if item.OwnerNodeID != "" {
+		s.BoundOccurrenceCount++
+		return
+	}
+	s.UnboundOccurrenceCount++
+	for _, finding := range item.Findings {
+		if finding.Reason == semanticanchors.AnchorFindingUnsupportedOwner {
+			s.UnsupportedOwnerCount++
+			return
+		}
+	}
 }
 
 func explainAnchorOccurrence(ctx context.Context, policy semanticanchors.AnchorPolicy, targets semanticanchors.TargetResolver, occ semanticanchors.AnchorOccurrence) anchorOccurrenceReport {
@@ -209,13 +276,28 @@ func explainAnchorOccurrence(ctx context.Context, policy semanticanchors.AnchorP
 		EvidenceAuthority:      "evidence_only",
 		PermittedUse:           []string{"retrieval_ranking", "review_signal"},
 		InstructionEligible:    false,
+		IndexingNote:           anchorIndexingNote(occ, res),
 		Findings:               occ.Findings,
 	}
 }
 
+func anchorIndexingNote(occ semanticanchors.AnchorOccurrence, res semanticanchors.AnchorResolution) string {
+	if occ.Type == semanticanchors.AnchorTypeBeacon {
+		return "beacon anchors are advisory recall hints and are not indexed as semantic graph edges"
+	}
+	if res.EdgeAction == semanticanchors.AnchorEdgeNone && occ.OwnerBinding.OwnerNodeID == "" {
+		return "semantic graph edge not emitted because the anchor owner is unbound"
+	}
+	return ""
+}
+
 func anchorSourcePaths(workspace, onlyPath string) ([]string, error) {
 	if strings.TrimSpace(onlyPath) != "" {
-		return []string{filepath.ToSlash(onlyPath)}, nil
+		rel, err := normalizeAnchorSourcePath(onlyPath)
+		if err != nil {
+			return nil, err
+		}
+		return []string{rel}, nil
 	}
 	var paths []string
 	err := filepath.WalkDir(workspace, func(path string, entry os.DirEntry, err error) error {
@@ -244,6 +326,27 @@ func anchorSourcePaths(workspace, onlyPath string) ([]string, error) {
 	return paths, err
 }
 
+func normalizeAnchorSourcePath(value string) (string, error) {
+	raw := strings.TrimSpace(value)
+	if raw == "" {
+		return "", fmt.Errorf("anchor source path is required")
+	}
+	if strings.Contains(raw, `\`) {
+		return "", fmt.Errorf("anchor source path must use repo-relative slash paths: %q", value)
+	}
+	if filepath.IsAbs(raw) || strings.HasPrefix(raw, "/") {
+		return "", fmt.Errorf("anchor source path must be repo-relative: %q", value)
+	}
+	clean := path.Clean(filepath.ToSlash(raw))
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+		return "", fmt.Errorf("anchor source path escapes workspace: %q", value)
+	}
+	if !isAnchorSourcePath(clean) {
+		return "", fmt.Errorf("anchor source path must be a supported source file: %q", value)
+	}
+	return clean, nil
+}
+
 func isAnchorSourcePath(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".go", ".ts", ".tsx", ".js", ".jsx", ".py", ".rs":
@@ -256,6 +359,15 @@ func isAnchorSourcePath(path string) bool {
 type cliAnchorOwnerResolver struct {
 	files   map[string]repoindex.Node
 	symbols map[string][]repoindex.Node
+}
+
+type anchorOwnerIndexSummary struct {
+	RepoKey         string `json:"repo_key"`
+	StorePath       string `json:"store_path,omitempty"`
+	FileNodeCount   int    `json:"file_node_count"`
+	SymbolNodeCount int    `json:"symbol_node_count"`
+	Status          string `json:"status"`
+	Hint            string `json:"hint,omitempty"`
 }
 
 func newCLIAnchorOwnerResolver(ctx context.Context, store *repoindex.Store) (*cliAnchorOwnerResolver, error) {
@@ -276,6 +388,31 @@ func newCLIAnchorOwnerResolver(ctx context.Context, store *repoindex.Store) (*cl
 		resolver.symbols[path] = append(resolver.symbols[path], symbol)
 	}
 	return resolver, nil
+}
+
+func (r *cliAnchorOwnerResolver) Summary(store *repoindex.Store) anchorOwnerIndexSummary {
+	summary := anchorOwnerIndexSummary{}
+	if store != nil {
+		summary.RepoKey = store.RepoKey()
+		summary.StorePath = store.Path()
+	}
+	if r != nil {
+		summary.FileNodeCount = len(r.files)
+		for _, nodes := range r.symbols {
+			summary.SymbolNodeCount += len(nodes)
+		}
+	}
+	switch {
+	case summary.FileNodeCount == 0 && summary.SymbolNodeCount == 0:
+		summary.Status = "empty"
+		summary.Hint = "run foxctl index repo build --workspace . before graph-binding semantic anchors"
+	case summary.SymbolNodeCount == 0:
+		summary.Status = "files_only"
+		summary.Hint = "repoindex has file nodes but no symbol nodes; rebuild with language indexing enabled"
+	default:
+		summary.Status = "ready"
+	}
+	return summary
 }
 
 func (r *cliAnchorOwnerResolver) ResolveFileOwner(path string) semanticanchors.AnchorOwner {

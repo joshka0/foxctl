@@ -29,12 +29,16 @@ type syncStoreResult struct {
 // newSyncCommand constructs the `foxctl sync` command.
 //
 // Index:
-// - Purpose: Provide an explicit, on-demand sync for configured Turso embedded replicas
-// - Flow: resolve target stores → load dbdriver config → open DB → call Syncer.Sync → emit envelope response
-// - SideEffects: may perform network I/O; may create/update embedded replica files; may block up to per-store timeout
-// - FailureModes: invalid store names, auth/network errors, sync timeouts, DB open failures
-// - Related: dbdriver.Syncer, dbdriver.ConfigLoader.LoadConfig, storage.CanonicalStores
-// - Keywords: sync, turso, replica, cross_device
+//   Purpose: Provide an explicit, on-demand sync for configured Turso embedded replicas
+//   Keywords: sync, turso, replica, cross_device
+//   Related: dbdriver.Syncer, dbdriver.ConfigLoader.LoadConfig, storage.CanonicalStores
+//   Flow: resolve target stores → load dbdriver config → open DB → call Syncer.Sync → emit envelope response
+//   Resources: embedded replica files, remote Turso database
+//   Events: sync-start, sync-complete, sync-skip
+//   OutputFields: store, class, driver, sync_url, synced, skipped, reason, error
+//
+// [[protocol:turso-embedded-replica-sync]]
+// [[risk:network-auth-timeout]]
 func newSyncCommand() *cobra.Command {
 	var storeNames []string
 	var perStoreTimeout time.Duration

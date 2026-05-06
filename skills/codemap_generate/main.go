@@ -42,13 +42,16 @@ func main() {
 // run orchestrates codemap generation using the codemap agent with optional embedding storage.
 //
 // Index:
-// - Purpose: Generate semantic codemaps using AI agent with natural language queries
-// - Flow: validate input → resolve workspace → open stores → create agent → generate codemap → store with embeddings
-// - SideEffects: database operations; graph store queries; AI agent execution; embedding generation; memory storage
-// - FailureModes: invalid queries, workspace validation errors, agent creation failures, generation errors, storage errors
-// - Observability: emits generated codemap with traces, files, and metadata
-// - Related: storeCodemapWithEmbedding, buildCodemapSummary
-// - Keywords: codemap/generate, agent, embeddings, semantic, traces
+//   Purpose: Generate semantic codemaps using AI agent with natural language queries
+//   Flow: validate input → resolve workspace → open stores → create agent → generate codemap → store with embeddings
+//   SideEffects: database operations; graph store queries; AI agent execution; embedding generation; memory storage
+//   FailureModes: invalid queries, workspace validation errors, agent creation failures, generation errors, storage errors
+//   Observability: emits generated codemap with traces, files, and metadata
+//   Related: storeCodemapWithEmbedding, buildCodemapSummary
+//   Keywords: codemap/generate, agent, embeddings, semantic, traces
+//
+// [[domain:semantic-codemap-generation]]
+// [[protocol:codemap-embedding-storage]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	start := time.Now()
 	if in.Query == "" {

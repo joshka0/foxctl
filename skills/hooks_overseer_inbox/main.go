@@ -38,13 +38,16 @@ func main() {
 // run orchestrates overseer inbox monitoring with recipient filtering and auto-acknowledgment.
 //
 // Index:
-// - Purpose: Surface mailbox messages sent to overseer (or broadcast) for human-in-the-loop communication
-// - Flow: resolve workspace → get recipient config → open board store → query inbox → build context → auto-mark surfaced → emit results
-// - SideEffects: message surfacing; auto-acknowledgment; context injection
-// - FailureModes: store access failures, inbox query errors
-// - Observability: emits message counts, recipient info, and formatted overseer context
-// - Related: buildOverseerContext, priorityToEmoji, kindToLabel
-// - Keywords: hooks/overseer_inbox, overseer_communication, message_monitoring, auto_acknowledgment, human_in_the_loop
+//   Purpose: Surface mailbox messages sent to overseer (or broadcast) for human-in-the-loop communication
+//   Keywords: hooks/overseer_inbox, overseer_communication, message_monitoring, auto_acknowledgment, human_in_the_loop
+//   Related: buildOverseerContext, priorityToEmoji, kindToLabel
+//   Flow: resolve workspace → get recipient config → open board store → query inbox → build context → auto-mark surfaced → emit results
+//   Resources: blackboard store (SQLite)
+//   Events: overseer-messages-surfaced
+//   OutputFields: message_count, workspace_id, recipient, context
+//
+// [[domain:mailbox-routing]]
+// [[protocol:overseer-communication]]
 func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	paths := sessionkit.ResolvePaths(rc.Config)
 

@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/joshka0/foxctl/internal/intelligence/indexing"
 	"github.com/joshka0/foxctl/internal/storage"
@@ -60,6 +61,10 @@ func configFromIndexer(cfg indexing.IndexerConfig) Config {
 
 	semConfig.ChunkBytes = extraInt(cfg.Extra, "chunk_bytes")
 	semConfig.ChunkOverlapBytes = extraInt(cfg.Extra, "chunk_overlap_bytes")
+	semConfig.ChunkDelay = extraDuration(cfg.Extra, "chunk_delay")
+	if semConfig.ChunkDelay == 0 {
+		semConfig.ChunkDelay = time.Duration(extraInt(cfg.Extra, "chunk_delay_ms")) * time.Millisecond
+	}
 	if v, ok := cfg.Extra["provider_model"].(string); ok {
 		semConfig.ProviderModel = v
 	}
@@ -80,6 +85,31 @@ func extraInt(extra map[string]any, key string) int {
 	case json.Number:
 		if parsed, err := v.Int64(); err == nil {
 			return int(parsed)
+		}
+	}
+	return 0
+}
+
+func extraDuration(extra map[string]any, key string) time.Duration {
+	switch v := extra[key].(type) {
+	case time.Duration:
+		return v
+	case string:
+		parsed, err := time.ParseDuration(v)
+		if err == nil {
+			return parsed
+		}
+	case int:
+		return time.Duration(v)
+	case int64:
+		return time.Duration(v)
+	case float64:
+		return time.Duration(v)
+	case float32:
+		return time.Duration(v)
+	case json.Number:
+		if parsed, err := v.Int64(); err == nil {
+			return time.Duration(parsed)
 		}
 	}
 	return 0

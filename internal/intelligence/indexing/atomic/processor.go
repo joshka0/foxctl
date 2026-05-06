@@ -129,12 +129,16 @@ type ProcessResult struct {
 // Returns token usage for cost tracking via observability.
 //
 // Index:
-// - Purpose: Convert raw text into disambiguated atomic facts using LLM
-// - Flow: build prompt → call LLM → parse facts → fallback to single fact on parse error
-// - SideEffects: network call to LLM
-// - FailureModes: missing input, LLM errors, parse errors (fallback)
-// - Related: buildAtomicPrompt, parseAtomicResponse, Processor.callLLM
-// - Keywords: atomic_facts, llm, entities, timestamp, disambiguation
+//   Purpose: Convert raw text into disambiguated atomic facts using LLM
+//   Keywords: atomic_facts, llm, entities, timestamp, disambiguation
+//   Related: buildAtomicPrompt, parseAtomicResponse, Processor.callLLM
+//   Flow: build prompt → call LLM → parse facts → fallback to single fact on parse error
+//   Resources: OpenRouter API
+//   Events: atomic-fact-process
+//   OutputFields: AtomicFact slice, TokenUsage
+//
+// [[protocol:atomic-fact-extraction]]
+// [[risk:llm-parse-fallback-to-identity]]
 func (p *Processor) Process(ctx context.Context, raw string, pctx ProcessContext) ([]AtomicFact, *obs.TokenUsage, error) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, nil, fmt.Errorf("empty input")

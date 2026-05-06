@@ -77,13 +77,15 @@ func main() {
 // run orchestrates DSPy training data export from sessions with multiple output formats and filtering options.
 //
 // Index:
-// - Purpose: Export session data as DSPy training examples with user-assistant pairing and tool usage tracking
-// - Flow: validate input → open sessions store → gather sessions → extract examples → write output → emit results
-// - SideEffects: reads session store; processes session turns; writes output files; generates training data
-// - FailureModes: missing session IDs/project, session store access failures, file I/O errors, format conversion errors
-// - Observability: emits export statistics, example counts, session usage, file paths, and comprehensive status information
-// - Related: extractExamples, writeExamples, unique, escapeCSV
-// - Keywords: session/export-dspy, dspy_training, data_export, machine_learning, session_processing
+//   Purpose: Export session data as DSPy training examples with user-assistant pairing and tool usage tracking
+//   Keywords: session/export-dspy, dspy_training, data_export, machine_learning, session_processing
+//   Related: extractExamples, writeExamples, unique, escapeCSV
+//   Flow: validate input → open sessions store → gather sessions → extract examples → write output → emit results
+//   Resources: session store, output file (optional)
+//   Events: DSPy export events
+//   OutputFields: examples_count, sessions_used, output_file, examples
+// [[domain:dspy-training-export]]
+// [[protocol:user-assistant-pairing]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if len(in.SessionIDs) == 0 && in.Project == "" {
 		return skillerr.Arg("either session_ids or project is required")

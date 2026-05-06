@@ -118,12 +118,15 @@ type RoomReminder struct {
 // The database driver is selected via the dbdriver env var conventions (e.g., FOXCTL_COORDINATION_DB_DRIVER).
 //
 // Index:
-// - Purpose: Provide a stable coordination store for single-leader daemon leases
-// - Flow: open db via dbutil → migrate schema → return store
-// - SideEffects: creates coordination.db and schema if missing
-// - FailureModes: open/migration errors
-// - Related: Store.TryAcquireLease, Store.ReleaseLease
-// - Keywords: coordination, leader_lease, daemon, single_leader
+//   Purpose: Provide a stable coordination store for single-leader daemon leases
+//   Keywords: coordination, leader_lease, daemon, single_leader
+//   Related: Store.TryAcquireLease, Store.ReleaseLease
+//   Flow: open db via dbutil → migrate schema → return store
+//   Resources: coordination.db, daemon_leases table, room_loops table, room_reminders table
+//   Events: none
+//   OutputFields: *Store
+// [[protocol:leader-lease-semantics]]
+// [[invariant:lease-expires-at-enforced-by-upsert-conditional]]
 func Open(ctx context.Context, storageRoot string) (*Store, error) {
 	db, closeFn, err := dbutil.OpenStoreDB(ctx, storageRoot, "COORDINATION", "coordination.db", migrate)
 	if err != nil {
@@ -840,12 +843,15 @@ func boolToIntCoord(v bool) int {
 // - Otherwise, it is not acquired and false is returned.
 //
 // Index:
-// - Purpose: Implement single-leader semantics for daemon-style background loops
-// - Flow: compute now+ttl → upsert-with-conditional-update → rowsAffected indicates acquisition
-// - SideEffects: writes daemon_leases
-// - FailureModes: DB errors
-// - Related: Store.ReleaseLease, Store.GetLease
-// - Keywords: lease, leader_election, coordination_db, expires_at
+//   Purpose: Implement single-leader semantics for daemon-style background loops
+//   Keywords: lease, leader_election, coordination_db, expires_at
+//   Related: Store.ReleaseLease, Store.GetLease
+//   Flow: compute now+ttl → upsert-with-conditional-update → rowsAffected indicates acquisition
+//   Resources: daemon_leases table
+//   Events: none
+//   OutputFields: bool (acquired)
+// [[protocol:leader-lease-semantics]]
+// [[invariant:lease-expires-at-enforced-by-upsert-conditional]]
 func (s *Store) TryAcquireLease(ctx context.Context, leaseName, ownerID string, ttl time.Duration) (bool, error) {
 	if s == nil || s.db == nil {
 		return false, fmt.Errorf("coordination: store not initialized")
@@ -888,12 +894,15 @@ func (s *Store) TryAcquireLease(ctx context.Context, leaseName, ownerID string, 
 // ReleaseLease releases the lease if it is owned by ownerID.
 //
 // Index:
-// - Purpose: Allow a leader to voluntarily relinquish a lease (best-effort)
-// - Flow: delete by (name, owner_id)
-// - SideEffects: deletes daemon_leases row
-// - FailureModes: DB errors
-// - Related: Store.TryAcquireLease
-// - Keywords: lease_release, leader_election
+//   Purpose: Allow a leader to voluntarily relinquish a lease (best-effort)
+//   Keywords: lease_release, leader_election
+//   Related: Store.TryAcquireLease
+//   Flow: delete by (name, owner_id)
+//   Resources: daemon_leases table
+//   Events: none
+//   OutputFields: none
+// [[protocol:leader-lease-semantics]]
+// [[risk:lease-not-released-on-crash]]
 func (s *Store) ReleaseLease(ctx context.Context, leaseName, ownerID string) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("coordination: store not initialized")

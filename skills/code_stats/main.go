@@ -70,13 +70,15 @@ func main() {
 // run orchestrates code statistics collection with configurable breakdown options.
 //
 // Index:
-// - Purpose: Collect and analyze code statistics including lines, files, languages, and breakdown metrics
-// - Flow: resolve path → walk directory tree → count lines per file → aggregate by breakdown category → calculate percentages → persist if needed
-// - SideEffects: file system reads; directory traversal; artifact persistence; CAS hint generation
-// - FailureModes: invalid paths, file read errors, directory traversal errors, large file skips
-// - Observability: emits statistics/breakdown_by/cas_hint/artifact with detailed metrics
-// - Related: detectLanguage, countLines, preparePreview
-// - Keywords: code/stats, statistics, lines, languages, breakdown, aggregation
+//   Purpose: Collect and analyze code statistics including lines, files, languages, and breakdown metrics
+//   Flow: resolve path → walk directory tree → count lines per file → aggregate by breakdown category → calculate percentages → persist if needed
+//   SideEffects: file system reads; directory traversal; artifact persistence; CAS hint generation
+//   FailureModes: invalid paths, file read errors, directory traversal errors, large file skips
+//   Observability: emits statistics/breakdown_by/cas_hint/artifact with detailed metrics
+//   Related: detectLanguage, countLines, preparePreview
+//   Keywords: code/stats, statistics, lines, languages, breakdown, aggregation
+//
+// [[domain:code-statistics-analysis]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Apply defaults
 	if in.BreakdownBy == "" {

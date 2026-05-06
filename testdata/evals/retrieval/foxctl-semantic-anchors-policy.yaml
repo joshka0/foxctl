@@ -1,0 +1,21 @@
+suite: foxctl-semantic-anchors
+limit: 10
+format: markdown
+fail_on_alerts: true
+modes:
+  - repoindex_search
+  - repoindex_semantic_search
+  - repoindex_dag
+  - repoindex_semantic_dag
+  - aca_default
+  - aca_semantic_anchors
+thresholds:
+  repoindex_semantic_search:
+    min_hit_rate_at_5: 0.60
+    min_hit_rate_at_10: 0.60
+  repoindex_semantic_dag:
+    min_hit_rate_at_5: 0.60
+    min_hit_rate_at_10: 0.60
+  aca_semantic_anchors:
+    min_hit_rate_at_5: 0.60
+    min_hit_rate_at_10: 0.60

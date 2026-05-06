@@ -73,13 +73,17 @@ func main() {
 // run orchestrates calibration feedback generation with multiple output formats and insight types.
 //
 // Index:
-// - Purpose: Generate actionable feedback about communication patterns and preferences from calibration profiles
-// - Flow: resolve workspace → open memory store → load profile → generate insights/tips/trends → emit formatted output
-// - SideEffects: profile loading; insight generation; trend analysis; expertise summarization
-// - FailureModes: workspace resolution failures, memory store access errors, missing profiles
-// - Observability: emits insight counts, expertise summaries, trend analysis, and actionable communication tips
-// - Related: generateInsights, generateExpertiseSummary, detectTrends, generateTips
-// - Keywords: calibration/feedback, user_profile, communication_patterns, expertise_analysis, preference_trends
+//
+//	Purpose: Generate actionable feedback about communication patterns and preferences from calibration profiles
+//	Flow: resolve workspace → open memory store → load profile → generate insights/tips/trends → emit formatted output
+//	SideEffects: profile loading; insight generation; trend analysis; expertise summarization
+//	FailureModes: workspace resolution failures, memory store access errors, missing profiles
+//	Observability: emits insight counts, expertise summaries, trend analysis, and actionable communication tips
+//	Related: generateInsights, generateExpertiseSummary, detectTrends, generateTips
+//	Keywords: calibration/feedback, user_profile, communication_patterns, expertise_analysis, preference_trends
+//
+// [[domain:user-calibration-feedback]]
+// [[doc:docs/general/memory.md#Skill/Runtime integration]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Resolve workspace
 	workspace := workspaceutil.Resolve(in.Workspace, "", rc.Workspace)
