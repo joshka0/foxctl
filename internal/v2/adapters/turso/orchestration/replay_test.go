@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/storage/dbutil"
-	libsqlevents "github.com/joshka0/foxctl/internal/v2/adapters/libsql/events"
+	tursoevents "github.com/joshka0/foxctl/internal/v2/adapters/turso/events"
 	coreevents "github.com/joshka0/foxctl/internal/v2/core/events"
 	coreorchestration "github.com/joshka0/foxctl/internal/v2/core/orchestration"
 )
@@ -22,14 +22,14 @@ func TestReplayFrom_RebuildsOrchestrationCards(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = closeFn() })
 
-	if err := libsqlevents.MigrateSchema(ctx, db); err != nil {
+	if err := tursoevents.MigrateSchema(ctx, db); err != nil {
 		t.Fatalf("migrate events: %v", err)
 	}
 	if err := MigrateSchema(ctx, db); err != nil {
 		t.Fatalf("migrate orchestration: %v", err)
 	}
 
-	eventStore := libsqlevents.NewStore(db, db.Close)
+	eventStore := tursoevents.NewStore(db, db.Close)
 	eventStore.SetNowForTest(func() time.Time { return time.Date(2026, time.March, 5, 15, 0, 0, 0, time.UTC) })
 
 	appendEvent := func(id, requestID, issueID, state string) {

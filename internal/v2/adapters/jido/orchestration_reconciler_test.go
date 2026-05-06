@@ -9,11 +9,13 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/storage/dbutil"
-	libsqlorchestration "github.com/joshka0/foxctl/internal/v2/adapters/libsql/orchestration"
+	tursoorchestration "github.com/joshka0/foxctl/internal/v2/adapters/turso/orchestration"
 	v2errors "github.com/joshka0/foxctl/internal/v2/core/errors"
 	v2events "github.com/joshka0/foxctl/internal/v2/core/events"
 	v2orchestration "github.com/joshka0/foxctl/internal/v2/core/orchestration"
 	"github.com/joshka0/foxctl/internal/v2/core/spawn"
+	v2runtimeorchestration "github.com/joshka0/foxctl/internal/v2/runtime/orchestration"
+	v2services "github.com/joshka0/foxctl/internal/v2/services"
 )
 
 func TestOrchestrationReconciler_RecordDispatchSpawned_ProjectsRunningLane(t *testing.T) {
@@ -25,12 +27,12 @@ func TestOrchestrationReconciler_RecordDispatchSpawned_ProjectsRunningLane(t *te
 		t.Fatalf("open sqlite db: %v", err)
 	}
 	t.Cleanup(func() { _ = closeFn() })
-	if err := libsqlorchestration.MigrateSchema(ctx, db); err != nil {
+	if err := tursoorchestration.MigrateSchema(ctx, db); err != nil {
 		t.Fatalf("migrate schema: %v", err)
 	}
 
 	now := time.Date(2026, time.March, 6, 12, 0, 0, 0, time.UTC)
-	projections := libsqlorchestration.NewStore(db, libsqlorchestration.StoreOptions{})
+	projections := tursoorchestration.NewStore(db, tursoorchestration.StoreOptions{})
 	projections.SetNowForTest(func() time.Time { return now })
 	events := &fakeEventAppender{}
 
@@ -112,12 +114,12 @@ func TestOrchestrationReconciler_RecordDispatchFailed_ProjectsBlockedLane(t *tes
 		t.Fatalf("open sqlite db: %v", err)
 	}
 	t.Cleanup(func() { _ = closeFn() })
-	if err := libsqlorchestration.MigrateSchema(ctx, db); err != nil {
+	if err := tursoorchestration.MigrateSchema(ctx, db); err != nil {
 		t.Fatalf("migrate schema: %v", err)
 	}
 
 	now := time.Date(2026, time.March, 6, 12, 15, 0, 0, time.UTC)
-	projections := libsqlorchestration.NewStore(db, libsqlorchestration.StoreOptions{})
+	projections := tursoorchestration.NewStore(db, tursoorchestration.StoreOptions{})
 	projections.SetNowForTest(func() time.Time { return now })
 	events := &fakeEventAppender{}
 
@@ -194,12 +196,12 @@ func TestOrchestrationReconciler_RecordDispatchFailed_ProjectsRetryQueueForTrans
 		t.Fatalf("open sqlite db: %v", err)
 	}
 	t.Cleanup(func() { _ = closeFn() })
-	if err := libsqlorchestration.MigrateSchema(ctx, db); err != nil {
+	if err := tursoorchestration.MigrateSchema(ctx, db); err != nil {
 		t.Fatalf("migrate schema: %v", err)
 	}
 
 	now := time.Date(2026, time.March, 6, 12, 20, 0, 0, time.UTC)
-	projections := libsqlorchestration.NewStore(db, libsqlorchestration.StoreOptions{})
+	projections := tursoorchestration.NewStore(db, tursoorchestration.StoreOptions{})
 	projections.SetNowForTest(func() time.Time { return now })
 	events := &fakeEventAppender{}
 
@@ -287,6 +289,188 @@ func TestOrchestrationReconciler_SpawnResultCallback_IgnoresNonDispatchSpawn(t *
 	}
 }
 
+func TestOrchestrationReconciler_SpawnResultCallback_ProjectsDispatchFailureToBlockedCard(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, filepath.Join(t.TempDir(), "callback_dispatch_blocked.db"), nil)
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { _ = closeFn() })
+	if err := tursoorchestration.MigrateSchema(ctx, db); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+
+	now := time.Date(2026, time.March, 6, 12, 35, 0, 0, time.UTC)
+	projections := tursoorchestration.NewStore(db, tursoorchestration.StoreOptions{})
+	projections.SetNowForTest(func() time.Time { return now })
+	events := &fakeEventAppender{}
+	reconciler, err := NewOrchestrationReconciler(OrchestrationReconcilerConfig{
+		Events:      events,
+		Projections: projections,
+		Now:         func() time.Time { return now },
+		NewID:       sequentialTestID("callback-blocked"),
+	})
+	if err != nil {
+		t.Fatalf("NewOrchestrationReconciler() error = %v", err)
+	}
+
+	callback := reconciler.SpawnResultCallback()
+	if callback == nil {
+		t.Fatal("expected callback")
+	}
+	err = callback(ctx, spawn.Request{
+		RequestID: "req-callback-blocked",
+		RunID:     "run-callback-blocked",
+		ActorID:   "actor:system:overseer",
+		Metadata: map[string]any{
+			"workspace_id":     "ws-1",
+			"issue_id":         "issue-callback-blocked",
+			"issue_identifier": "ABC-CALLBACK-BLOCKED",
+			"title":            "Spawn blocked worker",
+			"attempt":          1,
+		},
+	}, spawn.Response{}, &v2errors.V2Error{
+		Kind:    v2errors.ErrPolicyViolation,
+		Message: "depth exceeded",
+		Details: map[string]any{
+			"suggestion": "request overseer approval",
+		},
+		Fatal: true,
+	})
+	if err != nil {
+		t.Fatalf("callback() error = %v", err)
+	}
+
+	card, err := projections.Card(ctx, v2orchestration.CardRequest{
+		WorkspaceID: "ws-1",
+		IssueID:     "issue-callback-blocked",
+	})
+	if err != nil {
+		t.Fatalf("Card() error = %v", err)
+	}
+	if card.Card.State != v2orchestration.StateReleased {
+		t.Fatalf("state=%q want %q", card.Card.State, v2orchestration.StateReleased)
+	}
+	if card.Card.Lane != v2orchestration.LaneBlocked {
+		t.Fatalf("lane=%q want %q", card.Card.Lane, v2orchestration.LaneBlocked)
+	}
+	if card.Card.PolicyStatus != v2orchestration.PolicyStatusDenied {
+		t.Fatalf("policy_status=%q want %q", card.Card.PolicyStatus, v2orchestration.PolicyStatusDenied)
+	}
+	if card.Card.LastOutcome != v2orchestration.OutcomePolicyDenied {
+		t.Fatalf("last_outcome=%q want %q", card.Card.LastOutcome, v2orchestration.OutcomePolicyDenied)
+	}
+	if card.Card.DenialReason != "depth exceeded" {
+		t.Fatalf("denial_reason=%q want depth exceeded", card.Card.DenialReason)
+	}
+	if card.Card.Suggestion != "request overseer approval" {
+		t.Fatalf("suggestion=%q want request overseer approval", card.Card.Suggestion)
+	}
+	if len(events.events) != 1 {
+		t.Fatalf("appended events=%d want 1", len(events.events))
+	}
+}
+
+func TestScheduler_JidoDispatchFailureProjectsRetryCardWithoutRetryQueue(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, filepath.Join(t.TempDir(), "scheduler_dispatch_retry.db"), nil)
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { _ = closeFn() })
+	if err := tursoorchestration.MigrateSchema(ctx, db); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+
+	now := time.Date(2026, time.March, 6, 12, 40, 0, 0, time.UTC)
+	projections := tursoorchestration.NewStore(db, tursoorchestration.StoreOptions{})
+	projections.SetNowForTest(func() time.Time { return now })
+	events := &fakeEventAppender{}
+	reconciler, err := NewOrchestrationReconciler(OrchestrationReconcilerConfig{
+		Events:      events,
+		Projections: projections,
+		Now:         func() time.Time { return now },
+		NewID:       sequentialTestID("scheduler-dispatch"),
+	})
+	if err != nil {
+		t.Fatalf("NewOrchestrationReconciler() error = %v", err)
+	}
+	client := &fakeClient{
+		spawnChildErr: fmt.Errorf("dial unix /tmp/foxctl-jido.sock: connect: connection refused"),
+	}
+	childSpawner, err := NewChildSpawner(ChildSpawnerConfig{
+		Client:        client,
+		Now:           func() time.Time { return now },
+		OnSpawnResult: reconciler.SpawnResultCallback(),
+	})
+	if err != nil {
+		t.Fatalf("NewChildSpawner() error = %v", err)
+	}
+	spawnService := v2services.NewSpawnService(v2services.SpawnDependencies{
+		RuntimeSpawner: childSpawner,
+		Now:            func() time.Time { return now },
+		NewID:          sequentialTestID("spawn"),
+	})
+	dispatchService := v2services.NewOrchestrationService(v2services.OrchestrationDependencies{
+		Spawn:       spawnService,
+		Reader:      projections,
+		LaneOptions: v2orchestration.DefaultLaneOptions(),
+		Now:         func() time.Time { return now },
+	})
+	scheduler := v2runtimeorchestration.NewScheduler(v2runtimeorchestration.SchedulerConfig{
+		Source: &staticCandidateSource{candidates: []v2runtimeorchestration.Candidate{
+			{
+				WorkspaceID:     "ws-1",
+				IssueID:         "issue-scheduler-retry",
+				IssueIdentifier: "ABC-SCHED-RETRY",
+				Title:           "Retry scheduler dispatch",
+				ParentAgentID:   "agent:overseer",
+				Role:            "coder",
+				Prompt:          "handle the issue",
+				Attempt:         2,
+			},
+		}},
+		Service:            dispatchService,
+		MaxDispatchPerTick: 1,
+		NewRequestID:       sequentialTestID("scheduler"),
+		Now:                func() time.Time { return now },
+	})
+
+	if err := scheduler.Tick(ctx); err != nil {
+		t.Fatalf("Tick() error = %v", err)
+	}
+
+	card, err := projections.Card(ctx, v2orchestration.CardRequest{
+		WorkspaceID: "ws-1",
+		IssueID:     "issue-scheduler-retry",
+	})
+	if err != nil {
+		t.Fatalf("Card() error = %v", err)
+	}
+	if card.Card.State != v2orchestration.StateRetryQueue {
+		t.Fatalf("state=%q want %q", card.Card.State, v2orchestration.StateRetryQueue)
+	}
+	if card.Card.Lane != v2orchestration.LaneRetryQueue {
+		t.Fatalf("lane=%q want %q", card.Card.Lane, v2orchestration.LaneRetryQueue)
+	}
+	if card.Card.Attempt != 3 {
+		t.Fatalf("attempt=%d want 3", card.Card.Attempt)
+	}
+	if card.Card.RetryDueAt == nil {
+		t.Fatal("retry_due_at should be populated")
+	}
+	if len(events.events) != 1 {
+		t.Fatalf("appended events=%d want 1", len(events.events))
+	}
+	if client.spawnChildReq.AgentID != "agent:overseer" {
+		t.Fatalf("spawn child parent=%q want agent:overseer", client.spawnChildReq.AgentID)
+	}
+}
+
 func TestOrchestrationReconciler_Reconcile_ProjectsCompletedChildToReview(t *testing.T) {
 	t.Parallel()
 
@@ -296,12 +480,12 @@ func TestOrchestrationReconciler_Reconcile_ProjectsCompletedChildToReview(t *tes
 		t.Fatalf("open sqlite db: %v", err)
 	}
 	t.Cleanup(func() { _ = closeFn() })
-	if err := libsqlorchestration.MigrateSchema(ctx, db); err != nil {
+	if err := tursoorchestration.MigrateSchema(ctx, db); err != nil {
 		t.Fatalf("migrate schema: %v", err)
 	}
 
 	now := time.Date(2026, time.March, 6, 13, 0, 0, 0, time.UTC)
-	projections := libsqlorchestration.NewStore(db, libsqlorchestration.StoreOptions{
+	projections := tursoorchestration.NewStore(db, tursoorchestration.StoreOptions{
 		LaneOptions: v2orchestration.LaneOptions{
 			TerminalTrackerStates: []string{"done"},
 			ReviewTrackerStates:   []string{"human review"},
@@ -412,12 +596,12 @@ func TestOrchestrationReconciler_Reconcile_ProjectsFailedChildToBlocked(t *testi
 		t.Fatalf("open sqlite db: %v", err)
 	}
 	t.Cleanup(func() { _ = closeFn() })
-	if err := libsqlorchestration.MigrateSchema(ctx, db); err != nil {
+	if err := tursoorchestration.MigrateSchema(ctx, db); err != nil {
 		t.Fatalf("migrate schema: %v", err)
 	}
 
 	now := time.Date(2026, time.March, 6, 13, 15, 0, 0, time.UTC)
-	projections := libsqlorchestration.NewStore(db, libsqlorchestration.StoreOptions{
+	projections := tursoorchestration.NewStore(db, tursoorchestration.StoreOptions{
 		LaneOptions: v2orchestration.LaneOptions{
 			TerminalTrackerStates: []string{"done"},
 			ReviewTrackerStates:   []string{"human review"},
@@ -526,12 +710,12 @@ func TestOrchestrationReconciler_Reconcile_ProjectsTransientFailedChildToRetryQu
 		t.Fatalf("open sqlite db: %v", err)
 	}
 	t.Cleanup(func() { _ = closeFn() })
-	if err := libsqlorchestration.MigrateSchema(ctx, db); err != nil {
+	if err := tursoorchestration.MigrateSchema(ctx, db); err != nil {
 		t.Fatalf("migrate schema: %v", err)
 	}
 
 	now := time.Date(2026, time.March, 6, 13, 20, 0, 0, time.UTC)
-	projections := libsqlorchestration.NewStore(db, libsqlorchestration.StoreOptions{
+	projections := tursoorchestration.NewStore(db, tursoorchestration.StoreOptions{
 		LaneOptions: v2orchestration.LaneOptions{
 			TerminalTrackerStates: []string{"done"},
 			ReviewTrackerStates:   []string{"human review"},
@@ -642,12 +826,12 @@ func TestOrchestrationReconciler_Reconcile_SkipsNonRunningCard(t *testing.T) {
 		t.Fatalf("open sqlite db: %v", err)
 	}
 	t.Cleanup(func() { _ = closeFn() })
-	if err := libsqlorchestration.MigrateSchema(ctx, db); err != nil {
+	if err := tursoorchestration.MigrateSchema(ctx, db); err != nil {
 		t.Fatalf("migrate schema: %v", err)
 	}
 
 	now := time.Date(2026, time.March, 6, 13, 30, 0, 0, time.UTC)
-	projections := libsqlorchestration.NewStore(db, libsqlorchestration.StoreOptions{
+	projections := tursoorchestration.NewStore(db, tursoorchestration.StoreOptions{
 		LaneOptions: v2orchestration.LaneOptions{
 			TerminalTrackerStates: []string{"done"},
 			ReviewTrackerStates:   []string{"human review"},
@@ -709,6 +893,452 @@ func TestOrchestrationReconciler_Reconcile_SkipsNonRunningCard(t *testing.T) {
 	if len(events.events) != 0 {
 		t.Fatalf("appended events=%d want 0", len(events.events))
 	}
+}
+
+func TestOrchestrationReconciler_RecoverOrphanedRuns_MissingChildAfterGraceProjectsBlocked(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, filepath.Join(t.TempDir(), "startup_missing_blocked.db"), nil)
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { _ = closeFn() })
+	if err := tursoorchestration.MigrateSchema(ctx, db); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+
+	now := time.Date(2026, time.March, 6, 14, 0, 0, 0, time.UTC)
+	current := now
+	projections := tursoorchestration.NewStore(db, tursoorchestration.StoreOptions{})
+	projections.SetNowForTest(func() time.Time { return now })
+	events := &fakeEventAppender{}
+	reconciler, err := NewOrchestrationReconciler(OrchestrationReconcilerConfig{
+		Events:         events,
+		Projections:    projections,
+		Reader:         projections,
+		Client:         &fakeClient{getChildrenResp: GetChildrenResponse{AgentID: "agent:overseer"}},
+		ParentAgentIDs: []string{"agent:overseer"},
+		Now:            func() time.Time { return current },
+		NewID:          sequentialTestID("startup-missing"),
+	})
+	if err != nil {
+		t.Fatalf("NewOrchestrationReconciler() error = %v", err)
+	}
+
+	if _, err := reconciler.RecordDispatchSpawned(ctx, spawn.Request{
+		RequestID: "req-startup-missing",
+		RunID:     "run-startup-missing",
+		ActorID:   "actor:worker-missing",
+		Metadata: map[string]any{
+			"workspace_id":     "ws-1",
+			"issue_id":         "issue-startup-missing",
+			"issue_identifier": "ABC-MISSING",
+			"title":            "Recover missing child",
+			"attempt":          1,
+		},
+	}, spawn.Response{
+		RunID:   "run-startup-missing",
+		AgentID: "agent:worker-missing",
+		ActorID: "actor:worker-missing",
+	}); err != nil {
+		t.Fatalf("RecordDispatchSpawned() error = %v", err)
+	}
+	events.events = nil
+	current = now.Add(time.Minute)
+	projections.SetNowForTest(func() time.Time { return now.Add(time.Minute) })
+
+	if err := reconciler.RecoverOrphanedRuns(ctx); err != nil {
+		t.Fatalf("RecoverOrphanedRuns() error = %v", err)
+	}
+
+	card, err := projections.Card(ctx, v2orchestration.CardRequest{
+		WorkspaceID: "ws-1",
+		IssueID:     "issue-startup-missing",
+	})
+	if err != nil {
+		t.Fatalf("Card() error = %v", err)
+	}
+	if card.Card.Lane != v2orchestration.LaneBlocked {
+		t.Fatalf("lane=%q want %q", card.Card.Lane, v2orchestration.LaneBlocked)
+	}
+	if card.Card.DenialReason != "runtime child missing during startup recovery" {
+		t.Fatalf("denial_reason=%q unexpected", card.Card.DenialReason)
+	}
+	if len(events.events) != 1 {
+		t.Fatalf("appended events=%d want 1", len(events.events))
+	}
+}
+
+func TestOrchestrationReconciler_RecoverOrphanedRuns_MissingChildWithinGraceStaysRunning(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, filepath.Join(t.TempDir(), "startup_missing_grace.db"), nil)
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { _ = closeFn() })
+	if err := tursoorchestration.MigrateSchema(ctx, db); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+
+	now := time.Date(2026, time.March, 6, 14, 10, 0, 0, time.UTC)
+	projections := tursoorchestration.NewStore(db, tursoorchestration.StoreOptions{})
+	projections.SetNowForTest(func() time.Time { return now })
+	events := &fakeEventAppender{}
+	reconciler, err := NewOrchestrationReconciler(OrchestrationReconcilerConfig{
+		Events:         events,
+		Projections:    projections,
+		Reader:         projections,
+		Client:         &fakeClient{getChildrenResp: GetChildrenResponse{AgentID: "agent:overseer"}},
+		ParentAgentIDs: []string{"agent:overseer"},
+		Now:            func() time.Time { return now.Add(10 * time.Second) },
+		NewID:          sequentialTestID("startup-grace"),
+	})
+	if err != nil {
+		t.Fatalf("NewOrchestrationReconciler() error = %v", err)
+	}
+	if _, err := reconciler.RecordDispatchSpawned(ctx, spawn.Request{
+		RequestID: "req-startup-grace",
+		RunID:     "run-startup-grace",
+		Metadata: map[string]any{
+			"workspace_id": "ws-1",
+			"issue_id":     "issue-startup-grace",
+			"title":        "Grace period child",
+		},
+	}, spawn.Response{RunID: "run-startup-grace", AgentID: "agent:worker-grace"}); err != nil {
+		t.Fatalf("RecordDispatchSpawned() error = %v", err)
+	}
+	events.events = nil
+
+	if err := reconciler.RecoverOrphanedRuns(ctx); err != nil {
+		t.Fatalf("RecoverOrphanedRuns() error = %v", err)
+	}
+	card, err := projections.Card(ctx, v2orchestration.CardRequest{WorkspaceID: "ws-1", IssueID: "issue-startup-grace"})
+	if err != nil {
+		t.Fatalf("Card() error = %v", err)
+	}
+	if card.Card.State != v2orchestration.StateRunning {
+		t.Fatalf("state=%q want %q", card.Card.State, v2orchestration.StateRunning)
+	}
+	if len(events.events) != 0 {
+		t.Fatalf("appended events=%d want 0", len(events.events))
+	}
+}
+
+func TestOrchestrationReconciler_RecoverOrphanedRuns_LiveChildStaysRunning(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, filepath.Join(t.TempDir(), "startup_live_child.db"), nil)
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { _ = closeFn() })
+	if err := tursoorchestration.MigrateSchema(ctx, db); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+
+	now := time.Date(2026, time.March, 6, 14, 20, 0, 0, time.UTC)
+	projections := tursoorchestration.NewStore(db, tursoorchestration.StoreOptions{})
+	projections.SetNowForTest(func() time.Time { return now })
+	events := &fakeEventAppender{}
+	client := &fakeClient{
+		getChildrenResp: GetChildrenResponse{
+			AgentID: "agent:overseer",
+			Children: map[string]ChildRef{
+				"agent:worker-live": {
+					Tag:     "agent:worker-live",
+					AgentID: "agent:worker-live",
+					Metadata: map[string]any{
+						"workspace_id": "ws-1",
+						"issue_id":     "issue-startup-live",
+						"run_id":       "run-startup-live",
+					},
+				},
+			},
+		},
+		stateResp: StateResponse{
+			AgentID: "agent:worker-live",
+			Status:  "ok",
+			State:   json.RawMessage(`{"foxctl":{"status":"running"}}`),
+		},
+	}
+	reconciler, err := NewOrchestrationReconciler(OrchestrationReconcilerConfig{
+		Events:         events,
+		Projections:    projections,
+		Reader:         projections,
+		Client:         client,
+		ParentAgentIDs: []string{"agent:overseer"},
+		Now:            func() time.Time { return now.Add(time.Minute) },
+		NewID:          sequentialTestID("startup-live"),
+	})
+	if err != nil {
+		t.Fatalf("NewOrchestrationReconciler() error = %v", err)
+	}
+	if _, err := reconciler.RecordDispatchSpawned(ctx, spawn.Request{
+		RequestID: "req-startup-live",
+		RunID:     "run-startup-live",
+		Metadata: map[string]any{
+			"workspace_id": "ws-1",
+			"issue_id":     "issue-startup-live",
+			"title":        "Live child",
+		},
+	}, spawn.Response{RunID: "run-startup-live", AgentID: "agent:worker-live"}); err != nil {
+		t.Fatalf("RecordDispatchSpawned() error = %v", err)
+	}
+	events.events = nil
+
+	if err := reconciler.RecoverOrphanedRuns(ctx); err != nil {
+		t.Fatalf("RecoverOrphanedRuns() error = %v", err)
+	}
+	card, err := projections.Card(ctx, v2orchestration.CardRequest{WorkspaceID: "ws-1", IssueID: "issue-startup-live"})
+	if err != nil {
+		t.Fatalf("Card() error = %v", err)
+	}
+	if card.Card.State != v2orchestration.StateRunning {
+		t.Fatalf("state=%q want %q", card.Card.State, v2orchestration.StateRunning)
+	}
+	if len(events.events) != 0 {
+		t.Fatalf("appended events=%d want 0", len(events.events))
+	}
+}
+
+func TestOrchestrationReconciler_RecoverOrphanedRuns_TerminalChildProjectsCompleted(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, filepath.Join(t.TempDir(), "startup_terminal_child.db"), nil)
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { _ = closeFn() })
+	if err := tursoorchestration.MigrateSchema(ctx, db); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+
+	now := time.Date(2026, time.March, 6, 14, 25, 0, 0, time.UTC)
+	projections := tursoorchestration.NewStore(db, tursoorchestration.StoreOptions{
+		LaneOptions: v2orchestration.LaneOptions{
+			ReviewTrackerStates: []string{"human review"},
+		},
+	})
+	projections.SetNowForTest(func() time.Time { return now })
+	events := &fakeEventAppender{}
+	client := &fakeClient{
+		getChildrenResp: GetChildrenResponse{
+			AgentID: "agent:overseer",
+			Children: map[string]ChildRef{
+				"agent:worker-terminal": {
+					Tag:     "agent:worker-terminal",
+					AgentID: "agent:worker-terminal",
+					Metadata: map[string]any{
+						"workspace_id": "ws-1",
+						"issue_id":     "issue-startup-terminal",
+						"run_id":       "run-startup-terminal",
+						"request_id":   "req-startup-terminal",
+					},
+				},
+			},
+		},
+		stateResp: StateResponse{
+			AgentID: "agent:worker-terminal",
+			Status:  "ok",
+			State:   json.RawMessage(`{"foxctl":{"status":"completed","last_result":{"envelope":{"status":"ok"}}}}`),
+		},
+	}
+	reconciler, err := NewOrchestrationReconciler(OrchestrationReconcilerConfig{
+		Events:              events,
+		Projections:         projections,
+		Reader:              projections,
+		Client:              client,
+		ParentAgentIDs:      []string{"agent:overseer"},
+		SuccessTrackerState: "Human Review",
+		Now:                 func() time.Time { return now.Add(time.Minute) },
+		NewID:               sequentialTestID("startup-terminal"),
+	})
+	if err != nil {
+		t.Fatalf("NewOrchestrationReconciler() error = %v", err)
+	}
+	if _, err := reconciler.RecordDispatchSpawned(ctx, spawn.Request{
+		RequestID: "req-startup-terminal",
+		RunID:     "run-startup-terminal",
+		Metadata: map[string]any{
+			"workspace_id": "ws-1",
+			"issue_id":     "issue-startup-terminal",
+			"title":        "Terminal child",
+		},
+	}, spawn.Response{RunID: "run-startup-terminal", AgentID: "agent:worker-terminal"}); err != nil {
+		t.Fatalf("RecordDispatchSpawned() error = %v", err)
+	}
+
+	if err := reconciler.RecoverOrphanedRuns(ctx); err != nil {
+		t.Fatalf("RecoverOrphanedRuns() error = %v", err)
+	}
+	card, err := projections.Card(ctx, v2orchestration.CardRequest{WorkspaceID: "ws-1", IssueID: "issue-startup-terminal"})
+	if err != nil {
+		t.Fatalf("Card() error = %v", err)
+	}
+	if card.Card.State != v2orchestration.StateReleased {
+		t.Fatalf("state=%q want %q", card.Card.State, v2orchestration.StateReleased)
+	}
+	if card.Card.LastEvent != string(v2events.EventRunCompleted) {
+		t.Fatalf("last_event=%q want %q", card.Card.LastEvent, v2events.EventRunCompleted)
+	}
+	if card.Card.Lane != v2orchestration.LaneReview {
+		t.Fatalf("lane=%q want %q", card.Card.Lane, v2orchestration.LaneReview)
+	}
+}
+
+func TestOrchestrationReconciler_RecoverOrphanedRuns_TerminalFailedChildProjectsRetryQueue(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, filepath.Join(t.TempDir(), "startup_failed_child.db"), nil)
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { _ = closeFn() })
+	if err := tursoorchestration.MigrateSchema(ctx, db); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+
+	now := time.Date(2026, time.March, 6, 14, 27, 0, 0, time.UTC)
+	projections := tursoorchestration.NewStore(db, tursoorchestration.StoreOptions{})
+	projections.SetNowForTest(func() time.Time { return now })
+	events := &fakeEventAppender{}
+	client := &fakeClient{
+		getChildrenResp: GetChildrenResponse{
+			AgentID: "agent:overseer",
+			Children: map[string]ChildRef{
+				"agent:worker-failed": {
+					Tag:     "agent:worker-failed",
+					AgentID: "agent:worker-failed",
+					Metadata: map[string]any{
+						"workspace_id": "ws-1",
+						"issue_id":     "issue-startup-failed",
+						"run_id":       "run-startup-failed",
+						"request_id":   "req-startup-failed",
+						"attempt":      1,
+					},
+				},
+			},
+		},
+		stateResp: StateResponse{
+			AgentID: "agent:worker-failed",
+			Status:  "ok",
+			State:   json.RawMessage(`{"foxctl":{"status":"completed","last_result":{"envelope":{"status":"error","error":{"message":"database is locked"}}}}}`),
+		},
+	}
+	reconciler, err := NewOrchestrationReconciler(OrchestrationReconcilerConfig{
+		Events:         events,
+		Projections:    projections,
+		Reader:         projections,
+		Client:         client,
+		ParentAgentIDs: []string{"agent:overseer"},
+		Now:            func() time.Time { return now.Add(time.Minute) },
+		NewID:          sequentialTestID("startup-failed"),
+	})
+	if err != nil {
+		t.Fatalf("NewOrchestrationReconciler() error = %v", err)
+	}
+	if _, err := reconciler.RecordDispatchSpawned(ctx, spawn.Request{
+		RequestID: "req-startup-failed",
+		RunID:     "run-startup-failed",
+		Metadata: map[string]any{
+			"workspace_id": "ws-1",
+			"issue_id":     "issue-startup-failed",
+			"title":        "Failed child",
+			"attempt":      1,
+		},
+	}, spawn.Response{RunID: "run-startup-failed", AgentID: "agent:worker-failed"}); err != nil {
+		t.Fatalf("RecordDispatchSpawned() error = %v", err)
+	}
+
+	if err := reconciler.RecoverOrphanedRuns(ctx); err != nil {
+		t.Fatalf("RecoverOrphanedRuns() error = %v", err)
+	}
+	card, err := projections.Card(ctx, v2orchestration.CardRequest{WorkspaceID: "ws-1", IssueID: "issue-startup-failed"})
+	if err != nil {
+		t.Fatalf("Card() error = %v", err)
+	}
+	if card.Card.State != v2orchestration.StateRetryQueue {
+		t.Fatalf("state=%q want %q", card.Card.State, v2orchestration.StateRetryQueue)
+	}
+	if card.Card.Lane != v2orchestration.LaneRetryQueue {
+		t.Fatalf("lane=%q want %q", card.Card.Lane, v2orchestration.LaneRetryQueue)
+	}
+	if card.Card.Attempt != 2 {
+		t.Fatalf("attempt=%d want 2", card.Card.Attempt)
+	}
+}
+
+func TestOrchestrationReconciler_RecoverOrphanedRuns_RuntimeUnavailableReturnsErrorWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, filepath.Join(t.TempDir(), "startup_runtime_error.db"), nil)
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { _ = closeFn() })
+	if err := tursoorchestration.MigrateSchema(ctx, db); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+
+	now := time.Date(2026, time.March, 6, 14, 30, 0, 0, time.UTC)
+	projections := tursoorchestration.NewStore(db, tursoorchestration.StoreOptions{})
+	projections.SetNowForTest(func() time.Time { return now })
+	events := &fakeEventAppender{}
+	reconciler, err := NewOrchestrationReconciler(OrchestrationReconcilerConfig{
+		Events:         events,
+		Projections:    projections,
+		Reader:         projections,
+		Client:         &fakeClient{getChildrenErr: fmt.Errorf("connection refused")},
+		ParentAgentIDs: []string{"agent:overseer"},
+		Now:            func() time.Time { return now.Add(time.Minute) },
+		NewID:          sequentialTestID("startup-runtime-error"),
+	})
+	if err != nil {
+		t.Fatalf("NewOrchestrationReconciler() error = %v", err)
+	}
+	if _, err := reconciler.RecordDispatchSpawned(ctx, spawn.Request{
+		RequestID: "req-startup-error",
+		RunID:     "run-startup-error",
+		Metadata: map[string]any{
+			"workspace_id": "ws-1",
+			"issue_id":     "issue-startup-error",
+			"title":        "Runtime unavailable",
+		},
+	}, spawn.Response{RunID: "run-startup-error", AgentID: "agent:worker-error"}); err != nil {
+		t.Fatalf("RecordDispatchSpawned() error = %v", err)
+	}
+	events.events = nil
+
+	if err := reconciler.RecoverOrphanedRuns(ctx); err == nil {
+		t.Fatal("RecoverOrphanedRuns() error = nil, want error")
+	}
+	card, err := projections.Card(ctx, v2orchestration.CardRequest{WorkspaceID: "ws-1", IssueID: "issue-startup-error"})
+	if err != nil {
+		t.Fatalf("Card() error = %v", err)
+	}
+	if card.Card.State != v2orchestration.StateRunning {
+		t.Fatalf("state=%q want %q", card.Card.State, v2orchestration.StateRunning)
+	}
+	if len(events.events) != 0 {
+		t.Fatalf("appended events=%d want 0", len(events.events))
+	}
+}
+
+type staticCandidateSource struct {
+	candidates []v2runtimeorchestration.Candidate
+}
+
+func (s *staticCandidateSource) ListCandidates(context.Context, int) ([]v2runtimeorchestration.Candidate, error) {
+	out := make([]v2runtimeorchestration.Candidate, len(s.candidates))
+	copy(out, s.candidates)
+	return out, nil
 }
 
 func fakeOrchestrationEvent(id, requestID, workspaceID, issueID, issueIdentifier, title, state, eligibility string) v2events.Event {

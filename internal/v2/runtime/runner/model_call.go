@@ -2,6 +2,8 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -9,6 +11,8 @@ import (
 	v2errors "github.com/joshka0/foxctl/internal/v2/core/errors"
 	"github.com/joshka0/foxctl/internal/v2/core/events"
 	"github.com/joshka0/foxctl/internal/v2/core/run"
+	coretool "github.com/joshka0/foxctl/internal/v2/core/tool"
+	"github.com/joshka0/foxctl/internal/v2/runtime/toolnames"
 )
 
 func (p *Pipeline) stageModelCall(ctx context.Context, st *executionState) *v2errors.V2Error {
@@ -47,15 +51,22 @@ func (p *Pipeline) stageModelCallLLMChat(ctx context.Context, st *executionState
 			},
 		}
 
-		resp, err := p.cfg.Model.Complete(ctx, ModelInput{
+		modelInput := ModelInput{
 			Prompt:        st.in.Prompt,
 			Iteration:     iter,
 			MaxIterations: st.in.MaxIterations,
 			Tools:         cloneToolDefs(st.tools),
 			Messages:      cloneModelMessages(st.modelMessages),
-		})
-		if err != nil {
-			return asStageError(StageModelCall, err, true)
+		}
+		modelKey := run.EffectKey{
+			RunID:          st.in.RunID,
+			RequestID:      st.in.RequestID,
+			TurnID:         st.in.TurnID,
+			IterationIndex: iter,
+		}
+		resp, verr := p.modelResponse(ctx, modelKey, modelInput)
+		if verr != nil {
+			return verr
 		}
 
 		st.out.Iterations = iter
@@ -108,6 +119,105 @@ func (p *Pipeline) stageModelCallLLMChat(ctx context.Context, st *executionState
 		return emitErr
 	}
 	return nil
+}
+
+func (p *Pipeline) modelResponse(ctx context.Context, key run.EffectKey, input ModelInput) (ModelResponse, *v2errors.V2Error) {
+	var inputJSON json.RawMessage
+	if p.cfg.EffectJournal != nil {
+		var encodeErr error
+		inputJSON, encodeErr = encodeJSON(input)
+		if encodeErr != nil {
+			return ModelResponse{}, asStageError(StageModelCall, encodeErr, true)
+		}
+		record, err := p.cfg.EffectJournal.GetModelEffect(ctx, key)
+		if err == nil {
+			if !modelEffectMatchesInput(record, inputJSON) {
+				return ModelResponse{}, effectConflict("model effect input does not match current model input", map[string]any{
+					"iteration_index": key.IterationIndex,
+				})
+			}
+			return modelEffectResponse(record)
+		}
+		if !errors.Is(err, run.ErrEffectNotFound) {
+			return ModelResponse{}, asStageError(StageModelCall, err, true)
+		}
+
+		record, err = p.cfg.EffectJournal.BeginModelEffect(ctx, run.ModelEffectRecord{
+			EffectKey: key,
+			InputJSON: inputJSON,
+			Status:    run.ModelEffectIntent,
+		})
+		if err != nil {
+			return ModelResponse{}, asStageError(StageModelCall, err, true)
+		}
+		if record.Status.IsTerminal() {
+			return modelEffectResponse(record)
+		}
+	}
+
+	resp, err := p.cfg.Model.Complete(ctx, input)
+	if err != nil {
+		if p.cfg.EffectJournal != nil {
+			if _, journalErr := p.cfg.EffectJournal.CompleteModelEffect(ctx, run.ModelEffectRecord{
+				EffectKey:    key,
+				InputJSON:    inputJSON,
+				Status:       run.ModelEffectFailed,
+				ErrorMessage: err.Error(),
+			}); journalErr != nil {
+				return ModelResponse{}, asStageError(StageModelCall, fmt.Errorf("record model effect failure: %w", journalErr), true)
+			}
+		}
+		return ModelResponse{}, asStageError(StageModelCall, err, true)
+	}
+	if p.cfg.EffectJournal == nil {
+		return resp, nil
+	}
+
+	responseJSON, err := encodeJSON(resp)
+	if err != nil {
+		return ModelResponse{}, asStageError(StageModelCall, err, true)
+	}
+	if _, err := p.cfg.EffectJournal.CompleteModelEffect(ctx, run.ModelEffectRecord{
+		EffectKey:    key,
+		InputJSON:    inputJSON,
+		Status:       run.ModelEffectSucceeded,
+		ResponseJSON: responseJSON,
+	}); err != nil {
+		return ModelResponse{}, asStageError(StageModelCall, err, true)
+	}
+	return resp, nil
+}
+
+func modelEffectResponse(record run.ModelEffectRecord) (ModelResponse, *v2errors.V2Error) {
+	status := record.Status
+	if status == "" && len(record.ResponseJSON) > 0 {
+		status = run.ModelEffectSucceeded
+	}
+	switch status {
+	case run.ModelEffectSucceeded:
+		var stored ModelResponse
+		if err := decodeJSON(record.ResponseJSON, &stored); err != nil {
+			return ModelResponse{}, asStageError(StageModelCall, err, true)
+		}
+		return stored, nil
+	case run.ModelEffectFailed:
+		message := strings.TrimSpace(record.ErrorMessage)
+		if message == "" {
+			message = "stored model effect failed"
+		}
+		return ModelResponse{}, asStageError(StageModelCall, errors.New(message), true)
+	default:
+		return ModelResponse{}, &v2errors.V2Error{
+			Kind:      v2errors.ErrConflict,
+			Message:   "model effect has intent without terminal result",
+			Cause:     run.ErrEffectIncomplete,
+			Fatal:     true,
+			Retryable: false,
+			Details: map[string]any{
+				"iteration_index": record.IterationIndex,
+			},
+		}
+	}
 }
 
 func (p *Pipeline) stageModelCallRLMREPL(ctx context.Context, st *executionState) *v2errors.V2Error {
@@ -173,6 +283,12 @@ func (p *Pipeline) invokeTool(ctx context.Context, st *executionState, iteration
 		ArgsJSON:       append([]byte(nil), call.Args...),
 	}
 
+	replayPolicy := p.toolReplayPolicy(st.tools, call.Name)
+	res, toolErr, replayed, key, verr := p.prepareToolEffect(ctx, st, iteration, callID, call, replayPolicy)
+	if verr != nil {
+		return callID, ToolResult{}, verr
+	}
+
 	if err := p.appendEvent(ctx, st, StageModelCall, events.EventToolInvoked, events.ToolInvokedPayload{
 		Name:           call.Name,
 		IterationIndex: iteration,
@@ -180,9 +296,17 @@ func (p *Pipeline) invokeTool(ctx context.Context, st *executionState, iteration
 		return callID, ToolResult{}, err
 	}
 
-	res, err := p.cfg.ToolExecutor.Execute(ctx, call.Name, call.Args)
+	if !replayed {
+		res, toolErr = p.cfg.ToolExecutor.Execute(ctx, call.Name, call.Args)
+		if p.cfg.EffectJournal != nil {
+			if verr := p.completeToolEffect(ctx, key, call, replayPolicy, res, toolErr); verr != nil {
+				return callID, res, verr
+			}
+		}
+	}
+
 	var status string
-	if err != nil {
+	if toolErr != nil {
 		status = "error"
 	} else {
 		status = strings.TrimSpace(res.Status)
@@ -192,9 +316,9 @@ func (p *Pipeline) invokeTool(ctx context.Context, st *executionState, iteration
 	}
 	resultKind := "tool_result"
 	resultText := strings.TrimSpace(res.Output)
-	if err != nil {
+	if toolErr != nil {
 		resultKind = "tool_error"
-		resultText = strings.TrimSpace(err.Error())
+		resultText = strings.TrimSpace(toolErr.Error())
 	}
 	callRecord.Status = status
 	callRecord.ResultRef = run.ArtifactRef{
@@ -211,16 +335,163 @@ func (p *Pipeline) invokeTool(ctx context.Context, st *executionState, iteration
 	iterRecord.ToolCalls = append(iterRecord.ToolCalls, callRecord)
 
 	st.out.ToolCalls++
-	if err != nil {
+	if toolErr != nil {
 		return callID, res, &v2errors.V2Error{
 			Kind:      v2errors.ErrToolFailed,
 			Message:   "tool execution failed",
-			Cause:     err,
+			Cause:     toolErr,
 			Fatal:     true,
 			Retryable: true,
 		}
 	}
 	return callID, res, nil
+}
+
+func (p *Pipeline) prepareToolEffect(ctx context.Context, st *executionState, iteration int, callID string, call run.ToolCall, replayPolicy coretool.EffectReplayPolicy) (ToolResult, error, bool, run.EffectKey, *v2errors.V2Error) {
+	key := run.EffectKey{
+		RunID:          st.in.RunID,
+		RequestID:      st.in.RequestID,
+		TurnID:         st.in.TurnID,
+		IterationIndex: iteration,
+		ToolCallID:     callID,
+	}
+	if p.cfg.EffectJournal == nil {
+		return ToolResult{}, nil, false, key, nil
+	}
+
+	record, err := p.cfg.EffectJournal.GetToolEffect(ctx, key)
+	if err == nil {
+		if !toolEffectMatchesCall(record, call) {
+			return ToolResult{}, nil, true, key, effectConflict("tool effect input does not match current tool call", map[string]any{
+				"tool_call_id": callID,
+				"tool_name":    strings.TrimSpace(call.Name),
+			})
+		}
+		if record.Status.IsTerminal() {
+			var stored ToolResult
+			if len(record.ResultJSON) > 0 {
+				if err := decodeJSON(record.ResultJSON, &stored); err != nil {
+					return ToolResult{}, nil, true, key, asStageError(StageModelCall, err, true)
+				}
+			}
+			if record.Status == run.ToolEffectFailed {
+				message := strings.TrimSpace(record.ErrorMessage)
+				if message == "" {
+					message = "stored tool effect failed"
+				}
+				return stored, errors.New(message), true, key, nil
+			}
+			return stored, nil, true, key, nil
+		}
+		if toolEffectReplayPolicy(record, replayPolicy).AllowsIncompleteEffectRetry() {
+			return ToolResult{}, nil, false, key, nil
+		}
+		return ToolResult{}, nil, true, key, &v2errors.V2Error{
+			Kind:      v2errors.ErrConflict,
+			Message:   "tool effect has intent without terminal result",
+			Cause:     run.ErrEffectIncomplete,
+			Fatal:     true,
+			Retryable: false,
+			Details: map[string]any{
+				"tool_call_id": callID,
+				"tool_name":    strings.TrimSpace(call.Name),
+			},
+		}
+	}
+	if !errors.Is(err, run.ErrEffectNotFound) {
+		return ToolResult{}, nil, false, key, asStageError(StageModelCall, err, true)
+	}
+
+	if _, err := p.cfg.EffectJournal.BeginToolEffect(ctx, run.ToolEffectRecord{
+		EffectKey:    key,
+		ToolName:     strings.TrimSpace(call.Name),
+		ArgsJSON:     append([]byte(nil), call.Args...),
+		ReplayPolicy: string(replayPolicy),
+		Status:       run.ToolEffectIntent,
+	}); err != nil {
+		return ToolResult{}, nil, false, key, asStageError(StageModelCall, err, true)
+	}
+	return ToolResult{}, nil, false, key, nil
+}
+
+func (p *Pipeline) completeToolEffect(ctx context.Context, key run.EffectKey, call run.ToolCall, replayPolicy coretool.EffectReplayPolicy, res ToolResult, toolErr error) *v2errors.V2Error {
+	status := run.ToolEffectSucceeded
+	errorMessage := ""
+	if toolErr != nil {
+		status = run.ToolEffectFailed
+		errorMessage = toolErr.Error()
+	}
+	resultJSON, err := encodeJSON(res)
+	if err != nil {
+		return asStageError(StageModelCall, err, true)
+	}
+	if _, err := p.cfg.EffectJournal.CompleteToolEffect(ctx, run.ToolEffectRecord{
+		EffectKey:    key,
+		ToolName:     strings.TrimSpace(call.Name),
+		ArgsJSON:     append([]byte(nil), call.Args...),
+		ReplayPolicy: string(replayPolicy),
+		Status:       status,
+		ResultJSON:   resultJSON,
+		ErrorMessage: errorMessage,
+	}); err != nil {
+		return asStageError(StageModelCall, err, true)
+	}
+	return nil
+}
+
+func (p *Pipeline) toolReplayPolicy(tools []coretool.ToolDef, name string) coretool.EffectReplayPolicy {
+	name = toolnames.Canonical(name)
+	if name == "" {
+		return coretool.EffectReplayFailClosed
+	}
+	for _, tool := range tools {
+		if toolnames.Canonical(tool.Name) == name {
+			return tool.Policy.EffectReplay
+		}
+	}
+	return coretool.EffectReplayFailClosed
+}
+
+func toolEffectReplayPolicy(record run.ToolEffectRecord, fallback coretool.EffectReplayPolicy) coretool.EffectReplayPolicy {
+	if stored := strings.TrimSpace(record.ReplayPolicy); stored != "" {
+		return coretool.EffectReplayPolicy(stored)
+	}
+	return fallback
+}
+
+func modelEffectMatchesInput(record run.ModelEffectRecord, inputJSON json.RawMessage) bool {
+	return len(record.InputJSON) == 0 || string(record.InputJSON) == string(inputJSON)
+}
+
+func toolEffectMatchesCall(record run.ToolEffectRecord, call run.ToolCall) bool {
+	return toolnames.Canonical(record.ToolName) == toolnames.Canonical(call.Name) &&
+		string(record.ArgsJSON) == string(call.Args)
+}
+
+func effectConflict(message string, details map[string]any) *v2errors.V2Error {
+	return &v2errors.V2Error{
+		Kind:      v2errors.ErrConflict,
+		Message:   message,
+		Cause:     run.ErrEffectConflict,
+		Fatal:     true,
+		Retryable: false,
+		Details:   details,
+	}
+}
+
+func encodeJSON(v any) (json.RawMessage, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(b), nil
+}
+
+func decodeJSON(data json.RawMessage, v any) error {
+	if len(data) == 0 {
+		return errors.New("empty journal json")
+	}
+	return json.Unmarshal(data, v)
 }
 
 func cloneModelMessages(in []ModelMessage) []ModelMessage {

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -18,7 +19,7 @@ import (
 	"github.com/joshka0/foxctl/internal/domain/envelope"
 	"github.com/joshka0/foxctl/internal/platform/config"
 	v2jido "github.com/joshka0/foxctl/internal/v2/adapters/jido"
-	libsqlworkers "github.com/joshka0/foxctl/internal/v2/adapters/libsql/workers"
+	tursoworkers "github.com/joshka0/foxctl/internal/v2/adapters/turso/workers"
 	coreevents "github.com/joshka0/foxctl/internal/v2/core/events"
 	coreorchestration "github.com/joshka0/foxctl/internal/v2/core/orchestration"
 	coreworker "github.com/joshka0/foxctl/internal/v2/core/worker"
@@ -82,9 +83,22 @@ func TestOrchestrationCardActionCommand_ReleaseMovesCardBackToTodo(t *testing.T)
 	}
 }
 
+func TestOrchestrationRuntimeBackendDefaultsToGoRuntime(t *testing.T) {
+	t.Setenv(envCLIRuntimeBackend, "")
+	t.Setenv(envOverseerOrchestrationRuntimeBackend, "")
+
+	if got := resolveCLIRuntimeBackend(); got != cliRuntimeBackendGoruntime {
+		t.Fatalf("cli runtime backend=%q want %q", got, cliRuntimeBackendGoruntime)
+	}
+	if got := resolveOverseerOrchestrationRuntimeBackend(); got != orchestrationRuntimeBackendGoSubprocess {
+		t.Fatalf("overseer runtime backend=%q want %q", got, orchestrationRuntimeBackendGoSubprocess)
+	}
+}
+
 func TestOrchestrationCardRuntimeCommand_ReturnsRuntimeTree(t *testing.T) {
 	t.Setenv("FOXCTL_DB_DRIVER", "")
 	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv(envCLIRuntimeBackend, cliRuntimeBackendJido)
 
 	server, socketPath := startOrchestrationCLIJSONRPCServer(t, func(method string, params json.RawMessage) (any, *jsonrpcCLITestError) {
 		var req map[string]any
@@ -194,6 +208,7 @@ func TestOrchestrationCardRuntimeCommand_ReturnsRuntimeTree(t *testing.T) {
 func TestOrchestrationDispatchIssueCommand_ProjectsRunningCard(t *testing.T) {
 	t.Setenv("FOXCTL_DB_DRIVER", "")
 	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv(envCLIRuntimeBackend, cliRuntimeBackendJido)
 
 	server, socketPath := startOrchestrationCLIJSONRPCServer(t, func(method string, params json.RawMessage) (any, *jsonrpcCLITestError) {
 		switch method {
@@ -258,6 +273,61 @@ func TestOrchestrationDispatchIssueCommand_ProjectsRunningCard(t *testing.T) {
 	}
 	if card.Card.AgentID != "agent:worker-cli-1" {
 		t.Fatalf("agent_id=%q want agent:worker-cli-1", card.Card.AgentID)
+	}
+}
+
+func TestOverseerOrchestrationComponentsWireStartupRecovery(t *testing.T) {
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv(v2jido.EnvJidoOrchestrationParentAgentIDs, "agent:dispatch-root")
+	t.Setenv(v2jido.EnvJidoOrchestrationDispatchParentAgentID, "agent:dispatch-root")
+	t.Setenv(envCLIDispatchParentAgentID, "agent:dispatch-root")
+
+	ctx := context.Background()
+
+	t.Run("jido", func(t *testing.T) {
+		cfg := setupOrchestrationTestEnv(t)
+		runner, cleanup, err := newOverseerJidoOrchestrationComponent(ctx, cfg)
+		if err != nil {
+			t.Fatalf("newOverseerJidoOrchestrationComponent() error = %v", err)
+		}
+		defer cleanup()
+
+		assertComponentHasStartupRecovery(t, runner)
+	})
+
+	t.Run("goruntime", func(t *testing.T) {
+		cfg := setupOrchestrationTestEnv(t)
+		runner, cleanup, err := newOverseerGoOrchestrationComponent(ctx, cfg)
+		if err != nil {
+			t.Fatalf("newOverseerGoOrchestrationComponent() error = %v", err)
+		}
+		defer cleanup()
+
+		component, ok := runner.(*overseerGoOrchestrationComponent)
+		if !ok {
+			t.Fatalf("runner type = %T, want *overseerGoOrchestrationComponent", runner)
+		}
+		assertComponentHasStartupRecovery(t, component.component)
+	})
+}
+
+func assertComponentHasStartupRecovery(t *testing.T, component any) {
+	t.Helper()
+
+	value := reflect.ValueOf(component)
+	if value.Kind() != reflect.Pointer || value.IsNil() {
+		t.Fatalf("component = %T, want non-nil pointer", component)
+	}
+	recovery := value.Elem().FieldByName("recovery")
+	if !recovery.IsValid() {
+		t.Fatalf("component %T has no recovery field", component)
+	}
+	if recovery.Kind() != reflect.Interface {
+		t.Fatalf("component recovery kind = %s, want interface", recovery.Kind())
+	}
+	if recovery.IsNil() {
+		t.Fatalf("component %T has nil startup recovery", component)
 	}
 }
 
@@ -409,7 +479,7 @@ func TestOrchestrationCardRuntimeCommand_ReturnsGoRuntimeTree(t *testing.T) {
 		t.Fatalf("seed apply: %v", err)
 	}
 
-	workerStore, closeWorkers, err := libsqlworkers.Open(ctx, cfg.Storage.Root)
+	workerStore, closeWorkers, err := tursoworkers.Open(ctx, cfg.Storage.Root)
 	if err != nil {
 		t.Fatalf("open worker store: %v", err)
 	}

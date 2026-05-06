@@ -19,23 +19,27 @@ import (
 // DefaultRuntimeDependencies assembles the canonical production v2 runner with
 // the real default tool catalog and bridge delegate.
 type DefaultRuntimeDependencies struct {
-	Profile           coretool.ProcessProfile
-	ToolSpecs         map[coretool.ProcessProfile]profiles.ProfileSpec
-	AppConfig         sysconfig.Config
-	WorkspaceRoot     string
-	WorkspaceID       string
-	VaultPath         string
-	IncludeExtensions bool
-	ClassicRegistry   *classictools.Registry
-	EventStore        events.Appender
-	EventBus          runner.EventPublisher
-	Model             runner.Model
-	TurnRecorder      corerun.TurnRecorder
-	Hooks             runner.HookRunner
-	Now               func() time.Time
-	NewID             func() string
-	ObserveStage      runner.StageObserver
-	OnEventError      func(error)
+	Profile               coretool.ProcessProfile
+	ToolSpecs             map[coretool.ProcessProfile]profiles.ProfileSpec
+	AppConfig             sysconfig.Config
+	WorkspaceRoot         string
+	WorkspaceID           string
+	VaultPath             string
+	IncludeExtensions     bool
+	ClassicRegistry       *classictools.Registry
+	EventStore            events.Appender
+	EventBus              runner.EventPublisher
+	Model                 runner.Model
+	TurnRecorder          corerun.TurnRecorder
+	TurnRequests          corerun.TurnRequestRegistry
+	EffectJournal         corerun.EffectJournal
+	TurnRequestStaleAfter time.Duration
+	Hooks                 runner.HookRunner
+	Now                   func() time.Time
+	NewID                 func() string
+	ObserveStage          runner.StageObserver
+	OnEventError          func(error)
+	StrictDurableIdentity bool
 }
 
 // DefaultLongLivedRuntimeDependencies extends DefaultRuntimeDependencies with
@@ -65,18 +69,21 @@ func NewDefaultTurnRunner(deps DefaultRuntimeDependencies) (*runner.Pipeline, er
 		return nil, fmt.Errorf("build default v2 tool executor: %w", err)
 	}
 	toolExec := runtimetools.NewExecutor(catalog, profile, delegate)
+	strictDurableIdentity := deps.StrictDurableIdentity || deps.TurnRequests != nil || deps.EffectJournal != nil
 	return runner.New(runner.Config{
-		EventStore:   deps.EventStore,
-		EventBus:     deps.EventBus,
-		Model:        deps.Model,
-		Tools:        catalog.ForProfile(profile),
-		ToolExecutor: toolExec,
-		TurnRecorder: deps.TurnRecorder,
-		Hooks:        deps.Hooks,
-		Now:          deps.Now,
-		NewID:        deps.NewID,
-		ObserveStage: deps.ObserveStage,
-		OnEventError: deps.OnEventError,
+		EventStore:            deps.EventStore,
+		EventBus:              deps.EventBus,
+		Model:                 deps.Model,
+		Tools:                 catalog.ForProfile(profile),
+		ToolExecutor:          toolExec,
+		EffectJournal:         deps.EffectJournal,
+		TurnRecorder:          deps.TurnRecorder,
+		Hooks:                 deps.Hooks,
+		Now:                   deps.Now,
+		NewID:                 deps.NewID,
+		ObserveStage:          deps.ObserveStage,
+		OnEventError:          deps.OnEventError,
+		StrictDurableIdentity: strictDurableIdentity,
 	}), nil
 }
 
@@ -87,7 +94,7 @@ func NewDefaultRunService(deps DefaultRuntimeDependencies) (*RunService, error) 
 	if err != nil {
 		return nil, err
 	}
-	return NewRunService(turnRunner), nil
+	return newDefaultConfiguredRunService(turnRunner, deps), nil
 }
 
 // NewDefaultLongLivedRunService assembles the canonical production v2 runner
@@ -97,5 +104,15 @@ func NewDefaultLongLivedRunService(deps DefaultLongLivedRuntimeDependencies) (*L
 	if err != nil {
 		return nil, err
 	}
-	return NewLongLivedRunService(turnRunner, BuildLongLivedRunSpecs(deps.Components), deps.Observer), nil
+	runSvc := newDefaultConfiguredRunService(turnRunner, deps.DefaultRuntimeDependencies)
+	return newLongLivedRunService(runSvc, BuildLongLivedRunSpecs(deps.Components), deps.Observer), nil
+}
+
+func newDefaultConfiguredRunService(turnRunner TurnRunner, deps DefaultRuntimeDependencies) *RunService {
+	if deps.TurnRequestStaleAfter == 0 {
+		return NewRunServiceWithRegistry(turnRunner, deps.TurnRequests, deps.Now)
+	}
+	return NewRunServiceWithRegistryConfig(turnRunner, deps.TurnRequests, deps.Now, RunServiceConfig{
+		TurnRequestStaleAfter: deps.TurnRequestStaleAfter,
+	})
 }

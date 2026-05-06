@@ -496,6 +496,85 @@ func TestStore_BoardCursorAndLaneFilter(t *testing.T) {
 	}
 }
 
+func TestStore_ListRunningCards_FiltersWorkspaceArchivedAndCursor(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, filepath.Join(t.TempDir(), "orchestration_running_cards.db"), nil)
+	if err != nil {
+		t.Fatalf("open sqlite db: %v", err)
+	}
+	t.Cleanup(func() { _ = closeFn() })
+	if err := MigrateSchema(ctx, db); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+
+	store := NewStore(db, StoreOptions{})
+	apply := func(id, workspaceID, issueID, state string) {
+		t.Helper()
+		if err := store.Apply(ctx, coreevents.Event{
+			ID:            id,
+			Command:       "orchestration/dispatch-issue",
+			RequestID:     "req-" + issueID,
+			StreamID:      "run-" + issueID,
+			StreamType:    coreevents.StreamTypeRun,
+			StreamVersion: 1,
+			EventType:     coreevents.EventRunStarted,
+			OccurredAt:    time.Date(2026, time.March, 5, 14, 25, 0, 0, time.UTC),
+			Payload: coreevents.MustMarshalPayload(map[string]any{
+				"workspace_id": workspaceID,
+				"issue_id":     issueID,
+				"state":        state,
+				"eligibility":  "eligible",
+				"agent_id":     "agent:" + issueID,
+			}),
+		}); err != nil {
+			t.Fatalf("apply %s: %v", issueID, err)
+		}
+	}
+
+	apply("evt-running-a", "ws-1", "issue-a", "Running")
+	apply("evt-running-b", "ws-1", "issue-b", "Running")
+	apply("evt-released-c", "ws-1", "issue-c", "Released")
+	apply("evt-running-d", "ws-2", "issue-d", "Running")
+
+	if _, err := store.ArchiveCards(ctx, "ws-1", []string{"issue-b"}); err != nil {
+		t.Fatalf("ArchiveCards() error = %v", err)
+	}
+
+	cards, err := store.ListRunningCards(ctx, coreorchestration.RunningCardsRequest{
+		WorkspaceID: "ws-1",
+		Limit:       10,
+	})
+	if err != nil {
+		t.Fatalf("ListRunningCards() error = %v", err)
+	}
+	if len(cards) != 1 {
+		t.Fatalf("cards=%d want 1: %+v", len(cards), cards)
+	}
+	if cards[0].IssueID != "issue-a" {
+		t.Fatalf("issue_id=%q want issue-a", cards[0].IssueID)
+	}
+	if cards[0].State != coreorchestration.StateRunning {
+		t.Fatalf("state=%q want %q", cards[0].State, coreorchestration.StateRunning)
+	}
+	if cards[0].AgentID != "agent:issue-a" {
+		t.Fatalf("agent_id=%q want agent:issue-a", cards[0].AgentID)
+	}
+
+	afterCursor, err := store.ListRunningCards(ctx, coreorchestration.RunningCardsRequest{
+		WorkspaceID: "ws-1",
+		Cursor:      "issue-a",
+		Limit:       10,
+	})
+	if err != nil {
+		t.Fatalf("ListRunningCards(cursor) error = %v", err)
+	}
+	if len(afterCursor) != 0 {
+		t.Fatalf("cursor cards=%d want 0: %+v", len(afterCursor), afterCursor)
+	}
+}
+
 func TestStore_Apply_IdempotencyScopeUsesIssueForIssueCommands(t *testing.T) {
 	t.Parallel()
 

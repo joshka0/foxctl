@@ -78,8 +78,8 @@ V2 note: coarse-to-fine retrieval now runs through
 drill refs (`expandable_dates`, `turn/*`, slice refs) emitted by the layered
 bundle.
 
-PR-17 note: v2 now has a libsql-first artifact semantic retrieval surface in
-`internal/v2/adapters/libsql/turns` (`SearchArtifactsByEmbedding`) with a
+PR-17 note: v2 now has a Turso-backed artifact semantic retrieval surface in
+`internal/v2/adapters/turso/turns` (`SearchArtifactsByEmbedding`) with a
 deterministic cosine fallback when vector SQL is unavailable. The next step is
 to blend those artifact-semantic hits into layered context assembly (alongside
 temporal drill-down refs) rather than only using chronological context.
@@ -192,7 +192,7 @@ Companion runtime now emits layered temporal drill-down metadata through the v2
 contextbuilder (`expandable_dates`, stable turn refs, slice refs) so the model
 can move from coarse episodic context into specific turn slices when needed.
 
-Remaining roadmap item: blend libsql artifact-semantic hits directly into this
+Remaining roadmap item: blend Turso artifact-semantic hits directly into this
 companion layered assembly path (instead of relying on chronological layers
 only).
 

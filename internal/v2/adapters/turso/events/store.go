@@ -78,78 +78,176 @@ func (s *Store) Append(ctx context.Context, event v2events.Event) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("v2 events append: nil store")
 	}
-	event = normalizeEvent(event, s.now())
+	now := s.now()
+	event = normalizeEvent(event, now)
 
 	return sqlutil.WithTransaction(ctx, s.db, func(tx *sql.Tx) error {
-		var maxVersion int64
-		if err := tx.QueryRowContext(
-			ctx,
-			`SELECT COALESCE(MAX(stream_version), 0) FROM v2_events WHERE stream_id = $1 AND stream_type = $2`,
-			event.StreamID, string(event.StreamType),
-		).Scan(&maxVersion); err != nil {
-			return fmt.Errorf("query max version: %w", err)
-		}
+		_, err := appendNormalized(ctx, tx, event, now)
+		return err
+	})
+}
 
-		expectedVersion := maxVersion + 1
-		if event.StreamVersion == 0 {
-			event.StreamVersion = expectedVersion
-		}
-		if event.StreamVersion != expectedVersion {
-			return fmt.Errorf(
-				"%w: stream=%s/%s expected=%d got=%d",
-				v2events.ErrVersionConflict, event.StreamID, event.StreamType, expectedVersion, event.StreamVersion,
-			)
-		}
+// AppendIfAbsent writes one event unless the same material event ID is already durable.
+func (s *Store) AppendIfAbsent(ctx context.Context, event v2events.Event) (v2events.AppendResult, error) {
+	if s == nil || s.db == nil {
+		return v2events.AppendResult{}, fmt.Errorf("v2 events append if absent: nil store")
+	}
+	now := s.now()
+	event = normalizeEvent(event, now)
 
-		var maxSequence int64
-		if err := tx.QueryRowContext(
-			ctx,
-			`SELECT COALESCE(MAX(sequence), 0) FROM v2_events WHERE stream_id = $1 AND stream_type = $2`,
-			event.StreamID, string(event.StreamType),
-		).Scan(&maxSequence); err != nil {
-			return fmt.Errorf("query max sequence: %w", err)
-		}
-		expectedSequence := maxSequence + 1
-		if event.Sequence == 0 {
-			event.Sequence = expectedSequence
-		}
-		if event.Sequence != expectedSequence {
-			return fmt.Errorf(
-				"%w: sequence stream=%s/%s expected=%d got=%d",
-				v2events.ErrVersionConflict, event.StreamID, event.StreamType, expectedSequence, event.Sequence,
-			)
-		}
-
-		_, err := tx.ExecContext(ctx, `
-			INSERT INTO v2_events (
-				id, stream_id, stream_type, stream_version, sequence, event_type, occurred_at,
-				correlation_id, causation_id, actor_id, request_id, command, payload, created_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-		`,
-			event.ID,
-			event.StreamID,
-			string(event.StreamType),
-			event.StreamVersion,
-			event.Sequence,
-			string(event.EventType),
-			sqlutil.FormatTimestamp(event.OccurredAt),
-			event.CorrelationID,
-			event.CausationID,
-			event.ActorID,
-			event.RequestID,
-			event.Command,
-			string(event.Payload),
-			sqlutil.FormatTimestamp(s.now()),
-		)
-		if err != nil {
-			if strings.Contains(strings.ToLower(err.Error()), "unique") {
-				return fmt.Errorf("%w: %v", v2events.ErrVersionConflict, err)
+	var result v2events.AppendResult
+	err := sqlutil.WithTransaction(ctx, s.db, func(tx *sql.Tx) error {
+		stored, err := readEventByID(ctx, tx, event.ID)
+		if err == nil {
+			if !materialEventsEqual(stored, event) {
+				return fmt.Errorf("%w: event_id=%s", v2events.ErrIdempotencyConflict, event.ID)
 			}
-			return fmt.Errorf("insert event: %w", err)
+			result = v2events.AppendResult{Event: stored.Clone(), Appended: false}
+			return nil
+		}
+		if !errors.Is(err, v2events.ErrNotFound) {
+			return err
 		}
 
+		inserted, appendErr := appendNormalized(ctx, tx, event, now)
+		if appendErr != nil {
+			return appendErr
+		}
+		result = v2events.AppendResult{Event: inserted.Clone(), Appended: true}
 		return nil
 	})
+	if err != nil {
+		return v2events.AppendResult{}, err
+	}
+	return result, nil
+}
+
+func appendNormalized(ctx context.Context, tx *sql.Tx, event v2events.Event, createdAt time.Time) (v2events.Event, error) {
+	var maxVersion int64
+	if err := tx.QueryRowContext(
+		ctx,
+		`SELECT COALESCE(MAX(stream_version), 0) FROM v2_events WHERE stream_id = $1 AND stream_type = $2`,
+		event.StreamID, string(event.StreamType),
+	).Scan(&maxVersion); err != nil {
+		return v2events.Event{}, fmt.Errorf("query max version: %w", err)
+	}
+
+	expectedVersion := maxVersion + 1
+	if event.StreamVersion == 0 {
+		event.StreamVersion = expectedVersion
+	}
+	if event.StreamVersion != expectedVersion {
+		return v2events.Event{}, fmt.Errorf(
+			"%w: stream=%s/%s expected=%d got=%d",
+			v2events.ErrVersionConflict, event.StreamID, event.StreamType, expectedVersion, event.StreamVersion,
+		)
+	}
+
+	var maxSequence int64
+	if err := tx.QueryRowContext(
+		ctx,
+		`SELECT COALESCE(MAX(sequence), 0) FROM v2_events WHERE stream_id = $1 AND stream_type = $2`,
+		event.StreamID, string(event.StreamType),
+	).Scan(&maxSequence); err != nil {
+		return v2events.Event{}, fmt.Errorf("query max sequence: %w", err)
+	}
+	expectedSequence := maxSequence + 1
+	if event.Sequence == 0 {
+		event.Sequence = expectedSequence
+	}
+	if event.Sequence != expectedSequence {
+		return v2events.Event{}, fmt.Errorf(
+			"%w: sequence stream=%s/%s expected=%d got=%d",
+			v2events.ErrVersionConflict, event.StreamID, event.StreamType, expectedSequence, event.Sequence,
+		)
+	}
+
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO v2_events (
+			id, stream_id, stream_type, stream_version, sequence, event_type, occurred_at,
+			correlation_id, causation_id, actor_id, request_id, command, payload, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+	`,
+		event.ID,
+		event.StreamID,
+		string(event.StreamType),
+		event.StreamVersion,
+		event.Sequence,
+		string(event.EventType),
+		sqlutil.FormatTimestamp(event.OccurredAt),
+		event.CorrelationID,
+		event.CausationID,
+		event.ActorID,
+		event.RequestID,
+		event.Command,
+		string(event.Payload),
+		sqlutil.FormatTimestamp(createdAt),
+	)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			return v2events.Event{}, fmt.Errorf("%w: %v", v2events.ErrVersionConflict, err)
+		}
+		return v2events.Event{}, fmt.Errorf("insert event: %w", err)
+	}
+
+	return event, nil
+}
+
+func readEventByID(ctx context.Context, tx *sql.Tx, eventID string) (v2events.Event, error) {
+	evt, err := scanEvent(tx.QueryRowContext(ctx, `
+		SELECT
+			id, stream_id, stream_type, stream_version, sequence, event_type, occurred_at,
+			COALESCE(correlation_id, ''), COALESCE(causation_id, ''), COALESCE(actor_id, ''),
+			COALESCE(request_id, ''), COALESCE(command, ''), COALESCE(payload, '{}')
+		FROM v2_events
+		WHERE id = $1
+	`, eventID))
+	if err != nil {
+		if errors.Is(err, v2events.ErrNotFound) {
+			return v2events.Event{}, err
+		}
+		return v2events.Event{}, fmt.Errorf("query event by id: %w", err)
+	}
+	return evt, nil
+}
+
+func materialEventsEqual(a, b v2events.Event) bool {
+	return a.ID == b.ID &&
+		a.StreamID == b.StreamID &&
+		a.StreamType == b.StreamType &&
+		a.EventType == b.EventType &&
+		a.CorrelationID == b.CorrelationID &&
+		a.CausationID == b.CausationID &&
+		a.ActorID == b.ActorID &&
+		a.RequestID == b.RequestID &&
+		a.Command == b.Command &&
+		string(a.Payload) == string(b.Payload)
+}
+
+// ReadStreamCursor returns the current append position for one stream.
+func (s *Store) ReadStreamCursor(ctx context.Context, request v2events.StreamCursorRequest) (v2events.StreamCursor, error) {
+	if s == nil || s.db == nil {
+		return v2events.StreamCursor{}, fmt.Errorf("v2 events cursor: nil store")
+	}
+	streamID := strings.TrimSpace(request.StreamID)
+	if streamID == "" {
+		return v2events.StreamCursor{}, fmt.Errorf("v2 events cursor: stream_id is required")
+	}
+	streamType := strings.TrimSpace(string(request.StreamType))
+	if streamType == "" {
+		return v2events.StreamCursor{}, fmt.Errorf("v2 events cursor: stream_type is required")
+	}
+
+	var cursor v2events.StreamCursor
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT COALESCE(MAX(stream_version), 0), COALESCE(MAX(sequence), 0)
+		FROM v2_events
+		WHERE stream_id = $1
+			AND stream_type = $2
+	`, streamID, streamType).Scan(&cursor.StreamVersion, &cursor.Sequence); err != nil {
+		return v2events.StreamCursor{}, fmt.Errorf("query stream cursor: %w", err)
+	}
+	return cursor, nil
 }
 
 // ListStream returns ordered stream events.

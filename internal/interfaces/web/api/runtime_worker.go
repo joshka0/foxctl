@@ -12,7 +12,7 @@ import (
 	"github.com/joshka0/foxctl/internal/context/contextplane/taskhistory"
 	"github.com/joshka0/foxctl/internal/platform/config"
 	v2jido "github.com/joshka0/foxctl/internal/v2/adapters/jido"
-	libsqlworkers "github.com/joshka0/foxctl/internal/v2/adapters/libsql/workers"
+	tursoworkers "github.com/joshka0/foxctl/internal/v2/adapters/turso/workers"
 	coreworker "github.com/joshka0/foxctl/internal/v2/core/worker"
 )
 
@@ -56,7 +56,7 @@ func mergeRuntimeMetadata(base, overlay map[string]any) map[string]any {
 
 func loadOptionalRuntimeStateReader(ctx context.Context, cfg config.Config) (coreworker.StateReader, func() error, bool, error) {
 	if strings.EqualFold(ResolveOrchestrationRuntimeBackend(), orchestrationRuntimeBackendGoruntimeAPI) {
-		store, closeFn, err := libsqlworkers.Open(ctx, cfg.Storage.Root)
+		store, closeFn, err := tursoworkers.Open(ctx, cfg.Storage.Root)
 		if err != nil {
 			return nil, nil, false, err
 		}

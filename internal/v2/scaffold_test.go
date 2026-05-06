@@ -5,11 +5,11 @@ import (
 
 	_ "github.com/joshka0/foxctl/internal/v2/adapters"
 	_ "github.com/joshka0/foxctl/internal/v2/adapters/jido"
-	_ "github.com/joshka0/foxctl/internal/v2/adapters/libsql"
 	_ "github.com/joshka0/foxctl/internal/v2/adapters/llm"
 	_ "github.com/joshka0/foxctl/internal/v2/adapters/mailbox"
 	_ "github.com/joshka0/foxctl/internal/v2/adapters/sqlite"
 	_ "github.com/joshka0/foxctl/internal/v2/adapters/telemetry"
+	_ "github.com/joshka0/foxctl/internal/v2/adapters/turso"
 	_ "github.com/joshka0/foxctl/internal/v2/core/ask"
 	_ "github.com/joshka0/foxctl/internal/v2/core/errors"
 	_ "github.com/joshka0/foxctl/internal/v2/core/events"

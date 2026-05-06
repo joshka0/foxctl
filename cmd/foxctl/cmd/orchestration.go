@@ -17,8 +17,8 @@ import (
 	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/platform/logging"
 	v2jido "github.com/joshka0/foxctl/internal/v2/adapters/jido"
-	libsqlorchestration "github.com/joshka0/foxctl/internal/v2/adapters/libsql/orchestration"
-	libsqlworkers "github.com/joshka0/foxctl/internal/v2/adapters/libsql/workers"
+	tursoorchestration "github.com/joshka0/foxctl/internal/v2/adapters/turso/orchestration"
+	tursoworkers "github.com/joshka0/foxctl/internal/v2/adapters/turso/workers"
 	v2errors "github.com/joshka0/foxctl/internal/v2/core/errors"
 	coreevents "github.com/joshka0/foxctl/internal/v2/core/events"
 	coreorchestration "github.com/joshka0/foxctl/internal/v2/core/orchestration"
@@ -105,7 +105,7 @@ func newOrchestrationDispatchIssueCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "dispatch-issue <issue-id>",
-		Short: "Dispatch one orchestration issue through the Jido-backed runtime",
+		Short: "Dispatch one orchestration issue through the configured runtime",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := loadConfig(cmd.Context())
@@ -271,7 +271,7 @@ func runOrchestrationCardActionCLI(
 		IssueID:     issueID,
 	})
 	if err != nil {
-		if errors.Is(err, libsqlorchestration.ErrNotFound) {
+		if errors.Is(err, tursoorchestration.ErrNotFound) {
 			return orchestrationCardActionResponseCLI{}, &v2errors.V2Error{
 				Kind:    v2errors.ErrNotFound,
 				Message: "orchestration card not found",
@@ -377,7 +377,7 @@ func runOrchestrationCardRuntimeCLI(
 		IssueID:     issueID,
 	})
 	if err != nil {
-		if errors.Is(err, libsqlorchestration.ErrNotFound) {
+		if errors.Is(err, tursoorchestration.ErrNotFound) {
 			return orchestrationBoardCardRuntimeDataCLI{}, &v2errors.V2Error{
 				Kind:    v2errors.ErrNotFound,
 				Message: "orchestration card not found",
@@ -398,7 +398,7 @@ func runOrchestrationDispatchIssueCLI(
 	cfg config.Config,
 	req coreorchestration.DispatchRequest,
 ) (coreorchestration.DispatchResponse, error) {
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("FOXCTL_V2_ORCHESTRATION_RUNTIME_BACKEND")), "goruntime") {
+	if strings.EqualFold(resolveCLIRuntimeBackend(), cliRuntimeBackendGoruntime) {
 		return coreorchestration.DispatchResponse{}, &v2errors.V2Error{
 			Kind:    v2errors.ErrDependency,
 			Message: "goruntime orchestration dispatch requires a persistent host (use overseer or web server), not the one-shot CLI command",
@@ -465,13 +465,13 @@ func resolveCLIRuntimeBackend() string {
 	case cliRuntimeBackendJido:
 		return cliRuntimeBackendJido
 	default:
-		return cliRuntimeBackendJido
+		return cliRuntimeBackendGoruntime
 	}
 }
 
 func loadOptionalRuntimeStateReaderCLI(ctx context.Context, cfg config.Config) (coreworker.StateReader, func() error, bool, error) {
 	if strings.EqualFold(resolveCLIRuntimeBackend(), cliRuntimeBackendGoruntime) {
-		store, closeFn, err := libsqlworkers.Open(ctx, cfg.Storage.Root)
+		store, closeFn, err := tursoworkers.Open(ctx, cfg.Storage.Root)
 		if err != nil {
 			return nil, nil, false, err
 		}

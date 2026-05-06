@@ -16,6 +16,9 @@ This directory contains active planning documents and implementation roadmaps.
 - `features/opentui-agent-terminal-facades.md` — facade backlog for a greenfield OpenTUI agent terminal over v2 runtime, room, orchestration, skills, jobs, MCP, and CAS APIs.
 - `features/remote-workbench-session-handoff.md` — plan for moving a pi-mono-inspired TUI workbench to a Tailscale remote and continuing from browser/terminal attachments.
 - `features/semantic-code-anchors.md` — plan for typed code comments as repo graph edges, semantic envelope anchors, and ACA retrieval signals.
+- `features/durable-execution-recovery.md` — plan for v2 orchestration-first crash recovery using the orchestration card projection as the durable retry queue; runner checkpointing is deferred until side effects are replay-safe.
+- `features/durable-execution-layer1-side-effects.md` — Layer 1 runner side-effect safety sequence: Turn Request Registry, idempotent event append, then model/tool effect journal.
+- `follow_up_durable_execution.md` — follow-up backlog after the completed LLM-chat Layer 1 durable execution baseline.
 - `tui-agent-control-plane.md` — archived TypeScript TUI plan; current terminal work is `go-tui-agent-shell.md`.
 - `go-tui-agent-shell.md` — Go-native interactive coding shell plan with memory, continuity, and worker rails.
 - `v2-implementation-todo.md`

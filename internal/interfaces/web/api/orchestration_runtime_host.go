@@ -18,9 +18,9 @@ import (
 	"github.com/joshka0/foxctl/internal/platform/config"
 	v2goruntime "github.com/joshka0/foxctl/internal/v2/adapters/goruntime"
 	v2jido "github.com/joshka0/foxctl/internal/v2/adapters/jido"
-	libsqlevents "github.com/joshka0/foxctl/internal/v2/adapters/libsql/events"
-	libsqlorchestration "github.com/joshka0/foxctl/internal/v2/adapters/libsql/orchestration"
-	libsqlworkers "github.com/joshka0/foxctl/internal/v2/adapters/libsql/workers"
+	tursoevents "github.com/joshka0/foxctl/internal/v2/adapters/turso/events"
+	tursoorchestration "github.com/joshka0/foxctl/internal/v2/adapters/turso/orchestration"
+	tursoworkers "github.com/joshka0/foxctl/internal/v2/adapters/turso/workers"
 	coreevents "github.com/joshka0/foxctl/internal/v2/core/events"
 	corespawn "github.com/joshka0/foxctl/internal/v2/core/spawn"
 	coreworker "github.com/joshka0/foxctl/internal/v2/core/worker"
@@ -55,7 +55,7 @@ func ResolveOrchestrationRuntimeBackend() string {
 	case orchestrationRuntimeBackendJidoAPI:
 		return orchestrationRuntimeBackendJidoAPI
 	default:
-		return orchestrationRuntimeBackendJidoAPI
+		return orchestrationRuntimeBackendGoruntimeAPI
 	}
 }
 
@@ -74,7 +74,7 @@ func NewOrchestrationRuntimeHost(ctx context.Context, cfg config.Config, log zer
 		_ = eventStore.Close()
 		return nil, fmt.Errorf("open orchestration store: %w", err)
 	}
-	workerStore, closeWorkers, err := libsqlworkers.Open(ctx, cfg.Storage.Root)
+	workerStore, closeWorkers, err := tursoworkers.Open(ctx, cfg.Storage.Root)
 	if err != nil {
 		if closeOrchestration != nil {
 			_ = closeOrchestration()
@@ -128,10 +128,10 @@ func NewOrchestrationRuntimeHost(ctx context.Context, cfg config.Config, log zer
 type persistentOrchestrationRuntimeHost struct {
 	cfg                config.Config
 	log                zerolog.Logger
-	eventStore         *libsqlevents.Store
-	orchestrationStore *libsqlorchestration.Store
+	eventStore         *tursoevents.Store
+	orchestrationStore *tursoorchestration.Store
 	closeOrchestration func() error
-	workerStore        *libsqlworkers.Store
+	workerStore        *tursoworkers.Store
 	closeWorkers       func() error
 	workerState        *runtimeworkers.StateComponent
 	spawner            *v2goruntime.ManagedAgentSpawner

@@ -21,6 +21,7 @@ const (
 	ErrInternal        ErrorKind = "internal"
 	ErrValidation      ErrorKind = "validation"
 	ErrDependency      ErrorKind = "dependency"
+	ErrConflict        ErrorKind = "conflict"
 )
 
 // EventContext identifies event-stream metadata attached to generated error events.
@@ -82,6 +83,8 @@ func (e *V2Error) HTTPStatus() int {
 	switch e.Kind {
 	case ErrValidation:
 		return http.StatusBadRequest
+	case ErrConflict:
+		return http.StatusConflict
 	case ErrPolicyViolation:
 		return http.StatusForbidden
 	case ErrNotFound:
@@ -112,6 +115,8 @@ func (e *V2Error) EnvelopeCode() string {
 	switch e.Kind {
 	case ErrValidation:
 		return "EARG"
+	case ErrConflict:
+		return "ECONFLICT"
 	case ErrPolicyViolation:
 		return "EPOLICY"
 	case ErrNotFound:

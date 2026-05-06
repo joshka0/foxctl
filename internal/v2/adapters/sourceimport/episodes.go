@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joshka0/foxctl/internal/v2/adapters/libsql/turns"
+	"github.com/joshka0/foxctl/internal/v2/adapters/turso/turns"
 	"github.com/joshka0/foxctl/internal/v2/core/run"
 )
 

@@ -117,6 +117,14 @@ type BoardResponse struct {
 	NextCursor  string       `json:"next_cursor,omitempty"`
 }
 
+// RunningCardsRequest lists projected cards that are still in runtime execution.
+type RunningCardsRequest struct {
+	RequestID   string `json:"request_id,omitempty"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	Limit       int    `json:"limit,omitempty"`
+	Cursor      string `json:"cursor,omitempty"`
+}
+
 // DispatchRequest requests one issue dispatch through canonical spawn path.
 type DispatchRequest struct {
 	RequestID       string `json:"request_id"`
