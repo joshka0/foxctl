@@ -163,6 +163,13 @@ esac
 	foundAnchorConcept := false
 	for _, note := range withAnchors.ConceptNotes {
 		if strings.Contains(note, "anchor") {
+			noteBody, err := os.ReadFile(filepath.Join(vaultRoot, filepath.FromSlash(note)))
+			if err != nil {
+				t.Fatalf("read anchor concept note: %v", err)
+			}
+			if !strings.Contains(string(noteBody), "repo_anchors:") || !strings.Contains(string(noteBody), "anchor:foxctl:invariant:no-send-without-read") {
+				t.Fatalf("expected anchor concept note to carry repo_anchors frontmatter:\n%s", string(noteBody))
+			}
 			foundAnchorConcept = true
 			break
 		}

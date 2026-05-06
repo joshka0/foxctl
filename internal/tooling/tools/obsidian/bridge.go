@@ -30,20 +30,25 @@ type DocsBridgeDocResult struct {
 	ExistingVaultRefs       []string `json:"existing_vault_refs,omitempty"`
 	ExistingRepoDocBackrefs []string `json:"existing_repo_doc_backrefs,omitempty"`
 	SuggestedVaultRefs      []string `json:"suggested_vault_refs,omitempty"`
+	RepoAnchors             []string `json:"repo_anchors,omitempty"`
+	RepoSymbols             []string `json:"repo_symbols,omitempty"`
+	HealthFindings          []string `json:"health_findings,omitempty"`
 	DraftPath               string   `json:"draft_path"`
 }
 
 // DocsBridgeReconcileResult describes the generated docs-bridge draft bundle.
 type DocsBridgeReconcileResult struct {
-	RootNotePath   string                `json:"root_note_path"`
-	DocNotes       []DocsBridgeDocResult `json:"doc_notes"`
-	DocsScanned    int                   `json:"docs_scanned"`
-	DocsWithLinks  int                   `json:"docs_with_links"`
-	DocsMissing    int                   `json:"docs_missing_links"`
-	Folder         string                `json:"folder"`
-	WorkspaceRoot  string                `json:"workspace_root"`
-	DocsRoot       string                `json:"docs_root"`
-	CanonicalNotes int                   `json:"canonical_notes"`
+	RootNotePath    string                `json:"root_note_path"`
+	DocNotes        []DocsBridgeDocResult `json:"doc_notes"`
+	DocsScanned     int                   `json:"docs_scanned"`
+	DocsWithLinks   int                   `json:"docs_with_links"`
+	DocsMissing     int                   `json:"docs_missing_links"`
+	Folder          string                `json:"folder"`
+	WorkspaceRoot   string                `json:"workspace_root"`
+	DocsRoot        string                `json:"docs_root"`
+	CanonicalNotes  int                   `json:"canonical_notes"`
+	AnchorRefs      int                   `json:"anchor_refs"`
+	OrphanedAnchors int                   `json:"orphaned_anchors"`
 }
 
 // DocsBridgeApplyOptions configures applying reviewed bridge draft frontmatter patches.
@@ -57,12 +62,14 @@ type DocsBridgeApplyOptions struct {
 
 // DocsBridgeApplyResult describes the files patched from a reviewed bridge draft.
 type DocsBridgeApplyResult struct {
-	DraftPath         string   `json:"draft_path"`
-	RepoDocPath       string   `json:"repo_doc_path"`
-	VaultRefsApplied  []string `json:"vault_refs_applied,omitempty"`
-	VaultNotesPatched []string `json:"vault_notes_patched,omitempty"`
-	RepoDocUpdated    bool     `json:"repo_doc_updated"`
-	VaultNotesUpdated int      `json:"vault_notes_updated"`
+	DraftPath          string   `json:"draft_path"`
+	RepoDocPath        string   `json:"repo_doc_path"`
+	VaultRefsApplied   []string `json:"vault_refs_applied,omitempty"`
+	RepoAnchorsApplied []string `json:"repo_anchors_applied,omitempty"`
+	RepoSymbolsApplied []string `json:"repo_symbols_applied,omitempty"`
+	VaultNotesPatched  []string `json:"vault_notes_patched,omitempty"`
+	RepoDocUpdated     bool     `json:"repo_doc_updated"`
+	VaultNotesUpdated  int      `json:"vault_notes_updated"`
 }
 
 // DocsBridgeBatchApplyOptions configures applying reviewed bridge drafts in bulk.
@@ -281,13 +288,20 @@ func ReconcileDocsBridge(ctx context.Context, writer *Writer, opts DocsBridgeRec
 		for _, suggestion := range suggestions {
 			suggestedPaths = append(suggestedPaths, suggestion.Path)
 		}
-		if len(existingVaultRefs) > 0 || len(existingBackrefs) > 0 || len(suggestedPaths) > 0 {
+		repoAnchors := uniqueStrings(doc.FrontLists["repo_anchors"])
+		repoSymbols := uniqueStrings(doc.FrontLists["repo_symbols"])
+		anchorBackrefs := notesReferencingListValues(vaultNotes, "repo_anchors", repoAnchors)
+		symbolBackrefs := notesReferencingListValues(vaultNotes, "repo_symbols", repoSymbols)
+		healthFindings := docsBridgeAnchorHealthFindings(repoAnchors, vaultNotes)
+		result.AnchorRefs += len(repoAnchors)
+		result.OrphanedAnchors += len(healthFindings)
+		if len(existingVaultRefs) > 0 || len(existingBackrefs) > 0 || len(suggestedPaths) > 0 || len(anchorBackrefs) > 0 || len(symbolBackrefs) > 0 {
 			result.DocsWithLinks++
 		} else {
 			result.DocsMissing++
 		}
 		draftPath := filepath.ToSlash(filepath.Join(folder, safeSlug(doc.RelPath)+".md"))
-		body := renderDocsBridgeDraft(project, doc, existingVaultRefs, existingBackrefs, suggestions)
+		body := renderDocsBridgeDraft(project, doc, existingVaultRefs, existingBackrefs, suggestions, healthFindings)
 		if err := writer.CreateNote(ctx, draftPath, body, true); err != nil {
 			return DocsBridgeReconcileResult{}, fmt.Errorf("obsidian bridge: write draft note %s: %w", draftPath, err)
 		}
@@ -297,6 +311,9 @@ func ReconcileDocsBridge(ctx context.Context, writer *Writer, opts DocsBridgeRec
 			ExistingVaultRefs:       existingVaultRefs,
 			ExistingRepoDocBackrefs: existingBackrefs,
 			SuggestedVaultRefs:      suggestedPaths,
+			RepoAnchors:             repoAnchors,
+			RepoSymbols:             repoSymbols,
+			HealthFindings:          healthFindings,
 			DraftPath:               draftPath,
 		})
 	}
@@ -362,11 +379,15 @@ func ApplyDocsBridgeDraft(ctx context.Context, writer *Writer, opts DocsBridgeAp
 	if opts.MaxLinks > 0 && len(suggested) > opts.MaxLinks {
 		suggested = suggested[:opts.MaxLinks]
 	}
+	repoAnchors := uniqueStrings(draft.FrontLists["repo_anchors"])
+	repoSymbols := uniqueStrings(draft.FrontLists["repo_symbols"])
 
 	result := DocsBridgeApplyResult{
-		DraftPath:        draftPath,
-		RepoDocPath:      docPath,
-		VaultRefsApplied: append([]string{}, suggested...),
+		DraftPath:          draftPath,
+		RepoDocPath:        docPath,
+		VaultRefsApplied:   append([]string{}, suggested...),
+		RepoAnchorsApplied: append([]string{}, repoAnchors...),
+		RepoSymbolsApplied: append([]string{}, repoSymbols...),
 	}
 
 	repoDocFullPath := filepath.Join(workspaceRoot, filepath.FromSlash(docPath))
@@ -392,6 +413,16 @@ func ApplyDocsBridgeDraft(ctx context.Context, writer *Writer, opts DocsBridgeAp
 			return DocsBridgeApplyResult{}, fmt.Errorf("obsidian bridge: read vault note %s: %w", vaultRef, err)
 		}
 		updated, changed := mergeMarkdownFrontmatterList(text, "repo_docs", []string{docPath})
+		if len(repoAnchors) > 0 {
+			var anchorChanged bool
+			updated, anchorChanged = mergeMarkdownFrontmatterList(updated, "repo_anchors", repoAnchors)
+			changed = changed || anchorChanged
+		}
+		if len(repoSymbols) > 0 {
+			var symbolChanged bool
+			updated, symbolChanged = mergeMarkdownFrontmatterList(updated, "repo_symbols", repoSymbols)
+			changed = changed || symbolChanged
+		}
 		if !changed {
 			result.VaultNotesPatched = append(result.VaultNotesPatched, vaultRef)
 			continue
@@ -874,6 +905,44 @@ func notesReferencingDoc(notes []bridgeVaultNote, docPath string) []string {
 	return uniqueStrings(out)
 }
 
+func notesReferencingListValues(notes []bridgeVaultNote, key string, values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	wanted := map[string]struct{}{}
+	for _, value := range values {
+		value = filepath.ToSlash(strings.TrimSpace(value))
+		if value != "" {
+			wanted[value] = struct{}{}
+		}
+	}
+	var out []string
+	for _, note := range notes {
+		for _, candidate := range note.FrontLists[key] {
+			candidate = filepath.ToSlash(strings.TrimSpace(candidate))
+			if _, ok := wanted[candidate]; ok {
+				out = append(out, note.Path)
+				break
+			}
+		}
+	}
+	return uniqueStrings(out)
+}
+
+func docsBridgeAnchorHealthFindings(repoAnchors []string, notes []bridgeVaultNote) []string {
+	if len(repoAnchors) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(repoAnchors))
+	for _, anchor := range repoAnchors {
+		anchor = strings.TrimSpace(anchor)
+		if anchor != "" && len(notesReferencingListValues(notes, "repo_anchors", []string{anchor})) == 0 {
+			out = append(out, "orphaned_anchor:"+anchor)
+		}
+	}
+	return out
+}
+
 func suggestVaultNotes(ctx context.Context, doc bridgeDoc, notes []bridgeVaultNote, limit int, project string, provider DocsBridgeSearchProvider) []bridgeSuggestion {
 	if limit <= 0 {
 		limit = 5
@@ -905,7 +974,7 @@ func suggestVaultNotes(ctx context.Context, doc bridgeDoc, notes []bridgeVaultNo
 	}
 	suggestions := make([]bridgeSuggestion, 0, len(notes))
 	for _, note := range notes {
-		score := scoreBridgeNote(note, doc.RelPath, queryTokens, docCategory) + providerBoosts[filepath.ToSlash(note.Path)]
+		score := scoreBridgeNote(note, doc, queryTokens, docCategory) + providerBoosts[filepath.ToSlash(note.Path)]
 		if score <= 0 {
 			continue
 		}
@@ -939,12 +1008,22 @@ func bridgeSearchQuery(doc bridgeDoc) string {
 	return strings.Join(parts, " ")
 }
 
-func scoreBridgeNote(note bridgeVaultNote, docPath string, tokens []string, docCategory string) int {
-	docPath = filepath.ToSlash(strings.TrimSpace(docPath))
+func scoreBridgeNote(note bridgeVaultNote, doc bridgeDoc, tokens []string, docCategory string) int {
+	docPath := filepath.ToSlash(strings.TrimSpace(doc.RelPath))
 	score := 0
 	for _, repoDoc := range note.FrontLists["repo_docs"] {
 		if filepath.ToSlash(strings.TrimSpace(repoDoc)) == docPath {
 			score += 50
+		}
+	}
+	for _, repoAnchor := range doc.FrontLists["repo_anchors"] {
+		if containsString(note.FrontLists["repo_anchors"], repoAnchor) {
+			score += 36
+		}
+	}
+	for _, repoSymbol := range doc.FrontLists["repo_symbols"] {
+		if containsString(note.FrontLists["repo_symbols"], repoSymbol) {
+			score += 24
 		}
 	}
 	titleLower := strings.ToLower(note.Title)
@@ -1175,7 +1254,7 @@ func parseBridgeFrontmatter(text string) (map[string][]string, map[string]string
 			values[key] = strings.Trim(value, `"'`)
 		}
 		switch key {
-		case "repo_docs", "vault_refs", "suggested_vault_refs", "paths", "symbols", "anchor_paths", "impl_anchor_paths", "support_anchor_paths", "resource_anchor_paths":
+		case "repo_docs", "repo_anchors", "repo_symbols", "vault_refs", "suggested_vault_refs", "paths", "symbols", "anchor_paths", "impl_anchor_paths", "support_anchor_paths", "resource_anchor_paths":
 			if value == "" {
 				current = key
 				continue
@@ -1407,12 +1486,14 @@ func bridgeTitleFromContent(path, body string) string {
 	return base
 }
 
-func renderDocsBridgeDraft(project string, doc bridgeDoc, existingVaultRefs, existingBackrefs []string, suggestions []bridgeSuggestion) string {
+func renderDocsBridgeDraft(project string, doc bridgeDoc, existingVaultRefs, existingBackrefs []string, suggestions []bridgeSuggestion, healthFindings []string) string {
 	title := doc.Title + " Bridge"
 	suggestedPaths := make([]string, 0, len(suggestions))
 	for _, suggestion := range suggestions {
 		suggestedPaths = append(suggestedPaths, suggestion.Path)
 	}
+	repoAnchors := uniqueStrings(doc.FrontLists["repo_anchors"])
+	repoSymbols := uniqueStrings(doc.FrontLists["repo_symbols"])
 	var b strings.Builder
 	b.WriteString("---\n")
 	b.WriteString("title: " + title + "\n")
@@ -1422,6 +1503,18 @@ func renderDocsBridgeDraft(project string, doc bridgeDoc, existingVaultRefs, exi
 	b.WriteString("trust: raw\n")
 	b.WriteString("repo_docs:\n")
 	b.WriteString("  - " + doc.RelPath + "\n")
+	if len(repoAnchors) > 0 {
+		b.WriteString("repo_anchors:\n")
+		for _, anchor := range repoAnchors {
+			b.WriteString("  - " + anchor + "\n")
+		}
+	}
+	if len(repoSymbols) > 0 {
+		b.WriteString("repo_symbols:\n")
+		for _, symbol := range repoSymbols {
+			b.WriteString("  - " + symbol + "\n")
+		}
+	}
 	b.WriteString("vault_refs:\n")
 	refs := uniqueStrings(append(append([]string{}, existingVaultRefs...), existingBackrefs...))
 	for _, ref := range refs {
@@ -1437,6 +1530,20 @@ func renderDocsBridgeDraft(project string, doc bridgeDoc, existingVaultRefs, exi
 	b.WriteString("## Repo Doc\n\n")
 	b.WriteString("- Path: `" + doc.RelPath + "`\n")
 	b.WriteString("- Title: `" + doc.Title + "`\n\n")
+
+	if len(repoAnchors) > 0 || len(repoSymbols) > 0 || len(healthFindings) > 0 {
+		b.WriteString("## Semantic Anchor Health\n\n")
+		for _, anchor := range repoAnchors {
+			b.WriteString("- Repo anchor: `" + anchor + "`\n")
+		}
+		for _, symbol := range repoSymbols {
+			b.WriteString("- Repo symbol: `" + symbol + "`\n")
+		}
+		for _, finding := range healthFindings {
+			b.WriteString("- Health finding: `" + finding + "`\n")
+		}
+		b.WriteString("\n")
+	}
 
 	b.WriteString("## Existing Links\n\n")
 	if len(existingVaultRefs) == 0 {
@@ -1480,6 +1587,18 @@ func renderDocsBridgeDraft(project string, doc bridgeDoc, existingVaultRefs, exi
 			b.WriteString("```yaml\n")
 			b.WriteString("repo_docs:\n")
 			b.WriteString("  - " + doc.RelPath + "\n")
+			if len(repoAnchors) > 0 {
+				b.WriteString("repo_anchors:\n")
+				for _, anchor := range repoAnchors {
+					b.WriteString("  - " + anchor + "\n")
+				}
+			}
+			if len(repoSymbols) > 0 {
+				b.WriteString("repo_symbols:\n")
+				for _, symbol := range repoSymbols {
+					b.WriteString("  - " + symbol + "\n")
+				}
+			}
 			b.WriteString("```\n\n")
 		}
 	}
@@ -1489,12 +1608,15 @@ func renderDocsBridgeDraft(project string, doc bridgeDoc, existingVaultRefs, exi
 
 func renderDocsBridgeRoot(project, docsRoot string, docs []DocsBridgeDocResult) string {
 	var linked, missing int
+	var anchorRefs, orphanedAnchors int
 	for _, doc := range docs {
 		if len(doc.ExistingVaultRefs) > 0 || len(doc.ExistingRepoDocBackrefs) > 0 || len(doc.SuggestedVaultRefs) > 0 {
 			linked++
 		} else {
 			missing++
 		}
+		anchorRefs += len(doc.RepoAnchors)
+		orphanedAnchors += len(doc.HealthFindings)
 	}
 	var b strings.Builder
 	title := strings.TrimSpace(project) + " Docs Bridge"
@@ -1514,6 +1636,8 @@ func renderDocsBridgeRoot(project, docsRoot string, docs []DocsBridgeDocResult) 
 	b.WriteString("- Docs scanned: `" + fmt.Sprintf("%d", len(docs)) + "`\n")
 	b.WriteString("- Docs with links or suggestions: `" + fmt.Sprintf("%d", linked) + "`\n")
 	b.WriteString("- Docs missing bridge candidates: `" + fmt.Sprintf("%d", missing) + "`\n\n")
+	b.WriteString("- Repo anchors scanned: `" + fmt.Sprintf("%d", anchorRefs) + "`\n")
+	b.WriteString("- Orphaned repo anchors: `" + fmt.Sprintf("%d", orphanedAnchors) + "`\n\n")
 	b.WriteString("## Bridge Drafts\n\n")
 	for _, doc := range docs {
 		b.WriteString("- " + renderVaultWikiLink(doc.DraftPath, doc.Title+" Bridge") + " for `" + doc.DocPath + "`\n")

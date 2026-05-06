@@ -626,6 +626,10 @@ func renderConceptGraphNote(rootWiki string, draft conceptDraft) string {
 	b.WriteString("type: investigation\n")
 	b.WriteString("status: draft\n")
 	b.WriteString("trust: reviewed\n")
+	if repoindex.IsAnchorConceptNode(draft.concept) {
+		b.WriteString("repo_anchors:\n")
+		b.WriteString("  - " + repoindex.RawNodeID(draft.concept.ID) + "\n")
+	}
 	if strings.TrimSpace(draft.concept.File) != "" {
 		b.WriteString("paths:\n")
 		b.WriteString("  - " + filepath.ToSlash(draft.concept.File) + "\n")
