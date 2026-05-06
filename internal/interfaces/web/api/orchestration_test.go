@@ -24,12 +24,20 @@ import (
 	"github.com/joshka0/foxctl/internal/runtime/observability"
 	"github.com/joshka0/foxctl/internal/storage/dbdriver"
 	v2jido "github.com/joshka0/foxctl/internal/v2/adapters/jido"
-	libsqlworkers "github.com/joshka0/foxctl/internal/v2/adapters/libsql/workers"
+	tursoworkers "github.com/joshka0/foxctl/internal/v2/adapters/turso/workers"
 	coreevents "github.com/joshka0/foxctl/internal/v2/core/events"
 	coreorchestration "github.com/joshka0/foxctl/internal/v2/core/orchestration"
 	corespawn "github.com/joshka0/foxctl/internal/v2/core/spawn"
 	coreworker "github.com/joshka0/foxctl/internal/v2/core/worker"
 )
+
+func TestOrchestrationRuntimeBackendDefaultsToGoRuntime(t *testing.T) {
+	t.Setenv(EnvOrchestrationRuntimeBackend, "")
+
+	if got := ResolveOrchestrationRuntimeBackend(); got != orchestrationRuntimeBackendGoruntimeAPI {
+		t.Fatalf("runtime backend=%q want %q", got, orchestrationRuntimeBackendGoruntimeAPI)
+	}
+}
 
 func TestOrchestrationBoardGetHandler_ReturnsEnvelope(t *testing.T) {
 	t.Setenv("FOXCTL_DB_DRIVER", "")
@@ -143,6 +151,7 @@ func TestOrchestrationBoardCardGetHandler_ReturnsCard(t *testing.T) {
 func TestOrchestrationBoardCardGetHandler_IncludeRuntimeReturnsLiveState(t *testing.T) {
 	t.Setenv("FOXCTL_DB_DRIVER", "")
 	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv(EnvOrchestrationRuntimeBackend, orchestrationRuntimeBackendJidoAPI)
 
 	server, socketPath := startOrchestrationJSONRPCServer(t, func(method string, params json.RawMessage) (any, *jsonrpcTestError) {
 		switch method {
@@ -235,6 +244,7 @@ func TestOrchestrationBoardCardGetHandler_IncludeRuntimeReturnsLiveState(t *test
 func TestOrchestrationBoardCardRuntimeGetHandler_ReturnsRuntimeTree(t *testing.T) {
 	t.Setenv("FOXCTL_DB_DRIVER", "")
 	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv(EnvOrchestrationRuntimeBackend, orchestrationRuntimeBackendJidoAPI)
 
 	server, socketPath := startOrchestrationJSONRPCServer(t, func(method string, params json.RawMessage) (any, *jsonrpcTestError) {
 		var parsed map[string]any
@@ -392,7 +402,7 @@ func TestOrchestrationBoardCardGetHandler_ReturnsGoRuntimeSummary(t *testing.T) 
 		t.Fatalf("apply runtime card event: %v", err)
 	}
 
-	workerStore, closeWorkers, err := libsqlworkers.Open(ctx, cfg.Storage.Root)
+	workerStore, closeWorkers, err := tursoworkers.Open(ctx, cfg.Storage.Root)
 	if err != nil {
 		t.Fatalf("open worker store: %v", err)
 	}
@@ -483,7 +493,7 @@ func TestOrchestrationBoardCardRuntimeGetHandler_ReturnsGoRuntimeTree(t *testing
 		t.Fatalf("apply runtime card event: %v", err)
 	}
 
-	workerStore, closeWorkers, err := libsqlworkers.Open(ctx, cfg.Storage.Root)
+	workerStore, closeWorkers, err := tursoworkers.Open(ctx, cfg.Storage.Root)
 	if err != nil {
 		t.Fatalf("open worker store: %v", err)
 	}
@@ -625,6 +635,7 @@ func TestOrchestrationBoardCardGetHandler_EmitsSSEOrchestrationMetadata(t *testi
 func TestOrchestrationDispatchIssueHandler_SpawnsJidoChildAndProjectsRunningCard(t *testing.T) {
 	t.Setenv("FOXCTL_DB_DRIVER", "")
 	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv(EnvOrchestrationRuntimeBackend, orchestrationRuntimeBackendJidoAPI)
 
 	server, socketPath := startOrchestrationJSONRPCServer(t, func(method string, params json.RawMessage) (any, *jsonrpcTestError) {
 		switch method {
@@ -1430,6 +1441,7 @@ func TestOrchestrationRefreshHandler_EndToEndReplayProjectionLaneTransitions(t *
 func TestOrchestrationRefreshHandler_ReconcilesJidoCompletedChildIntoReviewLane(t *testing.T) {
 	t.Setenv("FOXCTL_DB_DRIVER", "")
 	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv(EnvOrchestrationRuntimeBackend, orchestrationRuntimeBackendJidoAPI)
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	ctx := context.Background()

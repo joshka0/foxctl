@@ -11,18 +11,20 @@ through the repo, plus the dependency order for getting to a Go-owned runtime.
 
 ## Current state
 
-The runtime is still hybrid:
+The runtime is still hybrid, but v2 orchestration defaults to the Go-owned
+runtime:
 
 1. The mailbox-driven agent runtime under `internal/agent` and
    `internal/agent/daemon` remains active for `agent run` and several classic agent
    management surfaces.
 2. The newer v2 stack under `internal/v2` owns the clearest event-sourced command and
    orchestration surfaces.
-3. Jido is still part of the live runtime story for some orchestration dispatch,
-   reconcile, and runtime-tree inspection paths.
+3. Go runtime state is the default orchestration backend. Jido remains as an
+   explicit optional backend for compatibility and bridge-specific flows.
 
-That means Jido is not yet purely optional in practice even though that is the intended
-direction.
+That means new durable-execution work should target Go runtime plus Turso-backed
+v2 stores first, then keep Jido behavior as optional compatibility where it is
+still wired.
 
 Important scope note:
 
@@ -43,7 +45,7 @@ Important scope note:
 | `internal/v2/runtime/orchestration` | Long-lived scheduler/reconcile component for board-driven orchestration |
 | `internal/v2/runtime/contextbuilder`, `internal/v2/runtime/enrichers`, `internal/v2/runtime/supervisor` | Context assembly, async enrichment, and component lifecycle management |
 | `internal/v2/adapters/jido` | Jido JSON-RPC client, child spawner, ask/runtime adapter, orchestration reconciler, and optional companion provider |
-| `internal/v2/adapters/libsql/*` | v2 events, projections, orchestration, idmap, and turn stores. The path is historical; the runtime opens Turso/SQLite-compatible stores through the dbdriver layer. |
+| `internal/v2/adapters/turso/*` | v2 events, projections, orchestration, idmap, and turn stores. The old `internal/v2/adapters/libsql` path remains only in `main` history at `938733293b81c9be8787e15300661cf587baa8af`. |
 | `internal/context/companion` | Companion chat/memory service and adapter layer into v2 context building |
 | `internal/agent`, `internal/agent/daemon` | Classic mailbox-driven agent runtime, overseer hierarchy, tool wiring, and foreground daemon loop |
 | `internal/runtime/daemon` | Local daemon service; currently mixes classic runtime behavior with newer v2-backed command helpers |
@@ -59,7 +61,7 @@ Use this shorthand when talking about “legacy” vs “v2” in runtime discus
 | `internal/agent/daemon` | `internal/v2/runtime/{runner,orchestration,supervisor}` | Foreground daemon loop replacement is partial |
 | `internal/runtime/execution/agentmanager` | `internal/v2/services/{spawn,kill,list,run}` | Still used as fallback in some CLI flows |
 | agent-management logic in `internal/runtime/daemon` | prefer `internal/v2/services/*` semantics | `internal/runtime/daemon` remains the hosting shell in places |
-| live Jido runtime-state dependencies in `internal/v2/adapters/jido` | Go-owned runtime state with Jido optional | Adapter remains, default dependence should shrink |
+| live Jido runtime-state dependencies in `internal/v2/adapters/jido` | Go-owned runtime state with Jido optional | Adapter remains for explicit compatibility paths |
 
 For the broader package topology, including what `v2` is **not** replacing, see
 `docs/architecture/package-topology.md`.
@@ -70,33 +72,34 @@ For the broader package topology, including what `v2` is **not** replacing, see
 |--------|--------------|-------|
 | `agent ask` | `cmd/foxctl/cmd/agent.go` -> `internal/v2/services.AskService` | Default can be mailbox-backed; Jido remains an optional dispatcher path |
 | `agent ask-status` | CLI -> v2 projections/events | Reads v2 run state and terminal callback metadata |
-| Overseer orchestration component | `cmd/foxctl/cmd/overseer_v2_orchestration.go` -> `internal/v2/runtime/orchestration` + runtime adapter | Still effectively Jido-oriented in important flows today |
+| Overseer orchestration component | `cmd/foxctl/cmd/overseer_v2_orchestration.go` -> `internal/v2/runtime/orchestration` + runtime adapter | Defaults to Go runtime; set `FOXCTL_V2_ORCHESTRATION_RUNTIME_BACKEND=jido` for the bridge path |
 | Companion layered context | `internal/context/companion` -> `internal/v2/runtime/contextbuilder` -> optional provider | Jido-backed provider is optional, not the desired default |
 | `agent run` | CLI -> `internal/agent/daemon.Run` | Still classic mailbox-driven runtime |
 | `agent spawn` | CLI prefers daemon path, then falls back to legacy `agentmanager` | Not hard-cut to v2 everywhere |
 | `agent list` | CLI -> local agents store | Not v2-service-only in current CLI |
 | `agent kill` | Mixed; CLI still uses legacy/local management path in places | v2 kill service exists but is not the only live path |
-| Web/API runtime tree views | `internal/interfaces/web/api` plus optional Jido client for some runtime state | This is one of the main parity gaps for making Jido optional |
+| Web/API runtime tree views | `internal/interfaces/web/api` plus Go worker state, with optional Jido client for explicit bridge paths | Default runtime-tree reads use Go-owned worker state |
 
 ## Runtime ownership seams that matter now
 
-These are the concrete seams that determine whether Jido is optional in fact or only in
-principle.
+These are the concrete seams that determine how far the Go-owned runtime default
+has replaced older bridge-dependent paths.
 
 | Concern | Current shape | Target shape |
 |--------|---------------|--------------|
 | Child spawn | v2 service already abstracts `RuntimeSpawner` | Default Go spawner backed by Go-owned worker state |
-| Child lifecycle | Jido-oriented runtime state and reconcile for some paths | Go-owned registry, heartbeat, exit state, and reconciler |
-| Runtime tree inspection | Some API handlers still query Jido runtime state directly | Trees derived from Go registry + projections |
-| Control-plane truth | Split across projections and external runtime inspection | Go-owned state as the canonical source |
+| Child lifecycle | Go-owned registry and reconciler are the default; Jido remains explicit | Harden heartbeat, exit state, and orphan recovery |
+| Runtime tree inspection | Go registry first, optional Jido branch when selected | Trees derived from Go registry + projections |
+| Control-plane truth | Projections plus Go-owned runtime state | Keep projections and worker registry canonical for default flows |
 | Engine/backend flexibility | Constrained by runtime ownership not being fully local | Runtime contracts first, engine/backend pluggability second |
 
-## Current Jido-backed orchestration flow
+## Optional Jido-backed orchestration flow
 
-This is the important current path to understand before changing it:
+This path remains available only when `FOXCTL_V2_ORCHESTRATION_RUNTIME_BACKEND`
+is set to `jido`:
 
-1. CLI or daemon wiring enables the orchestration component when Jido-oriented runtime
-   configuration is present.
+1. CLI or daemon wiring selects the Jido orchestration component when explicitly
+   configured.
 2. `cmd/foxctl/cmd/overseer_v2_orchestration.go` opens the v2 event store and
    orchestration projection store.
 3. The Jido adapter creates:

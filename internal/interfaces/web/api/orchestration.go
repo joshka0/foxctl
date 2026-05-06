@@ -23,8 +23,8 @@ import (
 	"github.com/joshka0/foxctl/internal/storage/cas"
 	"github.com/joshka0/foxctl/internal/storage/dbdriver"
 	v2jido "github.com/joshka0/foxctl/internal/v2/adapters/jido"
-	libsqlevents "github.com/joshka0/foxctl/internal/v2/adapters/libsql/events"
-	libsqlorchestration "github.com/joshka0/foxctl/internal/v2/adapters/libsql/orchestration"
+	tursoevents "github.com/joshka0/foxctl/internal/v2/adapters/turso/events"
+	tursoorchestration "github.com/joshka0/foxctl/internal/v2/adapters/turso/orchestration"
 	v2errors "github.com/joshka0/foxctl/internal/v2/core/errors"
 	coreevents "github.com/joshka0/foxctl/internal/v2/core/events"
 	coreorchestration "github.com/joshka0/foxctl/internal/v2/core/orchestration"
@@ -894,6 +894,13 @@ func (s orchestrationRuntimeSpawner) Spawn(ctx context.Context, req corespawn.Re
 	if s.runtimeHost != nil {
 		return s.runtimeHost.Spawn(ctx, req)
 	}
+	if strings.EqualFold(ResolveOrchestrationRuntimeBackend(), orchestrationRuntimeBackendGoruntimeAPI) {
+		return corespawn.Response{}, &v2errors.V2Error{
+			Kind:    v2errors.ErrDependency,
+			Message: "goruntime orchestration dispatch requires a persistent runtime host",
+			Fatal:   true,
+		}
+	}
 	req.ParentAgentID = chooseNonEmpty(strings.TrimSpace(req.ParentAgentID), resolveOrchestrationDispatchParentAgentID())
 	if strings.TrimSpace(req.ParentAgentID) == "" {
 		return corespawn.Response{}, &v2errors.V2Error{
@@ -939,7 +946,7 @@ func (s orchestrationRuntimeSpawner) Spawn(ctx context.Context, req corespawn.Re
 	return spawnService.Spawn(ctx, req)
 }
 
-func openOrchestrationStore(ctx context.Context, cfg config.Config) (*libsqlorchestration.Store, func() error, error) {
+func openOrchestrationStore(ctx context.Context, cfg config.Config) (*tursoorchestration.Store, func() error, error) {
 	storageRoot := strings.TrimSpace(cfg.Storage.Root)
 	if storageRoot == "" {
 		return nil, nil, fmt.Errorf("orchestration store open: storage root is required")
@@ -950,12 +957,12 @@ func openOrchestrationStore(ctx context.Context, cfg config.Config) (*libsqlorch
 		return nil, nil, err
 	}
 
-	db, closeFn, err := dbdriver.OpenDBCompatWithCloser(ctx, dbCfg, libsqlorchestration.MigrateSchema)
+	db, closeFn, err := dbdriver.OpenDBCompatWithCloser(ctx, dbCfg, tursoorchestration.MigrateSchema)
 	if err != nil {
 		return nil, nil, fmt.Errorf("orchestration store open: %w", err)
 	}
 
-	store := libsqlorchestration.NewStore(db, libsqlorchestration.StoreOptions{
+	store := tursoorchestration.NewStore(db, tursoorchestration.StoreOptions{
 		LaneOptions: defaultOrchestrationLaneOptions(),
 	})
 	return store, closeFn, nil
@@ -1057,7 +1064,8 @@ func runOrchestrationRefresh(
 		Str("request_id", strings.TrimSpace(requestID)).
 		Msg("orchestration refresh replay completed")
 
-	if !v2jido.OrchestrationRuntimeEnabled(v2jido.OrchestrationRuntimeConfig{}) {
+	if !strings.EqualFold(ResolveOrchestrationRuntimeBackend(), orchestrationRuntimeBackendJidoAPI) ||
+		!v2jido.OrchestrationRuntimeEnabled(v2jido.OrchestrationRuntimeConfig{}) {
 		return nil
 	}
 
@@ -1083,16 +1091,16 @@ func runOrchestrationRefresh(
 	return nil
 }
 
-func openOrchestrationEventStore(ctx context.Context, cfg config.Config) (*libsqlevents.Store, error) {
+func openOrchestrationEventStore(ctx context.Context, cfg config.Config) (*tursoevents.Store, error) {
 	dbCfg, err := orchestrationDBConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
-	db, closeFn, err := dbdriver.OpenDBCompatWithCloser(ctx, dbCfg, libsqlevents.MigrateSchema)
+	db, closeFn, err := dbdriver.OpenDBCompatWithCloser(ctx, dbCfg, tursoevents.MigrateSchema)
 	if err != nil {
 		return nil, fmt.Errorf("orchestration event store open: %w", err)
 	}
-	return libsqlevents.NewStore(db, closeFn), nil
+	return tursoevents.NewStore(db, closeFn), nil
 }
 
 func seedOrchestrationProjectionCards(
@@ -1334,7 +1342,7 @@ func applyOrchestrationCardAction(
 		IssueID:     req.IssueID,
 	})
 	if err != nil {
-		if errors.Is(err, libsqlorchestration.ErrNotFound) {
+		if errors.Is(err, tursoorchestration.ErrNotFound) {
 			return orchestrationCardActionResponse{}, &v2errors.V2Error{
 				Kind:    v2errors.ErrNotFound,
 				Message: "orchestration card not found",

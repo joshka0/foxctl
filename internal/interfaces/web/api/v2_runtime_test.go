@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -11,8 +12,8 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/joshka0/foxctl/internal/platform/config"
-	libsqlevents "github.com/joshka0/foxctl/internal/v2/adapters/libsql/events"
-	libsqlprojections "github.com/joshka0/foxctl/internal/v2/adapters/libsql/projections"
+	tursoevents "github.com/joshka0/foxctl/internal/v2/adapters/turso/events"
+	tursoprojections "github.com/joshka0/foxctl/internal/v2/adapters/turso/projections"
 	coreevents "github.com/joshka0/foxctl/internal/v2/core/events"
 	runtimeevents "github.com/joshka0/foxctl/internal/v2/runtime/events"
 	"github.com/joshka0/foxctl/internal/v2/runtime/runner"
@@ -26,7 +27,7 @@ func TestV2RunsListHandlerReturnsEnvelope(t *testing.T) {
 	cfg := orchestrationTestConfig(t.TempDir())
 	ctx := context.Background()
 
-	projectionStore, closeFn, err := libsqlprojections.Open(ctx, cfg.Storage.Root)
+	projectionStore, closeFn, err := tursoprojections.Open(ctx, cfg.Storage.Root)
 	if err != nil {
 		t.Fatalf("open projection store: %v", err)
 	}
@@ -119,7 +120,7 @@ func TestV2RunDetailEventsHandlerAfterVersion(t *testing.T) {
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	ctx := context.Background()
-	eventStore, err := libsqlevents.Open(ctx, cfg.Storage.Root)
+	eventStore, err := tursoevents.Open(ctx, cfg.Storage.Root)
 	if err != nil {
 		t.Fatalf("open event store: %v", err)
 	}
@@ -167,6 +168,64 @@ func TestV2RunDetailEventsHandlerAfterVersion(t *testing.T) {
 	}
 }
 
+func TestProjectingV2EventStoreAppendIfAbsentProjectsOnlyNewEvents(t *testing.T) {
+	t.Setenv("FOXCTL_DB_DRIVER", "sqlite")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "sqlite")
+
+	cfg := orchestrationTestConfig(t.TempDir())
+	ctx := context.Background()
+	eventStore, err := tursoevents.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open event store: %v", err)
+	}
+	defer func() { _ = eventStore.Close() }()
+
+	now := time.Date(2026, time.April, 21, 12, 30, 0, 0, time.UTC)
+	eventStore.SetNowForTest(func() time.Time {
+		return now
+	})
+	projections := &recordingProjectionApplier{}
+	store := projectingV2EventStore{
+		eventStore:      eventStore,
+		projectionStore: projections,
+	}
+
+	evt := coreevents.Event{
+		ID:         "evt-projecting-idempotent",
+		StreamID:   "run-projecting-idempotent",
+		StreamType: coreevents.StreamTypeRun,
+		EventType:  coreevents.EventRunStarted,
+		OccurredAt: now,
+		RequestID:  "req-projecting-idempotent",
+		Command:    "run",
+	}
+	result, err := store.AppendIfAbsent(ctx, evt)
+	if err != nil {
+		t.Fatalf("AppendIfAbsent(first) error = %v", err)
+	}
+	if !result.Appended {
+		t.Fatal("AppendIfAbsent(first).Appended=false want true")
+	}
+	if got := projections.Count(); got != 1 {
+		t.Fatalf("projection applies after first append=%d want 1", got)
+	}
+
+	replay := evt
+	replay.StreamVersion = 2
+	replay.Sequence = 2
+	replay.OccurredAt = now.Add(time.Minute)
+	result, err = store.AppendIfAbsent(ctx, replay)
+	if err != nil {
+		t.Fatalf("AppendIfAbsent(replay) error = %v", err)
+	}
+	if result.Appended {
+		t.Fatal("AppendIfAbsent(replay).Appended=true want false")
+	}
+	if got := projections.Count(); got != 1 {
+		t.Fatalf("projection applies after replay=%d want 1", got)
+	}
+}
+
 func TestV2EventsHandlerReplaysCanonicalStream(t *testing.T) {
 	t.Setenv("FOXCTL_DB_DRIVER", "sqlite")
 	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "sqlite")
@@ -174,7 +233,7 @@ func TestV2EventsHandlerReplaysCanonicalStream(t *testing.T) {
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	ctx := context.Background()
-	eventStore, err := libsqlevents.Open(ctx, cfg.Storage.Root)
+	eventStore, err := tursoevents.Open(ctx, cfg.Storage.Root)
 	if err != nil {
 		t.Fatalf("open event store: %v", err)
 	}
@@ -237,7 +296,7 @@ func TestV2EventsStreamHandlerReplaysThenStreamsLiveEvents(t *testing.T) {
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	ctx := context.Background()
-	eventStore, err := libsqlevents.Open(ctx, cfg.Storage.Root)
+	eventStore, err := tursoevents.Open(ctx, cfg.Storage.Root)
 	if err != nil {
 		t.Fatalf("open event store: %v", err)
 	}
@@ -386,6 +445,51 @@ func TestV2RunsCreateExecutesRunAndProjectsState(t *testing.T) {
 	}
 }
 
+func TestV2RunsCreateDuplicateRequestDoesNotInvokeModelTwice(t *testing.T) {
+	t.Setenv("FOXCTL_DB_DRIVER", "sqlite")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "sqlite")
+	t.Setenv("FOXCTL_V2_PROJECTIONS_DB_DRIVER", "sqlite")
+
+	cfg := orchestrationTestConfig(t.TempDir())
+	model := &countingTestV2RunModel{}
+	oldNewModel := newV2RunModel
+	newV2RunModel = func(config.Config, string) (runner.Model, error) {
+		return model, nil
+	}
+	t.Cleanup(func() {
+		newV2RunModel = oldNewModel
+	})
+
+	body := `{
+		"run_id":"run-duplicate-1",
+		"turn_id":"turn-duplicate-1",
+		"request_id":"req-duplicate-1",
+		"prompt":"dedupe this run request",
+		"max_iterations":1
+	}`
+	for i := 1; i <= 2; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/runs?profile=worker", strings.NewReader(body))
+		rr := httptest.NewRecorder()
+		V2RunsHandler(cfg, zerolog.Nop()).ServeHTTP(rr, req)
+		if rr.Code != http.StatusAccepted {
+			t.Fatalf("create %d status=%d body=%s", i, rr.Code, rr.Body.String())
+		}
+		resp := decodeResponseBody(t, rr)
+		if got := strings.TrimSpace(resp["command"].(string)); got != commandV2RunsCreate {
+			t.Fatalf("create %d command=%q want %q", i, got, commandV2RunsCreate)
+		}
+		data, _ := resp["data"].(map[string]any)
+		output, _ := data["output"].(map[string]any)
+		if got := strings.TrimSpace(output["summary"].(string)); got != "model response 1 for dedupe this run request" {
+			t.Fatalf("create %d summary=%q", i, got)
+		}
+	}
+
+	if model.calls != 1 {
+		t.Fatalf("model calls=%d want 1", model.calls)
+	}
+}
+
 func TestV2RunsCreateAsyncStartsRunAndReturnsBeforeCompletion(t *testing.T) {
 	t.Setenv("FOXCTL_DB_DRIVER", "sqlite")
 	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "sqlite")
@@ -473,7 +577,7 @@ func TestV2RunKillAppendsFailureForRunningRun(t *testing.T) {
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	ctx := context.Background()
-	projectionStore, closeFn, err := libsqlprojections.Open(ctx, cfg.Storage.Root)
+	projectionStore, closeFn, err := tursoprojections.Open(ctx, cfg.Storage.Root)
 	if err != nil {
 		t.Fatalf("open projection store: %v", err)
 	}
@@ -531,6 +635,18 @@ func (testV2RunModel) Complete(_ context.Context, in runner.ModelInput) (runner.
 	}, nil
 }
 
+type countingTestV2RunModel struct {
+	calls int
+}
+
+func (m *countingTestV2RunModel) Complete(_ context.Context, in runner.ModelInput) (runner.ModelResponse, error) {
+	m.calls++
+	return runner.ModelResponse{
+		Message: "model response " + strconv.Itoa(m.calls) + " for " + strings.TrimSpace(in.Prompt),
+		Done:    true,
+	}, nil
+}
+
 type blockingTestV2RunModel struct {
 	started chan struct{}
 	release chan struct{}
@@ -547,6 +663,19 @@ func (m blockingTestV2RunModel) Complete(ctx context.Context, in runner.ModelInp
 		Message: "model response for " + strings.TrimSpace(in.Prompt),
 		Done:    true,
 	}, nil
+}
+
+type recordingProjectionApplier struct {
+	events []coreevents.Event
+}
+
+func (p *recordingProjectionApplier) Apply(_ context.Context, evt coreevents.Event) error {
+	p.events = append(p.events, evt.Clone())
+	return nil
+}
+
+func (p *recordingProjectionApplier) Count() int {
+	return len(p.events)
 }
 
 func waitForV2RunStatus(t *testing.T, cfg config.Config, runID string, status string, timeout time.Duration) {

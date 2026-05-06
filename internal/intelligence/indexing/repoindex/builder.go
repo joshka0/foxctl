@@ -172,6 +172,13 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 	applyPackageRollups(nodes, localPackages)
 	applyRepoRollup(nodes, edges, opts.RepoKey, opts.RepoRoot, localPackages)
 	applyCommentEdges(nodes, edges, opts.RepoKey)
+	if opts.IncludeSemanticAnchors {
+		report("semantic_anchors", "building semantic anchor graph edges")
+		if err := applySemanticAnchorEdges(ctx, opts, nodes, edges); err != nil {
+			return result, err
+		}
+		report("semantic_anchors", "finished semantic anchor graph edges")
+	}
 
 	result.Nodes = len(nodes)
 	result.Edges = len(edges)

@@ -83,13 +83,21 @@ func NewLongLivedRunService(
 	specs []supervisor.Spec,
 	observe supervisor.Observer,
 ) *LongLivedRunService {
+	return newLongLivedRunService(NewRunService(runner), specs, observe)
+}
+
+func newLongLivedRunService(
+	runSvc *RunService,
+	specs []supervisor.Spec,
+	observe supervisor.Observer,
+) *LongLivedRunService {
 	filteredSpecs := sanitizeSupervisorSpecs(specs)
 	var host *supervisor.Host
 	if len(filteredSpecs) > 0 {
 		host = supervisor.NewHost(filteredSpecs, observe)
 	}
 	return &LongLivedRunService{
-		run:  NewRunService(runner),
+		run:  runSvc,
 		host: host,
 	}
 }

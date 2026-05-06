@@ -15,9 +15,9 @@ import (
 	"github.com/joshka0/foxctl/internal/storage/dbdriver"
 	v2goruntime "github.com/joshka0/foxctl/internal/v2/adapters/goruntime"
 	v2jido "github.com/joshka0/foxctl/internal/v2/adapters/jido"
-	libsqlevents "github.com/joshka0/foxctl/internal/v2/adapters/libsql/events"
-	libsqlorchestration "github.com/joshka0/foxctl/internal/v2/adapters/libsql/orchestration"
-	libsqlworkers "github.com/joshka0/foxctl/internal/v2/adapters/libsql/workers"
+	tursoevents "github.com/joshka0/foxctl/internal/v2/adapters/turso/events"
+	tursoorchestration "github.com/joshka0/foxctl/internal/v2/adapters/turso/orchestration"
+	tursoworkers "github.com/joshka0/foxctl/internal/v2/adapters/turso/workers"
 	coreorchestration "github.com/joshka0/foxctl/internal/v2/core/orchestration"
 	v2runtimeorchestration "github.com/joshka0/foxctl/internal/v2/runtime/orchestration"
 	runtimeworkers "github.com/joshka0/foxctl/internal/v2/runtime/workers"
@@ -119,6 +119,7 @@ func newOverseerJidoOrchestrationComponent(
 	component := v2runtimeorchestration.NewComponent(v2runtimeorchestration.ComponentConfig{
 		PollInterval: parseDurationMillisEnv(envJidoOrchestrationPollIntervalMS, 5*time.Second),
 		Scheduler:    scheduler,
+		Recovery:     runtime.Reconciler,
 		Reconciler:   runtime.Reconciler,
 		OnError: func(err error) {
 			if err == nil {
@@ -165,7 +166,7 @@ func newOverseerGoOrchestrationComponent(
 		_ = eventStore.Close()
 		return nil, nil, fmt.Errorf("open v2 orchestration store: %w", err)
 	}
-	workerStore, closeWorkers, err := libsqlworkers.Open(ctx, cfg.Storage.Root)
+	workerStore, closeWorkers, err := tursoworkers.Open(ctx, cfg.Storage.Root)
 	if err != nil {
 		_ = closeStore()
 		_ = eventStore.Close()
@@ -243,6 +244,7 @@ func newOverseerGoOrchestrationComponent(
 	component := v2runtimeorchestration.NewComponent(v2runtimeorchestration.ComponentConfig{
 		PollInterval: parseDurationMillisEnv(envJidoOrchestrationPollIntervalMS, 5*time.Second),
 		Scheduler:    scheduler,
+		Recovery:     reconciler,
 		Reconciler:   reconciler,
 		OnError: func(err error) {
 			if err == nil {
@@ -271,7 +273,7 @@ func resolveOverseerOrchestrationRuntimeBackend() string {
 	case orchestrationRuntimeBackendJido:
 		return orchestrationRuntimeBackendJido
 	default:
-		return orchestrationRuntimeBackendJido
+		return orchestrationRuntimeBackendGoSubprocess
 	}
 }
 
@@ -307,7 +309,7 @@ func resolveOverseerSuccessTrackerState() string {
 	return strings.TrimSpace(os.Getenv(v2jido.EnvJidoOrchestrationSuccessTrackerState))
 }
 
-func openOverseerOrchestrationStore(ctx context.Context, cfg config.Config) (*libsqlorchestration.Store, func() error, error) {
+func openOverseerOrchestrationStore(ctx context.Context, cfg config.Config) (*tursoorchestration.Store, func() error, error) {
 	storageRoot := strings.TrimSpace(cfg.Storage.Root)
 	if storageRoot == "" {
 		return nil, nil, fmt.Errorf("orchestration store open: storage root is required")
@@ -318,27 +320,27 @@ func openOverseerOrchestrationStore(ctx context.Context, cfg config.Config) (*li
 		return nil, nil, err
 	}
 
-	db, closeFn, err := dbdriver.OpenDBCompatWithCloser(ctx, dbCfg, libsqlorchestration.MigrateSchema)
+	db, closeFn, err := dbdriver.OpenDBCompatWithCloser(ctx, dbCfg, tursoorchestration.MigrateSchema)
 	if err != nil {
 		return nil, nil, fmt.Errorf("orchestration store open: %w", err)
 	}
 
-	store := libsqlorchestration.NewStore(db, libsqlorchestration.StoreOptions{
+	store := tursoorchestration.NewStore(db, tursoorchestration.StoreOptions{
 		LaneOptions: coreorchestration.DefaultLaneOptions(),
 	})
 	return store, closeFn, nil
 }
 
-func openOverseerOrchestrationEventStore(ctx context.Context, cfg config.Config) (*libsqlevents.Store, error) {
+func openOverseerOrchestrationEventStore(ctx context.Context, cfg config.Config) (*tursoevents.Store, error) {
 	dbCfg, err := overseerOrchestrationDBConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
-	db, closeFn, err := dbdriver.OpenDBCompatWithCloser(ctx, dbCfg, libsqlevents.MigrateSchema)
+	db, closeFn, err := dbdriver.OpenDBCompatWithCloser(ctx, dbCfg, tursoevents.MigrateSchema)
 	if err != nil {
 		return nil, fmt.Errorf("orchestration event store open: %w", err)
 	}
-	return libsqlevents.NewStore(db, closeFn), nil
+	return tursoevents.NewStore(db, closeFn), nil
 }
 
 func overseerOrchestrationDBConfig(cfg config.Config) (dbdriver.Config, error) {

@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/storage/dbutil"
-	libsqlevents "github.com/joshka0/foxctl/internal/v2/adapters/libsql/events"
-	"github.com/joshka0/foxctl/internal/v2/adapters/libsql/idmap"
+	tursoevents "github.com/joshka0/foxctl/internal/v2/adapters/turso/events"
+	"github.com/joshka0/foxctl/internal/v2/adapters/turso/idmap"
 	v2errors "github.com/joshka0/foxctl/internal/v2/core/errors"
 	v2events "github.com/joshka0/foxctl/internal/v2/core/events"
 )
@@ -24,14 +24,14 @@ func TestEventReplay_RebuildsProjection(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = closeFn() })
 
-	if err := libsqlevents.MigrateSchema(ctx, db); err != nil {
+	if err := tursoevents.MigrateSchema(ctx, db); err != nil {
 		t.Fatalf("migrate events: %v", err)
 	}
 	if err := MigrateSchema(ctx, db); err != nil {
 		t.Fatalf("migrate projections: %v", err)
 	}
 
-	eventStore := libsqlevents.NewStore(db, db.Close)
+	eventStore := tursoevents.NewStore(db, db.Close)
 	eventStoreAppendNow := time.Date(2026, time.February, 18, 14, 0, 0, 0, time.UTC)
 	eventStoreNow := eventStoreAppendNow
 	eventStoreNowFn := func() time.Time {
@@ -103,7 +103,7 @@ func TestProjectionStore_LegacyEntityLookup(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = closeFn() })
 
-	if err := libsqlevents.MigrateSchema(ctx, db); err != nil {
+	if err := tursoevents.MigrateSchema(ctx, db); err != nil {
 		t.Fatalf("migrate events: %v", err)
 	}
 	if err := MigrateSchema(ctx, db); err != nil {
@@ -113,7 +113,7 @@ func TestProjectionStore_LegacyEntityLookup(t *testing.T) {
 		t.Fatalf("migrate idmap: %v", err)
 	}
 
-	eventStore := libsqlevents.NewStore(db, db.Close)
+	eventStore := tursoevents.NewStore(db, db.Close)
 	eventStoreNow := time.Date(2026, time.February, 18, 14, 30, 0, 0, time.UTC)
 	eventStoreNowFn := func() time.Time {
 		current := eventStoreNow
@@ -165,14 +165,14 @@ func TestReplayFrom_DelegatesToAdditionalProjector(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = closeFn() })
 
-	if err := libsqlevents.MigrateSchema(ctx, db); err != nil {
+	if err := tursoevents.MigrateSchema(ctx, db); err != nil {
 		t.Fatalf("migrate events: %v", err)
 	}
 	if err := MigrateSchema(ctx, db); err != nil {
 		t.Fatalf("migrate projections: %v", err)
 	}
 
-	eventStore := libsqlevents.NewStore(db, db.Close)
+	eventStore := tursoevents.NewStore(db, db.Close)
 	eventStore.SetNowForTest(func() time.Time { return time.Date(2026, time.February, 18, 15, 0, 0, 0, time.UTC) })
 	if err := eventStore.Append(ctx, v2events.Event{
 		ID:            "evt-001",
@@ -210,14 +210,14 @@ func TestReplayFrom_ProjectorErrorFailsReplay(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = closeFn() })
 
-	if err := libsqlevents.MigrateSchema(ctx, db); err != nil {
+	if err := tursoevents.MigrateSchema(ctx, db); err != nil {
 		t.Fatalf("migrate events: %v", err)
 	}
 	if err := MigrateSchema(ctx, db); err != nil {
 		t.Fatalf("migrate projections: %v", err)
 	}
 
-	eventStore := libsqlevents.NewStore(db, db.Close)
+	eventStore := tursoevents.NewStore(db, db.Close)
 	eventStore.SetNowForTest(func() time.Time { return time.Date(2026, time.February, 18, 15, 10, 0, 0, time.UTC) })
 	if err := eventStore.Append(ctx, v2events.Event{
 		ID:            "evt-err-001",

@@ -28,33 +28,33 @@ const (
 
 // ModelInput captures the model request for one iteration.
 type ModelInput struct {
-	Prompt        string
-	Iteration     int
-	MaxIterations int
-	Tools         []coretool.ToolDef
-	Messages      []ModelMessage
+	Prompt        string             `json:"prompt,omitempty"`
+	Iteration     int                `json:"iteration"`
+	MaxIterations int                `json:"max_iterations,omitempty"`
+	Tools         []coretool.ToolDef `json:"tools,omitempty"`
+	Messages      []ModelMessage     `json:"messages,omitempty"`
 }
 
 // ModelResponse captures model output for one iteration.
 type ModelResponse struct {
-	Message   string
-	ToolCalls []run.ToolCall
-	Done      bool
+	Message   string         `json:"message,omitempty"`
+	ToolCalls []run.ToolCall `json:"tool_calls,omitempty"`
+	Done      bool           `json:"done"`
 }
 
 // ModelMessage is the provider-neutral message history passed to a model.
 type ModelMessage struct {
-	Role       string
-	Content    string
-	ToolCalls  []run.ToolCall
-	ToolCallID string
-	Name       string
+	Role       string         `json:"role"`
+	Content    string         `json:"content,omitempty"`
+	ToolCalls  []run.ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string         `json:"tool_call_id,omitempty"`
+	Name       string         `json:"name,omitempty"`
 }
 
 // ToolResult captures tool execution output.
 type ToolResult struct {
-	Status string
-	Output string
+	Status string `json:"status,omitempty"`
+	Output string `json:"output,omitempty"`
 }
 
 // Model abstracts LLM completion for deterministic runner tests.
@@ -84,12 +84,17 @@ type Config struct {
 	Tools          []coretool.ToolDef
 	RLMREPLFactory RLMREPLRunnerFactory
 	ToolExecutor   ToolExecutor
+	EffectJournal  run.EffectJournal
 	TurnRecorder   run.TurnRecorder
 	Hooks          HookRunner
 	Now            func() time.Time
 	NewID          func() string
 	ObserveStage   StageObserver
 	OnEventError   func(error)
+
+	// StrictDurableIdentity requires caller-supplied run_id, turn_id, and
+	// request_id before any runner side effects execute.
+	StrictDurableIdentity bool
 }
 
 // EventPublisher fan-outs runtime events to background subscribers.

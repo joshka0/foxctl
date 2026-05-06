@@ -30,6 +30,7 @@ type executionState struct {
 	modelMessages []ModelMessage
 	streamVersion int64
 	sequence      int64
+	eventOrdinal  int64
 }
 
 // Pipeline executes the canonical v2 runner stage sequence.
@@ -74,7 +75,14 @@ func New(cfg Config) *Pipeline {
 
 // RunTurn executes one turn through the canonical stage sequence.
 func (p *Pipeline) RunTurn(ctx context.Context, in run.TurnInput) (run.TurnOutput, error) {
+	in, verr := p.prepareTurnIdentity(in)
+	if verr != nil {
+		return run.TurnOutput{TurnID: strings.TrimSpace(in.TurnID)}, verr
+	}
 	st := &executionState{in: in, out: run.TurnOutput{TurnID: strings.TrimSpace(in.TurnID)}}
+	if verr := p.seedEventCursor(ctx, st); verr != nil {
+		return st.out, verr
+	}
 
 	stages := []stageDef{
 		{name: StageInitContext, fn: p.stageInitContext},
@@ -125,6 +133,89 @@ func (p *Pipeline) RunTurn(ctx context.Context, in run.TurnInput) (run.TurnOutpu
 	return st.out, nil
 }
 
+func (p *Pipeline) prepareTurnIdentity(in run.TurnInput) (run.TurnInput, *v2errors.V2Error) {
+	in.RunID = strings.TrimSpace(in.RunID)
+	in.TurnID = strings.TrimSpace(in.TurnID)
+	in.RequestID = strings.TrimSpace(in.RequestID)
+	in.CorrelationID = strings.TrimSpace(in.CorrelationID)
+	in.CausationID = strings.TrimSpace(in.CausationID)
+
+	if p.cfg.StrictDurableIdentity {
+		missing := make([]string, 0, 3)
+		if in.RunID == "" {
+			missing = append(missing, "run_id")
+		}
+		if in.TurnID == "" {
+			missing = append(missing, "turn_id")
+		}
+		if in.RequestID == "" {
+			missing = append(missing, "request_id")
+		}
+		if len(missing) > 0 {
+			return in, &v2errors.V2Error{
+				Kind:    v2errors.ErrValidation,
+				Message: "durable run identity requires run_id, turn_id, and request_id",
+				Fatal:   true,
+				Details: map[string]any{
+					"missing_fields": missing,
+				},
+			}
+		}
+	}
+
+	if in.RunID == "" {
+		in.RunID = fmt.Sprintf("run-%s", p.cfg.NewID())
+	}
+	if in.TurnID == "" {
+		in.TurnID = fmt.Sprintf("turn-%s", p.cfg.NewID())
+	}
+	if in.RequestID == "" {
+		in.RequestID = p.cfg.NewID()
+	}
+	if in.CorrelationID == "" {
+		in.CorrelationID = in.RequestID
+	}
+	if in.CausationID == "" {
+		in.CausationID = in.RequestID
+	}
+	return in, nil
+}
+
+func (p *Pipeline) seedEventCursor(ctx context.Context, st *executionState) *v2errors.V2Error {
+	if err := ctx.Err(); err != nil {
+		return contextError(StageInitContext, err)
+	}
+
+	reader, ok := p.cfg.EventStore.(events.StreamCursorReader)
+	if !ok || reader == nil {
+		if p.cfg.StrictDurableIdentity {
+			return &v2errors.V2Error{
+				Kind:    v2errors.ErrDependency,
+				Message: "event stream cursor reader is required for durable runner execution",
+				Fatal:   true,
+			}
+		}
+		return nil
+	}
+
+	cursor, err := reader.ReadStreamCursor(ctx, events.StreamCursorRequest{
+		StreamID:   st.in.RunID,
+		StreamType: events.StreamTypeRun,
+	})
+	if err != nil {
+		return &v2errors.V2Error{
+			Kind:      v2errors.ErrDependency,
+			Message:   "read event stream cursor",
+			Cause:     err,
+			Fatal:     true,
+			Retryable: true,
+		}
+	}
+	st.streamVersion = cursor.StreamVersion
+	st.sequence = cursor.Sequence
+	return nil
+}
+
 func (p *Pipeline) observe(stageName string) {
 	if p.cfg.ObserveStage != nil {
 		p.cfg.ObserveStage(stageName)
@@ -166,8 +257,9 @@ func (p *Pipeline) appendEvent(ctx context.Context, st *executionState, stageNam
 
 	st.sequence++
 	st.streamVersion++
+	st.eventOrdinal++
 	evt := events.Event{
-		ID:            p.cfg.NewID(),
+		ID:            p.eventID(st, evtType),
 		StreamID:      st.in.RunID,
 		StreamType:    events.StreamTypeRun,
 		StreamVersion: st.streamVersion,
@@ -182,7 +274,31 @@ func (p *Pipeline) appendEvent(ctx context.Context, st *executionState, stageNam
 		Payload:       raw,
 	}
 
-	if err := p.cfg.EventStore.Append(ctx, evt); err != nil {
+	shouldPublish := true
+	if p.cfg.StrictDurableIdentity {
+		appender, ok := p.cfg.EventStore.(events.AppendIfAbsent)
+		if !ok || appender == nil {
+			return &v2errors.V2Error{
+				Kind:    v2errors.ErrDependency,
+				Message: "idempotent event appender is required for durable runner execution",
+				Fatal:   true,
+			}
+		}
+		result, err := appender.AppendIfAbsent(ctx, evt)
+		if err != nil {
+			return &v2errors.V2Error{
+				Kind:      v2errors.ErrDependency,
+				Message:   "append event if absent",
+				Cause:     err,
+				Fatal:     true,
+				Retryable: true,
+			}
+		}
+		evt = result.Event
+		st.streamVersion = evt.StreamVersion
+		st.sequence = evt.Sequence
+		shouldPublish = result.Appended
+	} else if err := p.cfg.EventStore.Append(ctx, evt); err != nil {
 		return &v2errors.V2Error{
 			Kind:      v2errors.ErrDependency,
 			Message:   "append event",
@@ -191,7 +307,7 @@ func (p *Pipeline) appendEvent(ctx context.Context, st *executionState, stageNam
 			Retryable: true,
 		}
 	}
-	if p.cfg.EventBus != nil {
+	if shouldPublish && p.cfg.EventBus != nil {
 		// Runtime bus fanout is best-effort background wiring; event store append
 		// remains the authoritative path and must not fail when subscribers lag.
 		if err := p.cfg.EventBus.Publish(ctx, evt.Clone()); err != nil {
@@ -199,6 +315,20 @@ func (p *Pipeline) appendEvent(ctx context.Context, st *executionState, stageNam
 		}
 	}
 	return nil
+}
+
+func (p *Pipeline) eventID(st *executionState, evtType events.EventType) string {
+	if !p.cfg.StrictDurableIdentity {
+		return p.cfg.NewID()
+	}
+	return fmt.Sprintf(
+		"evt:run:%s:turn:%s:req:%s:%s:%d",
+		st.in.RunID,
+		st.in.TurnID,
+		st.in.RequestID,
+		evtType,
+		st.eventOrdinal,
+	)
 }
 
 func (p *Pipeline) emitStageFailed(ctx context.Context, st *executionState, stageName string, verr *v2errors.V2Error) *v2errors.V2Error {

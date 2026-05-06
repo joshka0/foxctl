@@ -161,3 +161,51 @@ func TestParseEdgeTypesAcceptsNaturalAliases(t *testing.T) {
 		t.Fatalf("got %#v", got)
 	}
 }
+
+func TestMergeEdgeTypesSupportsSemanticAndAllEdgeSets(t *testing.T) {
+	t.Parallel()
+
+	semantic, err := MergeEdgeTypes([]string{"semantic"}, nil)
+	if err != nil {
+		t.Fatalf("MergeEdgeTypes semantic error = %v", err)
+	}
+	if !edgeTypesContain(semantic, repoindex.EdgeEnforces) || edgeTypesContain(semantic, repoindex.EdgeCoChangesWith) {
+		t.Fatalf("semantic edge set = %#v", semantic)
+	}
+
+	all, err := MergeEdgeTypes([]string{"all"}, nil)
+	if err != nil {
+		t.Fatalf("MergeEdgeTypes all error = %v", err)
+	}
+	if !edgeTypesContain(all, repoindex.EdgeEnforces) || !edgeTypesContain(all, repoindex.EdgeCoChangesWith) {
+		t.Fatalf("all edge set = %#v", all)
+	}
+}
+
+func TestParseDAGGrepRequestSplitsOwnerAndSemanticAnchors(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`{"query":"anchor query","include_anchors":true,"include_owner_containers":false,"include_semantic_anchors":true}`)
+	req, err := ParseDAGGrepRequest(raw)
+	if err != nil {
+		t.Fatalf("ParseDAGGrepRequest error = %v", err)
+	}
+	if req.IncludeAnchors != true {
+		t.Fatal("legacy IncludeAnchors was not preserved")
+	}
+	if req.IncludeOwnerContainers != false {
+		t.Fatal("explicit IncludeOwnerContainers=false was not honored")
+	}
+	if req.IncludeSemanticAnchors != true {
+		t.Fatal("IncludeSemanticAnchors=false, want true")
+	}
+}
+
+func edgeTypesContain(values []repoindex.EdgeType, want repoindex.EdgeType) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}

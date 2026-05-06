@@ -52,12 +52,13 @@ func newIndexRepoBuildCommand() *cobra.Command {
 	var dryRun bool
 	var progress bool
 	var incremental bool
+	var includeSemanticAnchors bool
 
 	cmd := &cobra.Command{
 		Use:   "build",
 		Short: "Build the repo graph index",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includePython, includeRust, includeCSharp, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun, progress, incremental)
+			return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includePython, includeRust, includeCSharp, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun, progress, incremental, includeSemanticAnchors)
 		},
 	}
 
@@ -76,6 +77,7 @@ func newIndexRepoBuildCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Build without writing to the index")
 	cmd.Flags().BoolVar(&progress, "progress", false, "Write coarse build progress logs to stderr")
 	cmd.Flags().BoolVar(&incremental, "incremental", false, "Skip rebuild when stored per-file state and current workspace have no delta")
+	cmd.Flags().BoolVar(&includeSemanticAnchors, "semantic-anchors", false, "Include semantic anchor concept nodes and edges")
 
 	return cmd
 }
@@ -125,12 +127,13 @@ func newIndexRepoExpandCommand() *cobra.Command {
 	var budget int
 	var perNodeCap int
 	var direction string
+	var includeSemanticAnchors bool
 
 	cmd := &cobra.Command{
 		Use:   "expand",
 		Short: "Expand the graph from seed nodes",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runIndexRepoExpand(cmd, workspace, seeds, edgeTypes, depth, budget, perNodeCap, direction)
+			return runIndexRepoExpand(cmd, workspace, seeds, edgeTypes, depth, budget, perNodeCap, direction, includeSemanticAnchors)
 		},
 	}
 
@@ -141,6 +144,7 @@ func newIndexRepoExpandCommand() *cobra.Command {
 	cmd.Flags().IntVar(&budget, "budget", 50, "Max nodes to return")
 	cmd.Flags().IntVar(&perNodeCap, "per-node", 50, "Max edges per node per hop")
 	cmd.Flags().StringVar(&direction, "direction", string(repoindex.DirOut), "Traversal direction: out or in")
+	cmd.Flags().BoolVar(&includeSemanticAnchors, "semantic-anchors", false, "Include semantic anchor edges in traversal")
 	_ = cmd.MarkFlagRequired("seed")
 
 	return cmd
@@ -194,7 +198,7 @@ func newIndexRepoAskCommand() *cobra.Command {
 	return cmd
 }
 
-func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, includeGo, includePython, includeRust, includeCSharp, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun, progress, incremental bool) error {
+func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, includeGo, includePython, includeRust, includeCSharp, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun, progress, incremental, includeSemanticAnchors bool) error {
 	ctx := cmd.Context()
 	start := time.Now()
 
@@ -270,22 +274,23 @@ func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, 
 		}
 	}
 	buildOpts := repoindex.BuildOptions{
-		RepoRoot:              absWorkspace,
-		Patterns:              patterns,
-		IncludeTests:          includeTests,
-		IncludeGo:             includeGo,
-		IncludePython:         includePython,
-		IncludeRust:           includeRust,
-		IncludeCSharp:         includeCSharp,
-		IncludeTypescript:     includeTS,
-		IncludeElixir:         includeElixir,
-		IncludeTerraform:      includeTerraform,
-		IncludeKubernetes:     includeKubernetes,
-		IncludeShell:          includeShell,
-		DryRun:                dryRun,
-		SummaryProvider:       summaryProvider,
-		SymbolSummaryProvider: symbolSummaryProvider,
-		Progress:              progressFn,
+		RepoRoot:               absWorkspace,
+		Patterns:               patterns,
+		IncludeTests:           includeTests,
+		IncludeGo:              includeGo,
+		IncludePython:          includePython,
+		IncludeRust:            includeRust,
+		IncludeCSharp:          includeCSharp,
+		IncludeTypescript:      includeTS,
+		IncludeElixir:          includeElixir,
+		IncludeTerraform:       includeTerraform,
+		IncludeKubernetes:      includeKubernetes,
+		IncludeShell:           includeShell,
+		IncludeSemanticAnchors: includeSemanticAnchors,
+		DryRun:                 dryRun,
+		SummaryProvider:        summaryProvider,
+		SymbolSummaryProvider:  symbolSummaryProvider,
+		Progress:               progressFn,
 	}
 	var result repoindex.BuildResult
 	var deltaBuild repoindex.BuildDeltaResult
@@ -308,12 +313,13 @@ func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, 
 	meta, metaErr := store.GetMeta(ctx)
 
 	data := map[string]any{
-		"workspace":   absWorkspace,
-		"store_path":  store.Path(),
-		"result":      result,
-		"duration_ms": time.Since(start).Milliseconds(),
-		"dry_run":     dryRun,
-		"incremental": incremental,
+		"workspace":        absWorkspace,
+		"store_path":       store.Path(),
+		"result":           result,
+		"duration_ms":      time.Since(start).Milliseconds(),
+		"dry_run":          dryRun,
+		"incremental":      incremental,
+		"semantic_anchors": includeSemanticAnchors,
 	}
 	if deltaAvailable {
 		data["delta"] = delta
@@ -448,7 +454,7 @@ func runIndexRepoSearch(cmd *cobra.Command, workspace, query string, limit int) 
 	return protocol.Write(cmd.OutOrStdout(), env)
 }
 
-func runIndexRepoExpand(cmd *cobra.Command, workspace string, seeds, edgeTypes []string, depth, budget, perNodeCap int, direction string) error {
+func runIndexRepoExpand(cmd *cobra.Command, workspace string, seeds, edgeTypes []string, depth, budget, perNodeCap int, direction string, includeSemanticAnchors bool) error {
 	ctx := cmd.Context()
 
 	absWorkspace, err := filepath.Abs(workspace)
@@ -478,17 +484,19 @@ func runIndexRepoExpand(cmd *cobra.Command, workspace string, seeds, edgeTypes [
 		}
 		return fmt.Errorf("build expand request: %w", err)
 	}
+	req.IncludeSemanticAnchors = includeSemanticAnchors
 	result, err := service.ExpandWithProjection(ctx, req)
 	if err != nil {
 		return fmt.Errorf("repo query expand failed: %w", err)
 	}
 
 	data := map[string]any{
-		"workspace": absWorkspace,
-		"seeds":     req.Seeds,
-		"edges":     repoquery.EdgeTypeValues(req.EdgeTypes),
-		"result":    result.Result,
-		"anchors":   result.Anchors,
+		"workspace":                absWorkspace,
+		"seeds":                    req.Seeds,
+		"edges":                    repoquery.EdgeTypeValues(req.EdgeTypes),
+		"include_semantic_anchors": req.IncludeSemanticAnchors,
+		"result":                   result.Result,
+		"anchors":                  result.Anchors,
 	}
 
 	env := protocol.OK("index.repo.expand", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))

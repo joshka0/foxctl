@@ -31,6 +31,7 @@ func newObsidianGraphBuildCommand() *cobra.Command {
 	var maxSymbolsPerPackage int
 	var includePrefixes []string
 	var excludePrefixes []string
+	var includeAnchorConcepts bool
 
 	cmd := &cobra.Command{
 		Use:   "build",
@@ -61,6 +62,7 @@ func newObsidianGraphBuildCommand() *cobra.Command {
 				MaxSymbolsPerPackage:   maxSymbolsPerPackage,
 				IncludePackagePrefixes: includePrefixes,
 				ExcludePackagePrefixes: excludePrefixes,
+				IncludeAnchorConcepts:  includeAnchorConcepts,
 			})
 			if err != nil {
 				return err
@@ -83,6 +85,7 @@ func newObsidianGraphBuildCommand() *cobra.Command {
 	cmd.Flags().IntVar(&maxSymbolsPerPackage, "max-symbols-per-package", 12, "Maximum symbols per package note")
 	cmd.Flags().StringSliceVar(&includePrefixes, "include-package-prefix", nil, "Only include package paths starting with these prefixes (repeatable)")
 	cmd.Flags().StringSliceVar(&excludePrefixes, "exclude-package-prefix", nil, "Exclude package paths starting with these prefixes (repeatable)")
+	cmd.Flags().BoolVar(&includeAnchorConcepts, "include-anchor-concepts", false, "Include semantic anchor concept nodes in generated graph drafts")
 	return cmd
 }
 

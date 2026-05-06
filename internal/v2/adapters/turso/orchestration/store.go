@@ -275,6 +275,61 @@ func (s *Store) Board(ctx context.Context, req coreorchestration.BoardRequest) (
 	}, nil
 }
 
+// ListRunningCards returns projected non-archived cards that are still marked Running.
+func (s *Store) ListRunningCards(ctx context.Context, req coreorchestration.RunningCardsRequest) ([]coreorchestration.Card, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("v2 orchestration running cards: nil store")
+	}
+	limit := normalizeLimit(req.Limit)
+
+	args := []any{string(coreorchestration.StateRunning)}
+	where := []string{"state = ?", "archived_at = ''"}
+	if ws := strings.TrimSpace(req.WorkspaceID); ws != "" {
+		where = append(where, "workspace_id = ?")
+		args = append(args, ws)
+	}
+	if cursor := strings.TrimSpace(req.Cursor); cursor != "" {
+		where = append(where, "issue_id > ?")
+		args = append(args, cursor)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			COALESCE(workspace_id, ''), issue_id, COALESCE(issue_identifier, ''), COALESCE(title, ''), state, COALESCE(lane, ''),
+			COALESCE(tracker_state, ''), COALESCE(policy_status, ''), COALESCE(last_outcome, ''),
+			COALESCE(eligibility, ''), COALESCE(denial_reason, ''), COALESCE(suggestion, ''),
+			COALESCE(run_id, ''), COALESCE(agent_id, ''), COALESCE(actor_id, ''), COALESCE(attempt, 0),
+			COALESCE(retry_due_at, ''), COALESCE(last_event_type, ''), COALESCE(last_event_at, ''), COALESCE(archived_at, '')
+		FROM v2_orchestration_cards
+		WHERE %s
+		ORDER BY issue_id ASC
+		LIMIT ?
+	`, strings.Join(where, " AND "))
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query running orchestration cards: %w", err)
+	}
+	defer rows.Close()
+
+	cards := make([]coreorchestration.Card, 0, limit)
+	for rows.Next() {
+		card, scanErr := scanCardRow(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		if card.Lane == "" {
+			card.Lane = coreorchestration.DeriveLane(card, s.laneOptions)
+		}
+		cards = append(cards, card)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate running orchestration cards: %w", err)
+	}
+	return cards, nil
+}
+
 // DeleteCards removes projected orchestration cards for the provided issue ids
 // in a workspace. When issueIDs is empty, all cards in the workspace are
 // removed. If appliedEventIDs are provided, corresponding replay guards are

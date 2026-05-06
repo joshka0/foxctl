@@ -133,7 +133,7 @@ Use `spawn.Response` as authoritative for service outcome:
 2. `internal/v2/core/orchestration` for canonical orchestration types/state machine.
 3. `internal/v2/services/orchestration_service.go` for orchestration command boundary.
 4. `internal/v2/runtime/orchestration/*` for long-lived dispatcher/reconciler components.
-5. `internal/v2/adapters/libsql/orchestration/*` for durable projections.
+5. `internal/v2/adapters/turso/orchestration/*` for durable projections.
 
 ## 8. State Model and Kanban Lanes
 

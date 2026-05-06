@@ -21,6 +21,32 @@ type ToolPolicy struct {
 
 	// DenyByDefault indicates the tool requires explicit allowlisting.
 	DenyByDefault bool `json:"deny_by_default,omitempty"`
+
+	// EffectReplay controls whether an incomplete durable tool intent may be
+	// executed again during replay.
+	EffectReplay EffectReplayPolicy `json:"effect_replay,omitempty"`
+}
+
+// EffectReplayPolicy controls retry behavior for incomplete durable tool effects.
+type EffectReplayPolicy string
+
+const (
+	// EffectReplayFailClosed is the default for side-effecting or unknown tools.
+	EffectReplayFailClosed EffectReplayPolicy = "fail_closed"
+	// EffectReplayReadOnly allows retrying a tool whose execution is read-only.
+	EffectReplayReadOnly EffectReplayPolicy = "read_only"
+	// EffectReplayIdempotent allows retrying a tool with its own idempotency key.
+	EffectReplayIdempotent EffectReplayPolicy = "idempotent"
+)
+
+// AllowsIncompleteEffectRetry reports whether an intent-only tool effect may be retried.
+func (p EffectReplayPolicy) AllowsIncompleteEffectRetry() bool {
+	switch p {
+	case EffectReplayReadOnly, EffectReplayIdempotent:
+		return true
+	default:
+		return false
+	}
 }
 
 // ToolDef is the canonical v2 tool definition.
