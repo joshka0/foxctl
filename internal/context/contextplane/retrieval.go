@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/joshka0/foxctl/internal/context/contextengine"
+	"github.com/joshka0/foxctl/internal/intelligence/evidence"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/rerank"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
@@ -61,6 +62,7 @@ type retrievalPolicyFile struct {
 	RankingWeights map[string]int `yaml:"ranking_weights"`
 	ACA            struct {
 		PackageNoteFallback       bool `yaml:"package_note_fallback"`
+		SemanticAnchors           bool `yaml:"semantic_anchors"`
 		CoChangePrior             bool `yaml:"co_change_prior"`
 		CoChangeCommitLimit       int  `yaml:"co_change_commit_limit"`
 		CoChangeMaxFilesPerCommit int  `yaml:"co_change_max_files_per_commit"`
@@ -77,6 +79,7 @@ func DefaultRetrievalOptions() RetrievalOptions {
 		UseRelevantRefBoost:       true,
 		UseHandoffRefBoost:        true,
 		UseCodeHints:              true,
+		UseSemanticAnchors:        false,
 		UseSemanticVaultSearch:    true,
 		UsePackageNoteFallback:    false,
 		UseRepoMotifPrior:         true,
@@ -149,6 +152,7 @@ func (s *WorkspaceStore) loadRetrievalOptions() RetrievalOptions {
 		return opts
 	}
 	opts.UsePackageNoteFallback = policy.ACA.PackageNoteFallback
+	opts.UseSemanticAnchors = policy.ACA.SemanticAnchors
 	opts.UseRepoMotifPrior = true
 	opts.UseCoChangePrior = policy.ACA.CoChangePrior
 	if policy.ACA.CoChangeCommitLimit > 0 {
@@ -204,6 +208,14 @@ func (s *WorkspaceStore) RetrieveWithOptionsAndMemory(ctx context.Context, index
 	codeHints := retrievalCodeHints{}
 	if opts.UseCodeHints {
 		codeHints = deriveCodeHints(ctx, repo, query, result.TopOfMind, report.LatestHandoff)
+	}
+	if opts.UseSemanticAnchors {
+		semanticHints := deriveSemanticAnchorHints(ctx, repo, query, maxInt(limit*8, 24))
+		if !semanticHints.empty() {
+			result.SemanticAnchorHints = &semanticHints
+			codeHints.Paths = uniqueStrings(append(codeHints.Paths, semanticHints.Paths...))
+			codeHints.Symbols = uniqueStrings(append(codeHints.Symbols, semanticHints.Symbols...))
+		}
 	}
 	cochange := emptyCoChangePrior()
 	if opts.UseCoChangePrior {
@@ -279,7 +291,7 @@ func (s *WorkspaceStore) RetrieveWithOptionsAndMemory(ctx context.Context, index
 	}
 	vaultHits := make([]RetrievalHit, 0, len(byPath))
 	for _, hit := range byPath {
-		vaultHits = append(vaultHits, scoreVaultHit(*hit, maxSemantic, codeCentric, s.layout.WorkspacePath, result, report, codeHints, cochange, motifPrior, query, opts))
+		vaultHits = append(vaultHits, scoreVaultHit(*hit, maxSemantic, codeCentric, s.layout.WorkspacePath, result, report, codeHints, cochange, motifPrior, result.SemanticAnchorHints, query, opts))
 	}
 	vaultHits = filterRetrievalHitsByTrust(vaultHits, opts.AllowedTrusts)
 	sort.SliceStable(vaultHits, func(i, j int) bool {
@@ -394,7 +406,7 @@ func (s *WorkspaceStore) DetectContradictions(ctx context.Context, index obsidia
 	return out, nil
 }
 
-func scoreVaultHit(entry scoredVaultHit, maxSemantic int, codeCentric bool, workspacePath string, result RetrievalResult, report Report, codeHints retrievalCodeHints, cochange coChangePrior, motifs repoMotifPrior, query string, opts RetrievalOptions) RetrievalHit {
+func scoreVaultHit(entry scoredVaultHit, maxSemantic int, codeCentric bool, workspacePath string, result RetrievalResult, report Report, codeHints retrievalCodeHints, cochange coChangePrior, motifs repoMotifPrior, semanticHints *SemanticAnchorRetrievalHints, query string, opts RetrievalOptions) RetrievalHit {
 	hit := entry.hit
 	score := entry.lexicalScore * result.Weights.BaseIndexScore
 	if entry.semanticScore > 0 && maxSemantic > 0 {
@@ -424,6 +436,9 @@ func scoreVaultHit(entry scoredVaultHit, maxSemantic int, codeCentric bool, work
 	if opts.UseCoChangePrior {
 		score += coChangeBoostForHit(hit.RepoPaths, cochange, result.Weights)
 	}
+	if opts.UseSemanticAnchors {
+		score += semanticAnchorBoostForHit(hit.RepoPaths, hit.Symbols, semanticHints, result.Weights)
+	}
 	if opts.UseQueryTypeBias {
 		score += queryTypeBias(query, hit, result.Weights)
 	}
@@ -446,6 +461,20 @@ func scoreVaultHit(entry scoredVaultHit, maxSemantic int, codeCentric bool, work
 		AnchorRoles:       cloneAnchorRoles(hit.AnchorRoles),
 		Symbols:           append([]string(nil), hit.Symbols...),
 	}
+}
+
+func semanticAnchorBoostForHit(repoPaths, symbols []string, hints *SemanticAnchorRetrievalHints, weights RetrievalWeights) int {
+	if hints == nil {
+		return 0
+	}
+	score := 0
+	if matchesCodePaths(repoPaths, hints.Paths) {
+		score += weights.CodePath + weights.SemanticMatch
+	}
+	if matchesCodeSymbols(symbols, hints.Symbols) {
+		score += weights.CodeSymbol + weights.SemanticMatch
+	}
+	return score
 }
 
 func cloneAnchorRoles(raw map[string][]string) map[string][]string {
@@ -1149,6 +1178,10 @@ type retrievalCodeHints struct {
 	Symbols []string
 }
 
+func (h SemanticAnchorRetrievalHints) empty() bool {
+	return len(h.Paths) == 0 && len(h.Symbols) == 0 && len(h.Targets) == 0 && len(h.Evidence) == 0 && len(h.Warnings) == 0
+}
+
 func deriveCodeHints(ctx context.Context, repo *repoindex.Store, query string, top *TopOfMind, latest *HandoffRecord) retrievalCodeHints {
 	hints := retrievalCodeHints{}
 	if top != nil {
@@ -1182,6 +1215,112 @@ func deriveCodeHints(ctx context.Context, repo *repoindex.Store, query string, t
 	hints.Paths = uniqueStrings(hints.Paths)
 	hints.Symbols = uniqueStrings(hints.Symbols)
 	return hints
+}
+
+func deriveSemanticAnchorHints(ctx context.Context, repo *repoindex.Store, query string, limit int) SemanticAnchorRetrievalHints {
+	hints := SemanticAnchorRetrievalHints{}
+	if repo == nil || strings.TrimSpace(query) == "" {
+		return hints
+	}
+	engine := repoindex.NewQueryEngine(repo)
+	nodes, err := engine.SearchScored(ctx, query, limit)
+	if err != nil {
+		hints.Warnings = append(hints.Warnings, SemanticAnchorRetrievalWarning{Reason: "search_failed", Message: err.Error()})
+		return hints
+	}
+	seenEdges := map[string]struct{}{}
+	for _, item := range nodes {
+		node := item.Node
+		if repoindex.IsAnchorConceptNode(node) {
+			edges, err := repo.GetIncomingEdges(ctx, node.ID, repoindex.EdgeSetSemanticAnchors, limit)
+			if err != nil {
+				hints.Warnings = append(hints.Warnings, SemanticAnchorRetrievalWarning{Reason: "incoming_edges_failed", Message: err.Error()})
+				continue
+			}
+			addSemanticAnchorEdges(ctx, repo, edges, repoindex.Node{}, seenEdges, &hints)
+			continue
+		}
+		edges, err := repo.GetOutgoingEdges(ctx, node.ID, repoindex.EdgeSetSemanticAnchors, limit)
+		if err != nil {
+			hints.Warnings = append(hints.Warnings, SemanticAnchorRetrievalWarning{Reason: "outgoing_edges_failed", Message: err.Error()})
+			continue
+		}
+		addSemanticAnchorEdges(ctx, repo, edges, node, seenEdges, &hints)
+	}
+	hints.Paths = uniqueStrings(hints.Paths)
+	hints.Symbols = uniqueStrings(hints.Symbols)
+	hints.Targets = uniqueStrings(hints.Targets)
+	return hints
+}
+
+func addSemanticAnchorEdges(ctx context.Context, repo *repoindex.Store, edges []repoindex.Edge, fallbackOwner repoindex.Node, seen map[string]struct{}, hints *SemanticAnchorRetrievalHints) {
+	projection := repoindex.ProjectSemanticAnchorEdges(edges)
+	for _, warning := range projection.Warnings {
+		hints.Warnings = append(hints.Warnings, SemanticAnchorRetrievalWarning{
+			EdgeID:  warning.EdgeID,
+			Reason:  string(warning.Reason),
+			Message: warning.Message,
+		})
+	}
+	for _, edge := range projection.Edges {
+		edgeID := repoindex.SemanticProjectionEdgeID(edge)
+		if _, ok := seen[edgeID]; ok {
+			continue
+		}
+		seen[edgeID] = struct{}{}
+		meta, present, err := repoindex.DecodeAndValidateSemanticAnchorEdge(edge)
+		if err != nil || !present {
+			message := ""
+			if err != nil {
+				message = err.Error()
+			}
+			hints.Warnings = append(hints.Warnings, SemanticAnchorRetrievalWarning{EdgeID: edgeID, Reason: "invalid_edge", Message: message})
+			continue
+		}
+		evidenceMeta := evidence.EvidenceMeta{
+			Source:                  meta.Source,
+			SourcePlane:             meta.SourcePlane,
+			EvidenceClass:           meta.EvidenceClass,
+			EvidenceAuthority:       meta.EvidenceAuthority,
+			AllowedAuthorityEffects: append([]evidence.AuthorityEffect(nil), meta.AllowedAuthorityEffects...),
+		}
+		if err := evidence.ValidateEvidenceMeta(evidenceMeta); err != nil {
+			hints.Warnings = append(hints.Warnings, SemanticAnchorRetrievalWarning{EdgeID: edgeID, Reason: "invalid_evidence", Message: err.Error()})
+			continue
+		}
+		if err := evidence.ValidateRenderSurface(evidenceMeta, evidence.RenderSurfaceEvidenceHint); err != nil {
+			hints.Warnings = append(hints.Warnings, SemanticAnchorRetrievalWarning{EdgeID: edgeID, Reason: "illegal_render_surface", Message: err.Error()})
+			continue
+		}
+		owner := fallbackOwner
+		if owner.ID != meta.OwnerNodeID {
+			fetched, err := repo.GetNode(ctx, meta.OwnerNodeID)
+			if err != nil {
+				hints.Warnings = append(hints.Warnings, SemanticAnchorRetrievalWarning{EdgeID: edgeID, Reason: "owner_missing", Message: err.Error()})
+				continue
+			}
+			owner = fetched
+		}
+		targetDisplay := strings.TrimSpace(meta.TargetDisplay)
+		if targetDisplay == "" {
+			targetDisplay = string(meta.TargetID)
+		}
+		hints.Paths = append(hints.Paths, owner.File)
+		if owner.Kind == repoindex.NodeSymbol && strings.TrimSpace(owner.Name) != "" {
+			hints.Symbols = append(hints.Symbols, owner.Name)
+		}
+		hints.Targets = append(hints.Targets, string(meta.TargetID))
+		hints.Evidence = append(hints.Evidence, SemanticAnchorRetrievalEvidence{
+			EdgeID:        edgeID,
+			OwnerNodeID:   meta.OwnerNodeID,
+			OwnerPath:     owner.File,
+			OwnerSymbol:   owner.Name,
+			Relation:      string(meta.Relation),
+			TargetID:      string(meta.TargetID),
+			TargetDisplay: targetDisplay,
+			EvidenceMeta:  evidenceMeta,
+		})
+	}
 }
 
 func continuityBundlePaths(top *TopOfMind, latest *HandoffRecord, opts RetrievalOptions) []string {

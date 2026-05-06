@@ -325,6 +325,7 @@ type BuildOptions struct {
 	IncludeKubernetes      bool
 	IncludeShell           bool
 	IncludeSemanticAnchors bool
+	IncludeCoChange        bool
 	DryRun                 bool
 	SummaryProvider        FileSummaryProvider
 	SymbolSummaryProvider  SymbolSummaryProvider

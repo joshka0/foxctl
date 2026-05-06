@@ -2,6 +2,8 @@ package analysisflow
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -70,5 +72,103 @@ func TestNewDependenciesCopiesLifecycleRunner(t *testing.T) {
 	deps := NewDependencies(life)
 	if deps.RunSkill != nil {
 		t.Fatalf("expected nil run skill copy, got %#v", deps.RunSkill)
+	}
+}
+
+func TestAnalyzeSemanticAnchorsDefaultDisabledIsNoop(t *testing.T) {
+	workspace := t.TempDir()
+	writeFile(t, workspace, "internal/demo.go", `package demo
+
+// [[test:internal/demo_test.go]]
+func Build() {}
+`)
+
+	resp, err := AnalyzeSemanticAnchors(context.Background(), Request{
+		Workspace: workspace,
+		Payload: Payload{ToolInput: struct {
+			FilePath string `json:"file_path,omitempty"`
+		}{FilePath: "internal/demo.go"}},
+	})
+	if err != nil {
+		t.Fatalf("AnalyzeSemanticAnchors: %v", err)
+	}
+	if resp.Decision != "approve" {
+		t.Fatalf("decision = %q", resp.Decision)
+	}
+	if resp.Context != "" || len(resp.Warnings) != 0 {
+		t.Fatalf("expected disabled no-op, got context=%q warnings=%v", resp.Context, resp.Warnings)
+	}
+}
+
+func TestAnalyzeSemanticAnchorsTouchedFileProducesContext(t *testing.T) {
+	t.Setenv("FOXCTL_SEMANTIC_ANCHORS_HOOK", "1")
+	workspace := t.TempDir()
+	writeFile(t, workspace, "internal/demo_test.go", `package demo
+
+func TestBuild(t *testing.T) {}
+`)
+	writeFile(t, workspace, "internal/demo.go", `package demo
+
+// [[test:internal/demo_test.go]]
+func Build() {}
+`)
+
+	resp, err := AnalyzeSemanticAnchors(context.Background(), Request{
+		Workspace: workspace,
+		Payload: Payload{ToolInput: struct {
+			FilePath string `json:"file_path,omitempty"`
+		}{FilePath: "internal/demo.go"}},
+	})
+	if err != nil {
+		t.Fatalf("AnalyzeSemanticAnchors: %v", err)
+	}
+	if resp.Decision != "approve" {
+		t.Fatalf("decision = %q", resp.Decision)
+	}
+	if !strings.Contains(resp.Context, "Semantic anchors") {
+		t.Fatalf("expected anchor context, got %q", resp.Context)
+	}
+	if !strings.Contains(resp.Context, "Linked test contracts") || !strings.Contains(resp.Context, "internal/demo_test.go") {
+		t.Fatalf("expected linked test contract, got %q", resp.Context)
+	}
+}
+
+func TestAnalyzeSemanticAnchorsInvalidAnchorWarnsWithoutBlocking(t *testing.T) {
+	t.Setenv("FOXCTL_SEMANTIC_ANCHORS_HOOK", "1")
+	workspace := t.TempDir()
+	writeFile(t, workspace, "internal/demo.go", `package demo
+
+// [[test:../secret_test.go]]
+func Build() {}
+`)
+
+	resp, err := AnalyzeSemanticAnchors(context.Background(), Request{
+		Workspace: workspace,
+		Payload: Payload{ToolInput: struct {
+			FilePath string `json:"file_path,omitempty"`
+		}{FilePath: "internal/demo.go"}},
+	})
+	if err != nil {
+		t.Fatalf("AnalyzeSemanticAnchors: %v", err)
+	}
+	if resp.Decision != "approve" {
+		t.Fatalf("invalid anchor should remain advisory, decision=%q", resp.Decision)
+	}
+	if len(resp.Warnings) == 0 {
+		t.Fatalf("expected warnings, got none; context=%q", resp.Context)
+	}
+	if !strings.Contains(resp.Context, "Semantic anchor warnings") {
+		t.Fatalf("expected warning context, got %q", resp.Context)
+	}
+}
+
+func writeFile(t *testing.T, root, rel, body string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
 	}
 }

@@ -136,3 +136,51 @@ func TestBuildSymbolContentDigest_V2SymbolKey(t *testing.T) {
 
 	_ = digest
 }
+
+func TestBuildSemanticEnvelopeContentDigestStableAndMeaningful(t *testing.T) {
+	base := SemanticEnvelopeDigestInput{
+		ProviderVersion: "anchors-v1",
+		Anchors: []SemanticEnvelopeAnchorDigest{
+			{TargetID: "anchor:foxctl:invariant:no-send-without-read", Relation: "ENFORCES", TargetType: "invariant", ValidationStatus: "evidence_only"},
+		},
+		TextSections: []SemanticEnvelopeDigestSection{
+			{Name: "semantic_anchor", Text: "ENFORCES no-send-without-read"},
+		},
+		Keywords: []string{"read-before-write", "read-before-write"},
+	}
+	shuffled := base
+	shuffled.Anchors = append([]SemanticEnvelopeAnchorDigest(nil), base.Anchors...)
+	shuffled.TextSections = append([]SemanticEnvelopeDigestSection(nil), base.TextSections...)
+	shuffled.Keywords = []string{"read-before-write"}
+
+	if got, want := BuildSemanticEnvelopeContentDigest(shuffled), BuildSemanticEnvelopeContentDigest(base); got != want {
+		t.Fatalf("digest changed after stable reorder/dedupe: got=%s want=%s", got, want)
+	}
+
+	changed := base
+	changed.Anchors = append([]SemanticEnvelopeAnchorDigest(nil), base.Anchors...)
+	changed.Anchors[0].Relation = "PROTECTS_AGAINST"
+	if BuildSemanticEnvelopeContentDigest(changed) == BuildSemanticEnvelopeContentDigest(base) {
+		t.Fatal("digest did not change after anchor relation changed")
+	}
+}
+
+func TestBuildSemanticEnvelopeContentDigestCoChangeExplicitOnly(t *testing.T) {
+	base := SemanticEnvelopeDigestInput{
+		ProviderVersion:       "anchors-v1",
+		CoChangeNeighborPaths: []string{"internal/a.go", "internal/b.go"},
+	}
+	otherNeighbors := base
+	otherNeighbors.CoChangeNeighborPaths = []string{"internal/c.go"}
+	if BuildSemanticEnvelopeContentDigest(base) != BuildSemanticEnvelopeContentDigest(otherNeighbors) {
+		t.Fatal("metadata-only cochange neighbors changed digest")
+	}
+
+	withText := base
+	withText.IncludeCoChangeNeighborsInText = true
+	otherWithText := otherNeighbors
+	otherWithText.IncludeCoChangeNeighborsInText = true
+	if BuildSemanticEnvelopeContentDigest(withText) == BuildSemanticEnvelopeContentDigest(otherWithText) {
+		t.Fatal("explicit cochange text digest ignored neighbor paths")
+	}
+}

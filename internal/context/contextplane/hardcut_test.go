@@ -244,6 +244,7 @@ func TestMemoryProposalTypedKind(t *testing.T) {
 		PolicyKindObservationPromote,
 		PolicyKindTensionResolve,
 		PolicyKindMemoryDraft,
+		PolicyKindSemanticAnchorPatch,
 	} {
 		if !kind.IsValid() {
 			t.Errorf("expected %q to be valid", kind)

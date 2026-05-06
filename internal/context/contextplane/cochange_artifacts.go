@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	gitcochange "github.com/joshka0/foxctl/internal/intelligence/indexing/cochange"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
 	"github.com/joshka0/foxctl/internal/storage"
 )
@@ -173,40 +174,13 @@ type coChangeAnchor struct {
 }
 
 func deriveCoChangeAnchors(ctx context.Context, workspacePath string, cfg coChangeConfig, maxClusters int) ([]coChangeAnchor, error) {
-	args := []string{"-C", workspacePath, "log", fmt.Sprintf("-n%d", cfg.CommitLimit), "--format=%H%x1f%ct"}
-	cmd := exec.CommandContext(ctx, "git", args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("git log anchors: %w (%s)", err, strings.TrimSpace(stderr.String()))
+	commits, err := gitcochange.CollectGitCommits(ctx, workspacePath, nil, sharedCoChangeConfig(cfg, 0))
+	if err != nil {
+		return nil, err
 	}
-
-	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
 	counts := map[string]int{}
-	seenCommits := map[string]struct{}{}
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		parts := strings.Split(line, "\x1f")
-		if len(parts) != 2 {
-			continue
-		}
-		sha := strings.TrimSpace(parts[0])
-		if sha == "" {
-			continue
-		}
-		if _, ok := seenCommits[sha]; ok {
-			continue
-		}
-		seenCommits[sha] = struct{}{}
-		files, err := changedFilesForCommit(ctx, workspacePath, sha)
-		if err != nil {
-			return nil, err
-		}
-		files = filterNoisyPaths(normalizeRepoPaths(files))
+	for _, commit := range commits {
+		files := filterNoisyPaths(normalizeRepoPaths(commit.Files))
 		if len(files) < 2 || len(files) > cfg.MaxFilesPerCommit {
 			continue
 		}

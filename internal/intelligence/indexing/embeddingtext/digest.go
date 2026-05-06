@@ -62,6 +62,28 @@ type SymbolDigestInput struct {
 	Aliases []string
 }
 
+type SemanticEnvelopeDigestInput struct {
+	ProviderVersion                string
+	IncludeCoChangeNeighborsInText bool
+	Anchors                        []SemanticEnvelopeAnchorDigest
+	TextSections                   []SemanticEnvelopeDigestSection
+	Keywords                       []string
+	DigestParts                    []string
+	CoChangeNeighborPaths          []string
+}
+
+type SemanticEnvelopeAnchorDigest struct {
+	TargetID         string
+	Relation         string
+	TargetType       string
+	ValidationStatus string
+}
+
+type SemanticEnvelopeDigestSection struct {
+	Name string
+	Text string
+}
+
 // BuildSymbolContentDigest returns a stable digest for symbol embeddings.
 // It uses normalized doc text plus structured identifiers and digests, so
 // whitespace-only edits won't trigger re-embedding while semantic changes will.
@@ -119,6 +141,53 @@ func BuildSymbolContentDigest(input SymbolDigestInput) string {
 	return DigestSHA256(builder.String())
 }
 
+// BuildSemanticEnvelopeContentDigest returns a stable digest for semantic
+// envelope content. It intentionally excludes volatile line numbers,
+// timestamps, commit hashes, scores, and freshness values.
+func BuildSemanticEnvelopeContentDigest(input SemanticEnvelopeDigestInput) string {
+	var builder strings.Builder
+	builder.Grow(256)
+	builder.WriteString("semantic-envelope-v1\n")
+	builder.WriteString("provider:")
+	builder.WriteString(strings.TrimSpace(input.ProviderVersion))
+	builder.WriteString("\ninclude_cochange_text:")
+	if input.IncludeCoChangeNeighborsInText {
+		builder.WriteString("true")
+	} else {
+		builder.WriteString("false")
+	}
+	for _, anchor := range sortSemanticEnvelopeAnchors(input.Anchors) {
+		builder.WriteString("\nanchor:")
+		builder.WriteString(strings.Join([]string{
+			strings.TrimSpace(anchor.TargetID),
+			strings.TrimSpace(anchor.Relation),
+			strings.TrimSpace(anchor.TargetType),
+			strings.TrimSpace(anchor.ValidationStatus),
+		}, "|"))
+	}
+	for _, section := range sortSemanticEnvelopeSections(input.TextSections) {
+		builder.WriteString("\nsection:")
+		builder.WriteString(section.Name)
+		builder.WriteString("=")
+		builder.WriteString(section.Text)
+	}
+	for _, part := range sortDedupStrings(input.DigestParts) {
+		builder.WriteString("\npart:")
+		builder.WriteString(part)
+	}
+	for _, keyword := range sortDedupStrings(input.Keywords) {
+		builder.WriteString("\nkeyword:")
+		builder.WriteString(keyword)
+	}
+	if input.IncludeCoChangeNeighborsInText {
+		for _, path := range sortDedupStrings(input.CoChangeNeighborPaths) {
+			builder.WriteString("\ncochange:")
+			builder.WriteString(path)
+		}
+	}
+	return DigestSHA256(builder.String())
+}
+
 // DigestSHA256Prefix returns the first n characters of the digest.
 // Useful for shorter identifiers when full digest is not needed.
 //
@@ -157,4 +226,61 @@ func sortDedupStrings(items []string) []string {
 	}
 	sort.Strings(filtered)
 	return filtered
+}
+
+func sortSemanticEnvelopeAnchors(items []SemanticEnvelopeAnchorDigest) []SemanticEnvelopeAnchorDigest {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]SemanticEnvelopeAnchorDigest, 0, len(items))
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		item.TargetID = strings.TrimSpace(item.TargetID)
+		item.Relation = strings.TrimSpace(item.Relation)
+		item.TargetType = strings.TrimSpace(item.TargetType)
+		item.ValidationStatus = strings.TrimSpace(item.ValidationStatus)
+		if item.TargetID == "" && item.Relation == "" && item.TargetType == "" && item.ValidationStatus == "" {
+			continue
+		}
+		key := strings.Join([]string{item.TargetID, item.Relation, item.TargetType, item.ValidationStatus}, "\x00")
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, item)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a := strings.Join([]string{out[i].TargetID, out[i].Relation, out[i].TargetType, out[i].ValidationStatus}, "\x00")
+		b := strings.Join([]string{out[j].TargetID, out[j].Relation, out[j].TargetType, out[j].ValidationStatus}, "\x00")
+		return a < b
+	})
+	return out
+}
+
+func sortSemanticEnvelopeSections(items []SemanticEnvelopeDigestSection) []SemanticEnvelopeDigestSection {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]SemanticEnvelopeDigestSection, 0, len(items))
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		item.Name = strings.TrimSpace(item.Name)
+		item.Text = strings.TrimSpace(item.Text)
+		if item.Name == "" || item.Text == "" {
+			continue
+		}
+		key := item.Name + "\x00" + item.Text
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, item)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].Text < out[j].Text
+	})
+	return out
 }

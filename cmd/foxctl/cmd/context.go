@@ -110,6 +110,7 @@ func newContextRetrieveCommand() *cobra.Command {
 	var vaultPath string
 	var query string
 	var limit int
+	var semanticAnchors bool
 
 	cmd := &cobra.Command{
 		Use:   "retrieve",
@@ -143,7 +144,11 @@ func newContextRetrieveCommand() *cobra.Command {
 				return err
 			}
 			defer func() { _ = repo.Close() }()
-			result, err := store.RetrieveWithOptionsAndMemory(ctx, index, repo, openObsidianSemanticProvider(cfg), memStore, query, limit, store.CurrentRetrievalOptions())
+			opts := store.CurrentRetrievalOptions()
+			if semanticAnchors {
+				opts.UseSemanticAnchors = true
+			}
+			result, err := store.RetrieveWithOptionsAndMemory(ctx, index, repo, openObsidianSemanticProvider(cfg), memStore, query, limit, opts)
 			if err != nil {
 				return err
 			}
@@ -159,6 +164,7 @@ func newContextRetrieveCommand() *cobra.Command {
 	cmd.Flags().StringVar(&vaultPath, "vault-path", "", "Vault path")
 	cmd.Flags().StringVar(&query, "query", "", "Retrieval query")
 	cmd.Flags().IntVar(&limit, "limit", 5, "Maximum ranked vault hits")
+	cmd.Flags().BoolVar(&semanticAnchors, "semantic-anchors", false, "Use repoindex semantic anchor evidence as retrieval hints")
 	return cmd
 }
 

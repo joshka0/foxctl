@@ -5,19 +5,21 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/context/contextengine"
+	"github.com/joshka0/foxctl/internal/intelligence/evidence"
 )
 
 // PolicyKind is a typed enum for MemoryProposal.Kind.
 type PolicyKind string
 
 const (
-	PolicyKindRetrievalPatch     PolicyKind = "retrieval_policy_patch"
-	PolicyKindExternalImport     PolicyKind = "external_evidence_import"
-	PolicyKindMethodologyDraft   PolicyKind = "methodology_draft"
-	PolicyKindContradictionNote  PolicyKind = "contradiction_note"
-	PolicyKindObservationPromote PolicyKind = "observation_promote"
-	PolicyKindTensionResolve     PolicyKind = "tension_resolve"
-	PolicyKindMemoryDraft        PolicyKind = "memory_draft"
+	PolicyKindRetrievalPatch      PolicyKind = "retrieval_policy_patch"
+	PolicyKindExternalImport      PolicyKind = "external_evidence_import"
+	PolicyKindMethodologyDraft    PolicyKind = "methodology_draft"
+	PolicyKindContradictionNote   PolicyKind = "contradiction_note"
+	PolicyKindObservationPromote  PolicyKind = "observation_promote"
+	PolicyKindTensionResolve      PolicyKind = "tension_resolve"
+	PolicyKindMemoryDraft         PolicyKind = "memory_draft"
+	PolicyKindSemanticAnchorPatch PolicyKind = "semantic_anchor_patch"
 )
 
 // IsValid reports whether k is a known PolicyKind.
@@ -25,7 +27,7 @@ func (k PolicyKind) IsValid() bool {
 	switch k {
 	case PolicyKindRetrievalPatch, PolicyKindExternalImport, PolicyKindMethodologyDraft,
 		PolicyKindContradictionNote, PolicyKindObservationPromote, PolicyKindTensionResolve,
-		PolicyKindMemoryDraft:
+		PolicyKindMemoryDraft, PolicyKindSemanticAnchorPatch:
 		return true
 	default:
 		return false
@@ -293,6 +295,7 @@ type RetrievalOptions struct {
 	UseRelevantRefBoost       bool     `json:"use_relevant_ref_boost"`
 	UseHandoffRefBoost        bool     `json:"use_handoff_ref_boost"`
 	UseCodeHints              bool     `json:"use_code_hints"`
+	UseSemanticAnchors        bool     `json:"use_semantic_anchors"`
 	UseSemanticVaultSearch    bool     `json:"use_semantic_vault_search"`
 	UsePackageNoteFallback    bool     `json:"use_package_note_fallback"`
 	UseRepoMotifPrior         bool     `json:"use_repo_motif_prior"`
@@ -306,20 +309,46 @@ type RetrievalOptions struct {
 	IncludeControlPlaneRefs   bool     `json:"include_control_plane_refs"`
 }
 
+type SemanticAnchorRetrievalHints struct {
+	Paths    []string                          `json:"paths,omitempty"`
+	Symbols  []string                          `json:"symbols,omitempty"`
+	Targets  []string                          `json:"targets,omitempty"`
+	Evidence []SemanticAnchorRetrievalEvidence `json:"evidence,omitempty"`
+	Warnings []SemanticAnchorRetrievalWarning  `json:"warnings,omitempty"`
+}
+
+type SemanticAnchorRetrievalEvidence struct {
+	EdgeID        string                `json:"edge_id"`
+	OwnerNodeID   string                `json:"owner_node_id"`
+	OwnerPath     string                `json:"owner_path,omitempty"`
+	OwnerSymbol   string                `json:"owner_symbol,omitempty"`
+	Relation      string                `json:"relation"`
+	TargetID      string                `json:"target_id"`
+	TargetDisplay string                `json:"target_display,omitempty"`
+	EvidenceMeta  evidence.EvidenceMeta `json:"evidence_meta"`
+}
+
+type SemanticAnchorRetrievalWarning struct {
+	EdgeID  string `json:"edge_id,omitempty"`
+	Reason  string `json:"reason"`
+	Message string `json:"message,omitempty"`
+}
+
 // RetrievalResult blends control-plane state with ranked vault hits.
 type RetrievalResult struct {
-	WorkspaceID   string               `json:"workspace_id"`
-	Query         string               `json:"query"`
-	TopOfMind     *TopOfMind           `json:"top_of_mind,omitempty"`
-	LatestHandoff *HandoffRecord       `json:"latest_handoff,omitempty"`
-	Observations  []Observation        `json:"observations,omitempty"`
-	Tensions      []Tension            `json:"tensions,omitempty"`
-	VaultHits     []RetrievalHit       `json:"vault_hits,omitempty"`
-	RepoMotifHits []RepoMotifSearchHit `json:"repo_motif_hits,omitempty"`
-	Weights       RetrievalWeights     `json:"weights"`
-	SemanticModel string               `json:"semantic_model,omitempty"`
-	SemanticUsed  bool                 `json:"semantic_used"`
-	GeneratedAt   time.Time            `json:"generated_at"`
+	WorkspaceID         string                        `json:"workspace_id"`
+	Query               string                        `json:"query"`
+	TopOfMind           *TopOfMind                    `json:"top_of_mind,omitempty"`
+	LatestHandoff       *HandoffRecord                `json:"latest_handoff,omitempty"`
+	Observations        []Observation                 `json:"observations,omitempty"`
+	Tensions            []Tension                     `json:"tensions,omitempty"`
+	VaultHits           []RetrievalHit                `json:"vault_hits,omitempty"`
+	RepoMotifHits       []RepoMotifSearchHit          `json:"repo_motif_hits,omitempty"`
+	SemanticAnchorHints *SemanticAnchorRetrievalHints `json:"semantic_anchor_hints,omitempty"`
+	Weights             RetrievalWeights              `json:"weights"`
+	SemanticModel       string                        `json:"semantic_model,omitempty"`
+	SemanticUsed        bool                          `json:"semantic_used"`
+	GeneratedAt         time.Time                     `json:"generated_at"`
 }
 
 // ToEvidencePack converts the RetrievalResult into a canonical EvidencePack.
@@ -394,6 +423,36 @@ func (r *RetrievalResult) ToEvidencePack() contextengine.EvidencePack {
 				"symbols":             hit.Symbols,
 			},
 		})
+	}
+	if r.SemanticAnchorHints != nil {
+		for _, hint := range r.SemanticAnchorHints.Evidence {
+			if err := evidence.ValidateRenderSurface(hint.EvidenceMeta, evidence.RenderSurfaceEvidenceHint); err != nil {
+				continue
+			}
+			ref := contextengine.EvidenceRef{Type: contextengine.RefTypeSymbol, Ref: hint.OwnerNodeID}
+			if hint.OwnerPath != "" {
+				ref = contextengine.EvidenceRef{Type: contextengine.RefTypePath, Ref: hint.OwnerPath}
+			}
+			nodes = append(nodes, contextengine.EvidenceNode{
+				ID:          "semantic_anchor_" + hint.EdgeID,
+				WorkspaceID: r.WorkspaceID,
+				NodeType:    contextengine.EvidenceNodeTypeCode,
+				Ref:         ref,
+				Statement:   fmt.Sprintf("%s %s %s", hint.OwnerSymbol, hint.Relation, hint.TargetDisplay),
+				Confidence:  0.7,
+				Grounding:   contextengine.GroundingValidated,
+				Metadata: map[string]any{
+					"edge_id":        hint.EdgeID,
+					"owner_node_id":  hint.OwnerNodeID,
+					"owner_path":     hint.OwnerPath,
+					"owner_symbol":   hint.OwnerSymbol,
+					"relation":       hint.Relation,
+					"target_id":      hint.TargetID,
+					"target_display": hint.TargetDisplay,
+					"evidence_meta":  hint.EvidenceMeta,
+				},
+			})
+		}
 	}
 	return contextengine.EvidencePack{
 		ID:          fmt.Sprintf("retrieval_%s_%d", r.WorkspaceID, r.GeneratedAt.Unix()),

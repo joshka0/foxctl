@@ -5,9 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
+	gitcochange "github.com/joshka0/foxctl/internal/intelligence/indexing/cochange"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/semanticanchors"
 	"github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/runtime/hooks"
 	"github.com/joshka0/foxctl/internal/runtime/hooks/lifecycle"
@@ -36,6 +40,13 @@ type Response struct {
 	Decision string `json:"decision"`
 	Context  string `json:"context,omitempty"`
 	FilePath string `json:"file_path,omitempty"`
+}
+
+type SemanticAnchorResponse struct {
+	Decision string   `json:"decision"`
+	Context  string   `json:"context,omitempty"`
+	FilePath string   `json:"file_path,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 type complexityEnvelope struct {
@@ -125,6 +136,50 @@ func AnalyzeEditedFile(ctx context.Context, deps Dependencies, req Request) (Res
 	return response, nil
 }
 
+func AnalyzeSemanticAnchors(ctx context.Context, req Request) (SemanticAnchorResponse, error) {
+	target := workspace.Normalize(workspace.Detect(strings.TrimSpace(req.Workspace)))
+	if target == "" {
+		return SemanticAnchorResponse{}, fmt.Errorf("detect workspace")
+	}
+	response := SemanticAnchorResponse{Decision: "approve"}
+	filePath := strings.TrimSpace(req.Payload.ToolInput.FilePath)
+	if filePath == "" {
+		return response, nil
+	}
+	response.FilePath = filePath
+	if !envEnabled("FOXCTL_SEMANTIC_ANCHORS_HOOK") || !isCodeFile(filePath) {
+		return response, nil
+	}
+
+	relPath := normalizeHookRepoPath(target, filePath)
+	if relPath == "" {
+		return response, nil
+	}
+	body, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(relPath)))
+	if err != nil {
+		response.Warnings = append(response.Warnings, "semantic anchors: unable to read touched file: "+err.Error())
+		response.Context = buildSemanticAnchorContext(nil, response.Warnings, nil, nil)
+		return response, nil
+	}
+
+	policy := semanticanchors.DefaultAnchorPolicy(filepath.Base(target), nil)
+	extracted, err := semanticanchors.ExtractAnchorsFromSource(ctx, policy, hookAnchorOwnerResolver{}, relPath, body)
+	if err != nil {
+		response.Warnings = append(response.Warnings, "semantic anchors: unable to parse touched file: "+err.Error())
+		response.Context = buildSemanticAnchorContext(nil, response.Warnings, nil, nil)
+		return response, nil
+	}
+	warnings := semanticAnchorWarnings(extracted)
+	testContracts := linkedSemanticAnchorTestContracts(target, extracted.Occurrences)
+	neighbors := semanticAnchorCoChangeNeighbors(ctx, target, relPath)
+	if len(extracted.Occurrences) == 0 && len(warnings) == 0 && len(testContracts) == 0 && len(neighbors) == 0 {
+		return response, nil
+	}
+	response.Warnings = warnings
+	response.Context = buildSemanticAnchorContext(extracted.Occurrences, warnings, testContracts, neighbors)
+	return response, nil
+}
+
 func isCodeFile(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".go", ".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".c", ".cpp", ".rs":
@@ -160,4 +215,173 @@ func envInt(name string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+type hookAnchorOwnerResolver struct{}
+
+func (hookAnchorOwnerResolver) ResolveFileOwner(path string) semanticanchors.AnchorOwner {
+	return semanticanchors.AnchorOwner{
+		NodeID:    "file:" + path,
+		Kind:      "file",
+		StableKey: path,
+		Path:      path,
+	}
+}
+
+func (hookAnchorOwnerResolver) ResolveSymbolOwner(path string, lang string, span semanticanchors.Span, qualifiedName string) (semanticanchors.AnchorOwner, bool) {
+	name := strings.TrimSpace(qualifiedName)
+	if path == "" || name == "" {
+		return semanticanchors.AnchorOwner{}, false
+	}
+	return semanticanchors.AnchorOwner{
+		NodeID:    "symbol:" + path + ":" + name,
+		Kind:      "symbol",
+		StableKey: path + ":" + name,
+		Path:      path,
+		Name:      name,
+		StartLine: span.LineStart,
+		EndLine:   span.LineEnd,
+	}, true
+}
+
+func normalizeHookRepoPath(workspacePath, filePath string) string {
+	filePath = strings.TrimSpace(filePath)
+	if filePath == "" {
+		return ""
+	}
+	if filepath.IsAbs(filePath) {
+		rel, err := filepath.Rel(workspacePath, filePath)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			return ""
+		}
+		filePath = rel
+	}
+	return filepath.ToSlash(filepath.Clean(filePath))
+}
+
+func semanticAnchorWarnings(extracted semanticanchors.ExtractionResult) []string {
+	seen := map[string]struct{}{}
+	var warnings []string
+	add := func(prefix string, finding semanticanchors.Finding) {
+		if finding.Severity == "" || finding.Severity == semanticanchors.AnchorFindingInfo {
+			return
+		}
+		msg := prefix + string(finding.Reason)
+		if _, ok := seen[msg]; ok {
+			return
+		}
+		seen[msg] = struct{}{}
+		warnings = append(warnings, msg)
+	}
+	for _, finding := range extracted.Findings {
+		add("semantic anchors: ", finding)
+	}
+	for _, occ := range extracted.Occurrences {
+		for _, finding := range occ.Findings {
+			prefix := "semantic anchors"
+			if occ.DisplaySyntax != "" {
+				prefix += " " + occ.DisplaySyntax
+			}
+			add(prefix+": ", finding)
+		}
+	}
+	sort.Strings(warnings)
+	return warnings
+}
+
+func linkedSemanticAnchorTestContracts(workspacePath string, occurrences []semanticanchors.AnchorOccurrence) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	for _, occ := range occurrences {
+		if occ.Type != semanticanchors.AnchorTypeTest && occ.Type != semanticanchors.AnchorTypeTestContract {
+			continue
+		}
+		target := strings.Split(strings.TrimSpace(occ.Target), "#")[0]
+		if target == "" {
+			continue
+		}
+		clean := filepath.ToSlash(filepath.Clean(target))
+		if strings.HasPrefix(clean, "../") || filepath.IsAbs(clean) {
+			continue
+		}
+		if _, ok := seen[clean]; ok {
+			continue
+		}
+		if info, err := os.Stat(filepath.Join(workspacePath, filepath.FromSlash(clean))); err == nil && !info.IsDir() {
+			seen[clean] = struct{}{}
+			out = append(out, clean)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func semanticAnchorCoChangeNeighbors(ctx context.Context, workspacePath, relPath string) []string {
+	if !envEnabled("FOXCTL_SEMANTIC_ANCHORS_COCHANGE") {
+		return nil
+	}
+	commits, err := gitcochange.CollectGitCommits(ctx, workspacePath, []string{relPath}, gitcochange.Config{
+		CommitLimit:          envInt("FOXCTL_SEMANTIC_ANCHORS_COCHANGE_COMMITS", 200),
+		MaxFilesPerCommit:    50,
+		HalfLifeDays:         90,
+		TopKPerFile:          5,
+		Now:                  time.Now().UTC(),
+		SkipGenerated:        true,
+		SkipLockfiles:        true,
+		GiantCommitSoftLimit: 200,
+		GiantCommitHardLimit: 1000,
+	})
+	if err != nil {
+		return nil
+	}
+	scored := gitcochange.Score(commits, gitcochange.Config{TopKPerFile: 5, Now: time.Now().UTC(), SkipGenerated: true, SkipLockfiles: true})
+	neighbors := scored[relPath]
+	out := make([]string, 0, len(neighbors))
+	for _, neighbor := range neighbors {
+		if neighbor.Path != "" {
+			out = append(out, neighbor.Path)
+		}
+	}
+	return out
+}
+
+func buildSemanticAnchorContext(occurrences []semanticanchors.AnchorOccurrence, warnings, testContracts, neighbors []string) string {
+	var parts []string
+	if len(occurrences) > 0 {
+		lines := []string{fmt.Sprintf("**Semantic anchors:** %d anchor(s) in touched file", len(occurrences))}
+		for i, occ := range occurrences {
+			if i >= 5 {
+				lines = append(lines, fmt.Sprintf("- ...and %d more", len(occurrences)-i))
+				break
+			}
+			line := fmt.Sprintf("- `%s` line %d", occ.DisplaySyntax, occ.Span.LineStart)
+			if occ.ValidationStatus != "" {
+				line += " (" + string(occ.ValidationStatus) + ")"
+			}
+			lines = append(lines, line)
+		}
+		parts = append(parts, strings.Join(lines, "\n"))
+	}
+	if len(testContracts) > 0 {
+		lines := []string{"**Linked test contracts:**"}
+		for _, path := range testContracts {
+			lines = append(lines, "- `"+path+"`")
+		}
+		parts = append(parts, strings.Join(lines, "\n"))
+	}
+	if len(neighbors) > 0 {
+		lines := []string{"**Likely co-change neighbors:**"}
+		for _, path := range neighbors {
+			lines = append(lines, "- `"+path+"`")
+		}
+		parts = append(parts, strings.Join(lines, "\n"))
+	}
+	if len(warnings) > 0 {
+		lines := []string{"**Semantic anchor warnings:**"}
+		for _, warning := range warnings {
+			lines = append(lines, "- "+warning)
+		}
+		parts = append(parts, strings.Join(lines, "\n"))
+	}
+	return strings.Join(parts, "\n\n")
 }

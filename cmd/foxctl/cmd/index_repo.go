@@ -53,12 +53,13 @@ func newIndexRepoBuildCommand() *cobra.Command {
 	var progress bool
 	var incremental bool
 	var includeSemanticAnchors bool
+	var includeCoChange bool
 
 	cmd := &cobra.Command{
 		Use:   "build",
 		Short: "Build the repo graph index",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includePython, includeRust, includeCSharp, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun, progress, incremental, includeSemanticAnchors)
+			return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includePython, includeRust, includeCSharp, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun, progress, incremental, includeSemanticAnchors, includeCoChange)
 		},
 	}
 
@@ -78,6 +79,7 @@ func newIndexRepoBuildCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&progress, "progress", false, "Write coarse build progress logs to stderr")
 	cmd.Flags().BoolVar(&incremental, "incremental", false, "Skip rebuild when stored per-file state and current workspace have no delta")
 	cmd.Flags().BoolVar(&includeSemanticAnchors, "semantic-anchors", false, "Include semantic anchor concept nodes and edges")
+	cmd.Flags().BoolVar(&includeCoChange, "cochange", false, "Include empirical git co-change file edges")
 
 	return cmd
 }
@@ -198,7 +200,7 @@ func newIndexRepoAskCommand() *cobra.Command {
 	return cmd
 }
 
-func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, includeGo, includePython, includeRust, includeCSharp, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun, progress, incremental, includeSemanticAnchors bool) error {
+func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, includeGo, includePython, includeRust, includeCSharp, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun, progress, incremental, includeSemanticAnchors, includeCoChange bool) error {
 	ctx := cmd.Context()
 	start := time.Now()
 
@@ -287,6 +289,7 @@ func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, 
 		IncludeKubernetes:      includeKubernetes,
 		IncludeShell:           includeShell,
 		IncludeSemanticAnchors: includeSemanticAnchors,
+		IncludeCoChange:        includeCoChange,
 		DryRun:                 dryRun,
 		SummaryProvider:        summaryProvider,
 		SymbolSummaryProvider:  symbolSummaryProvider,

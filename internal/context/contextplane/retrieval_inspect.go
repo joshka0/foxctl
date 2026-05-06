@@ -18,16 +18,17 @@ import (
 )
 
 type RetrievalInspection struct {
-	Query           string                    `json:"query"`
-	ExpectedPaths   []string                  `json:"expected_paths,omitempty"`
-	RetrievedPaths  []string                  `json:"retrieved_paths,omitempty"`
-	Matched         bool                      `json:"matched"`
-	Classification  string                    `json:"classification"`
-	CandidateNote   string                    `json:"candidate_note,omitempty"`
-	CandidateExists bool                      `json:"candidate_exists"`
-	Observation     Observation               `json:"observation"`
-	Proposal        RetrievalCorrectionAction `json:"proposal"`
-	GeneratedAt     time.Time                 `json:"generated_at"`
+	Query               string                        `json:"query"`
+	ExpectedPaths       []string                      `json:"expected_paths,omitempty"`
+	RetrievedPaths      []string                      `json:"retrieved_paths,omitempty"`
+	Matched             bool                          `json:"matched"`
+	Classification      string                        `json:"classification"`
+	CandidateNote       string                        `json:"candidate_note,omitempty"`
+	CandidateExists     bool                          `json:"candidate_exists"`
+	Observation         Observation                   `json:"observation"`
+	Proposal            RetrievalCorrectionAction     `json:"proposal"`
+	SemanticAnchorHints *SemanticAnchorRetrievalHints `json:"semantic_anchor_hints,omitempty"`
+	GeneratedAt         time.Time                     `json:"generated_at"`
 }
 
 type RetrievalCorrectionAction struct {
@@ -133,7 +134,8 @@ func (s *WorkspaceStore) InspectRetrieval(
 				Kind:    "none",
 				Summary: "ACA retrieval already matched the expected path set.",
 			},
-			GeneratedAt: time.Now().UTC(),
+			SemanticAnchorHints: result.SemanticAnchorHints,
+			GeneratedAt:         time.Now().UTC(),
 		}, nil
 	}
 
@@ -159,6 +161,20 @@ func (s *WorkspaceStore) InspectRetrieval(
 	var proposal RetrievalCorrectionAction
 
 	switch {
+	case opts.UseSemanticAnchors && len(expectedRepoPaths) > 0 && semanticAnchorHintsMissingExpected(result.SemanticAnchorHints, expectedRepoPaths):
+		classification = "missing_semantic_anchor"
+		proposal = RetrievalCorrectionAction{
+			Kind:              "semantic_anchor_patch",
+			Summary:           "Add a reviewed semantic anchor linking the expected code path to this query intent.",
+			ExpectedRepoPaths: expectedRepoPaths,
+		}
+	case opts.UseSemanticAnchors && len(expectedRepoPaths) > 0 && !semanticAnchorHintsMatchExpected(result.SemanticAnchorHints, expectedRepoPaths):
+		classification = "stale_semantic_anchor"
+		proposal = RetrievalCorrectionAction{
+			Kind:              "semantic_anchor_patch",
+			Summary:           "Review existing semantic anchor hints; none point at the expected code path.",
+			ExpectedRepoPaths: expectedRepoPaths,
+		}
 	case candidateExists && !opts.UsePackageNoteFallback && queryLooksCodeCentric(query):
 		classification = "package_note_fallback_disabled"
 		proposal = RetrievalCorrectionAction{
@@ -207,16 +223,17 @@ func (s *WorkspaceStore) InspectRetrieval(
 	}
 
 	return RetrievalInspection{
-		Query:           query,
-		ExpectedPaths:   expectedPaths,
-		RetrievedPaths:  retrievedPaths,
-		Matched:         false,
-		Classification:  classification,
-		CandidateNote:   candidateNote,
-		CandidateExists: candidateExists,
-		Observation:     buildRetrievalObservation(filepath.Base(s.layout.WorkspacePath), classification, query, expectedPaths, candidateNote, result.VaultHits),
-		Proposal:        proposal,
-		GeneratedAt:     time.Now().UTC(),
+		Query:               query,
+		ExpectedPaths:       expectedPaths,
+		RetrievedPaths:      retrievedPaths,
+		Matched:             false,
+		Classification:      classification,
+		CandidateNote:       candidateNote,
+		CandidateExists:     candidateExists,
+		Observation:         buildRetrievalObservation(filepath.Base(s.layout.WorkspacePath), classification, query, expectedPaths, candidateNote, result.VaultHits),
+		Proposal:            proposal,
+		SemanticAnchorHints: result.SemanticAnchorHints,
+		GeneratedAt:         time.Now().UTC(),
 	}, nil
 }
 
@@ -378,6 +395,20 @@ func expectedCodePaths(expected []string) []string {
 		out = append(out, item)
 	}
 	return uniqueStrings(out)
+}
+
+func semanticAnchorHintsMissingExpected(hints *SemanticAnchorRetrievalHints, expectedRepoPaths []string) bool {
+	if len(expectedRepoPaths) == 0 {
+		return false
+	}
+	return hints == nil || (len(hints.Paths) == 0 && len(hints.Evidence) == 0)
+}
+
+func semanticAnchorHintsMatchExpected(hints *SemanticAnchorRetrievalHints, expectedRepoPaths []string) bool {
+	if hints == nil {
+		return false
+	}
+	return matchesCodePaths(expectedRepoPaths, hints.Paths)
 }
 
 func firstPackageNoteCandidate(repoName string, expectedRepoPaths []string) string {

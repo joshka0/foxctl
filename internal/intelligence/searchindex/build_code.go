@@ -33,6 +33,14 @@ type BuildCodeOptions struct {
 
 	// Progress, when set, receives batch-level progress updates.
 	Progress func(BuildProgress)
+
+	// EnvelopeProvider optionally enriches code documents with deterministic
+	// semantic context supplied by a caller-owned provider.
+	EnvelopeProvider CodeEnvelopeProvider
+
+	// IncludeCoChangeNeighborsInEnvelope allows provider-supplied co-change
+	// neighbors to enter embedding text. By default they remain metadata-only.
+	IncludeCoChangeNeighborsInEnvelope bool
 }
 
 // BuildCodeResult summarizes bootstrap activity.
@@ -95,6 +103,7 @@ func BuildCodeDocuments(ctx context.Context, source BootstrapSource, index Store
 			result.Skipped++
 			continue
 		}
+		doc = enrichDocumentWithCodeEnvelope(ctx, opts, doc)
 		symbolPending = append(symbolPending, doc)
 	}
 
@@ -124,6 +133,7 @@ func BuildCodeDocuments(ctx context.Context, source BootstrapSource, index Store
 			result.Skipped++
 			continue
 		}
+		doc = enrichDocumentWithCodeEnvelope(ctx, opts, doc)
 		filePending = append(filePending, doc)
 	}
 
@@ -141,6 +151,20 @@ func BuildCodeDocuments(ctx context.Context, source BootstrapSource, index Store
 		return result, fmt.Errorf("searchindex: bootstrap completed with errors")
 	}
 	return result, nil
+}
+
+func enrichDocumentWithCodeEnvelope(ctx context.Context, opts BuildCodeOptions, doc Document) Document {
+	if opts.EnvelopeProvider == nil {
+		return doc
+	}
+	bits, err := opts.EnvelopeProvider.BuildCodeEnvelope(ctx, CodeEnvelopeRequest{
+		Document:                           doc,
+		IncludeCoChangeNeighborsInEnvelope: opts.IncludeCoChangeNeighborsInEnvelope,
+	})
+	if err != nil {
+		return doc
+	}
+	return applySemanticEnvelope(doc, bits, opts)
 }
 
 func documentFromSymbol(entry storage.NamedEntry) (Document, bool) {
@@ -397,6 +421,12 @@ func embeddingTextForDocument(doc Document) string {
 	}
 	if len(doc.Keywords) > 0 {
 		parts = append(parts, strings.Join(doc.Keywords, " "))
+	}
+	for _, section := range envelopeTextSectionsFromMetadata(doc.Metadata) {
+		parts = append(parts, section.Name+": "+section.Text)
+	}
+	if cochange := coChangeTextFromMetadata(doc.Metadata); cochange != "" {
+		parts = append(parts, "cochange: "+cochange)
 	}
 	text := strings.TrimSpace(strings.Join(parts, "\n"))
 	if text == "" {

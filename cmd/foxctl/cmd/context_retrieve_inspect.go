@@ -18,6 +18,7 @@ func newContextRetrieveInspectCommand() *cobra.Command {
 	var query string
 	var expectedPaths []string
 	var limit int
+	var semanticAnchors bool
 	var apply bool
 	var applyPolicyPatch bool
 	var draftWhenPromotable bool
@@ -57,6 +58,9 @@ func newContextRetrieveInspectCommand() *cobra.Command {
 			defer func() { _ = repo.Close() }()
 
 			opts := store.CurrentRetrievalOptions()
+			if semanticAnchors {
+				opts.UseSemanticAnchors = true
+			}
 			result, err := store.RetrieveWithOptions(ctx, index, repo, openObsidianSemanticProvider(cfg), query, limit, opts)
 			if err != nil {
 				return err
@@ -95,6 +99,9 @@ func newContextRetrieveInspectCommand() *cobra.Command {
 				}
 				policyPatchApplied = true
 				updatedOpts := store.CurrentRetrievalOptions()
+				if semanticAnchors {
+					updatedOpts.UseSemanticAnchors = true
+				}
 				recheckedResult, err := store.RetrieveWithOptions(ctx, index, repo, openObsidianSemanticProvider(cfg), query, limit, updatedOpts)
 				if err != nil {
 					return err
@@ -148,6 +155,7 @@ func newContextRetrieveInspectCommand() *cobra.Command {
 	cmd.Flags().StringVar(&query, "query", "", "Retrieval query")
 	cmd.Flags().StringSliceVar(&expectedPaths, "expected-path", nil, "Expected repo or note path (repeatable)")
 	cmd.Flags().IntVar(&limit, "limit", 5, "Maximum ranked vault hits")
+	cmd.Flags().BoolVar(&semanticAnchors, "semantic-anchors", false, "Use repoindex semantic anchor evidence as retrieval hints")
 	cmd.Flags().BoolVar(&apply, "apply", false, "Persist the generated ACA observation and proposal")
 	cmd.Flags().BoolVar(&applyPolicyPatch, "apply-policy-patch", false, "Apply the suggested retrieval policy patch when safe")
 	cmd.Flags().BoolVar(&draftWhenPromotable, "draft-when-promotable", false, "Draft a promotion note when the generated observation is promotable")

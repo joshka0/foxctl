@@ -3,6 +3,8 @@ package searchindex
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/codefilter"
@@ -31,15 +33,18 @@ func (f fakeBootstrapSource) ListByType(_ context.Context, _ string, entryType s
 type fakeEmbeddingProvider struct {
 	batchCalls  int
 	singleCalls int
+	texts       []string
 }
 
-func (f *fakeEmbeddingProvider) Embed(_ context.Context, _ string) ([]float32, error) {
+func (f *fakeEmbeddingProvider) Embed(_ context.Context, text string) ([]float32, error) {
 	f.singleCalls++
+	f.texts = append(f.texts, text)
 	return []float32{0.5}, nil
 }
 
 func (f *fakeEmbeddingProvider) EmbedBatch(_ context.Context, texts []string) ([][]float32, error) {
 	f.batchCalls++
+	f.texts = append(f.texts, texts...)
 	out := make([][]float32, len(texts))
 	for i := range texts {
 		out[i] = []float32{float32(i + 1)}
@@ -51,6 +56,28 @@ func (f *fakeEmbeddingProvider) Model() string   { return "fake-batch-model" }
 func (f *fakeEmbeddingProvider) Dimensions() int { return 1 }
 
 var _ semantic.EmbeddingProvider = (*fakeEmbeddingProvider)(nil)
+
+type fakeCodeEnvelopeProvider struct {
+	err      error
+	requests []CodeEnvelopeRequest
+}
+
+func (f *fakeCodeEnvelopeProvider) BuildCodeEnvelope(_ context.Context, req CodeEnvelopeRequest) (SemanticEnvelopeBits, error) {
+	f.requests = append(f.requests, req)
+	if f.err != nil {
+		return SemanticEnvelopeBits{}, f.err
+	}
+	return SemanticEnvelopeBits{
+		ProviderVersion: "test-provider-v1",
+		TextSections: []EnvelopeSection{
+			{Name: "semantic_anchor", Text: "ENFORCES anchor:foxctl:invariant:no-send-without-read"},
+		},
+		Keywords:          []string{"read-before-write"},
+		Metadata:          map[string]any{"anchor_count": 1},
+		DigestParts:       []string{"anchor:foxctl:invariant:no-send-without-read", "ENFORCES"},
+		CoChangeNeighbors: []string{"pkg/audit.go"},
+	}, nil
+}
 
 func TestBuildCodeDocuments(t *testing.T) {
 	testCtx := context.Background()
@@ -226,6 +253,116 @@ func TestBuildCodeDocumentsBatchesEmbeddings(t *testing.T) {
 	}
 }
 
+func TestBuildCodeDocumentsAppliesSemanticEnvelopeProvider(t *testing.T) {
+	testCtx := context.Background()
+	store, err := Open(testCtx, t.TempDir())
+	if err != nil {
+		t.Fatalf("open search index: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	source := fakeBootstrapSource{items: map[string][]storage.NamedEntry{
+		symbol.SymbolType: {makeSearchIndexSymbolEntry(t, "pkg/main.go", "Guard")},
+	}}
+	provider := &fakeCodeEnvelopeProvider{}
+	embedder := &fakeEmbeddingProvider{}
+
+	result, err := BuildCodeDocuments(testCtx, source, store, "workspace", BuildCodeOptions{
+		EmbedProvider:    embedder,
+		EnvelopeProvider: provider,
+		EmbedBatchSize:   1,
+	})
+	if err != nil {
+		t.Fatalf("build code documents: %v", err)
+	}
+	if result.Upserted != 1 {
+		t.Fatalf("upserted=%d want 1", result.Upserted)
+	}
+	if len(provider.requests) != 1 {
+		t.Fatalf("provider requests=%d want 1", len(provider.requests))
+	}
+	if len(embedder.texts) != 1 || !strings.Contains(embedder.texts[0], "no-send-without-read") {
+		t.Fatalf("embedding text did not include semantic section: %#v", embedder.texts)
+	}
+	if strings.Contains(embedder.texts[0], "pkg/audit.go") {
+		t.Fatalf("co-change neighbor entered embedding text by default: %q", embedder.texts[0])
+	}
+
+	hits, err := store.LexicalRecall(testCtx, "workspace", "no-send-without-read", RecallOptions{Limit: 5})
+	if err != nil {
+		t.Fatalf("lexical recall: %v", err)
+	}
+	if len(hits) != 1 {
+		t.Fatalf("semantic anchor text not searchable, hits=%d", len(hits))
+	}
+	doc := hits[0].Doc
+	if doc.Metadata[metadataKeySemanticEnvelope] == nil {
+		t.Fatalf("missing semantic envelope metadata: %#v", doc.Metadata)
+	}
+	if doc.Metadata[metadataKeyCoChangeNeighbors] == nil {
+		t.Fatalf("missing metadata-only cochange neighbors: %#v", doc.Metadata)
+	}
+}
+
+func TestBuildCodeDocumentsCanIncludeCoChangeInEmbeddingTextExplicitly(t *testing.T) {
+	testCtx := context.Background()
+	store, err := Open(testCtx, t.TempDir())
+	if err != nil {
+		t.Fatalf("open search index: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	embedder := &fakeEmbeddingProvider{}
+	provider := &fakeCodeEnvelopeProvider{}
+	_, err = BuildCodeDocuments(testCtx, fakeBootstrapSource{items: map[string][]storage.NamedEntry{
+		symbol.SymbolType: {makeSearchIndexSymbolEntry(t, "pkg/main.go", "Guard")},
+	}}, store, "workspace", BuildCodeOptions{
+		EmbedProvider:                      embedder,
+		EnvelopeProvider:                   provider,
+		IncludeCoChangeNeighborsInEnvelope: true,
+	})
+	if err != nil {
+		t.Fatalf("build code documents: %v", err)
+	}
+	if len(embedder.texts) != 1 || !strings.Contains(embedder.texts[0], "pkg/audit.go") {
+		t.Fatalf("co-change neighbor missing from explicit embedding text: %#v", embedder.texts)
+	}
+	if len(provider.requests) != 1 || !provider.requests[0].IncludeCoChangeNeighborsInEnvelope {
+		t.Fatalf("provider did not receive explicit cochange flag: %#v", provider.requests)
+	}
+}
+
+func TestBuildCodeDocumentsEnvelopeProviderErrorKeepsPlainDocument(t *testing.T) {
+	testCtx := context.Background()
+	store, err := Open(testCtx, t.TempDir())
+	if err != nil {
+		t.Fatalf("open search index: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	result, err := BuildCodeDocuments(testCtx, fakeBootstrapSource{items: map[string][]storage.NamedEntry{
+		symbol.SymbolType: {makeSearchIndexSymbolEntry(t, "pkg/main.go", "Guard")},
+	}}, store, "workspace", BuildCodeOptions{
+		EnvelopeProvider: &fakeCodeEnvelopeProvider{err: errors.New("unavailable")},
+	})
+	if err != nil {
+		t.Fatalf("build code documents: %v", err)
+	}
+	if result.Errors != 0 || result.Upserted != 1 {
+		t.Fatalf("result=%+v, want graceful plain document", result)
+	}
+	hits, err := store.LexicalRecall(testCtx, "workspace", "Guard", RecallOptions{Limit: 5})
+	if err != nil {
+		t.Fatalf("lexical recall: %v", err)
+	}
+	if len(hits) != 1 {
+		t.Fatalf("hits=%d want 1", len(hits))
+	}
+	if hits[0].Doc.Metadata != nil {
+		t.Fatalf("metadata=%#v want nil after provider error", hits[0].Doc.Metadata)
+	}
+}
+
 func TestBuildCodeDocumentsValidateInputs(t *testing.T) {
 	testCtx := context.Background()
 	store, err := Open(testCtx, t.TempDir())
@@ -281,5 +418,26 @@ func TestShouldSkipCodePath(t *testing.T) {
 		if got := codefilter.ShouldSkipPath(tt.path); got != tt.want {
 			t.Fatalf("ShouldSkipPath(%q) = %v, want %v", tt.path, got, tt.want)
 		}
+	}
+}
+
+func makeSearchIndexSymbolEntry(t *testing.T, path, name string) storage.NamedEntry {
+	t.Helper()
+	raw, err := json.Marshal(symbol.Result{Symbol: symbol.Symbol{
+		ID:       symbol.ID(path, name),
+		FilePath: path,
+		Name:     name,
+		Language: "go",
+		Kind:     symbol.KindFunction,
+	}})
+	if err != nil {
+		t.Fatalf("marshal symbol payload: %v", err)
+	}
+	return storage.NamedEntry{
+		Name:      "symbol://workspace/" + path + ":" + name,
+		Type:      symbol.SymbolType,
+		Workspace: "workspace",
+		Summary:   "summary " + name,
+		Result:    raw,
 	}
 }

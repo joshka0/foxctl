@@ -42,6 +42,7 @@ import (
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
 	"github.com/joshka0/foxctl/internal/intelligence/repoquery"
+	repoqueryadapters "github.com/joshka0/foxctl/internal/intelligence/repoquery/adapters"
 	"github.com/joshka0/foxctl/internal/intelligence/retrieval"
 	retrievalv2 "github.com/joshka0/foxctl/internal/intelligence/retrieval/v2"
 	"github.com/joshka0/foxctl/internal/intelligence/searchindex"
@@ -1332,11 +1333,13 @@ func searchSymbolsWithRetrieval(
 
 	engine := retrievalv2.NewEngine(indexStore, embedProvider)
 	var repoQuerySvc *repoquery.QueryService
+	var envelopeProvider searchindex.CodeEnvelopeProvider
 	repoMode := normalizeSkillRepoIndexMode(repoIndexMode)
 	if repoMode != "off" {
 		if repoStore, err := repoindex.Open(ctx, cfg.Storage.Root, workspacePath); err == nil {
 			defer repoStore.Close()
 			repoQuerySvc = repoquery.NewQueryService(repoindex.NewQueryEngine(repoStore))
+			envelopeProvider = &repoqueryadapters.SemanticAnchorEnvelopeProvider{Store: repoStore}
 			engine = engine.WithRepoQueryService(repoQueryAdapter{service: repoQuerySvc})
 		}
 	}
@@ -1349,8 +1352,9 @@ func searchSymbolsWithRetrieval(
 
 	var bootstrapErr error
 	if _, err := searchindex.BuildCodeDocuments(ctx, memoryListByTypeSource{store: memStore}, indexStore, workspaceID, searchindex.BuildCodeOptions{
-		Limit:         limit * 10,
-		EmbedProvider: embedProvider,
+		Limit:            limit * 10,
+		EmbedProvider:    embedProvider,
+		EnvelopeProvider: envelopeProvider,
 	}); err != nil {
 		bootstrapErr = skillerr.WrapRuntime("build code search documents", err)
 	}

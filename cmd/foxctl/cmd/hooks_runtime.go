@@ -151,7 +151,7 @@ func newHooksCommand() *cobra.Command {
 		Use:   "hooks",
 		Short: "Go-native lifecycle entrypoints for provider hook wrappers",
 	}
-	cmd.AddCommand(newHooksSessionStartCommand(), newHooksSessionEndCommand(), newHooksSubagentStopCommand(), newHooksTodoSyncCommand(), newHooksTodoContinuationCommand(), newHooksTaskFileLinkCommand(), newHooksContextUpdaterDrainCommand(), newHooksSessionRestorePostcompactCommand(), newHooksOverseerInboxCommand(), newHooksOverseerInboxPostCommand(), newHooksAnchorDetectCommand(), newHooksMemoryDetectorCommand(), newHooksMemoryRecallCommand(), newHooksMemoryLifecycleCommand(), newHooksCodeAnalysisCommand(), newHooksLiveIndexCommand(), newHooksLSPDiagnosticsCommand(), newHooksEmbeddingFlushCommand(), newHooksPlanSyncCommand(), newHooksGraphMaintenanceCommand(), newHooksProposalPacketCommand(), newHooksProposalNextMergeCommand())
+	cmd.AddCommand(newHooksSessionStartCommand(), newHooksSessionEndCommand(), newHooksSubagentStopCommand(), newHooksTodoSyncCommand(), newHooksTodoContinuationCommand(), newHooksTaskFileLinkCommand(), newHooksContextUpdaterDrainCommand(), newHooksSessionRestorePostcompactCommand(), newHooksOverseerInboxCommand(), newHooksOverseerInboxPostCommand(), newHooksAnchorDetectCommand(), newHooksMemoryDetectorCommand(), newHooksMemoryRecallCommand(), newHooksMemoryLifecycleCommand(), newHooksCodeAnalysisCommand(), newHooksSemanticAnchorsCommand(), newHooksLiveIndexCommand(), newHooksLSPDiagnosticsCommand(), newHooksEmbeddingFlushCommand(), newHooksPlanSyncCommand(), newHooksGraphMaintenanceCommand(), newHooksProposalPacketCommand(), newHooksProposalNextMergeCommand())
 	return cmd
 }
 
@@ -675,6 +675,37 @@ func newHooksCodeAnalysisCommand() *cobra.Command {
 				return err
 			}
 			return envelope.Write(cmd.OutOrStdout(), envelope.OK("hooks/code-analysis", map[string]any{
+				"response": response,
+			}, envelope.WithMeta(envelope.Meta{Source: "cli"})))
+		},
+	}
+
+	cmd.Flags().StringVar(&workspacePath, "workspace", "", "Workspace path (default: auto-detect from cwd)")
+	return cmd
+}
+
+func newHooksSemanticAnchorsCommand() *cobra.Command {
+	var workspacePath string
+
+	cmd := &cobra.Command{
+		Use:   "semantic-anchors",
+		Short: "Advisory lint and context for semantic anchors in touched files",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx := cmd.Context()
+			payload, err := readOptionalCodeAnalysisPayload(cmd)
+			if err != nil {
+				return err
+			}
+			response, err := analysisflow.AnalyzeSemanticAnchors(ctx, analysisflow.Request{
+				Workspace: resolveContextWorkspace(workspacePath),
+				Payload: analysisflow.Payload{
+					ToolInput: payload.ToolInput,
+				},
+			})
+			if err != nil {
+				return err
+			}
+			return envelope.Write(cmd.OutOrStdout(), envelope.OK("hooks/semantic-anchors", map[string]any{
 				"response": response,
 			}, envelope.WithMeta(envelope.Meta{Source: "cli"})))
 		},

@@ -179,6 +179,13 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 		}
 		report("semantic_anchors", "finished semantic anchor graph edges")
 	}
+	if opts.IncludeCoChange {
+		report("cochange", "building empirical co-change graph edges")
+		if err := applyCoChangeEdges(ctx, opts, nodes, edges); err != nil {
+			return result, err
+		}
+		report("cochange", "finished empirical co-change graph edges")
+	}
 
 	result.Nodes = len(nodes)
 	result.Edges = len(edges)

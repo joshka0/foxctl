@@ -1268,6 +1268,7 @@ func registerTools(s *server.MCPServer) {
 			mcp.WithBoolean("include_shell", mcp.Description("Include shell scripts (default: false)")),
 			mcp.WithBoolean("include_tests", mcp.Description("Include test files (default: false)")),
 			mcp.WithBoolean("include_semantic_anchors", mcp.Description("Include semantic anchor concept nodes and edges (default: false)")),
+			mcp.WithBoolean("include_cochange", mcp.Description("Include empirical git co-change file edges (default: false)")),
 			mcp.WithBoolean("dry_run", mcp.Description("Build without writing to the index (default: false)")),
 			mcp.WithBoolean("progress", mcp.Description("Emit coarse build progress logs to stderr (default: false)")),
 			mcp.WithBoolean("incremental", mcp.Description("Skip rebuild when stored file state is current (default: false)")),
@@ -3285,6 +3286,7 @@ func executeMCPPipeSource(ctx context.Context, toolName string, args map[string]
 				getBoolArg(args, "progress", false),
 				getBoolArg(args, "incremental", false),
 				getBoolArg(args, "include_semantic_anchors", false),
+				getBoolArg(args, "include_cochange", false),
 			)
 		})
 	case "repo_index_status":
@@ -4439,12 +4441,13 @@ func handleRepoIndexBuild(ctx context.Context, req mcp.CallToolRequest) (*mcp.Ca
 	includeTests := getBoolArg(args, "include_tests", false)
 	dryRun := getBoolArg(args, "dry_run", false)
 	includeSemanticAnchors := getBoolArg(args, "include_semantic_anchors", false)
+	includeCoChange := getBoolArg(args, "include_cochange", false)
 
 	progress := getBoolArg(args, "progress", false)
 	incremental := getBoolArg(args, "incremental", false)
 
 	return runRepoIndexCommand(ctx, func(cmd *cobra.Command) error {
-		return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includePython, includeRust, includeCSharp, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun, progress, incremental, includeSemanticAnchors)
+		return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includePython, includeRust, includeCSharp, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun, progress, incremental, includeSemanticAnchors, includeCoChange)
 	})
 }
 
