@@ -490,6 +490,7 @@ func (s *Server) Handler() http.Handler {
 	apiMux.HandleFunc("/api/context/overview", api.ContextOverviewHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/context/next-proposal-merge", api.ContextNextProposalMergeHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/context/next-proposal-merge/claim", api.ContextNextProposalMergeHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/sink", api.SinkHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/context/proposals/", func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/release-merge"):
