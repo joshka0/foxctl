@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/embeddingtext"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedqueue"
 	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/storage/dbutil"
 	"github.com/joshka0/foxctl/internal/storage/queue"
@@ -44,7 +45,7 @@ type embeddingPayload struct {
 // before returning an error. The returned Store contains a cleanup function that must be called
 // via Store.Close when the store is no longer needed.
 func OpenStore(ctx context.Context, root string) (*Store, error) {
-	db, closeFn, err := dbutil.OpenStoreDB(ctx, root, "EMBEDDING_QUEUE", "embedding_queue.db", migrate)
+	db, closeFn, err := dbutil.OpenStoreDB(ctx, root, embedqueue.StoreName, embedqueue.DefaultDBFile, migrate)
 	if err != nil {
 		return nil, fmt.Errorf("embedding: open db: %w", err)
 	}
@@ -199,13 +200,14 @@ func migrateLegacyJobs(ctx context.Context, db *sql.DB) error {
 // Enqueue adds symbols to the embedding queue.
 //
 // Index:
-//   Purpose: Queue embedding jobs with optional deduplication
-//   Keywords: embedding_queue, dedupe, content_digest, workspace_id
-//   Related: queue.Store.EnqueueBatch, dedupeKeyForSymbol
-//   Flow: compute digest → check existing embeddings → enqueue jobs → return counts
-//   Resources: embedding_queue.db, symbol_embeddings table
-//   Events: embedding-enqueue
-//   OutputFields: EnqueueResult
+//
+//	Purpose: Queue embedding jobs with optional deduplication
+//	Keywords: embedding_queue, dedupe, content_digest, workspace_id
+//	Related: queue.Store.EnqueueBatch, dedupeKeyForSymbol
+//	Flow: compute digest → check existing embeddings → enqueue jobs → return counts
+//	Resources: embedding_queue.db, symbol_embeddings table
+//	Events: embedding-enqueue
+//	OutputFields: EnqueueResult
 //
 // [[protocol:embedding-job-enqueue]]
 // [[invariant:dedupe-by-content-digest]]

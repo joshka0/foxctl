@@ -50,14 +50,16 @@ func ExtractAnchorsFromSource(ctx context.Context, policy AnchorPolicy, resolver
 		return result, err
 	}
 	result.Comments = comments
+	var generatedFinding *Finding
 	if isGeneratedOrVendor(path, string(src)) {
-		result.Findings = append(result.Findings, newFinding(AnchorFindingGeneratedOrVendor, AnchorFindingError))
+		finding := newFinding(AnchorFindingGeneratedOrVendor, AnchorFindingError)
+		generatedFinding = &finding
 	}
 	for _, comment := range comments {
 		anchors := anchorsFromComment(policy, comment)
 		for _, occ := range anchors {
-			if len(result.Findings) > 0 && result.Findings[0].Reason == AnchorFindingGeneratedOrVendor {
-				occ.Findings = append(occ.Findings, result.Findings[0])
+			if generatedFinding != nil {
+				occ.Findings = append(occ.Findings, *generatedFinding)
 			}
 			if hasErrorFinding(occ.Findings) {
 				occ.ValidationStatus = AnchorValidationLintError
@@ -72,6 +74,9 @@ func ExtractAnchorsFromSource(ctx context.Context, policy AnchorPolicy, resolver
 			}
 			result.Occurrences = append(result.Occurrences, occ)
 		}
+	}
+	if generatedFinding != nil && len(result.Occurrences) > 0 {
+		result.Findings = append(result.Findings, *generatedFinding)
 	}
 	result.Findings = append(result.Findings, ValidateOccurrenceSet(policy, result.Occurrences)...)
 	_ = ctx
@@ -163,17 +168,34 @@ func extractGoCommentsAndSymbols(path string, src []byte) ([]CommentSpan, []symb
 	}
 	var symbols []symbolDecl
 	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok {
-			continue
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			start := fset.Position(d.Pos())
+			end := fset.Position(d.End())
+			name := d.Name.Name
+			if d.Recv != nil && len(d.Recv.List) > 0 {
+				name = receiverName(d.Recv.List[0].Type) + "." + name
+			}
+			symbols = append(symbols, symbolDecl{span: Span{LineStart: start.Line, LineEnd: end.Line, ColStart: start.Column, ColEnd: end.Column}, name: name})
+		case *ast.GenDecl:
+			for _, spec := range d.Specs {
+				switch s := spec.(type) {
+				case *ast.TypeSpec:
+					start := fset.Position(s.Pos())
+					end := fset.Position(s.End())
+					symbols = append(symbols, symbolDecl{span: Span{LineStart: start.Line, LineEnd: end.Line, ColStart: start.Column, ColEnd: end.Column}, name: s.Name.Name})
+				case *ast.ValueSpec:
+					for _, ident := range s.Names {
+						if ident.Name == "_" {
+							continue
+						}
+						start := fset.Position(ident.Pos())
+						end := fset.Position(s.End())
+						symbols = append(symbols, symbolDecl{span: Span{LineStart: start.Line, LineEnd: end.Line, ColStart: start.Column, ColEnd: end.Column}, name: ident.Name})
+					}
+				}
+			}
 		}
-		start := fset.Position(fn.Pos())
-		end := fset.Position(fn.End())
-		name := fn.Name.Name
-		if fn.Recv != nil && len(fn.Recv.List) > 0 {
-			name = receiverName(fn.Recv.List[0].Type) + "." + name
-		}
-		symbols = append(symbols, symbolDecl{span: Span{LineStart: start.Line, LineEnd: end.Line, ColStart: start.Column, ColEnd: end.Column}, name: name})
 	}
 	sort.Slice(symbols, func(i, j int) bool { return symbols[i].span.LineStart < symbols[j].span.LineStart })
 	return comments, symbols, fset.Position(file.Package).Line, nil

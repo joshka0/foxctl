@@ -79,12 +79,12 @@ func NewHub() *Hub {
 // Run starts the hub's event loop. Call in a goroutine.
 //
 // Index:
-//   Purpose: Broadcast SSE events and manage client lifecycle
-//   Flow: tick heartbeat → handle register/unregister → publish events
-//   Related: Hub.Publish, Hub.Register
-//   Keywords: sse, broadcast, clients, heartbeat
 //
-// [[lifecycle:component]]
+//	Purpose: Broadcast SSE events and manage client lifecycle
+//	Flow: tick heartbeat → handle register/unregister → publish events
+//	Related: Hub.Publish, Hub.Register
+//	Keywords: sse, broadcast, clients, heartbeat
+//
 // [[domain:sse-event-distribution]]
 func (h *Hub) Run(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Second)

@@ -73,15 +73,16 @@ func WithClock(clock func() time.Time) ScorerOption {
 // Recommend scores pending tasks and returns a ranked recommendation list.
 //
 // Index:
-//   Purpose: Rank pending tasks using graph insights and mailbox signals
-//   Keywords: recommend, critical_path_score, pagerank, unread_admin, unread_overseer, tasksgraph.NewAnalyzer
-//   Related: tasks.Store.ListByWorkspace, tasksgraph.NewAnalyzer, blackboard.BoardStore
-//   Flow: list tasks -> filter pending -> analyze graph -> count mail -> score/normalize -> sort -> limit -> return
-//   Resources: task store, blackboard store
-//   Events: task-recommendation-generated
-//   OutputFields: Recommendation
 //
-// [[protocol:task-recommendation-scoring]]
+//	Purpose: Rank pending tasks using graph insights and mailbox signals
+//	Keywords: recommend, critical_path_score, pagerank, unread_admin, unread_overseer, tasksgraph.NewAnalyzer
+//	Related: tasks.Store.ListByWorkspace, tasksgraph.NewAnalyzer, blackboard.BoardStore
+//	Flow: list tasks -> filter pending -> analyze graph -> count mail -> score/normalize -> sort -> limit -> return
+//	Resources: task store, blackboard store
+//	Events: task-recommendation-generated
+//	OutputFields: Recommendation
+//
+// [[protocol:work-item-recommendation-scoring]]
 // [[invariant:score-capped-at-1.0]]
 func (s *Scorer) Recommend(ctx context.Context, workspaceID string, limit int) (*Recommendation, error) {
 	// Get all tasks

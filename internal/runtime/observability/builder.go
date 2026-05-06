@@ -40,12 +40,12 @@ type EventBuilder struct {
 // It initializes the event with a new SpanID and current timestamp.
 //
 // Index:
-//   Purpose: Initialize a Event builder with base metadata and timing
-//   Flow: allocate event → set identifiers → initialize data map → start timer
-//   Related: EventBuilder.Success, EventBuilder.Error, EventBuilder.Build
-//   Keywords: foxcular_event, span_id, trace_id, event_builder, observability
 //
-// [[lifecycle:component]]
+//	Purpose: Initialize a Event builder with base metadata and timing
+//	Flow: allocate event → set identifiers → initialize data map → start timer
+//	Related: EventBuilder.Success, EventBuilder.Error, EventBuilder.Build
+//	Keywords: foxcular_event, span_id, trace_id, event_builder, observability
+//
 // [[domain:observability-event-builder]]
 func NewEvent(operation string) *EventBuilder {
 	return &EventBuilder{

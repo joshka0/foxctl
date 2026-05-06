@@ -104,12 +104,12 @@ type EventStore struct {
 // OpenEventStore opens or creates the events SQLite database.
 //
 // Index:
-//   Purpose: Initialize SQLite-backed persistence for foxcular events
-//   Flow: resolve db path → open database → ensure schema → return store
-//   Related: createEventSchema, EventStore.Insert
-//   Keywords: events_db, sqlite, foxcular_events, schema, persistence
 //
-// [[lifecycle:component]]
+//	Purpose: Initialize SQLite-backed persistence for foxcular events
+//	Flow: resolve db path → open database → ensure schema → return store
+//	Related: createEventSchema, EventStore.Insert
+//	Keywords: events_db, sqlite, foxcular_events, schema, persistence
+//
 // [[domain:observability-sqlite-persistence]]
 func OpenEventStore(ctx context.Context, obsDir string) (*EventStore, error) {
 	dbPath := filepath.Join(obsDir, "events.db")
@@ -171,10 +171,11 @@ func createEventSchema(ctx context.Context, db *sql.DB) error {
 // Insert writes an Event to the database.
 //
 // Index:
-//   Purpose: Persist an Event row to SQLite
-//   Flow: marshal data → lock store → validate state → insert/replace row
-//   Related: EventStore.Close, OpenEventStore
-//   Keywords: foxcular_events, insert, sqlite, span_id, trace_id
+//
+//	Purpose: Persist an Event row to SQLite
+//	Flow: marshal data → lock store → validate state → insert/replace row
+//	Related: EventStore.Close, OpenEventStore
+//	Keywords: foxcular_events, insert, sqlite, span_id, trace_id
 //
 // [[invariant:mutex-guarded-insert]]
 // [[domain:observability-sqlite-persistence]]
@@ -277,12 +278,12 @@ func NewSyncer(store *EventStore, config SyncConfig) *Syncer {
 // Start begins background synchronization.
 //
 // Index:
-//   Purpose: Start the NDJSON-to-SQLite sync worker
-//   Flow: acquire lock → guard running → init channels → launch goroutine
-//   Related: Syncer.Stop, Syncer.run
-//   Keywords: syncer, ndjson, sqlite, background, goroutine
 //
-// [[lifecycle:component]]
+//	Purpose: Start the NDJSON-to-SQLite sync worker
+//	Flow: acquire lock → guard running → init channels → launch goroutine
+//	Related: Syncer.Stop, Syncer.run
+//	Keywords: syncer, ndjson, sqlite, background, goroutine
+//
 // [[domain:observability-background-sync]]
 func (s *Syncer) Start() {
 	s.mu.Lock()
@@ -302,12 +303,12 @@ func (s *Syncer) Start() {
 // Stop stops the background syncer and waits for it to finish.
 //
 // Index:
-//   Purpose: Stop the NDJSON-to-SQLite sync worker gracefully
-//   Flow: acquire lock → close stop channel → wait for done → reset running flag
-//   Related: Syncer.Start, Syncer.run
-//   Keywords: syncer, stop, ndjson, sqlite, goroutine
 //
-// [[lifecycle:component]]
+//	Purpose: Stop the NDJSON-to-SQLite sync worker gracefully
+//	Flow: acquire lock → close stop channel → wait for done → reset running flag
+//	Related: Syncer.Start, Syncer.run
+//	Keywords: syncer, stop, ndjson, sqlite, goroutine
+//
 // [[domain:observability-background-sync]]
 func (s *Syncer) Stop() {
 	s.mu.Lock()
@@ -329,12 +330,12 @@ func (s *Syncer) Stop() {
 // run drives periodic synchronization until stopped.
 //
 // Index:
-//   Purpose: Periodically sync NDJSON events into SQLite
-//   Flow: start ticker → on tick syncOnce → on stop syncOnce and exit
-//   Related: Syncer.syncOnce, Syncer.syncFile
-//   Keywords: syncer, ticker, ndjson, sqlite, sync_once
 //
-// [[lifecycle:component]]
+//	Purpose: Periodically sync NDJSON events into SQLite
+//	Flow: start ticker → on tick syncOnce → on stop syncOnce and exit
+//	Related: Syncer.syncOnce, Syncer.syncFile
+//	Keywords: syncer, ticker, ndjson, sqlite, sync_once
+//
 // [[domain:observability-background-sync]]
 func (s *Syncer) run() {
 	defer close(s.doneCh)
@@ -357,10 +358,11 @@ func (s *Syncer) run() {
 // syncOnce performs a single NDJSON-to-SQLite sync cycle.
 //
 // Index:
-//   Purpose: Sync a batch of foxcular events from NDJSON to SQLite
-//   Flow: create timeout ctx → resolve obs dir → sync file → log results
-//   Related: Syncer.syncFile, getObsDir
-//   Keywords: sync_once, ndjson, sqlite, batch_size, timeout
+//
+//	Purpose: Sync a batch of foxcular events from NDJSON to SQLite
+//	Flow: create timeout ctx → resolve obs dir → sync file → log results
+//	Related: Syncer.syncFile, getObsDir
+//	Keywords: sync_once, ndjson, sqlite, batch_size, timeout
 //
 // [[domain:observability-background-sync]]
 // [[protocol:ndjson-sqlite-sync]]
@@ -389,10 +391,11 @@ func (s *Syncer) syncOnce() {
 // syncFile streams NDJSON events from a file into SQLite.
 //
 // Index:
-//   Purpose: Read NDJSON events incrementally and persist them to SQLite
-//   Flow: open file → seek offset → decode entries → insert rows → update offset
-//   Related: EventStore.Insert, Syncer.syncOnce
-//   Keywords: ndjson, sqlite, offset, decode, insert
+//
+//	Purpose: Read NDJSON events incrementally and persist them to SQLite
+//	Flow: open file → seek offset → decode entries → insert rows → update offset
+//	Related: EventStore.Insert, Syncer.syncOnce
+//	Keywords: ndjson, sqlite, offset, decode, insert
 //
 // [[domain:observability-background-sync]]
 // [[protocol:ndjson-sqlite-sync]]
@@ -475,12 +478,12 @@ var (
 // Call this once at startup if you want SQLite persistence.
 //
 // Index:
-//   Purpose: Initialize global SQLite persistence and background sync
-//   Flow: resolve obs dir → open event store → start syncer → cache globals
-//   Related: OpenEventStore, NewSyncer, ClosePersistence
-//   Keywords: init_persistence, sqlite, syncer, observability_dir, foxcular_events
 //
-// [[lifecycle:component]]
+//	Purpose: Initialize global SQLite persistence and background sync
+//	Flow: resolve obs dir → open event store → start syncer → cache globals
+//	Related: OpenEventStore, NewSyncer, ClosePersistence
+//	Keywords: init_persistence, sqlite, syncer, observability_dir, foxcular_events
+//
 // [[domain:observability-global-persistence]]
 func InitPersistence(ctx context.Context) error {
 	var initErr error
@@ -508,12 +511,12 @@ func InitPersistence(ctx context.Context) error {
 // After calling this, InitPersistence can be called again to re-initialize.
 //
 // Index:
-//   Purpose: Stop global persistence and release resources
-//   Flow: lock globals → stop syncer → close store → reset init guard
-//   Related: InitPersistence, EventStore.Close
-//   Keywords: close_persistence, syncer, sqlite, observability_dir
 //
-// [[lifecycle:component]]
+//	Purpose: Stop global persistence and release resources
+//	Flow: lock globals → stop syncer → close store → reset init guard
+//	Related: InitPersistence, EventStore.Close
+//	Keywords: close_persistence, syncer, sqlite, observability_dir
+//
 // [[domain:observability-global-persistence]]
 func ClosePersistence() error {
 	globalMu.Lock()
@@ -538,10 +541,11 @@ func ClosePersistence() error {
 // persistEvent handles the persistence based on event configuration.
 //
 // Index:
-//   Purpose: Persist an Event according to configured mode
-//   Flow: resolve mode → select destination → write NDJSON and/or SQLite
-//   Related: WriteEvent, EventStore.Insert
-//   Keywords: foxcular_events, persist_mode, ndjson, sqlite, hybrid
+//
+//	Purpose: Persist an Event according to configured mode
+//	Flow: resolve mode → select destination → write NDJSON and/or SQLite
+//	Related: WriteEvent, EventStore.Insert
+//	Keywords: foxcular_events, persist_mode, ndjson, sqlite, hybrid
 //
 // [[protocol:event-persistence-router]]
 // [[domain:observability-persistence]]

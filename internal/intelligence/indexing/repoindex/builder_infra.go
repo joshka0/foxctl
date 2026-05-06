@@ -66,7 +66,7 @@ func (b *Builder) buildTerraform(ctx context.Context, opts BuildOptions, nodes m
 			result.Packages++
 			seenPackages[pkgID] = true
 		}
-		fileNodeID := addInfraFileNode(ctx, opts, nodes, edges, pkgID, pkgNodeID, fileRelPath, content)
+		fileNodeID := addInfraFileNode(opts, nodes, edges, pkgID, pkgNodeID, fileRelPath, content)
 		result.Files++
 		blocks, added := addTerraformConcepts(opts, nodes, edges, fileNodeID, fileRelPath, content)
 		allBlocks = append(allBlocks, blocks...)
@@ -126,7 +126,7 @@ func (b *Builder) buildKubernetes(ctx context.Context, opts BuildOptions, nodes 
 			result.Packages++
 			seenPackages[pkgID] = true
 		}
-		fileNodeID := addInfraFileNode(ctx, opts, nodes, edges, pkgID, pkgNodeID, fileRelPath, content)
+		fileNodeID := addInfraFileNode(opts, nodes, edges, pkgID, pkgNodeID, fileRelPath, content)
 		result.Files++
 		if hasChart {
 			addNode(nodes, chartRef.node)
@@ -195,7 +195,7 @@ func (b *Builder) buildShell(ctx context.Context, opts BuildOptions, nodes map[s
 			result.Packages++
 			seenPackages[pkgID] = true
 		}
-		fileNodeID := addInfraFileNode(ctx, opts, nodes, edges, pkgID, pkgNodeID, fileRelPath, content)
+		fileNodeID := addInfraFileNode(opts, nodes, edges, pkgID, pkgNodeID, fileRelPath, content)
 		result.Files++
 		result.Symbols += addShellConcepts(opts, nodes, edges, fileNodeID, fileRelPath, content)
 	}
@@ -222,7 +222,7 @@ func ensureInfraPackageNode(nodes map[string]Node, prefix, repoKey, fileRelPath 
 	return pkgID, pkgNodeID
 }
 
-func addInfraFileNode(ctx context.Context, opts BuildOptions, nodes map[string]Node, edges map[string]Edge, pkgID, pkgNodeID, fileRelPath string, content []byte) string {
+func addInfraFileNode(opts BuildOptions, nodes map[string]Node, edges map[string]Edge, pkgID, pkgNodeID, fileRelPath string, content []byte) string {
 	fileNodeID := FileID(opts.RepoKey, pkgID, fileRelPath)
 	kindLabel := infraKindLabelFromPkgID(pkgID)
 	pkgDisplay := infraPackageDisplay(pkgID)
@@ -239,7 +239,6 @@ func addInfraFileNode(ctx context.Context, opts BuildOptions, nodes map[string]N
 		Hash:      symbol.ComputeDigest(content),
 		UpdatedAt: time.Now().UTC(),
 	}
-	applyFileSummary(ctx, opts, &fileNode, fileRelPath)
 	if strings.TrimSpace(fileNode.Summary) == "" {
 		fileNode.Summary = fmt.Sprintf("%s %s in package %s.", docLabel, filepath.Base(fileRelPath), pkgDisplay)
 	}

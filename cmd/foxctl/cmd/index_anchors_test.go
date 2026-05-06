@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -103,6 +104,129 @@ func Build() {}
 		if !strings.Contains(raw.String(), want) {
 			t.Fatalf("output missing %q:\n%s", want, raw.String())
 		}
+	}
+}
+
+func TestIndexAnchorsExplainRejectsUnsafePath(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	workspace := filepath.Join(home, "repo")
+	writeIndexAnchorsTestFile(t, workspace, "go.mod", "module example.com/anchors\n\ngo 1.22\n")
+	writeIndexAnchorsTestFile(t, workspace, "internal/demo/demo.go", "package demo\n")
+
+	cfg, err := config.Load(ctx)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	store, err := repoindex.Open(ctx, cfg.Storage.Root, workspace)
+	if err != nil {
+		t.Fatalf("open repoindex store: %v", err)
+	}
+	defer store.Close()
+
+	for _, badPath := range []string{
+		"../outside.go",
+		filepath.Join(home, "outside.go"),
+		"docs/readme.md",
+		`internal\demo\demo.go`,
+	} {
+		t.Run(badPath, func(t *testing.T) {
+			var stdout bytes.Buffer
+			cmd := newIndexAnchorsExplainCommand()
+			cmd.SetContext(config.WithContext(context.Background(), cfg))
+			cmd.SetOut(&stdout)
+			cmd.SetArgs([]string{"--workspace", workspace, "--path", badPath})
+			if err := cmd.Execute(); err == nil {
+				t.Fatalf("expected unsafe path %q to fail; stdout=%s", badPath, stdout.String())
+			}
+		})
+	}
+}
+
+func TestIndexAnchorsLintSummaryReportsOwnerIndexHealth(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	workspace := filepath.Join(home, "repo")
+	writeIndexAnchorsTestFile(t, workspace, "go.mod", "module example.com/anchors\n\ngo 1.22\n")
+	writeIndexAnchorsTestFile(t, workspace, "internal/demo/demo.go", `package demo
+
+// [[risk:orphan-owner]]
+func Build() {}
+`)
+
+	cfg, err := config.Load(ctx)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	_, raw := executeIndexAnchorsTestCommand(t, cfg, newIndexAnchorsLintCommand(),
+		"--workspace", workspace,
+		"--summary",
+	)
+
+	var payload map[string]any
+	if err := json.Unmarshal(raw.Bytes(), &payload); err != nil {
+		t.Fatalf("decode raw payload: %v\nstdout:\n%s", err, raw.String())
+	}
+	data := payload["data"].(map[string]any)
+	if got := data["summary_only"]; got != true {
+		t.Fatalf("summary_only=%v want true", got)
+	}
+	if got := int(data["file_count"].(float64)); got != 0 {
+		t.Fatalf("file_count=%d want 0 in summary mode", got)
+	}
+	if got := int(data["scanned_file_count"].(float64)); got != 1 {
+		t.Fatalf("scanned_file_count=%d want 1", got)
+	}
+	ownerIndex := data["owner_index"].(map[string]any)
+	if got := ownerIndex["status"]; got != "empty" {
+		t.Fatalf("owner_index.status=%v want empty", got)
+	}
+	findingSummary := data["finding_summary"].(map[string]any)
+	byReason := findingSummary["by_reason"].(map[string]any)
+	if got := int(byReason["unbound_owner"].(float64)); got == 0 {
+		t.Fatalf("unbound_owner count=%d want >0", got)
+	}
+	bindingSummary := data["owner_binding_summary"].(map[string]any)
+	if got := int(bindingSummary["occurrence_count"].(float64)); got != 1 {
+		t.Fatalf("occurrence_count=%d want 1", got)
+	}
+	if got := int(bindingSummary["unbound_occurrence_count"].(float64)); got != 1 {
+		t.Fatalf("unbound_occurrence_count=%d want 1", got)
+	}
+}
+
+func TestNormalizeAnchorSourcePath(t *testing.T) {
+	tests := []struct {
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{input: "internal/demo/../demo/demo.go", want: "internal/demo/demo.go"},
+		{input: "../demo.go", wantErr: true},
+		{input: "/tmp/demo.go", wantErr: true},
+		{input: `internal\demo.go`, wantErr: true},
+		{input: "docs/readme.md", wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(fmt.Sprintf("%q", tc.input), func(t *testing.T) {
+			got, err := normalizeAnchorSourcePath(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("normalizeAnchorSourcePath(%q)=%q, want error", tc.input, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("normalizeAnchorSourcePath(%q): %v", tc.input, err)
+			}
+			if got != tc.want {
+				t.Fatalf("normalizeAnchorSourcePath(%q)=%q want %q", tc.input, got, tc.want)
+			}
+		})
 	}
 }
 

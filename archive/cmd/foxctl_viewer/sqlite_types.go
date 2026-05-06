@@ -58,14 +58,13 @@ var knownDatabases = func() map[string]string {
 // friendlyStoreName converts a canonical store name (e.g., "EMBEDDING_QUEUE") into a human-friendly label.
 //
 // Index:
-//   Purpose: Keep viewer display names derived from the canonical store registry (avoid hand-maintained maps)
-//   Keywords: sqlite_viewer, store_registry, display_name
-//   Related: knownDatabases, storage.CanonicalStores
-//   Flow: normalize → special-case acronyms → title-case underscore-separated tokens
-//   Resources: storage.CanonicalStores
-//   OutputFields: friendly_label
 //
-// [[domain:store-registry-display-name]]
+//	Purpose: Keep viewer display names derived from the canonical store registry (avoid hand-maintained maps)
+//	Keywords: sqlite_viewer, store_registry, display_name
+//	Related: knownDatabases, storage.CanonicalStores
+//	Flow: normalize → special-case acronyms → title-case underscore-separated tokens
+//	Resources: storage.CanonicalStores
+//	OutputFields: friendly_label
 func friendlyStoreName(store string) string {
 	store = strings.TrimSpace(store)
 	if store == "" {

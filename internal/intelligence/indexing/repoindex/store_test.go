@@ -93,6 +93,53 @@ func TestStoreReplaceAllAndSearch(t *testing.T) {
 	}
 }
 
+func TestStoreUpdateNodeSummaryRefreshesSearch(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	storageRoot := filepath.Join(root, "storage")
+	repoRoot := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+
+	store, err := Open(ctx, storageRoot, repoRoot)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	key := repoKey(repoRoot)
+	node := Node{
+		ID:        FileID(key, "go:example", "main.go"),
+		Kind:      NodeFile,
+		Pkg:       "go:example",
+		File:      "main.go",
+		Name:      "main.go",
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := store.ReplaceAll(ctx, []Node{node}, nil); err != nil {
+		t.Fatalf("replace all: %v", err)
+	}
+
+	if err := store.UpdateNodeSummary(ctx, node.ID, "semantic anchor enrichment target"); err != nil {
+		t.Fatalf("update node summary: %v", err)
+	}
+	got, err := store.GetNode(ctx, node.ID)
+	if err != nil {
+		t.Fatalf("get node: %v", err)
+	}
+	if got.Summary != "semantic anchor enrichment target" {
+		t.Fatalf("summary=%q", got.Summary)
+	}
+	results, err := store.SearchFTS(ctx, "enrichment", 5)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(results) != 1 || results[0].ID != node.ID {
+		t.Fatalf("search results=%#v want node %s", results, node.ID)
+	}
+}
+
 func TestOpenContextExtendsShortDeadlines(t *testing.T) {
 	parent, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()

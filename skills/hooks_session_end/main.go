@@ -54,16 +54,17 @@ func main() {
 // run orchestrates session end processing with metrics collection and feedback prompting.
 //
 // Index:
-//   Purpose: Capture session metrics at session end and prompt for feedback collection
-//   Keywords: hooks/session_end, session_metrics, feedback_collection, graph_edges, task_statistics
-//   Related: buildFeedbackPrompt, createSessionGraphEdges, fileExists
-//   Flow: validate event → resolve workspace → collect task stats → get trajectory count → save metrics → create graph edges → emit feedback prompt
-//   Resources: memory store; graph store; task store; trajectory store
-//   Events: session-ended, metrics-saved
-//   OutputFields: metrics_id, tasks_completed, tasks_in_progress, tasks_pending, feedback_pending
 //
-// [[domain:session-lifecycle]]
-// [[protocol:session-metrics]]
+//	Purpose: Capture session metrics at session end and prompt for feedback collection
+//	Keywords: hooks/session_end, session_metrics, feedback_collection, graph_edges, task_statistics
+//	Related: buildFeedbackPrompt, createSessionGraphEdges, fileExists
+//	Flow: validate event → resolve workspace → collect task stats → get trajectory count → save metrics → create graph edges → emit feedback prompt
+//	Resources: memory store; graph store; task store; trajectory store
+//	Events: session-ended, metrics-saved
+//	OutputFields: metrics_id, tasks_completed, tasks_in_progress, tasks_pending, feedback_pending
+//
+// [[domain:agent-run-lifecycle]]
+// [[protocol:run-metrics]]
 func run(ctx context.Context, rc *skillmain.RunContext, in HookInput) error {
 	// Only process Stop events
 	if in.Event != hooks.EventSessionEnd && string(in.Event) != "Stop" {

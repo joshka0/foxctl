@@ -16,6 +16,7 @@ import (
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
 	"github.com/joshka0/foxctl/internal/intelligence/repoquery"
 	repoqueryadapters "github.com/joshka0/foxctl/internal/intelligence/repoquery/adapters"
+	"github.com/joshka0/foxctl/internal/platform/symbolutil"
 	"github.com/joshka0/foxctl/internal/protocol"
 	"github.com/joshka0/foxctl/internal/runtime/observability"
 	"github.com/joshka0/foxctl/internal/storage/memory"
@@ -29,6 +30,7 @@ func newIndexRepoCommand() *cobra.Command {
 	}
 	cmd.AddCommand(
 		newIndexRepoBuildCommand(),
+		newIndexRepoEnrichCommand(),
 		newIndexRepoStatusCommand(),
 		newIndexRepoSearchCommand(),
 		newIndexRepoExpandCommand(),
@@ -53,7 +55,7 @@ func newIndexRepoBuildCommand() *cobra.Command {
 	var includeTests bool
 	var dryRun bool
 	progress := true
-	var incremental bool
+	incremental := true
 	var includeSemanticAnchors bool
 	var includeCoChange bool
 
@@ -79,9 +81,36 @@ func newIndexRepoBuildCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Include test files")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Build without writing to the index")
 	cmd.Flags().BoolVar(&progress, "progress", true, "Write coarse build progress logs to stderr")
-	cmd.Flags().BoolVar(&incremental, "incremental", false, "Skip rebuild when stored per-file state and current workspace have no delta")
+	cmd.Flags().BoolVar(&incremental, "incremental", true, "Skip rebuild when stored per-file state and current workspace have no delta; set false to force a full rebuild")
 	cmd.Flags().BoolVar(&includeSemanticAnchors, "semantic-anchors", false, "Include semantic anchor concept nodes and edges")
 	cmd.Flags().BoolVar(&includeCoChange, "cochange", false, "Include empirical git co-change file edges")
+
+	return cmd
+}
+
+func newIndexRepoEnrichCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "enrich",
+		Short: "Enrich an existing repo graph index",
+	}
+	cmd.AddCommand(newIndexRepoEnrichSummariesCommand())
+	return cmd
+}
+
+func newIndexRepoEnrichSummariesCommand() *cobra.Command {
+	var workspace string
+	var dryRun bool
+
+	cmd := &cobra.Command{
+		Use:   "summaries",
+		Short: "Attach stored file and symbol summaries to repo graph nodes",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runIndexRepoEnrichSummaries(cmd, workspace, dryRun)
+		},
+	}
+
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root directory")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Report summary updates without writing to the index")
 
 	return cmd
 }
@@ -231,18 +260,6 @@ func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, 
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	casDir := cfg.Paths.CAS
-	if casDir == "" {
-		casDir = filepath.Join(cfg.Home, "cas")
-	}
-	progressLogger.ReportPhase("storage", "opening memory summary store")
-	memStore, err := memory.Open(ctx, cfg.Storage.Root, casDir)
-	if err != nil {
-		progressLogger.ReportPhase("error", fmt.Sprintf("open memory store failed: %v", err))
-		return fmt.Errorf("open memory store: %w", err)
-	}
-	defer memStore.Close()
-
 	progressLogger.ReportPhase("storage", "opening repoindex store")
 	store, err := repoindex.Open(ctx, cfg.Storage.Root, absWorkspace)
 	if err != nil {
@@ -263,8 +280,8 @@ func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, 
 			meta, metaErr := store.GetMeta(ctx)
 			current := repoindex.ResolveGitSnapshot(ctx, absWorkspace)
 			freshness := repoindex.CompareIndexFreshness(meta, current)
-			if computed.Empty() && computed.Unchanged > 0 && freshness.Level == repoindex.FreshnessCurrent {
-				progressLogger.ReportPhase("done", "repoindex is current; skipping rebuild")
+			if metaErr == nil && repoIndexBuildCanSkip(computed, meta, current) {
+				progressLogger.ReportPhase("done", "workspace diff unchanged; skipping repoindex rebuild")
 				data := map[string]any{
 					"workspace":    absWorkspace,
 					"store_path":   store.Path(),
@@ -275,11 +292,10 @@ func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, 
 					"dry_run":      dryRun,
 					"incremental":  true,
 					"skipped":      true,
-					"reason":       "file_state_current",
+					"reason":       "workspace_diff_unchanged",
+					"skip_basis":   "head_and_dirty_status_hash",
 				}
-				if metaErr == nil {
-					data["meta"] = meta
-				}
+				data["meta"] = meta
 				env := protocol.OK("index.repo.build", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 				progressLogger.ReportPhase("done", "writing success envelope")
 				return protocol.Write(cmd.OutOrStdout(), env)
@@ -289,8 +305,6 @@ func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, 
 		}
 	}
 
-	summaryProvider := &memorySummaryProvider{store: memStore, workspace: absWorkspace}
-	symbolSummaryProvider := &memorySymbolSummaryProvider{store: memStore, workspace: absWorkspace}
 	builder := repoindex.NewBuilder(store, absWorkspace)
 	buildOpts := repoindex.BuildOptions{
 		RepoRoot:               absWorkspace,
@@ -308,8 +322,6 @@ func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, 
 		IncludeSemanticAnchors: includeSemanticAnchors,
 		IncludeCoChange:        includeCoChange,
 		DryRun:                 dryRun,
-		SummaryProvider:        summaryProvider,
-		SymbolSummaryProvider:  symbolSummaryProvider,
 		Progress:               progressFn,
 	}
 	var result repoindex.BuildResult
@@ -366,6 +378,294 @@ func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, 
 	env := protocol.OK("index.repo.build", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	progressLogger.ReportPhase("done", "writing success envelope")
 	return protocol.Write(cmd.OutOrStdout(), env)
+}
+
+type repoIndexSummaryEnrichResult struct {
+	FileNodesScanned          int `json:"file_nodes_scanned"`
+	FileSummariesApplied      int `json:"file_summaries_applied,omitempty"`
+	FileSummariesWouldApply   int `json:"file_summaries_would_apply,omitempty"`
+	FileSummariesSkipped      int `json:"file_summaries_skipped,omitempty"`
+	FileSummariesMissing      int `json:"file_summaries_missing,omitempty"`
+	SymbolNodesScanned        int `json:"symbol_nodes_scanned"`
+	SymbolSummariesApplied    int `json:"symbol_summaries_applied,omitempty"`
+	SymbolSummariesWouldApply int `json:"symbol_summaries_would_apply,omitempty"`
+	SymbolSummariesSkipped    int `json:"symbol_summaries_skipped,omitempty"`
+	SymbolSummariesMissing    int `json:"symbol_summaries_missing,omitempty"`
+}
+
+func runIndexRepoEnrichSummaries(cmd *cobra.Command, workspace string, dryRun bool) error {
+	ctx := cmd.Context()
+	start := time.Now()
+
+	absWorkspace, err := filepath.Abs(workspace)
+	if err != nil {
+		return fmt.Errorf("resolve workspace: %w", err)
+	}
+
+	cfg, err := loadConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	store, err := repoindex.Open(ctx, cfg.Storage.Root, absWorkspace)
+	if err != nil {
+		return fmt.Errorf("open repoindex store: %w", err)
+	}
+	defer store.Close()
+
+	casDir := cfg.Paths.CAS
+	if casDir == "" {
+		casDir = filepath.Join(cfg.Home, "cas")
+	}
+	memStore, err := memory.Open(ctx, cfg.Storage.Root, casDir)
+	if err != nil {
+		return fmt.Errorf("open memory store: %w", err)
+	}
+	defer memStore.Close()
+
+	summaryMemory, err := loadRepoIndexSummaryMemory(ctx, memStore, absWorkspace)
+	if err != nil {
+		return fmt.Errorf("load summary memory: %w", err)
+	}
+	result := repoIndexSummaryEnrichResult{}
+
+	fileNodes, err := store.ListAllNodesByKind(ctx, repoindex.NodeFile)
+	if err != nil {
+		return fmt.Errorf("list file nodes: %w", err)
+	}
+	result.FileNodesScanned = len(fileNodes)
+	for _, node := range fileNodes {
+		if strings.TrimSpace(node.Summary) != "" {
+			result.FileSummariesSkipped++
+			continue
+		}
+		summary, ok := summaryMemory.FileSummary(node.File)
+		if !ok {
+			result.FileSummariesMissing++
+			continue
+		}
+		if dryRun {
+			result.FileSummariesWouldApply++
+			continue
+		}
+		if err := store.UpdateNodeSummary(ctx, node.ID, summary); err != nil {
+			return fmt.Errorf("update file node summary %s: %w", node.ID, err)
+		}
+		result.FileSummariesApplied++
+	}
+
+	symbolNodes, err := store.ListAllNodesByKind(ctx, repoindex.NodeSymbol)
+	if err != nil {
+		return fmt.Errorf("list symbol nodes: %w", err)
+	}
+	result.SymbolNodesScanned = len(symbolNodes)
+	for _, node := range symbolNodes {
+		if strings.TrimSpace(node.Summary) != "" {
+			result.SymbolSummariesSkipped++
+			continue
+		}
+		summaryPkg := symbolutil.DeriveSymbolPackage(node.File, repoIndexSummaryLanguageFromPackageID(node.Pkg))
+		symbolKey := repoIndexSummarySymbolKey(node)
+		symbolID := repoIndexSummarySymbolID(node)
+		summary, ok := summaryMemory.SymbolSummary(symbolID, symbolKey, summaryPkg)
+		if !ok {
+			result.SymbolSummariesMissing++
+			continue
+		}
+		if dryRun {
+			result.SymbolSummariesWouldApply++
+			continue
+		}
+		if err := store.UpdateNodeSummary(ctx, node.ID, summary); err != nil {
+			return fmt.Errorf("update symbol node summary %s: %w", node.ID, err)
+		}
+		result.SymbolSummariesApplied++
+	}
+
+	data := map[string]any{
+		"workspace":   absWorkspace,
+		"store_path":  store.Path(),
+		"dry_run":     dryRun,
+		"result":      result,
+		"duration_ms": time.Since(start).Milliseconds(),
+	}
+	env := protocol.OK("index.repo.enrich.summaries", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	return protocol.Write(cmd.OutOrStdout(), env)
+}
+
+type repoIndexSummaryMemory struct {
+	fileSummaries      map[string]string
+	symbolKeySummaries map[string]string
+	symbolIDSummaries  map[string]string
+}
+
+func loadRepoIndexSummaryMemory(ctx context.Context, store *memory.Store, workspace string) (repoIndexSummaryMemory, error) {
+	index := repoIndexSummaryMemory{
+		fileSummaries:      make(map[string]string),
+		symbolKeySummaries: make(map[string]string),
+		symbolIDSummaries:  make(map[string]string),
+	}
+	for _, candidate := range summaryWorkspaceCandidates(workspace) {
+		if err := loadRepoIndexFileSummaryMemory(ctx, store, candidate, index.fileSummaries); err != nil {
+			return repoIndexSummaryMemory{}, err
+		}
+		if err := loadRepoIndexSymbolSummaryMemory(ctx, store, candidate, index.symbolKeySummaries, index.symbolIDSummaries); err != nil {
+			return repoIndexSummaryMemory{}, err
+		}
+	}
+	return index, nil
+}
+
+func loadRepoIndexFileSummaryMemory(ctx context.Context, store *memory.Store, workspace string, out map[string]string) error {
+	return listRepoIndexSummaryEntries(ctx, store, workspace, symbol.FileSummaryType, func(entry memory.NamedEntry) {
+		path, ok := repoIndexFileSummaryPath(entry.Name, workspace)
+		if !ok {
+			return
+		}
+		addRepoIndexSummaryValue(out, filepath.ToSlash(path), entry.Summary)
+	})
+}
+
+func loadRepoIndexSymbolSummaryMemory(ctx context.Context, store *memory.Store, workspace string, keyed, byID map[string]string) error {
+	return listRepoIndexSummaryEntries(ctx, store, workspace, symbol.SymbolSummaryType, func(entry memory.NamedEntry) {
+		pkg, symbolKey, ok := repoIndexSymbolSummaryKey(entry.Name, workspace)
+		if ok {
+			addRepoIndexSummaryValue(keyed, repoIndexSymbolSummaryMapKey(pkg, symbolKey), entry.Summary)
+			return
+		}
+		if symbolID, ok := repoIndexSymbolSummaryID(entry.Name, workspace); ok {
+			addRepoIndexSummaryValue(byID, symbolID, entry.Summary)
+		}
+	})
+}
+
+func listRepoIndexSummaryEntries(ctx context.Context, store *memory.Store, workspace, typ string, visit func(memory.NamedEntry)) error {
+	const batchSize = 1000
+	filter := memory.ListFilter{Types: []string{typ}}
+	for offset := 0; ; {
+		entries, total, err := store.ListFiltered(ctx, workspace, filter, batchSize, offset)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			visit(entry)
+		}
+		offset += len(entries)
+		if len(entries) == 0 || offset >= total {
+			return nil
+		}
+	}
+}
+
+func addRepoIndexSummaryValue(out map[string]string, key, summary string) {
+	key = strings.TrimSpace(key)
+	summary = strings.TrimSpace(summary)
+	if key == "" || summary == "" {
+		return
+	}
+	if _, exists := out[key]; exists {
+		return
+	}
+	out[key] = summary
+}
+
+func (m repoIndexSummaryMemory) FileSummary(path string) (string, bool) {
+	for _, candidate := range summaryPathCandidates(path) {
+		if summary, ok := m.fileSummaries[filepath.ToSlash(candidate)]; ok {
+			return summary, true
+		}
+	}
+	return "", false
+}
+
+func (m repoIndexSummaryMemory) SymbolSummary(symbolID, symbolKey, pkg string) (string, bool) {
+	if strings.TrimSpace(pkg) != "" && strings.TrimSpace(symbolKey) != "" {
+		summary, ok := m.symbolKeySummaries[repoIndexSymbolSummaryMapKey(pkg, symbolKey)]
+		return summary, ok
+	}
+	for _, candidate := range summarySymbolIDCandidates(symbolID) {
+		if summary, ok := m.symbolIDSummaries[candidate]; ok {
+			return summary, true
+		}
+	}
+	return "", false
+}
+
+func repoIndexFileSummaryPath(name, workspace string) (string, bool) {
+	prefix := "file://" + workspace + "/"
+	if !strings.HasPrefix(name, prefix) {
+		return "", false
+	}
+	path := strings.TrimSpace(strings.TrimPrefix(name, prefix))
+	return path, path != ""
+}
+
+func repoIndexSymbolSummaryKey(name, workspace string) (pkg string, symbolKey string, ok bool) {
+	prefix := "symbol-summary://" + workspace + "/"
+	if !strings.HasPrefix(name, prefix) {
+		return "", "", false
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(name, prefix))
+	idx := strings.LastIndex(rest, "::")
+	if idx <= 0 || idx+2 >= len(rest) {
+		return "", "", false
+	}
+	pkg = strings.TrimSpace(rest[:idx])
+	symbolKey = strings.TrimSpace(rest[idx+2:])
+	return pkg, symbolKey, pkg != "" && symbolKey != ""
+}
+
+func repoIndexSymbolSummaryID(name, workspace string) (string, bool) {
+	prefix := "symbol-summary://" + workspace + "/"
+	if !strings.HasPrefix(name, prefix) {
+		return "", false
+	}
+	id := strings.TrimSpace(strings.TrimPrefix(name, prefix))
+	if strings.Contains(id, "::") {
+		return "", false
+	}
+	return id, id != ""
+}
+
+func repoIndexSymbolSummaryMapKey(pkg, symbolKey string) string {
+	return strings.TrimSpace(pkg) + "\x00" + strings.TrimSpace(symbolKey)
+}
+
+func repoIndexSummarySymbolID(node repoindex.Node) string {
+	_, raw := repoindex.SplitNamespacedID(node.ID)
+	prefix := "sym:" + strings.TrimSpace(node.Pkg) + ":"
+	if !strings.HasPrefix(raw, prefix) {
+		return strings.TrimSpace(node.ID)
+	}
+	return strings.TrimSpace(strings.TrimPrefix(raw, prefix))
+}
+
+func repoIndexSummarySymbolKey(node repoindex.Node) string {
+	_, raw := repoindex.SplitNamespacedID(node.ID)
+	prefix := "sym:" + strings.TrimSpace(node.Pkg) + ":"
+	if !strings.HasPrefix(raw, prefix) {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(raw, prefix))
+}
+
+func repoIndexSummaryLanguageFromPackageID(pkgID string) string {
+	switch {
+	case strings.HasPrefix(pkgID, "go:"):
+		return "go"
+	case strings.HasPrefix(pkgID, "ts:"):
+		return "typescript"
+	case strings.HasPrefix(pkgID, "py:"):
+		return "python"
+	case strings.HasPrefix(pkgID, "rs:"):
+		return "rust"
+	case strings.HasPrefix(pkgID, "cs:"):
+		return "csharp"
+	case strings.HasPrefix(pkgID, "ex:"):
+		return "elixir"
+	default:
+		return ""
+	}
 }
 
 type repoIndexBuildProgressLogger struct {
@@ -484,13 +784,13 @@ func formatRepoIndexBuildHeartbeat(start time.Time, progress repoindex.BuildProg
 }
 
 func repoIndexProgressElapsed(start time.Time, elapsedMs int64) time.Duration {
+	if !start.IsZero() {
+		return time.Since(start).Round(time.Millisecond)
+	}
 	if elapsedMs > 0 {
 		return (time.Duration(elapsedMs) * time.Millisecond).Round(time.Millisecond)
 	}
-	if start.IsZero() {
-		return 0
-	}
-	return time.Since(start).Round(time.Millisecond)
+	return 0
 }
 
 func formatRepoIndexBuildCounts(result repoindex.BuildResult) string {
@@ -512,6 +812,28 @@ func repoIndexBuildOptionsMessage(absWorkspace string, patterns []string, includ
 		incremental,
 		dryRun,
 	)
+}
+
+func repoIndexBuildCanSkip(delta repoindex.WorkspaceDelta, meta repoindex.IndexMeta, current repoindex.GitSnapshot) bool {
+	if delta.Unchanged == 0 {
+		return false
+	}
+	if len(delta.Modified) > 0 || len(delta.Deleted) > 0 {
+		return false
+	}
+	if strings.TrimSpace(meta.HeadSHA) == "" || strings.TrimSpace(current.HeadSHA) == "" {
+		return false
+	}
+	if meta.HeadSHA != current.HeadSHA {
+		return false
+	}
+	if meta.WorktreeDirty != current.WorktreeDirty {
+		return false
+	}
+	if meta.WorktreeDirty && (meta.DirtyStatusHash == "" || current.DirtyStatusHash == "") {
+		return false
+	}
+	return meta.DirtyStatusHash == current.DirtyStatusHash
 }
 
 func repoIndexBuildFamilies(includeGo, includePython, includeRust, includeCSharp, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell bool) []string {
@@ -1032,88 +1354,6 @@ func runIndexRepoAsk(cmd *cobra.Command, workspace, question, provider, model, a
 
 	env := protocol.OK("index.repo.ask", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	return protocol.Write(cmd.OutOrStdout(), env)
-}
-
-type memorySummaryProvider struct {
-	store     *memory.Store
-	workspace string
-}
-
-func (p *memorySummaryProvider) Summary(ctx context.Context, filePath string) (string, error) {
-	if p == nil || p.store == nil {
-		return "", fmt.Errorf("summary provider not configured")
-	}
-	workspaces := summaryWorkspaceCandidates(p.workspace)
-	paths := summaryPathCandidates(filePath)
-	if len(workspaces) == 0 || len(paths) == 0 {
-		return "", fmt.Errorf("summary provider missing workspace or file path")
-	}
-	var lastErr error
-	for _, workspace := range workspaces {
-		for _, path := range paths {
-			entryName := symbol.FileSummaryEntryName(workspace, path)
-			entry, err := p.store.Get(ctx, entryName, workspace)
-			if err != nil {
-				if errors.Is(err, memory.ErrNotFound) {
-					lastErr = err
-					continue
-				}
-				return "", err
-			}
-			return entry.Summary, nil
-		}
-	}
-	if lastErr == nil {
-		lastErr = memory.ErrNotFound
-	}
-	return "", lastErr
-}
-
-// memorySymbolSummaryProvider resolves symbol summaries from named memory.
-type memorySymbolSummaryProvider struct {
-	store     *memory.Store
-	workspace string
-}
-
-func (p *memorySymbolSummaryProvider) Summary(ctx context.Context, symbolID, symbolKey, pkg string) (string, error) {
-	if p == nil || p.store == nil {
-		return "", fmt.Errorf("symbol summary provider not configured")
-	}
-	workspaces := summaryWorkspaceCandidates(p.workspace)
-	ids := summarySymbolIDCandidates(symbolID)
-	if len(workspaces) == 0 || len(ids) == 0 {
-		return "", fmt.Errorf("symbol summary provider missing workspace or symbol ID")
-	}
-	var lastErr error
-	for _, workspace := range workspaces {
-		for _, id := range ids {
-			if pkg != "" && symbolKey != "" {
-				keyEntryName := symbol.SymbolSummaryKeyEntryName(workspace, pkg, symbolKey)
-				entry, err := p.store.Get(ctx, keyEntryName, workspace)
-				if err == nil {
-					return entry.Summary, nil
-				}
-				if !errors.Is(err, memory.ErrNotFound) {
-					return "", err
-				}
-			}
-			// Legacy fallback: try old entry name format
-			entryName := symbol.SymbolSummaryEntryName(workspace, id)
-			entry, err := p.store.Get(ctx, entryName, workspace)
-			if err == nil {
-				return entry.Summary, nil
-			}
-			if errors.Is(err, memory.ErrNotFound) {
-				lastErr = err
-				continue
-			}
-			return "", err
-		}
-	}
-	if lastErr == nil {
-		lastErr = memory.ErrNotFound
-	}
-	return "", lastErr
 }
 
 func summaryWorkspaceCandidates(workspace string) []string {

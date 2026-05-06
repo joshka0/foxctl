@@ -93,13 +93,13 @@ func PersistClassifiedClaims(ctx context.Context, store storage.MemoryStore, par
 // PersistDurableTranscriptMemories writes durable transcript-derived candidates to named memory.
 //
 // Index:
-//   Purpose: Persist durable transcript memories to named storage
-//   Flow: filter durable candidates → validate → build memory entries → store
-//   Related: shouldPersistTranscriptCandidate, transcriptMemoryType
-//   Keywords: transcript_memory, durable, persistence, consolidation
+//
+//	Purpose: Persist durable transcript memories to named storage
+//	Flow: filter durable candidates → validate → build memory entries → store
+//	Related: shouldPersistTranscriptCandidate, transcriptMemoryType
+//	Keywords: transcript_memory, durable, persistence, consolidation
 //
 // [[domain:transcript-memory-persistence]]
-// [[context:memory]]
 func PersistDurableTranscriptMemories(ctx context.Context, store storage.MemoryStore, parsed sourceimport.ParsedSession, conversationID, workspace string, derivations []companion.AnchoredMemoryDerivation) ([]PersistedMemory, error) {
 	workspace = strings.TrimSpace(workspace)
 	if workspace == "" {
@@ -171,13 +171,13 @@ func PersistDurableTranscriptMemories(ctx context.Context, store storage.MemoryS
 // PersistConsensusClaims writes durable group-level claims to named memory.
 //
 // Index:
-//   Purpose: Persist durable group-level consensus claims to named storage
-//   Flow: filter durable claims → validate → build memory entries → store
-//   Related: TranscriptMemoryName
-//   Keywords: consensus_claim, durable, group_memory, persistence
+//
+//	Purpose: Persist durable group-level consensus claims to named storage
+//	Flow: filter durable claims → validate → build memory entries → store
+//	Related: TranscriptMemoryName
+//	Keywords: consensus_claim, durable, group_memory, persistence
 //
 // [[domain:consensus-claim-persistence]]
-// [[context:memory]]
 func PersistConsensusClaims(ctx context.Context, store storage.MemoryStore, parsed sourceimport.ParsedSession, conversationID, workspace string, claims []ConsensusClaim) ([]PersistedMemory, error) {
 	workspace = strings.TrimSpace(workspace)
 	if workspace == "" {
@@ -232,13 +232,13 @@ func PersistConsensusClaims(ctx context.Context, store storage.MemoryStore, pars
 // ReconcileMemoryPrefix removes stale transcript-derived memories that are not in keep.
 //
 // Index:
-//   Purpose: Clean up stale transcript-derived memories not in the keep set
-//   Flow: list filtered memories → check prefix → remove entries not in keep
-//   Related: PersistDurableTranscriptMemories, PersistConsensusClaims
-//   Keywords: reconcile, cleanup, stale_memory, prefix
+//
+//	Purpose: Clean up stale transcript-derived memories not in the keep set
+//	Flow: list filtered memories → check prefix → remove entries not in keep
+//	Related: PersistDurableTranscriptMemories, PersistConsensusClaims
+//	Keywords: reconcile, cleanup, stale_memory, prefix
 //
 // [[domain:transcript-memory-reconciliation]]
-// [[context:memory]]
 func ReconcileMemoryPrefix(ctx context.Context, store storage.MemoryStore, workspace, prefix string, keep []PersistedMemory) ([]string, error) {
 	workspace = strings.TrimSpace(workspace)
 	prefix = strings.TrimSpace(prefix)

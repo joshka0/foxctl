@@ -2,7 +2,8 @@
 
 The repo graph index is a local, per-repo SQLite graph for navigating code by
 relationships. It powers `foxctl index repo ...` and the agent tools
-`repo_index_search`, `repo_index_expand`, and `repo_index_open`.
+`repo_index_build`, `repo_index_enrich_summaries`, `repo_index_search`,
+`repo_index_expand`, `repo_index_open`, and `repo_index_dag_grep`.
 
 Behavior contract:
 - [docs/spec/repo_graph_index_and_dag_grep.md](../spec/repo_graph_index_and_dag_grep.md)
@@ -42,19 +43,28 @@ foxctl index repo build --workspace . --terraform --kubernetes --shell
 ```
 
 Optional flags:
+- `--incremental=false` to force a full rebuild. Incremental skip is the default.
 - `--include-tests` to index test files
 - `--go-pattern ./...` to scope Go packages
 - `--terraform` to include Terraform files
 - `--kubernetes` to include Kubernetes YAML manifests
 - `--shell` to include shell scripts
 
-**Summaries:** repoindex reuses file summaries and symbol summaries. Run file
-summary generation to populate file node summaries and package/repo rollups,
-then generate symbol summaries to populate symbol node summaries:
+**Summaries:** repoindex build does not attach summaries. Generate summaries
+first, then run the explicit enrichment step to attach stored file and symbol
+summaries to repo graph nodes:
 
 ```bash
 foxctl index file-summaries --workspace .
 foxctl index symbol-summaries --workspace .
+foxctl index repo enrich summaries --workspace .
+```
+
+Equivalent skill wrappers:
+
+```bash
+foxctl run repo/index_build --input '{"workspace": ".", "include_go": true, "include_typescript": true}'
+foxctl run repo/index_enrich_summaries --input '{"workspace": "."}'
 ```
 
 ---
@@ -115,10 +125,9 @@ foxctl index repo ask --workspace . --question "Where is repoindex built?"
 ## Relationship to the semantic tree
 
 The semantic tree (`foxctl run code/semantic_search --input '{"format":"tree"}'`)
-and repoindex share the same file summary store. File summaries become file node
-summaries in repoindex, and package/repo rollups are generated from those file
-summaries. This lets you navigate top-down (tree) and sideways (graph edges)
-using the same source summaries.
+and repoindex share the same file summary store. `foxctl index repo enrich
+summaries` copies those stored summaries into repoindex nodes when you want graph
+search/open output to include summary text.
 
 ---
 

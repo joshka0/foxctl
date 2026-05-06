@@ -116,13 +116,14 @@ func NewWorker(
 // Start begins processing files in the background.
 //
 // Index:
-//   Purpose: Start the file summary worker loop
-//   Keywords: file_summary_worker, start, background, poll_interval
-//   Related: Worker.run, Worker.Stop
-//   Flow: validate state → spawn worker goroutine → return
-//   Resources: workspace files, LLM provider, memory store
-//   Events: filesummary.worker_start
-//   OutputFields: none
+//
+//	Purpose: Start the file summary worker loop
+//	Keywords: file_summary_worker, start, background, poll_interval
+//	Related: Worker.run, Worker.Stop
+//	Flow: validate state → spawn worker goroutine → return
+//	Resources: workspace files, LLM provider, memory store
+//	Events: filesummary.worker_start
+//	OutputFields: none
 //
 // [[protocol:file-summary-worker-start]]
 // [[invariant:single-worker-mode-only]]
@@ -268,16 +269,17 @@ func (w *Worker) Stats() (processed, errors int64) {
 // run polls for files and generates/stores summaries until shutdown.
 //
 // Index:
-//   Purpose: Drive the periodic file summary ingestion loop
-//   Keywords: file_summary, batch, poll, store, llm
-//   Related: Worker.processBatch, retrieval.FileSummaryGenerator
-//   Flow: poll work → generate summaries → store results → sleep/backoff
-//   Resources: workspace files, LLM provider, memory store
-//   Events: filesummary.batch
-//   OutputFields: none
+//
+//	Purpose: Drive the periodic file summary ingestion loop
+//	Keywords: file_summary, batch, poll, store, llm
+//	Related: Worker.processBatch, retrieval.FileSummaryGenerator
+//	Flow: poll work → generate summaries → store results → sleep/backoff
+//	Resources: workspace files, LLM provider, memory store
+//	Events: filesummary.batch
+//	OutputFields: none
 //
 // [[protocol:file-summary-ingestion-loop]]
-// [[invariant:stopCh-signal-respected]]
+// [[invariant:stop-channel-signal-respected]]
 func (w *Worker) run(ctx context.Context) {
 	defer close(w.doneCh)
 	defer func() {

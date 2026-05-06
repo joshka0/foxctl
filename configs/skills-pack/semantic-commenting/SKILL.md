@@ -188,6 +188,16 @@ For repo-wide confidence, build the graph with semantic anchors enabled:
 ./bin/foxctl index repo build --workspace . --semantic-anchors --include-tests
 ```
 
+Repo graph summaries are a separate concern from anchor graph construction. If
+reviewing graph output needs file/symbol summary text, generate summaries and
+then enrich the already-built graph:
+
+```bash
+foxctl index file-summaries --workspace .
+foxctl index symbol-summaries --workspace .
+foxctl index repo enrich summaries --workspace .
+```
+
 In non-foxctl repos, prefer equivalent project-native parser/index tests. If
 foxctl is available there, lint anchors against that workspace instead of
 assuming a foxctl scope:

@@ -41,12 +41,35 @@ foxctl run code/semantic_search --input '{"query": "repoindex", "format": "tree"
 ### Repo graph index
 ```bash
 # Build the repo graph index (dry-run first; this writes to the repoindex DB).
+# Builds are incremental by default; use `--incremental=false` for a forced full rebuild.
 # For TS/Elixir-only repos, add `--go=false` (otherwise Go indexing may fail).
 foxctl index repo build --dry-run --workspace . --go --typescript --elixir
 foxctl index repo build --workspace . --go --typescript --elixir
 
+# Or call the skill wrapper directly.
+foxctl run repo/index_build --input '{"workspace": ".", "include_go": true, "include_typescript": true}'
+
 foxctl index repo search --workspace . --query "repoindex"
 foxctl index repo expand --workspace . --seed "<node-id>" --edge CALLS --edge REFERS_TO
+```
+
+Summaries are separate from graph construction. Generate file/symbol summaries,
+then enrich the existing repo graph only when graph output should include those
+summaries:
+
+```bash
+foxctl index file-summaries --workspace .
+foxctl index symbol-summaries --workspace .
+foxctl index repo enrich summaries --workspace .
+
+# Skill wrapper for the enrichment step.
+foxctl run repo/index_enrich_summaries --input '{"workspace": "."}'
+```
+
+For semantic-comment anchors, build the graph with explicit anchor edges:
+
+```bash
+foxctl index repo build --workspace . --semantic-anchors --include-tests
 ```
 
 ### DAG grep (repo graph explanation subgraph)

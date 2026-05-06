@@ -239,16 +239,17 @@ func main() {
 // run orchestrates trajectory export with filtering, validation, and CAS storage with optional pinning.
 //
 // Index:
-//   Purpose: Export agent execution trajectories with filtering, metrics, and CAS storage for analysis and backup
-//   Keywords: trajectory/export, data_export, cas_storage, trajectory_analysis, agent_execution
-//   Related: forEachEpisode, buildEpisode, writeEpisodesToCAS, estimateEpisodesBytes
-//   Flow: validate input → parse parameters → open trajectory store → apply filters → export episodes → store in CAS → emit results
-//   Resources: trajectory store, CAS store
-//   Events: none
-//   OutputFields: summary.count, summary.format, artifact
+//
+//	Purpose: Export agent execution trajectories with filtering, metrics, and CAS storage for analysis and backup
+//	Keywords: trajectory/export, data_export, cas_storage, trajectory_analysis, agent_execution
+//	Related: forEachEpisode, buildEpisode, writeEpisodesToCAS, estimateEpisodesBytes
+//	Flow: validate input → parse parameters → open trajectory store → apply filters → export episodes → store in CAS → emit results
+//	Resources: trajectory store, CAS store
+//	Events: none
+//	OutputFields: summary.count, summary.format, artifact
 //
 // [[domain:trajectory_export]]
-// [[invariant:secret_redaction]]
+// [[invariant:sensitive-data-redaction]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Normalize input
 	in.WorkspaceID = strings.TrimSpace(in.WorkspaceID)

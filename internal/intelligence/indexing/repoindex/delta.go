@@ -28,6 +28,7 @@ func (s *Store) ComputeDelta(ctx context.Context) (WorkspaceDelta, error) {
 		}
 	}
 	currentFiles := map[string]struct{}{}
+	unchangedFiles := map[string]struct{}{}
 	for pathValue, state := range stored {
 		currentState, ok := fileStateForPath(s.repoRoot, pathValue, current.HeadSHA)
 		if !ok {
@@ -39,6 +40,7 @@ func (s *Store) ComputeDelta(ctx context.Context) (WorkspaceDelta, error) {
 			delta.Modified = append(delta.Modified, pathValue)
 		} else {
 			delta.Unchanged++
+			unchangedFiles[pathValue] = struct{}{}
 		}
 	}
 	untracked, modifiedFromGit := gitDeltaPaths(ctx, s.repoRoot)
@@ -54,6 +56,9 @@ func (s *Store) ComputeDelta(ctx context.Context) (WorkspaceDelta, error) {
 			continue
 		}
 		if _, ok := currentFiles[pathValue]; !ok {
+			continue
+		}
+		if _, ok := unchangedFiles[pathValue]; ok {
 			continue
 		}
 		delta.Modified = appendUniqueDeltaPath(delta.Modified, pathValue)

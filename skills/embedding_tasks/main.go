@@ -80,16 +80,17 @@ func main() {
 // run orchestrates task embedding generation with batch processing and scope filtering.
 //
 // Index:
-//   Purpose: Generate semantic embeddings for tasks to enable task search and retrieval
-//   Flow: validate input → list tasks by scope → process in batches → generate embeddings → store as memories
-//   SideEffects: embedding API calls; memory store updates; task content formatting; batch processing
-//   FailureModes: missing API keys, task store errors, embedding failures, memory store errors
-//   Observability: emits processing statistics, task results, error details, and timing metrics
-//   Related: taskEmbeddingContent, listAllTasks
-//   Keywords: embedding/tasks, tasks, semantic_search, batch_processing, embeddings
 //
-// [[domain:task-embedding-generation]]
-// [[protocol:task-memory-embedding-storage]]
+//	Purpose: Generate semantic embeddings for tasks to enable task search and retrieval
+//	Flow: validate input → list tasks by scope → process in batches → generate embeddings → store as memories
+//	SideEffects: embedding API calls; memory store updates; task content formatting; batch processing
+//	FailureModes: missing API keys, task store errors, embedding failures, memory store errors
+//	Observability: emits processing statistics, task results, error details, and timing metrics
+//	Related: taskEmbeddingContent, listAllTasks
+//	Keywords: embedding/tasks, tasks, semantic_search, batch_processing, embeddings
+//
+// [[domain:work-item-embedding-generation]]
+// [[protocol:work-item-memory-embedding-storage]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Validate input
 	if in.Scope == "" && in.TaskID == "" {

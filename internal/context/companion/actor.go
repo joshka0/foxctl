@@ -52,12 +52,12 @@ type CompanionActorConfig struct {
 // NewCompanionActor creates a companion actor with mailbox configuration.
 //
 // Index:
-//   Purpose: Build a companion actor backed by a companion service
-//   Flow: validate config → build actor config → return actor
-//   Related: CompanionActor.OnMailReceived, CompanionActor.Start
-//   Keywords: companion_actor, mailbox, namespace, service, board_store
 //
-// [[lifecycle:component]]
+//	Purpose: Build a companion actor backed by a companion service
+//	Flow: validate config → build actor config → return actor
+//	Related: CompanionActor.OnMailReceived, CompanionActor.Start
+//	Keywords: companion_actor, mailbox, namespace, service, board_store
+//
 // [[protocol:companion-actor-creation]]
 func NewCompanionActor(cfg CompanionActorConfig) (*CompanionActor, error) {
 	if cfg.Namespace == "" {
@@ -158,10 +158,11 @@ type MailboxMessage struct {
 // OnMailReceived handles mailbox messages and replies with companion output.
 //
 // Index:
-//   Purpose: Process mailbox messages and respond via blackboard
-//   Flow: parse payload → build chat request → call service → post response
-//   Related: Service.Chat, CompanionActor.postResponse
-//   Keywords: companion_mail, mailbox, chat_request, blackboard, response
+//
+//	Purpose: Process mailbox messages and respond via blackboard
+//	Flow: parse payload → build chat request → call service → post response
+//	Related: Service.Chat, CompanionActor.postResponse
+//	Keywords: companion_mail, mailbox, chat_request, blackboard, response
 //
 // [[protocol:companion-mail-handler]]
 // [[domain:mailbox-to-chat-bridge]]

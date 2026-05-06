@@ -1,0 +1,126 @@
+apiVersion: foxctl/v1
+kind: Skill
+metadata:
+  name: repo/index_build
+  version: 0.1.0
+  description: "Build or refresh the repo graph index for a workspace"
+  tags: ["repoindex", "graph", "indexing", "build"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/repo_index_build/repo_index_build
+io:
+  format: JSON
+signature:
+  command: repo/index_build
+  parameters:
+    - name: workspace
+      type: string
+      required: false
+      description: "Workspace root (default: current workspace)"
+    - name: go_pattern
+      type: array
+      required: false
+      items:
+        type: string
+      description: "Go package patterns to index (default: ./...)"
+    - name: include_go
+      type: boolean
+      required: false
+      default: true
+      description: "Include Go sources"
+    - name: include_typescript
+      type: boolean
+      required: false
+      default: true
+      description: "Include TypeScript sources"
+    - name: include_python
+      type: boolean
+      required: false
+      default: false
+      description: "Include Python sources"
+    - name: include_rust
+      type: boolean
+      required: false
+      default: false
+      description: "Include Rust sources"
+    - name: include_csharp
+      type: boolean
+      required: false
+      default: false
+      description: "Include C# sources"
+    - name: include_elixir
+      type: boolean
+      required: false
+      default: false
+      description: "Include Elixir sources"
+    - name: include_terraform
+      type: boolean
+      required: false
+      default: false
+      description: "Include Terraform files"
+    - name: include_kubernetes
+      type: boolean
+      required: false
+      default: false
+      description: "Include Kubernetes YAML manifests"
+    - name: include_shell
+      type: boolean
+      required: false
+      default: false
+      description: "Include shell scripts"
+    - name: include_tests
+      type: boolean
+      required: false
+      default: false
+      description: "Include test files"
+    - name: include_semantic_anchors
+      type: boolean
+      required: false
+      default: false
+      description: "Include semantic anchor concept nodes and edges"
+    - name: include_cochange
+      type: boolean
+      required: false
+      default: false
+      description: "Include empirical git co-change file edges"
+    - name: dry_run
+      type: boolean
+      required: false
+      default: false
+      description: "Build without writing to the index"
+    - name: progress
+      type: boolean
+      required: false
+      default: false
+      description: "Emit coarse build progress logs to stderr"
+    - name: incremental
+      type: boolean
+      required: false
+      default: true
+      description: "Skip rebuild when stored file state is current"
+  returns:
+    - name: workspace
+      type: string
+      description: "Absolute workspace root"
+    - name: store_path
+      type: string
+      description: "Repoindex database path"
+    - name: result
+      type: object
+      description: "Build result counts"
+    - name: delta_counts
+      type: object
+      description: "Workspace delta counts when incremental mode checked freshness"
+    - name: skipped
+      type: boolean
+      description: "Whether incremental freshness skipped the rebuild"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false
+openapi:
+  enabled: true
+  methods:
+    POST: "true"

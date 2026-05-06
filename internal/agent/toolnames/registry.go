@@ -25,7 +25,7 @@ var runtimeToolNames = []string{
 	"smart_search", "code_search_ensemble", "context_grep", "code_symbols", "refactor_scout", "context_filter", "session_timeline",
 	"memory_query", "session_recall", "annotation_recall", "annotation_list_sessions", "annotation_category_stats",
 	"agent_memory_context", "agent_memory_search",
-	"repo_index_search", "repo_index_expand", "repo_index_open", "repo_index_dag_grep",
+	"repo_index_build", "repo_index_enrich_summaries", "repo_index_search", "repo_index_expand", "repo_index_open", "repo_index_dag_grep",
 	"context_show", "context_retrieve", "obsidian_index_search", "obsidian_read", "obsidian_related",
 	"heartwood_state", "heartwood_action",
 	"agent_spawn", "agent_list", "agent_status", "agent_kill", "agent_hierarchy", "agent_wait",

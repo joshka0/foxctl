@@ -1,7 +1,6 @@
 package repoindex
 
 import (
-	"context"
 	"encoding/json"
 	"strings"
 	"time"
@@ -67,16 +66,20 @@ const (
 )
 
 const (
-	ToolSearch  = "repo_index_search"
-	ToolExpand  = "repo_index_expand"
-	ToolOpen    = "repo_index_open"
-	ToolDAGGrep = "repo_index_dag_grep"
+	ToolBuild           = "repo_index_build"
+	ToolEnrichSummaries = "repo_index_enrich_summaries"
+	ToolSearch          = "repo_index_search"
+	ToolExpand          = "repo_index_expand"
+	ToolOpen            = "repo_index_open"
+	ToolDAGGrep         = "repo_index_dag_grep"
 
 	// Legacy tool names (dot-delimited). Kept for backward compatibility.
-	ToolSearchLegacy  = "repo.index.search"
-	ToolExpandLegacy  = "repo.index.expand"
-	ToolOpenLegacy    = "repo.index.open"
-	ToolDAGGrepLegacy = "repo.index.dag_grep"
+	ToolBuildLegacy           = "repo.index.build"
+	ToolEnrichSummariesLegacy = "repo.index.enrich_summaries"
+	ToolSearchLegacy          = "repo.index.search"
+	ToolExpandLegacy          = "repo.index.expand"
+	ToolOpenLegacy            = "repo.index.open"
+	ToolDAGGrepLegacy         = "repo.index.dag_grep"
 )
 
 // Edge sets for ergonomic selection in tools.
@@ -298,17 +301,6 @@ type Stats struct {
 	NodesByKind map[NodeKind]int `json:"nodes_by_kind"`
 }
 
-// FileSummaryProvider supplies file summaries for repoindex nodes.
-type FileSummaryProvider interface {
-	Summary(ctx context.Context, filePath string) (string, error)
-}
-
-// SymbolSummaryProvider resolves summaries for symbol nodes.
-// Accepts symbol package, stable ID and stable key for lookup.
-type SymbolSummaryProvider interface {
-	Summary(ctx context.Context, symbolID, symbolKey, pkg string) (string, error)
-}
-
 // BuildOptions configure repoindex build behavior.
 type BuildOptions struct {
 	RepoRoot               string
@@ -327,8 +319,6 @@ type BuildOptions struct {
 	IncludeSemanticAnchors bool
 	IncludeCoChange        bool
 	DryRun                 bool
-	SummaryProvider        FileSummaryProvider
-	SymbolSummaryProvider  SymbolSummaryProvider
 	Progress               func(BuildProgress)
 }
 

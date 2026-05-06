@@ -22,6 +22,7 @@ web-ui/.vite/
 
 # SQLite databases (except test fixtures)
 *.db
+*.db-journal
 *.db-shm
 *.db-wal
 !test/**/*.db

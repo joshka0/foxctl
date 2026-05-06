@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // FileEmbeddingType is the memory entry type for single-file embeddings.
@@ -119,6 +120,9 @@ type Config struct {
 
 	// ChunkOverlapBytes is the overlap between chunks (default: 0).
 	ChunkOverlapBytes int `json:"chunk_overlap_bytes,omitempty"`
+
+	// ChunkDelay is an optional delay between chunk embedding requests.
+	ChunkDelay time.Duration `json:"chunk_delay,omitempty"`
 
 	// MaxFileKB is the maximum file size in KB to index (0 = no limit).
 	MaxFileKB int `json:"max_file_kb,omitempty"`

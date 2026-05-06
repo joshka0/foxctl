@@ -172,14 +172,16 @@ func main() {
 // run orchestrates semantic session retrieval with multiple granularity levels and fallback strategies.
 //
 // Index:
-//   Purpose: Search and retrieve sessions, context windows, or chunks using semantic similarity with fallback to full-text search
-//   Keywords: session/recall, semantic_search, session_retrieval, embedding_search, full_text_search
-//   Related: normalizeInput, semantic.NewProviderForScope, semantic.EnrichQuery
-//   Flow: validate input → detect embedding providers → generate query embedding → search at target granularity → format results → emit output
-//   Resources: session store, annotations store, embedding provider
-//   Events: semantic retrieval events
-//   OutputFields: query, matches, window_matches, chunk_matches, annotation_matches, session_list
-// [[domain:semantic-session-retrieval]]
+//
+//	Purpose: Search and retrieve sessions, context windows, or chunks using semantic similarity with fallback to full-text search
+//	Keywords: session/recall, semantic_search, session_retrieval, embedding_search, full_text_search
+//	Related: normalizeInput, semantic.NewProviderForScope, semantic.EnrichQuery
+//	Flow: validate input → detect embedding providers → generate query embedding → search at target granularity → format results → emit output
+//	Resources: session store, annotations store, embedding provider
+//	Events: semantic retrieval events
+//	OutputFields: query, matches, window_matches, chunk_matches, annotation_matches, session_list
+//
+// [[domain:semantic-run-retrieval]]
 // [[protocol:granularity-level-dispatch]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply defaults

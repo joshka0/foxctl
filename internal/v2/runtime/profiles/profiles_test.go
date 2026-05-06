@@ -82,7 +82,7 @@ func TestDefaultSpecs_OverseerIncludesRepoIndexTools(t *testing.T) {
 	}
 
 	normalized := profiles.NormalizeAllowedTools(spec.AllowedTools)
-	for _, want := range []string{"repo_index_search", "repo_index_expand", "repo_index_open", "repo_index_dag_grep", "smart_search"} {
+	for _, want := range []string{"repo_index_build", "repo_index_enrich_summaries", "repo_index_search", "repo_index_expand", "repo_index_open", "repo_index_dag_grep", "smart_search"} {
 		if !slices.Contains(normalized, want) {
 			t.Fatalf("overseer allowed tools=%v want %s", normalized, want)
 		}

@@ -57,13 +57,14 @@ func (idx *Indexer) ID() string {
 // Index processes a post-review event and updates file embeddings.
 //
 // Index:
-//   Purpose: Update semantic file embeddings for post-review changes
-//   Keywords: semantic_file_index, embeddings, post_review, files_indexed, files_failed
-//   Related: deleteFileEmbedding, indexFile
-//   Flow: validate config → loop files → delete removed → embed/update → record results
-//   Resources: memory store, embedding provider, workspace files
-//   Events: semantic-index-complete
-//   OutputFields: IndexerResult
+//
+//	Purpose: Update semantic file embeddings for post-review changes
+//	Keywords: semantic_file_index, embeddings, post_review, files_indexed, files_failed
+//	Related: deleteFileEmbedding, indexFile
+//	Flow: validate config → loop files → delete removed → embed/update → record results
+//	Resources: memory store, embedding provider, workspace files
+//	Events: semantic-index-complete
+//	OutputFields: IndexerResult
 //
 // [[protocol:semantic-file-index-post-review]]
 // [[invariant:workspace-id-canonicalization]]
@@ -227,6 +228,9 @@ func (idx *Indexer) indexChunkedFile(ctx context.Context, event indexing.PostRev
 			return fmt.Errorf("embed chunk %d: %w", i, err)
 		}
 		chunkEmbeddings[i] = embedding
+		if err := idx.waitBetweenChunkEmbeddings(ctx, file.Path, i, chunkCount); err != nil {
+			return fmt.Errorf("wait after chunk %d: %w", i, err)
+		}
 	}
 
 	// Phase 2: Prepare all entries
@@ -534,6 +538,9 @@ func (idx *Indexer) indexFileForJob(ctx context.Context, args JobArgs, file JobF
 				return 0, fmt.Errorf("embed chunk %d: %w", i, err)
 			}
 			chunkEmbeddings[i] = embedding
+			if err := idx.waitBetweenChunkEmbeddings(ctx, file.Path, i, chunkCount); err != nil {
+				return 0, fmt.Errorf("wait after chunk %d: %w", i, err)
+			}
 		}
 
 		// Phase 2: Save file entry (no embedding, just metadata)
@@ -603,6 +610,29 @@ func (idx *Indexer) indexFileForJob(ctx context.Context, args JobArgs, file JobF
 	}
 
 	return 0, nil
+}
+
+func (idx *Indexer) waitBetweenChunkEmbeddings(ctx context.Context, path string, chunkIndex, chunkCount int) error {
+	if idx.config.ChunkDelay <= 0 || chunkIndex >= chunkCount-1 {
+		return nil
+	}
+
+	idx.logger.Info().
+		Str("path", path).
+		Int("chunk", chunkIndex+1).
+		Int("chunks", chunkCount).
+		Dur("delay", idx.config.ChunkDelay).
+		Msg("waiting between chunk embeddings")
+
+	timer := time.NewTimer(idx.config.ChunkDelay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // saveFileEntry saves a file embedding entry to the memory store.
