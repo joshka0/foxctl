@@ -38,13 +38,14 @@ func main() {
 // run orchestrates overseer inbox monitoring with recipient filtering and auto-acknowledgment.
 //
 // Index:
-//   Purpose: Surface mailbox messages sent to overseer (or broadcast) for human-in-the-loop communication
-//   Keywords: hooks/overseer_inbox, overseer_communication, message_monitoring, auto_acknowledgment, human_in_the_loop
-//   Related: buildOverseerContext, priorityToEmoji, kindToLabel
-//   Flow: resolve workspace → get recipient config → open board store → query inbox → build context → auto-mark surfaced → emit results
-//   Resources: blackboard store (SQLite)
-//   Events: overseer-messages-surfaced
-//   OutputFields: message_count, workspace_id, recipient, context
+//
+//	Purpose: Surface mailbox messages sent to overseer (or broadcast) for human-in-the-loop communication
+//	Keywords: hooks/overseer_inbox, overseer_communication, message_monitoring, auto_acknowledgment, human_in_the_loop
+//	Related: buildOverseerContext, priorityToEmoji, kindToLabel
+//	Flow: resolve workspace → get recipient config → open board store → query inbox → build context → auto-mark surfaced → emit results
+//	Resources: blackboard store (SQLite)
+//	Events: overseer-messages-surfaced
+//	OutputFields: message_count, workspace_id, recipient, context
 //
 // [[domain:mailbox-routing]]
 // [[protocol:overseer-communication]]

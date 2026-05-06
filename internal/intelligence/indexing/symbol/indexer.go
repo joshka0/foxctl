@@ -70,13 +70,14 @@ func (idx *Indexer) ID() string {
 // Index processes a post-review event and updates symbol index.
 //
 // Index:
-//   Purpose: Update symbol and call indexes for post-review file changes
-//   Keywords: code_symbol_dag, post_review, files_indexed, files_skipped, files_failed, failures, embeddings, IndexerResult
-//   Related: indexFile, deleteFileSymbols, enqueueEmbeddings, Extractor.Extract
-//   Flow: validate config → loop files → delete removed → detect language/extractor → indexFile → update counts → log summary
-//   Resources: memory store, embedding store, workspace files
-//   Events: symbol-index-complete
-//   OutputFields: IndexerResult
+//
+//	Purpose: Update symbol and call indexes for post-review file changes
+//	Keywords: code_symbol_dag, post_review, files_indexed, files_skipped, files_failed, failures, embeddings, IndexerResult
+//	Related: indexFile, deleteFileSymbols, enqueueEmbeddings, Extractor.Extract
+//	Flow: validate config → loop files → delete removed → detect language/extractor → indexFile → update counts → log summary
+//	Resources: memory store, embedding store, workspace files
+//	Events: symbol-index-complete
+//	OutputFields: IndexerResult
 //
 // [[protocol:symbol-index-post-review]]
 // [[invariant:per-symbol-incremental-digest-check]]

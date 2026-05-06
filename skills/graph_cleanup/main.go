@@ -44,13 +44,14 @@ func main() {
 // run orchestrates graph maintenance and cleanup operations with workspace isolation.
 //
 // Index:
-//   Purpose: Execute graph cleanup operations (expired edges, dangling edges, degree recalculation)
-//   Keywords: graph/cleanup, graph_maintenance, database_cleanup, expired_edges, dangling_edges
-//   Related: handleCleanup, handleRepair, handleStats
-//   Flow: validate operation → open store → dispatch to handler → emit results
-//   Resources: graph database (SQLite); workspace-scoped cleanup
-//   Events: graph-cleanup, graph-repair, graph-stats
-//   OutputFields: expired_edges_removed, dangling_edges_removed, degrees_recalculated
+//
+//	Purpose: Execute graph cleanup operations (expired edges, dangling edges, degree recalculation)
+//	Keywords: graph/cleanup, graph_maintenance, database_cleanup, expired_edges, dangling_edges
+//	Related: handleCleanup, handleRepair, handleStats
+//	Flow: validate operation → open store → dispatch to handler → emit results
+//	Resources: graph database (SQLite); workspace-scoped cleanup
+//	Events: graph-cleanup, graph-repair, graph-stats
+//	OutputFields: expired_edges_removed, dangling_edges_removed, degrees_recalculated
 //
 // [[domain:graph-database]]
 // [[protocol:skill-dispatch]]

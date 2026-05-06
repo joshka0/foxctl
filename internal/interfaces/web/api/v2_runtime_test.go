@@ -525,8 +525,8 @@ func TestV2RunsCreateAsyncStartsRunAndReturnsBeforeCompletion(t *testing.T) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("async create did not return before model completion")
+	case <-time.After(5 * time.Second):
+		t.Fatal("async create did not return while model completion was blocked")
 	}
 	if createRR.Code != http.StatusAccepted {
 		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())

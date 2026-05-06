@@ -20,13 +20,14 @@ func NewRunnerExecutor() SkillExecutor {
 // Execute implements SkillExecutor using runner.RunWithOptions.
 //
 // Index:
-//   Purpose: Execute a skill via the runner adapter
-//   Keywords: skill_execute, runner, manifest, exit_code
-//   Related: runner.RunWithOptions, resolveManifest
-//   Flow: resolve manifest → run with options → map exit code → return result
-//   Resources: runner.RunWithOptions
-//   Events: none
-//   OutputFields: Result
+//
+//	Purpose: Execute a skill via the runner adapter
+//	Keywords: skill_execute, runner, manifest, exit_code
+//	Related: runner.RunWithOptions, resolveManifest
+//	Flow: resolve manifest → run with options → map exit code → return result
+//	Resources: runner.RunWithOptions
+//	Events: none
+//	OutputFields: Result
 //
 // [[domain:skill-execution-adapter]]
 func (e *RunnerExecutor) Execute(ctx context.Context, opts ExecuteOptions) (*Result, error) {

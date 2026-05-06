@@ -22,13 +22,15 @@ import (
 // - Never fails Open(); errors are logged and ignored.
 //
 // Index:
-//   Purpose: Keep historical named-memory entries reachable when workspace paths change across users/machines
-//   Keywords: workspace, migration, repair, memory, embeddings, symbols
-//   Related: ws.ID, ws.CanonicalID, (*Store).MigrateWorkspace
-//   Flow: detect path-like workspace values -> compute stable target IDs -> migrate via MigrateWorkspace -> log when rows move
-//   Resources: memory.db, named_memory, embedding_metadata, indexer_state
-//   Events: none
-//   OutputFields: none
+//
+//	Purpose: Keep historical named-memory entries reachable when workspace paths change across users/machines
+//	Keywords: workspace, migration, repair, memory, embeddings, symbols
+//	Related: ws.ID, ws.CanonicalID, (*Store).MigrateWorkspace
+//	Flow: detect path-like workspace values -> compute stable target IDs -> migrate via MigrateWorkspace -> log when rows move
+//	Resources: memory.db, named_memory, embedding_metadata, indexer_state
+//	Events: none
+//	OutputFields: none
+//
 // [[invariant:only-migrate-when-target-path-exists]]
 // [[domain:workspace-stable-identity]]
 func (s *Store) repairWorkspaceIDs(ctx context.Context) {

@@ -24,13 +24,15 @@ import (
 // Errors are logged and ignored.
 //
 // Index:
-//   Purpose: Backfill stable workspace IDs for legacy sessions so workspace-scoped session search works across machines/users
-//   Keywords: sessions, workspace_id, workspace_path, migration, repair
-//   Related: ws.ID, ws.CanonicalID, sessionkit.WorkspaceOrDefault
-//   Flow: detect legacy rows -> compute stable ID from workspace_path -> update sessions + session_edges -> log results
-//   Resources: sessions.db, sessions table, session_edges table
-//   Events: none
-//   OutputFields: none
+//
+//	Purpose: Backfill stable workspace IDs for legacy sessions so workspace-scoped session search works across machines/users
+//	Keywords: sessions, workspace_id, workspace_path, migration, repair
+//	Related: ws.ID, ws.CanonicalID, sessionkit.WorkspaceOrDefault
+//	Flow: detect legacy rows -> compute stable ID from workspace_path -> update sessions + session_edges -> log results
+//	Resources: sessions.db, sessions table, session_edges table
+//	Events: none
+//	OutputFields: none
+//
 // [[invariant:only-backfill-when-path-exists-on-disk]]
 // [[domain:workspace-stable-identity]]
 func (s *Store) repairWorkspaceIDs(ctx context.Context) {

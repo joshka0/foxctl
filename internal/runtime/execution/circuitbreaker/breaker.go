@@ -70,13 +70,14 @@ func New(name string, config Config) *Breaker {
 // Returns ErrCircuitOpen if the breaker is open.
 //
 // Index:
-//   Purpose: Guard a function with circuit breaker state transitions
-//   Keywords: circuit_breaker, execute, state_machine
-//   Related: Breaker.Allow, Breaker.RecordFailure
-//   Flow: check Allow → execute fn → record success/failure → return
-//   Resources: none
-//   Events: none
-//   OutputFields: error
+//
+//	Purpose: Guard a function with circuit breaker state transitions
+//	Keywords: circuit_breaker, execute, state_machine
+//	Related: Breaker.Allow, Breaker.RecordFailure
+//	Flow: check Allow → execute fn → record success/failure → return
+//	Resources: none
+//	Events: none
+//	OutputFields: error
 //
 // [[protocol:circuit-breaker-state-machine]]
 // [[invariant:half-open-failure-reopens]]

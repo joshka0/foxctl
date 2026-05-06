@@ -74,13 +74,14 @@ func main() {
 // run orchestrates incremental file indexing with symbol extraction, embedding queuing, and graph edge ingestion.
 //
 // Index:
-//   Purpose: Index individual files for live code search with symbol extraction, embedding, and graph relationships
-//   Flow: resolve path → detect language → extract symbols → upsert to memory store → queue embeddings → ingest graph edges
-//   SideEffects: updates memory store; queues embedding jobs; updates graph store with call/import relationships
-//   FailureModes: file access errors, parsing failures, storage errors, unsupported languages
-//   Observability: emits indexing statistics, timing metrics, and skip reasons for unsupported files
-//   Related: extractSymbols, upsertSymbols, queueEmbeddings, ingestGraphEdges
-//   Keywords: code/incremental_index, file_indexing, symbol_extraction, embedding_queue, graph_ingestion, live_indexing
+//
+//	Purpose: Index individual files for live code search with symbol extraction, embedding, and graph relationships
+//	Flow: resolve path → detect language → extract symbols → upsert to memory store → queue embeddings → ingest graph edges
+//	SideEffects: updates memory store; queues embedding jobs; updates graph store with call/import relationships
+//	FailureModes: file access errors, parsing failures, storage errors, unsupported languages
+//	Observability: emits indexing statistics, timing metrics, and skip reasons for unsupported files
+//	Related: extractSymbols, upsertSymbols, queueEmbeddings, ingestGraphEdges
+//	Keywords: code/incremental_index, file_indexing, symbol_extraction, embedding_queue, graph_ingestion, live_indexing
 //
 // [[domain:incremental-code-indexing]]
 // [[protocol:live-symbol-indexing]]

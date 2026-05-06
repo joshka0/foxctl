@@ -51,13 +51,14 @@ func main() {
 // run orchestrates stop validation with test status and review approval requirements.
 //
 // Index:
-//   Purpose: Block StopRequested until tests are green and review approval is present
-//   Keywords: hooks/stop_guard, stop_validation, test_requirements, review_approval, quality_gates
-//   Related: evaluateTests, evaluateReview, buildTestContext, hasReviewApproval, applyConfig
-//   Flow: load config → validate event → evaluate tests (if required) → evaluate review (if required) → emit decision
-//   Resources: testwatch store; blackboard store
-//   Events: stop-blocked, stop-approved
-//   OutputFields: decision, tests_total, tests_passing, tests_failing, review_required
+//
+//	Purpose: Block StopRequested until tests are green and review approval is present
+//	Keywords: hooks/stop_guard, stop_validation, test_requirements, review_approval, quality_gates
+//	Related: evaluateTests, evaluateReview, buildTestContext, hasReviewApproval, applyConfig
+//	Flow: load config → validate event → evaluate tests (if required) → evaluate review (if required) → emit decision
+//	Resources: testwatch store; blackboard store
+//	Events: stop-blocked, stop-approved
+//	OutputFields: decision, tests_total, tests_passing, tests_failing, review_required
 //
 // [[invariant:tests-green-before-stop]]
 // [[invariant:review-approval-before-stop]]

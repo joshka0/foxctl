@@ -50,13 +50,14 @@ type Options struct {
 // Run executes the WASI module and captures stdout/stderr.
 //
 // Index:
-//   Purpose: Run a WASI skill module with sandboxed runtime
-//   Keywords: wasi_runner, module_path, stdout, stderr, timeout
-//   Related: Runner.validateManifest, Runner.prepareRuntime
-//   Flow: validate manifest → load module → prepare workdir/runtime → execute → capture output
-//   Resources: wazero runtime, temp workdir
-//   Events: none
-//   OutputFields: stdout, stderr, error
+//
+//	Purpose: Run a WASI skill module with sandboxed runtime
+//	Keywords: wasi_runner, module_path, stdout, stderr, timeout
+//	Related: Runner.validateManifest, Runner.prepareRuntime
+//	Flow: validate manifest → load module → prepare workdir/runtime → execute → capture output
+//	Resources: wazero runtime, temp workdir
+//	Events: none
+//	OutputFields: stdout, stderr, error
 //
 // [[protocol:wasi-skill-contract]]
 // [[invariant:network-none-only]]

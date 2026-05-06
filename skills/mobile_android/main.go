@@ -108,13 +108,14 @@ func main() {
 // run orchestrates Android device automation via ADB with comprehensive device management capabilities.
 //
 // Index:
-//   Purpose: Automate Android devices/emulators via ADB including app management, UI interaction, and system operations
-//   Keywords: mobile/android, adb_automation, device_management, ui_automation, android_testing
-//   Related: mobileutil.RunADB, mobileutil.ListADBDevices, parseUIHierarchy, emitLogcatResult
-//   Flow: validate operation → check ADB availability → route to specific handler → execute ADB commands → emit results
-//   Resources: ADB tool; Android device/emulator
-//   Events: device-automated, app-installed, screenshot-captured
-//   OutputFields: operation, success, devices, screenshot, logs
+//
+//	Purpose: Automate Android devices/emulators via ADB including app management, UI interaction, and system operations
+//	Keywords: mobile/android, adb_automation, device_management, ui_automation, android_testing
+//	Related: mobileutil.RunADB, mobileutil.ListADBDevices, parseUIHierarchy, emitLogcatResult
+//	Flow: validate operation → check ADB availability → route to specific handler → execute ADB commands → emit results
+//	Resources: ADB tool; Android device/emulator
+//	Events: device-automated, app-installed, screenshot-captured
+//	OutputFields: operation, success, devices, screenshot, logs
 //
 // [[domain:mobile-automation]]
 // [[protocol:adb-integration]]

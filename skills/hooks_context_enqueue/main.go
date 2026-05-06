@@ -39,13 +39,14 @@ func main() {
 // run orchestrates context enqueuing to buffer for later injection with validation and deduplication.
 //
 // Index:
-//   Purpose: Enqueue context to buffer for later injection when direct injection isn't possible
-//   Keywords: hooks/context_enqueue, context_buffer, delayed_injection, ttl_management
-//   Related: contextbuffer.Enqueue, contextbuffer.Count
-//   Flow: validate input → open store → enqueue with TTL → get pending count → emit results
-//   Resources: context buffer store (SQLite)
-//   Events: context-enqueued
-//   OutputFields: id, source, priority, expires_at, total_pending
+//
+//	Purpose: Enqueue context to buffer for later injection when direct injection isn't possible
+//	Keywords: hooks/context_enqueue, context_buffer, delayed_injection, ttl_management
+//	Related: contextbuffer.Enqueue, contextbuffer.Count
+//	Flow: validate input → open store → enqueue with TTL → get pending count → emit results
+//	Resources: context buffer store (SQLite)
+//	Events: context-enqueued
+//	OutputFields: id, source, priority, expires_at, total_pending
 //
 // [[domain:context-buffer]]
 // [[protocol:context-injection]]

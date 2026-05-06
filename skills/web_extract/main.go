@@ -51,13 +51,14 @@ func main() {
 // run orchestrates web content extraction with validation, HTTP requests, HTML parsing, and query-based snippet generation.
 //
 // Index:
-//   Purpose: Extract content from multiple URLs with HTML-to-markdown conversion, query-based snippet extraction, and link harvesting
-//   Keywords: web/extract, html_parsing, content_extraction, snippet_generation, link_extraction, markdown_conversion
-//   Related: extractURL, extractTitle, extractLinks, htmlToMarkdown, extractRelevantSnippets
-//   Flow: validate URLs → configure limits → create HTTP client → extract each URL → parse HTML → generate snippets → emit with CAS
-//   Resources: HTTP client, CAS store
-//   Events: none
-//   OutputFields: extractions, query, truncated, artifact
+//
+//	Purpose: Extract content from multiple URLs with HTML-to-markdown conversion, query-based snippet extraction, and link harvesting
+//	Keywords: web/extract, html_parsing, content_extraction, snippet_generation, link_extraction, markdown_conversion
+//	Related: extractURL, extractTitle, extractLinks, htmlToMarkdown, extractRelevantSnippets
+//	Flow: validate URLs → configure limits → create HTTP client → extract each URL → parse HTML → generate snippets → emit with CAS
+//	Resources: HTTP client, CAS store
+//	Events: none
+//	OutputFields: extractions, query, truncated, artifact
 //
 // [[domain:web_content_extraction]]
 // [[risk:http_timeout]]

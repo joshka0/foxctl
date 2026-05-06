@@ -57,13 +57,14 @@ func BuildPostReviewEvent(artifact agent.ReviewArtifact, files []indexing.FileCh
 // gracefully.
 //
 // Index:
-//   Purpose: Build and persist post-review events for indexing
-//   Keywords: post_review_event, workspace_id, review_id, files
-//   Related: BuildPostReviewEvent, Store.Put
-//   Flow: build event → store Put → return event
-//   Resources: postreview event store
-//   Events: post-review-event-produced
-//   OutputFields: PostReviewEvent
+//
+//	Purpose: Build and persist post-review events for indexing
+//	Keywords: post_review_event, workspace_id, review_id, files
+//	Related: BuildPostReviewEvent, Store.Put
+//	Flow: build event → store Put → return event
+//	Resources: postreview event store
+//	Events: post-review-event-produced
+//	OutputFields: PostReviewEvent
 //
 // [[protocol:post-review-event-production]]
 // [[invariant:idempotent-event-store]]

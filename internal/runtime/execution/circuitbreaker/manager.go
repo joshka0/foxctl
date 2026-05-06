@@ -23,13 +23,14 @@ func NewManager(config Config) *Manager {
 // Execute runs a function through the circuit breaker for the given operation name.
 //
 // Index:
-//   Purpose: Execute guarded work via a named circuit breaker
-//   Keywords: circuit_breaker, execute, operation_name
-//   Related: Manager.GetOrCreate, Breaker.Execute
-//   Flow: get/create breaker → execute fn → return error
-//   Resources: Breaker registry
-//   Events: none
-//   OutputFields: error
+//
+//	Purpose: Execute guarded work via a named circuit breaker
+//	Keywords: circuit_breaker, execute, operation_name
+//	Related: Manager.GetOrCreate, Breaker.Execute
+//	Flow: get/create breaker → execute fn → return error
+//	Resources: Breaker registry
+//	Events: none
+//	OutputFields: error
 //
 // [[domain:circuit-breaker-execute]]
 func (m *Manager) Execute(ctx context.Context, name string, fn func(context.Context) error) error {

@@ -48,13 +48,14 @@ type ParsedDoc struct {
 // Field lines may optionally be prefixed with '-' or '*'.
 //
 // Index:
-//   Purpose: Parse structured Index blocks and keyword lists from doc comments
-//   Keywords: doc_index, parse, keywords, purpose, related, flow, resources, events, output_fields
-//   Related: DocIndex, ParsedDoc, normalizeIndex
-//   Flow: split lines → detect Index: → parse fields → normalize → return ParsedDoc
-//   Resources: repoindex comment edges
-//   Events: index-parse
-//   OutputFields: Doc, Index, HasIndex
+//
+//	Purpose: Parse structured Index blocks and keyword lists from doc comments
+//	Keywords: doc_index, parse, keywords, purpose, related, flow, resources, events, output_fields
+//	Related: DocIndex, ParsedDoc, normalizeIndex
+//	Flow: split lines → detect Index: → parse fields → normalize → return ParsedDoc
+//	Resources: repoindex comment edges
+//	Events: index-parse
+//	OutputFields: Doc, Index, HasIndex
 //
 // [[protocol:index-block-parsing]]
 // [[invariant:empty-index-reported-correctly]]

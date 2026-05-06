@@ -34,13 +34,14 @@ func main() {
 // run executes jq queries on JSON/YAML data with configurable output formatting.
 //
 // Index:
-//   Purpose: Execute jq queries on JSON/YAML data with various output options and artifact storage
-//   Flow: validate input → check jq availability → build command args → execute jq → parse results → store large outputs
-//   SideEffects: subprocess execution; file system reads; artifact storage; content type detection
-//   FailureModes: invalid queries, missing jq tool, execution errors, parse errors
-//   Observability: emits query results with success status, output type, and optional artifact storage
-//   Related: buildJQArgs
-//   Keywords: data/jq, JSON, YAML, query, transformation, subprocess
+//
+//	Purpose: Execute jq queries on JSON/YAML data with various output options and artifact storage
+//	Flow: validate input → check jq availability → build command args → execute jq → parse results → store large outputs
+//	SideEffects: subprocess execution; file system reads; artifact storage; content type detection
+//	FailureModes: invalid queries, missing jq tool, execution errors, parse errors
+//	Observability: emits query results with success status, output type, and optional artifact storage
+//	Related: buildJQArgs
+//	Keywords: data/jq, JSON, YAML, query, transformation, subprocess
 //
 // [[domain:json-data-transformation]]
 // [[protocol:subprocess-tool-execution]]

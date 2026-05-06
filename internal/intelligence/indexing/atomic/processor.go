@@ -129,13 +129,14 @@ type ProcessResult struct {
 // Returns token usage for cost tracking via observability.
 //
 // Index:
-//   Purpose: Convert raw text into disambiguated atomic facts using LLM
-//   Keywords: atomic_facts, llm, entities, timestamp, disambiguation
-//   Related: buildAtomicPrompt, parseAtomicResponse, Processor.callLLM
-//   Flow: build prompt → call LLM → parse facts → fallback to single fact on parse error
-//   Resources: OpenRouter API
-//   Events: atomic-fact-process
-//   OutputFields: AtomicFact slice, TokenUsage
+//
+//	Purpose: Convert raw text into disambiguated atomic facts using LLM
+//	Keywords: atomic_facts, llm, entities, timestamp, disambiguation
+//	Related: buildAtomicPrompt, parseAtomicResponse, Processor.callLLM
+//	Flow: build prompt → call LLM → parse facts → fallback to single fact on parse error
+//	Resources: OpenRouter API
+//	Events: atomic-fact-process
+//	OutputFields: AtomicFact slice, TokenUsage
 //
 // [[protocol:atomic-fact-extraction]]
 // [[risk:llm-parse-fallback-to-identity]]

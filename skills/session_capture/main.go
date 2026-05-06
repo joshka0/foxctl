@@ -66,13 +66,15 @@ func main() {
 // run orchestrates session capture from Claude Code and Codex with metadata extraction and storage.
 //
 // Index:
-//   Purpose: Extract and store conversation sessions from Claude Code and Codex with metadata, statistics, and high-signal content
-//   Keywords: session/capture, conversation_extraction, claude_code, codex, metadata_extraction, session_storage
-//   Related: findSessionFile, extractSession, extractHighSignal, scanCodexSessions, claudejsonl.OpenReader
-//   Flow: resolve workspace → detect source → locate session files → parse messages → extract metadata → save to store → emit results
-//   Resources: session store, Claude/Codex JSONL files
-//   Events: session capture events
-//   OutputFields: session_id, workspace_path, message_count, user_turns, tool_invocations, high_signal
+//
+//	Purpose: Extract and store conversation sessions from Claude Code and Codex with metadata, statistics, and high-signal content
+//	Keywords: session/capture, conversation_extraction, claude_code, codex, metadata_extraction, session_storage
+//	Related: findSessionFile, extractSession, extractHighSignal, scanCodexSessions, claudejsonl.OpenReader
+//	Flow: resolve workspace → detect source → locate session files → parse messages → extract metadata → save to store → emit results
+//	Resources: session store, Claude/Codex JSONL files
+//	Events: session capture events
+//	OutputFields: session_id, workspace_path, message_count, user_turns, tool_invocations, high_signal
+//
 // [[domain:session-capture-from-provider]]
 // [[protocol:claude-codex-jsonl-parsing]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {

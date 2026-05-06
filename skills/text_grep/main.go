@@ -40,13 +40,14 @@ func main() {
 // run orchestrates text pattern searching across files with regex compilation and result aggregation.
 //
 // Index:
-//   Purpose: Search for text patterns across files using regex with filtering, case sensitivity, and match limiting
-//   Keywords: text/grep, pattern_search, regex, file_search, text_matching
-//   Related: grepFile, textmatch.CompileRegex, fsutil.CollectEntries, skillout.PreviewAndPersistNDJSON
-//   Flow: validate pattern → compile regex → collect files → search files → aggregate results → emit output
-//   Resources: file system, CAS store
-//   Events: none
-//   OutputFields: pattern, case_insensitive, match_count, files_touched, preview, top_files, max_matches, artifact
+//
+//	Purpose: Search for text patterns across files using regex with filtering, case sensitivity, and match limiting
+//	Keywords: text/grep, pattern_search, regex, file_search, text_matching
+//	Related: grepFile, textmatch.CompileRegex, fsutil.CollectEntries, skillout.PreviewAndPersistNDJSON
+//	Flow: validate pattern → compile regex → collect files → search files → aggregate results → emit output
+//	Resources: file system, CAS store
+//	Events: none
+//	OutputFields: pattern, case_insensitive, match_count, files_touched, preview, top_files, max_matches, artifact
 //
 // [[domain:text_pattern_search]]
 // [[risk:unbounded_matches]]

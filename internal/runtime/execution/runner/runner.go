@@ -65,13 +65,14 @@ type RunOptions struct {
 // RunWithOptions executes the appropriate runtime for a manifest using structured options.
 //
 // Index:
-//   Purpose: Execute a skill using exec or WASI runtime with explicit options
-//   Keywords: run_options, exec, wasi, work_dir, extra_env, manifest, artifact_path, runner
-//   Related: Run, buildSkillEnv, execrunner.Runner, wasirunner.Runner
-//   Flow: resolve workspace/workdir → select runner → build env → run → return output
-//   Resources: execrunner.Runner, wasirunner.Runner
-//   Events: none
-//   OutputFields: stdout, stderr, error
+//
+//	Purpose: Execute a skill using exec or WASI runtime with explicit options
+//	Keywords: run_options, exec, wasi, work_dir, extra_env, manifest, artifact_path, runner
+//	Related: Run, buildSkillEnv, execrunner.Runner, wasirunner.Runner
+//	Flow: resolve workspace/workdir → select runner → build env → run → return output
+//	Resources: execrunner.Runner, wasirunner.Runner
+//	Events: none
+//	OutputFields: stdout, stderr, error
 //
 // [[protocol:skill-runtime-dispatch]]
 // [[invariant:session-var-propagation]]
@@ -121,13 +122,14 @@ func RunWithOptions(ctx context.Context, opts RunOptions) ([]byte, []byte, error
 // Deprecated: Use RunWithOptions for better clarity and extensibility.
 //
 // Index:
-//   Purpose: Execute a skill using exec or WASI runtime
-//   Keywords: runner, exec, wasi, manifest
-//   Related: RunWithOptions
-//   Flow: select runner → prepare env/workdir → run → return output
-//   Resources: execrunner.Runner, wasirunner.Runner
-//   Events: none
-//   OutputFields: stdout, stderr, error
+//
+//	Purpose: Execute a skill using exec or WASI runtime
+//	Keywords: runner, exec, wasi, manifest
+//	Related: RunWithOptions
+//	Flow: select runner → prepare env/workdir → run → return output
+//	Resources: execrunner.Runner, wasirunner.Runner
+//	Events: none
+//	OutputFields: stdout, stderr, error
 func Run(ctx context.Context, manifest skill.Manifest, artifactPath string, input []byte) ([]byte, []byte, error) {
 	return RunWithOptions(ctx, RunOptions{
 		Manifest:     manifest,

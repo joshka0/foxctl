@@ -73,13 +73,14 @@ func main() {
 // run orchestrates todo continuation analysis with dependency graph computation and prompt generation.
 //
 // Index:
-//   Purpose: Analyze task dependencies and generate continuation prompts with cycle detection and execution ordering
-//   Keywords: todo/continuation, task_dependencies, cycle_detection, execution_order, continuation_prompt
-//   Related: runContinuation, buildPrompt, loadOrComputeInsights, computeTasksHash
-//   Flow: validate input → open task store → analyze incomplete tasks → compute insights → generate prompt → emit results
-//   Resources: task store, cache directory
-//   Events: none
-//   OutputFields: should_continue, prompt, session_id, incomplete_count, unscoped_incomplete_count, ready_count, blocked_count, in_progress_count, cycle_count, cycles, topological_order, summary
+//
+//	Purpose: Analyze task dependencies and generate continuation prompts with cycle detection and execution ordering
+//	Keywords: todo/continuation, task_dependencies, cycle_detection, execution_order, continuation_prompt
+//	Related: runContinuation, buildPrompt, loadOrComputeInsights, computeTasksHash
+//	Flow: validate input → open task store → analyze incomplete tasks → compute insights → generate prompt → emit results
+//	Resources: task store, cache directory
+//	Events: none
+//	OutputFields: should_continue, prompt, session_id, incomplete_count, unscoped_incomplete_count, ready_count, blocked_count, in_progress_count, cycle_count, cycles, topological_order, summary
 //
 // [[domain:task_continuation]]
 // [[decision:cached_graph_insights]]

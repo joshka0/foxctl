@@ -68,13 +68,15 @@ func main() {
 // run orchestrates observability log queries with filtering, sorting, and statistics.
 //
 // Index:
-//   Purpose: Query observability logs from NDJSON files with filtering by time, status, operation, and component
-//   Keywords: obs/logs, observability, log_querying, ndjson_parsing, event_filtering, statistics
-//   Related: parseSince, readEvents, matchesFilters, computeStats, topN, buildSummary
-//   Flow: parse input → find events file → read and filter events → sort by timestamp → compute stats → emit results
-//   Resources: NDJSON log files, observability event store
-//   Events: observability log query events
-//   OutputFields: events, count, total_scanned, stats, summary
+//
+//	Purpose: Query observability logs from NDJSON files with filtering by time, status, operation, and component
+//	Keywords: obs/logs, observability, log_querying, ndjson_parsing, event_filtering, statistics
+//	Related: parseSince, readEvents, matchesFilters, computeStats, topN, buildSummary
+//	Flow: parse input → find events file → read and filter events → sort by timestamp → compute stats → emit results
+//	Resources: NDJSON log files, observability event store
+//	Events: observability log query events
+//	OutputFields: events, count, total_scanned, stats, summary
+//
 // [[domain:observability-log-query]]
 // [[risk:missing-log-file-fallback]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {

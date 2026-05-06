@@ -10,13 +10,14 @@ import (
 // SymbolTextOptions controls how symbol embedding text is built.
 //
 // Index:
-//   Purpose: Configuration for symbol embedding text generation
-//   Keywords: embedding text, symbol text
-//   Related: BuildSymbolEmbeddingText, SymbolInfo
-//   Flow: caller sets flags → BuildSymbolEmbeddingText reads them
-//   Resources: symbol metadata
-//   Events: none
-//   OutputFields: none
+//
+//	Purpose: Configuration for symbol embedding text generation
+//	Keywords: embedding text, symbol text
+//	Related: BuildSymbolEmbeddingText, SymbolInfo
+//	Flow: caller sets flags → BuildSymbolEmbeddingText reads them
+//	Resources: symbol metadata
+//	Events: none
+//	OutputFields: none
 //
 // [[domain:symbol-embedding-text-options]]
 type SymbolTextOptions struct {
@@ -37,13 +38,14 @@ type SymbolTextOptions struct {
 // DefaultSymbolTextOptions returns sensible defaults for symbol embedding.
 //
 // Index:
-//   Purpose: Provide default configuration for symbol embedding
-//   Keywords: symbol embedding, default options
-//   Related: SymbolTextOptions, BuildSymbolEmbeddingText
-//   Flow: called by BuildSymbolEmbeddingText
-//   Resources: none
-//   Events: none
-//   OutputFields: SymbolTextOptions
+//
+//	Purpose: Provide default configuration for symbol embedding
+//	Keywords: symbol embedding, default options
+//	Related: SymbolTextOptions, BuildSymbolEmbeddingText
+//	Flow: called by BuildSymbolEmbeddingText
+//	Resources: none
+//	Events: none
+//	OutputFields: SymbolTextOptions
 //
 // [[domain:symbol-embedding-defaults]]
 func DefaultSymbolTextOptions() SymbolTextOptions {
@@ -73,13 +75,14 @@ func DefaultSymbolTextOptionsSummaryOnly() SymbolTextOptions {
 // SymbolInfo contains the information needed to build embedding text.
 //
 // Index:
-//   Purpose: Input data for symbol embedding text generation
-//   Keywords: symbol info, embedding input
-//   Related: BuildSymbolEmbeddingText, symbol.Symbol
-//   Flow: caller populates → BuildSymbolEmbeddingText consumes
-//   Resources: symbol extraction results
-//   Events: none
-//   OutputFields: none
+//
+//	Purpose: Input data for symbol embedding text generation
+//	Keywords: symbol info, embedding input
+//	Related: BuildSymbolEmbeddingText, symbol.Symbol
+//	Flow: caller populates → BuildSymbolEmbeddingText consumes
+//	Resources: symbol extraction results
+//	Events: none
+//	OutputFields: none
 //
 // [[domain:symbol-embedding-input]]
 type SymbolInfo struct {
@@ -125,13 +128,14 @@ type SymbolInfo struct {
 // into a format optimized for semantic search.
 //
 // Index:
-//   Purpose: Generate embedding-optimized text from symbol metadata
-//   Keywords: symbol embedding, doc enriched, semantic text
-//   Related: SymbolInfo, SymbolTextOptions, NormalizeDoc
-//   Flow: build header → add signature → add doc → add relationships → add code
-//   Resources: symbol metadata
-//   Events: none
-//   OutputFields: embedding text string
+//
+//	Purpose: Generate embedding-optimized text from symbol metadata
+//	Keywords: symbol embedding, doc enriched, semantic text
+//	Related: SymbolInfo, SymbolTextOptions, NormalizeDoc
+//	Flow: build header → add signature → add doc → add relationships → add code
+//	Resources: symbol metadata
+//	Events: none
+//	OutputFields: embedding text string
 //
 // [[protocol:symbol-embedding-text-build]]
 // [[domain:embedding-text-format]]

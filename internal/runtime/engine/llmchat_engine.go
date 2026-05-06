@@ -145,13 +145,14 @@ func DefaultLLMChatConfig() LLMChatConfig {
 // Auto-detects provider from environment if not specified.
 //
 // Index:
-//   Purpose: Initialize an OpenAI-compatible chat engine with provider defaults
-//   Keywords: llm_chat, provider, api_key, base_url, model
-//   Related: DefaultLLMChatConfig, apiKeyForProvider, detectProvider
-//   Flow: resolve API key/provider → set base URL/model → apply defaults → create client
-//   Resources: environment variables
-//   Events: none
-//   OutputFields: LLMChatEngine
+//
+//	Purpose: Initialize an OpenAI-compatible chat engine with provider defaults
+//	Keywords: llm_chat, provider, api_key, base_url, model
+//	Related: DefaultLLMChatConfig, apiKeyForProvider, detectProvider
+//	Flow: resolve API key/provider → set base URL/model → apply defaults → create client
+//	Resources: environment variables
+//	Events: none
+//	OutputFields: LLMChatEngine
 //
 // [[domain:llm-provider-resolution]]
 func NewLLMChatEngine(cfg LLMChatConfig) (*LLMChatEngine, error) {
@@ -290,13 +291,14 @@ func (e *LLMChatEngine) IsStatelessMode() bool {
 // Run implements AgentEngine.
 //
 // Index:
-//   Purpose: Execute a single agent turn with tool calls, hooks, and LLM responses
-//   Keywords: agent_run, tool_calls, hook_dispatch, iterations, stop_reason
-//   Related: callLLM, dispatchPreToolUse, dispatchPostToolUse, ToolRunner.Execute
-//   Flow: build messages → loop LLM calls → dispatch hooks → run tools → append results → finalize output
-//   Resources: LLM provider API, hook dispatcher, tool runner
-//   Events: OpAgentIteration, llm.no_choices
-//   OutputFields: AssistantText, ToolCalls, ToolResults, StopReason, Tokens, Iterations
+//
+//	Purpose: Execute a single agent turn with tool calls, hooks, and LLM responses
+//	Keywords: agent_run, tool_calls, hook_dispatch, iterations, stop_reason
+//	Related: callLLM, dispatchPreToolUse, dispatchPostToolUse, ToolRunner.Execute
+//	Flow: build messages → loop LLM calls → dispatch hooks → run tools → append results → finalize output
+//	Resources: LLM provider API, hook dispatcher, tool runner
+//	Events: OpAgentIteration, llm.no_choices
+//	OutputFields: AssistantText, ToolCalls, ToolResults, StopReason, Tokens, Iterations
 //
 // [[protocol:agent-turn]]
 // [[invariant:max-iteration-bound]]

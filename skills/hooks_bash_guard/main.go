@@ -37,13 +37,14 @@ func main() {
 // run orchestrates bash command authorization with profile-based restrictions and sed rewriting.
 //
 // Index:
-//   Purpose: Enforce agent profile restrictions on bash commands with automatic sed-to-context_grep rewriting
-//   Keywords: hooks/bash_guard, bash_authorization, profile_restrictions, command_rewriting, sed_to_grep
-//   Related: extractCommand, resolveProfile, rewriteSedToContextGrep, emitApprove, emitBlock
-//   Flow: extract command → resolve profile → attempt sed rewrite → authorize command → emit decision
-//   Resources: agentpolicy.Profile, agentpolicy.AuthorizeBash
-//   Events: bash-authorized, bash-blocked, sed-rewritten
-//   OutputFields: decision, profile, parsed_skill, rewritten_from
+//
+//	Purpose: Enforce agent profile restrictions on bash commands with automatic sed-to-context_grep rewriting
+//	Keywords: hooks/bash_guard, bash_authorization, profile_restrictions, command_rewriting, sed_to_grep
+//	Related: extractCommand, resolveProfile, rewriteSedToContextGrep, emitApprove, emitBlock
+//	Flow: extract command → resolve profile → attempt sed rewrite → authorize command → emit decision
+//	Resources: agentpolicy.Profile, agentpolicy.AuthorizeBash
+//	Events: bash-authorized, bash-blocked, sed-rewritten
+//	OutputFields: decision, profile, parsed_skill, rewritten_from
 //
 // [[invariant:profile-restricted-bash]]
 // [[risk:unauthorized-command-execution]]
@@ -119,13 +120,14 @@ func extractCommand(toolInput json.RawMessage) (string, error) {
 // resolveProfile determines the agent profile from environment or config.
 //
 // Index:
-//   Purpose: Determine agent profile from environment or config
-//   Keywords: profile_resolution, environment_variable, hook_config
-//   Related: run
-//   Flow: check environment variable → check hook config → default to unrestricted
-//   Resources: FOXCTL_AGENT_PROFILE env var, hook config
-//   Events: profile-resolved
-//   OutputFields: profile
+//
+//	Purpose: Determine agent profile from environment or config
+//	Keywords: profile_resolution, environment_variable, hook_config
+//	Related: run
+//	Flow: check environment variable → check hook config → default to unrestricted
+//	Resources: FOXCTL_AGENT_PROFILE env var, hook config
+//	Events: profile-resolved
+//	OutputFields: profile
 //
 // [[domain:agent-policy]]
 func resolveProfile(in hooks.Input) agentpolicy.Profile {
@@ -165,13 +167,14 @@ type sedRange struct {
 // rewriteSedToContextGrep attempts to rewrite sed range commands to code/context_grep.
 //
 // Index:
-//   Purpose: Rewrite sed range commands to code/context_grep
-//   Keywords: sed_rewriting, context_grep
-//   Related: run
-//   Flow: split command → parse sed range → extract file path → build context grep command
-//   Resources: regex patterns for sed parsing
-//   Events: sed-rewritten
-//   OutputFields: rewritten, file_path, line_start, line_end
+//
+//	Purpose: Rewrite sed range commands to code/context_grep
+//	Keywords: sed_rewriting, context_grep
+//	Related: run
+//	Flow: split command → parse sed range → extract file path → build context grep command
+//	Resources: regex patterns for sed parsing
+//	Events: sed-rewritten
+//	OutputFields: rewritten, file_path, line_start, line_end
 //
 // [[domain:command-rewriting]]
 func rewriteSedToContextGrep(command string) (string, sedRange, bool) {

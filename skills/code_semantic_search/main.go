@@ -334,13 +334,14 @@ func semanticPreviewResultsLimit(rc *skillmain.RunContext) int {
 // run orchestrates unified semantic search across multiple data sources.
 //
 // Index:
-//   Purpose: Perform unified semantic search across symbols, sessions, memories, tasks, and codemaps with RRF fusion
-//   Flow: validate input → generate scoped embeddings → parallel search sources → fuse results → apply PageRank boost → rerank (optional) → synthesize (optional)
-//   SideEffects: embedding API calls; database queries; LLM API calls (synthesis); artifact persistence
-//   FailureModes: missing API keys, database errors, embedding failures, LLM errors, timeout errors
-//   Observability: emits query/results/context_hints/timelines/stats/summary/tree_text/tree/artifact
-//   Related: search, generateScopedEmbeddings, reciprocalRankFusion, applyPageRankBoost, applyReranking, synthesizeResults, buildFullRepoTree
-//   Keywords: code/semantic_search, unified, symbols, sessions, memories, tasks, codemaps, rrf, pagerank, rerank, synthesis, tree
+//
+//	Purpose: Perform unified semantic search across symbols, sessions, memories, tasks, and codemaps with RRF fusion
+//	Flow: validate input → generate scoped embeddings → parallel search sources → fuse results → apply PageRank boost → rerank (optional) → synthesize (optional)
+//	SideEffects: embedding API calls; database queries; LLM API calls (synthesis); artifact persistence
+//	FailureModes: missing API keys, database errors, embedding failures, LLM errors, timeout errors
+//	Observability: emits query/results/context_hints/timelines/stats/summary/tree_text/tree/artifact
+//	Related: search, generateScopedEmbeddings, reciprocalRankFusion, applyPageRankBoost, applyReranking, synthesizeResults, buildFullRepoTree
+//	Keywords: code/semantic_search, unified, symbols, sessions, memories, tasks, codemaps, rrf, pagerank, rerank, synthesis, tree
 //
 // [[domain:unified-semantic-search]]
 // [[protocol:rrf-pagerank-rerank]]

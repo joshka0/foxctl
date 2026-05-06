@@ -73,13 +73,14 @@ func main() {
 // run orchestrates file editing with fuzzy matching, backup creation, and diff generation.
 //
 // Index:
-//   Purpose: Apply targeted edits to files using exact, fuzzy, or regex matching with CAS backup
-//   Flow: validate input → resolve path → apply edits → create backup → generate diff → emit results
-//   SideEffects: file modifications; backup creation; CAS storage; diff generation
-//   FailureModes: invalid paths, regex errors, backup failures, file permission errors
-//   Observability: emits edit results, replacement counts, backup artifacts, and diff output
-//   Related: applyEdit, applyExactMatch, applyFuzzyMatch, applyRegexMatch
-//   Keywords: fs/apply_edit, file_editing, fuzzy_matching, backup, diff, cas
+//
+//	Purpose: Apply targeted edits to files using exact, fuzzy, or regex matching with CAS backup
+//	Flow: validate input → resolve path → apply edits → create backup → generate diff → emit results
+//	SideEffects: file modifications; backup creation; CAS storage; diff generation
+//	FailureModes: invalid paths, regex errors, backup failures, file permission errors
+//	Observability: emits edit results, replacement counts, backup artifacts, and diff output
+//	Related: applyEdit, applyExactMatch, applyFuzzyMatch, applyRegexMatch
+//	Keywords: fs/apply_edit, file_editing, fuzzy_matching, backup, diff, cas
 //
 // [[domain:file-editing-with-backup]]
 // [[protocol:cas-backup-diff-generation]]

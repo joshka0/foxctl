@@ -59,13 +59,14 @@ type ExecutorFunc func(ctx context.Context, opts ExecuteOptions) (*Result, error
 // Execute implements the SkillExecutor interface.
 //
 // Index:
-//   Purpose: Invoke a functional executor with standard options
-//   Keywords: skill_execute, executor_func
-//   Related: SkillExecutor
-//   Flow: call wrapped function → return result
-//   Resources: depends on wrapped executor
-//   Events: none
-//   OutputFields: Result
+//
+//	Purpose: Invoke a functional executor with standard options
+//	Keywords: skill_execute, executor_func
+//	Related: SkillExecutor
+//	Flow: call wrapped function → return result
+//	Resources: depends on wrapped executor
+//	Events: none
+//	OutputFields: Result
 //
 // [[domain:skill-executor-func]]
 func (f ExecutorFunc) Execute(ctx context.Context, opts ExecuteOptions) (*Result, error) {

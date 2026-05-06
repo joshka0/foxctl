@@ -49,13 +49,14 @@ func NewFileSummaryGenerator(
 // Returns the summary text and whether it was cached.
 //
 // Index:
-//   Purpose: Cache and generate file summaries for semantic search
-//   Keywords: file_summary, FileSummaryEntryName, ComputeFileSummaryDigest, FileSummaryType, path
-//   Related: FileSummaryEntryName, ComputeFileSummaryDigest, SummaryLLM.GenerateSummary, memory.Store.Save
-//   Flow: normalize input → lookup cache → compare digest → generate summary → store summary → return
-//   Resources: memory store, LLM provider, embedding provider
-//   Events: file_summary.cache_check_failed, file_summary.store_failed
-//   OutputFields: summary text, cached bool
+//
+//	Purpose: Cache and generate file summaries for semantic search
+//	Keywords: file_summary, FileSummaryEntryName, ComputeFileSummaryDigest, FileSummaryType, path
+//	Related: FileSummaryEntryName, ComputeFileSummaryDigest, SummaryLLM.GenerateSummary, memory.Store.Save
+//	Flow: normalize input → lookup cache → compare digest → generate summary → store summary → return
+//	Resources: memory store, LLM provider, embedding provider
+//	Events: file_summary.cache_check_failed, file_summary.store_failed
+//	OutputFields: summary text, cached bool
 //
 // [[protocol:file-summary-cache-or-create]]
 // [[invariant:digest-mismatch-triggers-regeneration]]

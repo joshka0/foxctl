@@ -30,13 +30,15 @@ func main() {
 // run orchestrates optimization reflection with trajectory analysis and improvement generation.
 //
 // Index:
-//   Purpose: Generate reflections and insights from trajectory data with pattern analysis and improvement suggestions
-//   Keywords: optimize/reflect, trajectory_analysis, pattern_recognition, improvement_generation, optimization
-//   Related: optimization.ReflectionEngine, trajectory store, pattern store
-//   Flow: validate input → resolve workspace → open stores → create engine → analyze trajectory or generate summary → emit results
-//   Resources: trajectory store, pattern store
-//   Events: reflection generation events
-//   OutputFields: reflection, summary, improvements, workspace, role
+//
+//	Purpose: Generate reflections and insights from trajectory data with pattern analysis and improvement suggestions
+//	Keywords: optimize/reflect, trajectory_analysis, pattern_recognition, improvement_generation, optimization
+//	Related: optimization.ReflectionEngine, trajectory store, pattern store
+//	Flow: validate input → resolve workspace → open stores → create engine → analyze trajectory or generate summary → emit results
+//	Resources: trajectory store, pattern store
+//	Events: reflection generation events
+//	OutputFields: reflection, summary, improvements, workspace, role
+//
 // [[domain:trajectory-reflection]]
 // [[invariant:role-required-for-reflection]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {

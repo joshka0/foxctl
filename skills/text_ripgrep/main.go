@@ -36,13 +36,14 @@ func main() {
 // run orchestrates ripgrep-based text search with pattern validation, path resolution, and comprehensive result formatting.
 //
 // Index:
-//   Purpose: Perform fast text searches using ripgrep with pattern matching, file filtering, and result preview
-//   Keywords: text/ripgrep, pattern_search, ripgrep, file_search, text_matching, result_preview
-//   Related: emitEmptyResult, convertMatches, rgutil.Normalize, ripgrep.SearchJSON
-//   Flow: validate pattern → normalize input → check ripgrep availability → resolve path → build options → execute search → format results → emit with preview
-//   Resources: ripgrep process, file system, CAS store
-//   Events: none
-//   OutputFields: pattern, case_insensitive, match_count, files_touched, preview, top_files, max_matches, artifact
+//
+//	Purpose: Perform fast text searches using ripgrep with pattern matching, file filtering, and result preview
+//	Keywords: text/ripgrep, pattern_search, ripgrep, file_search, text_matching, result_preview
+//	Related: emitEmptyResult, convertMatches, rgutil.Normalize, ripgrep.SearchJSON
+//	Flow: validate pattern → normalize input → check ripgrep availability → resolve path → build options → execute search → format results → emit with preview
+//	Resources: ripgrep process, file system, CAS store
+//	Events: none
+//	OutputFields: pattern, case_insensitive, match_count, files_touched, preview, top_files, max_matches, artifact
 //
 // [[domain:ripgrep_search]]
 // [[risk:ripgrep_not_installed]]

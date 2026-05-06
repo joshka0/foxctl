@@ -45,13 +45,14 @@ func main() {
 // run orchestrates file reservation management to prevent edit conflicts between agents.
 //
 // Index:
-//   Purpose: Manage file reservations to prevent edit conflicts between agents with advisory/strict modes
-//   Keywords: hooks/file_guard, file_reservations, conflict_prevention, agent_coordination
-//   Related: getTaskContext, formatConflicts, emitOutput
-//   Flow: detect write operations → resolve workspace/actor → extract file path → check conflicts → create reservation → emit decision
-//   Resources: blackboard store (SQLite); task store
-//   Events: file-reserved, file-conflict-detected
-//   OutputFields: decision, reservation_id, conflicts, workspace_id, actor_id
+//
+//	Purpose: Manage file reservations to prevent edit conflicts between agents with advisory/strict modes
+//	Keywords: hooks/file_guard, file_reservations, conflict_prevention, agent_coordination
+//	Related: getTaskContext, formatConflicts, emitOutput
+//	Flow: detect write operations → resolve workspace/actor → extract file path → check conflicts → create reservation → emit decision
+//	Resources: blackboard store (SQLite); task store
+//	Events: file-reserved, file-conflict-detected
+//	OutputFields: decision, reservation_id, conflicts, workspace_id, actor_id
 //
 // [[invariant:exclusive-file-reservation]]
 // [[risk:concurrent-edit-conflict]]

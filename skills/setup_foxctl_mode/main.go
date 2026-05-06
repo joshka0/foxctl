@@ -47,13 +47,15 @@ func main() {
 // run orchestrates foxctl mode management with get/set operations and workspace resolution.
 //
 // Index:
-//   Purpose: Manage foxctl mode settings per workspace with get/set operations
-//   Keywords: setup/foxctl_mode, workspace_settings, mode_management, database_storage
-//   Related: ensureSchema, getMode, setMode, workspaceutil.ResolveID
-//   Flow: validate operation → resolve workspace → open database → ensure schema → execute get/set → emit results
-//   Resources: SQLite tasks database
-//   Events: mode management events
-//   OutputFields: enabled, workspace_id
+//
+//	Purpose: Manage foxctl mode settings per workspace with get/set operations
+//	Keywords: setup/foxctl_mode, workspace_settings, mode_management, database_storage
+//	Related: ensureSchema, getMode, setMode, workspaceutil.ResolveID
+//	Flow: validate operation → resolve workspace → open database → ensure schema → execute get/set → emit results
+//	Resources: SQLite tasks database
+//	Events: mode management events
+//	OutputFields: enabled, workspace_id
+//
 // [[domain:workspace-mode-management]]
 // [[protocol:mode-get-set-dispatch]]
 func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {

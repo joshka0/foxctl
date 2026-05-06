@@ -30,13 +30,14 @@ func main() {
 // run orchestrates mailbox message routing with priority handling and surface tracking.
 //
 // Index:
-//   Purpose: Surface relevant mailbox messages into Claude's context, prioritizing admin and overseer messages
-//   Keywords: hooks/mail_router, mailbox_routing, message_prioritization, context_injection, plan_events
-//   Related: buildMailContext, isPlanEvent, extractPlanEventType, extractPlanTaskID, formatSender
-//   Flow: resolve workspace/actor → open board store → query inbox → build context → mark surfaced messages → emit results
-//   Resources: blackboard store (SQLite)
-//   Events: mailbox-messages-surfaced
-//   OutputFields: message_count, workspace_id, actor_id, context
+//
+//	Purpose: Surface relevant mailbox messages into Claude's context, prioritizing admin and overseer messages
+//	Keywords: hooks/mail_router, mailbox_routing, message_prioritization, context_injection, plan_events
+//	Related: buildMailContext, isPlanEvent, extractPlanEventType, extractPlanTaskID, formatSender
+//	Flow: resolve workspace/actor → open board store → query inbox → build context → mark surfaced messages → emit results
+//	Resources: blackboard store (SQLite)
+//	Events: mailbox-messages-surfaced
+//	OutputFields: message_count, workspace_id, actor_id, context
 //
 // [[domain:mailbox-routing]]
 // [[protocol:message-surfacing]]

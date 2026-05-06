@@ -103,12 +103,13 @@ func main() {
 // run orchestrates background embedding job processing with timeout and batch controls.
 //
 // Index:
-//   Purpose: Process queued embedding jobs with batch processing, timeout handling, and error recovery
-//   Flow: configure embedder → open store → claim jobs → generate embeddings → store results → repeat until done
-//   SideEffects: embedding API calls; job state transitions; queue statistics; dimension validation
-//   FailureModes: missing API keys, store errors, embedding failures, dimension mismatches, timeouts
-//   Observability: emits processing statistics, error details, queue snapshots, and timing metrics
-//   Keywords: embedding/worker, background, jobs, batch_processing, timeout, error_recovery
+//
+//	Purpose: Process queued embedding jobs with batch processing, timeout handling, and error recovery
+//	Flow: configure embedder → open store → claim jobs → generate embeddings → store results → repeat until done
+//	SideEffects: embedding API calls; job state transitions; queue statistics; dimension validation
+//	FailureModes: missing API keys, store errors, embedding failures, dimension mismatches, timeouts
+//	Observability: emits processing statistics, error details, queue snapshots, and timing metrics
+//	Keywords: embedding/worker, background, jobs, batch_processing, timeout, error_recovery
 //
 // [[domain:background-embedding-worker]]
 // [[protocol:embedding-job-lifecycle]]

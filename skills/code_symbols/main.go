@@ -58,13 +58,14 @@ func main() {
 // run orchestrates symbol extraction from files with configurable filtering options.
 //
 // Index:
-//   Purpose: Extract code symbols (functions, methods, types, variables) from source files with language-specific parsing
-//   Flow: resolve path → determine file/directory → extract symbols using language-specific parsers → filter by type/exports → limit results → persist if needed
-//   SideEffects: file system reads; directory traversal; AST parsing (Go); regex parsing (Python/JS/TS); artifact persistence
-//   FailureModes: invalid paths, parse errors, unsupported languages, file read errors
-//   Observability: emits symbol_count/preview/type_counts/symbol_type/language/artifact
-//   Related: extractFromDirectory, extractFromFile, extractGoSymbols, extractPythonSymbols, extractJSSymbols
-//   Keywords: code/symbols, extraction, AST, functions, methods, types, variables, documentation
+//
+//	Purpose: Extract code symbols (functions, methods, types, variables) from source files with language-specific parsing
+//	Flow: resolve path → determine file/directory → extract symbols using language-specific parsers → filter by type/exports → limit results → persist if needed
+//	SideEffects: file system reads; directory traversal; AST parsing (Go); regex parsing (Python/JS/TS); artifact persistence
+//	FailureModes: invalid paths, parse errors, unsupported languages, file read errors
+//	Observability: emits symbol_count/preview/type_counts/symbol_type/language/artifact
+//	Related: extractFromDirectory, extractFromFile, extractGoSymbols, extractPythonSymbols, extractJSSymbols
+//	Keywords: code/symbols, extraction, AST, functions, methods, types, variables, documentation
 //
 // [[domain:code-symbol-extraction]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {

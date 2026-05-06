@@ -55,13 +55,14 @@ func main() {
 // run orchestrates inbound todo synchronization from external providers into foxctl's task system.
 //
 // Index:
-//   Purpose: Sync todos FROM a provider (e.g., Claude Code) INTO foxctl's task management system
-//   Keywords: todo/sync_from_provider, todo_sync, inbound_sync, claude_code, task_management
-//   Related: todosync.Service, todosync.InboundSyncInput
-//   Flow: open task store → resolve session ID → get todos from input or file → run inbound sync → emit results
-//   Resources: task store, provider todo file
-//   Events: none
-//   OutputFields: created, updated, completed, removed, mapped, unmapped, deps_added, warnings, dry_run
+//
+//	Purpose: Sync todos FROM a provider (e.g., Claude Code) INTO foxctl's task management system
+//	Keywords: todo/sync_from_provider, todo_sync, inbound_sync, claude_code, task_management
+//	Related: todosync.Service, todosync.InboundSyncInput
+//	Flow: open task store → resolve session ID → get todos from input or file → run inbound sync → emit results
+//	Resources: task store, provider todo file
+//	Events: none
+//	OutputFields: created, updated, completed, removed, mapped, unmapped, deps_added, warnings, dry_run
 //
 // [[protocol:inbound_todo_sync]]
 // [[domain:provider_integration]]

@@ -78,13 +78,14 @@ func main() {
 // run lists codemaps with pagination, search, and filtering capabilities.
 //
 // Index:
-//   Purpose: List stored codemaps with pagination, optional semantic search, and summary truncation
-//   Flow: apply defaults → open memory store → search (vector/filter) → paginate → extract metadata → build output
-//   SideEffects: database queries; vector search; content truncation; metadata extraction
-//   FailureModes: database errors, search errors, timeout errors, parse errors
-//   Observability: emits paginated results with search method, timing metrics, and trace counts
-//   Related: searchCodemaps, extractTitleFromName
-//   Keywords: codemap/list, pagination, vector_search, filtering, metadata
+//
+//	Purpose: List stored codemaps with pagination, optional semantic search, and summary truncation
+//	Flow: apply defaults → open memory store → search (vector/filter) → paginate → extract metadata → build output
+//	SideEffects: database queries; vector search; content truncation; metadata extraction
+//	FailureModes: database errors, search errors, timeout errors, parse errors
+//	Observability: emits paginated results with search method, timing metrics, and trace counts
+//	Related: searchCodemaps, extractTitleFromName
+//	Keywords: codemap/list, pagination, vector_search, filtering, metadata
 //
 // [[domain:codemap-retrieval]]
 // [[protocol:codemap-semantic-listing]]

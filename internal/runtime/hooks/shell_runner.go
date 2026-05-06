@@ -21,13 +21,14 @@ type ShellRunner struct {
 // Run executes the configured shell hook and parses its output.
 //
 // Index:
-//   Purpose: Execute shell-based hook script and parse output
-//   Keywords: shell_hook, hook_output, FOXCTL_HOOK_EVENT, script_path, shell_runner
-//   Related: parseShellOutput, buildHookEnv
-//   Flow: resolve script path → marshal input → run command → parse output
-//   Resources: os/exec, shell environment
-//   Events: none
-//   OutputFields: Output
+//
+//	Purpose: Execute shell-based hook script and parse output
+//	Keywords: shell_hook, hook_output, FOXCTL_HOOK_EVENT, script_path, shell_runner
+//	Related: parseShellOutput, buildHookEnv
+//	Flow: resolve script path → marshal input → run command → parse output
+//	Resources: os/exec, shell environment
+//	Events: none
+//	OutputFields: Output
 //
 // [[risk:shell-injection]]
 // [[protocol:shell-hook-execution]]

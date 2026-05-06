@@ -124,10 +124,11 @@ func (s *Spec) GetOperation(operationID string) (*Operation, error) {
 // Load resolves, parses, validates, and caches an OpenAPI specification.
 //
 // Index:
-//   Purpose: Load and cache OpenAPI specs from CAS, memory, HTTP, or file paths
-//   Flow: normalize workspace → compute cache key → fetch bytes → parse/validate → cache → return
-//   Related: Loader.fetch, Loader.parse, Loader.cacheKey
-//   Keywords: openapi_load, cas_digest, memory_ref, http_url, file_path, cache
+//
+//	Purpose: Load and cache OpenAPI specs from CAS, memory, HTTP, or file paths
+//	Flow: normalize workspace → compute cache key → fetch bytes → parse/validate → cache → return
+//	Related: Loader.fetch, Loader.parse, Loader.cacheKey
+//	Keywords: openapi_load, cas_digest, memory_ref, http_url, file_path, cache
 //
 // [[protocol:openapi-spec-loader]]
 // [[domain:spec-resolution-caching]]

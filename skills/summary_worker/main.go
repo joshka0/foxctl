@@ -77,13 +77,15 @@ func main() {
 // run orchestrates summary queue processing with batch management, timeout handling, and error recovery.
 //
 // Index:
-//   Purpose: Process queued window summaries with LLM generation, batch management, and comprehensive error handling
-//   Keywords: summary/worker, queue_processing, batch_jobs, llm_summarization, error_recovery
-//   Related: getWindowContentPreview, buildWindowSummaryPrompt, callLLM
-//   Flow: validate providers → open stores → process jobs in batches → generate summaries → update windows → emit results
-//   Resources: queue store, session store, LLM providers
-//   Events: summary worker events
-//   OutputFields: processed, errors, skipped, remaining, batch_count, stats
+//
+//	Purpose: Process queued window summaries with LLM generation, batch management, and comprehensive error handling
+//	Keywords: summary/worker, queue_processing, batch_jobs, llm_summarization, error_recovery
+//	Related: getWindowContentPreview, buildWindowSummaryPrompt, callLLM
+//	Flow: validate providers → open stores → process jobs in batches → generate summaries → update windows → emit results
+//	Resources: queue store, session store, LLM providers
+//	Events: summary worker events
+//	OutputFields: processed, errors, skipped, remaining, batch_count, stats
+//
 // [[domain:queued-window-summarization]]
 // [[protocol:llm-provider-fallback-chain]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {

@@ -50,13 +50,14 @@ func (h *PostReviewHandler) RegisterIndexer(indexer Indexer) error {
 // after dispatching the work; otherwise it blocks until all indexers complete.
 //
 // Index:
-//   Purpose: Dispatch post-review events to enabled indexers
-//   Keywords: post_review, indexers, fanout_mode, workspace_id, review_id
-//   Related: PostReviewHandler.runIndexers, Indexer.Index
-//   Flow: validate config/event → resolve enabled indexers → select mode → run indexers or spawn async
-//   Resources: registered indexers, config
-//   Events: post-review-handled
-//   OutputFields: PostReviewResult
+//
+//	Purpose: Dispatch post-review events to enabled indexers
+//	Keywords: post_review, indexers, fanout_mode, workspace_id, review_id
+//	Related: PostReviewHandler.runIndexers, Indexer.Index
+//	Flow: validate config/event → resolve enabled indexers → select mode → run indexers or spawn async
+//	Resources: registered indexers, config
+//	Events: post-review-handled
+//	OutputFields: PostReviewResult
 //
 // [[protocol:post-review-handler-dispatch]]
 // [[invariant:empty-files-skips-indexers]]
@@ -149,13 +150,14 @@ type indexerWithConfig struct {
 // runIndexers executes all active indexers and collects results.
 //
 // Index:
-//   Purpose: Execute each enabled indexer and aggregate results
-//   Keywords: indexer_results, files_indexed, files_skipped, files_failed
-//   Related: PostReviewHandler.filterEvent, Indexer.Index
-//   Flow: filter files per indexer → run indexer → record result → continue
-//   Resources: indexer-specific stores/files
-//   Events: indexer-run-complete
-//   OutputFields: PostReviewResult
+//
+//	Purpose: Execute each enabled indexer and aggregate results
+//	Keywords: indexer_results, files_indexed, files_skipped, files_failed
+//	Related: PostReviewHandler.filterEvent, Indexer.Index
+//	Flow: filter files per indexer → run indexer → record result → continue
+//	Resources: indexer-specific stores/files
+//	Events: indexer-run-complete
+//	OutputFields: PostReviewResult
 //
 // [[protocol:indexer-fanout-execution]]
 // [[invariant:per-indexer-file-filtering]]

@@ -27,13 +27,14 @@ type SkillResolver struct {
 // NewSkillResolver creates a skill resolver with paths from config.
 //
 // Index:
-//   Purpose: Build a skill resolver with configured search paths
-//   Keywords: skill_resolver, search_paths, skill.yaml, builtin_paths
-//   Related: SkillResolver.Resolve, skill.NormalizeSearchPaths
-//   Flow: gather env/user/builtin paths → normalize → return resolver
-//   Resources: config.Config, environment variables
-//   Events: none
-//   OutputFields: *SkillResolver
+//
+//	Purpose: Build a skill resolver with configured search paths
+//	Keywords: skill_resolver, search_paths, skill.yaml, builtin_paths
+//	Related: SkillResolver.Resolve, skill.NormalizeSearchPaths
+//	Flow: gather env/user/builtin paths → normalize → return resolver
+//	Resources: config.Config, environment variables
+//	Events: none
+//	OutputFields: *SkillResolver
 func NewSkillResolver(cfg config.Config) *SkillResolver {
 	searchPaths := append([]string{}, skill.EnvSearchPaths()...)
 	if cfg.Paths.Skills != "" {
@@ -51,13 +52,14 @@ func NewSkillResolver(cfg config.Config) *SkillResolver {
 // Resolve finds a skill by name and returns an executable handle.
 //
 // Index:
-//   Purpose: Resolve a skill name to manifest and artifact paths
-//   Keywords: skill_resolve, manifest_path, artifact_path, skill_name
-//   Related: loadSkillDir, resolveAlternate
-//   Flow: resolve via resolver → load skill dir → fallback to alternate names
-//   Resources: filesystem, skill.Resolver
-//   Events: none
-//   OutputFields: *SkillHandle
+//
+//	Purpose: Resolve a skill name to manifest and artifact paths
+//	Keywords: skill_resolve, manifest_path, artifact_path, skill_name
+//	Related: loadSkillDir, resolveAlternate
+//	Flow: resolve via resolver → load skill dir → fallback to alternate names
+//	Resources: filesystem, skill.Resolver
+//	Events: none
+//	OutputFields: *SkillHandle
 //
 // [[domain:skill-resolution]]
 func (r *SkillResolver) Resolve(skillName string) (*SkillHandle, error) {
@@ -94,13 +96,14 @@ func (r *SkillResolver) Resolve(skillName string) (*SkillHandle, error) {
 // resolveAlternate tries alternate skill name normalizations.
 //
 // Index:
-//   Purpose: Resolve skill via alternate normalized names
-//   Keywords: skill_resolve, normalize, search_paths, skill.yaml
-//   Related: loadSkillDir, normalizeSkillCandidate
-//   Flow: build candidates → scan search paths → load skill dir
-//   Resources: filesystem, search paths
-//   Events: none
-//   OutputFields: *SkillHandle, bool
+//
+//	Purpose: Resolve skill via alternate normalized names
+//	Keywords: skill_resolve, normalize, search_paths, skill.yaml
+//	Related: loadSkillDir, normalizeSkillCandidate
+//	Flow: build candidates → scan search paths → load skill dir
+//	Resources: filesystem, search paths
+//	Events: none
+//	OutputFields: *SkillHandle, bool
 func (r *SkillResolver) resolveAlternate(resolver *skill.Resolver, requested string, failed skill.Handle) (*SkillHandle, bool) {
 	candidates := []string{requested}
 	if norm := normalizeSkillCandidate(requested); norm != requested {
@@ -138,13 +141,14 @@ func (r *SkillResolver) resolveAlternate(resolver *skill.Resolver, requested str
 // loadSkillDir loads a skill from a directory containing skill.yaml.
 //
 // Index:
-//   Purpose: Load manifest and artifact paths from a skill directory
-//   Keywords: skill.yaml, manifest, artifact, cgo, load_manifest
-//   Related: skill.LoadManifestAndArtifactFromDir
-//   Flow: validate skill.yaml → load manifest/artifact → return handle
-//   Resources: filesystem, skill package
-//   Events: none
-//   OutputFields: *SkillHandle
+//
+//	Purpose: Load manifest and artifact paths from a skill directory
+//	Keywords: skill.yaml, manifest, artifact, cgo, load_manifest
+//	Related: skill.LoadManifestAndArtifactFromDir
+//	Flow: validate skill.yaml → load manifest/artifact → return handle
+//	Resources: filesystem, skill package
+//	Events: none
+//	OutputFields: *SkillHandle
 func loadSkillDir(dir string) (*SkillHandle, error) {
 	manifestPath := filepath.Join(dir, "skill.yaml")
 	if _, err := os.Stat(manifestPath); err != nil {

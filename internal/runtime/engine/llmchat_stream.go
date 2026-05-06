@@ -57,13 +57,14 @@ type ToolCallStreamDelta struct {
 // RunStreaming executes with streaming output.
 //
 // Index:
-//   Purpose: Execute a streaming agent turn with tool calls and callbacks
-//   Keywords: run_streaming, tool_calls, callbacks, sse, stop_reason
-//   Related: callLLMStreaming, parseSSEStream, ToolRunner.Execute
-//   Flow: build messages → stream LLM → execute tools → append results → finalize output
-//   Resources: LLM provider API
-//   Events: llm.no_choices, OpAgentIteration
-//   OutputFields: AssistantText, ToolCalls, ToolResults, StopReason, Tokens
+//
+//	Purpose: Execute a streaming agent turn with tool calls and callbacks
+//	Keywords: run_streaming, tool_calls, callbacks, sse, stop_reason
+//	Related: callLLMStreaming, parseSSEStream, ToolRunner.Execute
+//	Flow: build messages → stream LLM → execute tools → append results → finalize output
+//	Resources: LLM provider API
+//	Events: llm.no_choices, OpAgentIteration
+//	OutputFields: AssistantText, ToolCalls, ToolResults, StopReason, Tokens
 //
 // [[protocol:agent-turn-streaming]]
 // [[risk:iteration-exhaustion-without-output]]
@@ -254,13 +255,14 @@ type accumulatedToolCall struct {
 // callLLMStreaming makes a streaming API request.
 //
 // Index:
-//   Purpose: Execute a streaming chat completion request
-//   Keywords: stream_request, http, sse, llm, provider
-//   Related: parseSSEStream
-//   Flow: build request → set headers → perform HTTP call → parse SSE stream
-//   Resources: LLM provider API
-//   Events: llm.no_choices
-//   OutputFields: streamResponse
+//
+//	Purpose: Execute a streaming chat completion request
+//	Keywords: stream_request, http, sse, llm, provider
+//	Related: parseSSEStream
+//	Flow: build request → set headers → perform HTTP call → parse SSE stream
+//	Resources: LLM provider API
+//	Events: llm.no_choices
+//	OutputFields: streamResponse
 //
 // [[protocol:openai-compatible-streaming]]
 func (e *LLMChatEngine) callLLMStreaming(ctx context.Context, messages []oaiMessage, tools []oaiTool, streamCfg StreamConfig) (*streamResponse, error) {
@@ -324,13 +326,14 @@ func (e *LLMChatEngine) callLLMStreaming(ctx context.Context, messages []oaiMess
 // parseSSEStream parses the SSE response stream.
 //
 // Index:
-//   Purpose: Decode SSE chunks into accumulated content and tool calls
-//   Keywords: sse, stream_delta, tool_call_delta, finish_reason, scanner
-//   Related: callLLMStreaming
-//   Flow: scan lines → decode chunks → accumulate content/tool calls → build response
-//   Resources: io.Reader
-//   Events: stream delta callbacks
-//   OutputFields: streamResponse
+//
+//	Purpose: Decode SSE chunks into accumulated content and tool calls
+//	Keywords: sse, stream_delta, tool_call_delta, finish_reason, scanner
+//	Related: callLLMStreaming
+//	Flow: scan lines → decode chunks → accumulate content/tool calls → build response
+//	Resources: io.Reader
+//	Events: stream delta callbacks
+//	OutputFields: streamResponse
 //
 // [[invariant:partial-tool-call-accumulation]]
 func (e *LLMChatEngine) parseSSEStream(reader io.Reader, streamCfg StreamConfig) (*streamResponse, error) {

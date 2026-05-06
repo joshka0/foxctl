@@ -307,13 +307,15 @@ func main() {
 // run orchestrates session summarization with multiple modes, deduplication, and embedding generation.
 //
 // Index:
-//   Purpose: Generate structured summaries for sessions with multiple output modes and cost optimization
-//   Keywords: session/summarize, session_summary, llm_summarization, deduplication, embeddings, cost_tracking
-//   Related: persistSessionLearnings, filterJSONL, summarizeWithFallback, buildSeedPrompt, reembedAll
-//   Flow: validate input → resolve mode → open session store → route to handler → generate summary → persist learnings → emit results
-//   Resources: session store, LLM providers, embedding provider
-//   Events: session summarization events
-//   OutputFields: session_id, summary, accomplished, decisions, gotchas, tags, key_files, seed_prompt
+//
+//	Purpose: Generate structured summaries for sessions with multiple output modes and cost optimization
+//	Keywords: session/summarize, session_summary, llm_summarization, deduplication, embeddings, cost_tracking
+//	Related: persistSessionLearnings, filterJSONL, summarizeWithFallback, buildSeedPrompt, reembedAll
+//	Flow: validate input → resolve mode → open session store → route to handler → generate summary → persist learnings → emit results
+//	Resources: session store, LLM providers, embedding provider
+//	Events: session summarization events
+//	OutputFields: session_id, summary, accomplished, decisions, gotchas, tags, key_files, seed_prompt
+//
 // [[domain:session-llm-summarization]]
 // [[protocol:multi-provider-fallback-summarization]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {

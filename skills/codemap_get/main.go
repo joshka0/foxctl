@@ -124,13 +124,14 @@ func parseInlineMode(value string) (InlineMode, error) {
 // run retrieves a codemap by ID with configurable trace inclusion and content limits.
 //
 // Index:
-//   Purpose: Retrieve stored codemaps by ID with format fallback and content truncation
-//   Flow: apply defaults → open memory store → search for codemap by ID → parse format (Windsurf/legacy) → build output with optional traces
-//   SideEffects: database queries; content truncation; format conversion
-//   FailureModes: invalid IDs, database errors, parse errors, timeout errors
-//   Observability: emits codemap data with found flag, traces, and timing metrics
-//   Related: extractWindsurfFiles
-//   Keywords: codemap/get, retrieval, traces, format_fallback, truncation
+//
+//	Purpose: Retrieve stored codemaps by ID with format fallback and content truncation
+//	Flow: apply defaults → open memory store → search for codemap by ID → parse format (Windsurf/legacy) → build output with optional traces
+//	SideEffects: database queries; content truncation; format conversion
+//	FailureModes: invalid IDs, database errors, parse errors, timeout errors
+//	Observability: emits codemap data with found flag, traces, and timing metrics
+//	Related: extractWindsurfFiles
+//	Keywords: codemap/get, retrieval, traces, format_fallback, truncation
 //
 // [[domain:codemap-retrieval]]
 // [[protocol:codemap-format-fallback]]

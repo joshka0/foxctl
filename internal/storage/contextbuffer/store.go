@@ -230,13 +230,15 @@ func (s *sqlStore) Peek(ctx context.Context, params DrainParams) (*DrainResult, 
 // drainInternal retrieves entries, optionally marks them consumed, and renders markdown.
 //
 // Index:
-//   Purpose: Drain buffered context with optional consumption and markdown rendering
-//   Keywords: contextbuffer_drain, mark_consumed, priority, total_pending, markdown
-//   Related: renderMarkdown, scanEntry
-//   Flow: begin tx → query entries → optionally mark consumed → count pending → commit → render markdown
-//   Resources: context_entries table
-//   Events: none
-//   OutputFields: DrainResult.Entries, DrainResult.TotalPending, DrainResult.Markdown
+//
+//	Purpose: Drain buffered context with optional consumption and markdown rendering
+//	Keywords: contextbuffer_drain, mark_consumed, priority, total_pending, markdown
+//	Related: renderMarkdown, scanEntry
+//	Flow: begin tx → query entries → optionally mark consumed → count pending → commit → render markdown
+//	Resources: context_entries table
+//	Events: none
+//	OutputFields: DrainResult.Entries, DrainResult.TotalPending, DrainResult.Markdown
+//
 // [[invariant:consumed-entries-are-atomic-within-tx]]
 // [[test-contract:drain-returns-priority-ordered-entries]]
 func (s *sqlStore) drainInternal(ctx context.Context, params DrainParams) (*DrainResult, error) {

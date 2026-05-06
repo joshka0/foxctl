@@ -95,13 +95,14 @@ func main() {
 // run orchestrates memory query operations with validation, normalization, and result formatting.
 //
 // Index:
-//   Purpose: Query memory records with filtering, search, and pagination capabilities
-//   Keywords: memory/query, memory_search, vector_search, filtering, pagination
-//   Related: normalizeInput, query, searchWithEmbeddings, isFileAssociated, extractFileFromEntry
-//   Flow: validate input → normalize parameters → execute query → format results → emit output
-//   Resources: memory store (SQLite); embedding service
-//   Events: memory-queried
-//   OutputFields: records, pagination, stats
+//
+//	Purpose: Query memory records with filtering, search, and pagination capabilities
+//	Keywords: memory/query, memory_search, vector_search, filtering, pagination
+//	Related: normalizeInput, query, searchWithEmbeddings, isFileAssociated, extractFileFromEntry
+//	Flow: validate input → normalize parameters → execute query → format results → emit output
+//	Resources: memory store (SQLite); embedding service
+//	Events: memory-queried
+//	OutputFields: records, pagination, stats
 //
 // [[domain:memory-query]]
 // [[protocol:vector-search]]

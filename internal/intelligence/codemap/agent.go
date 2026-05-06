@@ -73,13 +73,14 @@ type GenerateOptions struct {
 // NewAgent initializes a codemap agent with tools and LLM.
 //
 // Index:
-//   Purpose: Configure codemap agent dependencies
-//   Keywords: codemap_agent, llm, tools_registry, workspace, graph_store
-//   Related: Agent.Generate, tools.NewRegistry
-//   Flow: apply options → create LLM → build tool registry → return agent
-//   Resources: LLM provider, graph store, skill resolver
-//   Events: none
-//   OutputFields: Agent
+//
+//	Purpose: Configure codemap agent dependencies
+//	Keywords: codemap_agent, llm, tools_registry, workspace, graph_store
+//	Related: Agent.Generate, tools.NewRegistry
+//	Flow: apply options → create LLM → build tool registry → return agent
+//	Resources: LLM provider, graph store, skill resolver
+//	Events: none
+//	OutputFields: Agent
 //
 // [[protocol:codemap-agent-initialization]]
 // [[risk:llm-creation-failure]]
@@ -117,13 +118,14 @@ func NewAgent(opts ...AgentOption) (*Agent, error) {
 // Generate runs the codemap agent and returns a codemap.
 //
 // Index:
-//   Purpose: Generate a semantic codemap for a query
-//   Keywords: codemap_generate, finish_codemap, depth, tool_calls, query
-//   Related: context.Gatherer.GatherAll, tools.Registry.FinalCodemap
-//   Flow: normalize depth → gather context → init agent/tools → execute → parse codemap → add metadata
-//   Resources: LLM provider, graph store, tool registry
-//   Events: codemap-generated
-//   OutputFields: Codemap
+//
+//	Purpose: Generate a semantic codemap for a query
+//	Keywords: codemap_generate, finish_codemap, depth, tool_calls, query
+//	Related: context.Gatherer.GatherAll, tools.Registry.FinalCodemap
+//	Flow: normalize depth → gather context → init agent/tools → execute → parse codemap → add metadata
+//	Resources: LLM provider, graph store, tool registry
+//	Events: codemap-generated
+//	OutputFields: Codemap
 //
 // [[protocol:codemap-generation]]
 // [[invariant:finish-codemap-required-for-completion]]

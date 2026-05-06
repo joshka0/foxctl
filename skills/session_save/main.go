@@ -84,13 +84,15 @@ func main() {
 // run orchestrates session state capture before compaction with task prioritization and background archiving.
 //
 // Index:
-//   Purpose: Capture session state including active tasks, plans, and pending todos before compaction
-//   Keywords: session/save, session_capture, compaction_backup, task_prioritization, background_archiving
-//   Related: triggerArchiveAndSummarize, tasksgraph.Analyzer, sessionkit.OpenMemoryInCache, sessionkit.OpenTasks
-//   Flow: resolve workspace → open stores → build snapshot → capture tasks/plans → prioritize with PageRank → store snapshot
-//   Resources: memory store, task store, plan detector
-//   Events: session save events
-//   OutputFields: snapshot_id, items_captured, message
+//
+//	Purpose: Capture session state including active tasks, plans, and pending todos before compaction
+//	Keywords: session/save, session_capture, compaction_backup, task_prioritization, background_archiving
+//	Related: triggerArchiveAndSummarize, tasksgraph.Analyzer, sessionkit.OpenMemoryInCache, sessionkit.OpenTasks
+//	Flow: resolve workspace → open stores → build snapshot → capture tasks/plans → prioritize with PageRank → store snapshot
+//	Resources: memory store, task store, plan detector
+//	Events: session save events
+//	OutputFields: snapshot_id, items_captured, message
+//
 // [[domain:session-state-capture]]
 // [[protocol:pre-compaction-snapshot]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {

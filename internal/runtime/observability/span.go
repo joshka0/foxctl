@@ -170,10 +170,11 @@ func WithSpanPersistenceFile(name string) SpanOpt {
 //	span.WithData("files", count)
 //
 // Index:
-//   Purpose: Start a new span and return a completion callback
-//   Flow: call StartSpanAt with time.Now → return context, done, builder
-//   Related: StartSpanAt, EventBuilder
-//   Keywords: start_span, trace_id, event, done_callback, event_builder
+//
+//	Purpose: Start a new span and return a completion callback
+//	Flow: call StartSpanAt with time.Now → return context, done, builder
+//	Related: StartSpanAt, EventBuilder
+//	Keywords: start_span, trace_id, event, done_callback, event_builder
 //
 // [[protocol:span-lifecycle]]
 // [[domain:observability-tracing]]
@@ -185,10 +186,11 @@ func StartSpan(ctx context.Context, op string, opts ...SpanOpt) (context.Context
 // This is useful when you already captured a start time for other reasons.
 //
 // Index:
-//   Purpose: Start a span with a caller-provided start time
-//   Flow: apply options → ensure trace → build event → enrich context → return done func
-//   Related: StartSpan, EmitWithConfig, EnsureTraceID
-//   Keywords: start_span_at, trace_id, emit, event, persist_config
+//
+//	Purpose: Start a span with a caller-provided start time
+//	Flow: apply options → ensure trace → build event → enrich context → return done func
+//	Related: StartSpan, EmitWithConfig, EnsureTraceID
+//	Keywords: start_span_at, trace_id, emit, event, persist_config
 //
 // [[protocol:span-lifecycle]]
 // [[domain:observability-tracing]]

@@ -1665,13 +1665,14 @@ func runIndexGitDiff(cmd *cobra.Command, workspace, base, head string, dryRun, e
 // getGitDiffFileChanges returns the list of files changed between base and head commits.
 //
 // Index:
-//   Purpose: Translate a git diff range into (path, change_kind) entries for post-review indexers
-//   Keywords: git-diff, name-status, ORIG_HEAD, head, base, rename, deleted, added, modified
-//   Related: runIndexGitDiff, indexing.FileChange, indexing.ChangeKind
-//   Flow: resolve ORIG_HEAD fallback -> run git diff --name-status -> parse statuses -> expand renames -> return file changes
-//   Resources: git subprocess
-//   Events: git-diff-name-status
-//   OutputFields: path, change_kind
+//
+//	Purpose: Translate a git diff range into (path, change_kind) entries for post-review indexers
+//	Keywords: git-diff, name-status, ORIG_HEAD, head, base, rename, deleted, added, modified
+//	Related: runIndexGitDiff, indexing.FileChange, indexing.ChangeKind
+//	Flow: resolve ORIG_HEAD fallback -> run git diff --name-status -> parse statuses -> expand renames -> return file changes
+//	Resources: git subprocess
+//	Events: git-diff-name-status
+//	OutputFields: path, change_kind
 //
 // [[invariant:diff-range-must-resolve-to-file-changes]]
 // [[risk:stale-orig-head-fallback]]
@@ -1743,10 +1744,11 @@ func getGitDiffFileChanges(ctx context.Context, repoPath, base, head string) ([]
 // isGitDiffAutoBase reports whether the base argument should be auto-resolved.
 //
 // Index:
-//   Purpose: Allow `index git-diff` to default to "diff since last successful indexing" without requiring explicit SHAs
-//   Keywords: git-diff, base, auto, last-indexed, last_indexed
-//   Related: runIndexGitDiff, memory.Store.GetIndexerState
-//   Flow: normalize token -> compare against known auto markers
+//
+//	Purpose: Allow `index git-diff` to default to "diff since last successful indexing" without requiring explicit SHAs
+//	Keywords: git-diff, base, auto, last-indexed, last_indexed
+//	Related: runIndexGitDiff, memory.Store.GetIndexerState
+//	Flow: normalize token -> compare against known auto markers
 //
 // [[domain:git-diff-auto-base]]
 func isGitDiffAutoBase(base string) bool {
@@ -1762,11 +1764,12 @@ func isGitDiffAutoBase(base string) bool {
 // gitCommitExists reports whether rev resolves to a commit object.
 //
 // Index:
-//   Purpose: Avoid using stale "last indexed" SHAs that aren't present in the current clone (shallow clones, rewritten history)
-//   Keywords: git, commit, cat-file, verify, rev, exists
-//   Related: runIndexGitDiff, gitRevParse
-//   Flow: normalize rev -> run `git cat-file -e <rev>^{commit}` -> return status
-//   Resources: git subprocess
+//
+//	Purpose: Avoid using stale "last indexed" SHAs that aren't present in the current clone (shallow clones, rewritten history)
+//	Keywords: git, commit, cat-file, verify, rev, exists
+//	Related: runIndexGitDiff, gitRevParse
+//	Flow: normalize rev -> run `git cat-file -e <rev>^{commit}` -> return status
+//	Resources: git subprocess
 //
 // [[invariant:commit-existence-must-be-verified-before-indexing]]
 // [[risk:shallow-clone-missing-sha]]
@@ -1782,12 +1785,13 @@ func gitCommitExists(ctx context.Context, repoPath, rev string) bool {
 // gitRevParse resolves a git revision (HEAD, ref name, or SHA) to a full commit SHA.
 //
 // Index:
-//   Purpose: Persist a stable last-indexed anchor even when `--head` is a ref name like HEAD or main
-//   Keywords: git, rev-parse, sha, head, refs
-//   Related: runIndexGitDiff, gitCommitExists
-//   Flow: normalize rev -> run `git rev-parse <rev>` -> trim output
-//   Resources: git subprocess
-//   OutputFields: full_commit_sha
+//
+//	Purpose: Persist a stable last-indexed anchor even when `--head` is a ref name like HEAD or main
+//	Keywords: git, rev-parse, sha, head, refs
+//	Related: runIndexGitDiff, gitCommitExists
+//	Flow: normalize rev -> run `git rev-parse <rev>` -> trim output
+//	Resources: git subprocess
+//	OutputFields: full_commit_sha
 //
 // [[invariant:last-indexed-anchor-must-be-full-sha]]
 // [[risk:ref-name-instability]]

@@ -72,7 +72,7 @@ func TestSemanticAnchorEnvelopeProviderBuildsSearchEnvelope(t *testing.T) {
 func semanticAnchorResolutionForEnvelopeTest(t *testing.T, owner repoindex.Node) semanticanchors.AnchorResolution {
 	t.Helper()
 	policy := semanticanchors.DefaultAnchorPolicy("repo", nil)
-	occ, findings := semanticanchors.ParseInlineAnchor(policy, "[[foxctl:invariant/no-send-without-read]]")
+	occ, findings := semanticanchors.ParseInlineAnchor(policy, "[[invariant:no-send-without-read]]")
 	if len(findings) != 0 {
 		t.Fatalf("parse findings: %+v", findings)
 	}

@@ -149,13 +149,14 @@ func (s *WFQScheduler) Enqueue(job *Job) error {
 // Start begins the scheduler workers.
 //
 // Index:
-//   Purpose: Start worker pool and WFQ dispatch loop
-//   Keywords: wfq_start, workers, scheduler_loop
-//   Related: WFQScheduler.schedulerLoop, WFQScheduler.worker
-//   Flow: spawn workers → start scheduler loop → return
-//   Resources: goroutines, workCh
-//   Events: none
-//   OutputFields: none
+//
+//	Purpose: Start worker pool and WFQ dispatch loop
+//	Keywords: wfq_start, workers, scheduler_loop
+//	Related: WFQScheduler.schedulerLoop, WFQScheduler.worker
+//	Flow: spawn workers → start scheduler loop → return
+//	Resources: goroutines, workCh
+//	Events: none
+//	OutputFields: none
 //
 // [[domain:wfq-scheduler-start]]
 func (s *WFQScheduler) Start(ctx context.Context) {
@@ -194,13 +195,14 @@ func (s *WFQScheduler) Stop() {
 // schedulerLoop continuously dispatches jobs to workers.
 //
 // Index:
-//   Purpose: Dispatch jobs based on virtual finish time
-//   Keywords: wfq_dispatch, virtual_time, priority_queue
-//   Related: WFQScheduler.dispatchNext
-//   Flow: tick → select next job → send to worker queue
-//   Resources: workCh, globalQueue
-//   Events: none
-//   OutputFields: none
+//
+//	Purpose: Dispatch jobs based on virtual finish time
+//	Keywords: wfq_dispatch, virtual_time, priority_queue
+//	Related: WFQScheduler.dispatchNext
+//	Flow: tick → select next job → send to worker queue
+//	Resources: workCh, globalQueue
+//	Events: none
+//	OutputFields: none
 //
 // [[domain:wfq-scheduler-loop]]
 func (s *WFQScheduler) schedulerLoop(ctx context.Context) {
@@ -222,13 +224,14 @@ func (s *WFQScheduler) schedulerLoop(ctx context.Context) {
 // dispatchNext sends the next job with smallest virtual finish time to workers.
 //
 // Index:
-//   Purpose: Select next job and enqueue for execution
-//   Keywords: dispatch_next, virtual_finish, namespace_queue
-//   Related: WFQScheduler.schedulerLoop
-//   Flow: pop heap → update virtual times → send to work channel
-//   Resources: globalQueue, workCh
-//   Events: none
-//   OutputFields: none
+//
+//	Purpose: Select next job and enqueue for execution
+//	Keywords: dispatch_next, virtual_finish, namespace_queue
+//	Related: WFQScheduler.schedulerLoop
+//	Flow: pop heap → update virtual times → send to work channel
+//	Resources: globalQueue, workCh
+//	Events: none
+//	OutputFields: none
 //
 // [[invariant:smallest-virtual-finish-first]]
 func (s *WFQScheduler) dispatchNext() {

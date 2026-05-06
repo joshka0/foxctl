@@ -29,13 +29,14 @@ type syncStoreResult struct {
 // newSyncCommand constructs the `foxctl sync` command.
 //
 // Index:
-//   Purpose: Provide an explicit, on-demand sync for configured Turso embedded replicas
-//   Keywords: sync, turso, replica, cross_device
-//   Related: dbdriver.Syncer, dbdriver.ConfigLoader.LoadConfig, storage.CanonicalStores
-//   Flow: resolve target stores → load dbdriver config → open DB → call Syncer.Sync → emit envelope response
-//   Resources: embedded replica files, remote Turso database
-//   Events: sync-start, sync-complete, sync-skip
-//   OutputFields: store, class, driver, sync_url, synced, skipped, reason, error
+//
+//	Purpose: Provide an explicit, on-demand sync for configured Turso embedded replicas
+//	Keywords: sync, turso, replica, cross_device
+//	Related: dbdriver.Syncer, dbdriver.ConfigLoader.LoadConfig, storage.CanonicalStores
+//	Flow: resolve target stores → load dbdriver config → open DB → call Syncer.Sync → emit envelope response
+//	Resources: embedded replica files, remote Turso database
+//	Events: sync-start, sync-complete, sync-skip
+//	OutputFields: store, class, driver, sync_url, synced, skipped, reason, error
 //
 // [[protocol:turso-embedded-replica-sync]]
 // [[risk:network-auth-timeout]]

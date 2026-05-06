@@ -73,13 +73,14 @@ func (c *CoVe) spawnerForRequest(req CoVeRequest) *Spawner {
 // Run executes the complete Chain of Verification pipeline.
 //
 // Index:
-//   Purpose: Run the full CoVe pipeline from baseline generation through verification
-//   Keywords: cove_run, baseline_response, claims, verification, corrections, skip_refine
-//   Related: CoVe.generateBaseline, CoVe.extractClaims, Spawner.SpawnVerifiers, CoVe.refine
-//   Flow: generate baseline → extract claims → verify claims → refine (optional) → return response
-//   Resources: LLM client, spawner
-//   Events: cove-pipeline-complete
-//   OutputFields: CoVeResponse
+//
+//	Purpose: Run the full CoVe pipeline from baseline generation through verification
+//	Keywords: cove_run, baseline_response, claims, verification, corrections, skip_refine
+//	Related: CoVe.generateBaseline, CoVe.extractClaims, Spawner.SpawnVerifiers, CoVe.refine
+//	Flow: generate baseline → extract claims → verify claims → refine (optional) → return response
+//	Resources: LLM client, spawner
+//	Events: cove-pipeline-complete
+//	OutputFields: CoVeResponse
 //
 // [[protocol:chain-of-verification-run]]
 // [[invariant:skip-refine-bypasses-refinement]]
@@ -137,13 +138,14 @@ func (c *CoVe) Run(ctx context.Context, req CoVeRequest) (*CoVeResponse, error) 
 // RunFromBaseline executes the verification pipeline starting from a provided baseline.
 //
 // Index:
-//   Purpose: Run the CoVe pipeline when a baseline response is precomputed
-//   Keywords: cove_run_from_baseline, baseline_response, claims, verification, corrections, skip_refine
-//   Related: CoVe.extractClaims, Spawner.SpawnVerifiers, CoVe.refine
-//   Flow: validate baseline → extract claims → verify claims → refine (optional) → return response
-//   Resources: LLM client, spawner
-//   Events: cove-from-baseline-complete
-//   OutputFields: CoVeResponse
+//
+//	Purpose: Run the CoVe pipeline when a baseline response is precomputed
+//	Keywords: cove_run_from_baseline, baseline_response, claims, verification, corrections, skip_refine
+//	Related: CoVe.extractClaims, Spawner.SpawnVerifiers, CoVe.refine
+//	Flow: validate baseline → extract claims → verify claims → refine (optional) → return response
+//	Resources: LLM client, spawner
+//	Events: cove-from-baseline-complete
+//	OutputFields: CoVeResponse
 //
 // [[protocol:chain-of-verification-from-baseline]]
 // [[invariant:baseline-non-empty-required]]

@@ -51,13 +51,14 @@ type verificationResult struct {
 // This is the core "Swarm" implementation that enables high-throughput verification.
 //
 // Index:
-//   Purpose: Verify a batch of claims concurrently and aggregate results
-//   Keywords: verification, claims, parallelism, max_workers, queue_size, verdict
-//   Related: Spawner.worker, Spawner.verifyClaim
-//   Flow: size worker pool → enqueue jobs → collect results → tally verdict counts
-//   Resources: LLM client
-//   Events: verification-batch-complete
-//   OutputFields: BatchVerificationResult
+//
+//	Purpose: Verify a batch of claims concurrently and aggregate results
+//	Keywords: verification, claims, parallelism, max_workers, queue_size, verdict
+//	Related: Spawner.worker, Spawner.verifyClaim
+//	Flow: size worker pool → enqueue jobs → collect results → tally verdict counts
+//	Resources: LLM client
+//	Events: verification-batch-complete
+//	OutputFields: BatchVerificationResult
 //
 // [[protocol:claim-verification-swarm]]
 // [[invariant:per-claim-errors-captured]]

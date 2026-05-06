@@ -73,13 +73,15 @@ func main() {
 // run orchestrates character and overlay management with emotion-based sprite selection.
 //
 // Index:
-//   Purpose: Manage companion characters and emotion overlays with intensity-based sprite selection
-//   Keywords: presence/character, character_management, emotion_overlays, sprite_selection, companion_system
-//   Related: getCharacter, selectOverlay, registerCharacter, listCharacters, registerOverlay, nullString
-//   Flow: open companion database → validate action → route to handler → execute database operations → emit results
-//   Resources: companion SQLite database
-//   Events: character management events
-//   OutputFields: character, overlay, characters, overlays, action
+//
+//	Purpose: Manage companion characters and emotion overlays with intensity-based sprite selection
+//	Keywords: presence/character, character_management, emotion_overlays, sprite_selection, companion_system
+//	Related: getCharacter, selectOverlay, registerCharacter, listCharacters, registerOverlay, nullString
+//	Flow: open companion database → validate action → route to handler → execute database operations → emit results
+//	Resources: companion SQLite database
+//	Events: character management events
+//	OutputFields: character, overlay, characters, overlays, action
+//
 // [[domain:companion-character-management]]
 // [[protocol:character-action-dispatch]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {

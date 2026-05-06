@@ -54,10 +54,11 @@ func DefaultPruneOptions() PruneOptions {
 // Events are pruned based on their timestamp field, not file modification time.
 //
 // Index:
-//   Purpose: Remove events older than a cutoff across NDJSON files
-//   Flow: validate obs dir → scan event files → prune each file → aggregate results
-//   Related: pruneEventFile, PruneBySize
-//   Keywords: prune, ndjson, events_dir, older_than, dry_run
+//
+//	Purpose: Remove events older than a cutoff across NDJSON files
+//	Flow: validate obs dir → scan event files → prune each file → aggregate results
+//	Related: pruneEventFile, PruneBySize
+//	Keywords: prune, ndjson, events_dir, older_than, dry_run
 //
 // [[protocol:observability-prune-age]]
 // [[domain:observability-retention]]
@@ -112,10 +113,11 @@ func Prune(ctx context.Context, obsDir string, opts PruneOptions) (*PruneResult,
 // Returns (eventsPruned, eventsKept, bytesFreed, error).
 //
 // Index:
-//   Purpose: Filter NDJSON events by timestamp and rewrite a single file
-//   Flow: scan file → parse timestamps → retain/prune → rewrite temp → rename
-//   Related: Prune
-//   Keywords: prune_file, ndjson, cutoff, rename, temp_file
+//
+//	Purpose: Filter NDJSON events by timestamp and rewrite a single file
+//	Flow: scan file → parse timestamps → retain/prune → rewrite temp → rename
+//	Related: Prune
+//	Keywords: prune_file, ndjson, cutoff, rename, temp_file
 //
 // [[protocol:observability-prune-file]]
 // [[domain:observability-retention]]
@@ -219,10 +221,11 @@ func pruneEventFile(ctx context.Context, filePath string, cutoff time.Time, dryR
 // This is useful for keeping disk usage bounded regardless of event age.
 //
 // Index:
-//   Purpose: Prune events by total size regardless of age
-//   Flow: scan files → build event index → sort oldest first → rewrite affected files
-//   Related: Prune, pruneEventFile
-//   Keywords: prune_size, ndjson, max_bytes, rewrite, dry_run
+//
+//	Purpose: Prune events by total size regardless of age
+//	Flow: scan files → build event index → sort oldest first → rewrite affected files
+//	Related: Prune, pruneEventFile
+//	Keywords: prune_size, ndjson, max_bytes, rewrite, dry_run
 //
 // [[protocol:observability-prune-size]]
 // [[domain:observability-retention]]

@@ -32,13 +32,15 @@ func main() {
 // run orchestrates pattern management operations with workspace resolution and store initialization.
 //
 // Index:
-//   Purpose: Manage learned tool usage patterns for agent optimization with list, clear, and hints operations
-//   Keywords: optimize/patterns, tool_usage_patterns, agent_optimization, pattern_management, learning_system
-//   Related: listPatterns, clearPatterns, getHints, optimization.OpenPatternStore
-//   Flow: resolve workspace → open pattern store → dispatch action → execute operation → emit results
-//   Resources: pattern store, trajectory store
-//   Events: pattern management events
-//   OutputFields: patterns, count, hints, formatted
+//
+//	Purpose: Manage learned tool usage patterns for agent optimization with list, clear, and hints operations
+//	Keywords: optimize/patterns, tool_usage_patterns, agent_optimization, pattern_management, learning_system
+//	Related: listPatterns, clearPatterns, getHints, optimization.OpenPatternStore
+//	Flow: resolve workspace → open pattern store → dispatch action → execute operation → emit results
+//	Resources: pattern store, trajectory store
+//	Events: pattern management events
+//	OutputFields: patterns, count, hints, formatted
+//
 // [[domain:tool-usage-pattern-learning]]
 // [[protocol:pattern-store-action-dispatch]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {

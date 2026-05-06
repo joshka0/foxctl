@@ -164,13 +164,15 @@ func main() {
 // run orchestrates provider configuration management with validation, routing, and operation execution.
 //
 // Index:
-//   Purpose: Unified configuration management for AI coding assistants with MCP and skill support
-//   Keywords: providers/config, configuration_management, mcp_servers, skills_sync, ai_assistants
-//   Related: listProviders, getConfig, addMCP, removeMCP, addSkill, removeSkill, syncProviders
-//   Flow: validate operation → resolve provider → route to handler → execute operation → emit results
-//   Resources: provider configuration files, skill directories
-//   Events: provider configuration events
-//   OutputFields: providers, config, changes, errors
+//
+//	Purpose: Unified configuration management for AI coding assistants with MCP and skill support
+//	Keywords: providers/config, configuration_management, mcp_servers, skills_sync, ai_assistants
+//	Related: listProviders, getConfig, addMCP, removeMCP, addSkill, removeSkill, syncProviders
+//	Flow: validate operation → resolve provider → route to handler → execute operation → emit results
+//	Resources: provider configuration files, skill directories
+//	Events: provider configuration events
+//	OutputFields: providers, config, changes, errors
+//
 // [[domain:ai-assistant-provider-config]]
 // [[protocol:provider-operation-dispatch]]
 func run(_ context.Context, rc *skillmain.RunContext, in input) error {

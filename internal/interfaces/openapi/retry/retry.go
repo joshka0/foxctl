@@ -48,10 +48,11 @@ func New(cfg Config) *Retryer {
 // The provided function should return the HTTP response to inspect for retryable status codes.
 //
 // Index:
-//   Purpose: Retry HTTP operations with backoff and Retry-After support
-//   Flow: call fn → inspect status → compute delay → sleep → retry until max
-//   Related: Retryer.nextDelay, parseRetryAfter
-//   Keywords: retry, max_attempts, initial_delay, multiplier, retry_after, status_code
+//
+//	Purpose: Retry HTTP operations with backoff and Retry-After support
+//	Flow: call fn → inspect status → compute delay → sleep → retry until max
+//	Related: Retryer.nextDelay, parseRetryAfter
+//	Keywords: retry, max_attempts, initial_delay, multiplier, retry_after, status_code
 //
 // [[protocol:http-retry-policy]]
 // [[domain:resilient-http-client]]

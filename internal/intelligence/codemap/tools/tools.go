@@ -55,13 +55,14 @@ func WithSkillResolver(resolver *skill.Resolver) RegistryOption {
 // NewRegistry creates a codemap tool registry with configured dependencies.
 //
 // Index:
-//   Purpose: Initialize codemap tools for exploration and finish capture
-//   Keywords: codemap_tools, tool_registry, read_file, search_pattern, finish_codemap
-//   Related: Registry.registerTools
-//   Flow: apply options → register tools → return registry
-//   Resources: workspace, graph store, skill resolver
-//   Events: none
-//   OutputFields: Registry
+//
+//	Purpose: Initialize codemap tools for exploration and finish capture
+//	Keywords: codemap_tools, tool_registry, read_file, search_pattern, finish_codemap
+//	Related: Registry.registerTools
+//	Flow: apply options → register tools → return registry
+//	Resources: workspace, graph store, skill resolver
+//	Events: none
+//	OutputFields: Registry
 //
 // [[protocol:codemap-tool-registry-init]]
 func NewRegistry(opts ...RegistryOption) (*Registry, error) {

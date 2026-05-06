@@ -60,13 +60,15 @@ func main() {
 // run orchestrates session archival with JSONL parsing, chunking, compression, and optional embedding generation.
 //
 // Index:
-//   Purpose: Archive session JSONL files with chunking, context window generation, compression, and optional embedding generation
-//   Keywords: session/archive, jsonl_processing, chunking, compression, embedding_generation, context_windows
-//   Related: embedContextWindows, buildWindowEmbeddingText, filterEmbeddingContent, archive.ChunkFile
-//   Flow: validate input → resolve session → locate JSONL → parse and chunk → compress → save chunks/windows → generate embeddings → update metadata
-//   Resources: session store, JSONL files, archive storage, embedding provider
-//   Events: session archival events
-//   OutputFields: session_id, archive_path, original_size, compressed_size, chunk_count, window_count, embedded_windows
+//
+//	Purpose: Archive session JSONL files with chunking, context window generation, compression, and optional embedding generation
+//	Keywords: session/archive, jsonl_processing, chunking, compression, embedding_generation, context_windows
+//	Related: embedContextWindows, buildWindowEmbeddingText, filterEmbeddingContent, archive.ChunkFile
+//	Flow: validate input → resolve session → locate JSONL → parse and chunk → compress → save chunks/windows → generate embeddings → update metadata
+//	Resources: session store, JSONL files, archive storage, embedding provider
+//	Events: session archival events
+//	OutputFields: session_id, archive_path, original_size, compressed_size, chunk_count, window_count, embedded_windows
+//
 // [[domain:session-jsonl-archival]]
 // [[protocol:chunk-and-window-pipeline]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {

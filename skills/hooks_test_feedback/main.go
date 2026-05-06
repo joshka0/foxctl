@@ -47,13 +47,14 @@ func main() {
 // run orchestrates test failure feedback collection and formatting for advisory context.
 //
 // Index:
-//   Purpose: Surface failing test results to Claude after code edits with advisory context
-//   Keywords: hooks/test_feedback, test_failures, advisory_context, test_watching, failure_reporting
-//   Related: buildContextString
-//   Flow: load config → open store → get test statuses → filter failures → build context → emit advisory output
-//   Resources: testwatch store (SQLite)
-//   Events: test-feedback-emitted
-//   OutputFields: watchers, failing_count, context
+//
+//	Purpose: Surface failing test results to Claude after code edits with advisory context
+//	Keywords: hooks/test_feedback, test_failures, advisory_context, test_watching, failure_reporting
+//	Related: buildContextString
+//	Flow: load config → open store → get test statuses → filter failures → build context → emit advisory output
+//	Resources: testwatch store (SQLite)
+//	Events: test-feedback-emitted
+//	OutputFields: watchers, failing_count, context
 //
 // [[domain:test-feedback]]
 func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {

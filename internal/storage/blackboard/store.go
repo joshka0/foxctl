@@ -148,13 +148,15 @@ func (s *sqlStore) Search(ctx context.Context, ns, topic string, limit int) ([]a
 // Claim acquires a lease for a blackboard record if unleased.
 //
 // Index:
-//   Purpose: Atomically lease a blackboard record for an agent
-//   Keywords: blackboard_claim, lease, agent_id, lease_duration, ErrAlreadyLeased
-//   Related: scanRecord, agent.Lease
-//   Flow: begin tx → fetch record → build lease → conditional update → commit → return
-//   Resources: blackboard table
-//   Events: none
-//   OutputFields: agent.BlackboardRecord
+//
+//	Purpose: Atomically lease a blackboard record for an agent
+//	Keywords: blackboard_claim, lease, agent_id, lease_duration, ErrAlreadyLeased
+//	Related: scanRecord, agent.Lease
+//	Flow: begin tx → fetch record → build lease → conditional update → commit → return
+//	Resources: blackboard table
+//	Events: none
+//	OutputFields: agent.BlackboardRecord
+//
 // [[invariant:lease-only-if-null-or-empty]]
 // [[protocol:blackboard-lease-semantics]]
 func (s *sqlStore) Claim(ctx context.Context, id, agentID string, leaseDuration time.Duration) (agent.BlackboardRecord, error) {

@@ -18,13 +18,14 @@ func NewQueryEngine(store *Store) *QueryEngine {
 // Search performs an FTS search over nodes.
 //
 // Index:
-//   Purpose: Find repo graph nodes using FTS with syntax and OR fallback
-//   Keywords: repo_index_search, fts5, query, nodes, SearchFTS
-//   Related: Store.SearchFTS, quoteFTSQuery, buildFallbackCandidates
-//   Flow: run FTS → on syntax error retry quoted → on zero results retry OR
-//   Resources: repoindex node_fts
-//   Events: fts-query-fallback
-//   OutputFields: nodes
+//
+//	Purpose: Find repo graph nodes using FTS with syntax and OR fallback
+//	Keywords: repo_index_search, fts5, query, nodes, SearchFTS
+//	Related: Store.SearchFTS, quoteFTSQuery, buildFallbackCandidates
+//	Flow: run FTS → on syntax error retry quoted → on zero results retry OR
+//	Resources: repoindex node_fts
+//	Events: fts-query-fallback
+//	OutputFields: nodes
 //
 // [[protocol:repoindex-fts-search]]
 // [[risk:fts-syntax-error-fallback]]
@@ -225,13 +226,14 @@ func (q *QueryEngine) ResolveFileNodes(ctx context.Context, paths []string) ([]N
 // Expand traverses the graph starting from seed node IDs.
 //
 // Index:
-//   Purpose: Expand the repo graph from seeds with depth/budget limits
-//   Keywords: repo_index_expand, seeds, depth, budget, edges, nodes
-//   Related: GetOutgoingEdges, GetIncomingEdges, Store.GetNodes
-//   Flow: normalize options → BFS by depth → fetch edges → collect nodes/edges
-//   Resources: repoindex nodes, edges tables
-//   Events: graph-expand
-//   OutputFields: Nodes, Edges
+//
+//	Purpose: Expand the repo graph from seeds with depth/budget limits
+//	Keywords: repo_index_expand, seeds, depth, budget, edges, nodes
+//	Related: GetOutgoingEdges, GetIncomingEdges, Store.GetNodes
+//	Flow: normalize options → BFS by depth → fetch edges → collect nodes/edges
+//	Resources: repoindex nodes, edges tables
+//	Events: graph-expand
+//	OutputFields: Nodes, Edges
 //
 // [[protocol:repoindex-graph-expand]]
 // [[invariant:budget-enforced-per-depth]]

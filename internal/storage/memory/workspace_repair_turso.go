@@ -15,13 +15,15 @@ import (
 // Errors are logged and ignored.
 //
 // Index:
-//   Purpose: Keep historical Turso-backed named-memory entries reachable when workspace paths change across machines/users
-//   Keywords: workspace, migration, repair, memory, turso
-//   Related: ws.ID, ws.CanonicalID, (*TursoStore).migrateWorkspace
-//   Flow: detect path-like workspace values -> compute stable target IDs -> migrate -> log when rows move
-//   Resources: Turso DB, named_memory, embedding_metadata, indexer_state
-//   Events: none
-//   OutputFields: none
+//
+//	Purpose: Keep historical Turso-backed named-memory entries reachable when workspace paths change across machines/users
+//	Keywords: workspace, migration, repair, memory, turso
+//	Related: ws.ID, ws.CanonicalID, (*TursoStore).migrateWorkspace
+//	Flow: detect path-like workspace values -> compute stable target IDs -> migrate -> log when rows move
+//	Resources: Turso DB, named_memory, embedding_metadata, indexer_state
+//	Events: none
+//	OutputFields: none
+//
 // [[invariant:only-migrate-when-target-path-exists]]
 // [[domain:workspace-stable-identity]]
 func (s *TursoStore) repairWorkspaceIDs(ctx context.Context) {
@@ -80,13 +82,15 @@ func (s *TursoStore) repairWorkspaceIDs(ctx context.Context) {
 // migrateWorkspace rewrites named memory tables from one workspace key to another.
 //
 // Index:
-//   Purpose: Make legacy workspace IDs queryable under a stable workspace key in Turso
-//   Keywords: migrate, transaction, workspace, turso
-//   Related: (*TursoStore).repairWorkspaceIDs
-//   Flow: begin tx -> update named_memory (conflict-safe) -> update embedding_metadata (conflict-safe) -> commit
-//   Resources: Turso DB
-//   Events: none
-//   OutputFields: bool (moved)
+//
+//	Purpose: Make legacy workspace IDs queryable under a stable workspace key in Turso
+//	Keywords: migrate, transaction, workspace, turso
+//	Related: (*TursoStore).repairWorkspaceIDs
+//	Flow: begin tx -> update named_memory (conflict-safe) -> update embedding_metadata (conflict-safe) -> commit
+//	Resources: Turso DB
+//	Events: none
+//	OutputFields: bool (moved)
+//
 // [[invariant:skip-conflicting-rows-on-migration]]
 // [[domain:workspace-stable-identity]]
 func (s *TursoStore) migrateWorkspace(ctx context.Context, from, to string) (bool, error) {

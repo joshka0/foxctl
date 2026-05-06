@@ -69,13 +69,14 @@ func main() {
 // run orchestrates outbound todo synchronization with permission checks, task projection, and provider file writing.
 //
 // Index:
-//   Purpose: Sync tasks from foxctl to external providers (Claude Code) with configurable formatting and ordering
-//   Keywords: todo/sync_to_provider, outbound_sync, provider_integration, task_projection, claude_code_sync
-//   Related: todosync.NewService, todos.NewStore, sessionkit.OpenTasks
-//   Flow: check permissions → open task store → resolve session → build projection config → sync tasks → write provider file → emit results
-//   Resources: task store, provider state files
-//   Events: none
-//   OutputFields: written, updated, unchanged, file_path, file_hash, todos, warnings, dry_run
+//
+//	Purpose: Sync tasks from foxctl to external providers (Claude Code) with configurable formatting and ordering
+//	Keywords: todo/sync_to_provider, outbound_sync, provider_integration, task_projection, claude_code_sync
+//	Related: todosync.NewService, todos.NewStore, sessionkit.OpenTasks
+//	Flow: check permissions → open task store → resolve session → build projection config → sync tasks → write provider file → emit results
+//	Resources: task store, provider state files
+//	Events: none
+//	OutputFields: written, updated, unchanged, file_path, file_hash, todos, warnings, dry_run
 //
 // [[protocol:outbound_todo_sync]]
 // [[risk:provider_state_write]]

@@ -103,13 +103,14 @@ func runMain() error {
 // run orchestrates MCP server connections and tool execution with stdio and SSE transport support.
 //
 // Index:
-//   Purpose: Bridge to MCP servers supporting both stdio and SSE transports for tool execution
-//   Keywords: mcp/bridge, mcp_server, tool_execution, stdio_transport, sse_transport, protocol_bridge
-//   Related: mcputil.NewClient, mcputil.Initialize, parseInput
-//   Flow: validate input → create MCP client → initialize connection → call tool → format results → emit output
-//   Resources: MCP server process; HTTP connection
-//   Events: mcp-tool-called
-//   OutputFields: is_error, content
+//
+//	Purpose: Bridge to MCP servers supporting both stdio and SSE transports for tool execution
+//	Keywords: mcp/bridge, mcp_server, tool_execution, stdio_transport, sse_transport, protocol_bridge
+//	Related: mcputil.NewClient, mcputil.Initialize, parseInput
+//	Flow: validate input → create MCP client → initialize connection → call tool → format results → emit output
+//	Resources: MCP server process; HTTP connection
+//	Events: mcp-tool-called
+//	OutputFields: is_error, content
 //
 // [[domain:mcp-bridge]]
 // [[protocol:mcp-protocol]]

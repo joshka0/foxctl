@@ -183,13 +183,14 @@ func main() {
 // run orchestrates impact analysis for edited files using LSP references and implementations.
 //
 // Index:
-//   Purpose: Analyze external dependencies of edited code symbols using LSP servers
-//   Keywords: hooks/impact_analysis, lsp_analysis, code_dependencies, reference_analysis, implementation_analysis
-//   Related: getSymbols, analyzeImpacts, getLSPReferences, getLSPImplementations, formatImpactContext
-//   Flow: validate config → extract file path → check language → get symbols → analyze impacts in parallel → filter significant results → emit context
-//   Resources: LSP servers (gopls, tsserver, pylsp); code/symbols skill
-//   Events: impact-analyzed, impact-debounced
-//   OutputFields: impacts, symbol_count, ref_count, impl_count
+//
+//	Purpose: Analyze external dependencies of edited code symbols using LSP servers
+//	Keywords: hooks/impact_analysis, lsp_analysis, code_dependencies, reference_analysis, implementation_analysis
+//	Related: getSymbols, analyzeImpacts, getLSPReferences, getLSPImplementations, formatImpactContext
+//	Flow: validate config → extract file path → check language → get symbols → analyze impacts in parallel → filter significant results → emit context
+//	Resources: LSP servers (gopls, tsserver, pylsp); code/symbols skill
+//	Events: impact-analyzed, impact-debounced
+//	OutputFields: impacts, symbol_count, ref_count, impl_count
 //
 // [[domain:impact-analysis]]
 // [[protocol:lsp-integration]]

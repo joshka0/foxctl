@@ -12,13 +12,14 @@ import (
 // across insignificant formatting changes.
 //
 // Index:
-//   Purpose: Generate stable content hash for change detection
-//   Keywords: sha256, hash, content digest, change detection
-//   Related: NormalizeForDigest
-//   Flow: normalize text → hash → return sha256:hex
-//   Resources: none
-//   Events: none
-//   OutputFields: digest string
+//
+//	Purpose: Generate stable content hash for change detection
+//	Keywords: sha256, hash, content digest, change detection
+//	Related: NormalizeForDigest
+//	Flow: normalize text → hash → return sha256:hex
+//	Resources: none
+//	Events: none
+//	OutputFields: digest string
 //
 // [[invariant:digest-stable-across-formatting]]
 // [[domain:content-digest]]
@@ -31,13 +32,14 @@ func DigestSHA256(text string) string {
 // SymbolDigestInput captures normalized components used for symbol content digests.
 //
 // Index:
-//   Purpose: Provide structured inputs for symbol content hashing
-//   Keywords: content digest, symbol hash, embedding stability
-//   Related: BuildSymbolContentDigest, SymbolInfo
-//   Flow: caller populates → BuildSymbolContentDigest consumes
-//   Resources: symbol metadata
-//   Events: none
-//   OutputFields: none
+//
+//	Purpose: Provide structured inputs for symbol content hashing
+//	Keywords: content digest, symbol hash, embedding stability
+//	Related: BuildSymbolContentDigest, SymbolInfo
+//	Flow: caller populates → BuildSymbolContentDigest consumes
+//	Resources: symbol metadata
+//	Events: none
+//	OutputFields: none
 //
 // [[domain:symbol-digest-input]]
 type SymbolDigestInput struct {
@@ -100,13 +102,14 @@ type SemanticEnvelopeDigestSection struct {
 // whitespace-only edits won't trigger re-embedding while semantic changes will.
 //
 // Index:
-//   Purpose: Generate deterministic digest for symbol embedding deduplication
-//   Keywords: symbol digest, doc-enriched, deduplication
-//   Related: NormalizeDoc, DigestSHA256
-//   Flow: normalize fields → build v2 string → DigestSHA256
-//   Resources: none
-//   Events: none
-//   OutputFields: digest string
+//
+//	Purpose: Generate deterministic digest for symbol embedding deduplication
+//	Keywords: symbol digest, doc-enriched, deduplication
+//	Related: NormalizeDoc, DigestSHA256
+//	Flow: normalize fields → build v2 string → DigestSHA256
+//	Resources: none
+//	Events: none
+//	OutputFields: digest string
 //
 // [[invariant:whitespace-ignored-in-digest]]
 // [[domain:symbol-content-digest]]
@@ -212,13 +215,14 @@ func BuildSemanticEnvelopeContentDigest(input SemanticEnvelopeDigestInput) strin
 // Useful for shorter identifiers when full digest is not needed.
 //
 // Index:
-//   Purpose: Generate short content identifier
-//   Keywords: short hash, prefix
-//   Related: DigestSHA256
-//   Flow: compute digest → return prefix
-//   Resources: none
-//   Events: none
-//   OutputFields: prefix string
+//
+//	Purpose: Generate short content identifier
+//	Keywords: short hash, prefix
+//	Related: DigestSHA256
+//	Flow: compute digest → return prefix
+//	Resources: none
+//	Events: none
+//	OutputFields: prefix string
 //
 // [[domain:content-digest-prefix]]
 func DigestSHA256Prefix(text string, n int) string {

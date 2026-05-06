@@ -505,13 +505,15 @@ func (s *SQLiteStore) GetNeighbors(ctx context.Context, workspace, nodeID string
 // UpsertNodes bulk inserts or updates nodes.
 //
 // Index:
-//   Purpose: Persist node batches in a single transaction
-//   Keywords: graph_nodes, upsert, transaction, workspace_id
-//   Related: Node, SQLiteStore.UpsertEdges
-//   Flow: begin tx → prepare statement → upsert rows → commit
-//   Resources: graph_nodes table
-//   Events: none
-//   OutputFields: none
+//
+//	Purpose: Persist node batches in a single transaction
+//	Keywords: graph_nodes, upsert, transaction, workspace_id
+//	Related: Node, SQLiteStore.UpsertEdges
+//	Flow: begin tx → prepare statement → upsert rows → commit
+//	Resources: graph_nodes table
+//	Events: none
+//	OutputFields: none
+//
 // [[invariant:workspace-canonicalized-before-upsert]]
 // [[test-contract:node-batch-atomicity]]
 func (s *SQLiteStore) UpsertNodes(ctx context.Context, nodes []Node) error {
@@ -570,13 +572,15 @@ func (s *SQLiteStore) UpsertNodes(ctx context.Context, nodes []Node) error {
 // UpsertEdges bulk inserts or updates edges.
 //
 // Index:
-//   Purpose: Persist edge batches in a single transaction
-//   Keywords: graph_edges, upsert, transaction, workspace_id
-//   Related: Edge, SQLiteStore.UpsertNodes
-//   Flow: begin tx → prepare statement → upsert rows → commit
-//   Resources: graph_edges table
-//   Events: none
-//   OutputFields: none
+//
+//	Purpose: Persist edge batches in a single transaction
+//	Keywords: graph_edges, upsert, transaction, workspace_id
+//	Related: Edge, SQLiteStore.UpsertNodes
+//	Flow: begin tx → prepare statement → upsert rows → commit
+//	Resources: graph_edges table
+//	Events: none
+//	OutputFields: none
+//
 // [[invariant:sliding-ttl-on-edge-upsert]]
 // [[test-contract:edge-batch-atomicity]]
 func (s *SQLiteStore) UpsertEdges(ctx context.Context, edges []Edge) error {
@@ -779,13 +783,15 @@ func (s *SQLiteStore) GetAllNodes(ctx context.Context, workspace string) ([]Node
 // BulkUpdatePageRank updates PageRank for multiple nodes efficiently.
 //
 // Index:
-//   Purpose: Update PageRank scores for a workspace in a single transaction
-//   Keywords: pagerank, bulk_update, transaction, workspace_id
-//   Related: SQLiteStore.UpsertNodes
-//   Flow: begin tx → prepare statement → apply rank updates → commit
-//   Resources: graph_nodes table
-//   Events: none
-//   OutputFields: none
+//
+//	Purpose: Update PageRank scores for a workspace in a single transaction
+//	Keywords: pagerank, bulk_update, transaction, workspace_id
+//	Related: SQLiteStore.UpsertNodes
+//	Flow: begin tx → prepare statement → apply rank updates → commit
+//	Resources: graph_nodes table
+//	Events: none
+//	OutputFields: none
+//
 // [[invariant:workspace-canonicalized-before-update]]
 // [[test-contract:pagerank-batch-atomicity]]
 func (s *SQLiteStore) BulkUpdatePageRank(ctx context.Context, workspace string, ranks map[string]float64) error {

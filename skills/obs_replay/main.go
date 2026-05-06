@@ -55,13 +55,15 @@ func main() {
 // run orchestrates trace event reconstruction from multiple sources with artifact fetching.
 //
 // Index:
-//   Purpose: Reconstruct events from trace IDs by combining observability events and trajectory data with optional artifact fetching
-//   Keywords: obs/replay, trace_reconstruction, event_timeline, artifact_fetching, observability
-//   Related: findEvents, findTrajectoryEvents, fetchEventArtifacts, fetchCASContent
-//   Flow: locate observability directory → find events → query trajectory events → fetch artifacts → emit results
-//   Resources: NDJSON log files, trajectory store, CAS store
-//   Events: trace reconstruction events
-//   OutputFields: trace_id, event_count, traj_event_count, events, trajectory_events, summary
+//
+//	Purpose: Reconstruct events from trace IDs by combining observability events and trajectory data with optional artifact fetching
+//	Keywords: obs/replay, trace_reconstruction, event_timeline, artifact_fetching, observability
+//	Related: findEvents, findTrajectoryEvents, fetchEventArtifacts, fetchCASContent
+//	Flow: locate observability directory → find events → query trajectory events → fetch artifacts → emit results
+//	Resources: NDJSON log files, trajectory store, CAS store
+//	Events: trace reconstruction events
+//	OutputFields: trace_id, event_count, traj_event_count, events, trajectory_events, summary
+//
 // [[domain:trace-reconstruction]]
 // [[protocol:observability-event-envelope]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {

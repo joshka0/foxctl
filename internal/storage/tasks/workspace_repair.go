@@ -23,13 +23,15 @@ import (
 // - Never fails Open(); errors are logged and ignored.
 //
 // Index:
-//   Purpose: Auto-repair legacy path-keyed rows so workspace-scoped queries work across machines/users
-//   Keywords: workspace_id, migration, repair, tasks, active_tasks, epics, active_epics
-//   Related: ws.CanonicalID, ws.ID, (*sqlStore).migrateWorkspace, tasks.Open
-//   Flow: detect path-like workspace IDs -> compute stable target IDs -> migrate tables in a transaction -> log results
-//   Resources: tasks.db, tasks, active_tasks, epics, active_epics
-//   Events: none
-//   OutputFields: none
+//
+//	Purpose: Auto-repair legacy path-keyed rows so workspace-scoped queries work across machines/users
+//	Keywords: workspace_id, migration, repair, tasks, active_tasks, epics, active_epics
+//	Related: ws.CanonicalID, ws.ID, (*sqlStore).migrateWorkspace, tasks.Open
+//	Flow: detect path-like workspace IDs -> compute stable target IDs -> migrate tables in a transaction -> log results
+//	Resources: tasks.db, tasks, active_tasks, epics, active_epics
+//	Events: none
+//	OutputFields: none
+//
 // [[invariant:only-migrate-when-target-path-exists]]
 // [[domain:workspace-stable-identity]]
 func (s *sqlStore) repairWorkspaceIDs(ctx context.Context) {
@@ -86,13 +88,15 @@ func (s *sqlStore) repairWorkspaceIDs(ctx context.Context) {
 // migrateWorkspace rewrites all task-related tables from one workspace key to another.
 //
 // Index:
-//   Purpose: Make legacy workspace IDs queryable under a stable workspace key
-//   Keywords: migrate, transaction, workspace_id
-//   Related: (*sqlStore).repairWorkspaceIDs
-//   Flow: begin tx -> update tasks/epics -> update active_* with conflict-safe deletes -> commit
-//   Resources: tasks.db
-//   Events: none
-//   OutputFields: none
+//
+//	Purpose: Make legacy workspace IDs queryable under a stable workspace key
+//	Keywords: migrate, transaction, workspace_id
+//	Related: (*sqlStore).repairWorkspaceIDs
+//	Flow: begin tx -> update tasks/epics -> update active_* with conflict-safe deletes -> commit
+//	Resources: tasks.db
+//	Events: none
+//	OutputFields: none
+//
 // [[invariant:conflict-safe-delete-before-update-on-active-tables]]
 // [[domain:workspace-stable-identity]]
 func (s *sqlStore) migrateWorkspace(ctx context.Context, from, to string) error {

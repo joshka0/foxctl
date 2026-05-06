@@ -100,13 +100,14 @@ func main() {
 // run orchestrates iOS simulator automation via IDB with comprehensive device management.
 //
 // Index:
-//   Purpose: Automate iOS Simulator operations via IDB for mobile testing and development
-//   Keywords: mobile/ios, ios_simulator, idb_companion, device_automation, mobile_testing
-//   Related: mobileutil.RunIDB, executil.RequireTool, skillout.PersistBuffer
-//   Flow: validate operation → check IDB availability → route to handler → execute device operation → emit results
-//   Resources: IDB companion; Xcode simctl; iOS Simulator
-//   Events: simulator-automated, app-installed, screenshot-captured
-//   OutputFields: operation, success, devices, screenshot, logs
+//
+//	Purpose: Automate iOS Simulator operations via IDB for mobile testing and development
+//	Keywords: mobile/ios, ios_simulator, idb_companion, device_automation, mobile_testing
+//	Related: mobileutil.RunIDB, executil.RequireTool, skillout.PersistBuffer
+//	Flow: validate operation → check IDB availability → route to handler → execute device operation → emit results
+//	Resources: IDB companion; Xcode simctl; iOS Simulator
+//	Events: simulator-automated, app-installed, screenshot-captured
+//	OutputFields: operation, success, devices, screenshot, logs
 //
 // [[domain:mobile-automation]]
 // [[protocol:idb-integration]]

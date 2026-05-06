@@ -22,13 +22,14 @@ type RepoIndexToolExecutor struct {
 // NewRepoIndexToolExecutor creates a new repo index tool executor.
 //
 // Index:
-//   Purpose: Initialize repo index tool execution with workspace context
-//   Keywords: repo_index, tool_executor, workspace_id, query_engine
-//   Related: RepoIndexToolExecutor.Execute, repoindex.NewQueryEngine
-//   Flow: create query engine → capture workspace ID → return executor
-//   Resources: repoindex.Store
-//   Events: none
-//   OutputFields: RepoIndexToolExecutor
+//
+//	Purpose: Initialize repo index tool execution with workspace context
+//	Keywords: repo_index, tool_executor, workspace_id, query_engine
+//	Related: RepoIndexToolExecutor.Execute, repoindex.NewQueryEngine
+//	Flow: create query engine → capture workspace ID → return executor
+//	Resources: repoindex.Store
+//	Events: none
+//	OutputFields: RepoIndexToolExecutor
 //
 // [[domain:repoindex-tool-executor]]
 func NewRepoIndexToolExecutor(store *repoindex.Store) *RepoIndexToolExecutor {
@@ -72,13 +73,14 @@ func (e *RepoIndexToolExecutor) List() []ToolDef {
 // executeSearch runs repo_index_search with validation and observability.
 //
 // Index:
-//   Purpose: Execute repo index search and format tool output
-//   Keywords: repo_index_search, query, result_count, repo_index, observability
-//   Related: observability.WriteRepoIndexEvent, repoindex.QueryEngine.Search
-//   Flow: parse args → validate query → search engine → emit event → marshal output
-//   Resources: repoindex.QueryEngine
-//   Events: repo_index events
-//   OutputFields: JSON string
+//
+//	Purpose: Execute repo index search and format tool output
+//	Keywords: repo_index_search, query, result_count, repo_index, observability
+//	Related: observability.WriteRepoIndexEvent, repoindex.QueryEngine.Search
+//	Flow: parse args → validate query → search engine → emit event → marshal output
+//	Resources: repoindex.QueryEngine
+//	Events: repo_index events
+//	OutputFields: JSON string
 //
 // [[domain:repoindex-search-tool]]
 func (e *RepoIndexToolExecutor) executeSearch(ctx context.Context, args json.RawMessage) (string, error) {
@@ -123,13 +125,14 @@ func (e *RepoIndexToolExecutor) executeSearch(ctx context.Context, args json.Raw
 // executeExpand runs repo_index_expand with validation and observability.
 //
 // Index:
-//   Purpose: Expand repo index graph from seed nodes
-//   Keywords: repo_index_expand, seeds, edge_types, direction, repo_index
-//   Related: repoindex.QueryEngine.Expand, parseRepoIndexEdgeTypes
-//   Flow: parse args → validate seeds/edges → expand graph → emit event → marshal output
-//   Resources: repoindex.QueryEngine
-//   Events: repo_index events
-//   OutputFields: JSON string
+//
+//	Purpose: Expand repo index graph from seed nodes
+//	Keywords: repo_index_expand, seeds, edge_types, direction, repo_index
+//	Related: repoindex.QueryEngine.Expand, parseRepoIndexEdgeTypes
+//	Flow: parse args → validate seeds/edges → expand graph → emit event → marshal output
+//	Resources: repoindex.QueryEngine
+//	Events: repo_index events
+//	OutputFields: JSON string
 //
 // [[domain:repoindex-expand-tool]]
 func (e *RepoIndexToolExecutor) executeExpand(ctx context.Context, args json.RawMessage) (string, error) {
@@ -178,13 +181,14 @@ func (e *RepoIndexToolExecutor) executeExpand(ctx context.Context, args json.Raw
 // executeOpen runs repo_index_open with validation and observability.
 //
 // Index:
-//   Purpose: Open a repo index node by ID
-//   Keywords: repo_index_open, node_id, repo_index, observability
-//   Related: repoindex.QueryEngine.Open
-//   Flow: parse args → validate ID → fetch node → emit event → marshal output
-//   Resources: repoindex.QueryEngine
-//   Events: repo_index events
-//   OutputFields: JSON string
+//
+//	Purpose: Open a repo index node by ID
+//	Keywords: repo_index_open, node_id, repo_index, observability
+//	Related: repoindex.QueryEngine.Open
+//	Flow: parse args → validate ID → fetch node → emit event → marshal output
+//	Resources: repoindex.QueryEngine
+//	Events: repo_index events
+//	OutputFields: JSON string
 //
 // [[domain:repoindex-open-tool]]
 func (e *RepoIndexToolExecutor) executeOpen(ctx context.Context, args json.RawMessage) (string, error) {
@@ -231,13 +235,14 @@ func (e *RepoIndexToolExecutor) executeOpen(ctx context.Context, args json.RawMe
 // executeDagGrep runs repo_index_dag_grep with validation and observability.
 //
 // Index:
-//   Purpose: Produce a compact explanation subgraph for a query
-//   Keywords: repo_index_dag_grep, query, dag, graph, repo_index
-//   Related: repoindex.QueryEngine.DAGGrep
-//   Flow: parse args → search seeds → expand weighted graph → build DAG view → marshal output
-//   Resources: repoindex.QueryEngine
-//   Events: repo_index events
-//   OutputFields: JSON string
+//
+//	Purpose: Produce a compact explanation subgraph for a query
+//	Keywords: repo_index_dag_grep, query, dag, graph, repo_index
+//	Related: repoindex.QueryEngine.DAGGrep
+//	Flow: parse args → search seeds → expand weighted graph → build DAG view → marshal output
+//	Resources: repoindex.QueryEngine
+//	Events: repo_index events
+//	OutputFields: JSON string
 //
 // [[domain:repoindex-dag-grep-tool]]
 func (e *RepoIndexToolExecutor) executeDagGrep(ctx context.Context, args json.RawMessage) (string, error) {
@@ -307,7 +312,7 @@ func repoIndexToolDefs() []ToolDef {
 				"mode":{"type":"string","enum":["fts","semantic","hybrid"]},
 				"k":{"type":"integer","description":"Number of seed nodes (default 10)"},
 				"node_kinds":{"type":"array","items":{"type":"string","enum":["symbol","file","package","concept"]}},
-				"edge_sets":{"type":"array","items":{"type":"string","enum":["structural","doc","all"]}},
+				"edge_sets":{"type":"array","items":{"type":"string","enum":["structural","doc","semantic","semantic_anchor","semantic_anchors","empirical","all"]}},
 				"edge_types":{"type":"array","items":{"type":"string"}},
 				"direction":{"type":"string","enum":["out","in"]},
 				"depth":{"type":"integer","description":"Expansion depth"},

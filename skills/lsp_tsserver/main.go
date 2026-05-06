@@ -99,13 +99,14 @@ func main() {
 // run orchestrates TypeScript/JavaScript language server operations using typescript-language-server with JSON-RPC communication.
 //
 // Index:
-//   Purpose: Provide TypeScript/JavaScript language server operations (definition, references, symbols) via typescript-language-server
-//   Keywords: lsp/tsserver, typescript_language_server, javascript_language_server, json_rpc, code_navigation, symbol_search
-//   Related: newLSPClient, LSPClient.definition, LSPClient.references, LSPClient.documentSymbols, detectLanguage
-//   Flow: validate input → check server availability → create LSP client → initialize server → open file → execute operation → emit results
-//   Resources: typescript-language-server process; JSON-RPC client
-//   Events: tsserver-definition, tsserver-references, tsserver-symbols
-//   OutputFields: operation, definition, references, symbols, count
+//
+//	Purpose: Provide TypeScript/JavaScript language server operations (definition, references, symbols) via typescript-language-server
+//	Keywords: lsp/tsserver, typescript_language_server, javascript_language_server, json_rpc, code_navigation, symbol_search
+//	Related: newLSPClient, LSPClient.definition, LSPClient.references, LSPClient.documentSymbols, detectLanguage
+//	Flow: validate input → check server availability → create LSP client → initialize server → open file → execute operation → emit results
+//	Resources: typescript-language-server process; JSON-RPC client
+//	Events: tsserver-definition, tsserver-references, tsserver-symbols
+//	OutputFields: operation, definition, references, symbols, count
 //
 // [[domain:lsp-operations]]
 // [[protocol:tsserver-integration]]

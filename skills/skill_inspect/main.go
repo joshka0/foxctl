@@ -44,13 +44,15 @@ func main() {
 // run orchestrates skill inspection with multiple view modes including manifest, types, API, implementation, and examples.
 //
 // Index:
-//   Purpose: Analyze and document foxctl skills with multiple view modes for API discovery, type inspection, and example generation
-//   Keywords: skill/inspect, skill_analysis, api_documentation, type_extraction, example_generation, go_ast_parsing
-//   Related: findSkill, showManifest, showTypes, showAPI, showImplementation, showExamples
-//   Flow: validate input → find skill directory → dispatch to view handler → parse source code → generate documentation → emit results
-//   Resources: skill manifest files, Go source files
-//   Events: skill inspection events
-//   OutputFields: view, skill_name, manifest, types, functions, parameters, examples
+//
+//	Purpose: Analyze and document foxctl skills with multiple view modes for API discovery, type inspection, and example generation
+//	Keywords: skill/inspect, skill_analysis, api_documentation, type_extraction, example_generation, go_ast_parsing
+//	Related: findSkill, showManifest, showTypes, showAPI, showImplementation, showExamples
+//	Flow: validate input → find skill directory → dispatch to view handler → parse source code → generate documentation → emit results
+//	Resources: skill manifest files, Go source files
+//	Events: skill inspection events
+//	OutputFields: view, skill_name, manifest, types, functions, parameters, examples
+//
 // [[domain:skill-introspection]]
 // [[protocol:skill-view-dispatch]]
 func run(_ context.Context, rc *skillmain.RunContext, in input) error {

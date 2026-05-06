@@ -86,13 +86,14 @@ func runMain() error {
 // run orchestrates MCP server installation with client creation, tool discovery, and skill generation.
 //
 // Index:
-//   Purpose: Install MCP server configurations by discovering tools and generating foxctl skills
-//   Keywords: mcp/install, mcp_server, skill_generation, tool_discovery, bridge_client
-//   Related: generateSkill, parseInput, mcputil.NewClient, mcputil.Initialize
-//   Flow: validate input → create MCP client → initialize connection → list tools → generate skills → emit results
-//   Resources: MCP server process; file system for skill generation
-//   Events: mcp-tools-discovered, skills-generated
-//   OutputFields: installed, count, path
+//
+//	Purpose: Install MCP server configurations by discovering tools and generating foxctl skills
+//	Keywords: mcp/install, mcp_server, skill_generation, tool_discovery, bridge_client
+//	Related: generateSkill, parseInput, mcputil.NewClient, mcputil.Initialize
+//	Flow: validate input → create MCP client → initialize connection → list tools → generate skills → emit results
+//	Resources: MCP server process; file system for skill generation
+//	Events: mcp-tools-discovered, skills-generated
+//	OutputFields: installed, count, path
 //
 // [[domain:mcp-bridge]]
 // [[protocol:mcp-protocol]]

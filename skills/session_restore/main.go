@@ -142,13 +142,15 @@ func main() {
 // run orchestrates session restoration with semantic search, memory retrieval, and context injection.
 //
 // Index:
-//   Purpose: Restore session state after compaction with semantic search, memory retrieval, and comprehensive context injection
-//   Keywords: session/restore, context_restoration, semantic_search, memory_retrieval, session_continuity
-//   Related: runSemanticSearches, searchRelevantMemoryRecords, formatContextWithSearch, searchSimilarSessions
-//   Flow: validate input → open stores → find snapshot → search for context → format restoration → emit results
-//   Resources: memory store, session store, task store, embedding provider
-//   Events: session restore events
-//   OutputFields: hook_output, snapshot_id, items_restored, key_questions, search_results, relevant_memory_records
+//
+//	Purpose: Restore session state after compaction with semantic search, memory retrieval, and comprehensive context injection
+//	Keywords: session/restore, context_restoration, semantic_search, memory_retrieval, session_continuity
+//	Related: runSemanticSearches, searchRelevantMemoryRecords, formatContextWithSearch, searchSimilarSessions
+//	Flow: validate input → open stores → find snapshot → search for context → format restoration → emit results
+//	Resources: memory store, session store, task store, embedding provider
+//	Events: session restore events
+//	OutputFields: hook_output, snapshot_id, items_restored, key_questions, search_results, relevant_memory_records
+//
 // [[domain:session-context-restoration]]
 // [[protocol:post-compaction-context-injection]]
 //

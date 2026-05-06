@@ -68,13 +68,15 @@ func main() {
 // run orchestrates turn pattern querying across sessions with multiple filter strategies and comprehensive result formatting.
 //
 // Index:
-//   Purpose: Query turn patterns across sessions using text search, error filtering, tool pattern matching, and role filtering
-//   Keywords: session/turns, turn_pattern_query, session_search, error_filtering, tool_pattern_matching
-//   Related: sessionkit.OpenSessions, sessions.SessionStore, matchesToolPattern
-//   Flow: validate filters → open sessions store → search or scan sessions → apply filters → collect results → format output → emit results
-//   Resources: session store
-//   Events: turn query events
-//   OutputFields: query, turns, total_found
+//
+//	Purpose: Query turn patterns across sessions using text search, error filtering, tool pattern matching, and role filtering
+//	Keywords: session/turns, turn_pattern_query, session_search, error_filtering, tool_pattern_matching
+//	Related: sessionkit.OpenSessions, sessions.SessionStore, matchesToolPattern
+//	Flow: validate filters → open sessions store → search or scan sessions → apply filters → collect results → format output → emit results
+//	Resources: session store
+//	Events: turn query events
+//	OutputFields: query, turns, total_found
+//
 // [[domain:session-turn-query]]
 // [[protocol:multi-filter-turn-search]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {

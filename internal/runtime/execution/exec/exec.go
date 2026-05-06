@@ -52,13 +52,14 @@ type Options struct {
 // Run executes the skill and returns stdout/stderr bytes.
 //
 // Index:
-//   Purpose: Execute an exec-distributed skill with policy checks
-//   Keywords: exec_runner, subprocess, stdout, stderr, timeout
-//   Related: Runner.Options, bufferPool
-//   Flow: validate manifest → setup temp workdir → run command → capture stdout/stderr → cleanup
-//   Resources: subprocess, temp directory, bufferPool
-//   Events: none
-//   OutputFields: stdout, stderr, error
+//
+//	Purpose: Execute an exec-distributed skill with policy checks
+//	Keywords: exec_runner, subprocess, stdout, stderr, timeout
+//	Related: Runner.Options, bufferPool
+//	Flow: validate manifest → setup temp workdir → run command → capture stdout/stderr → cleanup
+//	Resources: subprocess, temp directory, bufferPool
+//	Events: none
+//	OutputFields: stdout, stderr, error
 //
 // [[protocol:exec-skill-contract]]
 // [[invariant:network-capability-restricted]]

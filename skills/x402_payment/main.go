@@ -175,13 +175,14 @@ func main() {
 // run orchestrates x402 payment operations with wallet management and HTTP payment handling.
 //
 // Index:
-//   Purpose: Handle AI-native HTTP micropayments via x402 protocol with wallet management and automatic payment
-//   Keywords: x402, micropayments, cryptocurrency, wallet_management, http_402
-//   Related: handleWalletInit, handleWalletStatus, handleFetch, handlePay, createPaymentPayload
-//   Flow: validate operation → set defaults → route to handler → execute wallet/fetch/pay operations → emit results
-//   Resources: wallet config, JSON-RPC endpoints, HTTP client
-//   Events: none
-//   OutputFields: operation, wallet, response, payment, error
+//
+//	Purpose: Handle AI-native HTTP micropayments via x402 protocol with wallet management and automatic payment
+//	Keywords: x402, micropayments, cryptocurrency, wallet_management, http_402
+//	Related: handleWalletInit, handleWalletStatus, handleFetch, handlePay, createPaymentPayload
+//	Flow: validate operation → set defaults → route to handler → execute wallet/fetch/pay operations → emit results
+//	Resources: wallet config, JSON-RPC endpoints, HTTP client
+//	Events: none
+//	OutputFields: operation, wallet, response, payment, error
 //
 // [[protocol:x402_payment]]
 // [[risk:crypto_payment_failure]]

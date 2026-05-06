@@ -43,13 +43,14 @@ func main() {
 // run orchestrates context buffer draining with filtering, peeking, and pruning capabilities.
 //
 // Index:
-//   Purpose: Drain the context buffer for injection into AI turns with flexible filtering and formatting
-//   Keywords: hooks/context_drain, context_buffer, context_injection, peek_operations, pruning
-//   Related: contextbuffer.Drain, contextbuffer.Peek, contextbuffer.PruneExpired
-//   Flow: validate input → open store → build drain params → drain/peek → optionally prune → emit results
-//   Resources: context buffer store (SQLite)
-//   Events: context-drained, context-peeked
-//   OutputFields: count, total_pending, duration_ms, entries, markdown
+//
+//	Purpose: Drain the context buffer for injection into AI turns with flexible filtering and formatting
+//	Keywords: hooks/context_drain, context_buffer, context_injection, peek_operations, pruning
+//	Related: contextbuffer.Drain, contextbuffer.Peek, contextbuffer.PruneExpired
+//	Flow: validate input → open store → build drain params → drain/peek → optionally prune → emit results
+//	Resources: context buffer store (SQLite)
+//	Events: context-drained, context-peeked
+//	OutputFields: count, total_pending, duration_ms, entries, markdown
 //
 // [[domain:context-buffer]]
 // [[protocol:context-injection]]

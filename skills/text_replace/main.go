@@ -102,13 +102,14 @@ func main() {
 // run orchestrates advanced text replacement with multiple operations, file filtering, and comprehensive validation.
 //
 // Index:
-//   Purpose: Perform advanced search and replace operations across multiple files with regex/literal support, backup, and validation
-//   Keywords: text/replace, search_replace, regex, literal_replacement, file_processing, syntax_validation
-//   Related: buildOperations, buildReplacer, validateFileSyntax, textreplace.ProcessFile
-//   Flow: validate input → build operations → create replacers → collect files → process each file → validate syntax → emit results
-//   Resources: file system, CAS store
-//   Events: none
-//   OutputFields: pattern, replacement, literal, case_insensitive, word_boundary, multiline, dry_run, files_modified, files_skipped, replacements_made, preview, files_processed, operations_count, backup_enabled, cas_backup_enabled, validation_enabled, artifact
+//
+//	Purpose: Perform advanced search and replace operations across multiple files with regex/literal support, backup, and validation
+//	Keywords: text/replace, search_replace, regex, literal_replacement, file_processing, syntax_validation
+//	Related: buildOperations, buildReplacer, validateFileSyntax, textreplace.ProcessFile
+//	Flow: validate input → build operations → create replacers → collect files → process each file → validate syntax → emit results
+//	Resources: file system, CAS store
+//	Events: none
+//	OutputFields: pattern, replacement, literal, case_insensitive, word_boundary, multiline, dry_run, files_modified, files_skipped, replacements_made, preview, files_processed, operations_count, backup_enabled, cas_backup_enabled, validation_enabled, artifact
 //
 // [[risk:destructive_file_modification]]
 // [[invariant:dry_run_safety]]

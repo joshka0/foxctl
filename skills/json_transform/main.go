@@ -38,13 +38,14 @@ func main() {
 // run orchestrates JSON transformation operations including extract, merge, validate, format, and keys.
 //
 // Index:
-//   Purpose: Transform and analyze JSON data with multiple operations: path extraction, deep merging, validation, formatting, and key enumeration
-//   Keywords: json/transform, json_manipulation, path_extraction, deep_merge, json_validation, formatting
-//   Related: extractOperation, mergeOperation, validateOperation, formatOperation, keysOperation
-//   Flow: validate input → parse JSON → dispatch operation → execute specific transformation → return structured result
-//   Resources: JSON parser; bytes buffer
-//   Events: json-transformed
-//   OutputFields: operation, result, formatted, keys, error
+//
+//	Purpose: Transform and analyze JSON data with multiple operations: path extraction, deep merging, validation, formatting, and key enumeration
+//	Keywords: json/transform, json_manipulation, path_extraction, deep_merge, json_validation, formatting
+//	Related: extractOperation, mergeOperation, validateOperation, formatOperation, keysOperation
+//	Flow: validate input → parse JSON → dispatch operation → execute specific transformation → return structured result
+//	Resources: JSON parser; bytes buffer
+//	Events: json-transformed
+//	OutputFields: operation, result, formatted, keys, error
 //
 // [[domain:json-manipulation]]
 func run(_ context.Context, rc *skillmain.RunContext, in input) error {

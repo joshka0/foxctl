@@ -24,13 +24,14 @@ type SkillRunner struct {
 // Run executes hook skills in order and merges their outputs.
 //
 // Index:
-//   Purpose: Execute hook skills and merge outputs into a decision
-//   Keywords: hook_skill, skill_runner, hook_output, execute, merge
-//   Related: SkillResolver.Resolve, Merge, parseSkillOutput
-//   Flow: resolve skills → marshal input → execute → parse outputs → merge
-//   Resources: execution.SkillExecutor, SkillResolver
-//   Events: none
-//   OutputFields: Output
+//
+//	Purpose: Execute hook skills and merge outputs into a decision
+//	Keywords: hook_skill, skill_runner, hook_output, execute, merge
+//	Related: SkillResolver.Resolve, Merge, parseSkillOutput
+//	Flow: resolve skills → marshal input → execute → parse outputs → merge
+//	Resources: execution.SkillExecutor, SkillResolver
+//	Events: none
+//	OutputFields: Output
 //
 // [[protocol:hook-skill-execution]]
 // [[invariant:skill-output-validation]]

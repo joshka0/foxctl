@@ -89,13 +89,14 @@ func main() {
 // run orchestrates memory embedding generation with batch processing and dry-run support.
 //
 // Index:
-//   Purpose: Generate semantic embeddings for memories to enable vector search and retrieval
-//   Flow: validate input → check API keys → list memories → process in batches → generate embeddings → update store
-//   SideEffects: embedding API calls; database updates; content formatting; batch processing
-//   FailureModes: missing API keys, embedding failures, database errors, timeout errors
-//   Observability: emits processing statistics, error details, and memory results with status
-//   Related: formatMemoryContent
-//   Keywords: embedding/memories, vector_search, semantic, batch_processing, embeddings
+//
+//	Purpose: Generate semantic embeddings for memories to enable vector search and retrieval
+//	Flow: validate input → check API keys → list memories → process in batches → generate embeddings → update store
+//	SideEffects: embedding API calls; database updates; content formatting; batch processing
+//	FailureModes: missing API keys, embedding failures, database errors, timeout errors
+//	Observability: emits processing statistics, error details, and memory results with status
+//	Related: formatMemoryContent
+//	Keywords: embedding/memories, vector_search, semantic, batch_processing, embeddings
 //
 // [[domain:memory-embedding-generation]]
 // [[protocol:semantic-embedding-batch-processing]]

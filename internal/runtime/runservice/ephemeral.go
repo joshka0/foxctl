@@ -24,13 +24,14 @@ import (
 //   - Job store is never opened
 //
 // Index:
-//   Purpose: Execute a skill without job persistence or history
-//   Keywords: execute_ephemeral, cache, runner, envelope
-//   Related: Executor.TryServeCache, Executor.handleEphemeralSuccess
-//   Flow: try cache → run runner directly → handle stdout/stderr → emit envelope
-//   Resources: execution.RunnerExecutor, observability trace context
-//   Events: none
-//   OutputFields: error
+//
+//	Purpose: Execute a skill without job persistence or history
+//	Keywords: execute_ephemeral, cache, runner, envelope
+//	Related: Executor.TryServeCache, Executor.handleEphemeralSuccess
+//	Flow: try cache → run runner directly → handle stdout/stderr → emit envelope
+//	Resources: execution.RunnerExecutor, observability trace context
+//	Events: none
+//	OutputFields: error
 //
 // [[protocol:ephemeral-execution]]
 // [[decision:skip-job-persistence-for-speed]]

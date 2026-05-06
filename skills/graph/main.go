@@ -111,13 +111,14 @@ func main() {
 // run orchestrates graph database operations with workspace isolation and validation.
 //
 // Index:
-//   Purpose: Execute graph database operations (nodes, edges, queries, stats, cleanup) with workspace isolation
-//   Keywords: graph, graph_database, dependency_graph, node_management, edge_management
-//   Related: handleAddNode, handleAddEdge, handleQuery, handleNeighbors, handleTopNodes, handleDeleteNode, handleDeleteEdge, handleStats, handleCleanup
-//   Flow: validate operation → open store → dispatch to handler → emit results
-//   Resources: graph database (SQLite); workspace-scoped node/edge storage
-//   Events: graph-node-added, graph-edge-added, graph-query, graph-cleanup
-//   OutputFields: node_id, edge_id, edges, neighbors, nodes, stats
+//
+//	Purpose: Execute graph database operations (nodes, edges, queries, stats, cleanup) with workspace isolation
+//	Keywords: graph, graph_database, dependency_graph, node_management, edge_management
+//	Related: handleAddNode, handleAddEdge, handleQuery, handleNeighbors, handleTopNodes, handleDeleteNode, handleDeleteEdge, handleStats, handleCleanup
+//	Flow: validate operation → open store → dispatch to handler → emit results
+//	Resources: graph database (SQLite); workspace-scoped node/edge storage
+//	Events: graph-node-added, graph-edge-added, graph-query, graph-cleanup
+//	OutputFields: node_id, edge_id, edges, neighbors, nodes, stats
 //
 // [[domain:graph-database]]
 // [[protocol:skill-dispatch]]

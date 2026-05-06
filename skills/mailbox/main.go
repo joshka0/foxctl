@@ -99,13 +99,14 @@ func main() {
 // run orchestrates mailbox management with message passing and file reservation capabilities.
 //
 // Index:
-//   Purpose: Manage workspace coordination through message passing and file reservations
-//   Keywords: mailbox/manage, message_passing, file_reservations, workspace_coordination, team_messaging
-//   Related: blackboard.OpenBoardStore, teams.Open, agent.BoardMessage, agent.FileReservation
-//   Flow: open board store → validate operation → route to handler → execute operation → emit results
-//   Resources: blackboard store (SQLite); teams store
-//   Events: message-sent, inbox-retrieved, reservation-created, reservation-released
-//   OutputFields: message_id, messages, count, granted, conflicts, summary
+//
+//	Purpose: Manage workspace coordination through message passing and file reservations
+//	Keywords: mailbox/manage, message_passing, file_reservations, workspace_coordination, team_messaging
+//	Related: blackboard.OpenBoardStore, teams.Open, agent.BoardMessage, agent.FileReservation
+//	Flow: open board store → validate operation → route to handler → execute operation → emit results
+//	Resources: blackboard store (SQLite); teams store
+//	Events: message-sent, inbox-retrieved, reservation-created, reservation-released
+//	OutputFields: message_id, messages, count, granted, conflicts, summary
 //
 // [[domain:mailbox-management]]
 // [[protocol:workspace-coordination]]

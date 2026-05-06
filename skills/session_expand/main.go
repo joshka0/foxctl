@@ -78,13 +78,15 @@ func main() {
 // run orchestrates session expansion with metadata retrieval, turn filtering, and comprehensive output formatting.
 //
 // Index:
-//   Purpose: Retrieve and analyze session turns with optional error filtering, tool call tracking, and session metadata
-//   Keywords: session/expand, turn_retrieval, session_analysis, error_tracking, tool_call_analysis
-//   Related: sessionkit.OpenSessions, storage.SessionStore, storage.SessionTurn
-//   Flow: validate input → open sessions store → get session metadata → retrieve turns (filtered or all) → format output → emit results
-//   Resources: session store
-//   Events: session expansion events
-//   OutputFields: session_id, session, turns, total_turns, error_count
+//
+//	Purpose: Retrieve and analyze session turns with optional error filtering, tool call tracking, and session metadata
+//	Keywords: session/expand, turn_retrieval, session_analysis, error_tracking, tool_call_analysis
+//	Related: sessionkit.OpenSessions, storage.SessionStore, storage.SessionTurn
+//	Flow: validate input → open sessions store → get session metadata → retrieve turns (filtered or all) → format output → emit results
+//	Resources: session store
+//	Events: session expansion events
+//	OutputFields: session_id, session, turns, total_turns, error_count
+//
 // [[domain:session-turn-expansion]]
 // [[protocol:turn-filtering-by-errors]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {

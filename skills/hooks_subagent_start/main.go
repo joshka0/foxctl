@@ -37,13 +37,14 @@ func main() {
 // run orchestrates subagent initialization with profile inference and capability briefing.
 //
 // Index:
-//   Purpose: Handle SubagentStart events to infer profiles, generate briefings, and set environment variables
-//   Keywords: hooks/subagent_start, subagent_lifecycle, profile_inference, capability_briefing, agent_handbook
-//   Related: inferProfile, generateBriefing, generateFallbackBriefing, containsAny
-//   Flow: parse payload → infer profile → get config → generate briefing → emit context injection
-//   Resources: agentpolicy package; agent/handbook skill
-//   Events: subagent-started
-//   OutputFields: subagent_name, inferred_profile, allowed_skills, briefing
+//
+//	Purpose: Handle SubagentStart events to infer profiles, generate briefings, and set environment variables
+//	Keywords: hooks/subagent_start, subagent_lifecycle, profile_inference, capability_briefing, agent_handbook
+//	Related: inferProfile, generateBriefing, generateFallbackBriefing, containsAny
+//	Flow: parse payload → infer profile → get config → generate briefing → emit context injection
+//	Resources: agentpolicy package; agent/handbook skill
+//	Events: subagent-started
+//	OutputFields: subagent_name, inferred_profile, allowed_skills, briefing
 //
 // [[domain:subagent-lifecycle]]
 // [[protocol:profile-inference]]

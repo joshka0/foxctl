@@ -40,13 +40,14 @@ type RLMToolExecutor struct {
 // NewRLMToolExecutor creates a new RLM tool executor.
 //
 // Index:
-//   Purpose: Initialize RLM context tool execution with per-conversation state
-//   Keywords: rlm_context, tool_executor, conversation_id, context_store
-//   Related: RLMToolExecutor.Execute, RLMToolDefs
-//   Flow: store context store and conversation ID → return executor
-//   Resources: contextvar.Store
-//   Events: none
-//   OutputFields: RLMToolExecutor
+//
+//	Purpose: Initialize RLM context tool execution with per-conversation state
+//	Keywords: rlm_context, tool_executor, conversation_id, context_store
+//	Related: RLMToolExecutor.Execute, RLMToolDefs
+//	Flow: store context store and conversation ID → return executor
+//	Resources: contextvar.Store
+//	Events: none
+//	OutputFields: RLMToolExecutor
 //
 // [[domain:rlm-context-tools]]
 func NewRLMToolExecutor(store contextvar.Store, conversationID string) *RLMToolExecutor {
@@ -101,13 +102,14 @@ func (e *RLMToolExecutor) QueryCount() int {
 // Execute implements ToolExecutor.
 //
 // Index:
-//   Purpose: Dispatch RLM context tool calls by name
-//   Keywords: rlm_context_put, rlm_context_query, rlm_context_list, rlm_personality_adjust
-//   Related: executePut, executeQuery, executeList, executePersonalityAdjust
-//   Flow: switch on tool name → execute handler → return JSON output
-//   Resources: contextvar.Store
-//   Events: none
-//   OutputFields: JSON string
+//
+//	Purpose: Dispatch RLM context tool calls by name
+//	Keywords: rlm_context_put, rlm_context_query, rlm_context_list, rlm_personality_adjust
+//	Related: executePut, executeQuery, executeList, executePersonalityAdjust
+//	Flow: switch on tool name → execute handler → return JSON output
+//	Resources: contextvar.Store
+//	Events: none
+//	OutputFields: JSON string
 //
 // [[protocol:rlm-tool-dispatch]]
 func (e *RLMToolExecutor) Execute(ctx context.Context, name string, args json.RawMessage) (string, error) {
@@ -133,13 +135,14 @@ func (e *RLMToolExecutor) List() []ToolDef {
 // RLMToolDefs returns the tool definitions for RLM context operations.
 //
 // Index:
-//   Purpose: Describe available RLM context tools and schemas
-//   Keywords: rlm_context_put, rlm_context_query, rlm_context_list, rlm_personality_adjust
-//   Related: RLMToolExecutor.Execute
-//   Flow: build tool definitions → return list
-//   Resources: none
-//   Events: none
-//   OutputFields: []ToolDef
+//
+//	Purpose: Describe available RLM context tools and schemas
+//	Keywords: rlm_context_put, rlm_context_query, rlm_context_list, rlm_personality_adjust
+//	Related: RLMToolExecutor.Execute
+//	Flow: build tool definitions → return list
+//	Resources: none
+//	Events: none
+//	OutputFields: []ToolDef
 //
 // [[domain:rlm-tool-schema]]
 func RLMToolDefs() []ToolDef {
@@ -298,13 +301,14 @@ type PersonalityProfile struct {
 // executePut stores a context variable via rlm_context_put.
 //
 // Index:
-//   Purpose: Persist a context variable with scope and optional TTL
-//   Keywords: rlm_context_put, scope, ttl_seconds, context_store, upsert
-//   Related: contextvar.Store.Put
-//   Flow: parse input → map scope → build params → store → marshal result
-//   Resources: contextvar.Store
-//   Events: none
-//   OutputFields: JSON string
+//
+//	Purpose: Persist a context variable with scope and optional TTL
+//	Keywords: rlm_context_put, scope, ttl_seconds, context_store, upsert
+//	Related: contextvar.Store.Put
+//	Flow: parse input → map scope → build params → store → marshal result
+//	Resources: contextvar.Store
+//	Events: none
+//	OutputFields: JSON string
 //
 // [[invariant:scope-must-be-valid]]
 func (e *RLMToolExecutor) executePut(ctx context.Context, args json.RawMessage) (string, error) {
@@ -355,13 +359,14 @@ func (e *RLMToolExecutor) executePut(ctx context.Context, args json.RawMessage) 
 // executeQuery retrieves context variables via rlm_context_query.
 //
 // Index:
-//   Purpose: Query context variables by key, pattern, or semantic search
-//   Keywords: rlm_context_query, key_pattern, semantic_query, access_count, context_store
-//   Related: executeSemanticQuery, contextvar.Store.Query
-//   Flow: parse input → increment count → run semantic or store query → format result
-//   Resources: contextvar.Store, companionDB
-//   Events: none
-//   OutputFields: JSON string
+//
+//	Purpose: Query context variables by key, pattern, or semantic search
+//	Keywords: rlm_context_query, key_pattern, semantic_query, access_count, context_store
+//	Related: executeSemanticQuery, contextvar.Store.Query
+//	Flow: parse input → increment count → run semantic or store query → format result
+//	Resources: contextvar.Store, companionDB
+//	Events: none
+//	OutputFields: JSON string
 //
 // [[invariant:query-count-incremented-per-turn]]
 func (e *RLMToolExecutor) executeQuery(ctx context.Context, args json.RawMessage) (string, error) {
@@ -448,13 +453,14 @@ func (e *RLMToolExecutor) executeQuery(ctx context.Context, args json.RawMessage
 // In v2 hard-cut mode, this always uses hybrid companion artifacts.
 //
 // Index:
-//   Purpose: Search hybrid companion artifacts (hard-state, episodes, evidence)
-//   Keywords: semantic_query, hybrid_memory, evidence, hard_state, episodes
-//   Related: executeHybridSemanticQuery
-//   Flow: read hybrid tables → compose trust-layered response → enforce output cap
-//   Resources: companionDB
-//   Events: none
-//   OutputFields: JSON string
+//
+//	Purpose: Search hybrid companion artifacts (hard-state, episodes, evidence)
+//	Keywords: semantic_query, hybrid_memory, evidence, hard_state, episodes
+//	Related: executeHybridSemanticQuery
+//	Flow: read hybrid tables → compose trust-layered response → enforce output cap
+//	Resources: companionDB
+//	Events: none
+//	OutputFields: JSON string
 //
 // [[domain:hybrid-companion-memory]]
 func (e *RLMToolExecutor) executeSemanticQuery(ctx context.Context, input ContextQueryInput) (string, error) {
@@ -827,13 +833,14 @@ func layerFromType(entryType string) string {
 // executeList lists context keys via rlm_context_list.
 //
 // Index:
-//   Purpose: List context keys filtered by scope
-//   Keywords: rlm_context_list, scope, keys, context_store
-//   Related: contextvar.Store.ListKeys
-//   Flow: parse input → map scope → list keys → marshal response
-//   Resources: contextvar.Store
-//   Events: none
-//   OutputFields: JSON string
+//
+//	Purpose: List context keys filtered by scope
+//	Keywords: rlm_context_list, scope, keys, context_store
+//	Related: contextvar.Store.ListKeys
+//	Flow: parse input → map scope → list keys → marshal response
+//	Resources: contextvar.Store
+//	Events: none
+//	OutputFields: JSON string
 //
 // [[domain:rlm-context-list]]
 func (e *RLMToolExecutor) executeList(ctx context.Context, args json.RawMessage) (string, error) {
@@ -873,13 +880,14 @@ func (e *RLMToolExecutor) executeList(ctx context.Context, args json.RawMessage)
 // executePersonalityAdjust updates the personality profile via rlm_personality_adjust.
 //
 // Index:
-//   Purpose: Adjust stored personality dimensions and learned traits
-//   Keywords: rlm_personality_adjust, personality_profile, dimensions, learned_traits
-//   Related: loadPersonalityProfile, savePersonalityProfile
-//   Flow: parse input → load profile → apply adjustment → save profile → marshal response
-//   Resources: contextvar.Store
-//   Events: none
-//   OutputFields: JSON string
+//
+//	Purpose: Adjust stored personality dimensions and learned traits
+//	Keywords: rlm_personality_adjust, personality_profile, dimensions, learned_traits
+//	Related: loadPersonalityProfile, savePersonalityProfile
+//	Flow: parse input → load profile → apply adjustment → save profile → marshal response
+//	Resources: contextvar.Store
+//	Events: none
+//	OutputFields: JSON string
 //
 // [[domain:rlm-personality-adjust]]
 func (e *RLMToolExecutor) executePersonalityAdjust(ctx context.Context, args json.RawMessage) (string, error) {
@@ -1155,13 +1163,14 @@ type CompositeToolExecutor struct {
 // NewCompositeToolExecutor creates a composite executor.
 //
 // Index:
-//   Purpose: Merge multiple tool executors into a single dispatcher
-//   Keywords: composite_executor, tool_index, tool_defs, dispatcher
-//   Related: CompositeToolExecutor.Execute, ToolExecutor.List
-//   Flow: store executors → build tool index → return composite
-//   Resources: none
-//   Events: none
-//   OutputFields: CompositeToolExecutor
+//
+//	Purpose: Merge multiple tool executors into a single dispatcher
+//	Keywords: composite_executor, tool_index, tool_defs, dispatcher
+//	Related: CompositeToolExecutor.Execute, ToolExecutor.List
+//	Flow: store executors → build tool index → return composite
+//	Resources: none
+//	Events: none
+//	OutputFields: CompositeToolExecutor
 //
 // [[domain:composite-tool-dispatch]]
 func NewCompositeToolExecutor(executors ...ToolExecutor) *CompositeToolExecutor {

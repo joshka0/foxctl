@@ -38,13 +38,15 @@ type agentStats struct {
 // run orchestrates trajectory analysis with performance metrics computation and optimization recommendations.
 //
 // Index:
-//   Purpose: Analyze agent trajectory data to compute performance metrics and generate optimization recommendations
-//   Keywords: optimize/analyze, trajectory_analysis, performance_metrics, optimization_recommendations, agent_performance
-//   Related: computeStats, analyzeToolUsage, generateRecommendations
-//   Flow: validate input → resolve workspace → open trajectory store → filter trajectories → compute stats → analyze tools → generate recommendations
-//   Resources: trajectory store
-//   Events: trajectory analysis events
-//   OutputFields: stats, tool_usage, recommendations, period_days
+//
+//	Purpose: Analyze agent trajectory data to compute performance metrics and generate optimization recommendations
+//	Keywords: optimize/analyze, trajectory_analysis, performance_metrics, optimization_recommendations, agent_performance
+//	Related: computeStats, analyzeToolUsage, generateRecommendations
+//	Flow: validate input → resolve workspace → open trajectory store → filter trajectories → compute stats → analyze tools → generate recommendations
+//	Resources: trajectory store
+//	Events: trajectory analysis events
+//	OutputFields: stats, tool_usage, recommendations, period_days
+//
 // [[domain:agent-performance-analysis]]
 // [[invariant:role-required-for-trajectory-filter]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {

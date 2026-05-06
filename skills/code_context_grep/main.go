@@ -99,13 +99,14 @@ func main() {
 // run orchestrates code context search with ripgrep, ast-grep, and line expansion modes.
 //
 // Index:
-//   Purpose: Search code with context expansion using multiple search engines (ripgrep, ast-grep, line expansion)
-//   Flow: apply defaults → detect mode → route to handler → execute search → expand matches → emit results
-//   SideEffects: executes external tools (ripgrep, ast-grep); reads file contents; expands code blocks
-//   FailureModes: missing tools, invalid patterns, file access errors, parsing failures
-//   Observability: emits match counts, block previews, file statistics, and search mode used
-//   Related: detectMode, runRipgrep, runASTGrep, runLineExpansion, codeblocks.ExpandMatches
-//   Keywords: code/context_grep, code_search, context_expansion, ripgrep, ast_grep, line_expansion
+//
+//	Purpose: Search code with context expansion using multiple search engines (ripgrep, ast-grep, line expansion)
+//	Flow: apply defaults → detect mode → route to handler → execute search → expand matches → emit results
+//	SideEffects: executes external tools (ripgrep, ast-grep); reads file contents; expands code blocks
+//	FailureModes: missing tools, invalid patterns, file access errors, parsing failures
+//	Observability: emits match counts, block previews, file statistics, and search mode used
+//	Related: detectMode, runRipgrep, runASTGrep, runLineExpansion, codeblocks.ExpandMatches
+//	Keywords: code/context_grep, code_search, context_expansion, ripgrep, ast_grep, line_expansion
 //
 // [[domain:code-context-search]]
 // [[protocol:multi-mode-code-search]]

@@ -82,13 +82,14 @@ func NewWorker(cfg WorkerConfig, store *Store, provider semantic.EmbeddingProvid
 // Start begins processing jobs in the background.
 //
 // Index:
-//   Purpose: Start the embedding worker loop
-//   Keywords: embedding_worker, start, rate_limit_rps, workers
-//   Related: Worker.run, Worker.Stop
-//   Flow: validate state → emit start event → spawn worker goroutine → return
-//   Resources: embedding store, embedding provider
-//   Events: embedding.worker_start
-//   OutputFields: none
+//
+//	Purpose: Start the embedding worker loop
+//	Keywords: embedding_worker, start, rate_limit_rps, workers
+//	Related: Worker.run, Worker.Stop
+//	Flow: validate state → emit start event → spawn worker goroutine → return
+//	Resources: embedding store, embedding provider
+//	Events: embedding.worker_start
+//	OutputFields: none
 //
 // [[protocol:embedding-worker-start]]
 // [[invariant:store-and-provider-required]]
@@ -116,13 +117,14 @@ func (w *Worker) Start(ctx context.Context) error {
 // Stop gracefully shuts down the worker.
 //
 // Index:
-//   Purpose: Stop the embedding worker loop
-//   Keywords: embedding_worker, stop, shutdown_timeout
-//   Related: Worker.run, Worker.Start
-//   Flow: signal stop → wait for done or timeout → emit stop/timeout event
-//   Resources: embedding store
-//   Events: embedding.worker_stop, embedding.worker_timeout
-//   OutputFields: none
+//
+//	Purpose: Stop the embedding worker loop
+//	Keywords: embedding_worker, stop, shutdown_timeout
+//	Related: Worker.run, Worker.Start
+//	Flow: signal stop → wait for done or timeout → emit stop/timeout event
+//	Resources: embedding store
+//	Events: embedding.worker_stop, embedding.worker_timeout
+//	OutputFields: none
 //
 // [[protocol:embedding-worker-stop]]
 // [[risk:shutdown-timeout-leaves-jobs-running]]
@@ -165,13 +167,14 @@ func (w *Worker) IsRunning() bool {
 // run processes queued embedding jobs until shutdown.
 //
 // Index:
-//   Purpose: Poll embedding jobs and write embedding results
-//   Keywords: embedding_queue, batch, poll, job_status
-//   Related: Store.Dequeue, Store.MarkComplete, Store.MarkFailed
-//   Flow: poll queue → process batch → update status → sleep/backoff
-//   Resources: embedding store, embedding provider
-//   Events: embedding.job_failed, embedding.job_succeeded, embedding.job_skipped
-//   OutputFields: none
+//
+//	Purpose: Poll embedding jobs and write embedding results
+//	Keywords: embedding_queue, batch, poll, job_status
+//	Related: Store.Dequeue, Store.MarkComplete, Store.MarkFailed
+//	Flow: poll queue → process batch → update status → sleep/backoff
+//	Resources: embedding store, embedding provider
+//	Events: embedding.job_failed, embedding.job_succeeded, embedding.job_skipped
+//	OutputFields: none
 //
 // [[protocol:embedding-job-poll-loop]]
 // [[invariant:claim-then-process-atomicity]]

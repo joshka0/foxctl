@@ -152,10 +152,11 @@ func (e *Error) Unwrap() error {
 // Execute performs the HTTP request and returns a processed response.
 //
 // Index:
-//   Purpose: Execute an OpenAPI HTTP request and normalize response data
-//   Flow: attach traces → send request → read body → build response metadata → inline or store in CAS
-//   Related: Client.readBody, shouldInline, inlineValue, previewOnly, storage.CASStore.Put
-//   Keywords: http_execute, status_code, content_type, preview, digest, timing, cas
+//
+//	Purpose: Execute an OpenAPI HTTP request and normalize response data
+//	Flow: attach traces → send request → read body → build response metadata → inline or store in CAS
+//	Related: Client.readBody, shouldInline, inlineValue, previewOnly, storage.CASStore.Put
+//	Keywords: http_execute, status_code, content_type, preview, digest, timing, cas
 //
 // [[protocol:openapi-http-execution]]
 // [[domain:http-client-boundary]]

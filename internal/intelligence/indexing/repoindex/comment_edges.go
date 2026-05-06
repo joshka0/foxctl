@@ -23,13 +23,14 @@ const (
 // applyCommentEdges parses Index blocks and builds comment edges for repoindex nodes.
 //
 // Index:
-//   Purpose: Parse Index blocks and build comment edges for repoindex
-//   Keywords: comment edges, Index block, doc edges, concept edges, related, flow, parse Index, repoindex
-//   Related: docparser.Parse, addConceptEdges, addDocEdges, resolveSymbolID
-//   Flow: collect symbol name maps → parse DocIndex meta → add concept edges → add Related/Flow edges
-//   Resources: repoindex nodes/edges maps
-//   Events: comment-edge-build
-//   OutputFields: mutated nodes, edges
+//
+//	Purpose: Parse Index blocks and build comment edges for repoindex
+//	Keywords: comment edges, Index block, doc edges, concept edges, related, flow, parse Index, repoindex
+//	Related: docparser.Parse, addConceptEdges, addDocEdges, resolveSymbolID
+//	Flow: collect symbol name maps → parse DocIndex meta → add concept edges → add Related/Flow edges
+//	Resources: repoindex nodes/edges maps
+//	Events: comment-edge-build
+//	OutputFields: mutated nodes, edges
 //
 // [[protocol:repoindex-comment-edges]]
 // [[invariant:unresolved-targets-skipped-silently]]

@@ -146,13 +146,14 @@ func main() {
 // run orchestrates PR comment analysis and task report generation.
 //
 // Index:
-//   Purpose: Generate task-focused PR reports with merge conflicts, CI failures, and review comments
-//   Flow: resolve PR → fetch comments/checks → enrich with job details → extract AI prompts → build markdown → emit structured output
-//   SideEffects: GitHub API calls; optional file output; artifact persistence for large content
-//   FailureModes: invalid PR, missing token, GitHub API errors, network timeouts, file write errors
-//   Observability: emits repository/pr_number/title/author/url/tasks/status/has_blocking_issues/tasks_list/markdown_preview/markdown_truncated/format/errors_only/with_context/comments/coderabbit_ai_prompt/markdown_output_path/markdown_artifact
-//   Related: getPR, getIssueComments, getReviewComments, getCheckRuns, getJobDetails, buildMarkdownReport, buildTasksList, cihelpers.ResolveOwnerRepo, cihelpers.ResolveToken
-//   Keywords: ci/prcomments, pr, comments, check_runs, merge_conflicts, tasks, markdown, coderabbit, greptile, errors_only, with_context
+//
+//	Purpose: Generate task-focused PR reports with merge conflicts, CI failures, and review comments
+//	Flow: resolve PR → fetch comments/checks → enrich with job details → extract AI prompts → build markdown → emit structured output
+//	SideEffects: GitHub API calls; optional file output; artifact persistence for large content
+//	FailureModes: invalid PR, missing token, GitHub API errors, network timeouts, file write errors
+//	Observability: emits repository/pr_number/title/author/url/tasks/status/has_blocking_issues/tasks_list/markdown_preview/markdown_truncated/format/errors_only/with_context/comments/coderabbit_ai_prompt/markdown_output_path/markdown_artifact
+//	Related: getPR, getIssueComments, getReviewComments, getCheckRuns, getJobDetails, buildMarkdownReport, buildTasksList, cihelpers.ResolveOwnerRepo, cihelpers.ResolveToken
+//	Keywords: ci/prcomments, pr, comments, check_runs, merge_conflicts, tasks, markdown, coderabbit, greptile, errors_only, with_context
 //
 // [[domain:github-pr-analysis]]
 // [[protocol:github-api-pr-reports]]

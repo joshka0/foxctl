@@ -37,13 +37,14 @@ func main() {
 // run orchestrates file reading with symlink safety, CAS storage, and preview generation.
 //
 // Index:
-//   Purpose: Read files safely with symlink protection, CAS storage, and text preview generation
-//   Flow: validate path → resolve symlinks → open file → store in CAS → generate preview → emit results
-//   SideEffects: file system access; CAS storage; symlink resolution; preview generation
-//   FailureModes: invalid paths, symlink attacks, permission errors, file not found, CAS errors
-//   Observability: emits file metadata, preview content, CAS artifacts, and binary/text detection
-//   Related: previewLimit, readPreview, formatPreviewWithLineNumbers, detectKind
-//   Keywords: fs/read, file_reading, symlink_safety, cas_storage, preview_generation
+//
+//	Purpose: Read files safely with symlink protection, CAS storage, and text preview generation
+//	Flow: validate path → resolve symlinks → open file → store in CAS → generate preview → emit results
+//	SideEffects: file system access; CAS storage; symlink resolution; preview generation
+//	FailureModes: invalid paths, symlink attacks, permission errors, file not found, CAS errors
+//	Observability: emits file metadata, preview content, CAS artifacts, and binary/text detection
+//	Related: previewLimit, readPreview, formatPreviewWithLineNumbers, detectKind
+//	Keywords: fs/read, file_reading, symlink_safety, cas_storage, preview_generation
 //
 // [[domain:safe-file-reading]]
 // [[invariant:symlink-resolution-before-access]]

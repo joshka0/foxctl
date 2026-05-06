@@ -144,13 +144,14 @@ func main() {
 // run orchestrates Go language server operations using either persistent daemon or CLI mode with fallback.
 //
 // Index:
-//   Purpose: Provide Go language server operations (definition, references, symbols, etc.) via gopls daemon or CLI
-//   Keywords: lsp/gopls, language_server, go_tools, code_navigation, symbol_search, call_hierarchy, diagnostics
-//   Related: runWithDaemon, runWithCLI, normalizeInput, parseDefinition, parseReferences
-//   Flow: normalize input → apply timeout → validate paths → try daemon mode → fallback to CLI mode → emit results
-//   Resources: gopls daemon; gopls CLI
-//   Events: gopls-definition, gopls-references, gopls-symbols
-//   OutputFields: operation, definition, references, symbols, diagnostics, count
+//
+//	Purpose: Provide Go language server operations (definition, references, symbols, etc.) via gopls daemon or CLI
+//	Keywords: lsp/gopls, language_server, go_tools, code_navigation, symbol_search, call_hierarchy, diagnostics
+//	Related: runWithDaemon, runWithCLI, normalizeInput, parseDefinition, parseReferences
+//	Flow: normalize input → apply timeout → validate paths → try daemon mode → fallback to CLI mode → emit results
+//	Resources: gopls daemon; gopls CLI
+//	Events: gopls-definition, gopls-references, gopls-symbols
+//	OutputFields: operation, definition, references, symbols, diagnostics, count
 //
 // [[domain:lsp-operations]]
 // [[protocol:gopls-integration]]
