@@ -1,8 +1,11 @@
 package webterm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -23,6 +26,8 @@ type Client struct {
 
 	mu     sync.Mutex
 	closed bool
+
+	writeMu sync.Mutex
 }
 
 // NewClient creates a new web terminal client.
@@ -105,42 +110,131 @@ func (c *Client) readPump(ctx context.Context, pty *PTYProcess) error {
 			return err
 		}
 
-		switch msgType {
-		case websocket.MessageText:
-			// JSON control message — check for resize
-			var cm ControlMessage
-			if jsonErr := json.Unmarshal(data, &cm); jsonErr == nil {
-				switch cm.Type {
-				case "resize":
-					var rm ResizeMessage
-					if unmarshalErr := json.Unmarshal(data, &rm); unmarshalErr == nil {
-						if resizeErr := pty.Resize(rm.Cols, rm.Rows); resizeErr != nil {
-							c.log.Debug().Err(resizeErr).
-								Uint16("cols", rm.Cols).
-								Uint16("rows", rm.Rows).
-								Msg("PTY resize failed")
-						} else {
-							c.log.Debug().
-								Uint16("cols", rm.Cols).
-								Uint16("rows", rm.Rows).
-								Msg("PTY resized")
-						}
-					}
-				}
-				continue
-			}
-			// Not JSON control — treat as text input to PTY
-			if writeErr := pty.WriteInput(data); writeErr != nil {
+		result, handleErr := handleClientMessage(msgType, data, pty)
+		if handleErr != nil {
+			return handleErr
+		}
+		if result.controlError != nil {
+			if writeErr := c.writeControlError(ctx, *result.controlError); writeErr != nil {
 				return writeErr
 			}
-
-		case websocket.MessageBinary:
-			// Raw binary input — write directly to PTY
-			if writeErr := pty.WriteInput(data); writeErr != nil {
-				return writeErr
-			}
+			continue
+		}
+		if result.resized {
+			c.log.Debug().
+				Uint16("cols", result.cols).
+				Uint16("rows", result.rows).
+				Msg("PTY resized")
 		}
 	}
+}
+
+type terminalControlTarget interface {
+	WriteInput([]byte) error
+	Resize(cols, rows uint16) error
+}
+
+type clientMessageResult struct {
+	controlError *ControlErrorMessage
+	resized      bool
+	cols         uint16
+	rows         uint16
+}
+
+func handleClientMessage(msgType websocket.MessageType, data []byte, pty terminalControlTarget) (clientMessageResult, error) {
+	switch msgType {
+	case websocket.MessageBinary:
+		return clientMessageResult{}, pty.WriteInput(data)
+	case websocket.MessageText:
+		resize, controlErr := parseTextControl(data)
+		if controlErr != nil {
+			return clientMessageResult{controlError: controlErr}, nil
+		}
+		if err := pty.Resize(resize.Cols, resize.Rows); err != nil {
+			return clientMessageResult{}, err
+		}
+		return clientMessageResult{resized: true, cols: resize.Cols, rows: resize.Rows}, nil
+	default:
+		return clientMessageResult{}, nil
+	}
+}
+
+type validatedResize struct {
+	Cols uint16
+	Rows uint16
+}
+
+func parseTextControl(data []byte) (validatedResize, *ControlErrorMessage) {
+	var cm ControlMessage
+	if err := decodeJSON(data, &cm); err != nil {
+		return validatedResize{}, newControlError("EINVAL", "text frames must be valid JSON control messages")
+	}
+
+	switch cm.Type {
+	case "resize":
+		var rm ResizeMessage
+		if err := decodeStrictJSON(data, &rm); err != nil {
+			return validatedResize{}, newControlError("EINVAL", "resize control must contain type, cols, and rows only")
+		}
+		cols, rows, err := validateResizeDimensions(rm.Cols, rm.Rows)
+		if err != nil {
+			return validatedResize{}, newControlError("EINVAL", err.Error())
+		}
+		return validatedResize{Cols: cols, Rows: rows}, nil
+	case "":
+		return validatedResize{}, newControlError("EINVAL", "control message missing type")
+	default:
+		return validatedResize{}, newControlError("EUNKNOWN", fmt.Sprintf("unknown control message type: %s", cm.Type))
+	}
+}
+
+func decodeStrictJSON(data []byte, v any) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	return decodeOneJSONValue(dec, v)
+}
+
+func decodeJSON(data []byte, v any) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	return decodeOneJSONValue(dec, v)
+}
+
+func decodeOneJSONValue(dec *json.Decoder, v any) error {
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+	if dec.Decode(&struct{}{}) != io.EOF {
+		return fmt.Errorf("multiple JSON values")
+	}
+	return nil
+}
+
+func validateResizeDimensions(cols, rows int) (uint16, uint16, error) {
+	if cols <= 0 || rows <= 0 {
+		return 0, 0, fmt.Errorf("resize dimensions must be positive")
+	}
+	if cols > MaxTerminalCols || rows > MaxTerminalRows {
+		return 0, 0, fmt.Errorf("resize dimensions exceed maximum %dx%d", MaxTerminalCols, MaxTerminalRows)
+	}
+	return uint16(cols), uint16(rows), nil
+}
+
+func newControlError(code, message string) *ControlErrorMessage {
+	return &ControlErrorMessage{
+		Type:    "error",
+		Code:    code,
+		Message: message,
+	}
+}
+
+func (c *Client) writeControlError(ctx context.Context, msg ControlErrorMessage) error {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	writeCtx, writeCancel := context.WithTimeout(ctx, DefaultWriteTimeout)
+	defer writeCancel()
+	return c.writeWS(writeCtx, websocket.MessageText, data)
 }
 
 // writePump writes PTY output to the WebSocket, with ping keepalive.
@@ -158,7 +252,7 @@ func (c *Client) writePump(ctx context.Context) error {
 				return nil
 			}
 			writeCtx, writeCancel := context.WithTimeout(ctx, DefaultWriteTimeout)
-			err := c.ws.Write(writeCtx, websocket.MessageBinary, data)
+			err := c.writeWS(writeCtx, websocket.MessageBinary, data)
 			writeCancel()
 			if err != nil {
 				return err
@@ -166,13 +260,25 @@ func (c *Client) writePump(ctx context.Context) error {
 
 		case <-pingTicker.C:
 			pingCtx, pingCancel := context.WithTimeout(ctx, DefaultWriteTimeout)
-			err := c.ws.Ping(pingCtx)
+			err := c.pingWS(pingCtx)
 			pingCancel()
 			if err != nil {
 				return err
 			}
 		}
 	}
+}
+
+func (c *Client) writeWS(ctx context.Context, msgType websocket.MessageType, data []byte) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	return c.ws.Write(ctx, msgType, data)
+}
+
+func (c *Client) pingWS(ctx context.Context) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	return c.ws.Ping(ctx)
 }
 
 // close closes the WebSocket connection.

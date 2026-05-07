@@ -44,3 +44,18 @@ bun run --cwd packages/gui-auth-gateway dist/server.js
 - `GUI_AUTH_SMTP_PASS`
 - `GUI_AUTH_SMTP_FROM`
 - `GUI_AUTH_SMTP_REPLY_TO`
+
+## Forwarded Identity Headers
+
+`gui-auth-gateway` is the trusted boundary for Better Auth browser identity.
+For authenticated `/api/*` and `/ws/*` proxy traffic it strips client-supplied
+identity headers, then forwards only session-derived Better Auth headers:
+
+- `X-BetterAuth-User-ID`
+- `X-BetterAuth-Email`
+- `X-BetterAuth-User-Name`
+
+The gateway also strips browser-supplied `X-Tailscale-*` and `X-Foxctl-*`
+identity headers before proxying. Those headers are reserved for trusted
+gateway/runtime boundaries and must not be accepted directly from public
+browser clients.

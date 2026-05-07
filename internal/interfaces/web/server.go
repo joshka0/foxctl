@@ -762,6 +762,23 @@ func withCORS(dev bool, next http.Handler) http.Handler {
 //   - Slow requests (latency > threshold)
 //   - Error responses (4xx, 5xx)
 //   - Specific endpoints that benefit from audit trails
+//
+// Use redactedRequestTarget for any future request-target field so WebSocket
+// tickets do not land in logs.
 func withRequestLogging(_ zerolog.Logger, next http.Handler) http.Handler {
 	return next
+}
+
+func redactedRequestTarget(r *http.Request) string {
+	if r == nil || r.URL == nil {
+		return ""
+	}
+	values := r.URL.Query()
+	if _, ok := values["ticket"]; !ok {
+		return r.URL.RequestURI()
+	}
+	values.Set("ticket", "REDACTED")
+	u := *r.URL
+	u.RawQuery = values.Encode()
+	return u.RequestURI()
 }

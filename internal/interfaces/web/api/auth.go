@@ -2,8 +2,31 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
+
+	"github.com/joshka0/foxctl/internal/domain/identity"
+)
+
+const (
+	headerBetterAuthUserID    = "X-BetterAuth-User-ID"
+	headerBetterAuthEmail     = "X-BetterAuth-Email"
+	headerBetterAuthUserName  = "X-BetterAuth-User-Name"
+	headerTailscaleUser       = "X-Tailscale-User"
+	headerTailscaleUserName   = "X-Tailscale-User-Name"
+	headerTailscaleNode       = "X-Tailscale-Node"
+	headerTailscaleNodeID     = "X-Tailscale-Node-ID"
+	headerFoxctlTenantID      = "X-Foxctl-Tenant-ID"
+	headerFoxctlWorkspaceID   = "X-Foxctl-Workspace-ID"
+	headerFoxctlWorkspaceRoot = "X-Foxctl-Workspace-Root"
+	headerFoxctlSessionID     = "X-Foxctl-Session-ID"
+)
+
+var (
+	ErrPrincipalConflict          = errors.New("conflicting identity headers")
+	ErrPrincipalTenantRequired    = errors.New("tenant id is required")
+	ErrPrincipalWorkspaceMismatch = errors.New("workspace id mismatch")
 )
 
 // Identity represents an authenticated user, extracted from either Better Auth
@@ -28,6 +51,11 @@ type Identity struct {
 
 	// Source indicates how the identity was derived: "tailscale" or "betterauth".
 	Source string
+}
+
+type PrincipalRequestOptions struct {
+	RequireTenant       bool
+	ExpectedWorkspaceID string
 }
 
 // IsAuthenticated reports whether the identity represents an authenticated
@@ -68,28 +96,86 @@ func IdentityFromRequest(r *http.Request) *Identity {
 	}
 
 	// 2. Tailscale headers from gateway reverse proxy
-	if tsUser := strings.TrimSpace(r.Header.Get("X-Tailscale-User")); tsUser != "" {
+	if tsUser := strings.TrimSpace(r.Header.Get(headerTailscaleUser)); tsUser != "" {
 		return &Identity{
 			UserID:    tsUser,
 			UserLogin: tsUser,
-			UserName:  strings.TrimSpace(r.Header.Get("X-Tailscale-User-Name")),
-			NodeName:  strings.TrimSpace(r.Header.Get("X-Tailscale-Node")),
-			NodeID:    strings.TrimSpace(r.Header.Get("X-Tailscale-Node-ID")),
+			UserName:  strings.TrimSpace(r.Header.Get(headerTailscaleUserName)),
+			NodeName:  strings.TrimSpace(r.Header.Get(headerTailscaleNode)),
+			NodeID:    strings.TrimSpace(r.Header.Get(headerTailscaleNodeID)),
 			Source:    "tailscale",
 		}
 	}
 
 	// 3. Better Auth headers from gui-auth-gateway
-	if baEmail := strings.TrimSpace(r.Header.Get("X-BetterAuth-Email")); baEmail != "" {
+	baEmail := strings.TrimSpace(r.Header.Get(headerBetterAuthEmail))
+	baUserID := strings.TrimSpace(r.Header.Get(headerBetterAuthUserID))
+	if baEmail != "" || baUserID != "" {
+		userID := baUserID
+		if userID == "" {
+			userID = baEmail
+		}
 		return &Identity{
-			UserID:    baEmail,
+			UserID:    userID,
 			UserLogin: baEmail,
-			UserName:  strings.TrimSpace(r.Header.Get("X-BetterAuth-User-Name")),
+			UserName:  strings.TrimSpace(r.Header.Get(headerBetterAuthUserName)),
 			Source:    "betterauth",
 		}
 	}
 
 	return nil
+}
+
+func PrincipalFromRequest(r *http.Request, opts PrincipalRequestOptions) (identity.Principal, error) {
+	if hasTailscaleIdentityHeaders(r) && hasBetterAuthIdentityHeaders(r) {
+		return identity.Principal{}, ErrPrincipalConflict
+	}
+
+	tenantID := strings.TrimSpace(r.Header.Get(headerFoxctlTenantID))
+	if opts.RequireTenant && tenantID == "" {
+		return identity.Principal{}, ErrPrincipalTenantRequired
+	}
+
+	workspaceID := strings.TrimSpace(r.Header.Get(headerFoxctlWorkspaceID))
+	expectedWorkspaceID := strings.TrimSpace(opts.ExpectedWorkspaceID)
+	if expectedWorkspaceID != "" {
+		if workspaceID != "" && workspaceID != expectedWorkspaceID {
+			return identity.Principal{}, ErrPrincipalWorkspaceMismatch
+		}
+		workspaceID = expectedWorkspaceID
+	}
+
+	id := IdentityFromRequest(r)
+	principal := identity.Principal{
+		TenantID:      tenantID,
+		WorkspaceID:   workspaceID,
+		WorkspaceRoot: strings.TrimSpace(r.Header.Get(headerFoxctlWorkspaceRoot)),
+		SessionID:     strings.TrimSpace(r.Header.Get(headerFoxctlSessionID)),
+	}
+	if id != nil {
+		principal.Platform = principalPlatform(id)
+		principal.UserID = strings.TrimSpace(id.UserID)
+		principal.Username = strings.TrimSpace(firstNonEmpty(id.UserName, id.UserLogin))
+	} else {
+		principal.Platform = "web"
+	}
+	return principal, nil
+}
+
+func principalPlatform(id *Identity) string {
+	if id != nil && id.Source == "tailscale" {
+		return "tailscale"
+	}
+	return "web"
+}
+
+func hasTailscaleIdentityHeaders(r *http.Request) bool {
+	return strings.TrimSpace(r.Header.Get(headerTailscaleUser)) != ""
+}
+
+func hasBetterAuthIdentityHeaders(r *http.Request) bool {
+	return strings.TrimSpace(r.Header.Get(headerBetterAuthEmail)) != "" ||
+		strings.TrimSpace(r.Header.Get(headerBetterAuthUserID)) != ""
 }
 
 // WithIdentity stores the given identity in the request context.
