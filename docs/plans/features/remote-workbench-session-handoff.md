@@ -1,8 +1,8 @@
 # Remote Workbench Session Handoff
 
-Status: Proposed  
+Status: Ready for PR-A/PR-B; later slices proposed
 Owner: Solo maintainer  
-Last Updated: 2026-05-05
+Last Updated: 2026-05-07
 
 ## Goal
 
@@ -48,6 +48,31 @@ The current weak spots are authority leaks through terminal-facing paths:
 - Better Auth proxying authenticates at the edge, but the Go web server needs a
   durable request principal
 - current WebSocket text-frame handling can swallow JSON-looking terminal input
+
+## Current Hardening Decision
+
+This plan is implementation-ready only through PR-A and PR-B. Those two slices
+remove the immediate terminal protocol ambiguity and establish the request
+identity bridge needed by every later workbench route.
+
+Do next:
+
+- PR-A: harden the existing `webterm` WebSocket protocol.
+- PR-B: bridge authenticated requests into `identity.Principal` and forward
+  explicit identity through the auth proxy.
+
+Do not start yet:
+
+- durable `WorkbenchSession` storage
+- public `/ws/workbench-terminal/{attachment_id}` routes
+- WebSocket tickets
+- write leases
+- remote host handoff orchestration
+- pi-mono adapter implementation
+
+Those later pieces depend on PR-A/PR-B evidence. A hidden browser terminal
+experiment can follow only as PR-C dogfooding against compatibility endpoints;
+it must not become the production authority model.
 
 Canonical references:
 
@@ -197,6 +222,36 @@ recovery can wait until the workbench API contract is stable.
    actor/participant binding, attachment generation, and requested mode.
 4. Terminal attachment events are audited with principal subject and node/user
    identity.
+
+## Pi/TUI Dogfood Lane
+
+Pi and the TUI are client surfaces for this architecture, not runtime owners.
+They are useful because they can exercise the same handoff contract a browser
+will eventually use, but they should consume existing typed foxctl APIs rather
+than bypass them.
+
+Allowed before durable workbench storage:
+
+- read room, task, run, event, memory, and semantic-search state through typed
+  APIs
+- use semantic anchors and repoindex output as retrieval evidence
+- display durable execution state from runtime, jobs, trajectory, room, and
+  mailbox stores
+- use hardened compatibility terminal endpoints for local or tailnet dogfood
+  only
+
+Not allowed before PR-D/PR-E:
+
+- treat Pi session IDs as durable workbench IDs
+- pass tmux, zellij, pane, filesystem, or backend refs through Pi as browser
+  authority
+- restore runtime meaning by parsing terminal scrollback
+- make the pi-mono extension own memory, session storage, agent lifecycle, or
+  remote handoff decisions
+
+After PR-A and PR-B land, the first Pi/TUI validation should prove that the
+client can show typed runtime continuity while terminal attachment remains a
+replaceable view. It does not need remote host movement yet.
 
 ## Target Architecture
 
@@ -663,6 +718,10 @@ The first implementation contract should cover:
 
 ## Implementation Sequence
 
+The implementation sequence is gated. PR-A and PR-B are the next executable
+work; PR-C is optional dogfooding; PR-D and later remain proposed until the
+protocol and identity evidence exists.
+
 ### PR-A: Terminal Protocol Hardening Only
 
 Goal: remove the immediate WebSocket correctness bug without introducing durable
@@ -679,7 +738,19 @@ Tasks:
 - add tests for binary input, JSON-looking terminal input, unknown control,
   invalid control, resize, and disconnect cleanup
 
-No durable workbench types yet.
+Acceptance criteria:
+
+- binary frames are the only implicit terminal input path
+- text frames are parsed as explicit control messages or rejected with a control
+  error
+- JSON-looking shell input is covered by a binary-frame test
+- unknown control messages and invalid JSON text do not disappear silently
+- resize controls reject zero, negative, and excessive dimensions
+- disconnect cleanup is deterministic
+- `go test ./internal/interfaces/gateway/webterm` passes
+
+No durable workbench types, tickets, leases, browser auth changes, or Pi adapter
+work in this PR.
 
 ### PR-B: Identity Bridge and Proxy Forwarding
 
@@ -695,12 +766,25 @@ Tasks:
 - document which headers are trusted and only from which proxy boundary
 - add log redaction for future `ticket` query params
 
+Acceptance criteria:
+
+- `PrincipalFromRequest` has explicit tests for Better Auth, Tailscale,
+  anonymous requests, conflicting headers, missing tenant behavior, and
+  workspace mismatch behavior
+- trusted identity headers are accepted only from the configured proxy boundary
+- `/api` and `/ws` proxy paths preserve the same principal inputs
+- future `ticket` query parameters are redacted from request logs
+- `go test ./internal/interfaces/gateway/...` and the relevant web auth tests
+  pass
+
 This lands before any public browser workbench terminal route.
 
 ### PR-C: Experimental Browser Terminal, Compatibility Endpoint Only
 
 Goal: validate wterm/browser ergonomics without claiming production attachment
 semantics.
+
+Gate: PR-C can start only after PR-A and PR-B have landed.
 
 Tasks:
 
@@ -712,6 +796,10 @@ Tasks:
   `gui-auth-gateway`
 
 No durable `WorkbenchSession` yet.
+
+This PR is a dogfood surface only. It must not introduce public production
+attachment routes, opaque attachment IDs, tickets, leases, or remote host
+handoff.
 
 ### PR-D: Workbench Domain and Storage Skeleton
 
