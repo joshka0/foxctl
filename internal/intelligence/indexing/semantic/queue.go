@@ -77,6 +77,16 @@ func (s *QueueStore) Close() error {
 	return s.queue.Close()
 }
 
+// EnqueueFiles queues file embedding work behind workspace-scoped dedupe keys.
+//
+// Index:
+//
+//	Purpose: Queues paced semantic file embedding jobs for repo indexing reuse.
+//	Related: ClaimNext, FileQueueDedupeKey, NewFileQueuePayload
+//	Keywords: embedding queue, semantic files, batching, paced embeddings
+//
+// [[domain:semantic-embedding-queue]]
+// [[invariant:workspace-scoped-file-embedding-dedupe]]
 func (s *QueueStore) EnqueueFiles(ctx context.Context, req FileQueueRequest) (*FileQueueResult, error) {
 	if s == nil || s.queue == nil {
 		return nil, fmt.Errorf("semantic queue store is nil")

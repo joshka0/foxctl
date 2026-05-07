@@ -70,12 +70,10 @@ type daemonStores struct {
 // On any error the function closes any already-opened resources before returning the error.
 //
 // Index:
-// - Purpose: Initialize daemon storage dependencies and optional companion services
-// - Flow: open stores → configure companion memory → start hybrid maintenance daemon → return handles
-// - SideEffects: opens databases; starts hybrid maintenance daemon
-// - FailureModes: store open errors, companion initialization failures
-// - Related: daemonStores.Close, initOptimization
-// - Keywords: daemon_stores, companion_memory, contextvar, mailbox, blackboard
+//
+//	Purpose: Opens daemon-owned stores with cleanup on partial initialization failure.
+//	Related: daemonStores.Close
+//	Keywords: daemon stores, companion memory, cleanup
 func openDaemonStores(ctx context.Context, root string, opts Options) (*daemonStores, error) {
 	stores := &daemonStores{}
 
@@ -266,12 +264,10 @@ func (s *daemonStores) Close() {
 // Run starts the agent daemon.
 //
 // Index:
-// - Purpose: Initialize daemon dependencies and run the polling loop
-// - Flow: resolve workspace → open stores → init optimization → load agent → init engine → start heartbeat → poll loop
-// - SideEffects: opens databases; starts goroutines; makes LLM calls; processes mailbox messages
-// - FailureModes: config errors, store errors, engine init failures, polling errors
-// - Related: openDaemonStores, runPollLoop, initOptimization
-// - Keywords: agent_daemon, poll_loop, heartbeat, mailbox, companion
+//
+//	Purpose: Daemon lifecycle entrypoint from workspace resolution through poll loop.
+//	Related: openDaemonStores, runPollLoop, buildToolsConfig
+//	Keywords: agent daemon, heartbeat, mailbox polling, companion service
 func Run(ctx context.Context, opts Options) error {
 	workspaceRoot := strings.TrimSpace(opts.WorkspaceRoot)
 	if workspaceRoot == "" {
@@ -472,14 +468,6 @@ type pollDeps struct {
 }
 
 // initOptimization initializes optimization stores and pattern collector if enabled.
-//
-// Index:
-// - Purpose: Enable pattern learning for tool selection hints
-// - Flow: open trajectory store → open pattern store → create collector → return context
-// - SideEffects: opens stores; logs warnings on failures
-// - FailureModes: store open errors disable optimization
-// - Related: optimization.NewMCPPatternCollector
-// - Keywords: optimization, pattern_store, trajectory_store, collector
 func initOptimization(ctx context.Context, opts Options) (*OptimizationContext, func()) {
 	if !opts.EnableOptimization {
 		return nil, func() {}
@@ -669,13 +657,10 @@ func initDedupeStore(ctx context.Context, opts Options) (DedupeStore, func(), er
 // runPollLoop polls mailbox messages and dispatches processing based on agent mode.
 //
 // Index:
-// - Purpose: Drive daemon message processing with polling and proactive ticks
-// - Flow: start poll ticker → optional think ticker → process poll ticks → handle proactive think
-// - SideEffects: polls mailbox; updates agent state; invokes message handlers
-// - Concurrency: runs ticker loop with non-blocking think checks
-// - FailureModes: poll errors, agent stop signals, message processing errors
-// - Related: processPollTick, runScheduledThink
-// - Keywords: poll_loop, mailbox, proactive, poll_interval, think_interval
+//
+//	Purpose: Drives mailbox polling and scheduled tick work for running agents.
+//	Related: processPollTick, runScheduledThink
+//	Keywords: poll loop, proactive agents, tick agents
 func runPollLoop(ctx context.Context, deps pollDeps) error {
 	pollTicker := time.NewTicker(deps.opts.PollInterval)
 	defer pollTicker.Stop()

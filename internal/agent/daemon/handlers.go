@@ -20,12 +20,10 @@ import (
 // handleAsk processes agent.ask messages and sends agent.reply results.
 //
 // Index:
-// - Purpose: Execute an ask request via companion service and reply
-// - Flow: parse payload → resolve conversation → execute engine → build reply → send mailbox response
-// - SideEffects: LLM calls; memory reads/writes; mailbox send
-// - FailureModes: payload decode errors, execution errors, reply marshal/send errors
-// - Related: handleCmd, handleConsoleAsk
-// - Keywords: agent.ask, agent.reply, mailbox, companion
+//
+//	Purpose: Converts agent.ask mailbox messages into companion execution and agent.reply messages.
+//	Related: handleCmd, handleConsoleAsk
+//	Keywords: agent.ask, agent.reply, mailbox reply
 func handleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Message, companionSvc ChatService, mailboxStore mailbox.Store, policy agent.Policy, optCtx *OptimizationContext, agentID string, agentRole string) error {
 	// 1. Parse payload envelope
 	var env struct {
