@@ -21,10 +21,14 @@ type Client struct {
 // NewClient creates a new daemon client.
 //
 // Index:
-// - Purpose: Initialize a daemon client with resolved socket path
-// - Flow: resolve socket path → return client
-// - Related: SocketPath, Client.call
-// - Keywords: daemon_client, socket_path, unix_socket
+//
+//	Purpose: Initialize a daemon client with resolved socket path
+//	Keywords: daemon_client, socket_path, unix_socket
+//	Related: SocketPath, Client.call
+//	Flow: resolve socket path → return client
+//	Resources: FOXCTL_DAEMON_SOCKET env
+//	Events: none
+//	OutputFields: *Client
 func NewClient() *Client {
 	return &Client{
 		socketPath: SocketPath(),
@@ -49,12 +53,14 @@ func (c *Client) isRunningWithTimeout(timeout time.Duration) bool {
 // Status returns the daemon status.
 //
 // Index:
-// - Purpose: Fetch daemon status over RPC
-// - Flow: call status -> decode result -> return
-// - SideEffects: RPC call to daemon socket
-// - FailureModes: call errors, daemon error response, decode errors
-// - Related: Client.call, marshalResult
-// - Keywords: daemon_status, status, rpc, socket
+//
+//	Purpose: Fetch daemon status over RPC
+//	Keywords: daemon_status, status, rpc, socket
+//	Related: Client.call, marshalResult
+//	Flow: call status -> decode result -> return
+//	Resources: unix socket
+//	Events: none
+//	OutputFields: *StatusResult
 func (c *Client) Status() (*StatusResult, error) {
 	resp, err := c.call("status", nil)
 	if err != nil {
@@ -80,12 +86,14 @@ func (c *Client) Status() (*StatusResult, error) {
 // Run executes a skill via the daemon.
 //
 // Index:
-// - Purpose: Execute a skill through the daemon RPC
-// - Flow: build params -> call run -> decode result -> return
-// - SideEffects: RPC call to daemon; may trigger skill execution
-// - FailureModes: call errors, daemon error response, decode errors
-// - Related: Client.call, marshalResult
-// - Keywords: run, skill, workspace, ephemeral, rpc, run_result
+//
+//	Purpose: Execute a skill through the daemon RPC
+//	Keywords: run, skill, workspace, ephemeral, rpc, run_result
+//	Related: Client.call, marshalResult
+//	Flow: build params -> call run -> decode result -> return
+//	Resources: unix socket
+//	Events: none
+//	OutputFields: *RunResult
 func (c *Client) Run(skill string, input []byte, workspace string, ephemeral bool) (*RunResult, error) {
 	params := RunParams{
 		Skill:     skill,
@@ -151,12 +159,14 @@ func (c *Client) Shutdown() error {
 // AgentSpawn spawns a new agent via the daemon.
 //
 // Index:
-// - Purpose: Request a new agent session from daemon
-// - Flow: call agent.spawn -> decode result -> return
-// - SideEffects: RPC call; may spawn agent session
-// - FailureModes: call errors, daemon error response, decode errors
-// - Related: Client.call, marshalResult
-// - Keywords: agent_spawn, agent.spawn, session_id, rpc
+//
+//	Purpose: Request a new agent session from daemon
+//	Keywords: agent_spawn, agent.spawn, session_id, rpc
+//	Related: Client.call, marshalResult
+//	Flow: call agent.spawn -> decode result -> return
+//	Resources: unix socket
+//	Events: none
+//	OutputFields: *AgentSpawnResult
 func (c *Client) AgentSpawn(params AgentSpawnParams) (*AgentSpawnResult, error) {
 	resp, err := c.call("agent.spawn", params)
 	if err != nil {
@@ -205,12 +215,14 @@ func (c *Client) AgentList() (*AgentListResult, error) {
 // AgentStatus gets the status of an agent session.
 //
 // Index:
-// - Purpose: Fetch agent session status from daemon
-// - Flow: call agent.status -> decode result -> return
-// - SideEffects: RPC call to daemon
-// - FailureModes: call errors, daemon error response, decode errors
-// - Related: Client.call, marshalResult
-// - Keywords: agent_status, agent.status, session_id, rpc
+//
+//	Purpose: Fetch agent session status from daemon
+//	Keywords: agent_status, agent.status, session_id, rpc
+//	Related: Client.call, marshalResult
+//	Flow: call agent.status -> decode result -> return
+//	Resources: unix socket
+//	Events: none
+//	OutputFields: *AgentStatusResult
 func (c *Client) AgentStatus(sessionID string) (*AgentStatusResult, error) {
 	params := AgentStatusParams{SessionID: sessionID}
 	resp, err := c.call("agent.status", params)
@@ -237,12 +249,14 @@ func (c *Client) AgentStatus(sessionID string) (*AgentStatusResult, error) {
 // AgentKill terminates an agent session.
 //
 // Index:
-// - Purpose: Request termination of an agent session
-// - Flow: call agent.kill -> decode result -> return
-// - SideEffects: RPC call; may terminate agent session
-// - FailureModes: call errors, daemon error response, decode errors
-// - Related: Client.call, marshalResult
-// - Keywords: agent_kill, agent.kill, session_id, rpc
+//
+//	Purpose: Request termination of an agent session
+//	Keywords: agent_kill, agent.kill, session_id, rpc
+//	Related: Client.call, marshalResult
+//	Flow: call agent.kill -> decode result -> return
+//	Resources: unix socket
+//	Events: none
+//	OutputFields: *AgentKillResult
 func (c *Client) AgentKill(sessionID string) (*AgentKillResult, error) {
 	params := AgentKillParams{SessionID: sessionID}
 	resp, err := c.call("agent.kill", params)
@@ -368,12 +382,17 @@ func (c *Client) connect() (net.Conn, error) {
 // call makes a request to the daemon and returns the response.
 //
 // Index:
-// - Purpose: Send a JSON request over the daemon socket and decode response
-// - Flow: connect → set deadline → encode request → decode response → return
-// - SideEffects: unix socket I/O
-// - FailureModes: connect errors, encode/decode errors, deadline errors
-// - Related: Client.connect, Client.EnsureRunningContext
-// - Keywords: daemon_call, json_rpc, socket, request, response
+//
+//	Purpose: Send a JSON request over the daemon socket and decode response
+//	Keywords: daemon_call, json_rpc, socket, request, response
+//	Related: Client.connect, Client.EnsureRunningContext
+//	Flow: connect → set deadline → encode request → decode response → return
+//	Resources: unix socket
+//	Events: none
+//	OutputFields: *Response
+//
+// [[protocol:daemon-rpc]]
+// [[invariant:request-response-correlation]]
 func (c *Client) call(method string, params any) (*Response, error) {
 	conn, err := c.connect()
 	if err != nil {
@@ -457,12 +476,17 @@ func (c *Client) EnsureRunning() error {
 // It returns nil if the daemon is now running, or an error if it couldn't be started.
 //
 // Index:
-// - Purpose: Ensure a daemon process is running before issuing requests
-// - Flow: check context → probe socket → daemonize → poll until ready
-// - SideEffects: starts daemon process; polls socket
-// - FailureModes: context timeout, daemonize errors, socket not ready
-// - Related: Client.isRunningWithTimeout, Daemonize
-// - Keywords: ensure_running, daemonize, socket, poll_interval, timeout
+//
+//	Purpose: Ensure a daemon process is running before issuing requests
+//	Keywords: ensure_running, daemonize, socket, poll_interval, timeout
+//	Related: Client.isRunningWithTimeout, Daemonize
+//	Flow: check context → probe socket → daemonize → poll until ready
+//	Resources: unix socket, os.Executable
+//	Events: none
+//	OutputFields: error
+//
+// [[protocol:daemon-lifecycle]]
+// [[risk:daemon-start-timeout]]
 func (c *Client) EnsureRunningContext(ctx context.Context) error {
 	// Check context before starting
 	if ctx.Err() != nil {

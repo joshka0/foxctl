@@ -45,13 +45,17 @@ func main() {
 // run orchestrates directory listing with filtering, statistics, and result persistence.
 //
 // Index:
-// - Purpose: List directory contents with filtering, statistics, and optional result persistence
-// - Flow: validate input → resolve path → read directory → apply filters → calculate stats → emit results
-// - SideEffects: directory traversal; file system access; CAS storage for large result sets
-// - FailureModes: invalid paths, permission errors, directory read errors
-// - Observability: emits entry counts, file/directory statistics, and artifact hints for large sets
-// - Related: readDir, fileSize
-// - Keywords: fs/ls, directory_listing, filtering, statistics, file_system
+//
+//	Purpose: List directory contents with filtering, statistics, and optional result persistence
+//	Flow: validate input → resolve path → read directory → apply filters → calculate stats → emit results
+//	SideEffects: directory traversal; file system access; CAS storage for large result sets
+//	FailureModes: invalid paths, permission errors, directory read errors
+//	Observability: emits entry counts, file/directory statistics, and artifact hints for large sets
+//	Related: readDir, fileSize
+//	Keywords: fs/ls, directory_listing, filtering, statistics, file_system
+//
+// [[domain:directory-listing]]
+// [[protocol:fs-metadata-extraction]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply defaults
 	if strings.TrimSpace(in.Path) == "" {

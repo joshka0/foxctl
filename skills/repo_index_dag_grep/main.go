@@ -29,7 +29,11 @@ type Input struct {
 	Budget         int      `json:"budget,omitempty"`
 	PerNodeCap     int      `json:"per_node_cap,omitempty"`
 	IncludeAnchors *bool    `json:"include_anchors,omitempty"`
-	Render         string   `json:"render,omitempty"`
+	// IncludeOwnerContainers is the explicit replacement for legacy IncludeAnchors.
+	IncludeOwnerContainers *bool `json:"include_owner_containers,omitempty"`
+	// Semantic anchor traversal is explicit; legacy IncludeAnchors never enables it.
+	IncludeSemanticAnchors bool   `json:"include_semantic_anchors,omitempty"`
+	Render                 string `json:"render,omitempty"`
 }
 
 func main() {
@@ -57,6 +61,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if err != nil {
 		return skillerr.Arg(err.Error())
 	}
+	if in.IncludeOwnerContainers != nil {
+		req.IncludeOwnerContainers = *in.IncludeOwnerContainers
+	}
+	req.IncludeSemanticAnchors = in.IncludeSemanticAnchors
 
 	result, err := service.DAGGrepWithProjection(ctx, req)
 	if err != nil {

@@ -32,13 +32,17 @@ func main() {
 // run orchestrates central hook dispatch with configuration loading and context buffer integration.
 //
 // Index:
-// - Purpose: Central dispatcher that loads hooks.yaml, matches hooks, runs them, and merges outputs with context buffer support
-// - Flow: validate event → resolve workspace → load hooks config → create dispatcher → dispatch hooks → process context buffer → emit results
-// - SideEffects: hook execution; context buffer processing; observability events; context injection
-// - FailureModes: invalid events, config loading failures, dispatch errors
-// - Observability: emits hook dispatch events, execution metrics, and context buffer stats
-// - Related: processContextBuffer, buildMatchedHooksInfo, buildStepsInfo, emitHookDispatchEvent
-// - Keywords: hooks/dispatch, hook_dispatcher, context_buffer, hook_matching, orchestration
+//
+//	Purpose: Central dispatcher that loads hooks.yaml, matches hooks, runs them, and merges outputs with context buffer support
+//	Keywords: hooks/dispatch, hook_dispatcher, context_buffer, hook_matching, orchestration
+//	Related: processContextBuffer, buildMatchedHooksInfo, buildStepsInfo, emitHookDispatchEvent
+//	Flow: validate event → resolve workspace → load hooks config → create dispatcher → dispatch hooks → process context buffer → emit results
+//	Resources: hooks.yaml config; skills directory; context buffer store
+//	Events: hook-dispatched, hook-blocked, context-buffer-processed
+//	OutputFields: hook_output, matched_hooks, steps, blocked, blocked_by, hooks_run
+//
+// [[domain:hook-system]]
+// [[protocol:hook-dispatch]]
 func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	start := time.Now()
 

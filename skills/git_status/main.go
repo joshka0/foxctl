@@ -56,13 +56,17 @@ func main() {
 // run orchestrates git repository status, diff, and log operations with result persistence.
 //
 // Index:
-// - Purpose: Execute git status, diff, and log operations with artifact storage for large outputs
-// - Flow: validate input → resolve repo → check git → dispatch operation → emit results
-// - SideEffects: git command execution; file system access; CAS storage for large diffs
-// - FailureModes: invalid git repo, git execution errors, permission issues
-// - Observability: emits status info, diff previews, commit logs, and artifact hints
-// - Related: getStatus, getDiff, getLog, parseStatusOutput, parseLogOutput, parseDiffStat, countByStatus
-// - Keywords: git/status, git_operations, repository_status, diff_analysis, commit_history
+//
+//	Purpose: Execute git status, diff, and log operations with artifact storage for large outputs
+//	Keywords: git/status, git_operations, repository_status, diff_analysis, commit_history
+//	Related: getStatus, getDiff, getLog, parseStatusOutput, parseLogOutput, parseDiffStat, countByStatus
+//	Flow: validate input → resolve repo → check git → dispatch operation → emit results
+//	Resources: git command execution; file system access; CAS storage for large diffs
+//	Events: git-status, git-diff, git-log
+//	OutputFields: operation, branch, head, files, diff_size, commits
+//
+// [[domain:git-operations]]
+// [[protocol:skill-dispatch]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Apply defaults
 	in.Operation = oputil.DefaultOp(in.Operation, "status")

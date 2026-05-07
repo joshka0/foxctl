@@ -1350,12 +1350,17 @@ ON CONFLICT(id) DO UPDATE SET
 // SaveChunks inserts multiple chunks in a batch.
 //
 // Index:
-// - Purpose: Persist session chunk batches in a single transaction
-// - Flow: begin tx → prepare statement → upsert chunks → commit
-// - SideEffects: database transaction; session_chunks writes
-// - FailureModes: tx errors, prepare errors, exec errors
-// - Related: SaveChunk
-// - Keywords: session_chunks, batch, upsert, transaction
+//
+//	Purpose: Persist session chunk batches in a single transaction
+//	Keywords: session_chunks, batch, upsert, transaction
+//	Related: SaveChunk
+//	Flow: begin tx → prepare statement → upsert chunks → commit
+//	Resources: session_chunks table, sqlutil
+//	Events: none
+//	OutputFields: none
+//
+// [[invariant:embedding-dimensions-validated-per-workspace]]
+// [[test-contract:chunk-batch-atomicity]]
 func (s *Store) SaveChunks(ctx context.Context, chunks []SessionChunk) error {
 	workspaceCache := make(map[string][2]string)
 	for _, chunk := range chunks {
@@ -1627,12 +1632,17 @@ ON CONFLICT(id) DO UPDATE SET
 // SaveChunkSummaries upserts multiple chunk-level summaries in a transaction.
 //
 // Index:
-// - Purpose: Persist chunk summary batches in a single transaction
-// - Flow: begin tx → prepare statement → upsert summaries → commit
-// - SideEffects: database transaction; session_chunk_summaries writes
-// - FailureModes: tx errors, prepare errors, exec errors
-// - Related: SaveChunkSummary
-// - Keywords: chunk_summary, batch, upsert, transaction
+//
+//	Purpose: Persist chunk summary batches in a single transaction
+//	Keywords: chunk_summary, batch, upsert, transaction
+//	Related: SaveChunkSummary
+//	Flow: begin tx → prepare statement → upsert summaries → commit
+//	Resources: session_chunk_summaries table, sqlutil
+//	Events: none
+//	OutputFields: none
+//
+// [[invariant:chunk-index-bounds-computed-from-indices]]
+// [[test-contract:summary-batch-atomicity]]
 func (s *Store) SaveChunkSummaries(ctx context.Context, summaries []SessionChunkSummary) error {
 	if len(summaries) == 0 {
 		return nil
@@ -1810,12 +1820,17 @@ ON CONFLICT(session_id, window_index) DO UPDATE SET
 // SaveContextWindows inserts multiple context windows in a batch.
 //
 // Index:
-// - Purpose: Persist context window batches in a single transaction
-// - Flow: begin tx → prepare statement → upsert windows → commit
-// - SideEffects: database transaction; session_context_windows writes
-// - FailureModes: tx errors, prepare errors, exec errors
-// - Related: SaveContextWindow
-// - Keywords: context_window, batch, upsert, transaction
+//
+//	Purpose: Persist context window batches in a single transaction
+//	Keywords: context_window, batch, upsert, transaction
+//	Related: SaveContextWindow
+//	Flow: begin tx → prepare statement → upsert windows → commit
+//	Resources: session_context_windows table, sqlutil
+//	Events: none
+//	OutputFields: none
+//
+// [[invariant:embedding-dimensions-validated-per-workspace]]
+// [[test-contract:context-window-batch-atomicity]]
 func (s *Store) SaveContextWindows(ctx context.Context, windows []ContextWindow) error {
 	if len(windows) == 0 {
 		return nil

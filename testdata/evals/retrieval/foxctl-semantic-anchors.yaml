@@ -1,0 +1,51 @@
+name: foxctl-semantic-anchors
+queries:
+  - id: invariant-evidence-only-is-not-instruction
+    query: "evidence only semantic anchors must not become instructions"
+    expected_any_of:
+      - internal/intelligence/evidence/validate.go
+    notes: "Positive invariant query for the evidence render-surface gate."
+  - id: invariant-instruction-authority-reviewed-memory
+    query: "instruction authority requires reviewed durable memory"
+    expected_any_of:
+      - internal/context/contextplane/memory_instruction_gate.go
+    notes: "Positive invariant query for the durable memory instruction gate."
+  - id: protocol-semantic-anchor-graph-emission
+    query: "semantic anchor graph emission protocol repoindex"
+    expected_any_of:
+      - internal/intelligence/indexing/repoindex/semantic_anchor_build.go
+    notes: "Positive protocol query for repoindex semantic edge emission."
+  - id: invariant-semantic-anchors-explicit-traversal
+    query: "semantic anchors explicit traversal not structural default"
+    expected_any_of:
+      - internal/intelligence/indexing/repoindex/dag_grep.go
+    notes: "Positive invariant query for opt-in DAG traversal."
+  - id: protocol-semantic-envelope-retrieval-evidence
+    query: "semantic envelope retrieval evidence provider version digest"
+    expected_any_of:
+      - internal/intelligence/searchindex/semantic_envelope.go
+    notes: "Positive protocol query for semantic envelope construction."
+  - id: beacon-control-does-not-hijack
+    query: "broad beacon semantic anchor retrieval experiment"
+    expected_any_of:
+      - docs/plans/features/semantic-code-anchors.md
+    forbidden_any_of:
+      - internal/intelligence/indexing/repoindex/semantic_anchor_build.go
+      - internal/intelligence/evidence/validate.go
+    notes: "Beacon control: broad beacon language must not force trust-critical owner code."
+  - id: domain-control-does-not-hijack
+    query: "semantic anchors domain overview"
+    expected_any_of:
+      - docs/plans/features/semantic-code-anchors.md
+    forbidden_any_of:
+      - internal/context/contextplane/memory_instruction_gate.go
+      - internal/intelligence/searchindex/semantic_envelope.go
+    notes: "Domain control: broad domain language should stay on the plan unless a specific owner is requested."
+  - id: risk-control-does-not-hijack-protocol
+    query: "risk protocol semantic anchor overview"
+    expected_any_of:
+      - docs/plans/features/semantic-code-anchors.md
+    forbidden_any_of:
+      - internal/intelligence/evidence/validate.go
+      - internal/intelligence/indexing/repoindex/dag_grep.go
+    notes: "Risk/protocol control: generic risk language must not hijack default traversal."

@@ -18,11 +18,17 @@ func NewQueryEngine(store *Store) *QueryEngine {
 // Search performs an FTS search over nodes.
 //
 // Index:
-// - Purpose: Find repo graph nodes using FTS with syntax and OR fallback
-// - Flow: run FTS → on syntax error retry quoted → on zero results retry OR
-// - FailureModes: FTS query errors, store errors
-// - Related: Store.SearchFTS, quoteFTSQuery, buildFallbackCandidates
-// - Keywords: repo_index_search, fts5, query, nodes, SearchFTS
+//
+//	Purpose: Find repo graph nodes using FTS with syntax and OR fallback
+//	Keywords: repo_index_search, fts5, query, nodes, SearchFTS
+//	Related: Store.SearchFTS, quoteFTSQuery, buildFallbackCandidates
+//	Flow: run FTS → on syntax error retry quoted → on zero results retry OR
+//	Resources: repoindex node_fts
+//	Events: fts-query-fallback
+//	OutputFields: nodes
+//
+// [[protocol:repoindex-fts-search]]
+// [[risk:fts-syntax-error-fallback]]
 func (q *QueryEngine) Search(ctx context.Context, query string, limit int) ([]Node, error) {
 	if q == nil || q.store == nil {
 		return nil, ErrNotFound
@@ -220,11 +226,17 @@ func (q *QueryEngine) ResolveFileNodes(ctx context.Context, paths []string) ([]N
 // Expand traverses the graph starting from seed node IDs.
 //
 // Index:
-// - Purpose: Expand the repo graph from seeds with depth/budget limits
-// - Flow: normalize options → BFS by depth → fetch edges → collect nodes/edges
-// - FailureModes: edge fetch errors, store errors
-// - Related: GetOutgoingEdges, GetIncomingEdges, Store.GetNodes
-// - Keywords: repo_index_expand, seeds, depth, budget, edges, nodes
+//
+//	Purpose: Expand the repo graph from seeds with depth/budget limits
+//	Keywords: repo_index_expand, seeds, depth, budget, edges, nodes
+//	Related: GetOutgoingEdges, GetIncomingEdges, Store.GetNodes
+//	Flow: normalize options → BFS by depth → fetch edges → collect nodes/edges
+//	Resources: repoindex nodes, edges tables
+//	Events: graph-expand
+//	OutputFields: Nodes, Edges
+//
+// [[protocol:repoindex-graph-expand]]
+// [[invariant:budget-enforced-per-depth]]
 func (q *QueryEngine) Expand(ctx context.Context, seeds []string, opts ExpandOptions) (ExpandResult, error) {
 	if q == nil || q.store == nil {
 		return ExpandResult{}, ErrNotFound
@@ -232,18 +244,7 @@ func (q *QueryEngine) Expand(ctx context.Context, seeds []string, opts ExpandOpt
 	if len(seeds) == 0 {
 		return ExpandResult{}, nil
 	}
-	if opts.Depth <= 0 {
-		opts.Depth = 1
-	}
-	if opts.Budget <= 0 {
-		opts.Budget = 50
-	}
-	if opts.PerNodeCap <= 0 {
-		opts.PerNodeCap = 50
-	}
-	if opts.Direction == "" {
-		opts.Direction = DirOut
-	}
+	opts = NormalizeExpandOptions(opts)
 
 	seenNodes := make(map[string]struct{})
 	seenEdges := make(map[string]Edge)
@@ -316,10 +317,36 @@ func (q *QueryEngine) Expand(ctx context.Context, seeds []string, opts ExpandOpt
 }
 
 func (q *QueryEngine) fetchEdges(ctx context.Context, nodeID string, opts ExpandOptions) ([]Edge, error) {
+	opts = NormalizeExpandOptions(opts)
 	if opts.Direction == DirIn {
 		return q.store.GetIncomingEdges(ctx, nodeID, opts.EdgeTypes, opts.PerNodeCap)
 	}
 	return q.store.GetOutgoingEdges(ctx, nodeID, opts.EdgeTypes, opts.PerNodeCap)
+}
+
+func NormalizeExpandOptions(opts ExpandOptions) ExpandOptions {
+	if opts.Depth <= 0 {
+		opts.Depth = 1
+	}
+	if opts.Budget <= 0 {
+		opts.Budget = 50
+	}
+	if opts.PerNodeCap <= 0 {
+		opts.PerNodeCap = 50
+	}
+	if opts.Direction == "" {
+		opts.Direction = DirOut
+	}
+	if len(opts.EdgeTypes) == 0 {
+		opts.EdgeTypes = DefaultExpandEdgeTypes()
+	} else {
+		opts.EdgeTypes = CopyEdgeSet(opts.EdgeTypes)
+	}
+	if opts.IncludeSemanticAnchors {
+		opts.EdgeTypes = append(opts.EdgeTypes, EdgeSetSemanticAnchors...)
+	}
+	opts.EdgeTypes = DeduplicateEdgeTypes(opts.EdgeTypes)
+	return opts
 }
 
 func edgeNeighbor(edge Edge, nodeID string, dir Direction) string {

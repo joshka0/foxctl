@@ -90,13 +90,17 @@ func main() {
 // run orchestrates session anchor operations including get, set, learning management, and question handling.
 //
 // Index:
-// - Purpose: Manage session anchors with main prompts, learnings, compaction tracking, and pending questions
-// - Flow: validate operation → resolve session ID → build anchor key → open memory store → execute operation
-// - SideEffects: anchor storage/retrieval; learning accumulation; compaction counting; question management
-// - FailureModes: memory store access failures, invalid operations, missing required fields
-// - Observability: emits anchor status, operation results, learning counts, and compaction numbers
-// - Related: loadAnchor, saveAnchor, messageForGet, truncateOneLine, capRecentLearnings, normalizeLearnings
-// - Keywords: session/anchor, session_management, learning_tracking, compaction, question_management
+//
+//	Purpose: Manage session anchors with main prompts, learnings, compaction tracking, and pending questions
+//	Keywords: session/anchor, session_management, learning_tracking, compaction, question_management
+//	Related: loadAnchor, saveAnchor, messageForGet, truncateOneLine, capRecentLearnings, normalizeLearnings
+//	Flow: validate operation → resolve session ID → build anchor key → open memory store → execute operation
+//	Resources: memory store (cache)
+//	Events: session anchor events
+//	OutputFields: found, anchor, message
+//
+// [[domain:session-anchor-management]]
+// [[protocol:session-anchor-operation-dispatch]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Default workspace
 	in.Workspace = workspaceutil.Resolve(in.Workspace, "", rc.Workspace)

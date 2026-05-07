@@ -175,13 +175,17 @@ func main() {
 // run orchestrates x402 payment operations with wallet management and HTTP payment handling.
 //
 // Index:
-// - Purpose: Handle AI-native HTTP micropayments via x402 protocol with wallet management and automatic payment
-// - Flow: validate operation → set defaults → route to handler → execute wallet/fetch/pay operations → emit results
-// - SideEffects: wallet creation; payment execution; HTTP requests with payment headers; balance queries
-// - FailureModes: invalid operations, wallet errors, payment failures, network issues, insufficient funds
-// - Observability: emits wallet status, payment transactions, HTTP responses with payment status
-// - Related: handleWalletInit, handleWalletStatus, handleFetch, handlePay, createPaymentPayload
-// - Keywords: x402/payment, micropayments, cryptocurrency, wallet_management, http_402
+//
+//	Purpose: Handle AI-native HTTP micropayments via x402 protocol with wallet management and automatic payment
+//	Keywords: x402, micropayments, cryptocurrency, wallet_management, http_402
+//	Related: handleWalletInit, handleWalletStatus, handleFetch, handlePay, createPaymentPayload
+//	Flow: validate operation → set defaults → route to handler → execute wallet/fetch/pay operations → emit results
+//	Resources: wallet config, JSON-RPC endpoints, HTTP client
+//	Events: none
+//	OutputFields: operation, wallet, response, payment, error
+//
+// [[protocol:x402_payment]]
+// [[risk:crypto_payment_failure]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	op := oputil.Op(in.Operation)
 	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOps, ", "))

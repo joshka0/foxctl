@@ -24,12 +24,17 @@ import (
 //   - Job store is never opened
 //
 // Index:
-// - Purpose: Execute a skill without job persistence or history
-// - Flow: try cache → run runner directly → handle stdout/stderr → emit envelope
-// - SideEffects: executes skill; may write envelope to stdout
-// - FailureModes: execution errors, envelope write errors
-// - Related: Executor.TryServeCache, Executor.handleEphemeralSuccess
-// - Keywords: execute_ephemeral, cache, runner, envelope
+//
+//	Purpose: Execute a skill without job persistence or history
+//	Keywords: execute_ephemeral, cache, runner, envelope
+//	Related: Executor.TryServeCache, Executor.handleEphemeralSuccess
+//	Flow: try cache → run runner directly → handle stdout/stderr → emit envelope
+//	Resources: execution.RunnerExecutor, observability trace context
+//	Events: none
+//	OutputFields: error
+//
+// [[protocol:ephemeral-execution]]
+// [[decision:skip-job-persistence-for-speed]]
 func (e *Executor) ExecuteEphemeral(input []byte) error {
 	// Step 1: Try cache for deduplication (read-only)
 	if done, err := e.TryServeCache(input); err != nil {

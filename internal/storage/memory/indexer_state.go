@@ -28,12 +28,17 @@ type IndexerState struct {
 // GetIndexerState returns the persisted per-workspace state for an indexer.
 //
 // Index:
-// - Purpose: Provide a stable "last indexed" anchor for incremental indexing workflows (e.g., git-diff since last run)
-// - Flow: canonicalize workspace -> query indexer_state -> parse timestamps -> return (state, ok)
-// - SideEffects: reads sqlite rows
-// - FailureModes: db errors, timestamp parse errors
-// - Related: SetLastIndexedHeadSHA, (*Store).MigrateWorkspace, (*Store).repairWorkspaceIDs
-// - Keywords: indexer_state, last_indexed_head_sha, workspace, incremental_index, git-diff
+//
+//	Purpose: Provide a stable "last indexed" anchor for incremental indexing workflows (e.g., git-diff since last run)
+//	Keywords: indexer_state, last_indexed_head_sha, workspace, incremental_index, git-diff
+//	Related: SetLastIndexedHeadSHA, (*Store).MigrateWorkspace, (*Store).repairWorkspaceIDs
+//	Flow: canonicalize workspace -> query indexer_state -> parse timestamps -> return (state, ok)
+//	Resources: indexer_state table
+//	Events: none
+//	OutputFields: IndexerState, bool
+//
+// [[domain:incremental-index-high-water-mark]]
+// [[invariant:workspace-canonicalized-before-query]]
 func (s *Store) GetIndexerState(ctx context.Context, workspaceID, indexerID string) (IndexerState, bool, error) {
 	if s == nil || s.db == nil {
 		return IndexerState{}, false, fmt.Errorf("memory: get indexer state: store not initialized")
@@ -75,12 +80,17 @@ func (s *Store) GetIndexerState(ctx context.Context, workspaceID, indexerID stri
 // SetLastIndexedHeadSHA upserts the last indexed HEAD commit SHA for a workspace+indexer.
 //
 // Index:
-// - Purpose: Record an indexer's "high-water mark" so future runs can diff from it
-// - Flow: canonicalize workspace -> upsert row -> fetch row -> return state
-// - SideEffects: writes sqlite rows
-// - FailureModes: db errors, timestamp parse errors
-// - Related: GetIndexerState, cmd/index.runIndexGitDiff
-// - Keywords: indexer_state, upsert, last_indexed_head_sha, workspace, head_sha
+//
+//	Purpose: Record an indexer's "high-water mark" so future runs can diff from it
+//	Keywords: indexer_state, upsert, last_indexed_head_sha, workspace, head_sha
+//	Related: GetIndexerState, cmd/index.runIndexGitDiff
+//	Flow: canonicalize workspace -> upsert row -> fetch row -> return state
+//	Resources: indexer_state table
+//	Events: none
+//	OutputFields: IndexerState
+//
+// [[domain:incremental-index-high-water-mark]]
+// [[invariant:workspace-canonicalized-before-upsert]]
 func (s *Store) SetLastIndexedHeadSHA(ctx context.Context, workspaceID, indexerID, headSHA string) (IndexerState, error) {
 	if s == nil || s.db == nil {
 		return IndexerState{}, fmt.Errorf("memory: set indexer state: store not initialized")

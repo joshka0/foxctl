@@ -65,10 +65,16 @@ func DefaultToolRunnerConfig() ToolRunnerConfig {
 // NewToolRunner creates a new tool runner.
 //
 // Index:
-// - Purpose: Initialize a tool runner with hooks and configuration
-// - Flow: store executor/dispatcher/config → return runner
-// - Related: ToolRunner.Execute, ToolExecutor
-// - Keywords: tool_runner, hooks, dispatcher, executor, config
+//
+//	Purpose: Initialize a tool runner with hooks and configuration
+//	Keywords: tool_runner, hooks, dispatcher, executor, config
+//	Related: ToolRunner.Execute, ToolExecutor
+//	Flow: store executor/dispatcher/config → return runner
+//	Resources: none
+//	Events: none
+//	OutputFields: ToolRunner
+//
+// [[domain:tool-runner-lifecycle]]
 func NewToolRunner(executor ToolExecutor, dispatcher hooks.Dispatcher, cfg ToolRunnerConfig) *ToolRunner {
 	return &ToolRunner{
 		executor:   executor,
@@ -89,12 +95,17 @@ func (r *ToolRunner) SetSessionID(sessionID string) {
 // by the caller or at the skill level if needed.
 //
 // Index:
-// - Purpose: Execute a tool call with pre/post hook processing
-// - Flow: dispatch pre-hook → execute tool → build result → dispatch post-hook → apply actions
-// - SideEffects: invokes hooks; executes tools; may mutate result content
-// - FailureModes: hook dispatch errors, tool execution errors
-// - Related: ToolRunner.dispatchPreToolUse, ToolRunner.dispatchPostToolUse
-// - Keywords: tool_execute, hooks, tool_call, tool_result, post_tool_use
+//
+//	Purpose: Execute a tool call with pre/post hook processing
+//	Keywords: tool_execute, hooks, tool_call, tool_result, post_tool_use
+//	Related: ToolRunner.dispatchPreToolUse, ToolRunner.dispatchPostToolUse
+//	Flow: dispatch pre-hook → execute tool → build result → dispatch post-hook → apply actions
+//	Resources: ToolExecutor, hooks.Dispatcher
+//	Events: hook.pre_tool_use_error, hook.post_tool_dispatch_failed
+//	OutputFields: ToolResult
+//
+// [[protocol:tool-execution-with-hooks]]
+// [[invariant:pre-tool-block-is-respected]]
 func (r *ToolRunner) Execute(ctx context.Context, call ToolCall) (ToolResult, error) {
 	start := time.Now()
 

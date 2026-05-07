@@ -34,13 +34,17 @@ func main() {
 // run orchestrates feedback operations with workspace resolution, store management, and action dispatch.
 //
 // Index:
-// - Purpose: Collect and analyze human feedback for agent optimization with rating and comment tracking
-// - Flow: resolve workspace → open trajectory store → create feedback collector → dispatch action (add/stats) → emit results
-// - SideEffects: writes feedback records to trajectory store; reads feedback statistics; manages optimization data
-// - FailureModes: missing trajectory IDs, invalid ratings, store access failures, workspace resolution errors
-// - Observability: emits feedback records, statistics, rating distributions, and comprehensive feedback analytics
-// - Related: addFeedback, getFeedbackStats, optimization.NewFeedbackCollector
-// - Keywords: optimize/feedback, human_feedback, optimization, rating_collection, feedback_analytics
+//
+//	Purpose: Collect and analyze human feedback for agent optimization with rating and comment tracking
+//	Keywords: optimize/feedback, human_feedback, optimization, rating_collection, feedback_analytics
+//	Related: addFeedback, getFeedbackStats, optimization.NewFeedbackCollector
+//	Flow: resolve workspace → open trajectory store → create feedback collector → dispatch action (add/stats) → emit results
+//	Resources: trajectory store
+//	Events: feedback collection events
+//	OutputFields: feedback, stats, workspace, role
+//
+// [[domain:human-feedback-loop]]
+// [[invariant:rating-range-1-to-5]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Resolve workspace
 	workspace := in.Workspace

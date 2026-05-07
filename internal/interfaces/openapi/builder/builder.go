@@ -41,12 +41,14 @@ func New(spec *loader.Spec) *Builder {
 // Build constructs an HTTP request from an operation and parameters.
 //
 // Index:
-// - Purpose: Build an HTTP request from an OpenAPI operation and parameter sets
-// - Flow: resolve operation -> choose base URL -> resolve path params -> add query params -> build headers -> serialize body
-// - SideEffects: none
-// - FailureModes: missing operation, invalid parameters, serialization errors
-// - Related: Builder.getBaseURL, Builder.resolvePath, Builder.addQueryParams, Builder.buildHeaders, Builder.serializeBody
-// - Keywords: operation_id, path_params, query_params, headers, request_body, content_type
+//
+//	Purpose: Build an HTTP request from an OpenAPI operation and parameter sets
+//	Flow: resolve operation → choose base URL → resolve path params → add query params → build headers → serialize body
+//	Related: Builder.getBaseURL, Builder.resolvePath, Builder.addQueryParams, Builder.buildHeaders, Builder.serializeBody
+//	Keywords: operation_id, path_params, query_params, headers, request_body, content_type
+//
+// [[protocol:openapi-request-builder]]
+// [[domain:http-request-construction]]
 func (b *Builder) Build(operationID string, params Params) (*Request, error) {
 	op, err := b.spec.GetOperation(operationID)
 	if err != nil {

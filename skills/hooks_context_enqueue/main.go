@@ -39,13 +39,17 @@ func main() {
 // run orchestrates context enqueuing to buffer for later injection with validation and deduplication.
 //
 // Index:
-// - Purpose: Enqueue context to buffer for later injection when direct injection isn't possible
-// - Flow: validate input → open store → enqueue with TTL → get pending count → emit results
-// - SideEffects: context buffer storage; deduplication; TTL management
-// - FailureModes: invalid input, store access failures, enqueue errors
-// - Observability: emits enqueue results, pending counts, and timing metrics
-// - Related: contextbuffer.Enqueue, contextbuffer.Count
-// - Keywords: hooks/context_enqueue, context_buffer, delayed_injection, ttl_management
+//
+//	Purpose: Enqueue context to buffer for later injection when direct injection isn't possible
+//	Keywords: hooks/context_enqueue, context_buffer, delayed_injection, ttl_management
+//	Related: contextbuffer.Enqueue, contextbuffer.Count
+//	Flow: validate input → open store → enqueue with TTL → get pending count → emit results
+//	Resources: context buffer store (SQLite)
+//	Events: context-enqueued
+//	OutputFields: id, source, priority, expires_at, total_pending
+//
+// [[domain:context-buffer]]
+// [[protocol:context-injection]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	start := time.Now()
 

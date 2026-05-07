@@ -36,6 +36,7 @@ func (f PreflightFunc) Check(ctx context.Context) error {
 type ComponentConfig struct {
 	PollInterval time.Duration
 	Scheduler    TickRunner
+	Recovery     StartupRecovery
 	Reconciler   Reconciler
 	Preflight    PreflightChecker
 	OnError      func(error)
@@ -45,6 +46,7 @@ type ComponentConfig struct {
 type Component struct {
 	pollInterval time.Duration
 	scheduler    TickRunner
+	recovery     StartupRecovery
 	reconciler   Reconciler
 	preflight    PreflightChecker
 	onError      func(error)
@@ -64,6 +66,7 @@ func NewComponent(cfg ComponentConfig) *Component {
 	return &Component{
 		pollInterval: pollInterval,
 		scheduler:    cfg.Scheduler,
+		recovery:     cfg.Recovery,
 		reconciler:   cfg.Reconciler,
 		preflight:    cfg.Preflight,
 		onError:      onError,
@@ -104,6 +107,13 @@ func (c *Component) runCycle(ctx context.Context) {
 	}
 	if ctx.Err() != nil {
 		return
+	}
+
+	if c.recovery != nil {
+		if err := c.recovery.RecoverOrphanedRuns(ctx); err != nil {
+			c.onError(err)
+			return
+		}
 	}
 
 	if c.reconciler != nil {

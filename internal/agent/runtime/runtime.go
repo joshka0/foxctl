@@ -649,25 +649,27 @@ func (e *agentToolExecutor) runtimeToolHandlers() map[string]runtimeToolHandler 
 		"annotation_list_sessions": func(ctx context.Context, _ map[string]any) (string, error) {
 			return e.executeAnnotationListSessions(ctx)
 		},
-		"annotation_category_stats": e.executeAnnotationCategoryStats,
-		"repo_index_search":         e.executeRepoIndexSearch,
-		"repo_index_expand":         e.executeRepoIndexExpand,
-		"repo_index_open":           e.executeRepoIndexOpen,
-		"repo_index_dag_grep":       e.executeRepoIndexDagGrep,
-		"context_show":              e.executeContextShow,
-		"context_retrieve":          e.executeContextRetrieve,
-		"obsidian_index_search":     e.executeObsidianIndexSearch,
-		"obsidian_read":             e.executeObsidianRead,
-		"obsidian_related":          e.executeObsidianRelated,
-		"heartwood_state":           e.executeHeartwoodState,
-		"heartwood_action":          e.executeHeartwoodAction,
-		"context_filter":            e.executeContextFilter,
-		"agent_spawn":               e.executeAgentSpawn,
-		"agent_list":                e.executeAgentList,
-		"agent_status":              e.executeAgentStatus,
-		"agent_kill":                e.executeAgentKill,
-		"agent_hierarchy":           e.executeAgentHierarchy,
-		"agent_wait":                e.executeAgentWait,
+		"annotation_category_stats":   e.executeAnnotationCategoryStats,
+		"repo_index_build":            e.executeRepoIndexBuild,
+		"repo_index_enrich_summaries": e.executeRepoIndexEnrichSummaries,
+		"repo_index_search":           e.executeRepoIndexSearch,
+		"repo_index_expand":           e.executeRepoIndexExpand,
+		"repo_index_open":             e.executeRepoIndexOpen,
+		"repo_index_dag_grep":         e.executeRepoIndexDagGrep,
+		"context_show":                e.executeContextShow,
+		"context_retrieve":            e.executeContextRetrieve,
+		"obsidian_index_search":       e.executeObsidianIndexSearch,
+		"obsidian_read":               e.executeObsidianRead,
+		"obsidian_related":            e.executeObsidianRelated,
+		"heartwood_state":             e.executeHeartwoodState,
+		"heartwood_action":            e.executeHeartwoodAction,
+		"context_filter":              e.executeContextFilter,
+		"agent_spawn":                 e.executeAgentSpawn,
+		"agent_list":                  e.executeAgentList,
+		"agent_status":                e.executeAgentStatus,
+		"agent_kill":                  e.executeAgentKill,
+		"agent_hierarchy":             e.executeAgentHierarchy,
+		"agent_wait":                  e.executeAgentWait,
 	}
 }
 
@@ -1697,6 +1699,71 @@ func (e *agentToolExecutor) executeRefactorScout(ctx context.Context, args map[s
 	return commandOutput(cmd, "refactor_scout")
 }
 
+func (e *agentToolExecutor) executeRepoIndexBuild(ctx context.Context, args map[string]any) (string, error) {
+	workspace := stringArg(args, "", "workspace")
+	if strings.TrimSpace(workspace) == "" {
+		workspace = strings.TrimSpace(e.workspaceRoot)
+	}
+	if strings.TrimSpace(workspace) == "" {
+		workspace = "."
+	}
+
+	patterns := stringSliceArg(args, "go_pattern", "go_patterns")
+	if len(patterns) == 0 {
+		patterns = []string{"./..."}
+	}
+
+	argsList := []string{"index", "repo", "build", "--workspace", workspace}
+	for _, pattern := range patterns {
+		pattern = strings.TrimSpace(pattern)
+		if pattern != "" {
+			argsList = append(argsList, "--go-pattern", pattern)
+		}
+	}
+	argsList = append(argsList,
+		fmt.Sprintf("--go=%t", boolArgDefault(args, true, "include_go", "go")),
+		fmt.Sprintf("--python=%t", boolArg(args, "include_python", "python")),
+		fmt.Sprintf("--rust=%t", boolArg(args, "include_rust", "rust")),
+		fmt.Sprintf("--csharp=%t", boolArg(args, "include_csharp", "csharp")),
+		fmt.Sprintf("--typescript=%t", boolArgDefault(args, true, "include_typescript", "typescript")),
+		fmt.Sprintf("--elixir=%t", boolArg(args, "include_elixir", "elixir")),
+		fmt.Sprintf("--terraform=%t", boolArg(args, "include_terraform", "terraform")),
+		fmt.Sprintf("--kubernetes=%t", boolArg(args, "include_kubernetes", "kubernetes")),
+		fmt.Sprintf("--shell=%t", boolArg(args, "include_shell", "shell")),
+		fmt.Sprintf("--include-tests=%t", boolArg(args, "include_tests", "include-tests")),
+		fmt.Sprintf("--semantic-anchors=%t", boolArg(args, "include_semantic_anchors", "semantic_anchors", "semantic-anchors")),
+		fmt.Sprintf("--cochange=%t", boolArg(args, "include_cochange", "cochange")),
+		fmt.Sprintf("--dry-run=%t", boolArg(args, "dry_run", "dry-run")),
+		fmt.Sprintf("--progress=%t", boolArgDefault(args, false, "progress")),
+		fmt.Sprintf("--incremental=%t", boolArgDefault(args, true, "incremental")),
+	)
+
+	cmd := e.newFoxctlCommand(ctx, argsList...)
+	return e.commandOutputData(cmd, "repo_index_build")
+}
+
+func (e *agentToolExecutor) executeRepoIndexEnrichSummaries(ctx context.Context, args map[string]any) (string, error) {
+	workspace := stringArg(args, "", "workspace")
+	if strings.TrimSpace(workspace) == "" {
+		workspace = strings.TrimSpace(e.workspaceRoot)
+	}
+	if strings.TrimSpace(workspace) == "" {
+		workspace = "."
+	}
+
+	cmd := e.newFoxctlCommand(
+		ctx,
+		"index",
+		"repo",
+		"enrich",
+		"summaries",
+		"--workspace",
+		workspace,
+		fmt.Sprintf("--dry-run=%t", boolArg(args, "dry_run", "dry-run")),
+	)
+	return e.commandOutputData(cmd, "repo_index_enrich_summaries")
+}
+
 func (e *agentToolExecutor) executeRepoIndexSearch(ctx context.Context, args map[string]any) (string, error) {
 	query, _ := args["query"].(string)
 	if query == "" {
@@ -2370,14 +2437,16 @@ type runtimeToolDataSummarizer func(map[string]any) string
 
 func runtimeToolDataSummarizers() map[string]runtimeToolDataSummarizer {
 	return map[string]runtimeToolDataSummarizer{
-		"shell":                 summarizeShellToolData,
-		"context_show":          summarizeContextShowToolData,
-		"context_retrieve":      summarizeContextRetrieveToolData,
-		"obsidian_index_search": summarizeObsidianIndexSearchToolData,
-		"obsidian_read":         summarizeObsidianReadToolData,
-		"obsidian_related":      summarizeObsidianRelatedToolData,
-		"agent_memory_context":  summarizeAgentMemoryContextToolData,
-		"agent_memory_search":   summarizeAgentMemorySearchToolData,
+		"shell":                       summarizeShellToolData,
+		"repo_index_build":            summarizeRepoIndexBuildToolData,
+		"repo_index_enrich_summaries": summarizeRepoIndexEnrichSummariesToolData,
+		"context_show":                summarizeContextShowToolData,
+		"context_retrieve":            summarizeContextRetrieveToolData,
+		"obsidian_index_search":       summarizeObsidianIndexSearchToolData,
+		"obsidian_read":               summarizeObsidianReadToolData,
+		"obsidian_related":            summarizeObsidianRelatedToolData,
+		"agent_memory_context":        summarizeAgentMemoryContextToolData,
+		"agent_memory_search":         summarizeAgentMemorySearchToolData,
 	}
 }
 
@@ -2396,6 +2465,63 @@ func summarizeShellToolData(m map[string]any) string {
 	if measure := shellreduce.MeasureSummaryLine(asStringMap(m["measure"])); measure != "" {
 		b.WriteString("\n")
 		b.WriteString(measure)
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func summarizeRepoIndexBuildToolData(m map[string]any) string {
+	var b strings.Builder
+	b.WriteString("Repoindex build\n")
+	writeKeyValueLine(&b, "Workspace", stringFromMap(m, "workspace"))
+	writeKeyValueLine(&b, "Store", stringFromMap(m, "store_path"))
+	writeKeyValueLine(&b, "Skipped", scalarString(m["skipped"]))
+	writeKeyValueLine(&b, "Reason", stringFromMap(m, "reason"))
+	writeKeyValueLine(&b, "Incremental", scalarString(m["incremental"]))
+	writeKeyValueLine(&b, "Dry run", scalarString(m["dry_run"]))
+	writeKeyValueLine(&b, "Duration ms", scalarString(m["duration_ms"]))
+	if result, ok := m["result"].(map[string]any); ok {
+		var counts []string
+		for _, key := range []string{"packages", "files", "symbols", "nodes", "edges"} {
+			if value := scalarString(result[key]); value != "" {
+				counts = append(counts, key+"="+value)
+			}
+		}
+		writeListLine(&b, "Result", counts, 0)
+	}
+	if delta, ok := m["delta_counts"].(map[string]any); ok {
+		var counts []string
+		for _, key := range []string{"added", "modified", "deleted", "untracked", "unchanged"} {
+			if value := scalarString(delta[key]); value != "" {
+				counts = append(counts, key+"="+value)
+			}
+		}
+		writeListLine(&b, "Delta", counts, 0)
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func summarizeRepoIndexEnrichSummariesToolData(m map[string]any) string {
+	var b strings.Builder
+	b.WriteString("Repoindex summary enrichment\n")
+	writeKeyValueLine(&b, "Workspace", stringFromMap(m, "workspace"))
+	writeKeyValueLine(&b, "Store", stringFromMap(m, "store_path"))
+	writeKeyValueLine(&b, "Dry run", scalarString(m["dry_run"]))
+	writeKeyValueLine(&b, "Duration ms", scalarString(m["duration_ms"]))
+	if result, ok := m["result"].(map[string]any); ok {
+		for _, key := range []string{
+			"file_nodes_scanned",
+			"file_summaries_applied",
+			"file_summaries_would_apply",
+			"file_summaries_skipped",
+			"file_summaries_missing",
+			"symbol_nodes_scanned",
+			"symbol_summaries_applied",
+			"symbol_summaries_would_apply",
+			"symbol_summaries_skipped",
+			"symbol_summaries_missing",
+		} {
+			writeKeyValueLine(&b, strings.ReplaceAll(key, "_", " "), scalarString(result[key]))
+		}
 	}
 	return strings.TrimSpace(b.String())
 }
@@ -2560,6 +2686,26 @@ func stringFromMap(m map[string]any, key string) string {
 		return strings.TrimSpace(v)
 	}
 	return ""
+}
+
+func scalarString(value any) string {
+	switch v := value.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case bool:
+		return strconv.FormatBool(v)
+	case int:
+		return strconv.Itoa(v)
+	case int64:
+		return strconv.FormatInt(v, 10)
+	case float64:
+		if v == float64(int64(v)) {
+			return strconv.FormatInt(int64(v), 10)
+		}
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	default:
+		return ""
+	}
 }
 
 func asStringMap(value any) map[string]any {
@@ -2799,6 +2945,34 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				},"required":["path"]}`),
 			},
 			engine.ToolDef{
+				Name:        "repo_index_build",
+				Description: "Build or refresh the repo graph index. Incremental is enabled by default; set incremental=false to force a full rebuild.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"workspace":{"type":"string","description":"Workspace root (default: agent workspace)"},
+					"go_pattern":{"type":"array","items":{"type":"string"},"description":"Go package patterns (default ./...)"},
+					"include_go":{"type":"boolean","description":"Include Go sources (default true)"},
+					"include_typescript":{"type":"boolean","description":"Include TypeScript sources (default true)"},
+					"include_python":{"type":"boolean","description":"Include Python sources"},
+					"include_rust":{"type":"boolean","description":"Include Rust sources"},
+					"include_csharp":{"type":"boolean","description":"Include C# sources"},
+					"include_elixir":{"type":"boolean","description":"Include Elixir sources"},
+					"include_terraform":{"type":"boolean","description":"Include Terraform files"},
+					"include_kubernetes":{"type":"boolean","description":"Include Kubernetes manifests"},
+					"include_shell":{"type":"boolean","description":"Include shell scripts"},
+					"include_tests":{"type":"boolean","description":"Include test files"},
+					"include_semantic_anchors":{"type":"boolean","description":"Include semantic anchor concept nodes and edges"},
+					"include_cochange":{"type":"boolean","description":"Include git co-change file edges"},
+					"dry_run":{"type":"boolean","description":"Build without writing"},
+					"progress":{"type":"boolean","description":"Emit coarse progress logs to stderr"},
+					"incremental":{"type":"boolean","description":"Skip rebuild when unchanged (default true)"}
+				}}`),
+			},
+			engine.ToolDef{
+				Name:        "repo_index_enrich_summaries",
+				Description: "Attach stored file and symbol summaries to an existing repo graph index. Run after file-summaries and symbol-summaries when graph output needs summaries.",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"workspace":{"type":"string","description":"Workspace root (default: agent workspace)"},"dry_run":{"type":"boolean","description":"Report updates without writing"}}}`),
+			},
+			engine.ToolDef{
 				Name:        "repo_index_search",
 				Description: "Search the repo index for nodes that match a short natural-language or symbol-name query. Avoid slash-heavy path strings.",
 				Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"FTS query string"},"limit":{"type":"integer","description":"Maximum results","default":20},"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much search detail to inline (default auto)"}},"required":["query"]}`),
@@ -2821,7 +2995,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 					"mode":{"type":"string","enum":["fts","semantic","hybrid"]},
 					"k":{"type":"integer","description":"Number of seed nodes (default 10)"},
 					"node_kinds":{"type":"array","items":{"type":"string","enum":["symbol","file","package","concept"]}},
-					"edge_sets":{"type":"array","items":{"type":"string","enum":["structural","doc","all"]}},
+					"edge_sets":{"type":"array","items":{"type":"string","enum":["structural","doc","semantic","semantic_anchor","semantic_anchors","empirical","all"]}},
 					"edge_types":{"type":"array","items":{"type":"string"}},
 					"direction":{"type":"string","enum":["out","in"]},
 					"depth":{"type":"integer","description":"Traversal depth"},
@@ -2963,6 +3137,34 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 	case types.RoleDAGScout:
 		tools = append(tools,
 			engine.ToolDef{
+				Name:        "repo_index_build",
+				Description: "Build or refresh the repo graph index. Incremental is enabled by default; set incremental=false to force a full rebuild.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"workspace":{"type":"string","description":"Workspace root (default: agent workspace)"},
+					"go_pattern":{"type":"array","items":{"type":"string"},"description":"Go package patterns (default ./...)"},
+					"include_go":{"type":"boolean","description":"Include Go sources (default true)"},
+					"include_typescript":{"type":"boolean","description":"Include TypeScript sources (default true)"},
+					"include_python":{"type":"boolean","description":"Include Python sources"},
+					"include_rust":{"type":"boolean","description":"Include Rust sources"},
+					"include_csharp":{"type":"boolean","description":"Include C# sources"},
+					"include_elixir":{"type":"boolean","description":"Include Elixir sources"},
+					"include_terraform":{"type":"boolean","description":"Include Terraform files"},
+					"include_kubernetes":{"type":"boolean","description":"Include Kubernetes manifests"},
+					"include_shell":{"type":"boolean","description":"Include shell scripts"},
+					"include_tests":{"type":"boolean","description":"Include test files"},
+					"include_semantic_anchors":{"type":"boolean","description":"Include semantic anchor concept nodes and edges"},
+					"include_cochange":{"type":"boolean","description":"Include git co-change file edges"},
+					"dry_run":{"type":"boolean","description":"Build without writing"},
+					"progress":{"type":"boolean","description":"Emit coarse progress logs to stderr"},
+					"incremental":{"type":"boolean","description":"Skip rebuild when unchanged (default true)"}
+				}}`),
+			},
+			engine.ToolDef{
+				Name:        "repo_index_enrich_summaries",
+				Description: "Attach stored file and symbol summaries to an existing repo graph index.",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"workspace":{"type":"string","description":"Workspace root (default: agent workspace)"},"dry_run":{"type":"boolean","description":"Report updates without writing"}}}`),
+			},
+			engine.ToolDef{
 				Name:        "repo_index_search",
 				Description: "Search the repo index for nodes that match a short natural-language or symbol-name query. Avoid slash-heavy path strings.",
 				Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"FTS query string"},"limit":{"type":"integer","description":"Maximum results","default":20},"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much search detail to inline (default auto)"}},"required":["query"]}`),
@@ -2985,7 +3187,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 					"mode":{"type":"string","enum":["fts","semantic","hybrid"]},
 					"k":{"type":"integer","description":"Number of seed nodes (default 10)"},
 					"node_kinds":{"type":"array","items":{"type":"string","enum":["symbol","file","package","concept"]}},
-					"edge_sets":{"type":"array","items":{"type":"string","enum":["structural","doc","all"]}},
+					"edge_sets":{"type":"array","items":{"type":"string","enum":["structural","doc","semantic","semantic_anchor","semantic_anchors","empirical","all"]}},
 					"edge_types":{"type":"array","items":{"type":"string"}},
 					"direction":{"type":"string","enum":["out","in"]},
 					"depth":{"type":"integer","description":"Traversal depth"},
@@ -3305,6 +3507,34 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				},"required":["query"]}`),
 			},
 			engine.ToolDef{
+				Name:        "repo_index_build",
+				Description: "Build or refresh the repo graph index. Incremental is enabled by default; set incremental=false to force a full rebuild.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"workspace":{"type":"string","description":"Workspace root (default: agent workspace)"},
+					"go_pattern":{"type":"array","items":{"type":"string"},"description":"Go package patterns (default ./...)"},
+					"include_go":{"type":"boolean","description":"Include Go sources (default true)"},
+					"include_typescript":{"type":"boolean","description":"Include TypeScript sources (default true)"},
+					"include_python":{"type":"boolean","description":"Include Python sources"},
+					"include_rust":{"type":"boolean","description":"Include Rust sources"},
+					"include_csharp":{"type":"boolean","description":"Include C# sources"},
+					"include_elixir":{"type":"boolean","description":"Include Elixir sources"},
+					"include_terraform":{"type":"boolean","description":"Include Terraform files"},
+					"include_kubernetes":{"type":"boolean","description":"Include Kubernetes manifests"},
+					"include_shell":{"type":"boolean","description":"Include shell scripts"},
+					"include_tests":{"type":"boolean","description":"Include test files"},
+					"include_semantic_anchors":{"type":"boolean","description":"Include semantic anchor concept nodes and edges"},
+					"include_cochange":{"type":"boolean","description":"Include git co-change file edges"},
+					"dry_run":{"type":"boolean","description":"Build without writing"},
+					"progress":{"type":"boolean","description":"Emit coarse progress logs to stderr"},
+					"incremental":{"type":"boolean","description":"Skip rebuild when unchanged (default true)"}
+				}}`),
+			},
+			engine.ToolDef{
+				Name:        "repo_index_enrich_summaries",
+				Description: "Attach stored file and symbol summaries to an existing repo graph index. Run after file-summaries and symbol-summaries when graph output needs summaries.",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"workspace":{"type":"string","description":"Workspace root (default: agent workspace)"},"dry_run":{"type":"boolean","description":"Report updates without writing"}}}`),
+			},
+			engine.ToolDef{
 				Name:        "repo_index_search",
 				Description: "Search the repo index for nodes that match a text query. USE THIS for precise structural discovery before spawning DAG-focused subagents.",
 				Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"FTS query string"},"limit":{"type":"integer","description":"Maximum results","default":20},"inline_mode":{"type":"string","enum":["auto","full","preview","artifact_only"],"description":"How much search detail to inline (default auto)"}},"required":["query"]}`),
@@ -3327,7 +3557,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 					"mode":{"type":"string","enum":["fts","semantic","hybrid"]},
 					"k":{"type":"integer","description":"Number of seed nodes (default 10)"},
 					"node_kinds":{"type":"array","items":{"type":"string","enum":["symbol","file","package","concept"]}},
-					"edge_sets":{"type":"array","items":{"type":"string","enum":["structural","doc","all"]}},
+					"edge_sets":{"type":"array","items":{"type":"string","enum":["structural","doc","semantic","semantic_anchor","semantic_anchors","empirical","all"]}},
 					"edge_types":{"type":"array","items":{"type":"string"}},
 					"direction":{"type":"string","enum":["out","in"]},
 					"depth":{"type":"integer","description":"Traversal depth"},
@@ -3921,6 +4151,15 @@ func boolArg(args map[string]any, keys ...string) bool {
 		}
 	}
 	return false
+}
+
+func boolArgDefault(args map[string]any, fallback bool, keys ...string) bool {
+	for _, key := range keys {
+		if v, ok := args[key].(bool); ok {
+			return v
+		}
+	}
+	return fallback
 }
 
 func stringSliceArg(args map[string]any, keys ...string) []string {

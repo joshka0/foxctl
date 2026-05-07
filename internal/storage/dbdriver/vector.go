@@ -4,10 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
 )
+
+// ErrVectorIndexUnsupported indicates that the database supports exact vector
+// functions but not ANN/vector index DDL for the current driver.
+var ErrVectorIndexUnsupported = errors.New("vector index unsupported")
 
 // VectorHelper provides vector search utilities for databases that support it
 type VectorHelper struct {
@@ -75,7 +80,7 @@ func (vh *VectorHelper) CreateVectorColumn(ctx context.Context, tableName, colum
 	if vh.db.GetDriverType() == DriverPostgres {
 		query = pgCreateVectorColumnSQL(tableName, columnName, vh.dimensions)
 	} else {
-		query = fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s F32_BLOB(%d)", tableName, columnName, vh.dimensions)
+		query = fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s BLOB", tableName, columnName)
 	}
 	_, err := vh.db.ExecContext(ctx, query)
 	if err != nil {
@@ -93,21 +98,19 @@ func (vh *VectorHelper) CreateVectorIndex(ctx context.Context, tableName, column
 	var query string
 	if vh.db.GetDriverType() == DriverPostgres {
 		query = pgCreateVectorIndexSQL(tableName, columnName, indexName)
-	} else {
-		query = fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s (libsql_vector_idx(%s))",
-			indexName, tableName, columnName)
+		_, err := vh.db.ExecContext(ctx, query)
+		return err
 	}
-	_, err := vh.db.ExecContext(ctx, query)
-	return err
+	return fmt.Errorf("%w: %s does not support indexed dense vector search on Turso main", ErrVectorIndexUnsupported, vh.db.GetDriverType())
 }
 
-// VectorExpression inserts a vector into the database using the vector() SQL function
+// VectorExpression inserts a vector into the database using the native vector SQL function.
 // Returns a SQL expression that can be used in INSERT/UPDATE statements
 func (vh *VectorHelper) VectorExpression(vector Vector) string {
 	if vh.db.GetDriverType() == DriverPostgres {
 		return pgVectorExpression(vector)
 	}
-	return fmt.Sprintf("vector('%s')", vector.String())
+	return tursoVectorExpression(vector)
 }
 
 // CosineSimilarity returns a SQL expression for cosine-based scoring between two vectors.
@@ -131,14 +134,14 @@ func cosineSimilarityExpr(driver DriverType, columnName string, queryVector Vect
 	if driver == DriverPostgres {
 		return pgCosineSimilarity(columnName, queryVector)
 	}
-	return fmt.Sprintf("vector_distance_cos(%s, '%s')", columnName, queryVector.String())
+	return fmt.Sprintf("vector_distance_cos(%s, %s)", columnName, tursoVectorExpression(queryVector))
 }
 
 func cosineSimilarityScoreExpr(driver DriverType, columnName string, queryVector Vector) string {
 	if driver == DriverPostgres {
 		return pgCosineSimilarityScore(columnName, queryVector)
 	}
-	return fmt.Sprintf("(1 - (vector_distance_cos(%s, '%s') / 2.0))", columnName, queryVector.String())
+	return fmt.Sprintf("(1 - (vector_distance_cos(%s, %s) / 2.0))", columnName, tursoVectorExpression(queryVector))
 }
 
 // EuclideanDistance calculates Euclidean distance between two vectors
@@ -147,20 +150,7 @@ func (vh *VectorHelper) EuclideanDistance(columnName string, queryVector Vector)
 	if vh.db.GetDriverType() == DriverPostgres {
 		return pgEuclideanDistance(columnName, queryVector)
 	}
-	return fmt.Sprintf("vector_distance_l2(%s, '%s')", columnName, queryVector.String())
-}
-
-// VectorTopK performs a vector similarity search using the index.
-// For Turso: returns a virtual table expression using vector_top_k().
-// For PostgreSQL: returns empty string (Postgres uses ORDER BY <=> in the main query).
-// Callers should use SearchSimilar() for cross-driver compatibility.
-func (vh *VectorHelper) VectorTopK(indexName string, queryVector Vector, k int) string {
-	if vh.db.GetDriverType() == DriverPostgres {
-		// PostgreSQL does not have a vector_top_k equivalent.
-		// Return empty string; callers should use SearchSimilar() instead.
-		return ""
-	}
-	return fmt.Sprintf("vector_top_k('%s', '%s', %d)", indexName, queryVector.String(), k)
+	return fmt.Sprintf("vector_distance_l2(%s, %s)", columnName, tursoVectorExpression(queryVector))
 }
 
 // ExtractVector extracts a vector from the database into a string representation.
@@ -200,17 +190,6 @@ func (vh *VectorHelper) SearchSimilar(
 			ORDER BY %s <=> '%s'
 			LIMIT %d
 		`, qVC, queryVector.String(), limit)
-	} else if indexName != "" {
-		// Turso: use vector index for fast approximate search.
-		query = fmt.Sprintf(`
-			SELECT t.*
-			FROM %s vt
-			JOIN %s t ON t.rowid = vt.id
-		`, vh.VectorTopK(indexName, queryVector, limit), tableName)
-
-		if additionalWhere != "" {
-			query += " WHERE " + additionalWhere
-		}
 	} else {
 		// Full table scan with exact normalized cosine score calculation
 		query = fmt.Sprintf(`
@@ -229,6 +208,10 @@ func (vh *VectorHelper) SearchSimilar(
 	}
 
 	return vh.db.QueryContext(ctx, query, args...)
+}
+
+func tursoVectorExpression(vector Vector) string {
+	return fmt.Sprintf("vector32('%s')", vector.String())
 }
 
 // GetDimensions returns the configured vector dimensions

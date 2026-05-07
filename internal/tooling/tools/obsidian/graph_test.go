@@ -30,17 +30,23 @@ func TestBuildRepoGraphDrafts(t *testing.T) {
 	}
 	defer repo.Close()
 	key := repo.RepoKey()
+	now := time.Now().UTC()
 
 	nodes := []repoindex.Node{
-		{ID: repoindex.PackageID(key, "go:internal/context/contextplane"), Kind: repoindex.NodePackage, Pkg: "go:internal/context/contextplane", Name: "internal/context/contextplane", UpdatedAt: time.Now().UTC()},
-		{ID: repoindex.FileID(key, "go:internal/context/contextplane", "internal/context/contextplane/store.go"), Kind: repoindex.NodeFile, Pkg: "go:internal/context/contextplane", File: "internal/context/contextplane/store.go", Name: "store.go", UpdatedAt: time.Now().UTC()},
-		{ID: repoindex.SymbolID(key, "go:internal/context/contextplane", "WorkspaceStore"), Kind: repoindex.NodeSymbol, Pkg: "go:internal/context/contextplane", File: "internal/context/contextplane/store.go", Name: "WorkspaceStore", UpdatedAt: time.Now().UTC()},
-		{ID: repoindex.PackageID(key, "go:internal/storage/obsidianindex"), Kind: repoindex.NodePackage, Pkg: "go:internal/storage/obsidianindex", Name: "internal/storage/obsidianindex", UpdatedAt: time.Now().UTC()},
-		{ID: repoindex.FileID(key, "go:internal/storage/obsidianindex", "internal/storage/obsidianindex/store.go"), Kind: repoindex.NodeFile, Pkg: "go:internal/storage/obsidianindex", File: "internal/storage/obsidianindex/store.go", Name: "store.go", UpdatedAt: time.Now().UTC()},
-		{ID: repoindex.SymbolID(key, "go:internal/storage/obsidianindex", "Store"), Kind: repoindex.NodeSymbol, Pkg: "go:internal/storage/obsidianindex", File: "internal/storage/obsidianindex/store.go", Name: "Store", UpdatedAt: time.Now().UTC()},
+		{ID: repoindex.PackageID(key, "go:internal/context/contextplane"), Kind: repoindex.NodePackage, Pkg: "go:internal/context/contextplane", Name: "internal/context/contextplane", UpdatedAt: now},
+		{ID: repoindex.FileID(key, "go:internal/context/contextplane", "internal/context/contextplane/store.go"), Kind: repoindex.NodeFile, Pkg: "go:internal/context/contextplane", File: "internal/context/contextplane/store.go", Name: "store.go", UpdatedAt: now},
+		{ID: repoindex.SymbolID(key, "go:internal/context/contextplane", "WorkspaceStore"), Kind: repoindex.NodeSymbol, Pkg: "go:internal/context/contextplane", File: "internal/context/contextplane/store.go", Name: "WorkspaceStore", UpdatedAt: now},
+		{ID: repoindex.NamespacedID(key, "kw:workspace-store"), Kind: repoindex.NodeConcept, Pkg: "go:internal/context/contextplane", File: "internal/context/contextplane/store.go", Name: "workspace store", UpdatedAt: now},
+		{ID: repoindex.NamespacedID(key, "anchor:foxctl:invariant:no-send-without-read"), Kind: repoindex.NodeConcept, Pkg: "go:internal/context/contextplane", File: "internal/context/contextplane/store.go", Name: "anchor invariant", UpdatedAt: now},
+		{ID: repoindex.NamespacedID(key, "anchor:foxctl:risk:global-anchor"), Kind: repoindex.NodeConcept, Pkg: "tf:infra", File: "infra/main.tf", Name: "global anchor", UpdatedAt: now},
+		{ID: repoindex.PackageID(key, "go:internal/storage/obsidianindex"), Kind: repoindex.NodePackage, Pkg: "go:internal/storage/obsidianindex", Name: "internal/storage/obsidianindex", UpdatedAt: now},
+		{ID: repoindex.FileID(key, "go:internal/storage/obsidianindex", "internal/storage/obsidianindex/store.go"), Kind: repoindex.NodeFile, Pkg: "go:internal/storage/obsidianindex", File: "internal/storage/obsidianindex/store.go", Name: "store.go", UpdatedAt: now},
+		{ID: repoindex.SymbolID(key, "go:internal/storage/obsidianindex", "Store"), Kind: repoindex.NodeSymbol, Pkg: "go:internal/storage/obsidianindex", File: "internal/storage/obsidianindex/store.go", Name: "Store", UpdatedAt: now},
 	}
 	edges := []repoindex.Edge{
 		{Src: repoindex.PackageID(key, "go:internal/context/contextplane"), Dst: repoindex.FileID(key, "go:internal/context/contextplane", "internal/context/contextplane/store.go"), Type: repoindex.EdgeContains, Weight: 1},
+		{Src: repoindex.PackageID(key, "go:internal/context/contextplane"), Dst: repoindex.NamespacedID(key, "kw:workspace-store"), Type: repoindex.EdgeContains, Weight: 1},
+		{Src: repoindex.PackageID(key, "go:internal/context/contextplane"), Dst: repoindex.NamespacedID(key, "anchor:foxctl:invariant:no-send-without-read"), Type: repoindex.EdgeContains, Weight: 1},
 		{Src: repoindex.FileID(key, "go:internal/context/contextplane", "internal/context/contextplane/store.go"), Dst: repoindex.SymbolID(key, "go:internal/context/contextplane", "WorkspaceStore"), Type: repoindex.EdgeContains, Weight: 1},
 		{Src: repoindex.PackageID(key, "go:internal/context/contextplane"), Dst: repoindex.PackageID(key, "go:internal/storage/obsidianindex"), Type: repoindex.EdgeImports, Weight: 1},
 		{Src: repoindex.PackageID(key, "go:internal/storage/obsidianindex"), Dst: repoindex.FileID(key, "go:internal/storage/obsidianindex", "internal/storage/obsidianindex/store.go"), Type: repoindex.EdgeContains, Weight: 1},
@@ -100,6 +106,14 @@ esac
 	if result.RootNotePath == "" || len(result.PackageNotes) == 0 {
 		t.Fatalf("unexpected result: %#v", result)
 	}
+	if len(result.ConceptNotes) == 0 {
+		t.Fatalf("expected at least one non-anchor concept note")
+	}
+	for _, note := range result.ConceptNotes {
+		if strings.Contains(note, "anchor") {
+			t.Fatalf("anchor concept note generated by default: %#v", result.ConceptNotes)
+		}
+	}
 
 	rootBody, err := os.ReadFile(filepath.Join(vaultRoot, result.RootNotePath))
 	if err != nil {
@@ -135,5 +149,32 @@ esac
 	}
 	if !strings.Contains(string(body), "status: reviewed") || !strings.Contains(string(body), "trust: canonical") {
 		t.Fatalf("expected canonicalized graph root:\n%s", string(body))
+	}
+
+	withAnchors, err := BuildRepoGraphDrafts(ctx, writer, repo, RepoGraphBuildOptions{
+		Project:               "foxctl",
+		WorkspaceRoot:         repoRoot,
+		MaxPackages:           4,
+		IncludeAnchorConcepts: true,
+	})
+	if err != nil {
+		t.Fatalf("BuildRepoGraphDrafts with anchors: %v", err)
+	}
+	foundAnchorConcept := false
+	for _, note := range withAnchors.ConceptNotes {
+		if strings.Contains(note, "anchor") {
+			noteBody, err := os.ReadFile(filepath.Join(vaultRoot, filepath.FromSlash(note)))
+			if err != nil {
+				t.Fatalf("read anchor concept note: %v", err)
+			}
+			if !strings.Contains(string(noteBody), "repo_anchors:") || !strings.Contains(string(noteBody), "anchor:foxctl:invariant:no-send-without-read") {
+				t.Fatalf("expected anchor concept note to carry repo_anchors frontmatter:\n%s", string(noteBody))
+			}
+			foundAnchorConcept = true
+			break
+		}
+	}
+	if !foundAnchorConcept {
+		t.Fatalf("expected explicit anchor concept opt-in to produce anchor concept note: %#v", withAnchors.ConceptNotes)
 	}
 }

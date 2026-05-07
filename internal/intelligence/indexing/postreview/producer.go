@@ -57,12 +57,17 @@ func BuildPostReviewEvent(artifact agent.ReviewArtifact, files []indexing.FileCh
 // gracefully.
 //
 // Index:
-// - Purpose: Build and persist post-review events for indexing
-// - Flow: build event → store Put → return event
-// - SideEffects: writes postreview store
-// - FailureModes: store write errors
-// - Related: BuildPostReviewEvent, Store.Put
-// - Keywords: post_review_event, workspace_id, review_id, files
+//
+//	Purpose: Build and persist post-review events for indexing
+//	Keywords: post_review_event, workspace_id, review_id, files
+//	Related: BuildPostReviewEvent, Store.Put
+//	Flow: build event → store Put → return event
+//	Resources: postreview event store
+//	Events: post-review-event-produced
+//	OutputFields: PostReviewEvent
+//
+// [[protocol:post-review-event-production]]
+// [[invariant:idempotent-event-store]]
 func (p *Producer) Produce(ctx context.Context, artifact agent.ReviewArtifact, files []indexing.FileChange) (indexing.PostReviewEvent, error) {
 	event := BuildPostReviewEvent(artifact, files)
 	return p.store.Put(ctx, event)

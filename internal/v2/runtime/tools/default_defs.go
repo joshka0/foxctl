@@ -12,11 +12,11 @@ import (
 // the catalog/toolname layer on load.
 func DefaultDefs() []coretool.ToolDef {
 	return []coretool.ToolDef{
-		def("fs/read_file", "Read a file from the workspace.", schemaObject(
+		readOnlyDef("fs/read_file", "Read a file from the workspace.", schemaObject(
 			req("path", "string", "Path to the file"),
 			prop("max_bytes", "integer", "Maximum bytes to read"),
 		)),
-		def("fs/list_dir", "List directory contents from the workspace.", schemaObject(
+		readOnlyDef("fs/list_dir", "List directory contents from the workspace.", schemaObject(
 			req("path", "string", "Path to the directory"),
 			prop("depth", "integer", "Maximum recursion depth"),
 		)),
@@ -25,27 +25,27 @@ func DefaultDefs() []coretool.ToolDef {
 			req("content", "string", "File content"),
 		)),
 
-		def("code/search", "Search code with ripgrep-backed recall.", schemaObject(
+		readOnlyDef("code/search", "Search code with ripgrep-backed recall.", schemaObject(
 			req("pattern", "string", "Search pattern"),
 			prop("path", "string", "Optional subpath"),
 			prop("file_pattern", "string", "Optional glob"),
 			prop("context_lines", "integer", "Context lines"),
 			prop("max_results", "integer", "Maximum result count"),
 		)),
-		def("code/symbols", "Inspect symbols in a file.", schemaObject(
+		readOnlyDef("code/symbols", "Inspect symbols in a file.", schemaObject(
 			req("path", "string", "Path to inspect"),
 			prop("symbol_type", "string", "Optional symbol kind filter"),
 			prop("include_docs", "boolean", "Include symbol docs"),
 		)),
-		def("context/search", "Semantic tree/context search over the repo.", schemaObject(
+		readOnlyDef("context/search", "Semantic tree/context search over the repo.", schemaObject(
 			req("query", "string", "Question or search topic"),
 			prop("limit", "integer", "Maximum result count"),
 		)),
-		def("smart/search", "Search and extract code evidence in one call.", schemaObject(
+		readOnlyDef("smart/search", "Search and extract code evidence in one call.", schemaObject(
 			req("question", "string", "Question to investigate"),
 			prop("limits", "object", "Optional search limits"),
 		)),
-		def("context/grep", "Search with function-body context.", schemaObject(
+		readOnlyDef("context/grep", "Search with function-body context.", schemaObject(
 			req("pattern", "string", "Pattern to search"),
 			prop("path", "string", "Optional subpath"),
 		)),
@@ -56,11 +56,11 @@ func DefaultDefs() []coretool.ToolDef {
 			prop("llm", "object", "Optional LLM override"),
 		)),
 
-		def("repo_index/search", "Search repo index nodes.", schemaObject(
+		readOnlyDef("repo_index/search", "Search repo index nodes.", schemaObject(
 			req("query", "string", "FTS query string"),
 			prop("limit", "integer", "Maximum result count"),
 		)),
-		def("repo_index/expand", "Expand the repo index graph.", schemaObject(
+		readOnlyDef("repo_index/expand", "Expand the repo index graph.", schemaObject(
 			req("seeds", "array", "Seed node IDs"),
 			prop("edge_types", "array", "Edge types to traverse"),
 			prop("direction", "string", "Traversal direction"),
@@ -68,10 +68,10 @@ func DefaultDefs() []coretool.ToolDef {
 			prop("budget", "integer", "Traversal budget"),
 			prop("per_node_cap", "integer", "Per-node edge cap"),
 		)),
-		def("repo_index/open", "Open a repo index node by ID.", schemaObject(
+		readOnlyDef("repo_index/open", "Open a repo index node by ID.", schemaObject(
 			req("id", "string", "Node ID"),
 		)),
-		def("repo_index/dag_grep", "Search and expand a compact explanation subgraph.", schemaObject(
+		readOnlyDef("repo_index/dag_grep", "Search and expand a compact explanation subgraph.", schemaObject(
 			req("query", "string", "Search query"),
 			prop("mode", "string", "fts, semantic, or hybrid"),
 			prop("k", "integer", "Number of seeds"),
@@ -86,42 +86,42 @@ func DefaultDefs() []coretool.ToolDef {
 			prop("render", "string", "none, tree, mermaid"),
 		)),
 
-		def("context/show", "Read the ACA top-of-mind bundle.", schemaObject()),
-		def("context/retrieve", "Blend ACA state with vault retrieval.", schemaObject(
+		readOnlyDef("context/show", "Read the ACA top-of-mind bundle.", schemaObject()),
+		readOnlyDef("context/retrieve", "Blend ACA state with vault retrieval.", schemaObject(
 			req("query", "string", "Question or topic"),
 			prop("vault_path", "string", "Optional vault path"),
 			prop("limit", "integer", "Maximum result count"),
 		)),
 
-		def("obsidian/index_search", "Search the local Obsidian vault index.", schemaObject(
+		readOnlyDef("obsidian/index_search", "Search the local Obsidian vault index.", schemaObject(
 			req("query", "string", "Vault search query"),
 			prop("vault_path", "string", "Optional vault path"),
 			prop("limit", "integer", "Maximum result count"),
 			prop("semantic", "boolean", "Use semantic note search"),
 		)),
-		def("obsidian/read", "Read one Obsidian note.", schemaObject(
+		readOnlyDef("obsidian/read", "Read one Obsidian note.", schemaObject(
 			req("path", "string", "Vault note path"),
 			prop("vault_path", "string", "Optional vault path"),
 		)),
-		def("obsidian/related", "List related Obsidian notes.", schemaObject(
+		readOnlyDef("obsidian/related", "List related Obsidian notes.", schemaObject(
 			req("path", "string", "Vault note path"),
 			prop("vault_path", "string", "Optional vault path"),
 			prop("limit", "integer", "Maximum result count"),
 		)),
 
-		def("memory/query", "Query canonical memory records for relevant context.", schemaObject(
+		readOnlyDef("memory/query", "Query canonical memory records for relevant context.", schemaObject(
 			req("query", "string", "Search query"),
 			prop("kinds", "string", "Optional canonical memory kind filter"),
 			prop("lifecycle_states", "string", "Optional lifecycle filter; default returns active plus strongly matching candidate/stale evidence"),
 			prop("file", "string", "Optional file filter"),
 			prop("limit", "integer", "Maximum result count"),
 		)),
-		def("session/timeline", "Retrieve a session-oriented semantic timeline.", schemaObject(
+		readOnlyDef("session/timeline", "Retrieve a session-oriented semantic timeline.", schemaObject(
 			req("query", "string", "Search query"),
 			prop("limit", "integer", "Maximum result count"),
 		)),
 
-		def("todo/query", "Query tasks in the task database.", schemaObject(
+		readOnlyDef("todo/query", "Query tasks in the task database.", schemaObject(
 			prop("status", "string", "Task status"),
 			prop("tags", "array", "Optional tags"),
 			prop("parent_id", "string", "Optional parent task id"),
@@ -138,7 +138,7 @@ func DefaultDefs() []coretool.ToolDef {
 			req("id", "string", "Task id"),
 			prop("summary", "string", "Completion summary"),
 		)),
-		def("todo/graph_insights", "Read task graph insights.", schemaObject(
+		readOnlyDef("todo/graph_insights", "Read task graph insights.", schemaObject(
 			prop("root_id", "string", "Optional root task id"),
 			prop("insight_type", "string", "critical_path, blockers, priorities, dependencies, all"),
 		)),
@@ -157,17 +157,17 @@ func DefaultDefs() []coretool.ToolDef {
 			prop("llm_provider", "string", "Optional provider override"),
 			prop("llm_model", "string", "Optional model override"),
 		)),
-		def("agent/list", "List active agents.", schemaObject()),
-		def("agent/status", "Inspect one agent.", schemaObject(
+		readOnlyDef("agent/list", "List active agents.", schemaObject()),
+		readOnlyDef("agent/status", "Inspect one agent.", schemaObject(
 			req("session_id", "string", "Agent session id"),
 		)),
 		def("agent/kill", "Terminate an agent.", schemaObject(
 			req("session_id", "string", "Agent session id"),
 		)),
-		def("agent/hierarchy", "Show the agent hierarchy tree.", schemaObject(
+		readOnlyDef("agent/hierarchy", "Show the agent hierarchy tree.", schemaObject(
 			prop("session_id", "string", "Optional root session id"),
 		)),
-		def("agent/wait", "Wait for child agents.", schemaObject(
+		readOnlyDef("agent/wait", "Wait for child agents.", schemaObject(
 			prop("timeout_seconds", "integer", "Timeout in seconds"),
 		)),
 
@@ -181,7 +181,7 @@ func DefaultDefs() []coretool.ToolDef {
 // of the portable core v2 tool set.
 func ExtensionDefs() []coretool.ToolDef {
 	return []coretool.ToolDef{
-		def("heartwood/state", "Fetch compact Heartwood participant state.", schemaObject(
+		readOnlyDef("heartwood/state", "Fetch compact Heartwood participant state.", schemaObject(
 			prop("heartwood_root", "string", "Path to the Heartwood repo"),
 			req("host", "string", "WebSocket host"),
 			req("db_name", "string", "Heartwood database name"),
@@ -220,6 +220,12 @@ func def(name, description string, params json.RawMessage) coretool.ToolDef {
 		Description: description,
 		Parameters:  params,
 	}
+}
+
+func readOnlyDef(name, description string, params json.RawMessage) coretool.ToolDef {
+	tool := def(name, description, params)
+	tool.Policy.EffectReplay = coretool.EffectReplayReadOnly
+	return tool
 }
 
 func schemaObject(props ...schemaProp) json.RawMessage {

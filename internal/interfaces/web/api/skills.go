@@ -79,13 +79,14 @@ func SkillsListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 // SkillsRunHandler returns a handler for POST /api/skills/run.
 //
 // Index:
-// - Purpose: Execute a skill and return its result
-// - Flow: validate method -> decode request -> validate skill -> run skill -> emit event -> respond
-// - SideEffects: executes skill runner (may spawn processes or write files)
-// - FailureModes: method not allowed, invalid JSON, missing skill, skill execution errors
-// - Observability: emits skill.run with skill_name and duration
-// - Related: NewSkillRunner, SkillRunner.Run, observability.Emit, readJSON
-// - Keywords: skills/run, skill, input, output, duration_ms, skill.run, skill_name, ok
+//
+//	Purpose: Execute a skill and return its result
+//	Flow: validate method → decode request → validate skill → run skill → emit event → respond
+//	Related: NewSkillRunner, SkillRunner.Run, observability.Emit, readJSON
+//	Keywords: skills/run, skill, input, output, duration_ms, skill.run, skill_name, ok
+//
+// [[protocol:http-skill-api]]
+// [[domain:skill-execution-boundary]]
 func SkillsRunHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 	runner := NewSkillRunner(cfg)
 

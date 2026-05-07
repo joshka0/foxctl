@@ -109,10 +109,19 @@ Formula: `score = alpha * bm25_scaled + (1 - alpha) * vector_scaled`
 ## Repo Graph Index Flow
 
 ```bash
+# Builds are incremental by default; use `--incremental=false` for a forced rebuild.
 foxctl index repo build --dry-run --workspace . --go --typescript --elixir
 foxctl index repo build --workspace . --go --typescript --elixir
 foxctl index repo search --workspace . --query "Supervisor" --limit 10
 foxctl index repo expand --workspace . --seed "<node-id>" --edge CALLS --edge REFERS_TO --depth 2
+```
+
+Summaries are separate from graph construction:
+
+```bash
+foxctl index file-summaries --workspace .
+foxctl index symbol-summaries --workspace .
+foxctl index repo enrich summaries --workspace .
 ```
 
 ## Common Failure Modes

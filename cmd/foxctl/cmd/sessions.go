@@ -23,8 +23,8 @@ import (
 	providertodos "github.com/joshka0/foxctl/internal/providers/claude/todos"
 	"github.com/joshka0/foxctl/internal/storage"
 	"github.com/joshka0/foxctl/internal/storage/sessions"
-	"github.com/joshka0/foxctl/internal/v2/adapters/libsql/turns"
 	"github.com/joshka0/foxctl/internal/v2/adapters/sourceimport"
+	"github.com/joshka0/foxctl/internal/v2/adapters/turso/turns"
 	"github.com/joshka0/foxctl/internal/v2/core/run"
 	"github.com/spf13/cobra"
 )

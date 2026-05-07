@@ -69,13 +69,17 @@ func main() {
 // run orchestrates epic completion with task analysis, gotcha capture, and learning extraction.
 //
 // Index:
-// - Purpose: Complete epics with comprehensive analysis, gotcha persistence, and learning extraction
-// - Flow: validate epic → analyze tasks → extract learnings → persist gotchas → mark epic complete → clear active epic
-// - SideEffects: database updates; memory store operations; learning extraction; epic state changes
-// - FailureModes: epic not found, pending tasks without force, store errors, learning extraction failures
-// - Observability: emits completion statistics, task breakdown, gotchas, learnings, and status messages
-// - Related: extractLearnings, persistGotchas, matchesEpic, sanitizeForName
-// - Keywords: epic/complete, epic_management, task_analysis, gotchas, learnings, closure
+//
+//	Purpose: Complete epics with comprehensive analysis, gotcha persistence, and learning extraction
+//	Flow: validate epic → analyze tasks → extract learnings → persist gotchas → mark epic complete → clear active epic
+//	SideEffects: database updates; memory store operations; learning extraction; epic state changes
+//	FailureModes: epic not found, pending tasks without force, store errors, learning extraction failures
+//	Observability: emits completion statistics, task breakdown, gotchas, learnings, and status messages
+//	Related: extractLearnings, persistGotchas, matchesEpic, sanitizeForName
+//	Keywords: epic/complete, epic_management, task_analysis, gotchas, learnings, closure
+//
+// [[domain:epic-lifecycle-management]]
+// [[protocol:epic-completion-gate]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Initialize package logger
 	logger = obs.NewLogger(obs.WithLogCommand(commandName))

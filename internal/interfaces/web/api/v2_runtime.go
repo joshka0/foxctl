@@ -16,9 +16,11 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/joshka0/foxctl/internal/platform/config"
-	libsqlevents "github.com/joshka0/foxctl/internal/v2/adapters/libsql/events"
-	libsqlprojections "github.com/joshka0/foxctl/internal/v2/adapters/libsql/projections"
 	v2llm "github.com/joshka0/foxctl/internal/v2/adapters/llm"
+	tursoeffects "github.com/joshka0/foxctl/internal/v2/adapters/turso/effects"
+	tursoevents "github.com/joshka0/foxctl/internal/v2/adapters/turso/events"
+	tursoprojections "github.com/joshka0/foxctl/internal/v2/adapters/turso/projections"
+	tursoturnrequests "github.com/joshka0/foxctl/internal/v2/adapters/turso/turnrequests"
 	v2errors "github.com/joshka0/foxctl/internal/v2/core/errors"
 	coreevents "github.com/joshka0/foxctl/internal/v2/core/events"
 	corekill "github.com/joshka0/foxctl/internal/v2/core/kill"
@@ -228,7 +230,7 @@ func V2EventsStreamHandler(cfg config.Config, _ zerolog.Logger) http.HandlerFunc
 			return
 		}
 
-		eventStore, err := libsqlevents.Open(r.Context(), cfg.Storage.Root)
+		eventStore, err := tursoevents.Open(r.Context(), cfg.Storage.Root)
 		if err != nil {
 			writeCommandError(w, http.StatusServiceUnavailable, commandV2EventsLive, "ERUNTIME", "v2 event store is unavailable", map[string]any{
 				"hint": httpErrorHint(http.StatusServiceUnavailable),
@@ -343,7 +345,7 @@ func handleV2RunsList(w http.ResponseWriter, r *http.Request, cfg config.Config)
 		return
 	}
 
-	store, closeFn, err := libsqlprojections.Open(r.Context(), cfg.Storage.Root)
+	store, closeFn, err := tursoprojections.Open(r.Context(), cfg.Storage.Root)
 	if err != nil {
 		writeCommandError(w, http.StatusServiceUnavailable, commandV2RunsList, "ERUNTIME", "v2 run projection store is unavailable", map[string]any{
 			"hint": httpErrorHint(http.StatusServiceUnavailable),
@@ -352,7 +354,7 @@ func handleV2RunsList(w http.ResponseWriter, r *http.Request, cfg config.Config)
 	}
 	defer func() { _ = closeFn() }()
 
-	svc := v2services.NewListService(libsqlprojections.NewServiceAdapter(store))
+	svc := v2services.NewListService(tursoprojections.NewServiceAdapter(store))
 	resp, err := svc.List(r.Context(), corelist.Request{
 		Limit:   limit,
 		Status:  strings.TrimSpace(r.URL.Query().Get("status")),
@@ -460,7 +462,7 @@ func handleV2RunGet(w http.ResponseWriter, r *http.Request, cfg config.Config, r
 		return
 	}
 
-	store, closeFn, err := libsqlprojections.Open(r.Context(), cfg.Storage.Root)
+	store, closeFn, err := tursoprojections.Open(r.Context(), cfg.Storage.Root)
 	if err != nil {
 		writeCommandError(w, http.StatusServiceUnavailable, commandV2RunGet, "ERUNTIME", "v2 run projection store is unavailable", map[string]any{
 			"hint": httpErrorHint(http.StatusServiceUnavailable),
@@ -469,7 +471,7 @@ func handleV2RunGet(w http.ResponseWriter, r *http.Request, cfg config.Config, r
 	}
 	defer func() { _ = closeFn() }()
 
-	state, err := libsqlprojections.NewServiceAdapter(store).GetRunState(r.Context(), runID)
+	state, err := tursoprojections.NewServiceAdapter(store).GetRunState(r.Context(), runID)
 	if err != nil {
 		if errors.Is(err, coreevents.ErrNotFound) {
 			writeV2RuntimeServiceError(w, commandV2RunGet, &v2errors.V2Error{
@@ -705,6 +707,41 @@ func (s projectingV2EventStore) Append(ctx context.Context, evt coreevents.Event
 	return nil
 }
 
+func (s projectingV2EventStore) AppendIfAbsent(ctx context.Context, evt coreevents.Event) (coreevents.AppendResult, error) {
+	if s.eventStore == nil {
+		return coreevents.AppendResult{}, fmt.Errorf("v2 projecting event store: nil event store")
+	}
+	appender, ok := s.eventStore.(coreevents.AppendIfAbsent)
+	if !ok || appender == nil {
+		return coreevents.AppendResult{}, fmt.Errorf("v2 projecting event store: idempotent appender unavailable")
+	}
+	result, err := appender.AppendIfAbsent(ctx, evt)
+	if err != nil {
+		return coreevents.AppendResult{}, err
+	}
+	if !result.Appended {
+		return result, nil
+	}
+	if s.projectionStore == nil {
+		return coreevents.AppendResult{}, fmt.Errorf("v2 projecting event store: nil projection store")
+	}
+	if err := s.projectionStore.Apply(ctx, result.Event); err != nil {
+		return coreevents.AppendResult{}, fmt.Errorf("apply v2 projection: %w", err)
+	}
+	if s.eventBus != nil {
+		_ = s.eventBus.Publish(ctx, result.Event.Clone())
+	}
+	return result, nil
+}
+
+func (s projectingV2EventStore) ReadStreamCursor(ctx context.Context, req coreevents.StreamCursorRequest) (coreevents.StreamCursor, error) {
+	reader, ok := s.eventStore.(coreevents.StreamCursorReader)
+	if !ok || reader == nil {
+		return coreevents.StreamCursor{}, fmt.Errorf("v2 projecting event store: cursor reader unavailable")
+	}
+	return reader.ReadStreamCursor(ctx, req)
+}
+
 func (s projectingV2EventStore) withNextVersion(ctx context.Context, evt coreevents.Event) coreevents.Event {
 	if evt.StreamVersion != 0 && evt.Sequence != 0 {
 		return evt
@@ -806,13 +843,15 @@ func normalizeV2RunCreateInput(req corerun.TurnInput) corerun.TurnInput {
 }
 
 type webV2RunExecution struct {
-	svc             *v2services.RunService
-	eventStore      *libsqlevents.Store
-	closeProjection func() error
+	svc               *v2services.RunService
+	eventStore        *tursoevents.Store
+	closeProjection   func() error
+	closeTurnRequests func() error
+	closeEffects      func() error
 }
 
 func newWebV2RunExecution(ctx context.Context, cfg config.Config, profile coretool.ProcessProfile, workspaceRoot string, model runner.Model) (*webV2RunExecution, error) {
-	eventStore, err := libsqlevents.Open(ctx, cfg.Storage.Root)
+	eventStore, err := tursoevents.Open(ctx, cfg.Storage.Root)
 	if err != nil {
 		return nil, &v2errors.V2Error{
 			Kind:      v2errors.ErrDependency,
@@ -823,12 +862,39 @@ func newWebV2RunExecution(ctx context.Context, cfg config.Config, profile coreto
 		}
 	}
 
-	projectionStore, closeProjection, err := libsqlprojections.Open(ctx, cfg.Storage.Root)
+	projectionStore, closeProjection, err := tursoprojections.Open(ctx, cfg.Storage.Root)
 	if err != nil {
 		_ = eventStore.Close()
 		return nil, &v2errors.V2Error{
 			Kind:      v2errors.ErrDependency,
 			Message:   "v2 run projection store is unavailable",
+			Cause:     err,
+			Fatal:     true,
+			Retryable: true,
+		}
+	}
+
+	turnRequests, closeTurnRequests, err := tursoturnrequests.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		_ = closeProjection()
+		_ = eventStore.Close()
+		return nil, &v2errors.V2Error{
+			Kind:      v2errors.ErrDependency,
+			Message:   "v2 turn request registry is unavailable",
+			Cause:     err,
+			Fatal:     true,
+			Retryable: true,
+		}
+	}
+
+	effectJournal, closeEffects, err := tursoeffects.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		_ = closeTurnRequests()
+		_ = closeProjection()
+		_ = eventStore.Close()
+		return nil, &v2errors.V2Error{
+			Kind:      v2errors.ErrDependency,
+			Message:   "v2 effect journal is unavailable",
 			Cause:     err,
 			Fatal:     true,
 			Retryable: true,
@@ -845,12 +911,16 @@ func newWebV2RunExecution(ctx context.Context, cfg config.Config, profile coreto
 			projectionStore: projectionStore,
 			eventBus:        v2RuntimeEventBus,
 		},
-		Model: model,
+		Model:         model,
+		TurnRequests:  turnRequests,
+		EffectJournal: effectJournal,
 		NewID: func() string {
 			return "evt-" + ulid.Make().String()
 		},
 	})
 	if err != nil {
+		_ = closeEffects()
+		_ = closeTurnRequests()
 		_ = closeProjection()
 		_ = eventStore.Close()
 		return nil, &v2errors.V2Error{
@@ -863,9 +933,11 @@ func newWebV2RunExecution(ctx context.Context, cfg config.Config, profile coreto
 	}
 
 	return &webV2RunExecution{
-		svc:             svc,
-		eventStore:      eventStore,
-		closeProjection: closeProjection,
+		svc:               svc,
+		eventStore:        eventStore,
+		closeProjection:   closeProjection,
+		closeTurnRequests: closeTurnRequests,
+		closeEffects:      closeEffects,
 	}, nil
 }
 
@@ -875,6 +947,12 @@ func (e *webV2RunExecution) Close() {
 	}
 	if e.closeProjection != nil {
 		_ = e.closeProjection()
+	}
+	if e.closeTurnRequests != nil {
+		_ = e.closeTurnRequests()
+	}
+	if e.closeEffects != nil {
+		_ = e.closeEffects()
 	}
 	if e.eventStore != nil {
 		_ = e.eventStore.Close()
@@ -1018,7 +1096,7 @@ func resolveV2RunWorkspaceRoot() string {
 }
 
 func listV2Events(r *http.Request, cfg config.Config, streamID string, streamType coreevents.StreamType, afterVersion int64, limit int) ([]coreevents.Event, error) {
-	eventStore, err := libsqlevents.Open(r.Context(), cfg.Storage.Root)
+	eventStore, err := tursoevents.Open(r.Context(), cfg.Storage.Root)
 	if err != nil {
 		return nil, &v2errors.V2Error{
 			Kind:      v2errors.ErrDependency,
@@ -1058,7 +1136,7 @@ func handleV2RunKill(w http.ResponseWriter, r *http.Request, cfg config.Config, 
 	req.RunID = runID
 	req.RequestID = normalizePrefixedULID(req.RequestID, "req")
 
-	eventStore, err := libsqlevents.Open(r.Context(), cfg.Storage.Root)
+	eventStore, err := tursoevents.Open(r.Context(), cfg.Storage.Root)
 	if err != nil {
 		writeCommandError(w, http.StatusServiceUnavailable, commandV2RunKill, "ERUNTIME", "v2 event store is unavailable", map[string]any{
 			"hint": httpErrorHint(http.StatusServiceUnavailable),
@@ -1067,7 +1145,7 @@ func handleV2RunKill(w http.ResponseWriter, r *http.Request, cfg config.Config, 
 	}
 	defer func() { _ = eventStore.Close() }()
 
-	projectionStore, closeProjection, err := libsqlprojections.Open(r.Context(), cfg.Storage.Root)
+	projectionStore, closeProjection, err := tursoprojections.Open(r.Context(), cfg.Storage.Root)
 	if err != nil {
 		writeCommandError(w, http.StatusServiceUnavailable, commandV2RunKill, "ERUNTIME", "v2 run projection store is unavailable", map[string]any{
 			"hint": httpErrorHint(http.StatusServiceUnavailable),
@@ -1088,7 +1166,7 @@ func handleV2RunKill(w http.ResponseWriter, r *http.Request, cfg config.Config, 
 			requestID:  req.RequestID,
 			actorID:    "actor:web",
 		},
-		Projections: libsqlprojections.NewServiceAdapter(projectionStore),
+		Projections: tursoprojections.NewServiceAdapter(projectionStore),
 	})
 	resp, err := svc.Kill(r.Context(), req)
 	if err != nil {

@@ -26,7 +26,9 @@ func RedactString(s string) string {
 	for _, p := range redactPatterns {
 		s = p.ReplaceAllString(s, redactReplacement)
 	}
-	return s
+	event := &Event{Message: s}
+	redacted := foxcular.NewRedactionPolicy().RedactEvent(event)
+	return redacted.Message
 }
 
 // RedactEvent applies redaction to sensitive fields of a Event in place.

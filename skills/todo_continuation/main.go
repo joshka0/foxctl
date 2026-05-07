@@ -73,13 +73,17 @@ func main() {
 // run orchestrates todo continuation analysis with dependency graph computation and prompt generation.
 //
 // Index:
-// - Purpose: Analyze task dependencies and generate continuation prompts with cycle detection and execution ordering
-// - Flow: validate input → open task store → analyze incomplete tasks → compute insights → generate prompt → emit results
-// - SideEffects: reads task store; computes dependency graphs; caches insights; generates continuation prompts
-// - FailureModes: task store access failures, dependency analysis errors, cache I/O failures, prompt generation errors
-// - Observability: emits task counts, dependency cycles, execution order, ready tasks, and comprehensive continuation guidance
-// - Related: runContinuation, buildPrompt, loadOrComputeInsights, computeTasksHash
-// - Keywords: todo/continuation, task_dependencies, cycle_detection, execution_order, continuation_prompt
+//
+//	Purpose: Analyze task dependencies and generate continuation prompts with cycle detection and execution ordering
+//	Keywords: todo/continuation, task_dependencies, cycle_detection, execution_order, continuation_prompt
+//	Related: runContinuation, buildPrompt, loadOrComputeInsights, computeTasksHash
+//	Flow: validate input → open task store → analyze incomplete tasks → compute insights → generate prompt → emit results
+//	Resources: task store, cache directory
+//	Events: none
+//	OutputFields: should_continue, prompt, session_id, incomplete_count, unscoped_incomplete_count, ready_count, blocked_count, in_progress_count, cycle_count, cycles, topological_order, summary
+//
+// [[domain:task_continuation]]
+// [[decision:cached_graph_insights]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Default workspace
 	in.WorkspaceID = workspaceutil.Resolve(in.WorkspaceID, "", rc.Workspace)

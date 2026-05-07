@@ -60,13 +60,17 @@ func main() {
 // run orchestrates Expo development operations with device management and EAS integration.
 //
 // Index:
-// - Purpose: Unified Expo development with device control, deep linking, EAS builds, and log retrieval
-// - Flow: validate operation → detect platform → route to handler → emit operation-specific results
-// - SideEffects: device interactions; ADB/IDB commands; EAS API calls; file system access
-// - FailureModes: invalid operations, device not found, ADB/IDB failures, EAS errors, missing tools
-// - Observability: emits operation status, platform info, build IDs, and detailed error messages
-// - Related: detectPlatform, shake, reload, deepLink, build, update, logs
-// - Keywords: mobile/expo, expo, react_native, device_control, eas_build, development
+//
+//	Purpose: Unified Expo development with device control, deep linking, EAS builds, and log retrieval
+//	Flow: validate operation → detect platform → route to handler → emit operation-specific results
+//	SideEffects: device interactions; ADB/IDB commands; EAS API calls; file system access
+//	FailureModes: invalid operations, device not found, ADB/IDB failures, EAS errors, missing tools
+//	Observability: emits operation status, platform info, build IDs, and detailed error messages
+//	Related: detectPlatform, shake, reload, deepLink, build, update, logs
+//	Keywords: mobile/expo, expo, react_native, device_control, eas_build, development
+//
+// [[domain:expo-mobile-development]]
+// [[protocol:expo-device-control]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Validate input
 	op := oputil.Op(in.Operation)

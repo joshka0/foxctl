@@ -31,13 +31,17 @@ func main() {
 // run retrieves content from CAS and writes it to file system.
 //
 // Index:
-// - Purpose: Retrieve CAS artifacts by digest and write to file system with proper extension handling
-// - Flow: validate digest → get metadata → retrieve content → determine output path → write file → emit results
-// - SideEffects: file creation; CAS store access; temporary file creation; directory creation
-// - FailureModes: invalid digest format, CAS access errors, file write errors, permission errors
-// - Observability: emits file path, digest, size, kind, and summary information
-// - Related: extensionFromKind
-// - Keywords: fs/cas_get, cas, content_addressable_storage, file_retrieval
+//
+//	Purpose: Retrieve CAS artifacts by digest and write to file system with proper extension handling
+//	Flow: validate digest → get metadata → retrieve content → determine output path → write file → emit results
+//	SideEffects: file creation; CAS store access; temporary file creation; directory creation
+//	FailureModes: invalid digest format, CAS access errors, file write errors, permission errors
+//	Observability: emits file path, digest, size, kind, and summary information
+//	Related: extensionFromKind
+//	Keywords: fs/cas_get, cas, content_addressable_storage, file_retrieval
+//
+// [[domain:cas-artifact-retrieval]]
+// [[protocol:digest-validation-and-extension-mapping]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate digest format
 	if strings.TrimSpace(in.Digest) == "" {

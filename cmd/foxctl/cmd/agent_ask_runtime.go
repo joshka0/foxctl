@@ -11,8 +11,8 @@ import (
 	"github.com/joshka0/foxctl/internal/context/contextplane/taskhistory"
 	ws "github.com/joshka0/foxctl/internal/platform/workspace"
 	v2jido "github.com/joshka0/foxctl/internal/v2/adapters/jido"
-	libsqlevents "github.com/joshka0/foxctl/internal/v2/adapters/libsql/events"
-	libsqlprojections "github.com/joshka0/foxctl/internal/v2/adapters/libsql/projections"
+	tursoevents "github.com/joshka0/foxctl/internal/v2/adapters/turso/events"
+	tursoprojections "github.com/joshka0/foxctl/internal/v2/adapters/turso/projections"
 	v2ask "github.com/joshka0/foxctl/internal/v2/core/ask"
 	v2events "github.com/joshka0/foxctl/internal/v2/core/events"
 	v2services "github.com/joshka0/foxctl/internal/v2/services"
@@ -49,11 +49,11 @@ func newJidoAskRuntime(
 	nowFn func() time.Time,
 	newID func() string,
 ) (v2services.AskDispatcher, v2events.Appender, v2services.AskProjectionApplier, func(), error) {
-	eventStore, err := libsqlevents.Open(ctx, storageRoot)
+	eventStore, err := tursoevents.Open(ctx, storageRoot)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("open v2 events store for jido ask: %w", err)
 	}
-	projectionStore, closeProjections, err := libsqlprojections.Open(ctx, storageRoot)
+	projectionStore, closeProjections, err := tursoprojections.Open(ctx, storageRoot)
 	if err != nil {
 		_ = eventStore.Close()
 		return nil, nil, nil, nil, fmt.Errorf("open v2 projection store for jido ask: %w", err)

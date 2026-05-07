@@ -32,21 +32,6 @@ func (p *Pipeline) stageInitContext(ctx context.Context, st *executionState) *v2
 	if strings.TrimSpace(st.in.Mode) == "" {
 		st.in.Mode = "reactive"
 	}
-	if strings.TrimSpace(st.in.RunID) == "" {
-		st.in.RunID = fmt.Sprintf("run-%s", p.cfg.NewID())
-	}
-	if strings.TrimSpace(st.in.TurnID) == "" {
-		st.in.TurnID = fmt.Sprintf("turn-%s", p.cfg.NewID())
-	}
-	if strings.TrimSpace(st.in.RequestID) == "" {
-		st.in.RequestID = p.cfg.NewID()
-	}
-	if strings.TrimSpace(st.in.CorrelationID) == "" {
-		st.in.CorrelationID = st.in.RequestID
-	}
-	if strings.TrimSpace(st.in.CausationID) == "" {
-		st.in.CausationID = st.in.RequestID
-	}
 	st.out.TurnID = st.in.TurnID
 	turnIndex := p.nextTurnIndex(ctx, st.in.RunID)
 	st.turn = run.TurnRecord{

@@ -1,0 +1,44 @@
+apiVersion: foxctl/v1
+kind: Skill
+metadata:
+  name: repo/index_enrich_summaries
+  version: 0.1.0
+  description: "Attach stored file and symbol summaries to an existing repo graph index"
+  tags: ["repoindex", "graph", "summaries", "enrichment"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/repo_index_enrich_summaries/repo_index_enrich_summaries
+io:
+  format: JSON
+signature:
+  command: repo/index_enrich_summaries
+  parameters:
+    - name: workspace
+      type: string
+      required: false
+      description: "Workspace root (default: current workspace)"
+    - name: dry_run
+      type: boolean
+      required: false
+      default: false
+      description: "Report summary updates without writing to the index"
+  returns:
+    - name: workspace
+      type: string
+      description: "Absolute workspace root"
+    - name: store_path
+      type: string
+      description: "Repoindex database path"
+    - name: result
+      type: object
+      description: "Summary enrichment counts"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false
+openapi:
+  enabled: true
+  methods:
+    POST: "true"

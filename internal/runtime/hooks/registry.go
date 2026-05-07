@@ -37,11 +37,14 @@ type RegistryOptions struct {
 // NewRegistry configures hook runners and skill resolution.
 //
 // Index:
-// - Purpose: Configure hook runners and skill resolution
-// - Flow: resolve executor → resolve resolver → build shell/skill runners → return registry
-// - SideEffects: initializes runner dependencies
-// - Related: NewDispatcherWithRegistry, SkillRunner, ShellRunner
-// - Keywords: hook_registry, skill_resolver, shell_runner, skill_runner, executor
+//
+//	Purpose: Configure hook runners and skill resolution
+//	Keywords: hook_registry, skill_resolver, shell_runner, skill_runner, executor
+//	Related: NewDispatcherWithRegistry, SkillRunner, ShellRunner
+//	Flow: resolve executor → resolve resolver → build shell/skill runners → return registry
+//	Resources: execution.SkillExecutor, SkillResolver
+//	Events: none
+//	OutputFields: *Registry
 func NewRegistry(cfg *Config, opts RegistryOptions) *Registry {
 	// Set up executor
 	executor := opts.Executor
@@ -133,10 +136,14 @@ func (r *RegistryRunner) Run(ctx context.Context, hookDef HookDef, input Input) 
 // NewDispatcherWithRegistry builds a dispatcher with a registry-backed runner.
 //
 // Index:
-// - Purpose: Construct a dispatcher that resolves hook skills by name
-// - Flow: build registry → wrap with RegistryRunner → create dispatcher
-// - Related: NewRegistry, NewDispatcher
-// - Keywords: hook_dispatcher, registry, skill_resolver, hooks
+//
+//	Purpose: Construct a dispatcher that resolves hook skills by name
+//	Keywords: hook_dispatcher, registry, skill_resolver, hooks
+//	Related: NewRegistry, NewDispatcher
+//	Flow: build registry → wrap with RegistryRunner → create dispatcher
+//	Resources: *Registry, RegistryRunner
+//	Events: none
+//	OutputFields: Dispatcher
 func NewDispatcherWithRegistry(cfg *Config, skillsDir string) Dispatcher {
 	registry := NewRegistry(cfg, RegistryOptions{
 		SkillsDir: skillsDir,

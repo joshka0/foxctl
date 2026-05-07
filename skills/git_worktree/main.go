@@ -42,13 +42,17 @@ func main() {
 // run orchestrates git worktree operations with path validation and repository management.
 //
 // Index:
-// - Purpose: Execute git worktree operations (list, add, remove, prune) with path validation
-// - Flow: validate input → resolve repo → check git → dispatch operation → emit results
-// - SideEffects: git worktree creation/removal; file system access; repository management
-// - FailureModes: invalid git repo, path validation errors, git execution errors
-// - Observability: emits worktree lists, operation results, and error context
-// - Related: listWorktrees, addWorktree, removeWorktree, pruneWorktrees, parseWorktreeList
-// - Keywords: git/worktree, worktree_management, git_operations, repository_management
+//
+//	Purpose: Execute git worktree operations (list, add, remove, prune) with path validation
+//	Keywords: git/worktree, worktree_management, git_operations, repository_management
+//	Related: listWorktrees, addWorktree, removeWorktree, pruneWorktrees, parseWorktreeList
+//	Flow: validate input → resolve repo → check git → dispatch operation → emit results
+//	Resources: git command execution; file system access; repository management
+//	Events: git-worktree-list, git-worktree-add, git-worktree-remove, git-worktree-prune
+//	OutputFields: operation, worktree_count, worktrees, path, branch
+//
+// [[domain:git-operations]]
+// [[protocol:skill-dispatch]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Apply defaults
 	in.Operation = oputil.DefaultOp(in.Operation, "list")

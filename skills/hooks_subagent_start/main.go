@@ -37,13 +37,17 @@ func main() {
 // run orchestrates subagent initialization with profile inference and capability briefing.
 //
 // Index:
-// - Purpose: Handle SubagentStart events to infer profiles, generate briefings, and set environment variables
-// - Flow: parse payload → infer profile → get config → generate briefing → emit context injection
-// - SideEffects: profile inference; handbook generation; context injection; environment setup
-// - FailureModes: payload parsing errors, profile inference failures, handbook generation errors
-// - Observability: emits subagent name, inferred profile, allowed skills, and briefing content
-// - Related: inferProfile, generateBriefing, generateFallbackBriefing, containsAny
-// - Keywords: hooks/subagent_start, subagent_lifecycle, profile_inference, capability_briefing, agent_handbook
+//
+//	Purpose: Handle SubagentStart events to infer profiles, generate briefings, and set environment variables
+//	Keywords: hooks/subagent_start, subagent_lifecycle, profile_inference, capability_briefing, agent_handbook
+//	Related: inferProfile, generateBriefing, generateFallbackBriefing, containsAny
+//	Flow: parse payload → infer profile → get config → generate briefing → emit context injection
+//	Resources: agentpolicy package; agent/handbook skill
+//	Events: subagent-started
+//	OutputFields: subagent_name, inferred_profile, allowed_skills, briefing
+//
+// [[domain:subagent-lifecycle]]
+// [[protocol:profile-inference]]
 func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	// Parse subagent payload from tool input
 	var payload SubagentPayload

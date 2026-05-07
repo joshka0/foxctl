@@ -134,6 +134,34 @@ func TestScheduler_Tick_ReturnsErrorWhenRetryQueueIsFull(t *testing.T) {
 	}
 }
 
+func TestScheduler_Tick_WithNilRetryQueueDoesNotUseInMemoryRetryQueue(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.March, 5, 13, 18, 0, 0, time.UTC)
+	source := &fakeCandidateSource{
+		candidates: []Candidate{{IssueID: "issue-fail", Role: "coder"}},
+	}
+	service := &fakeDispatchService{
+		errByIssue: map[string]error{
+			"issue-fail": errors.New("dispatch failed after spawn callback recorded card projection"),
+		},
+	}
+	scheduler := NewScheduler(SchedulerConfig{
+		Source:             source,
+		Service:            service,
+		MaxDispatchPerTick: 1,
+		NewRequestID:       sequentialTestID("req"),
+		Now:                func() time.Time { return now },
+	})
+
+	if err := scheduler.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick() error = %v", err)
+	}
+	if len(service.calls) != 1 {
+		t.Fatalf("dispatch calls=%d want 1", len(service.calls))
+	}
+}
+
 func TestScheduler_Tick_ReturnsRetryErrorWhenSourceNil(t *testing.T) {
 	t.Parallel()
 

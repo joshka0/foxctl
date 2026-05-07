@@ -18,12 +18,14 @@ type LogEntry = observability.EventRecord
 // LogsHandler returns a handler for GET /api/logs.
 //
 // Index:
-// - Purpose: Serve filtered observability events via HTTP
-// - Flow: validate method → parse query → resolve obs dir → read entries → respond
-// - SideEffects: reads NDJSON log files
-// - FailureModes: method not allowed, read errors, missing observability directory
-// - Related: readLogEntries, readLogFileTail, readLogFile
-// - Keywords: logs, limit, since, component, operation, workspace, errors_only
+//
+//	Purpose: Serve filtered observability events via HTTP
+//	Flow: validate method → parse query → resolve obs dir → read entries → respond
+//	Related: readLogEntries, readLogFileTail, readLogFile
+//	Keywords: logs, limit, since, component, operation, workspace, errors_only
+//
+// [[protocol:http-log-api]]
+// [[domain:observability-query]]
 func LogsHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

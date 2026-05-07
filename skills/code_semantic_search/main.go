@@ -42,6 +42,7 @@ import (
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
 	"github.com/joshka0/foxctl/internal/intelligence/repoquery"
+	repoqueryadapters "github.com/joshka0/foxctl/internal/intelligence/repoquery/adapters"
 	"github.com/joshka0/foxctl/internal/intelligence/retrieval"
 	retrievalv2 "github.com/joshka0/foxctl/internal/intelligence/retrieval/v2"
 	"github.com/joshka0/foxctl/internal/intelligence/searchindex"
@@ -333,13 +334,17 @@ func semanticPreviewResultsLimit(rc *skillmain.RunContext) int {
 // run orchestrates unified semantic search across multiple data sources.
 //
 // Index:
-// - Purpose: Perform unified semantic search across symbols, sessions, memories, tasks, and codemaps with RRF fusion
-// - Flow: validate input → generate scoped embeddings → parallel search sources → fuse results → apply PageRank boost → rerank (optional) → synthesize (optional)
-// - SideEffects: embedding API calls; database queries; LLM API calls (synthesis); artifact persistence
-// - FailureModes: missing API keys, database errors, embedding failures, LLM errors, timeout errors
-// - Observability: emits query/results/context_hints/timelines/stats/summary/tree_text/tree/artifact
-// - Related: search, generateScopedEmbeddings, reciprocalRankFusion, applyPageRankBoost, applyReranking, synthesizeResults, buildFullRepoTree
-// - Keywords: code/semantic_search, unified, symbols, sessions, memories, tasks, codemaps, rrf, pagerank, rerank, synthesis, tree
+//
+//	Purpose: Perform unified semantic search across symbols, sessions, memories, tasks, and codemaps with RRF fusion
+//	Flow: validate input → generate scoped embeddings → parallel search sources → fuse results → apply PageRank boost → rerank (optional) → synthesize (optional)
+//	SideEffects: embedding API calls; database queries; LLM API calls (synthesis); artifact persistence
+//	FailureModes: missing API keys, database errors, embedding failures, LLM errors, timeout errors
+//	Observability: emits query/results/context_hints/timelines/stats/summary/tree_text/tree/artifact
+//	Related: search, generateScopedEmbeddings, reciprocalRankFusion, applyPageRankBoost, applyReranking, synthesizeResults, buildFullRepoTree
+//	Keywords: code/semantic_search, unified, symbols, sessions, memories, tasks, codemaps, rrf, pagerank, rerank, synthesis, tree
+//
+// [[domain:unified-semantic-search]]
+// [[protocol:rrf-pagerank-rerank]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply defaults
 	in.Profile = normalizeSemanticSearchProfile(in.Profile)
@@ -1332,11 +1337,13 @@ func searchSymbolsWithRetrieval(
 
 	engine := retrievalv2.NewEngine(indexStore, embedProvider)
 	var repoQuerySvc *repoquery.QueryService
+	var envelopeProvider searchindex.CodeEnvelopeProvider
 	repoMode := normalizeSkillRepoIndexMode(repoIndexMode)
 	if repoMode != "off" {
 		if repoStore, err := repoindex.Open(ctx, cfg.Storage.Root, workspacePath); err == nil {
 			defer repoStore.Close()
 			repoQuerySvc = repoquery.NewQueryService(repoindex.NewQueryEngine(repoStore))
+			envelopeProvider = &repoqueryadapters.SemanticAnchorEnvelopeProvider{Store: repoStore}
 			engine = engine.WithRepoQueryService(repoQueryAdapter{service: repoQuerySvc})
 		}
 	}
@@ -1349,8 +1356,9 @@ func searchSymbolsWithRetrieval(
 
 	var bootstrapErr error
 	if _, err := searchindex.BuildCodeDocuments(ctx, memoryListByTypeSource{store: memStore}, indexStore, workspaceID, searchindex.BuildCodeOptions{
-		Limit:         limit * 10,
-		EmbedProvider: embedProvider,
+		Limit:            limit * 10,
+		EmbedProvider:    embedProvider,
+		EnvelopeProvider: envelopeProvider,
 	}); err != nil {
 		bootstrapErr = skillerr.WrapRuntime("build code search documents", err)
 	}

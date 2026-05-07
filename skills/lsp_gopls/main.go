@@ -144,13 +144,17 @@ func main() {
 // run orchestrates Go language server operations using either persistent daemon or CLI mode with fallback.
 //
 // Index:
-// - Purpose: Provide Go language server operations (definition, references, symbols, etc.) via gopls daemon or CLI
-// - Flow: normalize input → apply timeout → validate paths → try daemon mode → fallback to CLI mode → emit results
-// - SideEffects: spawns persistent gopls daemon; executes gopls CLI commands; parses LSP-style output
-// - FailureModes: gopls not installed, daemon startup failures, invalid file paths, timeout errors, parsing failures
-// - Observability: emits operation results, location data, symbol information, diagnostic messages, and timing metrics
-// - Related: runWithDaemon, runWithCLI, normalizeInput, parseDefinition, parseReferences
-// - Keywords: lsp/gopls, language_server, go_tools, code_navigation, symbol_search, call_hierarchy, diagnostics
+//
+//	Purpose: Provide Go language server operations (definition, references, symbols, etc.) via gopls daemon or CLI
+//	Keywords: lsp/gopls, language_server, go_tools, code_navigation, symbol_search, call_hierarchy, diagnostics
+//	Related: runWithDaemon, runWithCLI, normalizeInput, parseDefinition, parseReferences
+//	Flow: normalize input → apply timeout → validate paths → try daemon mode → fallback to CLI mode → emit results
+//	Resources: gopls daemon; gopls CLI
+//	Events: gopls-definition, gopls-references, gopls-symbols
+//	OutputFields: operation, definition, references, symbols, diagnostics, count
+//
+// [[domain:lsp-operations]]
+// [[protocol:gopls-integration]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply defaults and normalize LSP-style parameters
 	normalizeInput(&in)

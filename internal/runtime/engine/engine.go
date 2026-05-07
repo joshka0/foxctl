@@ -262,10 +262,16 @@ type EngineConfig struct {
 // DefaultEngineConfig returns sensible defaults.
 //
 // Index:
-// - Purpose: Provide baseline engine configuration values
-// - Flow: populate defaults → return config
-// - Related: EngineConfig, WithMaxIterations, WithMaxResultBytes
-// - Keywords: engine_config, max_iterations, max_result_bytes, temperature, max_tokens
+//
+//	Purpose: Provide baseline engine configuration values
+//	Keywords: engine_config, max_iterations, max_result_bytes, temperature, max_tokens
+//	Related: EngineConfig, WithMaxIterations, WithMaxResultBytes
+//	Flow: populate defaults → return config
+//	Resources: none
+//	Events: none
+//	OutputFields: EngineConfig
+//
+// [[domain:engine-defaults]]
 func DefaultEngineConfig() EngineConfig {
 	return EngineConfig{
 		MaxIterations:  50,

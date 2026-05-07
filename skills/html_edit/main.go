@@ -39,13 +39,16 @@ func main() {
 // run orchestrates DOM-aware HTML editing using CSS selectors with diff generation and dry-run support.
 //
 // Index:
-// - Purpose: Edit HTML files using CSS selectors with precise DOM manipulation and diff generation
-// - Flow: validate input → read file → parse HTML → apply operations → render modified HTML → generate diff → write file
-// - SideEffects: reads and writes HTML files; modifies DOM structure; generates unified diffs; preserves formatting
-// - FailureModes: file access errors, HTML parsing errors, invalid CSS selectors, write permission errors
-// - Observability: emits operation results, element counts, diff output, and editing statistics
-// - Related: htmledit.ApplyOperations, htmledit.RenderDocument, diffutil.UnifiedDiff
-// - Keywords: html/edit, dom_manipulation, css_selectors, html_parsing, diff_generation, dry_run
+//
+//	Purpose: Edit HTML files using CSS selectors with precise DOM manipulation and diff generation
+//	Keywords: html/edit, dom_manipulation, css_selectors, html_parsing, diff_generation, dry_run
+//	Related: htmledit.ApplyOperations, htmledit.RenderDocument, diffutil.UnifiedDiff
+//	Flow: validate input → read file → parse HTML → apply operations → render modified HTML → generate diff → write file
+//	Resources: file system; goquery DOM parser
+//	Events: html-edited
+//	OutputFields: path, edited, operations_applied, elements_affected, diff
+//
+// [[domain:html-editing]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate
 	if strings.TrimSpace(in.Path) == "" {

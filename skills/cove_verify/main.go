@@ -145,13 +145,17 @@ func main() {
 // run orchestrates claim verification using the CoVE (Chain of Verification) method.
 //
 // Index:
-// - Purpose: Verify factual claims in responses using multi-step verification with parallel claim checking
-// - Flow: validate input → resolve LLM → configure CoVE → extract claims → verify in parallel → optionally refine → emit results
-// - SideEffects: LLM API calls; parallel verification; artifact storage for large results; timing measurements
-// - FailureModes: invalid input, LLM errors, verification failures, timeout errors, storage errors
-// - Observability: emits verification metrics, claim results, corrections, and timing breakdown
-// - Related: resolveLLM, convertResult, buildPreview
-// - Keywords: verification/cove_verify, CoVE, claim_verification, fact_checking, LLM
+//
+//	Purpose: Verify factual claims in responses using multi-step verification with parallel claim checking
+//	Flow: validate input → resolve LLM → configure CoVE → extract claims → verify in parallel → optionally refine → emit results
+//	SideEffects: LLM API calls; parallel verification; artifact storage for large results; timing measurements
+//	FailureModes: invalid input, LLM errors, verification failures, timeout errors, storage errors
+//	Observability: emits verification metrics, claim results, corrections, and timing breakdown
+//	Related: resolveLLM, convertResult, buildPreview
+//	Keywords: verification/cove_verify, CoVE, claim_verification, fact_checking, LLM
+//
+// [[domain:llm-claim-verification]]
+// [[protocol:chain-of-verification]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate input
 	if strings.TrimSpace(in.Question) == "" {

@@ -30,8 +30,8 @@ import (
 	"github.com/joshka0/foxctl/internal/storage/agents"
 	"github.com/joshka0/foxctl/internal/storage/mailbox"
 	"github.com/joshka0/foxctl/internal/storage/sessions"
-	libsqlevents "github.com/joshka0/foxctl/internal/v2/adapters/libsql/events"
-	libsqlprojections "github.com/joshka0/foxctl/internal/v2/adapters/libsql/projections"
+	tursoevents "github.com/joshka0/foxctl/internal/v2/adapters/turso/events"
+	tursoprojections "github.com/joshka0/foxctl/internal/v2/adapters/turso/projections"
 	v2ask "github.com/joshka0/foxctl/internal/v2/core/ask"
 	v2errors "github.com/joshka0/foxctl/internal/v2/core/errors"
 	"github.com/joshka0/foxctl/internal/v2/core/events"
@@ -1680,7 +1680,7 @@ func runAgentAskStatus(cmd *cobra.Command, args []string) error {
 	}
 	runID := "ask:" + askID
 
-	projectionStore, closeProjections, err := libsqlprojections.Open(ctx, cfg.Storage.Root)
+	projectionStore, closeProjections, err := tursoprojections.Open(ctx, cfg.Storage.Root)
 	if err != nil {
 		return writeErrorEnvelope(cmd, "agent/ask_status", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open v2 projection store: %v", err))
 	}
@@ -1692,14 +1692,14 @@ func runAgentAskStatus(cmd *cobra.Command, args []string) error {
 
 	runState, err := projectionStore.GetRunState(ctx, runID)
 	if err != nil {
-		if errors.Is(err, libsqlprojections.ErrNotFound) {
+		if errors.Is(err, tursoprojections.ErrNotFound) {
 			return writeErrorEnvelope(cmd, "agent/ask_status", string(protocol.ErrorCodeENotFound), fmt.Sprintf("ask status not found for ask_id=%s", askID))
 		}
 		return writeErrorEnvelope(cmd, "agent/ask_status", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to load ask run state: %v", err))
 	}
 
 	callback := jidoTerminalCallback{}
-	eventStore, eventErr := libsqlevents.Open(ctx, cfg.Storage.Root)
+	eventStore, eventErr := tursoevents.Open(ctx, cfg.Storage.Root)
 	if eventErr == nil {
 		defer func() { _ = eventStore.Close() }()
 		if resolved, resolveErr := resolveJidoTerminalCallback(ctx, eventStore, askID); resolveErr == nil {
@@ -2048,7 +2048,7 @@ func waitForReply(ctx context.Context, store mailbox.Store, out io.Writer, calle
 }
 
 type jidoRunStateReader interface {
-	GetRunState(ctx context.Context, runID string) (libsqlprojections.RunState, error)
+	GetRunState(ctx context.Context, runID string) (tursoprojections.RunState, error)
 }
 
 type jidoRunEventReader interface {
@@ -2068,7 +2068,7 @@ func waitForJidoRunState(
 	reader jidoRunStateReader,
 	askID string,
 	timeout time.Duration,
-) (libsqlprojections.RunState, error) {
+) (tursoprojections.RunState, error) {
 	return waitForJidoRunStateWithPoll(ctx, reader, askID, timeout, 250*time.Millisecond)
 }
 
@@ -2078,13 +2078,13 @@ func waitForJidoRunStateWithPoll(
 	askID string,
 	timeout time.Duration,
 	pollInterval time.Duration,
-) (libsqlprojections.RunState, error) {
+) (tursoprojections.RunState, error) {
 	if reader == nil {
-		return libsqlprojections.RunState{}, fmt.Errorf("jido run-state reader is required")
+		return tursoprojections.RunState{}, fmt.Errorf("jido run-state reader is required")
 	}
 	askID = strings.TrimSpace(askID)
 	if askID == "" {
-		return libsqlprojections.RunState{}, fmt.Errorf("ask_id is required")
+		return tursoprojections.RunState{}, fmt.Errorf("ask_id is required")
 	}
 	if timeout <= 0 {
 		timeout = 5 * time.Minute
@@ -2099,14 +2099,14 @@ func waitForJidoRunStateWithPoll(
 	for time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
-			return libsqlprojections.RunState{}, ctx.Err()
+			return tursoprojections.RunState{}, ctx.Err()
 		case <-time.After(pollInterval):
 			state, err := reader.GetRunState(ctx, runID)
 			if err != nil {
-				if errors.Is(err, libsqlprojections.ErrNotFound) {
+				if errors.Is(err, tursoprojections.ErrNotFound) {
 					continue
 				}
-				return libsqlprojections.RunState{}, fmt.Errorf("query run state for %s: %w", runID, err)
+				return tursoprojections.RunState{}, fmt.Errorf("query run state for %s: %w", runID, err)
 			}
 			switch strings.ToLower(strings.TrimSpace(state.Status)) {
 			case "completed", "failed", "canceled", "cancelled", "timed_out", "timeout":
@@ -2115,7 +2115,7 @@ func waitForJidoRunStateWithPoll(
 		}
 	}
 
-	return libsqlprojections.RunState{}, fmt.Errorf("timeout waiting for jido ask run to complete: ask_id=%s", askID)
+	return tursoprojections.RunState{}, fmt.Errorf("timeout waiting for jido ask run to complete: ask_id=%s", askID)
 }
 
 func resolveJidoTerminalCallback(
@@ -2212,7 +2212,7 @@ func askWaitFailureHint(callback jidoTerminalCallback) string {
 
 func buildAskRunResponseData(
 	askID string,
-	runState libsqlprojections.RunState,
+	runState tursoprojections.RunState,
 	callback jidoTerminalCallback,
 ) map[string]any {
 	data := map[string]any{

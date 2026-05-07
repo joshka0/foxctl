@@ -51,13 +51,17 @@ func main() {
 // run orchestrates stop validation with test status and review approval requirements.
 //
 // Index:
-// - Purpose: Block StopRequested until tests are green and review approval is present
-// - Flow: load config → validate event → evaluate tests (if required) → evaluate review (if required) → emit decision
-// - SideEffects: test status checking; review approval verification; context building
-// - FailureModes: store access failures, missing test watchers, review verification errors
-// - Observability: emits test results, review status, and blocking reasons
-// - Related: evaluateTests, evaluateReview, buildTestContext, hasReviewApproval, applyConfig
-// - Keywords: hooks/stop_guard, stop_validation, test_requirements, review_approval, quality_gates
+//
+//	Purpose: Block StopRequested until tests are green and review approval is present
+//	Keywords: hooks/stop_guard, stop_validation, test_requirements, review_approval, quality_gates
+//	Related: evaluateTests, evaluateReview, buildTestContext, hasReviewApproval, applyConfig
+//	Flow: load config → validate event → evaluate tests (if required) → evaluate review (if required) → emit decision
+//	Resources: testwatch store; blackboard store
+//	Events: stop-blocked, stop-approved
+//	OutputFields: decision, tests_total, tests_passing, tests_failing, review_required
+//
+// [[invariant:tests-green-before-stop]]
+// [[invariant:review-approval-before-stop]]
 func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	cfg := defaultStopGuardConfig()
 	applyConfig(&cfg, in.HookConfig)

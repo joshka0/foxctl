@@ -1237,7 +1237,7 @@ func parseFrontmatter(body []byte) frontmatter {
 
 func isFrontmatterListKey(key string) bool {
 	switch key {
-	case "tags", "paths", "anchor_paths", "symbols", "impl_anchor_paths", "support_anchor_paths", "resource_anchor_paths":
+	case "tags", "paths", "anchor_paths", "symbols", "repo_symbols", "impl_anchor_paths", "support_anchor_paths", "resource_anchor_paths":
 		return true
 	default:
 		return false
@@ -1283,7 +1283,7 @@ func appendFrontmatterList(out *frontmatter, key, item string) {
 		appendAnchorRole(out, "support", filepath.ToSlash(item))
 	case "resource_anchor_paths":
 		appendAnchorRole(out, "resource", filepath.ToSlash(item))
-	case "symbols":
+	case "symbols", "repo_symbols":
 		out.Symbols = append(out.Symbols, item)
 	}
 }

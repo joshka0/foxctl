@@ -23,12 +23,17 @@ const (
 // applyCommentEdges parses Index blocks and builds comment edges for repoindex nodes.
 //
 // Index:
-// - Purpose: Parse Index blocks and build comment edges for repoindex
-// - Flow: collect symbol name maps -> parse DocIndex meta -> add concept edges -> add Related/Flow edges
-// - SideEffects: mutates nodes/edges maps
-// - FailureModes: malformed meta JSON (skipped), unresolved targets (skipped)
-// - Related: docparser.ParseDoc, addConceptEdges, addDocEdges, resolveSymbolID
-// - Keywords: comment edges, Index block, doc edges, concept edges, related, flow, parse Index, repoindex
+//
+//	Purpose: Parse Index blocks and build comment edges for repoindex
+//	Keywords: comment edges, Index block, doc edges, concept edges, related, flow, parse Index, repoindex
+//	Related: docparser.Parse, addConceptEdges, addDocEdges, resolveSymbolID
+//	Flow: collect symbol name maps → parse DocIndex meta → add concept edges → add Related/Flow edges
+//	Resources: repoindex nodes/edges maps
+//	Events: comment-edge-build
+//	OutputFields: mutated nodes, edges
+//
+// [[protocol:repoindex-comment-edges]]
+// [[invariant:unresolved-targets-skipped-silently]]
 func applyCommentEdges(nodes map[string]Node, edges map[string]Edge, repoKey string) {
 	if len(nodes) == 0 {
 		return

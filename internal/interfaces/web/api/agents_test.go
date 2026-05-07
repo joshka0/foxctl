@@ -18,7 +18,7 @@ import (
 	"github.com/joshka0/foxctl/internal/storage/agents"
 	"github.com/joshka0/foxctl/internal/storage/blackboard"
 	v2jido "github.com/joshka0/foxctl/internal/v2/adapters/jido"
-	libsqlworkers "github.com/joshka0/foxctl/internal/v2/adapters/libsql/workers"
+	tursoworkers "github.com/joshka0/foxctl/internal/v2/adapters/turso/workers"
 	coreworker "github.com/joshka0/foxctl/internal/v2/core/worker"
 )
 
@@ -43,6 +43,7 @@ func resetAgentStreamRegistry() {
 
 func TestAgentRuntimeGetHandler_ReturnsRuntimeTree(t *testing.T) {
 	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv(EnvOrchestrationRuntimeBackend, orchestrationRuntimeBackendJidoAPI)
 
 	server, socketPath := startOrchestrationJSONRPCServer(t, func(method string, params json.RawMessage) (any, *jsonrpcTestError) {
 		var parsed map[string]any
@@ -195,7 +196,7 @@ func TestAgentRuntimeGetHandler_ReturnsGoRuntimeTree(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	workerStore, closeWorkers, err := libsqlworkers.Open(context.Background(), cfg.Storage.Root)
+	workerStore, closeWorkers, err := tursoworkers.Open(context.Background(), cfg.Storage.Root)
 	if err != nil {
 		t.Fatalf("open worker store: %v", err)
 	}
@@ -349,7 +350,7 @@ func TestAgentRuntimeLogsGetHandler_ReturnsGoRuntimeRecentLogs(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	workerStore, closeWorkers, err := libsqlworkers.Open(context.Background(), cfg.Storage.Root)
+	workerStore, closeWorkers, err := tursoworkers.Open(context.Background(), cfg.Storage.Root)
 	if err != nil {
 		t.Fatalf("open worker store: %v", err)
 	}
@@ -426,7 +427,7 @@ func TestAgentRuntimeLogsStreamHandler_StreamsGoRuntimeLogUpdates(t *testing.T) 
 		t.Fatalf("create agent: %v", err)
 	}
 
-	workerStore, closeWorkers, err := libsqlworkers.Open(context.Background(), cfg.Storage.Root)
+	workerStore, closeWorkers, err := tursoworkers.Open(context.Background(), cfg.Storage.Root)
 	if err != nil {
 		t.Fatalf("open worker store: %v", err)
 	}

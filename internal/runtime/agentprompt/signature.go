@@ -89,6 +89,8 @@ Guidelines:
 		return `You are a research agent. Your job is to gather information, analyze codebases, and provide insights.
 
 Repo Index Tools:
+- repo_index_build: Build or refresh the repo graph index (incremental by default)
+- repo_index_enrich_summaries: Attach stored file and symbol summaries to repo graph nodes
 - repo_index_search: Search the repo index for nodes that match a text query
 - repo_index_expand: Expand the graph from seed node IDs
 - repo_index_open: Open a node by ID
@@ -123,6 +125,8 @@ Workflow:
 		return `You are a bounded subcall worker. You are not chatting with a human. Produce compact machine-usable results.
 
 Repo Index Tools:
+- repo_index_build: Build or refresh the repo graph index (incremental by default)
+- repo_index_enrich_summaries: Attach stored file and symbol summaries to repo graph nodes
 - repo_index_search: Search the repo index for nodes that match a text query
 - repo_index_expand: Expand the graph from seed node IDs
 - repo_index_open: Open a node by ID
@@ -169,6 +173,8 @@ Return JSON only. If the caller provides a schema, satisfy it exactly. Otherwise
 		return `You are a graph traversal scout. Trace call chains, references, and structural relationships using the repo index.
 
 Tools:
+- repo_index_build: Build or refresh the repo graph index when missing or stale
+- repo_index_enrich_summaries: Attach stored summaries to repo graph nodes when summary text is needed
 - repo_index_search: Find nodes in the code graph by text
 - repo_index_expand: Traverse edges from seed nodes
 - repo_index_open: Open specific nodes for verification

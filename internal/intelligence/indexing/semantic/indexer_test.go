@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/joshka0/foxctl/internal/intelligence/indexing"
 	"github.com/joshka0/foxctl/internal/platform/fsutil"
@@ -609,6 +610,48 @@ func TestRunInitFilesJob_ChunkedFile(t *testing.T) {
 	}
 	if result.Summary.ChunksIndexed == 0 {
 		t.Error("expected chunks for large file")
+	}
+}
+
+func TestRunInitFilesJob_ChunkDelayHonorsContextCancellation(t *testing.T) {
+	cfg := Config{
+		Enabled:           true,
+		ChunkBytes:        50,
+		ChunkOverlapBytes: 0,
+		ChunkDelay:        50 * time.Millisecond,
+		ProviderModel:     "test-model",
+	}
+	idx, _, workspaceDir, workspaceID := setupTestIndexer(t, cfg)
+
+	content := make([]byte, 200)
+	for i := range content {
+		content[i] = byte('a' + (i % 26))
+	}
+	createTestFile(t, workspaceDir, "large.txt", string(content))
+
+	args := JobArgs{
+		WorkspaceID: workspaceID,
+		Files: []JobFileInput{
+			{Path: "large.txt"},
+		},
+		Reason: ReasonInitialIndex,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	defer cancel()
+
+	result, err := idx.RunInitFilesJob(ctx, args)
+	if err != nil {
+		t.Fatalf("RunInitFilesJob should record per-file failure, got error: %v", err)
+	}
+	if result.Summary.FilesIndexed != 0 {
+		t.Fatalf("expected no indexed files after chunk-delay cancellation, got %d", result.Summary.FilesIndexed)
+	}
+	if len(result.Failures) != 1 {
+		t.Fatalf("expected one file failure, got %d", len(result.Failures))
+	}
+	if !containsStr(result.Failures[0].ErrorMessage, "context deadline exceeded") {
+		t.Fatalf("expected context deadline failure, got %q", result.Failures[0].ErrorMessage)
 	}
 }
 

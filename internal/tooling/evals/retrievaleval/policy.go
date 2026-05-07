@@ -45,8 +45,22 @@ func LoadPolicy(path string) (Policy, error) {
 }
 
 func BuildAlerts(summaries []Summary, policy Policy) []Alert {
+	alerts := make([]Alert, 0)
+	if policy.FailOnAlerts {
+		for _, summary := range summaries {
+			if summary.ForbiddenHits > 0 {
+				alerts = append(alerts, Alert{
+					Mode:    summary.Mode,
+					Metric:  "forbidden_hits",
+					Actual:  float64(summary.ForbiddenHits),
+					Minimum: 0,
+					Message: fmt.Sprintf("%s returned %d forbidden retrieval hits", summary.Mode, summary.ForbiddenHits),
+				})
+			}
+		}
+	}
 	if len(policy.Thresholds) == 0 {
-		return nil
+		return alerts
 	}
 	thresholdsByMode := make(map[string]ModeThreshold, len(policy.Thresholds))
 	for mode, threshold := range policy.Thresholds {
@@ -57,9 +71,8 @@ func BuildAlerts(summaries []Summary, policy Policy) []Alert {
 		thresholdsByMode[key] = threshold
 	}
 	if len(thresholdsByMode) == 0 {
-		return nil
+		return alerts
 	}
-	alerts := make([]Alert, 0, len(thresholdsByMode)*3)
 	for _, summary := range summaries {
 		threshold, ok := thresholdsByMode[strings.ToLower(strings.TrimSpace(summary.Mode))]
 		if !ok {

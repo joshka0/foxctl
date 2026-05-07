@@ -185,13 +185,17 @@ func main() {
 // run orchestrates emotion detection from emoji and text markers with configurable filtering.
 //
 // Index:
-// - Purpose: Parse text for emoji and emotion markers to extract structured emotion data with confidence scores
-// - Flow: build allowed emotions → extract emoji → extract markers → determine dominant emotion → apply filters → strip markers
-// - SideEffects: emotion mapping; confidence calculation; text cleaning; marker removal
-// - FailureModes: invalid input parameters, malformed text patterns
-// - Observability: emits emotion classification, intensity scores, confidence levels, and detected markers
-// - Related: extractEmoji, extractMarkers, stripEmoji, stripMarkers
-// - Keywords: presence/parse, emotion_detection, emoji_parsing, marker_analysis, sentiment_analysis
+//
+//	Purpose: Parse text for emoji and emotion markers to extract structured emotion data with confidence scores
+//	Keywords: presence/parse, emotion_detection, emoji_parsing, marker_analysis, sentiment_analysis
+//	Related: extractEmoji, extractMarkers, stripEmoji, stripMarkers
+//	Flow: build allowed emotions → extract emoji → extract markers → determine dominant emotion → apply filters → strip markers
+//	Resources: emoji and marker mapping tables
+//	Events: emotion parsing events
+//	OutputFields: emotion, intensity, confidence, stripped_text, detected_emoji, markers, method
+//
+// [[domain:emotion-parsing]]
+// [[invariant:emoji-precedence-over-markers]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	out := Output{
 		Emotion:       EmotionNeutral,

@@ -81,9 +81,11 @@ defer store.Close()
 ```bash
 go test ./internal/storage/dbdriver
 go test ./internal/storage/memory
-go test ./internal/v2/adapters/libsql/turns
+go test ./internal/v2/adapters/turso/turns
 go test ./cmd/foxctl/cmd -run 'Test.*Memory|Test.*Orchestration'
 ```
 
-The `internal/v2/adapters/libsql` import path is an internal historical package
-name. Its live default storage path is now Turso.
+The active v2 SQL adapter path is `internal/v2/adapters/turso`. The previous
+`internal/v2/adapters/libsql` path still exists on `main` at
+`938733293b81c9be8787e15300661cf587baa8af`; do not reintroduce it in current
+work. The `libsql://` URL scheme remains the Turso remote URL scheme.

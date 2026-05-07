@@ -15,7 +15,11 @@ import (
 	"github.com/joshka0/foxctl/internal/v2/core/spawn"
 )
 
-const commandDispatchIssue = "orchestration/dispatch-issue"
+const (
+	commandDispatchIssue     = "orchestration/dispatch-issue"
+	startupRecoveryCardLimit = 200
+	startupRecoveryGrace     = 30 * time.Second
+)
 
 // OrchestrationReconciler appends Jido-backed dispatch outcomes as canonical v2 orchestration events.
 type OrchestrationReconciler struct {
@@ -33,6 +37,7 @@ type OrchestrationReconciler struct {
 // OrchestrationCardReader reads projected orchestration cards for lifecycle filtering.
 type OrchestrationCardReader interface {
 	Card(ctx context.Context, req v2orchestration.CardRequest) (v2orchestration.CardResponse, error)
+	ListRunningCards(ctx context.Context, req v2orchestration.RunningCardsRequest) ([]v2orchestration.Card, error)
 }
 
 // OrchestrationReconcilerConfig configures orchestration event reconciliation.
@@ -163,6 +168,101 @@ func (r *OrchestrationReconciler) Reconcile(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// RecoverOrphanedRuns reconciles projected running cards against the Jido runtime at startup.
+func (r *OrchestrationReconciler) RecoverOrphanedRuns(ctx context.Context) error {
+	if r == nil || len(r.parentIDs) == 0 {
+		return nil
+	}
+	if r.client == nil {
+		return fmt.Errorf("jido client is required for orchestration startup recovery")
+	}
+	if r.reader == nil {
+		return fmt.Errorf("orchestration card reader is required for orchestration startup recovery")
+	}
+
+	children, err := r.runningRuntimeChildren(ctx)
+	if err != nil {
+		return err
+	}
+	cards, err := r.listRunningCards(ctx)
+	if err != nil {
+		return err
+	}
+
+	plans := make([]startupRecoveryPlan, 0, len(cards))
+	for _, card := range cards {
+		if card.State != v2orchestration.StateRunning {
+			continue
+		}
+		child, ok := matchRunningChild(card, children)
+		if !ok {
+			if withinStartupRecoveryGrace(card, r.now().UTC()) {
+				continue
+			}
+			plans = append(plans, startupRecoveryPlan{
+				child: syntheticMissingChild(card),
+				outcome: childLifecycle{
+					Terminal: true,
+					Status:   "failed",
+					Error:    "runtime child missing during startup recovery",
+				},
+			})
+			continue
+		}
+
+		if strings.TrimSpace(child.AgentID) == "" {
+			continue
+		}
+		stateResp, err := r.client.State(ctx, StateRequest{AgentID: strings.TrimSpace(child.AgentID)})
+		if err != nil {
+			return fmt.Errorf("read jido child state agent_id=%s: %w", child.AgentID, err)
+		}
+		outcome, err := decodeChildLifecycle(stateResp)
+		if err != nil {
+			return fmt.Errorf("decode jido child state agent_id=%s: %w", child.AgentID, err)
+		}
+		if !outcome.Terminal {
+			continue
+		}
+		plans = append(plans, startupRecoveryPlan{child: child, outcome: outcome})
+	}
+
+	for _, plan := range plans {
+		if plan.outcome.Success {
+			if _, err := r.RecordDispatchCompleted(ctx, plan.child, plan.outcome); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, err := r.RecordDispatchRuntimeFailed(ctx, plan.child, plan.outcome); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *OrchestrationReconciler) listRunningCards(ctx context.Context) ([]v2orchestration.Card, error) {
+	var out []v2orchestration.Card
+	cursor := ""
+	for {
+		cards, err := r.reader.ListRunningCards(ctx, v2orchestration.RunningCardsRequest{
+			Limit:  startupRecoveryCardLimit,
+			Cursor: cursor,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("list running orchestration cards: %w", err)
+		}
+		if len(cards) == 0 {
+			return out, nil
+		}
+		out = append(out, cards...)
+		cursor = cards[len(cards)-1].IssueID
+		if len(cards) < startupRecoveryCardLimit {
+			return out, nil
+		}
+	}
 }
 
 // RecordDispatchSpawned appends a run.started orchestration event for one accepted child dispatch.
@@ -628,6 +728,75 @@ func sortedChildren(children map[string]ChildRef) []ChildRef {
 		out = append(out, children[key])
 	}
 	return out
+}
+
+type startupRecoveryPlan struct {
+	child   ChildRef
+	outcome childLifecycle
+}
+
+func (r *OrchestrationReconciler) runningRuntimeChildren(ctx context.Context) ([]ChildRef, error) {
+	children := make([]ChildRef, 0)
+	for _, parentID := range r.parentIDs {
+		childrenResp, err := r.client.GetChildren(ctx, GetChildrenRequest{AgentID: parentID})
+		if err != nil {
+			return nil, fmt.Errorf("list jido children for %s: %w", parentID, err)
+		}
+		children = append(children, sortedChildren(childrenResp.Children)...)
+	}
+	return children, nil
+}
+
+func matchRunningChild(card v2orchestration.Card, children []ChildRef) (ChildRef, bool) {
+	for _, child := range children {
+		if !sameCardIssue(card, child) {
+			continue
+		}
+		if !sameRun(card.RunID, dispatchMetaString(child.Metadata, "run_id")) {
+			continue
+		}
+		childAgentID := strings.TrimSpace(child.AgentID)
+		if card.AgentID != "" && childAgentID != "" && card.AgentID != childAgentID {
+			continue
+		}
+		return child, true
+	}
+	return ChildRef{}, false
+}
+
+func sameCardIssue(card v2orchestration.Card, child ChildRef) bool {
+	if strings.TrimSpace(card.IssueID) == "" || strings.TrimSpace(card.IssueID) != dispatchMetaString(child.Metadata, "issue_id") {
+		return false
+	}
+	cardWorkspaceID := strings.TrimSpace(card.WorkspaceID)
+	childWorkspaceID := dispatchMetaString(child.Metadata, "workspace_id")
+	return cardWorkspaceID == "" || childWorkspaceID == "" || cardWorkspaceID == childWorkspaceID
+}
+
+func withinStartupRecoveryGrace(card v2orchestration.Card, now time.Time) bool {
+	if card.LastEventAt == nil {
+		return false
+	}
+	return now.Sub(card.LastEventAt.UTC()) < startupRecoveryGrace
+}
+
+func syntheticMissingChild(card v2orchestration.Card) ChildRef {
+	meta := map[string]any{
+		"issue_id": card.IssueID,
+	}
+	putDispatchString(meta, "workspace_id", card.WorkspaceID)
+	putDispatchString(meta, "issue_identifier", card.IssueIdentifier)
+	putDispatchString(meta, "title", card.Title)
+	putDispatchString(meta, "run_id", card.RunID)
+	putDispatchString(meta, "actor_id", card.ActorID)
+	if card.Attempt > 0 {
+		meta["attempt"] = card.Attempt
+	}
+	return ChildRef{
+		Tag:      chooseNonEmpty(card.AgentID, card.RunID, card.IssueID),
+		AgentID:  strings.TrimSpace(card.AgentID),
+		Metadata: meta,
+	}
 }
 
 func sameRun(cardRunID, metaRunID string) bool {

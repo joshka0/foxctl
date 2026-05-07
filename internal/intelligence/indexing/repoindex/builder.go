@@ -19,7 +19,6 @@ import (
 	docparser "github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex/parser"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
 	"github.com/joshka0/foxctl/internal/platform/fsutil"
-	"github.com/joshka0/foxctl/internal/platform/symbolutil"
 )
 
 const (
@@ -55,12 +54,17 @@ func NewBuilder(store *Store, repoRoot string) *Builder {
 // Build builds and replaces the repo graph index.
 //
 // Index:
-// - Purpose: Build repo graph nodes/edges for enabled languages and persist to store
-// - Flow: validate opts → buildGo/TS/Elixir → rollups → comment edges → replace store → set meta
-// - SideEffects: reads workspace files; runs language tooling; writes repoindex SQLite
-// - FailureModes: package load errors, file read errors, store write errors
-// - Related: buildGo, buildTS, buildElixir, applyCommentEdges, Store.ReplaceAll
-// - Keywords: repo_index_build, repoindex, nodes, edges, repo_key, schema_version, buildGo, buildTS, buildElixir, ReplaceAll
+//
+//	Purpose: Build repo graph nodes/edges for enabled languages and persist to store
+//	Keywords: repo_index_build, repoindex, nodes, edges, repo_key, schema_version, buildGo, buildTS, buildElixir, ReplaceAll
+//	Related: buildGo, buildTS, buildElixir, applyCommentEdges, Store.ReplaceAll
+//	Flow: validate opts → buildGo/TS/Elixir → rollups → comment edges → replace store → set meta
+//	Resources: repoindex SQLite store, workspace files, language tooling
+//	Events: repoindex-build-progress
+//	OutputFields: Nodes, Edges, Packages, Files, Symbols
+//
+// [[protocol:repoindex-build]]
+// [[invariant:at-least-one-language-enabled]]
 func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, error) {
 	result := BuildResult{}
 	start := time.Now()
@@ -172,6 +176,20 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 	applyPackageRollups(nodes, localPackages)
 	applyRepoRollup(nodes, edges, opts.RepoKey, opts.RepoRoot, localPackages)
 	applyCommentEdges(nodes, edges, opts.RepoKey)
+	if opts.IncludeSemanticAnchors {
+		report("semantic_anchors", "building semantic anchor graph edges")
+		if err := applySemanticAnchorEdges(ctx, opts, nodes, edges); err != nil {
+			return result, err
+		}
+		report("semantic_anchors", "finished semantic anchor graph edges")
+	}
+	if opts.IncludeCoChange {
+		report("cochange", "building empirical co-change graph edges")
+		if err := applyCoChangeEdges(ctx, opts, nodes, edges); err != nil {
+			return result, err
+		}
+		report("cochange", "finished empirical co-change graph edges")
+	}
 
 	result.Nodes = len(nodes)
 	result.Edges = len(edges)
@@ -300,8 +318,12 @@ func (b *Builder) buildGo(ctx context.Context, opts BuildOptions, nodes map[stri
 		return fmt.Errorf("repoindex: go packages load errors")
 	}
 	reportBuildProgress(opts, "go_load_packages", fmt.Sprintf("loaded %d Go packages", len(pkgs)), *result)
+	reportBuildProgress(opts, "go_index_packages", fmt.Sprintf("indexing %d Go packages", len(pkgs)), *result)
 
-	for _, pkg := range pkgs {
+	for i, pkg := range pkgs {
+		if i > 0 && i%100 == 0 {
+			reportBuildProgress(opts, "go_index_packages", fmt.Sprintf("indexed %d/%d Go packages", i, len(pkgs)), *result)
+		}
 		pkgID := goPackageID(pkg.PkgPath)
 		pkgNodeID := PackageID(opts.RepoKey, pkgID)
 		addNode(nodes, Node{
@@ -357,7 +379,6 @@ func (b *Builder) buildGo(ctx context.Context, opts BuildOptions, nodes map[stri
 				Hash:      symbol.ComputeDigest(content),
 				UpdatedAt: time.Now().UTC(),
 			}
-			applyFileSummary(ctx, opts, &fileNode, fileRelPath)
 			addNode(nodes, fileNode)
 			addEdge(edges, Edge{
 				Src:    pkgNodeID,
@@ -382,10 +403,13 @@ func (b *Builder) buildGo(ctx context.Context, opts BuildOptions, nodes map[stri
 			}
 		}
 	}
+	reportBuildProgress(opts, "go_index_packages", fmt.Sprintf("indexed %d/%d Go packages", len(pkgs), len(pkgs)), *result)
 
-	if err := b.addGoReferenceEdges(opts, pkgs, nodes, edges); err != nil {
+	reportBuildProgress(opts, "go_reference_edges", "building Go reference edges", *result)
+	if err := b.addGoReferenceEdges(opts, pkgs, nodes, edges, result); err != nil {
 		return err
 	}
+	reportBuildProgress(opts, "go_reference_edges", "finished Go reference edges", *result)
 
 	return nil
 }
@@ -473,7 +497,6 @@ func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[stri
 			Hash:      symbol.ComputeDigest(content),
 			UpdatedAt: time.Now().UTC(),
 		}
-		applyFileSummary(ctx, opts, &fileNode, fileRelPath)
 		addNode(nodes, fileNode)
 		addEdge(edges, Edge{
 			Src:    pkgNodeID,
@@ -665,7 +688,6 @@ func (b *Builder) buildPython(ctx context.Context, opts BuildOptions, nodes map[
 			Hash:      symbol.ComputeDigest(content),
 			UpdatedAt: time.Now().UTC(),
 		}
-		applyFileSummary(ctx, opts, &fileNode, fileRelPath)
 		addNode(nodes, fileNode)
 		addEdge(edges, Edge{
 			Src:    pkgNodeID,
@@ -769,7 +791,6 @@ func (b *Builder) buildRust(ctx context.Context, opts BuildOptions, nodes map[st
 			Hash:      symbol.ComputeDigest(content),
 			UpdatedAt: time.Now().UTC(),
 		}
-		applyFileSummary(ctx, opts, &fileNode, fileRelPath)
 		addNode(nodes, fileNode)
 		addEdge(edges, Edge{
 			Src:    pkgNodeID,
@@ -877,7 +898,6 @@ func (b *Builder) buildCSharp(ctx context.Context, opts BuildOptions, nodes map[
 			Hash:      symbol.ComputeDigest(content),
 			UpdatedAt: time.Now().UTC(),
 		}
-		applyFileSummary(ctx, opts, &fileNode, fileRelPath)
 		addNode(nodes, fileNode)
 		addEdge(edges, Edge{
 			Src:    pkgNodeID,
@@ -1004,7 +1024,6 @@ func (b *Builder) buildElixir(ctx context.Context, opts BuildOptions, nodes map[
 			Hash:      symbol.ComputeDigest(content),
 			UpdatedAt: time.Now().UTC(),
 		}
-		applyFileSummary(ctx, opts, &fileNode, fileRelPath)
 		addNode(nodes, fileNode)
 		addEdge(edges, Edge{
 			Src:    pkgNodeID,
@@ -1073,11 +1092,14 @@ func elixirPackageID(filePath string) string {
 	return elixirPkgPrefix + filepath.ToSlash(dir)
 }
 
-func (b *Builder) addGoReferenceEdges(opts BuildOptions, pkgs []*packages.Package, nodes map[string]Node, edges map[string]Edge) error {
+func (b *Builder) addGoReferenceEdges(opts BuildOptions, pkgs []*packages.Package, nodes map[string]Node, edges map[string]Edge, result *BuildResult) error {
 	if len(pkgs) == 0 {
 		return nil
 	}
-	for _, pkg := range pkgs {
+	for i, pkg := range pkgs {
+		if i > 0 && i%100 == 0 && result != nil {
+			reportBuildProgress(opts, "go_reference_edges", fmt.Sprintf("processed reference edges for %d/%d Go packages", i, len(pkgs)), *result)
+		}
 		if pkg == nil || pkg.TypesInfo == nil || pkg.Fset == nil {
 			continue
 		}
@@ -1149,6 +1171,9 @@ func (b *Builder) addGoReferenceEdges(opts BuildOptions, pkgs []*packages.Packag
 			}
 			addGoFileRootReferenceEdges(opts, pkg, file, fileNodeID, nodes, edges)
 		}
+	}
+	if result != nil {
+		reportBuildProgress(opts, "go_reference_edges", fmt.Sprintf("processed reference edges for %d/%d Go packages", len(pkgs), len(pkgs)), *result)
 	}
 	return nil
 }
@@ -1387,9 +1412,6 @@ func addSymbol(ctx context.Context, opts BuildOptions, nodes map[string]Node, ed
 			node.Meta = meta
 		}
 	}
-	lang := languageFromPackageID(pkgID)
-	pkg := symbolutil.DeriveSymbolPackage(sym.FilePath, lang)
-	applySymbolSummary(ctx, opts, &node, sym.ID, sym.EffectiveID(), pkg)
 	addNode(nodes, node)
 	addEdge(edges, Edge{
 		Src:    fileID,
@@ -1411,45 +1433,6 @@ func addSymbol(ctx context.Context, opts BuildOptions, nodes map[string]Node, ed
 			UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		})
 	}
-}
-
-func applyFileSummary(ctx context.Context, opts BuildOptions, node *Node, relPath string) {
-	if node == nil || opts.SummaryProvider == nil {
-		return
-	}
-	if node.Summary != "" {
-		return
-	}
-	summary, err := opts.SummaryProvider.Summary(ctx, relPath)
-	if err != nil {
-		return
-	}
-	summary = strings.TrimSpace(summary)
-	if summary == "" {
-		return
-	}
-	node.Summary = summary
-}
-
-func applySymbolSummary(ctx context.Context, opts BuildOptions, node *Node, symbolID, symbolKey, pkg string) {
-	if node == nil || opts.SymbolSummaryProvider == nil {
-		return
-	}
-	if node.Summary != "" {
-		return
-	}
-	if symbolID == "" {
-		return
-	}
-	summary, err := opts.SymbolSummaryProvider.Summary(ctx, symbolID, symbolKey, pkg)
-	if err != nil {
-		return
-	}
-	summary = strings.TrimSpace(summary)
-	if summary == "" {
-		return
-	}
-	node.Summary = summary
 }
 
 func collectLocalPackages(nodes map[string]Node, repoKey string) []string {

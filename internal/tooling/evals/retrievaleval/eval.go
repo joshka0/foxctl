@@ -11,10 +11,11 @@ import (
 )
 
 type Query struct {
-	ID            string   `yaml:"id" json:"id"`
-	Query         string   `yaml:"query" json:"query"`
-	ExpectedAnyOf []string `yaml:"expected_any_of" json:"expected_any_of"`
-	Notes         string   `yaml:"notes,omitempty" json:"notes,omitempty"`
+	ID             string   `yaml:"id" json:"id"`
+	Query          string   `yaml:"query" json:"query"`
+	ExpectedAnyOf  []string `yaml:"expected_any_of" json:"expected_any_of"`
+	ForbiddenAnyOf []string `yaml:"forbidden_any_of,omitempty" json:"forbidden_any_of,omitempty"`
+	Notes          string   `yaml:"notes,omitempty" json:"notes,omitempty"`
 }
 
 type Suite struct {
@@ -29,6 +30,8 @@ type ModeResult struct {
 	TotalHits        int      `json:"total_hits"`
 	TopPaths         []string `json:"top_paths,omitempty"`
 	FirstCorrectRank int      `json:"first_correct_rank,omitempty"`
+	ForbiddenHit     bool     `json:"forbidden_hit,omitempty"`
+	ForbiddenPaths   []string `json:"forbidden_paths,omitempty"`
 	HitAt5           bool     `json:"hit_at_5"`
 	HitAt10          bool     `json:"hit_at_10"`
 }
@@ -44,6 +47,7 @@ type Summary struct {
 	Mode               string  `json:"mode"`
 	Queries            int     `json:"queries"`
 	Available          int     `json:"available"`
+	ForbiddenHits      int     `json:"forbidden_hits,omitempty"`
 	HitRateAt5         float64 `json:"hit_rate_at_5"`
 	HitRateAt10        float64 `json:"hit_rate_at_10"`
 	MeanReciprocalRank float64 `json:"mean_reciprocal_rank"`
@@ -75,6 +79,10 @@ func LoadSuite(path string) (Suite, error) {
 }
 
 func EvaluateMode(mode string, hitPaths, expected []string, totalHits int, err error) ModeResult {
+	return EvaluateModeWithForbidden(mode, hitPaths, expected, nil, totalHits, err)
+}
+
+func EvaluateModeWithForbidden(mode string, hitPaths, expected, forbidden []string, totalHits int, err error) ModeResult {
 	result := ModeResult{
 		Mode:      mode,
 		Available: err == nil,
@@ -86,12 +94,19 @@ func EvaluateMode(mode string, hitPaths, expected []string, totalHits int, err e
 		return result
 	}
 	normalizedExpected := normalizeExpected(expected)
+	normalizedForbidden := normalizeExpected(forbidden)
 	for i, hit := range hitPaths {
 		if containsPath(normalizedExpected, hit) {
 			result.FirstCorrectRank = i + 1
 			result.HitAt5 = i < 5
 			result.HitAt10 = i < 10
 			break
+		}
+	}
+	for _, hit := range hitPaths {
+		if containsPath(normalizedForbidden, hit) {
+			result.ForbiddenHit = true
+			result.ForbiddenPaths = append(result.ForbiddenPaths, filepath.ToSlash(strings.TrimSpace(hit)))
 		}
 	}
 	return result
@@ -106,6 +121,9 @@ func Summarize(results []QueryResult, modes []string) []Summary {
 			modeResult, ok := query.Modes[mode]
 			if !ok || !modeResult.Available {
 				continue
+			}
+			if modeResult.ForbiddenHit {
+				s.ForbiddenHits++
 			}
 			s.Available++
 			if modeResult.HitAt5 {
@@ -136,10 +154,10 @@ func RenderMarkdown(result RunResult) string {
 	fmt.Fprintf(&b, "- Vault: `%s`\n", result.VaultPath)
 	fmt.Fprintf(&b, "- Limit: `%d`\n\n", result.Limit)
 	b.WriteString("## Summary\n\n")
-	b.WriteString("| Mode | Available | hit@5 | hit@10 | MRR |\n")
-	b.WriteString("| --- | ---: | ---: | ---: | ---: |\n")
+	b.WriteString("| Mode | Available | forbidden | hit@5 | hit@10 | MRR |\n")
+	b.WriteString("| --- | ---: | ---: | ---: | ---: | ---: |\n")
 	for _, s := range result.Summaries {
-		b.WriteString(fmt.Sprintf("| %s | %d/%d | %.2f | %.2f | %.2f |\n", s.Mode, s.Available, s.Queries, s.HitRateAt5, s.HitRateAt10, s.MeanReciprocalRank))
+		b.WriteString(fmt.Sprintf("| %s | %d/%d | %d | %.2f | %.2f | %.2f |\n", s.Mode, s.Available, s.Queries, s.ForbiddenHits, s.HitRateAt5, s.HitRateAt10, s.MeanReciprocalRank))
 	}
 	b.WriteString("\n## Queries\n\n")
 	for _, q := range result.Queries {
@@ -159,9 +177,12 @@ func RenderMarkdown(result RunResult) string {
 				b.WriteString("\n")
 				continue
 			}
-			b.WriteString(line + fmt.Sprintf("rank=%d hit@5=%t hit@10=%t\n", m.FirstCorrectRank, m.HitAt5, m.HitAt10))
+			b.WriteString(line + fmt.Sprintf("rank=%d hit@5=%t hit@10=%t forbidden=%t\n", m.FirstCorrectRank, m.HitAt5, m.HitAt10, m.ForbiddenHit))
 			for _, path := range m.TopPaths[:minInt(len(m.TopPaths), 3)] {
 				b.WriteString("  - `" + path + "`\n")
+			}
+			for _, path := range m.ForbiddenPaths {
+				b.WriteString("  - forbidden: `" + path + "`\n")
 			}
 		}
 		b.WriteString("\n")
@@ -212,14 +233,17 @@ func sortedModeKeys(m map[string]ModeResult) []string {
 		"aca_package_fallback":       11,
 		"aca_query_typed":            12,
 		"aca_default":                13,
-		"aca_cochange":               14,
-		"aca_cochange_continuity":    15,
-		"cochange_artifacts":         16,
-		"repoindex_search":           17,
-		"repoindex_dag":              18,
-		"rlm_llm":                    19,
-		"rlm_llm_codeintel":          20,
-		"rlm_llm_code_staged":        21,
+		"aca_semantic_anchors":       14,
+		"aca_cochange":               15,
+		"aca_cochange_continuity":    16,
+		"cochange_artifacts":         17,
+		"repoindex_search":           18,
+		"repoindex_semantic_search":  19,
+		"repoindex_dag":              20,
+		"repoindex_semantic_dag":     21,
+		"rlm_llm":                    22,
+		"rlm_llm_codeintel":          23,
+		"rlm_llm_code_staged":        24,
 	}
 	for i := 0; i < len(keys); i++ {
 		for j := i + 1; j < len(keys); j++ {

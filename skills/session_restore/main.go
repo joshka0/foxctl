@@ -142,13 +142,17 @@ func main() {
 // run orchestrates session restoration with semantic search, memory retrieval, and context injection.
 //
 // Index:
-// - Purpose: Restore session state after compaction with semantic search, memory retrieval, and comprehensive context injection
-// - Flow: validate input → open stores → find snapshot → search for context → format restoration → emit results
-// - SideEffects: reads memory and session stores; performs semantic searches; injects context; clears pending restore flags
-// - FailureModes: missing stores, invalid snapshots, search failures, context formatting errors
-// - Observability: emits restoration context, search results, memory data, and comprehensive session state
-// - Related: runSemanticSearches, searchRelevantMemoryRecords, formatContextWithSearch, searchSimilarSessions
-// - Keywords: session/restore, context_restoration, semantic_search, memory_retrieval, session_continuity
+//
+//	Purpose: Restore session state after compaction with semantic search, memory retrieval, and comprehensive context injection
+//	Keywords: session/restore, context_restoration, semantic_search, memory_retrieval, session_continuity
+//	Related: runSemanticSearches, searchRelevantMemoryRecords, formatContextWithSearch, searchSimilarSessions
+//	Flow: validate input → open stores → find snapshot → search for context → format restoration → emit results
+//	Resources: memory store, session store, task store, embedding provider
+//	Events: session restore events
+//	OutputFields: hook_output, snapshot_id, items_restored, key_questions, search_results, relevant_memory_records
+//
+// [[domain:session-context-restoration]]
+// [[protocol:post-compaction-context-injection]]
 //
 //nolint:gocyclo // Legacy restoration orchestrator; this slice only changes the memory record contract.
 func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {

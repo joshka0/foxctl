@@ -29,6 +29,9 @@ List: `foxctl skills list`
 | `code/security` | Security scan |
 | `code/semantic_search` | Vector search across symbols/codemaps/memories |
 | `code/dag_grep` | Repo graph explanation subgraph (DAG view) |
+| `repo/index_build` | Build or refresh repo graph index (incremental by default) |
+| `repo/index_enrich_summaries` | Attach stored file/symbol summaries to repo graph nodes |
+| `repo/index_search`, `repo/index_expand`, `repo/index_open` | Search, traverse, and inspect repo graph nodes |
 | `code/smart_write` | Symbol-based editing with diff preview |
 | `code/diff` | Staged/unstaged/branch diffs |
 | `code/git` | Blame, hotspots, history |

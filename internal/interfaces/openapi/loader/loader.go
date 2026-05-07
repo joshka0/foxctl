@@ -124,12 +124,14 @@ func (s *Spec) GetOperation(operationID string) (*Operation, error) {
 // Load resolves, parses, validates, and caches an OpenAPI specification.
 //
 // Index:
-// - Purpose: Load and cache OpenAPI specs from CAS, memory, HTTP, or file paths
-// - Flow: normalize workspace -> compute cache key -> fetch bytes -> parse/validate -> cache -> return
-// - SideEffects: reads CAS/memory/HTTP/file; populates cache
-// - FailureModes: invalid ref, fetch errors, parse/validation errors
-// - Related: Loader.fetch, Loader.parse, Loader.cacheKey
-// - Keywords: openapi_load, cas_digest, memory_ref, http_url, file_path, cache
+//
+//	Purpose: Load and cache OpenAPI specs from CAS, memory, HTTP, or file paths
+//	Flow: normalize workspace → compute cache key → fetch bytes → parse/validate → cache → return
+//	Related: Loader.fetch, Loader.parse, Loader.cacheKey
+//	Keywords: openapi_load, cas_digest, memory_ref, http_url, file_path, cache
+//
+// [[protocol:openapi-spec-loader]]
+// [[domain:spec-resolution-caching]]
 func (l *Loader) Load(ctx context.Context, ref string) (*Spec, error) {
 	if strings.TrimSpace(ref) == "" {
 		return nil, fmt.Errorf("spec reference cannot be empty")

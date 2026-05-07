@@ -38,13 +38,16 @@ func main() {
 // run orchestrates JSON transformation operations including extract, merge, validate, format, and keys.
 //
 // Index:
-// - Purpose: Transform and analyze JSON data with multiple operations: path extraction, deep merging, validation, formatting, and key enumeration
-// - Flow: validate input → parse JSON → dispatch operation → execute specific transformation → return structured result
-// - SideEffects: parses JSON strings; performs deep object merging; validates structure; formats output with configurable indentation
-// - FailureModes: invalid JSON input, invalid operations, path extraction errors, merge conflicts
-// - Observability: emits operation results, error messages, structure analysis, and formatting statistics
-// - Related: extractOperation, mergeOperation, validateOperation, formatOperation, keysOperation
-// - Keywords: json/transform, json_manipulation, path_extraction, deep_merge, json_validation, formatting
+//
+//	Purpose: Transform and analyze JSON data with multiple operations: path extraction, deep merging, validation, formatting, and key enumeration
+//	Keywords: json/transform, json_manipulation, path_extraction, deep_merge, json_validation, formatting
+//	Related: extractOperation, mergeOperation, validateOperation, formatOperation, keysOperation
+//	Flow: validate input → parse JSON → dispatch operation → execute specific transformation → return structured result
+//	Resources: JSON parser; bytes buffer
+//	Events: json-transformed
+//	OutputFields: operation, result, formatted, keys, error
+//
+// [[domain:json-manipulation]]
 func run(_ context.Context, rc *skillmain.RunContext, in input) error {
 	op := oputil.Op(in.Operation)
 	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOps, ", "))

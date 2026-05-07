@@ -466,6 +466,15 @@ func shellQuote(value string) string {
 }
 
 // Read returns a bounded scrollback capture for one pane.
+//
+// Index:
+//
+//	Purpose: Capture pane output for bridge read operations.
+//	Keywords: tmux, pane, capture, scrollback
+//	Related: Send, ResolveTarget
+//
+// [[invariant:read-target-resolved-before-capture]]
+// [[test:internal/runtime/terminal/tmuxbridge/client_test.go#TestReadReturnsCapturedLines]]
 func (c *Client) Read(ctx context.Context, target string, lines int) (ReadResult, error) {
 	if lines <= 0 {
 		lines = 50
@@ -497,6 +506,15 @@ func (c *Client) Read(ctx context.Context, target string, lines int) (ReadResult
 
 // Send injects one structured bridge message into the target pane and presses Enter.
 // When running outside tmux, sender must resolve to an existing pane label or target.
+//
+// Index:
+//
+//	Purpose: Inject bridge messages into tmux panes with sender attribution.
+//	Keywords: tmux, bridge, send, message, pane
+//	Related: Read, resolveSenderPane, relayPostPasteKeys
+//
+// [[invariant:sender-resolved-before-inject]]
+// [[test:internal/runtime/terminal/tmuxbridge/client_test.go#TestSendWithExplicitSenderLabel]]
 func (c *Client) Send(ctx context.Context, sender string, target string, text string) (SendResult, error) {
 	content := strings.TrimSpace(text)
 	if content == "" {
@@ -939,6 +957,19 @@ func (c *Client) describePaneWithSocket(ctx context.Context, socket, target stri
 	return panes[0], nil
 }
 
+// resolveSenderPane determines the originating pane for a bridge message.
+// It prefers an explicit sender, falls back to TMUX_BRIDGE_SENDER, then
+// the current tmux pane, and fails if none are available outside tmux.
+//
+// Index:
+//
+//	Purpose: Resolve sender pane for bridge message attribution.
+//	Keywords: sender, pane, participant, tmux
+//	Related: Send, CurrentPane, ParseParticipantID
+//
+// [[invariant:sender-resolution-order]]
+// [[risk:sender-required-outside-tmux]]
+// [[test:internal/runtime/terminal/tmuxbridge/client_test.go#TestSendRequiresSenderOutsideTmux]]
 func (c *Client) resolveSenderPane(ctx context.Context, sender string) (Pane, error) {
 	explicit := strings.TrimSpace(sender)
 	if explicit == "" {

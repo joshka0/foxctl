@@ -91,13 +91,17 @@ func main() {
 // run orchestrates CI check run analysis for a GitHub pull request.
 //
 // Index:
-// - Purpose: Summarize GitHub check runs for PRs with optional detailed error extraction and filtering
-// - Flow: resolve PR → fetch check runs → filter/sort → enrich with job details → extract error excerpts → emit summary
-// - SideEffects: GitHub API calls; optional log fetching for detailed mode
-// - FailureModes: invalid PR, missing token, GitHub API errors, network timeouts
-// - Observability: emits repository/pr_number/head_sha/overall_status/has_blocking_ci/all_checks_successful/has_neutral_or_skipped/totals/mode/errors_only/checks
-// - Related: getPR, getCheckRuns, getJobDetails, getJobLogs, extractConciseError, cihelpers.ResolveOwnerRepo, cihelpers.ResolveToken
-// - Keywords: ci/checks, pr, check_runs, conclusion, errors_only, mode, summary, detailed, github_api
+//
+//	Purpose: Summarize GitHub check runs for PRs with optional detailed error extraction and filtering
+//	Flow: resolve PR → fetch check runs → filter/sort → enrich with job details → extract error excerpts → emit summary
+//	SideEffects: GitHub API calls; optional log fetching for detailed mode
+//	FailureModes: invalid PR, missing token, GitHub API errors, network timeouts
+//	Observability: emits repository/pr_number/head_sha/overall_status/has_blocking_ci/all_checks_successful/has_neutral_or_skipped/totals/mode/errors_only/checks
+//	Related: getPR, getCheckRuns, getJobDetails, getJobLogs, extractConciseError, cihelpers.ResolveOwnerRepo, cihelpers.ResolveToken
+//	Keywords: ci/checks, pr, check_runs, conclusion, errors_only, mode, summary, detailed, github_api
+//
+// [[domain:github-ci-checks]]
+// [[protocol:github-api-check-runs]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	prRef := strings.TrimSpace(in.PR.String())
 

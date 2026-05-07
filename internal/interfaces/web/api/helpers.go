@@ -34,12 +34,14 @@ func readJSON(w http.ResponseWriter, r *http.Request, out any) error {
 // httpError writes an error envelope response that matches the canonical wire format.
 //
 // Index:
-// - Purpose: Provide consistent error payloads for HTTP API endpoints
-// - Flow: derive stable error.code + user hint → build envelope.Error → write JSON with HTTP status
-// - SideEffects: writes response headers/body
-// - FailureModes: JSON encoding errors ignored (best-effort)
-// - Related: envelope.Error, writeJSON
-// - Keywords: http, api, error_envelope, status_code, remediation_hint
+//
+//	Purpose: Provide consistent error payloads for HTTP API endpoints
+//	Flow: derive stable error.code + user hint → build envelope.Error → write JSON with HTTP status
+//	Related: envelope.Error, writeJSON
+//	Keywords: http, api, error_envelope, status_code, remediation_hint
+//
+// [[invariant:canonical-error-envelope]]
+// [[domain:http-error-format]]
 func httpError(w http.ResponseWriter, status int, msg string) {
 	code := fmt.Sprintf("http_%d", status)
 	if text := http.StatusText(status); text != "" {
@@ -61,12 +63,11 @@ func httpError(w http.ResponseWriter, status int, msg string) {
 // httpErrorHint provides a user-facing remediation hint for common HTTP errors.
 //
 // Index:
-// - Purpose: Give clients actionable remediation guidance without leaking internals
-// - Flow: map HTTP status → hint string
-// - SideEffects: none
-// - FailureModes: none
-// - Related: httpError
-// - Keywords: hint, remediation, http_status
+//
+//	Purpose: Give clients actionable remediation guidance without leaking internals
+//	Flow: map HTTP status → hint string
+//	Related: httpError
+//	Keywords: hint, remediation, http_status
 func httpErrorHint(status int) string {
 	switch status {
 	case http.StatusBadRequest:

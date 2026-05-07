@@ -63,13 +63,17 @@ func main() {
 // run orchestrates directory tree generation with multiple output formats and statistics.
 //
 // Index:
-// - Purpose: Generate directory trees with filtering, statistics, and multiple output formats
-// - Flow: validate input → resolve path → build tree → generate output format → emit results
-// - SideEffects: directory traversal; file system access; CAS storage for large trees
-// - FailureModes: invalid paths, permission errors, directory read errors
-// - Observability: emits tree structure, statistics, and artifact hints for large trees
-// - Related: buildTree, renderTree, renderList, formatSize
-// - Keywords: fs/tree, directory_tree, tree_generation, statistics, file_system
+//
+//	Purpose: Generate directory trees with filtering, statistics, and multiple output formats
+//	Flow: validate input → resolve path → build tree → generate output format → emit results
+//	SideEffects: directory traversal; file system access; CAS storage for large trees
+//	FailureModes: invalid paths, permission errors, directory read errors
+//	Observability: emits tree structure, statistics, and artifact hints for large trees
+//	Related: buildTree, renderTree, renderList, formatSize
+//	Keywords: fs/tree, directory_tree, tree_generation, statistics, file_system
+//
+// [[domain:directory-tree-generation]]
+// [[protocol:recursive-tree-rendering]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply defaults
 	if in.MaxDepth <= 0 {

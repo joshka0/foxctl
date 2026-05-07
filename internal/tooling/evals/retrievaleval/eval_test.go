@@ -3,24 +3,30 @@ package retrievaleval
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
 func TestEvaluateModeAndSummarize(t *testing.T) {
-	mode := EvaluateMode("lexical",
+	mode := EvaluateModeWithForbidden("lexical",
 		[]string{
 			"notes/repo/foxctl/index.md",
+			"internal/runtime/terminal/tmuxbridge/client.go",
 			"notes/repo/foxctl/packages/cmd-foxctl-cmd.md",
 		},
 		[]string{"notes/repo/foxctl/packages/cmd-foxctl-cmd.md"},
-		2,
+		[]string{"internal/runtime/terminal/tmuxbridge/client.go"},
+		3,
 		nil,
 	)
-	if mode.FirstCorrectRank != 2 {
-		t.Fatalf("rank=%d want 2", mode.FirstCorrectRank)
+	if mode.FirstCorrectRank != 3 {
+		t.Fatalf("rank=%d want 3", mode.FirstCorrectRank)
 	}
 	if !mode.HitAt5 || !mode.HitAt10 {
 		t.Fatalf("expected hit at 5 and 10")
+	}
+	if !mode.ForbiddenHit || len(mode.ForbiddenPaths) != 1 {
+		t.Fatalf("expected forbidden hit to be recorded: %+v", mode)
 	}
 
 	results := []QueryResult{
@@ -37,8 +43,11 @@ func TestEvaluateModeAndSummarize(t *testing.T) {
 	if summaries[0].HitRateAt5 != 1.0 {
 		t.Fatalf("hit@5=%.2f want 1.0", summaries[0].HitRateAt5)
 	}
-	if summaries[0].MeanReciprocalRank != 0.5 {
-		t.Fatalf("mrr=%.2f want 0.5", summaries[0].MeanReciprocalRank)
+	if summaries[0].MeanReciprocalRank != 1.0/3.0 {
+		t.Fatalf("mrr=%.2f want %.2f", summaries[0].MeanReciprocalRank, 1.0/3.0)
+	}
+	if summaries[0].ForbiddenHits != 1 {
+		t.Fatalf("forbidden_hits=%d want 1", summaries[0].ForbiddenHits)
 	}
 }
 
@@ -86,6 +95,11 @@ thresholds:
 	if len(alerts) != 3 {
 		t.Fatalf("len(alerts)=%d want 3", len(alerts))
 	}
+
+	forbiddenAlerts := BuildAlerts([]Summary{{Mode: "repoindex_semantic_dag", ForbiddenHits: 1}}, Policy{FailOnAlerts: true})
+	if len(forbiddenAlerts) != 1 || forbiddenAlerts[0].Metric != "forbidden_hits" {
+		t.Fatalf("forbidden alerts=%+v", forbiddenAlerts)
+	}
 }
 
 func TestLoadSuite(t *testing.T) {
@@ -99,5 +113,51 @@ func TestLoadSuite(t *testing.T) {
 	}
 	if len(suite.Queries) == 0 {
 		t.Fatalf("expected queries")
+	}
+}
+
+func TestLoadSemanticAnchorSuiteCoversAcceptanceGate(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "..", "testdata", "evals", "retrieval", "foxctl-semantic-anchors.yaml")
+	suite, err := LoadSuite(path)
+	if err != nil {
+		t.Fatalf("LoadSuite: %v", err)
+	}
+	if suite.Name != "foxctl-semantic-anchors" {
+		t.Fatalf("name=%q", suite.Name)
+	}
+	if len(suite.Queries) != 8 {
+		t.Fatalf("queries=%d want 8", len(suite.Queries))
+	}
+	positive, controls := 0, 0
+	requiredControls := map[string]bool{
+		"beacon":   false,
+		"domain":   false,
+		"protocol": false,
+		"risk":     false,
+	}
+	for _, q := range suite.Queries {
+		if len(q.ExpectedAnyOf) > 0 {
+			positive++
+		}
+		if len(q.ForbiddenAnyOf) > 0 {
+			controls++
+			lower := strings.ToLower(q.ID + " " + q.Query + " " + q.Notes)
+			for key := range requiredControls {
+				if strings.Contains(lower, key) {
+					requiredControls[key] = true
+				}
+			}
+		}
+	}
+	if positive < 5 {
+		t.Fatalf("positive queries=%d want at least 5", positive)
+	}
+	if controls < 3 {
+		t.Fatalf("control queries=%d want at least 3", controls)
+	}
+	for key, ok := range requiredControls {
+		if !ok {
+			t.Fatalf("suite missing %s control coverage", key)
+		}
 	}
 }

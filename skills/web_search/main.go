@@ -64,13 +64,17 @@ func main() {
 // run orchestrates web searches using Exa or Tavily providers with optional content extraction.
 //
 // Index:
-// - Purpose: Search the web using Exa/Tavily APIs with optional content extraction from top results
-// - Flow: validate input → determine provider → execute search → extract content if requested → emit results
-// - SideEffects: HTTP requests to search APIs; web content fetching; HTML parsing; CAS storage for large results
-// - FailureModes: missing API keys, network failures, HTTP errors, content extraction failures
-// - Observability: emits search results, extraction counts, provider info, and artifact digests for large content
-// - Related: searchExa, searchTavily, extractContent, extractTextFromHTML, removeTagContent
-// - Keywords: web/search, web_searching, exa_api, tavily_api, content_extraction, html_parsing
+//
+//	Purpose: Search the web using Exa/Tavily APIs with optional content extraction from top results
+//	Keywords: web/search, web_searching, exa_api, tavily_api, content_extraction, html_parsing
+//	Related: searchExa, searchTavily, extractContent, extractTextFromHTML, removeTagContent
+//	Flow: validate input → determine provider → execute search → extract content if requested → emit results
+//	Resources: Exa API, Tavily API, HTTP client, CAS store
+//	Events: none
+//	OutputFields: results, extractions, provider, query, truncated, artifact
+//
+// [[domain:web_search]]
+// [[risk:missing-provider-credential]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Validate input
 	if strings.TrimSpace(in.Query) == "" {

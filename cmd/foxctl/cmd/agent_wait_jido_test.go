@@ -12,15 +12,15 @@ import (
 	"github.com/joshka0/foxctl/internal/domain/envelope"
 	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/protocol"
-	libsqlevents "github.com/joshka0/foxctl/internal/v2/adapters/libsql/events"
-	libsqlprojections "github.com/joshka0/foxctl/internal/v2/adapters/libsql/projections"
+	tursoevents "github.com/joshka0/foxctl/internal/v2/adapters/turso/events"
+	tursoprojections "github.com/joshka0/foxctl/internal/v2/adapters/turso/projections"
 	v2events "github.com/joshka0/foxctl/internal/v2/core/events"
 	"github.com/oklog/ulid/v2"
 	"github.com/spf13/cobra"
 )
 
 type fakeJidoRunStateReader struct {
-	states         []libsqlprojections.RunState
+	states         []tursoprojections.RunState
 	notFoundReads  int
 	err            error
 	currentStateIx int
@@ -38,16 +38,16 @@ func (f *fakeJidoRunEventReader) ListStream(context.Context, v2events.StreamFilt
 	return append([]v2events.Event(nil), f.events...), nil
 }
 
-func (f *fakeJidoRunStateReader) GetRunState(context.Context, string) (libsqlprojections.RunState, error) {
+func (f *fakeJidoRunStateReader) GetRunState(context.Context, string) (tursoprojections.RunState, error) {
 	if f.notFoundReads > 0 {
 		f.notFoundReads--
-		return libsqlprojections.RunState{}, libsqlprojections.ErrNotFound
+		return tursoprojections.RunState{}, tursoprojections.ErrNotFound
 	}
 	if f.err != nil {
-		return libsqlprojections.RunState{}, f.err
+		return tursoprojections.RunState{}, f.err
 	}
 	if len(f.states) == 0 {
-		return libsqlprojections.RunState{}, libsqlprojections.ErrNotFound
+		return tursoprojections.RunState{}, tursoprojections.ErrNotFound
 	}
 	idx := f.currentStateIx
 	if idx >= len(f.states) {
@@ -154,7 +154,7 @@ func TestWaitForJidoRunStateWithPoll_CompletesAfterRunning(t *testing.T) {
 	t.Parallel()
 
 	reader := &fakeJidoRunStateReader{
-		states: []libsqlprojections.RunState{
+		states: []tursoprojections.RunState{
 			{RunID: "ask:ask-1", Status: "running"},
 			{RunID: "ask:ask-1", Status: "completed", LastEventID: "evt-done"},
 		},
@@ -176,7 +176,7 @@ func TestWaitForJidoRunStateWithPoll_ReturnsFailedTerminalState(t *testing.T) {
 	t.Parallel()
 
 	reader := &fakeJidoRunStateReader{
-		states: []libsqlprojections.RunState{
+		states: []tursoprojections.RunState{
 			{RunID: "ask:ask-2", Status: "failed"},
 		},
 	}
@@ -248,7 +248,7 @@ func TestAskWaitFailureHint_IncludesStructuredCallbackDetails(t *testing.T) {
 func TestBuildAskRunResponseData_IncludesCallbackDetails(t *testing.T) {
 	t.Parallel()
 
-	data := buildAskRunResponseData("ask-123", libsqlprojections.RunState{
+	data := buildAskRunResponseData("ask-123", tursoprojections.RunState{
 		RunID:       "ask:ask-123",
 		Status:      "completed",
 		LastEventID: "evt-123",
@@ -317,13 +317,13 @@ func TestRunAgentAskStatus_ReturnsCallbackEnrichedStatus(t *testing.T) {
 	requestID := "req-" + ulid.Make().String()
 	actorID := "actor:coder:test"
 
-	eventStore, err := libsqlevents.Open(ctx, tmp)
+	eventStore, err := tursoevents.Open(ctx, tmp)
 	if err != nil {
 		t.Fatalf("open event store: %v", err)
 	}
 	t.Cleanup(func() { _ = eventStore.Close() })
 
-	projStore, closeProj, err := libsqlprojections.Open(ctx, tmp)
+	projStore, closeProj, err := tursoprojections.Open(ctx, tmp)
 	if err != nil {
 		t.Fatalf("open projection store: %v", err)
 	}

@@ -180,7 +180,7 @@ func TestMemoryCuratorReportEmitsEventTelemetry(t *testing.T) {
 	require.NotNil(t, found, "memory.curator_report event not emitted")
 	require.Equal(t, observability.ComponentSkill, observability.EventDataString(found, observability.DataKeyComponent))
 	require.Equal(t, command, found.Name)
-	require.Equal(t, rc.Workspace, observability.EventDataString(found, observability.DataKeyWorkspaceID))
+	require.Equal(t, observability.RedactString(rc.Workspace), observability.EventDataString(found, observability.DataKeyWorkspaceID))
 	require.Equal(t, observability.StatusOK, found.Status)
 	require.Equal(t, "dry_run", found.Data["mode"])
 	require.Equal(t, float64(1), found.Data["total_records"])

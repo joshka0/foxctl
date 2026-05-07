@@ -183,13 +183,17 @@ func main() {
 // run orchestrates impact analysis for edited files using LSP references and implementations.
 //
 // Index:
-// - Purpose: Analyze external dependencies of edited code symbols using LSP servers
-// - Flow: validate config → extract file path → check language → get symbols → analyze impacts in parallel → filter significant results → emit context
-// - SideEffects: LSP server communication; debouncing; context injection
-// - FailureModes: LSP server errors, file access failures, timeout errors
-// - Observability: emits impact analysis results, dependency counts, and performance metrics
-// - Related: getSymbols, analyzeImpacts, getLSPReferences, getLSPImplementations, formatImpactContext
-// - Keywords: hooks/impact_analysis, lsp_analysis, code_dependencies, reference_analysis, implementation_analysis
+//
+//	Purpose: Analyze external dependencies of edited code symbols using LSP servers
+//	Keywords: hooks/impact_analysis, lsp_analysis, code_dependencies, reference_analysis, implementation_analysis
+//	Related: getSymbols, analyzeImpacts, getLSPReferences, getLSPImplementations, formatImpactContext
+//	Flow: validate config → extract file path → check language → get symbols → analyze impacts in parallel → filter significant results → emit context
+//	Resources: LSP servers (gopls, tsserver, pylsp); code/symbols skill
+//	Events: impact-analyzed, impact-debounced
+//	OutputFields: impacts, symbol_count, ref_count, impl_count
+//
+// [[domain:impact-analysis]]
+// [[protocol:lsp-integration]]
 func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	cfg := LoadConfig()
 

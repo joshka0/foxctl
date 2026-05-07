@@ -10,16 +10,18 @@ import (
 
 // DAGGrepRequest configures repo index DAG_grep.
 type DAGGrepRequest struct {
-	Query          string
-	Mode           string
-	K              int
-	NodeKinds      []NodeKind
-	EdgeTypes      []EdgeType
-	Direction      Direction
-	Depth          int
-	Budget         int
-	PerNodeCap     int
-	IncludeAnchors bool
+	Query                  string
+	Mode                   string
+	K                      int
+	NodeKinds              []NodeKind
+	EdgeTypes              []EdgeType
+	Direction              Direction
+	Depth                  int
+	Budget                 int
+	PerNodeCap             int
+	IncludeAnchors         bool
+	IncludeOwnerContainers bool
+	IncludeSemanticAnchors bool
 }
 
 // DAGView captures a layered DAG view plus back edges.
@@ -56,30 +58,12 @@ func (q *QueryEngine) DAGGrep(ctx context.Context, req DAGGrepRequest) (DAGGrepR
 	if query == "" {
 		return result, nil
 	}
+	req = NormalizeDAGGrepRequest(req)
 
 	mode := strings.ToLower(strings.TrimSpace(req.Mode))
-	if mode == "" {
-		mode = "hybrid"
-	}
 	result.Query = query
 	result.Mode = mode
 	result.ModeUsed = "fts"
-
-	if req.K <= 0 {
-		req.K = 10
-	}
-	if req.Depth <= 0 {
-		req.Depth = 2
-	}
-	if req.Budget <= 0 {
-		req.Budget = 80
-	}
-	if req.PerNodeCap <= 0 {
-		req.PerNodeCap = 20
-	}
-	if req.Direction == "" {
-		req.Direction = DirOut
-	}
 
 	kindFilter := make(map[NodeKind]struct{})
 	for _, kind := range req.NodeKinds {
@@ -120,7 +104,7 @@ func (q *QueryEngine) DAGGrep(ctx context.Context, req DAGGrepRequest) (DAGGrepR
 		return result, err
 	}
 
-	if req.IncludeAnchors {
+	if req.IncludeOwnerContainers {
 		nodes, edges = q.addAnchorNodes(ctx, nodes, edges)
 	}
 
@@ -198,11 +182,12 @@ func (q *QueryEngine) expandWeighted(ctx context.Context, seeds []ScoredNode, re
 		}
 
 		edges, err := q.fetchEdges(ctx, item.id, ExpandOptions{
-			Direction:  req.Direction,
-			EdgeTypes:  req.EdgeTypes,
-			Depth:      req.Depth,
-			Budget:     req.Budget,
-			PerNodeCap: req.PerNodeCap,
+			Direction:              req.Direction,
+			EdgeTypes:              req.EdgeTypes,
+			Depth:                  req.Depth,
+			Budget:                 req.Budget,
+			PerNodeCap:             req.PerNodeCap,
+			IncludeSemanticAnchors: req.IncludeSemanticAnchors,
 		})
 		if err != nil {
 			return nil, nil, err
@@ -248,6 +233,49 @@ func (q *QueryEngine) expandWeighted(ctx context.Context, seeds []ScoredNode, re
 	}
 
 	return nodes, edges, nil
+}
+
+// [[invariant:semantic-anchors-explicit-traversal]]
+// [[doc:docs/plans/features/semantic-code-anchors.md#Remaining Work]]
+// [[test:internal/intelligence/indexing/repoindex/edge_normalization_test.go#TestDAGGrepIncludeSemanticAnchorsSeparateFromOwnerContainers]]
+func NormalizeDAGGrepRequest(req DAGGrepRequest) DAGGrepRequest {
+	req.Query = strings.TrimSpace(req.Query)
+	req.Mode = strings.ToLower(strings.TrimSpace(req.Mode))
+	if req.Mode == "" {
+		req.Mode = "hybrid"
+	}
+	if req.K <= 0 {
+		req.K = 10
+	}
+	if req.Depth <= 0 {
+		req.Depth = 2
+	}
+	if req.Budget <= 0 {
+		req.Budget = 80
+	}
+	if req.PerNodeCap <= 0 {
+		req.PerNodeCap = 20
+	}
+	if req.Direction == "" {
+		req.Direction = DirOut
+	}
+	if req.IncludeAnchors {
+		req.IncludeOwnerContainers = true
+	}
+	opts := NormalizeExpandOptions(ExpandOptions{
+		Direction:              req.Direction,
+		EdgeTypes:              req.EdgeTypes,
+		Depth:                  req.Depth,
+		Budget:                 req.Budget,
+		PerNodeCap:             req.PerNodeCap,
+		IncludeSemanticAnchors: req.IncludeSemanticAnchors,
+	})
+	req.Direction = opts.Direction
+	req.EdgeTypes = opts.EdgeTypes
+	req.Depth = opts.Depth
+	req.Budget = opts.Budget
+	req.PerNodeCap = opts.PerNodeCap
+	return req
 }
 
 func (q *QueryEngine) addAnchorNodes(ctx context.Context, nodes []Node, edges []Edge) ([]Node, []Edge) {

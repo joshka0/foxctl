@@ -45,12 +45,17 @@ func NewAnalyzer() Analyzer {
 // Edge direction: if task A depends on task B, edge goes A -> B (A points to B).
 //
 // Index:
-// - Purpose: Compute graph insights for task scoring and prioritization
-// - Flow: build graph -> compute pagerank/degree -> detect cycles -> compute critical paths -> topo order -> assemble metrics
-// - SideEffects: none
-// - FailureModes: none (empty input yields empty insights)
-// - Related: network.PageRank, topo.Sort, detectCycles, computeCriticalPaths
-// - Keywords: pagerank, critical_path_score, topological_order, cycles, in_degree, out_degree
+//
+//	Purpose: Compute graph insights for task scoring and prioritization
+//	Keywords: pagerank, critical_path_score, topological_order, cycles, in_degree, out_degree
+//	Related: network.PageRank, topo.Sort, detectCycles, computeCriticalPaths
+//	Flow: build graph -> compute pagerank/degree -> detect cycles -> compute critical paths -> topo order -> assemble metrics
+//	Resources: gonum graph library
+//	Events: task-graph-analyzed
+//	OutputFields: Insights
+//
+// [[protocol:work-item-graph-analysis]]
+// [[invariant:empty-input-yields-empty-insights]]
 func (a *analyzer) Analyze(taskList []tasks.Task, workspaceID string) (Insights, error) {
 	insights := Insights{
 		WorkspaceID: workspaceID,

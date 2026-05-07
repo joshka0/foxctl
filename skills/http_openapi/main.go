@@ -66,13 +66,17 @@ func main() {
 // run orchestrates OpenAPI operation execution with pagination, retry, and authentication support.
 //
 // Index:
-// - Purpose: Invoke OpenAPI 3.x operations with authentication, pagination, retry, and dry-run capabilities
-// - Flow: validate input → load spec → build request → apply auth → execute with pagination/retry → emit response
-// - SideEffects: HTTP requests; memory store usage; secret redaction; artifact storage for large responses
-// - FailureModes: spec loading failures, operation not found, authentication errors, HTTP failures
-// - Observability: emits request/response details, pagination summaries, retry attempts, and error hints
-// - Related: executeWithPagination, emitDryRun, emitResponse, wrapOpenAPIError, suggestOperations
-// - Keywords: http/openapi, openapi_execution, http_client, pagination, authentication, retry_logic
+//
+//	Purpose: Invoke OpenAPI 3.x operations with authentication, pagination, retry, and dry-run capabilities
+//	Keywords: http/openapi, openapi_execution, http_client, pagination, authentication, retry_logic
+//	Related: executeWithPagination, emitDryRun, emitResponse, wrapOpenAPIError, suggestOperations
+//	Flow: validate input → load spec → build request → apply auth → execute with pagination/retry → emit response
+//	Resources: HTTP client; memory store; CAS store for large responses
+//	Events: openapi-request-executed, openapi-dry-run
+//	OutputFields: summary, body, artifact, pagination
+//
+// [[domain:openapi-execution]]
+// [[protocol:http-client]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Validate input
 	if in.Spec == "" {

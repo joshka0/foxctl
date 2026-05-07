@@ -28,8 +28,7 @@ var _ storage.SessionStore = (*TursoStore)(nil)
 type TursoStore struct {
 	db              dbdriver.DB
 	vh              *dbdriver.VectorHelper
-	hasIndex        bool // true if vector index exists
-	vectorDimension int  // configured embedding dimensions
+	vectorDimension int // configured embedding dimensions
 }
 
 // OpenTurso initializes a session store using Turso database.
@@ -73,9 +72,6 @@ func OpenTurso(ctx context.Context, cfg dbdriver.TursoConfig) (*TursoStore, erro
 		return nil, err
 	}
 
-	// Check if vector index exists
-	store.hasIndex = store.checkVectorIndex(ctx)
-
 	return store, nil
 }
 
@@ -118,8 +114,8 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int)
 		return fmt.Errorf("create embedding_metadata table: %w", err)
 	}
 
-	// Create sessions table with F32_BLOB for native vector search
-	sessionsQuery := fmt.Sprintf(`
+	// Create sessions table with BLOB embeddings populated by Turso vector32().
+	sessionsQuery := `
 		CREATE TABLE IF NOT EXISTS sessions (
 			id TEXT PRIMARY KEY,
 			workspace_id TEXT NOT NULL DEFAULT '',
@@ -143,7 +139,7 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int)
 			total_tokens INTEGER DEFAULT 0,
 			raw_jsonl_path TEXT,
 			content_hash TEXT,
-			embedding F32_BLOB(%d),
+			embedding BLOB,
 			embedding_model TEXT,
 			parent_session_id TEXT,
 			agent_id TEXT NOT NULL DEFAULT 'foxctl',
@@ -152,7 +148,7 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int)
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)
-	`, dimensions)
+	`
 	if _, err = db.ExecContext(ctx, sessionsQuery); err != nil {
 		return fmt.Errorf("create sessions table: %w", err)
 	}
@@ -251,8 +247,8 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int)
 		return fmt.Errorf("create session_turns table: %w", err)
 	}
 
-	// Create session_chunks table with F32_BLOB
-	chunksQuery := fmt.Sprintf(`
+	// Create session_chunks table with BLOB embeddings populated by Turso vector32().
+	chunksQuery := `
 		CREATE TABLE IF NOT EXISTS session_chunks (
 			id TEXT PRIMARY KEY,
 			session_id TEXT NOT NULL,
@@ -266,12 +262,12 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int)
 			files_touched TEXT DEFAULT '[]',
 			has_error INTEGER DEFAULT 0,
 			error_type TEXT,
-			embedding F32_BLOB(%d),
+			embedding BLOB,
 			embedding_model TEXT,
 			created_at TEXT NOT NULL,
 			FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 		)
-	`, dimensions)
+	`
 	if _, err = db.ExecContext(ctx, chunksQuery); err != nil {
 		return fmt.Errorf("create session_chunks table: %w", err)
 	}
@@ -333,26 +329,6 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int)
 		return fmt.Errorf("create chunk summary index: %w", err)
 	}
 
-	return nil
-}
-
-// checkVectorIndex checks if the vector index exists.
-func (s *TursoStore) checkVectorIndex(ctx context.Context) bool {
-	var count int
-	err := s.db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM sqlite_master
-		WHERE type='index' AND name='idx_sessions_embedding_vec'
-	`).Scan(&count)
-	return err == nil && count > 0
-}
-
-// CreateVectorIndex creates a vector index for faster similarity search.
-func (s *TursoStore) CreateVectorIndex(ctx context.Context) error {
-	err := s.vh.CreateVectorIndex(ctx, "sessions", "embedding", "idx_sessions_embedding_vec")
-	if err != nil {
-		return fmt.Errorf("sessions: create vector index: %w", err)
-	}
-	s.hasIndex = true
 	return nil
 }
 
@@ -432,7 +408,7 @@ func (s *TursoStore) Save(ctx context.Context, session Session) (Session, error)
 				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
 				parent_session_id, agent_id, agent_type, status,
 				created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, vector('%s'), ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, vector32('%s'), ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET
 				workspace_id = excluded.workspace_id,
 				workspace_path = excluded.workspace_path,
@@ -687,78 +663,39 @@ func (s *TursoStore) SearchSimilar(ctx context.Context, workspace string, queryE
 	vec := make(dbdriver.Vector, len(queryEmbedding))
 	copy(vec, queryEmbedding)
 
-	var query string
+	workspaceID, workspacePath := resolveWorkspaceSelector(workspace)
+	distExpr := s.vh.CosineSimilarity("embedding", vec)
 	var rows *sql.Rows
 	var err error
-
-	workspaceID, workspacePath := resolveWorkspaceSelector(workspace)
-
-	if s.hasIndex {
-		// Use vector_top_k for fast indexed search
-		// vector_top_k returns only rowid, we must compute distance ourselves
-		// Note: We fetch more results and filter by workspace in-memory to handle index limitations
-		topKExpr := s.vh.VectorTopK("idx_sessions_embedding_vec", vec, limit*3) // Fetch more to filter
-		distExpr := s.vh.CosineSimilarity("s.embedding", vec)
-		if workspaceID != "" {
-			query = fmt.Sprintf(`
-				SELECT s.id, s.workspace_id, s.workspace_path, s.project_name, s.git_branch, s.claude_version,
-					s.started_at, s.ended_at, s.summary, s.accomplished, s.decisions, s.gotchas, s.user_insights,
-					s.tags, s.key_files, s.tools_pattern, s.message_count, s.user_turns,
-					s.tool_invocations, s.total_tokens, s.raw_jsonl_path, s.content_hash, s.embedding_model,
-					s.parent_session_id, s.agent_id, s.agent_type, s.status,
-					s.created_at, s.updated_at,
-					%s as distance
-				FROM %s vt
-				JOIN sessions s ON s.rowid = vt.id
-				WHERE %s`, distExpr, topKExpr, workspaceFilterSQL("s", workspacePath))
-			args := workspaceFilterArgs(workspaceID, workspacePath)
-			rows, err = s.db.QueryContext(ctx, query, args...)
-		} else {
-			query = fmt.Sprintf(`
-				SELECT s.id, s.workspace_id, s.workspace_path, s.project_name, s.git_branch, s.claude_version,
-					s.started_at, s.ended_at, s.summary, s.accomplished, s.decisions, s.gotchas, s.user_insights,
-					s.tags, s.key_files, s.tools_pattern, s.message_count, s.user_turns,
-					s.tool_invocations, s.total_tokens, s.raw_jsonl_path, s.content_hash, s.embedding_model,
-					s.parent_session_id, s.agent_id, s.agent_type, s.status,
-					s.created_at, s.updated_at,
-					%s as distance
-				FROM %s vt
-				JOIN sessions s ON s.rowid = vt.id`, distExpr, topKExpr)
-			rows, err = s.db.QueryContext(ctx, query)
-		}
+	if workspaceID != "" {
+		query := fmt.Sprintf(`
+			SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
+				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+				tags, key_files, tools_pattern, message_count, user_turns,
+				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
+				parent_session_id, agent_id, agent_type, status,
+				created_at, updated_at,
+				%s as distance
+			FROM sessions
+			WHERE %s AND embedding IS NOT NULL
+			ORDER BY distance ASC
+			LIMIT ?`, distExpr, workspaceFilterSQL("", workspacePath))
+		args := append(workspaceFilterArgs(workspaceID, workspacePath), limit)
+		rows, err = s.db.QueryContext(ctx, query, args...)
 	} else {
-		// Fallback to full table scan with cosine distance
-		distExpr := s.vh.CosineSimilarity("embedding", vec)
-		if workspaceID != "" {
-			query = fmt.Sprintf(`
-				SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
-					started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
-					tags, key_files, tools_pattern, message_count, user_turns,
-					tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
-					parent_session_id, agent_id, agent_type, status,
-					created_at, updated_at,
-					%s as distance
-				FROM sessions
-				WHERE %s AND embedding IS NOT NULL
-				ORDER BY distance ASC
-				LIMIT ?`, distExpr, workspaceFilterSQL("", workspacePath))
-			args := append(workspaceFilterArgs(workspaceID, workspacePath), limit)
-			rows, err = s.db.QueryContext(ctx, query, args...)
-		} else {
-			query = fmt.Sprintf(`
-				SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
-					started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
-					tags, key_files, tools_pattern, message_count, user_turns,
-					tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
-					parent_session_id, agent_id, agent_type, status,
-					created_at, updated_at,
-					%s as distance
-				FROM sessions
-				WHERE embedding IS NOT NULL
-				ORDER BY distance ASC
-				LIMIT ?`, distExpr)
-			rows, err = s.db.QueryContext(ctx, query, limit)
-		}
+		query := fmt.Sprintf(`
+			SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
+				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+				tags, key_files, tools_pattern, message_count, user_turns,
+				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
+				parent_session_id, agent_id, agent_type, status,
+				created_at, updated_at,
+				%s as distance
+			FROM sessions
+			WHERE embedding IS NOT NULL
+			ORDER BY distance ASC
+			LIMIT ?`, distExpr)
+		rows, err = s.db.QueryContext(ctx, query, limit)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("sessions: search similar: %w", err)
@@ -891,7 +828,7 @@ func (s *TursoStore) SetEmbedding(ctx context.Context, id string, embedding []by
 
 	query := fmt.Sprintf(`
 		UPDATE sessions SET
-			embedding = vector('%s'),
+			embedding = vector32('%s'),
 			embedding_model = ?,
 			updated_at = ?
 		WHERE id = ?`, vectorStr)
@@ -1141,7 +1078,7 @@ func (s *TursoStore) SaveChunk(ctx context.Context, chunk SessionChunk) (Session
 				id, session_id, chunk_index, chunk_type, content_hash, content_preview,
 				byte_offset, byte_length, tools_used, files_touched, has_error, error_type,
 				embedding, embedding_model, created_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, vector('%s'), ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, vector32('%s'), ?, ?)
 			ON CONFLICT(id) DO UPDATE SET
 				content_preview = excluded.content_preview,
 				embedding = excluded.embedding,
@@ -2469,42 +2406,20 @@ func (s *TursoStore) SearchSimilarGlobal(ctx context.Context, queryEmbedding []f
 	vec := make(dbdriver.Vector, len(queryEmbedding))
 	copy(vec, queryEmbedding)
 
-	var query string
-	var rows *sql.Rows
-	var err error
-
-	if s.hasIndex {
-		// Use vector_top_k for fast indexed search across all workspaces
-		topKExpr := s.vh.VectorTopK("idx_sessions_embedding_vec", vec, limit*2)
-		distExpr := s.vh.CosineSimilarity("s.embedding", vec)
-		query = fmt.Sprintf(`
-			SELECT s.id, s.workspace_id, s.workspace_path, s.project_name, s.git_branch, s.claude_version,
-				s.started_at, s.ended_at, s.summary, s.accomplished, s.decisions, s.gotchas, s.user_insights,
-				s.tags, s.key_files, s.tools_pattern, s.message_count, s.user_turns,
-				s.tool_invocations, s.total_tokens, s.raw_jsonl_path, s.content_hash, s.embedding_model,
-				s.parent_session_id, s.agent_id, s.agent_type, s.status,
-				s.created_at, s.updated_at,
-				%s as distance
-			FROM %s vt
-			JOIN sessions s ON s.rowid = vt.id`, distExpr, topKExpr)
-		rows, err = s.db.QueryContext(ctx, query)
-	} else {
-		// Fallback to full table scan with cosine distance (no workspace filter)
-		distExpr := s.vh.CosineSimilarity("embedding", vec)
-		query = fmt.Sprintf(`
-			SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
-				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
-				tags, key_files, tools_pattern, message_count, user_turns,
-				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
-				parent_session_id, agent_id, agent_type, status,
-				created_at, updated_at,
-				%s as distance
-			FROM sessions
-			WHERE embedding IS NOT NULL
-			ORDER BY distance ASC
-			LIMIT ?`, distExpr)
-		rows, err = s.db.QueryContext(ctx, query, limit)
-	}
+	distExpr := s.vh.CosineSimilarity("embedding", vec)
+	query := fmt.Sprintf(`
+		SELECT id, workspace_id, workspace_path, project_name, git_branch, claude_version,
+			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+			tags, key_files, tools_pattern, message_count, user_turns,
+			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
+			parent_session_id, agent_id, agent_type, status,
+			created_at, updated_at,
+			%s as distance
+		FROM sessions
+		WHERE embedding IS NOT NULL
+		ORDER BY distance ASC
+		LIMIT ?`, distExpr)
+	rows, err := s.db.QueryContext(ctx, query, limit)
 	if err != nil {
 		return nil, fmt.Errorf("sessions: search similar global: %w", err)
 	}

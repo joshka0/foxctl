@@ -59,13 +59,16 @@ func main() {
 // run orchestrates import analysis across multiple languages with graph building and dependency tracking.
 //
 // Index:
-// - Purpose: Analyze imports and dependencies in codebases across Go, Python, and JavaScript/TypeScript
-// - Flow: apply defaults → resolve path → extract imports → process query type → build response with statistics
-// - SideEffects: reads file contents; parses source code; builds dependency graphs; stores artifacts
-// - FailureModes: file access errors, parsing failures, unsupported languages, invalid query types
-// - Observability: emits import lists, dependency graphs, statistics, and external dependency analysis
-// - Related: extractFromDirectory, extractFromFile, buildGraph, getDependencies, getDependents
-// - Keywords: code/imports, import_analysis, dependency_graph, code_dependencies, cross_language
+//
+//	Purpose: Analyze imports and dependencies in codebases across Go, Python, and JavaScript/TypeScript
+//	Flow: apply defaults → resolve path → extract imports → process query type → build response with statistics
+//	SideEffects: reads file contents; parses source code; builds dependency graphs; stores artifacts
+//	FailureModes: file access errors, parsing failures, unsupported languages, invalid query types
+//	Observability: emits import lists, dependency graphs, statistics, and external dependency analysis
+//	Related: extractFromDirectory, extractFromFile, buildGraph, getDependencies, getDependents
+//	Keywords: code/imports, import_analysis, dependency_graph, code_dependencies, cross_language
+//
+// [[domain:import-dependency-analysis]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Apply defaults
 	if in.QueryType == "" {

@@ -40,13 +40,17 @@ func main() {
 // run orchestrates text pattern searching across files with regex compilation and result aggregation.
 //
 // Index:
-// - Purpose: Search for text patterns across files using regex with filtering, case sensitivity, and match limiting
-// - Flow: validate pattern → compile regex → collect files → search files → aggregate results → emit output
-// - SideEffects: reads file system; scans file contents; generates match previews; persists search results
-// - FailureModes: invalid regex patterns, file access errors, scanner errors, path resolution failures
-// - Observability: emits match counts, file statistics, top files, search previews, and comprehensive result metrics
-// - Related: grepFile, textmatch.CompileRegex, fsutil.CollectEntries, skillout.PreviewAndPersistNDJSON
-// - Keywords: text/grep, pattern_search, regex, file_search, text_matching
+//
+//	Purpose: Search for text patterns across files using regex with filtering, case sensitivity, and match limiting
+//	Keywords: text/grep, pattern_search, regex, file_search, text_matching
+//	Related: grepFile, textmatch.CompileRegex, fsutil.CollectEntries, skillout.PreviewAndPersistNDJSON
+//	Flow: validate pattern → compile regex → collect files → search files → aggregate results → emit output
+//	Resources: file system, CAS store
+//	Events: none
+//	OutputFields: pattern, case_insensitive, match_count, files_touched, preview, top_files, max_matches, artifact
+//
+// [[domain:text_pattern_search]]
+// [[risk:unbounded_matches]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate pattern
 	if err := textmatch.RequirePattern(in.Pattern); err != nil {

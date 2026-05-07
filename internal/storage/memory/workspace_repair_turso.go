@@ -15,13 +15,17 @@ import (
 // Errors are logged and ignored.
 //
 // Index:
-// - Purpose: Keep historical Turso-backed named-memory entries reachable when workspace paths change across machines/users
-// - Flow: detect path-like workspace values -> compute stable target IDs -> migrate -> log when rows move
-// - SideEffects: updates remote named_memory + embedding_metadata workspace values (conflicts skipped)
-// - FailureModes: turso errors, tx errors (logged; does not fail Open)
-// - Observability: logs warnings on failures; logs info when a migration moves rows
-// - Related: ws.ID, ws.CanonicalID, (*TursoStore).migrateWorkspace
-// - Keywords: workspace, migration, repair, memory, turso
+//
+//	Purpose: Keep historical Turso-backed named-memory entries reachable when workspace paths change across machines/users
+//	Keywords: workspace, migration, repair, memory, turso
+//	Related: ws.ID, ws.CanonicalID, (*TursoStore).migrateWorkspace
+//	Flow: detect path-like workspace values -> compute stable target IDs -> migrate -> log when rows move
+//	Resources: Turso DB, named_memory, embedding_metadata, indexer_state
+//	Events: none
+//	OutputFields: none
+//
+// [[invariant:only-migrate-when-target-path-exists]]
+// [[domain:workspace-stable-identity]]
 func (s *TursoStore) repairWorkspaceIDs(ctx context.Context) {
 	if s == nil || s.db == nil {
 		return
@@ -78,12 +82,17 @@ func (s *TursoStore) repairWorkspaceIDs(ctx context.Context) {
 // migrateWorkspace rewrites named memory tables from one workspace key to another.
 //
 // Index:
-// - Purpose: Make legacy workspace IDs queryable under a stable workspace key in Turso
-// - Flow: begin tx -> update named_memory (conflict-safe) -> update embedding_metadata (conflict-safe) -> commit
-// - SideEffects: remote database writes; may skip rows that conflict with the target workspace
-// - FailureModes: tx errors, exec errors
-// - Related: (*TursoStore).repairWorkspaceIDs
-// - Keywords: migrate, transaction, workspace, turso
+//
+//	Purpose: Make legacy workspace IDs queryable under a stable workspace key in Turso
+//	Keywords: migrate, transaction, workspace, turso
+//	Related: (*TursoStore).repairWorkspaceIDs
+//	Flow: begin tx -> update named_memory (conflict-safe) -> update embedding_metadata (conflict-safe) -> commit
+//	Resources: Turso DB
+//	Events: none
+//	OutputFields: bool (moved)
+//
+// [[invariant:skip-conflicting-rows-on-migration]]
+// [[domain:workspace-stable-identity]]
 func (s *TursoStore) migrateWorkspace(ctx context.Context, from, to string) (bool, error) {
 	from = strings.TrimSpace(from)
 	to = strings.TrimSpace(to)

@@ -298,7 +298,7 @@ func (h *HybridSearcher) Search(
 	tableName string,
 	textColumn string,
 	vectorColumn string,
-	indexName string,
+	_ string,
 	limit int,
 	additionalWhere string,
 	args ...any,
@@ -313,10 +313,6 @@ func (h *HybridSearcher) Search(
 	if err := validateSQLIdentifier(vectorColumn); err != nil {
 		return nil, fmt.Errorf("invalid vector column: %w", err)
 	}
-	if err := validateSQLIdentifier(indexName); err != nil {
-		return nil, fmt.Errorf("invalid index name: %w", err)
-	}
-
 	// Phase 1: Get candidate documents using vector search
 	// This gives us a reasonable subset to score with BM25
 	var candidateQuery string
@@ -342,22 +338,25 @@ func (h *HybridSearcher) Search(
 			LIMIT %d
 		`, vectorColumn, queryVector.String(), limit*2)
 	} else {
-		// Turso: use vector_top_k virtual table.
+		// Turso main currently supports exact dense-vector search.
 		candidateQuery = fmt.Sprintf(`
 			SELECT
 				t.id as id,
 				t.%s as text,
 				%s as vector_sim
-			FROM %s vt
-			JOIN %s t ON t.rowid = vt.id
+			FROM %s t
 		`, textColumn,
 			h.vectorHelper.CosineSimilarityScore("t."+vectorColumn, queryVector),
-			h.vectorHelper.VectorTopK(indexName, queryVector, limit*2),
 			tableName)
 
 		if additionalWhere != "" {
 			candidateQuery += " WHERE " + additionalWhere
 		}
+
+		candidateQuery += fmt.Sprintf(`
+			ORDER BY vector_sim DESC
+			LIMIT %d
+		`, limit*2)
 	}
 
 	candidateQuery = h.db.GetDialect().Rebind(candidateQuery)

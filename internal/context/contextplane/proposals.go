@@ -372,6 +372,9 @@ func memoryProposalFromRetrievalInspection(inspection RetrievalInspection) Memor
 	if len(inspection.Proposal.ExpectedRepoPaths) > 0 {
 		change["expected_repo_paths"] = append([]string(nil), inspection.Proposal.ExpectedRepoPaths...)
 	}
+	if inspection.SemanticAnchorHints != nil {
+		change["semantic_anchor_hints"] = inspection.SemanticAnchorHints
+	}
 	if inspection.Query != "" {
 		change["query"] = inspection.Query
 	}
@@ -407,6 +410,8 @@ func proposalShapeFromRetrievalAction(kind string) (proposalKind PolicyKind, bla
 		return "bridge_metadata_patch", "medium", true
 	case "draft_package_note":
 		return "missing_note_draft", "medium", true
+	case "semantic_anchor_patch":
+		return PolicyKindSemanticAnchorPatch, "medium", true
 	default:
 		return "manual_review", "high", true
 	}

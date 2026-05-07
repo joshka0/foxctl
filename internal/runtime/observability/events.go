@@ -66,13 +66,14 @@ func SetObsDirForTesting(dir string) {
 // The function ignores context cancellation to avoid dropping terminal events.
 //
 // Index:
-// - Purpose: Persist a structured observability event as NDJSON
-// - Flow: resolve observability dir → validate name → ensure dir → append JSON line
-// - SideEffects: creates directories; appends to NDJSON file
-// - FailureModes: invalid name ignored, mkdir errors, file open/encode errors
-// - Observability: emits stderr logs on write failures
-// - Related: getObsDir, logWriteError
-// - Keywords: ndjson, observability_dir, events, write_event
+//
+//	Purpose: Persist a structured observability event as NDJSON
+//	Flow: resolve observability dir → validate name → ensure dir → append JSON line
+//	Related: getObsDir, logWriteError
+//	Keywords: ndjson, observability_dir, events, write_event
+//
+// [[protocol:ndjson-event-write]]
+// [[domain:observability-persistence]]
 func WriteEvent(_ context.Context, name string, v any) error {
 	dir := getObsDir()
 	if dir == "" {

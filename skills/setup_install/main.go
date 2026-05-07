@@ -78,13 +78,17 @@ func main() {
 // run orchestrates foxctl installation with validation and setup operations for multiple providers.
 //
 // Index:
-// - Purpose: Install and validate foxctl setup with directory creation, hook installation, and environment configuration
-// - Flow: validate input → execute validation or installation → check directories → install hooks → verify binary → check environment → emit results
-// - SideEffects: creates directories; installs provider hooks; validates environment; manages configuration files; performs system checks
-// - FailureModes: permission errors, missing directories, hook installation failures, environment issues, binary access problems
-// - Observability: emits installation status, directory creation results, hook installation details, environment status, and comprehensive setup information
-// - Related: validate, install, checkHooks, installHooks, checkEnvironment
-// - Keywords: setup/install, foxctl_installation, provider_hooks, environment_setup, directory_management
+//
+//	Purpose: Install and validate foxctl setup with directory creation, hook installation, and environment configuration
+//	Keywords: setup/install, foxctl_installation, provider_hooks, environment_setup, directory_management
+//	Related: validate, install, checkHooks, installHooks, checkEnvironment
+//	Flow: validate input → execute validation or installation → check directories → install hooks → verify binary → check environment → emit results
+//	Resources: filesystem, provider config directories
+//	Events: installation events
+//	OutputFields: status, provider, directories, hooks, binary, environment
+//
+// [[domain:foxctl-installation]]
+// [[protocol:provider-hook-installation]]
 func run(_ context.Context, rc *skillmain.RunContext, in input) error {
 	if in.Provider == "" {
 		in.Provider = "claude-code"

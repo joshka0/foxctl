@@ -120,6 +120,37 @@ Canonical package note without repo path metadata.
 	}
 }
 
+func TestInspectRetrievalClassifiesMissingSemanticAnchorAndBuildsReviewProposal(t *testing.T) {
+	store := NewWorkspaceStore(filepath.Join(t.TempDir(), "foxctl"))
+	opts := DefaultRetrievalOptions()
+	opts.UseSemanticAnchors = true
+	expectedPath := "internal/runtime/terminal/tmuxbridge/client.go"
+
+	inspection, err := store.InspectRetrieval(context.Background(), nil, "", "read before write enforced", []string{expectedPath}, RetrievalResult{}, opts, 5)
+	if err != nil {
+		t.Fatalf("InspectRetrieval: %v", err)
+	}
+	if inspection.Classification != "missing_semantic_anchor" {
+		t.Fatalf("classification=%q want missing_semantic_anchor", inspection.Classification)
+	}
+	if inspection.Proposal.Kind != "semantic_anchor_patch" {
+		t.Fatalf("proposal.kind=%q want semantic_anchor_patch", inspection.Proposal.Kind)
+	}
+	proposal := memoryProposalFromRetrievalInspection(inspection)
+	if proposal.Kind != PolicyKindSemanticAnchorPatch {
+		t.Fatalf("proposal.Kind=%q want %q", proposal.Kind, PolicyKindSemanticAnchorPatch)
+	}
+	if !proposal.ReviewRequired {
+		t.Fatalf("semantic anchor proposal must be review required")
+	}
+	if proposal.ApplyStatus != "pending" {
+		t.Fatalf("apply_status=%q want pending", proposal.ApplyStatus)
+	}
+	if got := proposal.ProposedChange["expected_repo_paths"]; got == nil {
+		t.Fatalf("expected_repo_paths missing from proposed change: %+v", proposal.ProposedChange)
+	}
+}
+
 func TestSummarizeRetrievalInspections(t *testing.T) {
 	summary := SummarizeRetrievalInspections([]RetrievalInspection{
 		{

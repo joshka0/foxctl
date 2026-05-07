@@ -566,42 +566,45 @@ func newEvalRetrievalCommand() *cobra.Command {
 					Notes: q.Notes,
 					Modes: map[string]retrievaleval.ModeResult{},
 				}
+				evaluate := func(mode string, paths []string, err error) retrievaleval.ModeResult {
+					return retrievaleval.EvaluateModeWithForbidden(mode, paths, q.ExpectedAnyOf, q.ForbiddenAnyOf, len(paths), err)
+				}
 				if hasMode(selectedModes, "baseline") {
 					hits, err := index.SearchNotes(ctx, q.Query, limit)
 					paths := extractSearchHitPaths(hits)
 					paths = filterEvalPaths(paths, true)
-					qr.Modes["baseline"] = retrievaleval.EvaluateMode("baseline", paths, q.ExpectedAnyOf, len(paths), err)
+					qr.Modes["baseline"] = evaluate("baseline", paths, err)
 				}
 				if hasMode(selectedModes, "lexical") {
 					hits, err := index.SearchNotes(ctx, q.Query, limit)
 					paths := filterEvalPaths(extractSearchHitPaths(hits), canonicalOnly)
-					qr.Modes["lexical"] = retrievaleval.EvaluateMode("lexical", paths, q.ExpectedAnyOf, len(paths), err)
+					qr.Modes["lexical"] = evaluate("lexical", paths, err)
 				}
 				if hasMode(selectedModes, "semantic") {
 					if semanticProvider == nil {
-						qr.Modes["semantic"] = retrievaleval.EvaluateMode("semantic", nil, q.ExpectedAnyOf, 0, fmt.Errorf("semantic provider unavailable"))
+						qr.Modes["semantic"] = evaluate("semantic", nil, fmt.Errorf("semantic provider unavailable"))
 					} else {
 						hits, err := index.SearchNotesSemantic(ctx, q.Query, semanticProvider, limit)
 						paths := filterEvalPaths(extractSearchHitPaths(hits), canonicalOnly)
-						qr.Modes["semantic"] = retrievaleval.EvaluateMode("semantic", paths, q.ExpectedAnyOf, len(paths), err)
+						qr.Modes["semantic"] = evaluate("semantic", paths, err)
 					}
 				}
 				if hasMode(selectedModes, "blended") {
 					result, err := workspaceStore.Retrieve(ctx, index, repo, semanticProvider, q.Query, limit)
 					paths := filterEvalPaths(extractRetrievalHitPaths(result.VaultHits), canonicalOnly)
-					qr.Modes["blended"] = retrievaleval.EvaluateMode("blended", paths, q.ExpectedAnyOf, len(paths), err)
+					qr.Modes["blended"] = evaluate("blended", paths, err)
 				}
 				if hasMode(selectedModes, "skill_default") {
 					paths, err := runSemanticSearchEvalMode(ctx, target, vaultPath, q.Query, limit, []string{"symbols", "sessions", "memories", "tasks", "codemaps"})
-					qr.Modes["skill_default"] = retrievaleval.EvaluateMode("skill_default", paths, q.ExpectedAnyOf, len(paths), err)
+					qr.Modes["skill_default"] = evaluate("skill_default", paths, err)
 				}
 				if hasMode(selectedModes, "skill_context") {
 					paths, err := runSemanticSearchEvalMode(ctx, target, vaultPath, q.Query, limit, []string{"context"})
-					qr.Modes["skill_context"] = retrievaleval.EvaluateMode("skill_context", paths, q.ExpectedAnyOf, len(paths), err)
+					qr.Modes["skill_context"] = evaluate("skill_context", paths, err)
 				}
 				if hasMode(selectedModes, "skill_default_plus_context") {
 					paths, err := runSemanticSearchEvalMode(ctx, target, vaultPath, q.Query, limit, []string{"symbols", "sessions", "memories", "tasks", "codemaps", "context"})
-					qr.Modes["skill_default_plus_context"] = retrievaleval.EvaluateMode("skill_default_plus_context", paths, q.ExpectedAnyOf, len(paths), err)
+					qr.Modes["skill_default_plus_context"] = evaluate("skill_default_plus_context", paths, err)
 				}
 				baseACAOpts := workspaceStore.CurrentRetrievalOptions()
 				if hasMode(selectedModes, "aca_control_only") {
@@ -615,7 +618,7 @@ func newEvalRetrievalCommand() *cobra.Command {
 					opts.UseSemanticVaultSearch = false
 					opts.IncludeControlPlaneRefs = true
 					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
-					qr.Modes["aca_control_only"] = retrievaleval.EvaluateMode("aca_control_only", paths, q.ExpectedAnyOf, len(paths), err)
+					qr.Modes["aca_control_only"] = evaluate("aca_control_only", paths, err)
 				}
 				if hasMode(selectedModes, "aca_vault_only") {
 					opts := baseACAOpts
@@ -628,7 +631,7 @@ func newEvalRetrievalCommand() *cobra.Command {
 					opts.UseSemanticVaultSearch = true
 					opts.IncludeControlPlaneRefs = false
 					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
-					qr.Modes["aca_vault_only"] = retrievaleval.EvaluateMode("aca_vault_only", paths, q.ExpectedAnyOf, len(paths), err)
+					qr.Modes["aca_vault_only"] = evaluate("aca_vault_only", paths, err)
 				}
 				if hasMode(selectedModes, "aca_repo_hints") {
 					opts := baseACAOpts
@@ -641,7 +644,7 @@ func newEvalRetrievalCommand() *cobra.Command {
 					opts.UseSemanticVaultSearch = true
 					opts.IncludeControlPlaneRefs = false
 					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
-					qr.Modes["aca_repo_hints"] = retrievaleval.EvaluateMode("aca_repo_hints", paths, q.ExpectedAnyOf, len(paths), err)
+					qr.Modes["aca_repo_hints"] = evaluate("aca_repo_hints", paths, err)
 				}
 				if hasMode(selectedModes, "aca_canonical_only") {
 					opts := baseACAOpts
@@ -655,7 +658,7 @@ func newEvalRetrievalCommand() *cobra.Command {
 					opts.AllowedTrusts = []string{"canonical", "reviewed"}
 					opts.IncludeControlPlaneRefs = false
 					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
-					qr.Modes["aca_canonical_only"] = retrievaleval.EvaluateMode("aca_canonical_only", paths, q.ExpectedAnyOf, len(paths), err)
+					qr.Modes["aca_canonical_only"] = evaluate("aca_canonical_only", paths, err)
 				}
 				if hasMode(selectedModes, "aca_package_fallback") {
 					opts := baseACAOpts
@@ -670,7 +673,7 @@ func newEvalRetrievalCommand() *cobra.Command {
 					opts.AllowedTrusts = []string{"canonical", "reviewed"}
 					opts.IncludeControlPlaneRefs = false
 					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
-					qr.Modes["aca_package_fallback"] = retrievaleval.EvaluateMode("aca_package_fallback", paths, q.ExpectedAnyOf, len(paths), err)
+					qr.Modes["aca_package_fallback"] = evaluate("aca_package_fallback", paths, err)
 				}
 				if hasMode(selectedModes, "aca_query_typed") {
 					opts := baseACAOpts
@@ -685,13 +688,20 @@ func newEvalRetrievalCommand() *cobra.Command {
 					opts.UseQueryTypeBias = true
 					opts.IncludeControlPlaneRefs = false
 					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
-					qr.Modes["aca_query_typed"] = retrievaleval.EvaluateMode("aca_query_typed", paths, q.ExpectedAnyOf, len(paths), err)
+					qr.Modes["aca_query_typed"] = evaluate("aca_query_typed", paths, err)
 				}
 				if hasMode(selectedModes, "aca_default") {
 					opts := baseACAOpts
 					opts.IncludeControlPlaneRefs = false
 					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
-					qr.Modes["aca_default"] = retrievaleval.EvaluateMode("aca_default", paths, q.ExpectedAnyOf, len(paths), err)
+					qr.Modes["aca_default"] = evaluate("aca_default", paths, err)
+				}
+				if hasMode(selectedModes, "aca_semantic_anchors") {
+					opts := baseACAOpts
+					opts.IncludeControlPlaneRefs = false
+					opts.UseSemanticAnchors = true
+					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
+					qr.Modes["aca_semantic_anchors"] = evaluate("aca_semantic_anchors", paths, err)
 				}
 				if hasMode(selectedModes, "aca_cochange") {
 					opts := baseACAOpts
@@ -699,7 +709,7 @@ func newEvalRetrievalCommand() *cobra.Command {
 					opts.UseCoChangePrior = true
 					opts.UseContinuityBundles = false
 					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
-					qr.Modes["aca_cochange"] = retrievaleval.EvaluateMode("aca_cochange", paths, q.ExpectedAnyOf, len(paths), err)
+					qr.Modes["aca_cochange"] = evaluate("aca_cochange", paths, err)
 				}
 				if hasMode(selectedModes, "aca_cochange_continuity") {
 					opts := baseACAOpts
@@ -707,31 +717,39 @@ func newEvalRetrievalCommand() *cobra.Command {
 					opts.UseCoChangePrior = true
 					opts.UseContinuityBundles = true
 					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
-					qr.Modes["aca_cochange_continuity"] = retrievaleval.EvaluateMode("aca_cochange_continuity", paths, q.ExpectedAnyOf, len(paths), err)
+					qr.Modes["aca_cochange_continuity"] = evaluate("aca_cochange_continuity", paths, err)
 				}
 				if hasMode(selectedModes, "cochange_artifacts") {
 					paths, err := runCoChangeArtifactEvalMode(ctx, target, q.Query, limit, cochangeMemStore, cochangeProvider)
-					qr.Modes["cochange_artifacts"] = retrievaleval.EvaluateMode("cochange_artifacts", paths, q.ExpectedAnyOf, len(paths), err)
+					qr.Modes["cochange_artifacts"] = evaluate("cochange_artifacts", paths, err)
 				}
 				if hasMode(selectedModes, "repoindex_search") {
 					paths, err := runRepoIndexSearchEvalMode(ctx, cfg.Storage.Root, target, q.Query, limit)
-					qr.Modes["repoindex_search"] = retrievaleval.EvaluateMode("repoindex_search", paths, q.ExpectedAnyOf, len(paths), err)
+					qr.Modes["repoindex_search"] = evaluate("repoindex_search", paths, err)
+				}
+				if hasMode(selectedModes, "repoindex_semantic_search") {
+					paths, err := runRepoIndexSearchEvalMode(ctx, cfg.Storage.Root, target, q.Query, limit)
+					qr.Modes["repoindex_semantic_search"] = evaluate("repoindex_semantic_search", paths, err)
 				}
 				if hasMode(selectedModes, "repoindex_dag") {
-					paths, err := runRepoIndexDAGEvalMode(ctx, cfg.Storage.Root, target, q.Query, limit)
-					qr.Modes["repoindex_dag"] = retrievaleval.EvaluateMode("repoindex_dag", paths, q.ExpectedAnyOf, len(paths), err)
+					paths, err := runRepoIndexDAGEvalMode(ctx, cfg.Storage.Root, target, q.Query, limit, false)
+					qr.Modes["repoindex_dag"] = evaluate("repoindex_dag", paths, err)
+				}
+				if hasMode(selectedModes, "repoindex_semantic_dag") {
+					paths, err := runRepoIndexDAGEvalMode(ctx, cfg.Storage.Root, target, q.Query, limit, true)
+					qr.Modes["repoindex_semantic_dag"] = evaluate("repoindex_semantic_dag", paths, err)
 				}
 				if hasMode(selectedModes, "rlm_llm") {
 					paths, err := runRLMEvalMode(ctx, cfg, target, vaultPath, q.Query, limit, rlmenv.ToolProfileDefault)
-					qr.Modes["rlm_llm"] = retrievaleval.EvaluateMode("rlm_llm", paths, q.ExpectedAnyOf, len(paths), err)
+					qr.Modes["rlm_llm"] = evaluate("rlm_llm", paths, err)
 				}
 				if hasMode(selectedModes, "rlm_llm_codeintel") {
 					paths, err := runRLMEvalMode(ctx, cfg, target, vaultPath, q.Query, limit, rlmenv.ToolProfileCodeIntel)
-					qr.Modes["rlm_llm_codeintel"] = retrievaleval.EvaluateMode("rlm_llm_codeintel", paths, q.ExpectedAnyOf, len(paths), err)
+					qr.Modes["rlm_llm_codeintel"] = evaluate("rlm_llm_codeintel", paths, err)
 				}
 				if hasMode(selectedModes, "rlm_llm_code_staged") {
 					paths, err := runRLMStagedEvalMode(ctx, cfg, target, vaultPath, q.Query, limit)
-					qr.Modes["rlm_llm_code_staged"] = retrievaleval.EvaluateMode("rlm_llm_code_staged", paths, q.ExpectedAnyOf, len(paths), err)
+					qr.Modes["rlm_llm_code_staged"] = evaluate("rlm_llm_code_staged", paths, err)
 				}
 				results = append(results, qr)
 			}
@@ -787,7 +805,7 @@ func newEvalRetrievalCommand() *cobra.Command {
 	cmd.Flags().StringVar(&vaultPath, "vault-path", "", "Vault path")
 	cmd.Flags().IntVar(&limit, "limit", 10, "Maximum hits per retrieval mode")
 	cmd.Flags().StringVar(&format, "format", "markdown", "Output companion format: markdown or json")
-	cmd.Flags().StringSliceVar(&modes, "mode", []string{"baseline", "lexical", "semantic", "blended"}, "Retrieval modes to evaluate (also available: skill_default, skill_context, skill_default_plus_context, aca_control_only, aca_vault_only, aca_repo_hints, aca_canonical_only, aca_package_fallback, aca_query_typed, aca_default, aca_cochange, aca_cochange_continuity, cochange_artifacts, repoindex_search, repoindex_dag, rlm_llm, rlm_llm_codeintel, rlm_llm_code_staged)")
+	cmd.Flags().StringSliceVar(&modes, "mode", []string{"baseline", "lexical", "semantic", "blended"}, "Retrieval modes to evaluate (also available: skill_default, skill_context, skill_default_plus_context, aca_control_only, aca_vault_only, aca_repo_hints, aca_canonical_only, aca_package_fallback, aca_query_typed, aca_default, aca_semantic_anchors, aca_cochange, aca_cochange_continuity, cochange_artifacts, repoindex_search, repoindex_semantic_search, repoindex_dag, repoindex_semantic_dag, rlm_llm, rlm_llm_codeintel, rlm_llm_code_staged)")
 	cmd.Flags().StringVar(&policyFile, "policy-file", "", "Optional YAML file with retrieval suite defaults and metric thresholds")
 	cmd.Flags().BoolVar(&failOnAlerts, "fail-on-alerts", false, "Exit with an error when any retrieval metric alert is present")
 	cmd.Flags().BoolVar(&rebuildIndex, "rebuild-index", true, "Rebuild the vault index before evaluation")
@@ -926,7 +944,7 @@ func evalModesRequireVault(modes []string) bool {
 		switch mode {
 		case "baseline", "lexical", "semantic", "blended",
 			"aca_control_only", "aca_vault_only", "aca_repo_hints", "aca_canonical_only", "aca_package_fallback", "aca_query_typed",
-			"aca_default", "aca_cochange", "aca_cochange_continuity":
+			"aca_default", "aca_semantic_anchors", "aca_cochange", "aca_cochange_continuity":
 			return true
 		}
 	}
@@ -992,7 +1010,7 @@ func runRepoIndexSearchEvalMode(ctx context.Context, storageRoot, workspacePath,
 	return extractRepoAnchorPaths(result.Anchors), nil
 }
 
-func runRepoIndexDAGEvalMode(ctx context.Context, storageRoot, workspacePath, query string, limit int) ([]string, error) {
+func runRepoIndexDAGEvalMode(ctx context.Context, storageRoot, workspacePath, query string, limit int, includeSemanticAnchors bool) ([]string, error) {
 	store, err := repoindex.Open(ctx, storageRoot, resolveContextWorkspace(workspacePath))
 	if err != nil {
 		return nil, err
@@ -1000,14 +1018,15 @@ func runRepoIndexDAGEvalMode(ctx context.Context, storageRoot, workspacePath, qu
 	defer func() { _ = store.Close() }()
 	service := repoquery.NewQueryService(repoindex.NewQueryEngine(store))
 	result, err := service.DAGGrepWithProjection(ctx, repoquery.DAGGrepRequest{
-		Query:          strings.TrimSpace(query),
-		K:              3,
-		EdgeTypes:      repoindex.EdgeSetStructural,
-		Direction:      repoindex.DirOut,
-		Depth:          2,
-		Budget:         dagBudget(limit),
-		PerNodeCap:     20,
-		IncludeAnchors: true,
+		Query:                  strings.TrimSpace(query),
+		K:                      3,
+		EdgeTypes:              repoindex.EdgeSetStructural,
+		Direction:              repoindex.DirOut,
+		Depth:                  2,
+		Budget:                 dagBudget(limit),
+		PerNodeCap:             20,
+		IncludeAnchors:         true,
+		IncludeSemanticAnchors: includeSemanticAnchors,
 	})
 	if err != nil {
 		return nil, err

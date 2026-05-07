@@ -125,14 +125,32 @@ func firstNonEmpty(values ...string) string {
 
 // ensureVectorSupport verifies that vector search is available.
 func ensureVectorSupport(ctx context.Context, db *sql.DB, dimensions int) error {
-	testQuery := fmt.Sprintf(`
+	_ = dimensions
+	testQuery := `
 		CREATE TEMP TABLE IF NOT EXISTS _vector_test (
 			id INTEGER PRIMARY KEY,
-			embedding F32_BLOB(%d)
+			embedding BLOB
 		)
-	`, dimensions)
+	`
 
 	if _, err := db.ExecContext(ctx, testQuery); err != nil {
+		return fmt.Errorf("vector search not available in turso: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO _vector_test (id, embedding)
+		VALUES (1, vector32('[0.1,0.2,0.3,0.4]'))
+	`); err != nil {
+		_, _ = db.ExecContext(ctx, "DROP TABLE IF EXISTS _vector_test") //nolint:errcheck
+		return fmt.Errorf("vector search not available in turso: %w", err)
+	}
+
+	var distance float64
+	if err := db.QueryRowContext(ctx, `
+		SELECT vector_distance_cos(embedding, vector32('[0.1,0.2,0.3,0.4]'))
+		FROM _vector_test
+		WHERE id = 1
+	`).Scan(&distance); err != nil {
+		_, _ = db.ExecContext(ctx, "DROP TABLE IF EXISTS _vector_test") //nolint:errcheck
 		return fmt.Errorf("vector search not available in turso: %w", err)
 	}
 

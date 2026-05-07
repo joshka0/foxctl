@@ -19,6 +19,8 @@ import (
 const (
 	commandDispatchIssue            = "orchestration/dispatch-issue"
 	defaultOrchestrationEventIDPref = "evt"
+	defaultStartupRecoveryCardLimit = 200
+	defaultStartupRecoveryGrace     = 30 * time.Second
 )
 
 type (
@@ -153,6 +155,86 @@ func (r *OrchestrationReconciler) Reconcile(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// RecoverOrphanedRuns repairs projected Running cards before dispatch resumes after startup.
+func (r *OrchestrationReconciler) RecoverOrphanedRuns(ctx context.Context) error {
+	if r == nil || len(r.parentIDs) == 0 {
+		return nil
+	}
+	if r.reader == nil {
+		return fmt.Errorf("orchestration card reader is required for subprocess startup recovery")
+	}
+	if r.workers == nil {
+		return fmt.Errorf("worker state reader is required for subprocess startup recovery")
+	}
+
+	childrenByParent := make(map[string][]coreworker.Record, len(r.parentIDs))
+	for _, parentID := range r.parentIDs {
+		children, err := r.workers.Children(ctx, coreworker.ChildrenRequest{ParentAgentID: parentID})
+		if err != nil {
+			return fmt.Errorf("list subprocess children for startup recovery parent_agent_id=%s: %w", parentID, err)
+		}
+		childrenByParent[parentID] = sortedWorkerRecords(children)
+	}
+
+	cards, err := r.listRunningCards(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, card := range sortedRunningCards(cards) {
+		if card.State != v2orchestration.StateRunning {
+			continue
+		}
+		child, ok := findWorkerForCard(card, childrenByParent)
+		if !ok {
+			if !startupGraceElapsed(card, r.now().UTC(), defaultStartupRecoveryGrace) {
+				continue
+			}
+			if _, err := r.RecordDispatchRuntimeFailed(ctx, orphanedWorkerRecord(card)); err != nil {
+				return err
+			}
+			continue
+		}
+		if !coreworker.IsTerminal(child.Status) {
+			continue
+		}
+		switch child.Status {
+		case coreworker.StatusCompleted:
+			if _, err := r.RecordDispatchCompleted(ctx, child); err != nil {
+				return err
+			}
+		case coreworker.StatusFailed, coreworker.StatusCancelled:
+			if _, err := r.RecordDispatchRuntimeFailed(ctx, child); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func (r *OrchestrationReconciler) listRunningCards(ctx context.Context) ([]v2orchestration.Card, error) {
+	var out []v2orchestration.Card
+	cursor := ""
+	for {
+		cards, err := r.reader.ListRunningCards(ctx, v2orchestration.RunningCardsRequest{
+			Limit:  defaultStartupRecoveryCardLimit,
+			Cursor: cursor,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("list running orchestration cards for subprocess startup recovery: %w", err)
+		}
+		if len(cards) == 0 {
+			return out, nil
+		}
+		out = append(out, cards...)
+		cursor = cards[len(cards)-1].IssueID
+		if len(cards) < defaultStartupRecoveryCardLimit {
+			return out, nil
+		}
+	}
 }
 
 // RecordDispatchSpawned appends a run.started orchestration event for one accepted child dispatch.
@@ -539,6 +621,75 @@ func sortedWorkerRecords(records []coreworker.Record) []coreworker.Record {
 		return left < right
 	})
 	return out
+}
+
+func sortedRunningCards(cards []v2orchestration.Card) []v2orchestration.Card {
+	if len(cards) == 0 {
+		return nil
+	}
+	out := append([]v2orchestration.Card(nil), cards...)
+	sort.Slice(out, func(i, j int) bool {
+		left := chooseNonEmpty(out[i].WorkspaceID, "_") + "\x00" + out[i].IssueID
+		right := chooseNonEmpty(out[j].WorkspaceID, "_") + "\x00" + out[j].IssueID
+		return left < right
+	})
+	return out
+}
+
+func findWorkerForCard(card v2orchestration.Card, childrenByParent map[string][]coreworker.Record) (coreworker.Record, bool) {
+	for _, children := range childrenByParent {
+		for _, child := range children {
+			if workerMatchesCard(child, card) {
+				return child, true
+			}
+		}
+	}
+	return coreworker.Record{}, false
+}
+
+func workerMatchesCard(worker coreworker.Record, card v2orchestration.Card) bool {
+	if card.IssueID == "" || dispatchMetaString(worker.Metadata, "issue_id") != card.IssueID {
+		return false
+	}
+	if card.WorkspaceID != "" && dispatchMetaString(worker.Metadata, "workspace_id") != card.WorkspaceID {
+		return false
+	}
+	if !sameRun(card.RunID, dispatchMetaString(worker.Metadata, "run_id"), worker.RunID) {
+		return false
+	}
+	if card.AgentID != "" && strings.TrimSpace(worker.AgentID) != "" && card.AgentID != strings.TrimSpace(worker.AgentID) {
+		return false
+	}
+	return true
+}
+
+func startupGraceElapsed(card v2orchestration.Card, now time.Time, grace time.Duration) bool {
+	if card.LastEventAt == nil {
+		return false
+	}
+	return !card.LastEventAt.UTC().Add(grace).After(now.UTC())
+}
+
+func orphanedWorkerRecord(card v2orchestration.Card) coreworker.Record {
+	return coreworker.Record{
+		WorkerID:    chooseNonEmpty(strings.TrimSpace(card.AgentID), strings.TrimSpace(card.RunID), strings.TrimSpace(card.IssueID)) + ":startup-orphan",
+		BackendKind: coreworker.BackendSubprocess,
+		AgentID:     strings.TrimSpace(card.AgentID),
+		RunID:       strings.TrimSpace(card.RunID),
+		WorkspaceID: strings.TrimSpace(card.WorkspaceID),
+		Status:      coreworker.StatusFailed,
+		StopReason:  "runtime worker missing during startup recovery",
+		Metadata: map[string]any{
+			"workspace_id":     strings.TrimSpace(card.WorkspaceID),
+			"issue_id":         strings.TrimSpace(card.IssueID),
+			"issue_identifier": strings.TrimSpace(card.IssueIdentifier),
+			"title":            strings.TrimSpace(card.Title),
+			"run_id":           strings.TrimSpace(card.RunID),
+			"actor_id":         strings.TrimSpace(card.ActorID),
+			"attempt":          card.Attempt,
+			"retry_suggestion": "inspect subprocess runtime state before redispatch",
+		},
+	}
 }
 
 func normalizeParentAgentIDs(values []string) []string {

@@ -142,12 +142,14 @@ func shouldPublishToSSE(event *Event) bool {
 // publishToSSE publishes an Event to the configured SSE publisher as an ActivityEvent.
 //
 // Index:
-// - Purpose: Stream eligible Events to SSE clients as activity updates
-// - Flow: resolve publisher → filter by operation prefix → map to ActivityEvent → publish
-// - SideEffects: publishes SSE activity events
-// - FailureModes: no-op when publisher is nil or event is ineligible
-// - Related: shouldPublishToSSE, extractActivityData
-// - Keywords: sse, activity, event, publish, operation_prefix
+//
+//	Purpose: Stream eligible Events to SSE clients as activity updates
+//	Flow: resolve publisher → filter by operation prefix → map to ActivityEvent → publish
+//	Related: shouldPublishToSSE, extractActivityData
+//	Keywords: sse, activity, event, publish, operation_prefix
+//
+// [[protocol:sse-activity-publish]]
+// [[domain:observability-sse-bridge]]
 func publishToSSE(event *Event) {
 	pub := getSSEPublisher()
 	if pub == nil {
