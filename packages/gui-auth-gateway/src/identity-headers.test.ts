@@ -55,4 +55,37 @@ describe("identity header forwarding", () => {
       "x-betterauth-email": "real@example.com",
     });
   });
+
+  test("rebuilds identity for terminal WebSocket upgrade headers", () => {
+    const headers: Record<string, string> = {
+      connection: "Upgrade",
+      upgrade: "websocket",
+      host: "localhost:3001",
+      "sec-websocket-key": "test-upgrade-key",
+      "sec-websocket-version": "13",
+      "x-betterauth-user-id": "spoof-user",
+      "x-betterauth-email": "spoof@example.com",
+      "x-tailscale-user": "spoof@tailnet",
+      "x-foxctl-session-id": "spoof-session",
+    };
+
+    applySessionIdentityHeaders(headers, {
+      user: {
+        id: "user-123",
+        email: "real@example.com",
+        name: "Real User",
+      },
+    });
+
+    expect(headers).toEqual({
+      connection: "Upgrade",
+      upgrade: "websocket",
+      host: "localhost:3001",
+      "sec-websocket-key": "test-upgrade-key",
+      "sec-websocket-version": "13",
+      "x-betterauth-user-id": "user-123",
+      "x-betterauth-email": "real@example.com",
+      "x-betterauth-user-name": "Real User",
+    });
+  });
 });

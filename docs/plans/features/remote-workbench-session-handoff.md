@@ -793,7 +793,9 @@ Tasks:
 - mark the feature experimental and dev/tailnet only
 - keep room-ID terminal endpoints out of public workbench handoff flows
 - add one identity-forwarding smoke test if the experiment runs through
-  `gui-auth-gateway`
+  `gui-auth-gateway`; for `/ws/terminal/*`, spoofed trusted identity headers
+  must be stripped and rebuilt from the authenticated session while WebSocket
+  upgrade headers pass through
 
 No durable `WorkbenchSession` yet.
 
