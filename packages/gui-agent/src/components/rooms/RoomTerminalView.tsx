@@ -7,8 +7,6 @@ import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { RoomLiveTerminalPanel } from '@/components/rooms/RoomLiveTerminalPanel'
-import { isRoomLiveTerminalEnabled } from '@/lib/room-terminal-protocol'
 import { cn } from '@/lib/utils'
 import { addRoomReminder, cancelRoomReminder, listRoomReminders, readMuxPane } from '@/api/client'
 import { participantTransportKind } from '@/api/types'
@@ -149,10 +147,6 @@ export function RoomTerminalView({ roomId, workspaceId, panes, participants, sen
   const transportUnavailable = selectedParticipant?.transport?.transport === 'unavailable'
   const transportReady = selectedParticipant?.transport?.transport === 'available'
   const bindOptions = useMemo(() => participants.map((participant) => participant.actor_id).filter(Boolean).sort(), [participants])
-  const showLiveTerminal = useMemo(() => {
-    if (typeof window === 'undefined') return false
-    return isRoomLiveTerminalEnabled(window.location, window.localStorage)
-  }, [])
 
   useEffect(() => {
     const preferred = paneRecipient && bindOptions.includes(paneRecipient) ? paneRecipient : bindOptions[0] || ''
@@ -371,8 +365,6 @@ export function RoomTerminalView({ roomId, workspaceId, panes, participants, sen
           )}
         </div>
       </div>
-
-      {showLiveTerminal ? <RoomLiveTerminalPanel roomId={roomId} roomLabel={selectedKey || roomId} /> : null}
 
       <div className="border-t bg-primary/5 px-4 py-3 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono">
