@@ -118,23 +118,37 @@ func (r *SkillRunner) Run(ctx context.Context, skillName string, input map[strin
 		return nil, err
 	}
 
-	// Marshal input to JSON
-	inputJSON, err := json.Marshal(input)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal input: %w", err)
-	}
-
 	switch handle.Manifest.Distribution.Type {
 	case "exec", "wasi":
 	default:
 		return nil, fmt.Errorf("unknown distribution type: %s", handle.Manifest.Distribution.Type)
 	}
 
+	workDir := filepath.Dir(handle.ManifestPath)
+	workspaceRoot, err := skillWorkspaceRootFromInput(input)
+	if err != nil {
+		return nil, err
+	}
+	if workspaceRoot == "" && skillDeclaresWorkspaceControl(handle.Manifest) {
+		return nil, fmt.Errorf("workspace root required for skill %s; pass workspace_root, workspace_path, or workspace", skillName)
+	}
+	if workspaceRoot != "" {
+		workDir = workspaceRoot
+	}
+
+	runInput := skillInputWithoutUndeclaredWorkspaceControls(input, handle.Manifest)
+
+	// Marshal input to JSON
+	inputJSON, err := json.Marshal(runInput)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal input: %w", err)
+	}
+
 	stdout, stderr, runErr := runner.RunWithOptions(ctx, runner.RunOptions{
 		Manifest:     handle.Manifest,
 		ArtifactPath: handle.ArtifactPath,
 		Input:        inputJSON,
-		WorkDir:      filepath.Dir(handle.ManifestPath),
+		WorkDir:      workDir,
 		ExtraEnv: []string{
 			"FOXCTL_HOME=" + r.cfg.Home,
 			"FOXCTL_STORAGE_ROOT=" + r.cfg.Storage.Root,
@@ -207,4 +221,78 @@ func ReadInputFromReader(r io.Reader) (map[string]any, error) {
 		return nil, err
 	}
 	return input, nil
+}
+
+var skillWorkspaceControlKeys = []string{"workspace_root", "workspace_path", "workspace"}
+
+// skillWorkspaceRootFromInput extracts the explicit execution workspace for web-triggered skill calls.
+//
+// Index:
+//
+//	Purpose: Keep web and Pi skill calls scoped to a caller-selected workspace root.
+//	Keywords: web skills, workspace_root, workspace_path, workspace, pi integration, skill cwd
+//	Related: SkillRunner.Run, skillInputWithoutUndeclaredWorkspaceControls, runner.RunWithOptions
+//
+// [[invariant:explicit-workspace-root-drives-web-skill-cwd]]
+// [[test:internal/interfaces/web/api/skill_runner_test.go#TestSkillRunnerRunUsesExplicitWorkspaceRoot]]
+func skillWorkspaceRootFromInput(input map[string]any) (string, error) {
+	for _, key := range skillWorkspaceControlKeys {
+		value, ok := input[key]
+		if !ok {
+			continue
+		}
+		raw, ok := value.(string)
+		if !ok {
+			return "", fmt.Errorf("%s must be a string workspace root", key)
+		}
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		abs, err := filepath.Abs(raw)
+		if err != nil {
+			return "", fmt.Errorf("resolve %s: %w", key, err)
+		}
+		return abs, nil
+	}
+	return "", nil
+}
+
+func skillDeclaresWorkspaceControl(manifest skill.Manifest) bool {
+	for _, param := range manifest.Signature.Parameters {
+		for _, key := range skillWorkspaceControlKeys {
+			if param.Name == key {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func skillInputWithoutUndeclaredWorkspaceControls(input map[string]any, manifest skill.Manifest) map[string]any {
+	if len(input) == 0 {
+		return input
+	}
+	declared := make(map[string]bool, len(manifest.Signature.Parameters))
+	for _, param := range manifest.Signature.Parameters {
+		declared[param.Name] = true
+	}
+
+	var out map[string]any
+	for _, key := range skillWorkspaceControlKeys {
+		if _, ok := input[key]; !ok || declared[key] {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]any, len(input))
+			for inputKey, value := range input {
+				out[inputKey] = value
+			}
+		}
+		delete(out, key)
+	}
+	if out != nil {
+		return out
+	}
+	return input
 }

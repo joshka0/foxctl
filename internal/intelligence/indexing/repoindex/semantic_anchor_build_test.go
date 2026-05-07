@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -97,6 +98,24 @@ func TestBuilderSkipsSemanticAnchorEdgesByDefault(t *testing.T) {
 	}
 	if len(semantic) != 0 {
 		t.Fatalf("semantic edges emitted by default: %+v", semantic)
+	}
+}
+
+func TestSemanticAnchorSymbolStableKeyUsesRepoindexSymbolID(t *testing.T) {
+	node := Node{
+		ID:   SymbolID("repo", "go:internal/foo", "Guard"),
+		Kind: NodeSymbol,
+		Pkg:  "go:internal/foo",
+		File: "internal/foo/foo.go",
+		Name: "Guard",
+	}
+	got := semanticAnchorSymbolStableKey(node)
+	want := "symbol:" + node.ID
+	if got != want {
+		t.Fatalf("stable key = %q, want %q", got, want)
+	}
+	if strings.Contains(got, node.File) {
+		t.Fatalf("stable key used file locator as durable identity: %q", got)
 	}
 }
 

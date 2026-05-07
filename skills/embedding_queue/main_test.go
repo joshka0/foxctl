@@ -13,6 +13,7 @@ import (
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/domain/envelope"
 	"github.com/joshka0/foxctl/internal/domain/policy"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedding"
 	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/storage/cas"
 	"github.com/rs/zerolog"
@@ -92,6 +93,81 @@ func TestEnqueue(t *testing.T) {
 		t.Errorf("expected status ok, got %s", env.Status)
 	}
 
+	data := env.Data.(map[string]any)
+	if data["queued"].(float64) != 1 {
+		t.Errorf("expected 1 queued, got %v", data["queued"])
+	}
+}
+
+func TestEnqueuePreservesSymbolIdentityFields(t *testing.T) {
+	work := t.TempDir()
+	stdout := &bytes.Buffer{}
+	rc := newTestRunContext(t, stdout, work)
+	defer rc.Close()
+
+	in := Input{
+		Operation:   "enqueue",
+		WorkspaceID: "test-ws",
+		Symbols: []SymbolInput{{
+			SymbolID:   "legacy-id",
+			FilePath:   "pkg/foo/foo.go",
+			SymbolName: "Handler",
+			Language:   "go",
+			PackageID:  "go:pkg/foo",
+			SymbolKey:  "func Handler",
+			MemoryName: "symbol://test-ws/go:pkg/foo::func Handler",
+			Content:    "func Handler() {}",
+		}},
+	}
+
+	if err := run(context.Background(), rc, in); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	store, err := embedding.OpenStore(context.Background(), rc.Config.Paths.Cache)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+	job, err := store.ClaimNext(context.Background())
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if job.MemoryName != "symbol://test-ws/go:pkg/foo::func Handler" {
+		t.Fatalf("memory name=%q", job.MemoryName)
+	}
+	if job.PackageID != "go:pkg/foo" || job.SymbolKey != "func Handler" || job.Language != "go" {
+		t.Fatalf("identity language/package/key=%q/%q/%q", job.Language, job.PackageID, job.SymbolKey)
+	}
+}
+
+func TestEnqueueMemories(t *testing.T) {
+	work := t.TempDir()
+	stdout := &bytes.Buffer{}
+	rc := newTestRunContext(t, stdout, work)
+	defer rc.Close()
+
+	in := Input{
+		Operation:   "enqueue",
+		WorkspaceID: "test-ws",
+		Memories: []MemoryInput{{
+			Name:    "decision:queue",
+			Type:    "decision",
+			Content: "[May 2026] [decision] Queue memory embeddings",
+		}},
+	}
+
+	if err := run(context.Background(), rc, in); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var env envelope.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("failed to unmarshal output: %v", err)
+	}
+	if env.Status != "ok" {
+		t.Errorf("expected status ok, got %s", env.Status)
+	}
 	data := env.Data.(map[string]any)
 	if data["queued"].(float64) != 1 {
 		t.Errorf("expected 1 queued, got %v", data["queued"])

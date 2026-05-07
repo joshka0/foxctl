@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedding"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -29,12 +30,14 @@ func TestInput_AllFields(t *testing.T) {
 		MaxDuration: 600,
 		ProcessAll:  true,
 		DryRun:      true,
+		JobDelayMS:  250,
 	}
 
 	assert.Equal(t, 20, in.BatchSize)
 	assert.Equal(t, 600, in.MaxDuration)
 	assert.True(t, in.ProcessAll)
 	assert.True(t, in.DryRun)
+	assert.Equal(t, 250, in.JobDelayMS)
 }
 
 func TestInput_JSONSerialization(t *testing.T) {
@@ -122,6 +125,7 @@ func TestOutput_AllFields(t *testing.T) {
 	out := Output{
 		Processed:  50,
 		Errors:     3,
+		Memories:   7,
 		Remaining:  10,
 		BatchCount: 5,
 		Status:     "completed",
@@ -139,6 +143,7 @@ func TestOutput_AllFields(t *testing.T) {
 
 	assert.Equal(t, 50, out.Processed)
 	assert.Equal(t, 3, out.Errors)
+	assert.Equal(t, 7, out.Memories)
 	assert.Equal(t, 10, out.Remaining)
 	assert.Equal(t, 5, out.BatchCount)
 	assert.Equal(t, "completed", out.Status)
@@ -447,4 +452,39 @@ func TestOutput_FullJSONRoundTrip(t *testing.T) {
 	assert.Equal(t, out.Status, decoded.Status)
 	assert.NotNil(t, decoded.Stats)
 	assert.Equal(t, out.Stats.Queued, decoded.Stats.Queued)
+}
+
+func TestSymbolMemoryEntryNamePrefersQueuedCanonicalName(t *testing.T) {
+	job := &embedding.EmbeddingJob{
+		WorkspaceID: "test-ws",
+		FilePath:    "legacy.go",
+		SymbolName:  "Handler",
+		PackageID:   "go:pkg/foo",
+		SymbolKey:   "func Handler",
+		MemoryName:  "symbol://test-ws/go:pkg/foo::func Handler",
+	}
+
+	assert.Equal(t, "symbol://test-ws/go:pkg/foo::func Handler", symbolMemoryEntryName(job))
+}
+
+func TestSymbolMemoryEntryNameBuildsKeyedNameFromPackageIdentity(t *testing.T) {
+	job := &embedding.EmbeddingJob{
+		WorkspaceID: "test-ws",
+		FilePath:    "legacy.go",
+		SymbolName:  "Handler",
+		PackageID:   "go:pkg/foo",
+		SymbolKey:   "func Handler",
+	}
+
+	assert.Equal(t, "symbol://test-ws/go:pkg/foo::func Handler", symbolMemoryEntryName(job))
+}
+
+func TestSymbolMemoryEntryNameFallsBackToLegacyLocator(t *testing.T) {
+	job := &embedding.EmbeddingJob{
+		WorkspaceID: "test-ws",
+		FilePath:    "legacy.go",
+		SymbolName:  "Handler",
+	}
+
+	assert.Equal(t, "symbol://test-ws/legacy.go:Handler", symbolMemoryEntryName(job))
 }

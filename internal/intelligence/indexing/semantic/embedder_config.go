@@ -43,16 +43,20 @@ func ResolveModelForScope(scope EmbeddingScope, cfg config.Config) string {
 // NewEmbedderFromConfig creates an Embedder using config-based model/provider selection.
 func NewEmbedderFromConfig(scope EmbeddingScope, cfg config.Config, opts ...EmbedderOption) (*Embedder, error) {
 	model := ResolveModelForScope(scope, cfg)
+	configOpts := make([]EmbedderOption, 0, len(opts)+6)
 	if strings.TrimSpace(model) != "" {
-		opts = append(opts, WithModelOverride(model))
+		configOpts = append(configOpts, WithModelOverride(model))
 	}
-	opts = append(opts,
+	configOpts = append(configOpts,
 		WithProvider(strings.TrimSpace(cfg.Embedding.Provider)),
 		WithAPIKey(strings.TrimSpace(cfg.Embedding.APIKey)),
 		WithBaseURL(strings.TrimSpace(cfg.Embedding.BaseURL)),
+		WithVoyageKey(strings.TrimSpace(cfg.Embedding.VoyageAPIKey)),
+		WithGeminiKey(strings.TrimSpace(cfg.LLM.GeminiAPIKey)),
 	)
-	opts = applyProviderPreference(model, cfg, opts)
-	return NewEmbedder(scope, opts...)
+	configOpts = applyProviderPreference(model, cfg, configOpts)
+	configOpts = append(configOpts, opts...)
+	return NewEmbedder(scope, configOpts...)
 }
 
 // NewProviderForScope creates an EmbeddingProvider using config-based model selection.

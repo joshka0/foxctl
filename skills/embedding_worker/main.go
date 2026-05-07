@@ -15,7 +15,9 @@ import (
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/symbolutil"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedding"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedqueue"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+	"github.com/joshka0/foxctl/internal/storage"
 	"github.com/joshka0/foxctl/internal/storage/annotations"
 	"github.com/joshka0/foxctl/internal/storage/sessions"
 	"github.com/joshka0/foxctl/internal/storage/vector"
@@ -41,6 +43,9 @@ type Input struct {
 
 	// DryRun if true, claims jobs but doesn't call the embedding API.
 	DryRun bool `json:"dry_run,omitempty"`
+
+	// JobDelayMS pauses between claimed jobs, useful for local GPU-backed embedding.
+	JobDelayMS int `json:"job_delay_ms,omitempty"`
 
 	// SyncMemory requests syncing symbol embeddings into named memory after processing.
 	SyncMemory bool `json:"sync_memory,omitempty"`
@@ -73,6 +78,7 @@ type Input struct {
 type Output struct {
 	Processed  int            `json:"processed"`
 	Errors     int            `json:"errors"`
+	Memories   int            `json:"memories,omitempty"`
 	Synced     int            `json:"synced,omitempty"`
 	SyncErrors int            `json:"sync_errors,omitempty"`
 	Remaining  int            `json:"remaining"`
@@ -124,18 +130,24 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		in.MaxDuration = defaultMaxDur
 	}
 
-	// Determine embedding provider (prefer Voyage, fall back to Gemini).
-	var embeddingModel string
-	var expectedDims int
-
 	voyageKey := os.Getenv("VOYAGE_API_KEY")
 	geminiKey := os.Getenv("GEMINI_API_KEY")
-	model := semantic.ResolveModelForScope(semantic.ScopeSymbols, rc.Config)
 
-	var embedder *semantic.Embedder
-	if !in.DryRun {
+	var symbolEmbedder *semantic.Embedder
+	symbolEmbeddingModel := semantic.ResolveModelForScope(semantic.ScopeSymbols, rc.Config)
+	symbolExpectedDims := semantic.DimensionsForModel(symbolEmbeddingModel)
+	if rc.Config.Embedding.Dimensions > 0 {
+		symbolExpectedDims = rc.Config.Embedding.Dimensions
+	}
+	getSymbolEmbedder := func() (*semantic.Embedder, int, error) {
+		if in.DryRun {
+			return nil, symbolExpectedDims, nil
+		}
+		if symbolEmbedder != nil {
+			return symbolEmbedder, symbolExpectedDims, nil
+		}
 		var err error
-		embedder, err = semantic.NewEmbedderFromConfig(
+		symbolEmbedder, err = semantic.NewEmbedderFromConfig(
 			semantic.ScopeSymbols,
 			rc.Config,
 			semantic.WithVoyageKey(voyageKey),
@@ -143,45 +155,54 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 			skillmain.EmbeddingGuard(rc),
 		)
 		if err != nil {
-			return skillerr.Auth(
-				"VOYAGE_API_KEY or GEMINI_API_KEY required",
-				skillerr.WithCause(err),
-				skillerr.WithHint("set VOYAGE_API_KEY (preferred) or GEMINI_API_KEY environment variable"),
-			)
+			return nil, 0, err
 		}
-	} else {
-		embedder, _ = semantic.NewEmbedderFromConfig(
-			semantic.ScopeSymbols,
+		symbolExpectedDims = symbolEmbedder.Dimensions()
+		if rc.Config.Embedding.Dimensions > 0 {
+			symbolExpectedDims = rc.Config.Embedding.Dimensions
+		}
+		log.Info().
+			Str("provider", symbolEmbedder.Provider()).
+			Str("model", symbolEmbedder.Model()).
+			Int("dims", symbolExpectedDims).
+			Msg("using symbol embeddings")
+		return symbolEmbedder, symbolExpectedDims, nil
+	}
+
+	var memoryEmbedder *semantic.Embedder
+	memoryEmbeddingModel := semantic.ResolveModelForScope(semantic.ScopeMemory, rc.Config)
+	memoryExpectedDims := semantic.DimensionsForModel(memoryEmbeddingModel)
+	if rc.Config.Embedding.Dimensions > 0 {
+		memoryExpectedDims = rc.Config.Embedding.Dimensions
+	}
+	getMemoryEmbedder := func() (*semantic.Embedder, int, error) {
+		if in.DryRun {
+			return nil, memoryExpectedDims, nil
+		}
+		if memoryEmbedder != nil {
+			return memoryEmbedder, memoryExpectedDims, nil
+		}
+		var err error
+		memoryEmbedder, err = semantic.NewEmbedderFromConfig(
+			semantic.ScopeMemory,
 			rc.Config,
 			semantic.WithVoyageKey(voyageKey),
 			semantic.WithGeminiKey(geminiKey),
 			skillmain.EmbeddingGuard(rc),
 		)
-	}
-
-	if embedder != nil {
-		embeddingModel = embedder.Model()
-		expectedDims = embedder.Dimensions()
-		log.Info().
-			Str("provider", embedder.Provider()).
-			Str("model", embeddingModel).
-			Int("dims", expectedDims).
-			Msg("using embeddings")
-	} else {
-		embeddingModel = model
-		if embeddingModel == "" {
-			embeddingModel = "gemini-embedding-001"
+		if err != nil {
+			return nil, 0, err
 		}
-		expectedDims = semantic.DimensionsForModel(embeddingModel)
+		memoryExpectedDims = memoryEmbedder.Dimensions()
+		if rc.Config.Embedding.Dimensions > 0 {
+			memoryExpectedDims = rc.Config.Embedding.Dimensions
+		}
 		log.Info().
-			Str("provider", "dry-run").
-			Str("model", embeddingModel).
-			Int("dims", expectedDims).
-			Msg("using embeddings")
-	}
-
-	if rc.Config.Embedding.Dimensions > 0 {
-		expectedDims = rc.Config.Embedding.Dimensions
+			Str("provider", memoryEmbedder.Provider()).
+			Str("model", memoryEmbedder.Model()).
+			Int("dims", memoryExpectedDims).
+			Msg("using memory embeddings")
+		return memoryEmbedder, memoryExpectedDims, nil
 	}
 
 	// Open store using cache path from config
@@ -271,8 +292,49 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 				processedWorkspaces[ws] = struct{}{}
 			}
 
+			if job.Kind == embedqueue.TaskKindMemory {
+				if err := processMemoryEmbeddingJob(ctx, store, memoryStore, job, in.DryRun, getMemoryEmbedder); err != nil {
+					log.Error().Err(err).Str("job_id", job.ID).Str("memory", job.MemoryName).Msg("memory embedding job failed")
+					if failErr := store.Fail(ctx, job.ID, err.Error()); failErr != nil {
+						output.LastError = fmt.Sprintf("fail memory job: %v (original: %v)", failErr, err)
+					} else {
+						output.LastError = err.Error()
+					}
+					output.Errors++
+					continue
+				}
+				log.Info().Str("job_id", job.ID).Str("memory", job.MemoryName).Str("status", "completed").Msg("memory job completed")
+				output.Processed++
+				output.Memories++
+				batchProcessed++
+				if err := waitEmbeddingJobDelay(ctx, in.JobDelayMS); err != nil {
+					output.Status = "timeout"
+					output.LastError = err.Error()
+					break
+				}
+				continue
+			}
+			if job.Kind != "" && job.Kind != embedqueue.TaskKindSymbol {
+				errMsg := fmt.Sprintf("unsupported embedding job kind %q", job.Kind)
+				log.Error().Str("job_id", job.ID).Msg(errMsg)
+				if failErr := store.Fail(ctx, job.ID, errMsg); failErr != nil {
+					output.LastError = fmt.Sprintf("fail job: %v (original: %v)", failErr, errMsg)
+				} else {
+					output.LastError = errMsg
+				}
+				output.Errors++
+				continue
+			}
+
 			// Generate embedding
 			if in.DryRun {
+				_, expectedDims, err := getSymbolEmbedder()
+				if err != nil {
+					log.Error().Err(err).Str("job_id", job.ID).Msg("failed to resolve dry-run embedding dimensions")
+					output.LastError = err.Error()
+					output.Errors++
+					continue
+				}
 				// Dry run: mark as complete with fake embedding using config dimensions
 				fakeEmbed := make([]float32, expectedDims)
 				if err := store.Complete(ctx, job.ID, fakeEmbed, "dry-run"); err != nil {
@@ -283,10 +345,15 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 				}
 				log.Info().Str("job_id", job.ID).Str("status", "dry-run").Int("dims", expectedDims).Msg("job completed")
 			} else {
-				if embedder == nil {
-					output.LastError = "embedding provider not available"
+				embedder, expectedDims, err := getSymbolEmbedder()
+				if err != nil {
+					errMsg := fmt.Sprintf("symbol embedding provider: %v", err)
+					output.LastError = errMsg
 					output.Errors++
-					log.Error().Str("job_id", job.ID).Msg("embedding provider not available")
+					log.Error().Err(err).Str("job_id", job.ID).Msg("symbol embedding provider unavailable")
+					if failErr := store.Fail(ctx, job.ID, errMsg); failErr != nil {
+						output.LastError = fmt.Sprintf("fail job: %v (original: %v)", failErr, err)
+					}
 					continue
 				}
 
@@ -333,16 +400,14 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 				}
 				if memoryStore != nil {
 					workspaceID := strings.TrimSpace(job.WorkspaceID)
-					filePath := strings.TrimSpace(job.FilePath)
-					symbolName := strings.TrimSpace(job.SymbolName)
-					if workspaceID == "" || filePath == "" || symbolName == "" {
+					entryName := symbolMemoryEntryName(job)
+					if workspaceID == "" || entryName == "" {
 						log.Warn().
 							Str("job_id", job.ID).
 							Str("symbol_id", job.SymbolID).
-							Msg("skipping embedding update due to missing workspace/file/symbol")
+							Msg("skipping embedding update due to missing workspace/symbol identity")
 						addSyncTarget(workspaceID, job.SymbolID)
 					} else {
-						entryName := symbolutil.EntryName(workspaceID, filePath, symbolName)
 						if err := memoryStore.UpdateEmbedding(ctx, entryName, workspaceID, embed); err != nil {
 							log.Warn().Err(err).Str("job_id", job.ID).Str("symbol_id", job.SymbolID).Msg("failed to update symbol embedding")
 							addSyncTarget(workspaceID, job.SymbolID)
@@ -354,6 +419,11 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 			output.Processed++
 			batchProcessed++
+			if err := waitEmbeddingJobDelay(ctx, in.JobDelayMS); err != nil {
+				output.Status = "timeout"
+				output.LastError = err.Error()
+				break
+			}
 		}
 
 		// Only count batch if we processed at least one job
@@ -594,6 +664,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		if in.SyncMemory {
 			if in.DryRun {
 				log.Warn().Msg("sync_memory requested during dry_run; skipping sync")
+			} else if syncStore, ok := memoryStore.(memoryutil.SymbolSyncStore); !ok {
+				log.Warn().Msg("sync_memory requested but memory store does not support symbol sync")
 			} else {
 				if len(syncTargets) > 0 {
 					for ws, symbols := range syncTargets {
@@ -601,7 +673,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 						for id := range symbols {
 							ids = append(ids, id)
 						}
-						updated, err := memoryStore.SyncSymbolEmbeddings(ctx, embeddingDBPath, memoryutil.SyncSymbolEmbeddingsOptions{
+						updated, err := syncStore.SyncSymbolEmbeddings(ctx, embeddingDBPath, memoryutil.SyncSymbolEmbeddingsOptions{
 							WorkspaceID: ws,
 							SymbolIDs:   ids,
 							OnlyMissing: syncOnlyMissing,
@@ -630,7 +702,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 					log.Warn().Msg("no workspaces available for sync_memory")
 				} else if in.SyncAll {
 					for ws := range syncWorkspaces {
-						updated, err := memoryStore.SyncSymbolEmbeddings(ctx, embeddingDBPath, memoryutil.SyncSymbolEmbeddingsOptions{
+						updated, err := syncStore.SyncSymbolEmbeddings(ctx, embeddingDBPath, memoryutil.SyncSymbolEmbeddingsOptions{
 							WorkspaceID: ws,
 							OnlyMissing: syncOnlyMissing,
 						})
@@ -646,7 +718,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 					}
 				} else if len(syncTargets) == 0 {
 					if ws := strings.TrimSpace(in.SyncWorkspace); ws != "" {
-						updated, err := memoryStore.SyncSymbolEmbeddings(ctx, embeddingDBPath, memoryutil.SyncSymbolEmbeddingsOptions{
+						updated, err := syncStore.SyncSymbolEmbeddings(ctx, embeddingDBPath, memoryutil.SyncSymbolEmbeddingsOptions{
 							WorkspaceID: ws,
 							OnlyMissing: syncOnlyMissing,
 						})
@@ -693,4 +765,100 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	return skillout.Emit(rc, command, output)
+}
+
+func processMemoryEmbeddingJob(
+	ctx context.Context,
+	store *embedding.Store,
+	memoryStore memoryutil.Store,
+	job *embedding.EmbeddingJob,
+	dryRun bool,
+	getEmbedder func() (*semantic.Embedder, int, error),
+) error {
+	if strings.TrimSpace(job.MemoryName) == "" {
+		return fmt.Errorf("memory_name is required")
+	}
+	if strings.TrimSpace(job.WorkspaceID) == "" {
+		return fmt.Errorf("workspace_id is required")
+	}
+	if dryRun {
+		return store.CompleteJob(ctx, job.ID)
+	}
+	if memoryStore == nil {
+		return fmt.Errorf("memory store unavailable")
+	}
+	embedder, expectedDims, err := getEmbedder()
+	if err != nil {
+		return fmt.Errorf("memory embedding provider: %w", err)
+	}
+	if embedder == nil {
+		return fmt.Errorf("memory embedding provider not available")
+	}
+	result, err := embedder.Embed(ctx, job.Content)
+	if err != nil {
+		return fmt.Errorf("embed memory: %w", err)
+	}
+	if expectedDims > 0 && len(result.Vec) != expectedDims {
+		return fmt.Errorf("memory dimension mismatch: got %d, expected %d", len(result.Vec), expectedDims)
+	}
+	if err := memoryStore.ValidateEmbeddingDimensions(ctx, job.WorkspaceID, len(result.Vec)); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	createdAt := job.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = now
+	}
+	if err := memoryStore.SetEmbeddingMetadata(ctx, storage.EmbeddingMetadata{
+		Workspace:  job.WorkspaceID,
+		Provider:   embedder.Provider(),
+		Model:      result.Model,
+		Dimensions: len(result.Vec),
+		CreatedAt:  createdAt,
+		UpdatedAt:  now,
+	}); err != nil {
+		return fmt.Errorf("set memory embedding metadata: %w", err)
+	}
+	if err := memoryStore.UpdateEmbedding(ctx, job.MemoryName, job.WorkspaceID, result.Vec); err != nil {
+		return fmt.Errorf("update memory embedding: %w", err)
+	}
+	if err := store.CompleteJob(ctx, job.ID); err != nil {
+		return fmt.Errorf("complete memory job: %w", err)
+	}
+	return nil
+}
+
+func symbolMemoryEntryName(job *embedding.EmbeddingJob) string {
+	if job == nil {
+		return ""
+	}
+	if name := strings.TrimSpace(job.MemoryName); name != "" {
+		return name
+	}
+	workspaceID := strings.TrimSpace(job.WorkspaceID)
+	packageID := strings.TrimSpace(job.PackageID)
+	symbolKey := strings.TrimSpace(job.SymbolKey)
+	if workspaceID != "" && packageID != "" && symbolKey != "" {
+		return symbolutil.KeyEntryName(workspaceID, packageID, symbolKey)
+	}
+	filePath := strings.TrimSpace(job.FilePath)
+	symbolName := strings.TrimSpace(job.SymbolName)
+	if workspaceID != "" && filePath != "" && symbolName != "" {
+		return symbolutil.EntryName(workspaceID, filePath, symbolName)
+	}
+	return ""
+}
+
+func waitEmbeddingJobDelay(ctx context.Context, delayMS int) error {
+	if delayMS <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(time.Duration(delayMS) * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }

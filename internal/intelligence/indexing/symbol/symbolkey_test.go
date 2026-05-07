@@ -44,6 +44,26 @@ func TestGoInitSymbolKey(t *testing.T) {
 	}
 }
 
+func TestGoNonExportedSymbolKey(t *testing.T) {
+	tests := []struct {
+		name         string
+		symName      string
+		fileBasename string
+		expected     SymbolKey
+	}{
+		{"private function", "helper", "store.go", SymbolKey("store.go/helper")},
+		{"private method", "Store.load", "store.go", SymbolKey("store.go/Store.load")},
+		{"missing file keeps name", "helper", "", SymbolKey("helper")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := GoNonExportedSymbolKey(tt.symName, tt.fileBasename); got != tt.expected {
+				t.Errorf("GoNonExportedSymbolKey(%q, %q) = %q, want %q", tt.symName, tt.fileBasename, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestTSSymbolKey(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -82,6 +102,46 @@ func TestElixirSymbolKey(t *testing.T) {
 			got := ElixirSymbolKey(tt.input)
 			if got != tt.expected {
 				t.Errorf("ElixirSymbolKey(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestPythonSymbolKey(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected SymbolKey
+	}{
+		{"function", "run", SymbolKey("run")},
+		{"method", "Runner.run", SymbolKey("Runner.run")},
+		{"trims", "  load  ", SymbolKey("load")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := PythonSymbolKey(tt.input); got != tt.expected {
+				t.Errorf("PythonSymbolKey(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestRustSymbolKey(t *testing.T) {
+	tests := []struct {
+		name         string
+		symName      string
+		exported     bool
+		fileBasename string
+		expected     SymbolKey
+	}{
+		{"public", "api", true, "lib.rs", SymbolKey("api")},
+		{"private", "helper", false, "lib.rs", SymbolKey("lib.rs/helper")},
+		{"private missing file", "helper", false, "", SymbolKey("helper")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := RustSymbolKey(tt.symName, tt.exported, tt.fileBasename); got != tt.expected {
+				t.Errorf("RustSymbolKey(%q, %v, %q) = %q, want %q", tt.symName, tt.exported, tt.fileBasename, got, tt.expected)
 			}
 		})
 	}

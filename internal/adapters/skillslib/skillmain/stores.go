@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/storage"
 	"github.com/joshka0/foxctl/internal/storage/memory"
 	"github.com/joshka0/foxctl/internal/storage/sessions"
 	"github.com/joshka0/foxctl/internal/storage/tasks"
@@ -16,12 +17,13 @@ import (
 type StoreProvider struct {
 	cfg config.Config
 
-	mu          sync.Mutex
-	memoryStore *memory.Store
-	cacheMemory *memory.Store
-	sessStore   *sessions.Store
-	taskStore   tasks.Store
-	closeFuncs  []func()
+	mu                    sync.Mutex
+	memoryStore           *memory.Store
+	configuredMemoryStore storage.MemoryStore
+	cacheMemory           *memory.Store
+	sessStore             *sessions.Store
+	taskStore             tasks.Store
+	closeFuncs            []func()
 }
 
 // NewStoreProvider creates a new StoreProvider from config.
@@ -44,6 +46,24 @@ func (sp *StoreProvider) Memory(ctx context.Context) (*memory.Store, error) {
 		return nil, fmt.Errorf("open memory store: %w", err)
 	}
 	sp.memoryStore = store
+	sp.closeFuncs = append(sp.closeFuncs, func() { _ = store.Close() })
+	return store, nil
+}
+
+// ConfiguredMemory returns the configured memory backend, including Turso when enabled.
+func (sp *StoreProvider) ConfiguredMemory(ctx context.Context) (storage.MemoryStore, error) {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+
+	if sp.configuredMemoryStore != nil {
+		return sp.configuredMemoryStore, nil
+	}
+
+	store, err := memory.OpenWithConfig(ctx, sp.cfg)
+	if err != nil {
+		return nil, fmt.Errorf("open configured memory store: %w", err)
+	}
+	sp.configuredMemoryStore = store
 	sp.closeFuncs = append(sp.closeFuncs, func() { _ = store.Close() })
 	return store, nil
 }
@@ -113,6 +133,7 @@ func (sp *StoreProvider) Close() error {
 	}
 	sp.closeFuncs = nil
 	sp.memoryStore = nil
+	sp.configuredMemoryStore = nil
 	sp.cacheMemory = nil
 	sp.sessStore = nil
 	sp.taskStore = nil

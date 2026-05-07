@@ -10,6 +10,7 @@ import (
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/codefilter"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
+	"github.com/joshka0/foxctl/internal/platform/symbolutil"
 	"github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/storage"
 )
@@ -177,7 +178,13 @@ func documentFromSymbol(entry storage.NamedEntry) (Document, bool) {
 	}
 	workspaceID := workspace.CanonicalID(entry.Workspace)
 
-	symbolID := parsed.Symbol.EffectiveID()
+	symbolKey := parsed.Symbol.EffectiveID()
+	symbolID := symbolKey
+	metadata := map[string]any{"symbol_key": symbolKey}
+	if scoped, ok := symbolutil.ScopedSymbolIDFromKeyEntryName(workspaceID, entry.Name); ok {
+		symbolID = scoped
+		metadata["symbol_ref"] = scoped
+	}
 	searchText := encodeSearchText(
 		parsed.Symbol.Name,
 		string(parsed.Symbol.Kind),
@@ -213,6 +220,7 @@ func documentFromSymbol(entry storage.NamedEntry) (Document, bool) {
 			StartByte: parsed.Symbol.StartByte,
 			EndByte:   parsed.Symbol.EndByte,
 		},
+		Metadata: metadata,
 	}, true
 }
 

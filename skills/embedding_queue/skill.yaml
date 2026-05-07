@@ -2,7 +2,7 @@ apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: embedding/queue
-  description: Background queue for generating symbol embeddings
+  description: Background queue for generating symbol and named-memory embeddings
   version: 0.1.0
   author: foxctl
   tags: [embedding, queue, indexing, async]
@@ -27,7 +27,11 @@ signature:
     - name: symbols
       type: array
       required: false
-      description: Symbols to enqueue (for enqueue operation) - objects with symbol_id, file_path, symbol_name, content
+      description: Symbols to enqueue (for enqueue operation) - objects with symbol_id, file_path, symbol_name, language, package_id, symbol_key, memory_name, content
+    - name: memories
+      type: array
+      required: false
+      description: Named memories to enqueue (for enqueue operation) - objects with name, type, content
     - name: priority
       type: integer
       required: false
@@ -64,7 +68,7 @@ signature:
       description: Number of jobs enqueued
     - name: skipped
       type: integer
-      description: Number of symbols skipped (deduplicated)
+      description: Number of jobs skipped (deduplicated or empty)
     - name: job_ids
       type: array
       description: IDs of created jobs
@@ -89,11 +93,12 @@ signature:
   help:
     short: "Manage background embedding generation queue"
     long: |
-      embedding/queue manages a background queue for generating symbol embeddings.
-      Integrates with the live-index hook to queue symbols as files are edited.
+      embedding/queue manages a background queue for generating symbol and
+      named-memory embeddings. Integrates with the live-index hook to queue
+      symbols as files are edited, and with memory reembedding for paced drains.
 
       Operations:
-      - enqueue: Add symbols to the embedding queue
+      - enqueue: Add symbols or named memories to the embedding queue
       - stats: Get queue statistics
       - get: Retrieve embedding for a specific symbol
       - get_by_file: Get all embeddings for a file
@@ -111,8 +116,21 @@ signature:
             - symbol_id: "main.go:Handler"
               file_path: "main.go"
               symbol_name: "Handler"
+              language: "go"
+              package_id: "go:root"
+              symbol_key: "func Handler"
+              memory_name: "symbol://myproject/go:root::func Handler"
               content: "func Handler(w http.ResponseWriter, r *http.Request) { ... }"
           deduplicate: true
+      - id: enqueue-memories
+        description: "Enqueue named memories for embedding"
+        example_input:
+          operation: enqueue
+          workspace_id: myproject
+          memories:
+            - name: "decision:memory-backend"
+              type: "decision"
+              content: "[May 2026] [decision] Use local Turso memory backend"
       - id: check-stats
         description: "Check queue statistics"
         example_input:

@@ -67,6 +67,22 @@ func TestFormatMemoryContent_Format(t *testing.T) {
 	assert.Equal(t, "[Jun 2026] [insight] Test summary", result)
 }
 
+func TestMemoryInputsFromEntriesUsesFormattedContent(t *testing.T) {
+	entries := []memory.NamedEntry{{
+		Name:      "decision:test",
+		Type:      "decision",
+		Summary:   "Use queued embeddings",
+		CreatedAt: time.Date(2026, 5, 7, 10, 0, 0, 0, time.UTC),
+	}}
+
+	inputs := memoryInputsFromEntries(entries)
+
+	assert.Len(t, inputs, 1)
+	assert.Equal(t, "decision:test", inputs[0].Name)
+	assert.Equal(t, "decision", inputs[0].Type)
+	assert.Equal(t, "[May 2026] [decision] Use queued embeddings", inputs[0].Content)
+}
+
 func TestFormatMemoryContent_EmptySummaryUsesName(t *testing.T) {
 	entry := memory.NamedEntry{
 		Name:      "my-memory-name",
@@ -141,12 +157,14 @@ func TestInput_AllFields(t *testing.T) {
 		BatchSize:  20,
 		ProcessAll: true,
 		DryRun:     true,
+		Enqueue:    true,
 	}
 
 	assert.Equal(t, "/test/workspace", in.Workspace)
 	assert.Equal(t, 20, in.BatchSize)
 	assert.True(t, in.ProcessAll)
 	assert.True(t, in.DryRun)
+	assert.True(t, in.Enqueue)
 }
 
 // Tests for Output structure
@@ -156,6 +174,7 @@ func TestOutput_SuccessfulRun(t *testing.T) {
 		Workspace:     "/workspace",
 		MemoriesFound: 10,
 		Embedded:      8,
+		Queued:        7,
 		Skipped:       1,
 		Errors:        1,
 		Remaining:     0,
@@ -166,6 +185,7 @@ func TestOutput_SuccessfulRun(t *testing.T) {
 	assert.Equal(t, "/workspace", output.Workspace)
 	assert.Equal(t, 10, output.MemoriesFound)
 	assert.Equal(t, 8, output.Embedded)
+	assert.Equal(t, 7, output.Queued)
 	assert.Equal(t, 1, output.Skipped)
 	assert.Equal(t, 1, output.Errors)
 	assert.Equal(t, 2, output.BatchCount)

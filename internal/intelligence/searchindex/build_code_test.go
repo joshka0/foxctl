@@ -201,6 +201,35 @@ func TestBuildCodeDocuments(t *testing.T) {
 	}
 }
 
+func TestDocumentFromSymbolUsesPackageScopedSymbolRef(t *testing.T) {
+	raw, err := json.Marshal(symbol.Result{Symbol: symbol.Symbol{
+		ID:       symbol.ID("pkg/a/foo.go", "Helper"),
+		FilePath: "pkg/a/foo.go",
+		Name:     "Helper",
+		Language: "go",
+		Kind:     symbol.KindFunction,
+		Key:      symbol.GoSymbolKey("Helper"),
+	}})
+	if err != nil {
+		t.Fatalf("marshal symbol: %v", err)
+	}
+	doc, ok := documentFromSymbol(storage.NamedEntry{
+		Name:      "symbol://workspace/go:pkg/a::Helper",
+		Type:      symbol.SymbolType,
+		Workspace: "workspace",
+		Result:    raw,
+	})
+	if !ok {
+		t.Fatal("documentFromSymbol returned false")
+	}
+	if doc.SymbolID != "go:pkg/a::Helper" {
+		t.Fatalf("SymbolID=%q want package-scoped symbol ref", doc.SymbolID)
+	}
+	if doc.Metadata["symbol_key"] != "Helper" || doc.Metadata["symbol_ref"] != "go:pkg/a::Helper" {
+		t.Fatalf("metadata=%#v", doc.Metadata)
+	}
+}
+
 func TestBuildCodeDocumentsBatchesEmbeddings(t *testing.T) {
 	testCtx := context.Background()
 	store, err := Open(testCtx, t.TempDir())
@@ -417,8 +446,11 @@ func TestBuildCodeDocumentsEnvelopeProviderErrorKeepsPlainDocument(t *testing.T)
 	if len(hits) != 1 {
 		t.Fatalf("hits=%d want 1", len(hits))
 	}
-	if hits[0].Doc.Metadata != nil {
-		t.Fatalf("metadata=%#v want nil after provider error", hits[0].Doc.Metadata)
+	if _, ok := hits[0].Doc.Metadata[metadataKeySemanticEnvelope]; ok {
+		t.Fatalf("semantic envelope metadata present after provider error: %#v", hits[0].Doc.Metadata)
+	}
+	if hits[0].Doc.Metadata["symbol_key"] == "" {
+		t.Fatalf("missing base symbol metadata after provider error: %#v", hits[0].Doc.Metadata)
 	}
 }
 

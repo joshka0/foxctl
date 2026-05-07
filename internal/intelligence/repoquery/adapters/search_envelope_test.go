@@ -67,6 +67,19 @@ func TestSemanticAnchorEnvelopeProviderBuildsSearchEnvelope(t *testing.T) {
 	if bits.Metadata["owner_node_id"] != owner.ID {
 		t.Fatalf("owner metadata=%#v want %q", bits.Metadata["owner_node_id"], owner.ID)
 	}
+
+	bits, err = provider.BuildCodeEnvelope(ctx, searchindex.CodeEnvelopeRequest{Document: searchindex.Document{
+		Kind:       searchindex.KindSymbol,
+		Path:       "moved/locator.go",
+		SymbolID:   repoIndexNodeScopedSymbolID(owner),
+		SymbolName: "stale-name",
+	}})
+	if err != nil {
+		t.Fatalf("BuildCodeEnvelope by symbol ref: %v", err)
+	}
+	if bits.Metadata["owner_node_id"] != owner.ID {
+		t.Fatalf("symbol-ref owner metadata=%#v want %q", bits.Metadata["owner_node_id"], owner.ID)
+	}
 }
 
 func semanticAnchorResolutionForEnvelopeTest(t *testing.T, owner repoindex.Node) semanticanchors.AnchorResolution {

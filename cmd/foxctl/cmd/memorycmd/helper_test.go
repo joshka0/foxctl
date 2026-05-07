@@ -111,7 +111,7 @@ func setupHelperConfig(t *testing.T) config.Config {
 	if err != nil {
 		t.Fatalf("config load: %v", err)
 	}
-	dirs := []string{cfg.Home, cfg.Paths.CAS, cfg.Paths.Jobs, cfg.Paths.Cache, cfg.Paths.Skills}
+	dirs := []string{cfg.Home, cfg.Paths.CAS, cfg.Paths.Jobs, cfg.Paths.Cache, cfg.Paths.Skills, cfg.Storage.Root}
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", dir, err)

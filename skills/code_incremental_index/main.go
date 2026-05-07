@@ -480,6 +480,15 @@ func queueEmbeddings(ctx context.Context, storageRoot, workspaceID string, symbo
 	contentStr := string(fileContent)
 
 	for _, sym := range symbols {
+		symbolLang := strings.TrimSpace(sym.Language)
+		if symbolLang == "" {
+			symbolLang = langutil.DetectAllowed(sym.FilePath, langutil.CommonCodeLanguages)
+		}
+		pkg := symbolutil.DeriveSymbolPackage(sym.FilePath, symbolLang)
+		symbolKey := strings.TrimSpace(sym.Key.String())
+		if symbolKey == "" {
+			symbolKey = sym.EffectiveID()
+		}
 		// Extract symbol body from file content
 		body := extractSymbolBody(contentStr, sym)
 		content := body
@@ -498,6 +507,7 @@ func queueEmbeddings(ctx context.Context, storageRoot, workspaceID string, symbo
 				Model:      model,
 				Kind:       string(sym.Kind),
 				Name:       sym.Name,
+				SymbolKey:  sym.EffectiveID(),
 				FilePath:   sym.FilePath,
 				Signature:  sym.Signature,
 				Doc:        sym.Documentation,
@@ -511,9 +521,13 @@ func queueEmbeddings(ctx context.Context, storageRoot, workspaceID string, symbo
 		}
 
 		symbolInputs = append(symbolInputs, embedding.SymbolInput{
-			SymbolID:      sym.ID,
+			SymbolID:      symbolutil.ScopedSymbolID(pkg, symbolKey),
 			FilePath:      sym.FilePath,
 			SymbolName:    sym.Name,
+			Language:      symbolLang,
+			PackageID:     pkg,
+			SymbolKey:     symbolKey,
+			MemoryName:    symbolutil.KeyEntryName(workspaceID, pkg, symbolKey),
 			Content:       content,
 			ContentDigest: contentDigest,
 		})

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedqueue"
 	"github.com/joshka0/foxctl/internal/storage/queue"
 )
 
@@ -46,10 +47,14 @@ type EmbeddingJob struct {
 	// ID is the unique job identifier (ULID).
 	ID string `json:"id"`
 
+	// Kind identifies what target the job embeds.
+	Kind embedqueue.TaskKind `json:"kind"`
+
 	// WorkspaceID identifies the workspace.
 	WorkspaceID string `json:"workspace_id"`
 
-	// SymbolID is the unique symbol identifier (file_path:symbol_name).
+	// SymbolID is the embedding-storage symbol identifier. New keyed symbol jobs
+	// use "<package_id>::<symbol_key>"; legacy jobs may still use file/name IDs.
 	SymbolID string `json:"symbol_id"`
 
 	// FilePath is the source file path.
@@ -58,11 +63,29 @@ type EmbeddingJob struct {
 	// SymbolName is the symbol name.
 	SymbolName string `json:"symbol_name"`
 
+	// Language is the source language for package-scoped symbol identity.
+	Language string `json:"language,omitempty"`
+
+	// PackageID is the package identifier for package-scoped symbol identity.
+	PackageID string `json:"package_id,omitempty"`
+
+	// SymbolKey is the canonical symbol key within PackageID.
+	SymbolKey string `json:"symbol_key,omitempty"`
+
+	// MemoryName is the named memory entry name for memory embedding jobs.
+	MemoryName string `json:"memory_name,omitempty"`
+
+	// MemoryType is the named memory type for memory embedding jobs.
+	MemoryType string `json:"memory_type,omitempty"`
+
 	// Content is the text to embed (symbol body or snippet).
 	Content string `json:"content"`
 
 	// ContentDigest is the SHA256 of the content for deduplication.
 	ContentDigest string `json:"content_digest"`
+
+	// Model is the queued embedding model identity used for deduplication.
+	Model string `json:"model,omitempty"`
 
 	// State is the current job state.
 	State JobState `json:"state"`
@@ -94,7 +117,7 @@ type EmbeddingJob struct {
 
 // EmbeddingResult stores the generated embedding for a symbol.
 type EmbeddingResult struct {
-	// SymbolID is the unique symbol identifier.
+	// SymbolID is the embedding-storage symbol identifier.
 	SymbolID string `json:"symbol_id"`
 
 	// WorkspaceID identifies the workspace.
@@ -137,9 +160,25 @@ type EnqueueRequest struct {
 	Deduplicate bool `json:"deduplicate,omitempty"`
 }
 
+// MemoryEnqueueRequest is the input for enqueuing named memories for embedding.
+type MemoryEnqueueRequest struct {
+	// WorkspaceID identifies the workspace.
+	WorkspaceID string `json:"workspace_id"`
+
+	// Memories is the list of named memories to embed.
+	Memories []MemoryInput `json:"memories"`
+
+	// Priority sets the job priority.
+	Priority JobPriority `json:"priority,omitempty"`
+
+	// Model is the embedding model used for deduplication checks.
+	Model string `json:"model,omitempty"`
+}
+
 // SymbolInput describes a symbol to be embedded.
 type SymbolInput struct {
-	// SymbolID is the unique symbol identifier.
+	// SymbolID is the requested symbol identifier. When PackageID and SymbolKey
+	// are present, the queue stores the embedding under "<package_id>::<symbol_key>".
 	SymbolID string `json:"symbol_id"`
 
 	// FilePath is the source file path.
@@ -147,6 +186,18 @@ type SymbolInput struct {
 
 	// SymbolName is the symbol name.
 	SymbolName string `json:"symbol_name"`
+
+	// Language is the source language for package-scoped symbol identity.
+	Language string `json:"language,omitempty"`
+
+	// PackageID is the package identifier for package-scoped symbol identity.
+	PackageID string `json:"package_id,omitempty"`
+
+	// SymbolKey is the canonical symbol key within PackageID.
+	SymbolKey string `json:"symbol_key,omitempty"`
+
+	// MemoryName is the canonical named-memory entry name for this symbol.
+	MemoryName string `json:"memory_name,omitempty"`
 
 	// Content is the text to embed.
 	Content string `json:"content"`
@@ -156,12 +207,28 @@ type SymbolInput struct {
 	ContentDigest string `json:"content_digest,omitempty"`
 }
 
-// EnqueueResult is the output after enqueuing symbols.
+// MemoryInput describes a named memory to be embedded.
+type MemoryInput struct {
+	// Name is the stable named-memory entry name.
+	Name string `json:"name"`
+
+	// Type is the named-memory entry type.
+	Type string `json:"type,omitempty"`
+
+	// Content is the text to embed.
+	Content string `json:"content"`
+
+	// ContentDigest is the SHA256 digest of the content for deduplication.
+	// When empty, the queue will compute a digest from Content.
+	ContentDigest string `json:"content_digest,omitempty"`
+}
+
+// EnqueueResult is the output after enqueuing embedding jobs.
 type EnqueueResult struct {
 	// Queued is the number of jobs added to the queue.
 	Queued int `json:"queued"`
 
-	// Skipped is the number of symbols skipped (duplicates).
+	// Skipped is the number of jobs skipped (duplicates or empty content).
 	Skipped int `json:"skipped"`
 
 	// JobIDs are the IDs of the created jobs.

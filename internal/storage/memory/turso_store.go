@@ -377,7 +377,7 @@ func (s *TursoStore) SearchSimilar(ctx context.Context, workspace string, embedd
 		var distance float64
 
 		if err := scanEntryValues(rows, &entry, &distance); err != nil {
-			continue
+			return nil, fmt.Errorf("memory: scan similar: %w", err)
 		}
 
 		// Convert cosine distance to similarity (distance is in [0, 2], normalize to [0, 1])
@@ -437,7 +437,7 @@ func (s *TursoStore) SearchSimilarByType(ctx context.Context, workspace, entryTy
 		var distance float64
 
 		if err := scanEntryValues(rows, &entry, &distance); err != nil {
-			continue
+			return nil, fmt.Errorf("memory: scan similar by type: %w", err)
 		}
 
 		similarity := 1.0 - distance/2.0
@@ -701,7 +701,7 @@ func (s *TursoStore) SearchSimilarGlobal(ctx context.Context, embedding []float3
 		var distance float64
 
 		if err := scanEntryValues(rows, &entry, &distance); err != nil {
-			continue
+			return nil, fmt.Errorf("memory: scan similar global: %w", err)
 		}
 
 		// Convert cosine distance to similarity (distance is in [0, 2], normalize to [0, 1])
@@ -780,7 +780,7 @@ func (s *TursoStore) SearchSimilarMultiWorkspace(ctx context.Context, workspaces
 		var distance float64
 
 		if err := scanEntryValues(rows, &entry, &distance); err != nil {
-			continue
+			return nil, fmt.Errorf("memory: scan similar multi-workspace: %w", err)
 		}
 
 		similarity := 1.0 - distance/2.0
@@ -1072,8 +1072,16 @@ func (s *TursoStore) ListFiltered(ctx context.Context, workspace string, filter 
 
 // ListWithoutEmbedding returns memories that don't have embeddings yet.
 func (s *TursoStore) ListWithoutEmbedding(ctx context.Context, workspace string, limit int) ([]NamedEntry, error) {
+	return s.ListWithoutEmbeddingPage(ctx, workspace, limit, 0)
+}
+
+// ListWithoutEmbeddingPage returns memories that don't have embeddings yet using limit/offset pagination.
+func (s *TursoStore) ListWithoutEmbeddingPage(ctx context.Context, workspace string, limit, offset int) ([]NamedEntry, error) {
 	if limit <= 0 {
 		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
 	}
 	workspace = ws.CanonicalID(workspace)
 
@@ -1083,7 +1091,7 @@ func (s *TursoStore) ListWithoutEmbedding(ctx context.Context, workspace string,
 		FROM named_memory
 		WHERE workspace = ? AND (embedding IS NULL OR LENGTH(embedding) = 0)
 		ORDER BY updated_at DESC
-		LIMIT ?`, namedEntrySelectColumns), workspace, limit)
+		LIMIT ? OFFSET ?`, namedEntrySelectColumns), workspace, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("memory: list without embedding: %w", err)
 	}

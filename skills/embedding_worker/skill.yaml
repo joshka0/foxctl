@@ -31,6 +31,11 @@ signature:
       required: false
       default: false
       description: Claim jobs but skip actual embedding API calls
+    - name: job_delay_ms
+      type: integer
+      required: false
+      default: 0
+      description: Milliseconds to wait between jobs for local GPU-backed embedding
     - name: sync_memory
       type: boolean
       required: false
@@ -60,6 +65,9 @@ signature:
     - name: synced
       type: integer
       description: Number of symbol embeddings synced into named memory
+    - name: memories
+      type: integer
+      description: Number of named memory embedding jobs processed
     - name: sync_errors
       type: integer
       description: Number of sync attempts that failed
@@ -84,18 +92,19 @@ signature:
   help:
     short: "Process queued embedding jobs using Gemini API"
     long: |
-      embedding/worker processes jobs from the embedding queue, generating
-      embeddings using the Gemini embedding API. It runs in batches with
+      embedding/worker processes symbol and named-memory jobs from the embedding
+      queue, generating embeddings using the configured provider. It runs in batches with
       configurable size and timeout.
 
       The worker:
       - Claims pending jobs atomically
-      - Generates embeddings via Gemini API
-      - Stores results in the embedding database
+      - Generates embeddings via the configured embedding provider
+      - Stores symbol results in the embedding database
+      - Stores named-memory embeddings in the configured memory backend
       - Handles retries with exponential backoff
       - Respects rate limits
 
-      Requires GEMINI_API_KEY environment variable.
+      Requires a configured embedding provider.
 
       Typically invoked by the embedding-flush.sh Stop hook to process
       accumulated jobs at session end.
@@ -108,8 +117,10 @@ signature:
       - id: drain-queue
         description: "Process all remaining jobs (large batch, long timeout)"
         example_input:
-          batch_size: 100
+          batch_size: 1
           max_duration: 600
+          process_all: true
+          job_delay_ms: 2000
       - id: dry-run
         description: "Test job claiming without calling API"
         example_input:

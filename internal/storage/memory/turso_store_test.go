@@ -205,6 +205,53 @@ func TestTursoLocalVectorSearchResultsProjectToCanonicalMemoryRecord(t *testing.
 	assertVectorSearchRecord("SearchSimilarMultiWorkspace", results, err)
 }
 
+func TestTursoLocalStoreSearchSimilar4096Dimensions(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "memory-4096.turso")
+	store, err := OpenTurso(ctx, dbdriver.TursoConfig{
+		Path:               dbPath,
+		ReplicaPath:        dbPath,
+		EnableVectorSearch: true,
+		VectorDimensions:   4096,
+	})
+	if err != nil {
+		if isUnavailableLocalTursoError(err) {
+			t.Skipf("local turso unavailable: %v", err)
+		}
+		t.Fatalf("OpenTurso() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	embedding := make([]float32, 4096)
+	for i := range embedding {
+		embedding[i] = (float32(i%17) - 8) / 17
+	}
+	_, err = store.SaveWithEmbedding(ctx, NamedEntry{
+		Name:      "qwen-sized",
+		Type:      "decision",
+		Workspace: "ws",
+		Summary:   "4096 dimension vector smoke",
+		Result:    []byte(`{"ok":true}`),
+	}, embedding, "text-embedding-qwen3-embedding-8b")
+	if err != nil {
+		if isUnavailableLocalTursoError(err) {
+			t.Skipf("local turso vector write unavailable: %v", err)
+		}
+		t.Fatalf("SaveWithEmbedding: %v", err)
+	}
+
+	results, err := store.SearchSimilar(ctx, "ws", embedding, 10)
+	if err != nil {
+		t.Fatalf("SearchSimilar: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("SearchSimilar returned %d results, want 1", len(results))
+	}
+	if results[0].Entry.Name != "qwen-sized" {
+		t.Fatalf("result name = %q, want qwen-sized", results[0].Entry.Name)
+	}
+}
+
 func TestTursoLocalStoreListWithoutEmbeddingReturnsSavedMemoryFields(t *testing.T) {
 	ctx := context.Background()
 	store := openLocalTursoOrSkip(t, ctx)
@@ -235,6 +282,26 @@ func TestTursoLocalStoreListWithoutEmbeddingReturnsSavedMemoryFields(t *testing.
 	}
 	if entries[0].ReviewStatus != "reviewed" || !entries[0].LastValidatedAt.Equal(validatedAt) {
 		t.Fatalf("ListWithoutEmbedding dropped lifecycle fields: %#v", entries[0])
+	}
+
+	for _, name := range []string{"needs-embedding-page-2", "needs-embedding-page-3"} {
+		if _, err := store.SaveFromResult(ctx, name, "note", "ws", name+" summary", result); err != nil {
+			t.Fatalf("save %s: %v", name, err)
+		}
+	}
+	first, err := store.ListWithoutEmbeddingPage(ctx, "ws", 2, 0)
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	second, err := store.ListWithoutEmbeddingPage(ctx, "ws", 2, 2)
+	if err != nil {
+		t.Fatalf("second page: %v", err)
+	}
+	if len(first) != 2 || len(second) != 1 {
+		t.Fatalf("paged lengths = %d/%d, want 2/1", len(first), len(second))
+	}
+	if first[0].Name == second[0].Name || first[1].Name == second[0].Name {
+		t.Fatalf("pagination returned duplicate entry: first=%v second=%v", first, second)
 	}
 }
 

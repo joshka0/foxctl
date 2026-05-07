@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -245,7 +247,7 @@ func TestMemoryQueryEmitsEventTelemetry(t *testing.T) {
 	require.NotNil(t, found, "memory.query event not emitted")
 	require.Equal(t, observability.ComponentSkill, observability.EventDataString(found, observability.DataKeyComponent))
 	require.Equal(t, "memory/query", found.Name)
-	require.Equal(t, rc.Workspace, observability.EventDataString(found, observability.DataKeyWorkspaceID))
+	require.Equal(t, observability.RedactString(rc.Workspace), observability.EventDataString(found, observability.DataKeyWorkspaceID))
 	require.Equal(t, observability.StatusOK, found.Status)
 	require.Equal(t, true, found.Data["query_present"])
 	require.Equal(t, float64(1), found.Data["records_returned"])
@@ -771,6 +773,51 @@ func TestMemoryQuery_BM25Fallback(t *testing.T) {
 	// Either "bm25" or "vector" is valid - we just want success
 	method := stats["search_method"].(string)
 	assert.True(t, method == "bm25" || method == "vector")
+}
+
+func TestMemoryQuery_VectorTimeoutFallsBackToBM25(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	oldTimeout := memoryQueryVectorSearchTimeout
+	memoryQueryVectorSearchTimeout = 10 * time.Millisecond
+	t.Cleanup(func() { memoryQueryVectorSearchTimeout = oldTimeout })
+
+	var buf bytes.Buffer
+	rc, cleanup := newTestContext(t, &buf)
+	defer cleanup()
+
+	rc.Config.Embedding.Provider = "openai_compat"
+	rc.Config.Embedding.Model = "text-embedding-qwen3-embedding-8b"
+	rc.Config.Embedding.BaseURL = server.URL + "/v1"
+	rc.Config.Embedding.APIKey = "test-key"
+
+	store := openMemoryStore(t, rc)
+	seedMemory(t, store, rc.Workspace, &seedOpts{
+		Name:    "slow-vector-fallback",
+		Type:    "semantic_fact",
+		Summary: "Unique slow vector fallback token",
+	})
+
+	err := run(context.Background(), rc, Input{
+		Query: "unique slow vector fallback token",
+		Limit: 3,
+	})
+	require.NoError(t, err)
+
+	env := decodeEnvelope(t, &buf)
+	assertOK(t, env)
+	data := getData(t, env)
+
+	stats := data["stats"].(map[string]any)
+	assert.Equal(t, "bm25", stats["search_method"])
+	assert.Contains(t, stats["hint"], "vector search failed")
+
+	records := data["records"].([]any)
+	require.NotEmpty(t, records)
 }
 
 func TestMemoryQuery_FilterMethod(t *testing.T) {

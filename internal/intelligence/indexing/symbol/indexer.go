@@ -360,6 +360,10 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 					SymbolID:      symID,
 					FilePath:      sym.FilePath,
 					SymbolName:    sym.Name,
+					Language:      sym.Language,
+					PackageID:     pkg,
+					SymbolKey:     symID,
+					MemoryName:    platformsymbol.KeyEntryName(event.WorkspaceID, pkg, symID),
 					Content:       content,
 					ContentDigest: digest,
 				})

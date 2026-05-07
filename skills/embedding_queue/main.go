@@ -1,4 +1,4 @@
-// Package main implements the embedding queue skill for background symbol embeddings.
+// Package main implements the embedding queue skill for background symbol and memory embeddings.
 package main
 
 import (
@@ -30,6 +30,9 @@ type Input struct {
 	// Symbols is the list of symbols to enqueue (for "enqueue" operation).
 	Symbols []SymbolInput `json:"symbols,omitempty"`
 
+	// Memories is the list of named memories to enqueue (for "enqueue" operation).
+	Memories []MemoryInput `json:"memories,omitempty"`
+
 	// Priority sets the job priority (for "enqueue" operation).
 	Priority int `json:"priority,omitempty"`
 
@@ -54,7 +57,18 @@ type SymbolInput struct {
 	SymbolID   string `json:"symbol_id"`
 	FilePath   string `json:"file_path"`
 	SymbolName string `json:"symbol_name"`
+	Language   string `json:"language,omitempty"`
+	PackageID  string `json:"package_id,omitempty"`
+	SymbolKey  string `json:"symbol_key,omitempty"`
+	MemoryName string `json:"memory_name,omitempty"`
 	Content    string `json:"content"`
+}
+
+// MemoryInput describes a named memory to be embedded.
+type MemoryInput struct {
+	Name    string `json:"name"`
+	Type    string `json:"type,omitempty"`
+	Content string `json:"content"`
 }
 
 // Output is the skill output for embedding/queue operations.
@@ -94,15 +108,15 @@ func main() {
 //
 // Index:
 //
-//	Purpose: Manage background symbol embedding queue with enqueue, stats, retrieval, and cleanup operations
+//	Purpose: Manage background embedding queue operations for symbols and named memories
 //	Flow: validate operation → open store → route to handler → emit operation-specific results
 //	SideEffects: database operations; job state management; embedding storage; queue cleanup
 //	FailureModes: invalid operations, store errors, missing required fields, job not found
 //	Observability: emits operation results with statistics, job IDs, and human-readable messages
 //	Related: handleEnqueue, handleStats, handleGet, handleGetByFile, handleJobStatus, handleCleanup
-//	Keywords: embedding/queue, background, jobs, symbols, batch_processing
+//	Keywords: embedding/queue, background, jobs, symbols, named memories, batch_processing
 //
-// [[domain:symbol-embedding-queue]]
+// [[domain:background-embedding-queue]]
 // [[protocol:background-embedding-jobs]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	op := oputil.Op(in.Operation)
@@ -127,8 +141,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 	switch op {
 	case "enqueue":
-		model := semantic.ResolveModelForScope(semantic.ScopeSymbols, rc.Config)
-		if err := handleEnqueue(ctx, store, &in, &output, model); err != nil {
+		symbolModel := semantic.ResolveModelForScope(semantic.ScopeSymbols, rc.Config)
+		memoryModel := semantic.ResolveModelForScope(semantic.ScopeMemory, rc.Config)
+		if err := handleEnqueue(ctx, store, &in, &output, symbolModel, memoryModel); err != nil {
 			return err
 		}
 
@@ -162,20 +177,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 }
 
 // handleEnqueue processes symbol enqueue requests with deduplication and priority support.
-func handleEnqueue(ctx context.Context, store *embedding.Store, input *Input, output *Output, model string) error {
-	if len(input.Symbols) == 0 {
-		return skillerr.Arg("symbols is required for enqueue")
-	}
-
-	// Convert input symbols
-	symbols := make([]embedding.SymbolInput, len(input.Symbols))
-	for i, s := range input.Symbols {
-		symbols[i] = embedding.SymbolInput{
-			SymbolID:   s.SymbolID,
-			FilePath:   s.FilePath,
-			SymbolName: s.SymbolName,
-			Content:    s.Content,
-		}
+func handleEnqueue(ctx context.Context, store *embedding.Store, input *Input, output *Output, symbolModel, memoryModel string) error {
+	if len(input.Symbols) == 0 && len(input.Memories) == 0 {
+		return skillerr.Arg("symbols or memories is required for enqueue")
 	}
 
 	priority := embedding.PriorityNormal
@@ -183,21 +187,59 @@ func handleEnqueue(ctx context.Context, store *embedding.Store, input *Input, ou
 		priority = embedding.JobPriority(input.Priority)
 	}
 
-	result, err := store.Enqueue(ctx, embedding.EnqueueRequest{
-		WorkspaceID: input.WorkspaceID,
-		Symbols:     symbols,
-		Priority:    priority,
-		Model:       model,
-		Deduplicate: input.Deduplicate,
-	})
-	if err != nil {
-		return skillerr.WrapIO("enqueue", err)
+	if len(input.Symbols) > 0 {
+		symbols := make([]embedding.SymbolInput, len(input.Symbols))
+		for i, s := range input.Symbols {
+			symbols[i] = embedding.SymbolInput{
+				SymbolID:   s.SymbolID,
+				FilePath:   s.FilePath,
+				SymbolName: s.SymbolName,
+				Language:   s.Language,
+				PackageID:  s.PackageID,
+				SymbolKey:  s.SymbolKey,
+				MemoryName: s.MemoryName,
+				Content:    s.Content,
+			}
+		}
+		result, err := store.Enqueue(ctx, embedding.EnqueueRequest{
+			WorkspaceID: input.WorkspaceID,
+			Symbols:     symbols,
+			Priority:    priority,
+			Model:       symbolModel,
+			Deduplicate: input.Deduplicate,
+		})
+		if err != nil {
+			return skillerr.WrapIO("enqueue symbols", err)
+		}
+		output.Queued += result.Queued
+		output.Skipped += result.Skipped
+		output.JobIDs = append(output.JobIDs, result.JobIDs...)
 	}
 
-	output.Queued = result.Queued
-	output.Skipped = result.Skipped
-	output.JobIDs = result.JobIDs
-	output.Message = fmt.Sprintf("Enqueued %d symbols (%d skipped)", result.Queued, result.Skipped)
+	if len(input.Memories) > 0 {
+		memories := make([]embedding.MemoryInput, len(input.Memories))
+		for i, m := range input.Memories {
+			memories[i] = embedding.MemoryInput{
+				Name:    m.Name,
+				Type:    m.Type,
+				Content: m.Content,
+			}
+		}
+		result, err := store.EnqueueMemories(ctx, embedding.MemoryEnqueueRequest{
+			WorkspaceID: input.WorkspaceID,
+			Memories:    memories,
+			Priority:    priority,
+			Model:       memoryModel,
+		})
+		if err != nil {
+			return skillerr.WrapIO("enqueue memories", err)
+		}
+		output.Queued += result.Queued
+		output.Skipped += result.Skipped
+		output.JobIDs = append(output.JobIDs, result.JobIDs...)
+	}
+
+	output.Message = fmt.Sprintf("Enqueued %d embedding jobs (%d skipped)", output.Queued, output.Skipped)
 	return nil
 }
 

@@ -1,7 +1,6 @@
 package repoquery
 
 import (
-	"fmt"
 	"math"
 	"sort"
 	"strconv"
@@ -106,10 +105,7 @@ func (Projector) FromNodeValue(node repoindex.Node) *Anchor {
 }
 
 func symbolIDFromNode(node repoindex.Node) string {
-	if strings.TrimSpace(node.File) == "" || strings.TrimSpace(node.Name) == "" {
-		return ""
-	}
-	return fmt.Sprintf("%s:%s", node.File, node.Name)
+	return strings.TrimSpace(node.ID)
 }
 
 func firstPositive(values ...int) int {

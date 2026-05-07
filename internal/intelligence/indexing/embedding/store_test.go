@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"testing"
+
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedqueue"
 )
 
 func TestStore_EnqueueAndClaim(t *testing.T) {
@@ -60,6 +62,236 @@ func TestStore_EnqueueAndClaim(t *testing.T) {
 	}
 	if job.WorkspaceID != "test-ws" {
 		t.Errorf("expected workspace test-ws, got %s", job.WorkspaceID)
+	}
+}
+
+func TestStore_EnqueueMemoriesAndClaim(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	store, err := OpenStore(ctx, root)
+	if err != nil {
+		t.Fatalf("failed to open store: %v", err)
+	}
+	defer store.Close()
+
+	result, err := store.EnqueueMemories(ctx, MemoryEnqueueRequest{
+		WorkspaceID: "test-ws",
+		Memories: []MemoryInput{{
+			Name:    "decision:backend",
+			Type:    "decision",
+			Content: "[May 2026] [decision] Use Turso with Qwen embeddings",
+		}},
+		Priority: PriorityHigh,
+		Model:    "text-embedding-qwen3-embedding-8b",
+	})
+	if err != nil {
+		t.Fatalf("enqueue memories failed: %v", err)
+	}
+	if result.Queued != 1 {
+		t.Fatalf("queued=%d want 1", result.Queued)
+	}
+
+	job, err := store.ClaimNext(ctx)
+	if err != nil {
+		t.Fatalf("claim failed: %v", err)
+	}
+	if job == nil {
+		t.Fatal("expected a job, got nil")
+	}
+	if job.Kind != embedqueue.TaskKindMemory {
+		t.Fatalf("kind=%q want %q", job.Kind, embedqueue.TaskKindMemory)
+	}
+	if job.MemoryName != "decision:backend" {
+		t.Fatalf("memory name=%q", job.MemoryName)
+	}
+	if job.Model != "text-embedding-qwen3-embedding-8b" {
+		t.Fatalf("model=%q", job.Model)
+	}
+}
+
+func TestStore_EnqueueMemoriesDeduplicatesByModelAndDigest(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	store, err := OpenStore(ctx, root)
+	if err != nil {
+		t.Fatalf("failed to open store: %v", err)
+	}
+	defer store.Close()
+
+	req := MemoryEnqueueRequest{
+		WorkspaceID: "test-ws",
+		Memories: []MemoryInput{{
+			Name:    "note:queue",
+			Type:    "note",
+			Content: "queue this memory",
+		}},
+		Model: "model-a",
+	}
+	first, err := store.EnqueueMemories(ctx, req)
+	if err != nil {
+		t.Fatalf("first enqueue failed: %v", err)
+	}
+	if first.Queued != 1 {
+		t.Fatalf("first queued=%d want 1", first.Queued)
+	}
+	second, err := store.EnqueueMemories(ctx, req)
+	if err != nil {
+		t.Fatalf("second enqueue failed: %v", err)
+	}
+	if second.Queued != 0 || second.Skipped != 1 {
+		t.Fatalf("second queued=%d skipped=%d, want 0/1", second.Queued, second.Skipped)
+	}
+
+	req.Model = "model-b"
+	third, err := store.EnqueueMemories(ctx, req)
+	if err != nil {
+		t.Fatalf("third enqueue failed: %v", err)
+	}
+	if third.Queued != 1 {
+		t.Fatalf("third queued=%d want 1 for changed model", third.Queued)
+	}
+}
+
+func TestStore_EnqueueSymbolPreservesCanonicalIdentity(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	store, err := OpenStore(ctx, root)
+	if err != nil {
+		t.Fatalf("failed to open store: %v", err)
+	}
+	defer store.Close()
+
+	result, err := store.Enqueue(ctx, EnqueueRequest{
+		WorkspaceID: "test-ws",
+		Symbols: []SymbolInput{{
+			SymbolID:   "legacy-id",
+			FilePath:   "pkg/foo/foo.go",
+			SymbolName: "Handler",
+			Language:   "go",
+			PackageID:  "go:pkg/foo",
+			SymbolKey:  "func Handler",
+			MemoryName: "symbol://test-ws/go:pkg/foo::func Handler",
+			Content:    "func Handler() {}",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("enqueue failed: %v", err)
+	}
+	if result.Queued != 1 {
+		t.Fatalf("queued=%d want 1", result.Queued)
+	}
+
+	job, err := store.ClaimNext(ctx)
+	if err != nil {
+		t.Fatalf("claim failed: %v", err)
+	}
+	if job.MemoryName != "symbol://test-ws/go:pkg/foo::func Handler" {
+		t.Fatalf("memory name=%q", job.MemoryName)
+	}
+	if job.SymbolID != "go:pkg/foo::func Handler" {
+		t.Fatalf("symbol id=%q, want package-scoped storage id", job.SymbolID)
+	}
+	if job.Language != "go" || job.PackageID != "go:pkg/foo" || job.SymbolKey != "func Handler" {
+		t.Fatalf("identity language/package/key=%q/%q/%q", job.Language, job.PackageID, job.SymbolKey)
+	}
+}
+
+func TestStore_EnqueueSymbolDedupeDistinguishesPackages(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	store, err := OpenStore(ctx, root)
+	if err != nil {
+		t.Fatalf("failed to open store: %v", err)
+	}
+	defer store.Close()
+
+	req := EnqueueRequest{
+		WorkspaceID: "test-ws",
+		Symbols: []SymbolInput{
+			{
+				SymbolID:   "legacy-same",
+				FilePath:   "pkg/a/foo.go",
+				SymbolName: "Handler",
+				Language:   "go",
+				PackageID:  "go:pkg/a",
+				SymbolKey:  "func Handler",
+				MemoryName: "symbol://test-ws/go:pkg/a::func Handler",
+				Content:    "func Handler() {}",
+			},
+			{
+				SymbolID:   "legacy-same",
+				FilePath:   "pkg/b/foo.go",
+				SymbolName: "Handler",
+				Language:   "go",
+				PackageID:  "go:pkg/b",
+				SymbolKey:  "func Handler",
+				MemoryName: "symbol://test-ws/go:pkg/b::func Handler",
+				Content:    "func Handler() {}",
+			},
+		},
+	}
+	result, err := store.Enqueue(ctx, req)
+	if err != nil {
+		t.Fatalf("enqueue failed: %v", err)
+	}
+	if result.Queued != 2 || result.Skipped != 0 {
+		t.Fatalf("queued/skipped=%d/%d want 2/0", result.Queued, result.Skipped)
+	}
+	jobA, err := store.ClaimNext(ctx)
+	if err != nil {
+		t.Fatalf("claim first: %v", err)
+	}
+	if err := store.Complete(ctx, jobA.ID, []float32{0.1, 0.2}, "model-a"); err != nil {
+		t.Fatalf("complete first: %v", err)
+	}
+	jobB, err := store.ClaimNext(ctx)
+	if err != nil {
+		t.Fatalf("claim second: %v", err)
+	}
+	if err := store.Complete(ctx, jobB.ID, []float32{0.3, 0.4}, "model-a"); err != nil {
+		t.Fatalf("complete second: %v", err)
+	}
+	if _, err := store.GetEmbedding(ctx, "test-ws", "go:pkg/a::func Handler"); err != nil {
+		t.Fatalf("get package a embedding: %v", err)
+	}
+	if _, err := store.GetEmbedding(ctx, "test-ws", "go:pkg/b::func Handler"); err != nil {
+		t.Fatalf("get package b embedding: %v", err)
+	}
+}
+
+func TestStore_CompleteMemoryJobDoesNotCreateSymbolEmbedding(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	store, err := OpenStore(ctx, root)
+	if err != nil {
+		t.Fatalf("failed to open store: %v", err)
+	}
+	defer store.Close()
+
+	_, err = store.EnqueueMemories(ctx, MemoryEnqueueRequest{
+		WorkspaceID: "test-ws",
+		Memories: []MemoryInput{{
+			Name:    "note:external-storage",
+			Content: "memory embeddings are stored in named memory",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("enqueue memories failed: %v", err)
+	}
+	job, err := store.ClaimNext(ctx)
+	if err != nil {
+		t.Fatalf("claim failed: %v", err)
+	}
+	if err := store.CompleteJob(ctx, job.ID); err != nil {
+		t.Fatalf("complete memory job failed: %v", err)
+	}
+	if _, err := store.GetEmbedding(ctx, "test-ws", "note:external-storage"); err == nil {
+		t.Fatal("memory job created symbol embedding unexpectedly")
 	}
 }
 

@@ -251,6 +251,8 @@ type MemoryStore interface {
 	ListFiltered(ctx context.Context, workspace string, filter MemoryListFilter, limit, offset int) ([]NamedEntry, int, error)
 	// ListWithoutEmbedding returns memories that don't have embeddings yet.
 	ListWithoutEmbedding(ctx context.Context, workspace string, limit int) ([]NamedEntry, error)
+	// ListWithoutEmbeddingPage returns memories without embeddings using limit/offset pagination.
+	ListWithoutEmbeddingPage(ctx context.Context, workspace string, limit, offset int) ([]NamedEntry, error)
 	// ValidateEmbeddingDimensions checks if new embedding dimensions are compatible with existing ones.
 	ValidateEmbeddingDimensions(ctx context.Context, workspace string, dimensions int) error
 	// SetEmbeddingMetadata stores embedding configuration for a workspace.

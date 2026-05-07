@@ -834,16 +834,24 @@ func (s *Store) ListByType(ctx context.Context, workspace, entryType string, lim
 // ListWithoutEmbedding returns memories that don't have an embedding yet.
 // Used for incremental embedding generation.
 func (s *Store) ListWithoutEmbedding(ctx context.Context, workspace string, limit int) ([]NamedEntry, error) {
+	return s.ListWithoutEmbeddingPage(ctx, workspace, limit, 0)
+}
+
+// ListWithoutEmbeddingPage returns memories that don't have embeddings yet using limit/offset pagination.
+func (s *Store) ListWithoutEmbeddingPage(ctx context.Context, workspace string, limit, offset int) ([]NamedEntry, error) {
 	workspace = ws.CanonicalID(workspace)
 	if limit <= 0 {
 		limit = 1000
+	}
+	if offset < 0 {
+		offset = 0
 	}
 	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
 		SELECT %s
 		FROM named_memory
 		WHERE workspace = $1 AND (embedding IS NULL OR LENGTH(embedding) = 0) AND summary IS NOT NULL AND summary != ''
 		ORDER BY created_at DESC
-		LIMIT $2`, namedEntrySelectColumns), workspace, limit)
+		LIMIT $2 OFFSET $3`, namedEntrySelectColumns), workspace, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("memory: list without embedding: %w", err)
 	}

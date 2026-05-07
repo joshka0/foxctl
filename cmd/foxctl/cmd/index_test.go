@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	embedstore "github.com/joshka0/foxctl/internal/intelligence/indexing/embedding"
 	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/storage/memory"
 )
 
 func TestIndexCommand_Init(t *testing.T) {
@@ -116,7 +118,61 @@ func TestCreateIndexEmbeddingProviderForScope_OpenAICompat(t *testing.T) {
 	if provider == nil {
 		t.Fatal("expected provider")
 	}
-	if provider.Model() == "" {
-		t.Fatal("expected provider model")
+	if provider.Model() != "text-embedding-embeddinggemma-300m-qat" {
+		t.Fatalf("provider model = %q, want configured OpenAI-compatible model", provider.Model())
+	}
+}
+
+func TestEnqueueMemoryEmbeddingJobsQueuesMissingMemories(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	cfg := config.Config{}
+	cfg.Storage.Root = filepath.Join(root, "storage")
+	cfg.Paths.CAS = filepath.Join(root, "cas")
+	cfg.Paths.Cache = filepath.Join(root, "cache")
+	cfg.Embedding.Models = map[string]string{"memory": "text-embedding-qwen3-embedding-8b"}
+
+	store, err := memory.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
+	if err != nil {
+		t.Fatalf("open memory store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2026-05-07T00:00:00Z"},"error":{}}`)
+	if _, err := store.SaveFromResult(ctx, "needs-embedding", "decision", "ws", "queue this memory", result); err != nil {
+		t.Fatalf("save missing memory: %v", err)
+	}
+	if _, err := store.SaveFromResult(ctx, "already-embedded", "decision", "ws", "skip this memory", result); err != nil {
+		t.Fatalf("save embedded memory: %v", err)
+	}
+	if err := store.UpdateEmbedding(ctx, "already-embedded", "ws", []float32{0.1, 0.2}); err != nil {
+		t.Fatalf("update embedding: %v", err)
+	}
+
+	queued, err := enqueueMemoryEmbeddingJobs(ctx, cfg, store, "ws", false)
+	if err != nil {
+		t.Fatalf("enqueue memory embeddings: %v", err)
+	}
+	if queued != 1 {
+		t.Fatalf("queued=%d want 1", queued)
+	}
+
+	queueStore, err := embedstore.OpenStore(ctx, cfg.Paths.Cache)
+	if err != nil {
+		t.Fatalf("open queue store: %v", err)
+	}
+	defer queueStore.Close()
+	job, err := queueStore.ClaimNext(ctx)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if job == nil {
+		t.Fatal("expected queued memory job")
+	}
+	if job.MemoryName != "needs-embedding" {
+		t.Fatalf("memory name=%q want needs-embedding", job.MemoryName)
+	}
+	if job.Model != "text-embedding-qwen3-embedding-8b" {
+		t.Fatalf("model=%q", job.Model)
 	}
 }

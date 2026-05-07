@@ -10,6 +10,7 @@ import (
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semanticanchors"
 	"github.com/joshka0/foxctl/internal/intelligence/searchindex"
+	"github.com/joshka0/foxctl/internal/platform/symbolutil"
 )
 
 type SemanticAnchorEnvelopeProvider struct {
@@ -19,6 +20,8 @@ type SemanticAnchorEnvelopeProvider struct {
 	err  error
 
 	symbolsByFileName map[string][]repoindex.Node
+	symbolsByID       map[string][]repoindex.Node
+	symbolsByScopedID map[string][]repoindex.Node
 	filesByPath       map[string]repoindex.Node
 }
 
@@ -102,10 +105,18 @@ func (p *SemanticAnchorEnvelopeProvider) load(ctx context.Context) error {
 			return
 		}
 		p.symbolsByFileName = make(map[string][]repoindex.Node, len(symbols))
+		p.symbolsByID = make(map[string][]repoindex.Node, len(symbols))
+		p.symbolsByScopedID = make(map[string][]repoindex.Node, len(symbols))
 		p.filesByPath = make(map[string]repoindex.Node, len(files))
 		for _, node := range symbols {
 			key := semanticEnvelopeSymbolKey(node.File, node.Name)
 			p.symbolsByFileName[key] = append(p.symbolsByFileName[key], node)
+			if id := strings.TrimSpace(node.ID); id != "" {
+				p.symbolsByID[id] = append(p.symbolsByID[id], node)
+			}
+			if scoped := repoIndexNodeScopedSymbolID(node); scoped != "" {
+				p.symbolsByScopedID[scoped] = append(p.symbolsByScopedID[scoped], node)
+			}
 		}
 		for _, node := range files {
 			p.filesByPath[node.File] = node
@@ -117,21 +128,31 @@ func (p *SemanticAnchorEnvelopeProvider) load(ctx context.Context) error {
 func (p *SemanticAnchorEnvelopeProvider) ownerForDocument(doc searchindex.Document) (repoindex.Node, bool) {
 	switch doc.Kind {
 	case searchindex.KindSymbol:
+		if node, ok := firstNodeBySortedID(p.symbolsByID[doc.SymbolID]); ok {
+			return node, true
+		}
+		if node, ok := firstNodeBySortedID(p.symbolsByScopedID[doc.SymbolID]); ok {
+			return node, true
+		}
 		candidates := p.symbolsByFileName[semanticEnvelopeSymbolKey(doc.Path, doc.SymbolName)]
 		if len(candidates) == 0 && doc.SymbolName != doc.Title {
 			candidates = p.symbolsByFileName[semanticEnvelopeSymbolKey(doc.Path, doc.Title)]
 		}
-		if len(candidates) == 0 {
-			return repoindex.Node{}, false
-		}
-		sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].ID < candidates[j].ID })
-		return candidates[0], true
+		return firstNodeBySortedID(candidates)
 	case searchindex.KindFile:
 		node, ok := p.filesByPath[doc.Path]
 		return node, ok
 	default:
 		return repoindex.Node{}, false
 	}
+}
+
+func firstNodeBySortedID(candidates []repoindex.Node) (repoindex.Node, bool) {
+	if len(candidates) == 0 {
+		return repoindex.Node{}, false
+	}
+	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].ID < candidates[j].ID })
+	return candidates[0], true
 }
 
 type semanticEnvelopeAnchor struct {
@@ -164,4 +185,13 @@ func anchorEmbeddingText(anchor semanticEnvelopeAnchor) string {
 
 func semanticEnvelopeSymbolKey(path, name string) string {
 	return strings.TrimSpace(path) + "\x00" + strings.TrimSpace(name)
+}
+
+func repoIndexNodeScopedSymbolID(node repoindex.Node) string {
+	_, raw := repoindex.SplitNamespacedID(node.ID)
+	prefix := "sym:" + node.Pkg + ":"
+	if !strings.HasPrefix(raw, prefix) {
+		return ""
+	}
+	return symbolutil.ScopedSymbolID(node.Pkg, strings.TrimPrefix(raw, prefix))
 }

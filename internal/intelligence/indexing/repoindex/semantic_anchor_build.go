@@ -173,7 +173,10 @@ func anchorOwnerForNode(node Node, stableKey string) semanticanchors.AnchorOwner
 }
 
 func semanticAnchorSymbolStableKey(node Node) string {
-	return strings.Join([]string{"symbol", node.Pkg, filepath.ToSlash(node.File), node.Name}, ":")
+	if id := strings.TrimSpace(node.ID); id != "" {
+		return "symbol:" + id
+	}
+	return strings.Join([]string{"symbol", node.Pkg, node.Name}, ":")
 }
 
 type semanticAnchorFileTargetResolver struct {

@@ -11,6 +11,7 @@ import (
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/workspaceutil"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedding"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
 	"github.com/joshka0/foxctl/internal/storage/memory"
 )
@@ -34,6 +35,9 @@ type Input struct {
 
 	// DryRun if true, lists memories but doesn't generate embeddings.
 	DryRun bool `json:"dry_run,omitempty"`
+
+	// Enqueue queues memory embedding jobs instead of embedding inline.
+	Enqueue bool `json:"enqueue,omitempty"`
 }
 
 // Output is the skill output for embedding/memories operations.
@@ -41,11 +45,13 @@ type Output struct {
 	Workspace     string         `json:"workspace"`
 	MemoriesFound int            `json:"memories_found"`
 	Embedded      int            `json:"embedded"`
+	Queued        int            `json:"queued,omitempty"`
 	Skipped       int            `json:"skipped"`
 	Errors        int            `json:"errors"`
 	Remaining     int            `json:"remaining,omitempty"`
 	BatchCount    int            `json:"batch_count,omitempty"`
 	DurationMs    int64          `json:"duration_ms"`
+	JobIDs        []string       `json:"job_ids,omitempty"`
 	Memories      []MemoryResult `json:"memories,omitempty"`
 	ErrorDetails  []string       `json:"error_details,omitempty"`
 }
@@ -81,6 +87,19 @@ func formatMemoryContent(entry memory.NamedEntry) string {
 	return fmt.Sprintf("[%s] [%s] %s", dateStr, typeStr, content)
 }
 
+func memoryInputsFromEntries(entries []memory.NamedEntry) []embedding.MemoryInput {
+	inputs := make([]embedding.MemoryInput, 0, len(entries))
+	for _, entry := range entries {
+		content := formatMemoryContent(entry)
+		inputs = append(inputs, embedding.MemoryInput{
+			Name:    entry.Name,
+			Type:    entry.Type,
+			Content: content,
+		})
+	}
+	return inputs
+}
+
 // main is the skill entry point for embedding/memories.
 func main() {
 	skillmain.Main(command, run)
@@ -112,13 +131,6 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		Workspace: in.Workspace,
 	}
 
-	// Check for API key
-	voyageKey := os.Getenv("VOYAGE_API_KEY")
-	geminiKey := os.Getenv("GEMINI_API_KEY")
-	if voyageKey == "" && geminiKey == "" && !in.DryRun {
-		return skillerr.Auth("no embedding API key set", skillerr.WithHint("Set VOYAGE_API_KEY or GEMINI_API_KEY"))
-	}
-
 	// Open memory store
 	memStore, err := memory.OpenWithConfig(ctx, rc.Config)
 	if err != nil {
@@ -146,6 +158,58 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		output.DurationMs = time.Since(start).Milliseconds()
 		return skillout.Emit(rc, command, output)
 	}
+
+	if in.Enqueue {
+		queueStore, err := embedding.OpenStore(ctx, rc.Config.Paths.Cache)
+		if err != nil {
+			return skillerr.WrapIO("open embedding queue", err)
+		}
+		defer queueStore.Close() //nolint:errcheck
+
+		model := semantic.ResolveModelForScope(semantic.ScopeMemory, rc.Config)
+		offset := 0
+		output.MemoriesFound = 0
+		for {
+			memories, err := memStore.ListWithoutEmbeddingPage(ctx, in.Workspace, in.BatchSize, offset)
+			if err != nil {
+				return skillerr.Runtime("list memories", skillerr.WithCause(err))
+			}
+			if len(memories) == 0 {
+				break
+			}
+			result, err := queueStore.EnqueueMemories(ctx, embedding.MemoryEnqueueRequest{
+				WorkspaceID: in.Workspace,
+				Memories:    memoryInputsFromEntries(memories),
+				Priority:    embedding.PriorityNormal,
+				Model:       model,
+			})
+			if err != nil {
+				return skillerr.WrapIO("enqueue memories", err)
+			}
+			output.MemoriesFound += len(memories)
+			output.Queued += result.Queued
+			output.Skipped += result.Skipped
+			if len(output.JobIDs) < 100 {
+				remainingSlots := 100 - len(output.JobIDs)
+				if len(result.JobIDs) < remainingSlots {
+					remainingSlots = len(result.JobIDs)
+				}
+				output.JobIDs = append(output.JobIDs, result.JobIDs[:remainingSlots]...)
+			}
+			output.BatchCount++
+			if !in.ProcessAll {
+				output.Remaining = len(memories) - result.Queued - result.Skipped
+				break
+			}
+			offset += len(memories)
+		}
+		output.DurationMs = time.Since(start).Milliseconds()
+		return skillout.Emit(rc, command, output)
+	}
+
+	// Check embedding provider after queue-only paths, so local queueing works without network credentials.
+	voyageKey := os.Getenv("VOYAGE_API_KEY")
+	geminiKey := os.Getenv("GEMINI_API_KEY")
 
 	embedder, err := semantic.NewEmbedderFromConfig(
 		semantic.ScopeMemory,

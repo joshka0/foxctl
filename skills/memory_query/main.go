@@ -21,17 +21,19 @@ import (
 	"github.com/joshka0/foxctl/internal/runtime/observability"
 	"github.com/joshka0/foxctl/internal/storage"
 	contextstore "github.com/joshka0/foxctl/internal/storage/contextengine"
-	"github.com/joshka0/foxctl/internal/storage/memory"
 )
 
 const (
 	DefaultLimit                  = 10
 	DefaultMinSimilarity          = 0.3
 	DefaultStrongLifecycleScore   = 0.9
-	DefaultTimeout                = 5 * time.Second
+	DefaultTimeout                = 20 * time.Second
+	DefaultVectorSearchTimeout    = 8 * time.Second
 	defaultLifecyclePolicy        = "active_default_strong_candidate_stale"
 	explicitLifecycleFilterPolicy = "explicit_lifecycle_states"
 )
+
+var memoryQueryVectorSearchTimeout = DefaultVectorSearchTimeout
 
 // Input defines the skill input parameters for memory query with filtering and search options.
 type Input struct {
@@ -225,7 +227,7 @@ func query(ctx context.Context, rc *skillmain.RunContext, in *Input) (*Output, e
 
 	workspacePath := in.Workspace
 
-	memStore, err := rc.Stores.Memory(ctx)
+	memStore, err := rc.Stores.ConfiguredMemory(ctx)
 	if err != nil {
 		return nil, skillerr.WrapIO("open memory store", err)
 	}
@@ -282,7 +284,7 @@ func query(ctx context.Context, rc *skillmain.RunContext, in *Input) (*Output, e
 	return out, nil
 }
 
-func queryNamedMemoryRecords(ctx context.Context, memStore *memory.Store, rc *skillmain.RunContext, workspacePath string, in *Input, kindFilters []memorycore.Kind, lifecycleFilters []memorycore.LifecycleState) ([]recordCandidate, int, int, string, string, error) {
+func queryNamedMemoryRecords(ctx context.Context, memStore storage.MemoryStore, rc *skillmain.RunContext, workspacePath string, in *Input, kindFilters []memorycore.Kind, lifecycleFilters []memorycore.LifecycleState) ([]recordCandidate, int, int, string, string, error) {
 	scoredEntries, searchMethod, hint, err := namedMemoryScoredEntries(ctx, memStore, rc, workspacePath, in)
 	if err != nil {
 		return nil, 0, 0, searchMethod, hint, err
@@ -322,11 +324,23 @@ func queryNamedMemoryRecords(ctx context.Context, memStore *memory.Store, rc *sk
 	return filtered, len(scoredEntries), suppressed, searchMethod, hint, nil
 }
 
-func namedMemoryScoredEntries(ctx context.Context, memStore *memory.Store, rc *skillmain.RunContext, workspacePath string, in *Input) ([]storage.ScoredEntry, string, string, error) {
+func namedMemoryScoredEntries(ctx context.Context, memStore storage.MemoryStore, rc *skillmain.RunContext, workspacePath string, in *Input) ([]storage.ScoredEntry, string, string, error) {
 	if in.Query != "" {
-		scoredEntries, err := searchWithEmbeddings(ctx, memStore, rc.Config, workspacePath, in, skillmain.EmbeddingGuard(rc))
+		vectorCtx, cancelVectorSearch := memoryQueryVectorContext(ctx)
+		scoredEntries, err := searchWithEmbeddings(vectorCtx, memStore, rc.Config, workspacePath, in, skillmain.EmbeddingGuard(rc))
+		cancelVectorSearch()
 		if err == nil {
+			if len(scoredEntries) == 0 {
+				fallbackEntries, fallbackErr := memStore.Search(ctx, workspacePath, in.Query, in.Limit*3)
+				if fallbackErr != nil {
+					return scoredEntries, "vector", "vector search returned no records", nil
+				}
+				return fallbackEntries, "bm25", "vector search returned no records; using BM25", nil
+			}
 			return scoredEntries, "vector", "", nil
+		}
+		if ctx.Err() != nil {
+			return nil, "vector", "", err
 		}
 		scoredEntries, fallbackErr := memStore.Search(ctx, workspacePath, in.Query, in.Limit*3)
 		if fallbackErr != nil {
@@ -351,6 +365,13 @@ func namedMemoryScoredEntries(ctx context.Context, memStore *memory.Store, rc *s
 		})
 	}
 	return scoredEntries, "filter", "", nil
+}
+
+func memoryQueryVectorContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if memoryQueryVectorSearchTimeout <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, memoryQueryVectorSearchTimeout)
 }
 
 func queryContextClaimRecords(ctx context.Context, rc *skillmain.RunContext, workspacePath string, in *Input, kindFilters []memorycore.Kind, lifecycleFilters []memorycore.LifecycleState) ([]recordCandidate, int, int, error) {
@@ -539,7 +560,7 @@ func appendHint(existing, next string) string {
 }
 
 // searchWithEmbeddings performs vector similarity search using embeddings with query enrichment.
-func searchWithEmbeddings(ctx context.Context, memStore *memory.Store, cfg config.Config, workspacePath string, in *Input, embedOpts ...semantic.EmbedderOption) ([]storage.ScoredEntry, error) {
+func searchWithEmbeddings(ctx context.Context, memStore storage.MemoryStore, cfg config.Config, workspacePath string, in *Input, embedOpts ...semantic.EmbedderOption) ([]storage.ScoredEntry, error) {
 	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeMemory, cfg, embedOpts...)
 	if err != nil {
 		return nil, skillerr.WrapRuntime("create embedder", err)
@@ -550,6 +571,9 @@ func searchWithEmbeddings(ctx context.Context, memStore *memory.Store, cfg confi
 	result, err := embedder.Embed(ctx, enrichedQuery)
 	if err != nil {
 		return nil, skillerr.WrapRuntime("generate query embedding", err)
+	}
+	if err := memStore.ValidateEmbeddingDimensions(ctx, workspacePath, len(result.Vec)); err != nil {
+		return nil, skillerr.WrapIO("validate query embedding dimensions", err)
 	}
 
 	results, err := memStore.SearchSimilar(ctx, workspacePath, result.Vec, in.Limit*3)
