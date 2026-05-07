@@ -1,6 +1,6 @@
 ---
 name: pi-maestri-live
-description: "Live-test the foxctl Pi extension through Maestri Shell #6: edit foxctl-pi, reload or restart interactive Pi, and exercise foxctl tools with maestri ask."
+description: "Live-test the foxctl Pi extension through a Maestri shell: edit foxctl-pi, reload or restart interactive Pi, and exercise foxctl tools with maestri ask."
 ---
 
 # pi-maestri-live
@@ -11,8 +11,8 @@ The goal is a fast loop:
 
 1. edit `/Users/joshka/repos/personal/foxctl-pi/foxctl.ts`
 2. typecheck from `/Users/joshka/repos/githubs/pi-mono`
-3. reload or restart Pi in Maestri Shell #6
-4. use `maestri ask "Shell #6" ...` to make the Pi model exercise the extension tools
+3. reload or restart Pi in the active Maestri shell
+4. use `maestri ask "<shell-name>" ...` to make the Pi model exercise the extension tools
 
 ## Working Paths
 
@@ -23,14 +23,17 @@ The goal is a fast loop:
 - foxctl terminal gateway URL: `http://localhost:8765`
 - OpenRouter env source: `/Users/joshka/.foxctl/.env`
 
-## Start Or Inspect Shell #6
+## Start Or Inspect The Maestri Shell
 
 Always begin with:
 
 ```bash
 maestri list
-maestri check "Shell #6"
+maestri check "Shell"
 ```
+
+Use the connected shell name from `maestri list`; current local sessions may be
+named `Shell` instead of the older `Shell #6`.
 
 If Pi is already running, prefer `/reload` after extension-only edits:
 
@@ -47,6 +50,9 @@ Use a free OpenRouter model and source the key without printing it:
 ```bash
 maestri ask "Shell #6" 'cd /Users/joshka/repos/githubs/pi-mono && set -a && source /Users/joshka/.foxctl/.env && set +a && ./node_modules/.bin/pi --provider openrouter --model poolside/laguna-xs.2:free --thinking off --foxctl-url http://localhost:8090 --foxctl-gateway-url http://localhost:8765 --foxctl-workspace /Users/joshka/repos/personal/foxctl --foxctl-room pi-maestri-interactive --foxctl-actor actor:pi:maestri --foxctl-session pi:maestri:shell-6 --foxctl-room-bind --foxctl-context --tools foxctl_health,gather_context,foxctl_gather_context,foxctl_context,foxctl_room_status,foxctl_room_inbox,foxctl_room_bind_pi,foxctl_room_terminal_links,foxctl_room_terminal_register,foxctl_room_tasks,foxctl_room_task_create,foxctl_room_task_action,foxctl_room_message_ack,foxctl_room_messages_resolve,foxctl_room_loop,foxctl_foxprox_room_sessions,foxctl_foxprox_room_message,foxctl_foxprox_spawn,foxctl_foxprox_stop_session'
 ```
+
+Replace `Shell #6` with the active shell name reported by `maestri list` when
+needed.
 
 After launch, send an empty ask or check the shell to confirm the TUI is active:
 
@@ -120,6 +126,8 @@ The live Pi loop has successfully exercised:
 - `foxctl_room_status`
 - `foxctl_room_inbox`
 - `foxctl_room_bind_pi`
+- `foxctl_room_terminal_links`
+- `foxctl_room_terminal_register`
 - `foxctl_room_tasks`
 - `foxctl_room_loop`
 - `foxctl_foxprox_room_sessions`
