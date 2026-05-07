@@ -20,6 +20,7 @@ The goal is a fast loop:
 - Extension source: `/Users/joshka/repos/personal/foxctl-pi/foxctl.ts`
 - Pi project symlink: `/Users/joshka/repos/githubs/pi-mono/.pi/extensions/foxctl.ts`
 - foxctl daemon URL: `http://localhost:8090`
+- foxctl terminal gateway URL: `http://localhost:8765`
 - OpenRouter env source: `/Users/joshka/.foxctl/.env`
 
 ## Start Or Inspect Shell #6
@@ -44,7 +45,7 @@ Important: `/reload` reloads extension code, skills, prompts, themes, and keybin
 Use a free OpenRouter model and source the key without printing it:
 
 ```bash
-maestri ask "Shell #6" 'cd /Users/joshka/repos/githubs/pi-mono && set -a && source /Users/joshka/.foxctl/.env && set +a && ./node_modules/.bin/pi --provider openrouter --model poolside/laguna-xs.2:free --thinking off --foxctl-url http://localhost:8090 --foxctl-workspace /Users/joshka/repos/personal/foxctl --foxctl-room pi-maestri-interactive --foxctl-actor actor:pi:maestri --foxctl-session pi:maestri:shell-6 --foxctl-room-bind --foxctl-context --tools foxctl_health,gather_context,foxctl_gather_context,foxctl_context,foxctl_room_status,foxctl_room_inbox,foxctl_room_bind_pi,foxctl_room_tasks,foxctl_room_task_create,foxctl_room_task_action,foxctl_room_message_ack,foxctl_room_messages_resolve,foxctl_room_loop,foxctl_foxprox_room_sessions,foxctl_foxprox_room_message,foxctl_foxprox_spawn,foxctl_foxprox_stop_session'
+maestri ask "Shell #6" 'cd /Users/joshka/repos/githubs/pi-mono && set -a && source /Users/joshka/.foxctl/.env && set +a && ./node_modules/.bin/pi --provider openrouter --model poolside/laguna-xs.2:free --thinking off --foxctl-url http://localhost:8090 --foxctl-gateway-url http://localhost:8765 --foxctl-workspace /Users/joshka/repos/personal/foxctl --foxctl-room pi-maestri-interactive --foxctl-actor actor:pi:maestri --foxctl-session pi:maestri:shell-6 --foxctl-room-bind --foxctl-context --tools foxctl_health,gather_context,foxctl_gather_context,foxctl_context,foxctl_room_status,foxctl_room_inbox,foxctl_room_bind_pi,foxctl_room_terminal_links,foxctl_room_terminal_register,foxctl_room_tasks,foxctl_room_task_create,foxctl_room_task_action,foxctl_room_message_ack,foxctl_room_messages_resolve,foxctl_room_loop,foxctl_foxprox_room_sessions,foxctl_foxprox_room_message,foxctl_foxprox_spawn,foxctl_foxprox_stop_session'
 ```
 
 After launch, send an empty ask or check the shell to confirm the TUI is active:
@@ -90,6 +91,10 @@ Use foxctl_room_tasks and foxctl_room_loop for your configured room. Do not use 
 ```
 
 ```text
+Call foxctl_room_terminal_links for your configured room. Summarize the browser URL, WebSocket URL, and the binary/text frame protocol. Do not claim this is a durable workbench attachment.
+```
+
+```text
 Use your available foxctl tools to propose the next five Pi-facing tool names or aliases. Prefer user workflows over raw endpoint coverage.
 ```
 
@@ -125,4 +130,3 @@ The direct registration smoke confirmed:
 - `foxctl_room_task_action`
 - `foxctl_room_message_ack`
 - `foxctl_room_messages_resolve`
-
