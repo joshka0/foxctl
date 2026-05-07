@@ -14,10 +14,11 @@ import (
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/workspaceutil"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedding"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedqueue"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
 )
 
-var allowedOps = []string{"enqueue", "stats", "get", "get_by_file", "job_status", "cleanup"}
+var allowedOps = []string{"enqueue", "stats", "get", "get_by_file", "job_status", "cleanup", "recover_stale"}
 
 // Input is the skill input schema for embedding/queue operations.
 type Input struct {
@@ -26,6 +27,9 @@ type Input struct {
 
 	// WorkspaceID identifies the workspace.
 	WorkspaceID string `json:"workspace_id,omitempty"`
+
+	// Kind restricts stats and stale recovery to one task kind (symbol or memory).
+	Kind string `json:"kind,omitempty"`
 
 	// Symbols is the list of symbols to enqueue (for "enqueue" operation).
 	Symbols []SymbolInput `json:"symbols,omitempty"`
@@ -50,6 +54,9 @@ type Input struct {
 
 	// OlderThan is the duration for cleanup (for "cleanup" operation).
 	OlderThanHours int `json:"older_than_hours,omitempty"`
+
+	// StaleAfterSeconds is the age threshold for recovering running jobs.
+	StaleAfterSeconds int `json:"stale_after_seconds,omitempty"`
 }
 
 // SymbolInput describes a symbol to be embedded.
@@ -74,6 +81,7 @@ type MemoryInput struct {
 // Output is the skill output for embedding/queue operations.
 type Output struct {
 	Operation string `json:"operation"`
+	Kind      string `json:"kind,omitempty"`
 
 	// For enqueue
 	Queued  int      `json:"queued,omitempty"`
@@ -95,6 +103,9 @@ type Output struct {
 	// For cleanup
 	Deleted int64 `json:"deleted,omitempty"`
 
+	// For recover_stale
+	Recovered int64 `json:"recovered,omitempty"`
+
 	// Message provides human-readable info.
 	Message string `json:"message,omitempty"`
 }
@@ -113,7 +124,7 @@ func main() {
 //	SideEffects: database operations; job state management; embedding storage; queue cleanup
 //	FailureModes: invalid operations, store errors, missing required fields, job not found
 //	Observability: emits operation results with statistics, job IDs, and human-readable messages
-//	Related: handleEnqueue, handleStats, handleGet, handleGetByFile, handleJobStatus, handleCleanup
+//	Related: handleEnqueue, handleStats, handleGet, handleGetByFile, handleJobStatus, handleCleanup, handleRecoverStale
 //	Keywords: embedding/queue, background, jobs, symbols, named memories, batch_processing
 //
 // [[domain:background-embedding-queue]]
@@ -128,8 +139,6 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		return skillerr.Arg(err.Error(), skillerr.WithHint(opHint))
 	}
 
-	in.WorkspaceID = workspaceutil.Resolve(in.WorkspaceID, "", rc.Workspace)
-
 	// Open store using cache path from config
 	store, err := embedding.OpenStore(ctx, rc.Config.Paths.Cache)
 	if err != nil {
@@ -141,6 +150,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 	switch op {
 	case "enqueue":
+		if err := requireWorkspaceID(rc, &in, op); err != nil {
+			return err
+		}
 		symbolModel := semantic.ResolveModelForScope(semantic.ScopeSymbols, rc.Config)
 		memoryModel := semantic.ResolveModelForScope(semantic.ScopeMemory, rc.Config)
 		if err := handleEnqueue(ctx, store, &in, &output, symbolModel, memoryModel); err != nil {
@@ -148,16 +160,22 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		}
 
 	case "stats":
-		if err := handleStats(ctx, store, &output); err != nil {
+		if err := handleStats(ctx, store, &in, &output); err != nil {
 			return err
 		}
 
 	case "get":
+		if err := requireWorkspaceID(rc, &in, op); err != nil {
+			return err
+		}
 		if err := handleGet(ctx, store, &in, &output); err != nil {
 			return err
 		}
 
 	case "get_by_file":
+		if err := requireWorkspaceID(rc, &in, op); err != nil {
+			return err
+		}
 		if err := handleGetByFile(ctx, store, &in, &output); err != nil {
 			return err
 		}
@@ -171,9 +189,22 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		if err := handleCleanup(ctx, store, &in, &output); err != nil {
 			return err
 		}
+
+	case "recover_stale":
+		if err := handleRecoverStale(ctx, store, &in, &output); err != nil {
+			return err
+		}
 	}
 
 	return skillout.Emit(rc, "embedding/queue", output)
+}
+
+func requireWorkspaceID(rc *skillmain.RunContext, input *Input, op string) error {
+	input.WorkspaceID = workspaceutil.Resolve(input.WorkspaceID, "", rc.Workspace)
+	if strings.TrimSpace(input.WorkspaceID) == "" {
+		return skillerr.Arg("workspace_id is required for "+op, skillerr.WithHint("Pass workspace_id explicitly or run from a detectable workspace."))
+	}
+	return nil
 }
 
 // handleEnqueue processes symbol enqueue requests with deduplication and priority support.
@@ -244,15 +275,36 @@ func handleEnqueue(ctx context.Context, store *embedding.Store, input *Input, ou
 }
 
 // handleStats retrieves and formats queue statistics for monitoring.
-func handleStats(ctx context.Context, store *embedding.Store, output *Output) error {
-	stats, err := store.Stats(ctx)
+func handleStats(ctx context.Context, store *embedding.Store, input *Input, output *Output) error {
+	workspaceID := strings.TrimSpace(input.WorkspaceID)
+	kind, err := normalizeTaskKind(input.Kind)
+	if err != nil {
+		return err
+	}
+	var (
+		stats *embedding.QueueStats
+	)
+	switch {
+	case workspaceID != "" && kind != "":
+		stats, err = store.StatsInWorkspaceKind(ctx, workspaceID, kind)
+	case workspaceID != "":
+		stats, err = store.StatsInWorkspace(ctx, workspaceID)
+	case kind != "":
+		stats, err = store.StatsKind(ctx, kind)
+	default:
+		stats, err = store.Stats(ctx)
+	}
 	if err != nil {
 		return skillerr.WrapIO("stats", err)
 	}
 
 	output.Stats = stats
-	output.Message = fmt.Sprintf("Queue: %d pending, %d running, %d completed, %d failed | Embeddings: %d stored",
-		stats.QueuedCount, stats.RunningCount, stats.CompletedCount, stats.FailedCount, stats.EmbeddingsCount)
+	if kind != "" {
+		output.Kind = string(kind)
+	}
+	scope := describeScope(workspaceID, kind)
+	output.Message = fmt.Sprintf("Queue (%s): %d pending, %d running, %d completed, %d failed | Embeddings: %d stored",
+		scope, stats.QueuedCount, stats.RunningCount, stats.CompletedCount, stats.FailedCount, stats.EmbeddingsCount)
 	return nil
 }
 
@@ -323,4 +375,64 @@ func handleCleanup(ctx context.Context, store *embedding.Store, input *Input, ou
 	output.Deleted = deleted
 	output.Message = fmt.Sprintf("Deleted %d completed/failed jobs older than %d hours", deleted, hours)
 	return nil
+}
+
+func handleRecoverStale(ctx context.Context, store *embedding.Store, input *Input, output *Output) error {
+	if input.StaleAfterSeconds <= 0 {
+		return skillerr.Arg("stale_after_seconds must be > 0 for recover_stale")
+	}
+
+	olderThan := time.Duration(input.StaleAfterSeconds) * time.Second
+	workspaceID := strings.TrimSpace(input.WorkspaceID)
+	kind, err := normalizeTaskKind(input.Kind)
+	if err != nil {
+		return err
+	}
+	var (
+		recovered int64
+	)
+	switch {
+	case workspaceID != "" && kind != "":
+		recovered, err = store.RequeueStaleRunningInWorkspaceKind(ctx, workspaceID, kind, olderThan)
+	case workspaceID != "":
+		recovered, err = store.RequeueStaleRunningInWorkspace(ctx, workspaceID, olderThan)
+	case kind != "":
+		recovered, err = store.RequeueStaleRunningKind(ctx, kind, olderThan)
+	default:
+		recovered, err = store.RequeueStaleRunning(ctx, olderThan)
+	}
+	if err != nil {
+		return skillerr.WrapIO("recover stale jobs", err)
+	}
+
+	output.Recovered = recovered
+	if kind != "" {
+		output.Kind = string(kind)
+	}
+	scope := describeScope(workspaceID, kind)
+	output.Message = fmt.Sprintf("Recovered %d stale running jobs for %s", recovered, scope)
+	return nil
+}
+
+func normalizeTaskKind(raw string) (embedqueue.TaskKind, error) {
+	switch kind := embedqueue.TaskKind(strings.TrimSpace(raw)); kind {
+	case "":
+		return "", nil
+	case embedqueue.TaskKindSymbol, embedqueue.TaskKindMemory:
+		return kind, nil
+	default:
+		return "", skillerr.Arg("kind must be one of: symbol, memory")
+	}
+}
+
+func describeScope(workspaceID string, kind embedqueue.TaskKind) string {
+	workspaceID = strings.TrimSpace(workspaceID)
+	scope := "all workspaces"
+	if workspaceID != "" {
+		scope = "workspace " + workspaceID
+	}
+	if kind != "" {
+		scope += ", kind " + string(kind)
+	}
+	return scope
 }

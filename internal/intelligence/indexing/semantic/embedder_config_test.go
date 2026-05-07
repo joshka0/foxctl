@@ -43,3 +43,17 @@ func TestNewEmbedderFromConfigUsesConfigGeminiKey(t *testing.T) {
 		t.Fatalf("model = %q, want gemini-embedding-001", provider.Model())
 	}
 }
+
+func TestResolveDimensionsForModelPrefersKnownNonDefaultModel(t *testing.T) {
+	got := ResolveDimensionsForModel("text-embedding-qwen3-embedding-8b", 1024)
+	if got != 4096 {
+		t.Fatalf("dimensions = %d, want 4096", got)
+	}
+}
+
+func TestResolveDimensionsForModelUsesConfiguredForUnknownModel(t *testing.T) {
+	got := ResolveDimensionsForModel("local-unknown-embedder", 1536)
+	if got != 1536 {
+		t.Fatalf("dimensions = %d, want configured 1536", got)
+	}
+}

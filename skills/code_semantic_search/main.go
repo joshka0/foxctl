@@ -1871,108 +1871,78 @@ func searchMemories(
 	in *Input,
 	memStore storage.MemoryStore,
 ) ([]Result, string, error) {
-	// Check if we should use Turso vector search
-	// Use Turso when remote is requested OR when configured
-	useTurso := in.Remote || (cfg.Database.Driver == "turso" && cfg.Database.Vector.Enabled && cfg.Database.Turso.URL != "" && queryEmbedding != nil)
-
 	var scoredEntries []storage.ScoredEntry
 
-	if useTurso {
-		// Remote mode requires embeddings
+	if in.Remote {
 		if queryEmbedding == nil {
 			return nil, "memory remote search requires embeddings; " + noEmbeddingHint(cfg), nil
 		}
 
-		// Determine vector dimensions from config
-		vectorDims := cfg.Database.Vector.Dimensions
-		if vectorDims == 0 {
-			vectorDims = cfg.Embedding.Dimensions
-		}
-		if vectorDims == 0 {
-			vectorDims = dbdriver.GetDefaultVectorDimensions()
-		}
-
-		// Use Turso for vector search
-		tursoCfg := dbdriver.TursoConfig{
-			URL:              cfg.Database.Turso.URL,
-			AuthToken:        cfg.Database.Turso.AuthToken,
-			VectorDimensions: vectorDims,
-		}
-		tursoStore, err := memory.OpenTurso(ctx, tursoCfg)
+		store, closeStore, err := ensureSemanticSearchMemoryStore(ctx, cfg, memStore)
 		if err != nil {
-			if in.Remote {
-				// Remote mode requires Turso - fail if unavailable
-				return nil, "", skillerr.WrapIO("open turso memory store (remote mode)", err)
-			}
-			// Fallback to BM25 if Turso fails, with hint about the failure
-			hint := fmt.Sprintf("memory vector search unavailable: %v; using BM25 fallback", err)
-			results, bm25Err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit, memStore)
-			return results, hint, bm25Err
+			return nil, "", skillerr.WrapIO("open memory store (remote mode)", err)
 		}
-		defer func() { errs.Ignore(tursoStore.Close(), "close turso memory store") }()
+		if closeStore != nil {
+			defer closeStore()
+		}
 
-		// Use appropriate search method based on remote options
+		remoteStore, ok := store.(remoteMemorySearcher)
+		if !ok && (in.Global || len(in.Workspaces) > 0) {
+			return nil, "", skillerr.Validation("memory store does not support cross-workspace search; Turso required")
+		}
+
 		if in.Remote && in.Global {
-			scoredEntries, err = tursoStore.SearchSimilarGlobal(ctx, queryEmbedding, limit)
+			scoredEntries, err = remoteStore.SearchSimilarGlobal(ctx, queryEmbedding, limit)
 		} else if in.Remote && len(in.Workspaces) > 0 {
-			scoredEntries, err = tursoStore.SearchSimilarMultiWorkspace(ctx, in.Workspaces, queryEmbedding, limit)
+			scoredEntries, err = remoteStore.SearchSimilarMultiWorkspace(ctx, in.Workspaces, queryEmbedding, limit)
 		} else {
-			scoredEntries, err = tursoStore.SearchSimilar(ctx, workspaceID, queryEmbedding, limit)
+			scoredEntries, err = store.SearchSimilar(ctx, workspaceID, queryEmbedding, limit)
 		}
 		if err != nil {
-			if in.Remote {
-				// Remote mode - don't fallback to BM25
-				return nil, "", skillerr.WrapRuntime("memory remote search failed", err)
-			}
-			// Fallback to BM25 on error, with hint about the failure
+			return nil, "", skillerr.WrapRuntime("memory remote search failed", err)
+		}
+
+		return memoryResultsFromScored(scoredEntries, limit), "", nil
+	}
+
+	if queryEmbedding != nil {
+		results, err := searchMemoriesVector(ctx, cfg, workspaceID, queryEmbedding, limit, memStore)
+		if err == nil && len(results) > 0 {
+			return results, "", nil
+		}
+		if err != nil {
 			hint := fmt.Sprintf("memory vector search failed: %v; using BM25 fallback", err)
 			results, bm25Err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit, memStore)
 			return results, hint, bm25Err
 		}
-
-		// Fallback to BM25 if vector search returns empty (may indicate missing vectors)
-		// Skip fallback for remote mode - empty results are valid
-		if len(scoredEntries) == 0 && !in.Remote {
-			hint := "memory vector search returned no results; trying BM25 fallback"
-			results, bm25Err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit, memStore)
-			if bm25Err != nil {
-				return nil, hint, bm25Err
-			}
-			if len(results) > 0 {
-				// BM25 found results, return with hint about vector search being empty
-				return results, hint, nil
-			}
-			// Both searches empty - vector is authoritative
-			return nil, "", nil
-		}
-	} else {
-		// SQLite store - use vector search if embeddings available, otherwise BM25
-		if queryEmbedding != nil {
-			// Use in-memory cosine similarity search
-			results, err := searchMemoriesVector(ctx, cfg, workspaceID, queryEmbedding, limit, memStore)
-			if err == nil && len(results) > 0 {
-				return results, "", nil
-			}
-			// Fall back to BM25 if vector search fails or returns empty
-			if err != nil {
-				hint := fmt.Sprintf("memory vector search failed: %v; using BM25 fallback", err)
-				results, bm25Err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit, memStore)
-				return results, hint, bm25Err
-			}
-		}
-		// Use SQLite BM25 search (no hint needed - this is expected behavior)
-		results, err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit, memStore)
-		return results, "", err
 	}
 
-	// Convert scored entries to results
+	results, err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit, memStore)
+	return results, "", err
+}
+
+type remoteMemorySearcher interface {
+	SearchSimilarGlobal(ctx context.Context, embedding []float32, limit int) ([]storage.ScoredEntry, error)
+	SearchSimilarMultiWorkspace(ctx context.Context, workspaces []string, embedding []float32, limit int) ([]storage.ScoredEntry, error)
+}
+
+func ensureSemanticSearchMemoryStore(ctx context.Context, cfg config.Config, memStore storage.MemoryStore) (storage.MemoryStore, func(), error) {
+	if memStore != nil {
+		return memStore, nil, nil
+	}
+	store, err := openSemanticSearchMemoryStore(ctx, cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	return store, func() { _ = store.Close() }, nil
+}
+
+func memoryResultsFromScored(scoredEntries []storage.ScoredEntry, limit int) []Result {
 	results := make([]Result, 0, len(scoredEntries))
 	rank := 1
 	for _, scored := range scoredEntries {
 		entry := scored.Entry
-		// Skip code-related entries - they're handled by symbol search
-		// Only include semantic memory types: gotcha, pattern, decision, note, etc.
-		if entry.Type == "code_symbol" || entry.Type == "symbol" || entry.Type == "file_embedding" || entry.Type == "edit" {
+		if isCodeMemoryEntryType(entry.Type) {
 			continue
 		}
 
@@ -1992,7 +1962,7 @@ func searchMemories(
 		}
 	}
 
-	return results, "", nil // Vector search succeeded, no hint needed
+	return results
 }
 
 // searchMemoriesBM25 uses SQLite BM25-like text search for memories.
@@ -2026,9 +1996,7 @@ func searchMemoriesBM25(
 	rank := 1
 	for _, scored := range scoredEntries {
 		entry := scored.Entry
-		// Skip code-related entries - they're handled by symbol search
-		// Only include semantic memory types: gotcha, pattern, decision, note, etc.
-		if entry.Type == "code_symbol" || entry.Type == "symbol" || entry.Type == "file_embedding" || entry.Type == "edit" {
+		if isCodeMemoryEntryType(entry.Type) {
 			continue
 		}
 		source := "memory"
@@ -2098,9 +2066,7 @@ func searchMemoriesVector(
 	rank := 1
 	for _, scored := range scoredEntries {
 		entry := scored.Entry
-		// Skip code-related entries - they're handled by symbol search
-		// Only include semantic memory types: gotcha, pattern, decision, note, etc.
-		if entry.Type == "code_symbol" || entry.Type == "symbol" || entry.Type == "file_embedding" || entry.Type == "edit" {
+		if isCodeMemoryEntryType(entry.Type) {
 			continue
 		}
 		source := "memory"
@@ -2128,6 +2094,15 @@ func searchMemoriesVector(
 	}
 
 	return results, nil
+}
+
+func isCodeMemoryEntryType(entryType string) bool {
+	switch entryType {
+	case "code_symbol", "symbol", "file_embedding", "file_embedding_chunk", "edit":
+		return true
+	default:
+		return false
+	}
 }
 
 // ID normalization functions for canonical IDs

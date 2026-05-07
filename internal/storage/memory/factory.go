@@ -83,7 +83,7 @@ func openTursoFromConfig(ctx context.Context, cfg config.Config) (*TursoStore, e
 
 	store, err := OpenTurso(ctx, tursoCfg)
 	if err != nil {
-		return nil, fmt.Errorf("memory: open turso: %w", err)
+		return nil, formatTursoOpenError(tursoCfg, err)
 	}
 
 	if tursoCfg.URL != "" {
@@ -92,6 +92,37 @@ func openTursoFromConfig(ctx context.Context, cfg config.Config) (*TursoStore, e
 		logger.Info().Str("path", tursoCfg.Path).Bool("vector", true).Msg("opened local Turso store")
 	}
 	return store, nil
+}
+
+func formatTursoOpenError(cfg dbdriver.TursoConfig, err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "libsql_vector_idx") {
+		return fmt.Errorf("memory: open turso: %w", err)
+	}
+
+	parts := []string{
+		"legacy libSQL vector index detected",
+		"use a fresh Turso memory database",
+	}
+	if cfg.URL != "" {
+		parts = append(parts, "set FOXCTL_MEMORY_DB_URL to a memory-specific remote if the configured remote is stale")
+	}
+	if path := firstNonEmptyString(cfg.ReplicaPath, cfg.Path); path != "" {
+		parts = append(parts, fmt.Sprintf("move local replica %q aside if only the local cache is stale", path))
+	}
+	return fmt.Errorf("memory: open turso: %s: %w", strings.Join(parts, "; "), err)
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func envString(name string) (string, bool) {

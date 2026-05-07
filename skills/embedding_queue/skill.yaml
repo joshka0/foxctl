@@ -19,11 +19,15 @@ signature:
     - name: operation
       type: string
       required: true
-      description: "Operation to perform: enqueue, stats, get, get_by_file, job_status, cleanup"
+      description: "Operation to perform: enqueue, stats, get, get_by_file, job_status, cleanup, recover_stale"
     - name: workspace_id
       type: string
       required: false
       description: Workspace identifier (defaults to detected workspace)
+    - name: kind
+      type: string
+      required: false
+      description: "Restrict stats or stale recovery to one embedding job kind: symbol or memory"
     - name: symbols
       type: array
       required: false
@@ -59,10 +63,17 @@ signature:
       required: false
       default: 24
       description: Delete jobs older than N hours (for cleanup operation)
+    - name: stale_after_seconds
+      type: integer
+      required: false
+      description: Move running jobs older than N seconds back to retry (for recover_stale operation)
   returns:
     - name: operation
       type: string
       description: Operation that was performed
+    - name: kind
+      type: string
+      description: Job kind filter used for this queue operation
     - name: queued
       type: integer
       description: Number of jobs enqueued
@@ -87,6 +98,9 @@ signature:
     - name: deleted
       type: integer
       description: Number of jobs cleaned up
+    - name: recovered
+      type: integer
+      description: Number of stale running jobs recovered
     - name: message
       type: string
       description: Human-readable summary
@@ -104,6 +118,7 @@ signature:
       - get_by_file: Get all embeddings for a file
       - job_status: Check status of a specific job
       - cleanup: Remove old completed jobs
+      - recover_stale: Move stale running jobs back to retry after a worker crash
 
       Enable with FOXCTL_EMBED_QUEUE=1 during live indexing.
     workflows:
@@ -135,6 +150,12 @@ signature:
         description: "Check queue statistics"
         example_input:
           operation: stats
+      - id: check-memory-stats
+        description: "Check only named-memory queue statistics"
+        example_input:
+          operation: stats
+          workspace_id: myproject
+          kind: memory
       - id: get-embedding
         description: "Get embedding for a symbol"
         example_input:
@@ -146,6 +167,13 @@ signature:
         example_input:
           operation: cleanup
           older_than_hours: 48
+      - id: recover-stale
+        description: "Recover jobs left running after an interrupted worker"
+        example_input:
+          operation: recover_stale
+          workspace_id: myproject
+          kind: memory
+          stale_after_seconds: 1800
 capabilities:
   network: "none"
   filesystem:

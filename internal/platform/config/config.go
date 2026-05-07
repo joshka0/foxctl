@@ -287,6 +287,19 @@ type EmbeddingSettings struct {
 	VoyageAPIKey string `mapstructure:"voyage_api_key" json:"voyage_api_key"`
 }
 
+// MarshalJSON implements json.Marshaler to redact embedding provider secrets.
+func (e EmbeddingSettings) MarshalJSON() ([]byte, error) {
+	type Alias EmbeddingSettings
+	redacted := Alias(e)
+	if redacted.APIKey != "" {
+		redacted.APIKey = "[REDACTED]"
+	}
+	if redacted.VoyageAPIKey != "" {
+		redacted.VoyageAPIKey = "[REDACTED]"
+	}
+	return json.Marshal(redacted)
+}
+
 // SearchSettings configure web search provider API keys.
 // These are used by the web_search skill and MCP server.
 type SearchSettings struct {
@@ -301,6 +314,22 @@ type SearchSettings struct {
 	// PerplexityAPIKey is the Perplexity API key (from PERPLEXITY_API_KEY)
 	// Used for the "ask" tool for question answering.
 	PerplexityAPIKey string `mapstructure:"perplexity_api_key" json:"perplexity_api_key"`
+}
+
+// MarshalJSON implements json.Marshaler to redact search provider secrets.
+func (s SearchSettings) MarshalJSON() ([]byte, error) {
+	type Alias SearchSettings
+	redacted := Alias(s)
+	if redacted.TavilyAPIKey != "" {
+		redacted.TavilyAPIKey = "[REDACTED]"
+	}
+	if redacted.ExaAPIKey != "" {
+		redacted.ExaAPIKey = "[REDACTED]"
+	}
+	if redacted.PerplexityAPIKey != "" {
+		redacted.PerplexityAPIKey = "[REDACTED]"
+	}
+	return json.Marshal(redacted)
 }
 
 // DatabaseSettings configure database driver and connection.
@@ -481,6 +510,40 @@ type LLMSettings struct {
 	// BedrockRegion is the AWS region for Bedrock (from BEDROCK_REGION or AWS_DEFAULT_REGION).
 	// Uses the standard AWS credential chain (env vars, shared credentials, IAM role).
 	BedrockRegion string `mapstructure:"bedrock_region" json:"bedrock_region"`
+}
+
+// MarshalJSON implements json.Marshaler to redact LLM provider secrets.
+func (l LLMSettings) MarshalJSON() ([]byte, error) {
+	type Alias LLMSettings
+	redacted := Alias(l)
+	if redacted.APIKey != "" {
+		redacted.APIKey = "[REDACTED]"
+	}
+	if redacted.CerebrasAPIKey != "" {
+		redacted.CerebrasAPIKey = "[REDACTED]"
+	}
+	if redacted.OpenRouterAPIKey != "" {
+		redacted.OpenRouterAPIKey = "[REDACTED]"
+	}
+	if redacted.GroqAPIKey != "" {
+		redacted.GroqAPIKey = "[REDACTED]"
+	}
+	if redacted.OpenAIAPIKey != "" {
+		redacted.OpenAIAPIKey = "[REDACTED]"
+	}
+	if redacted.GeminiAPIKey != "" {
+		redacted.GeminiAPIKey = "[REDACTED]"
+	}
+	if redacted.AnthropicAPIKey != "" {
+		redacted.AnthropicAPIKey = "[REDACTED]"
+	}
+	if redacted.AtomicAPIKey != "" {
+		redacted.AtomicAPIKey = "[REDACTED]"
+	}
+	if redacted.ElevenLabsAPIKey != "" {
+		redacted.ElevenLabsAPIKey = "[REDACTED]"
+	}
+	return json.Marshal(redacted)
 }
 
 // ResolveAPIKey returns the API key for the given provider.

@@ -204,6 +204,81 @@ func TestStats(t *testing.T) {
 	}
 }
 
+func TestStatsKindFiltersQueue(t *testing.T) {
+	work := t.TempDir()
+	stdout := &bytes.Buffer{}
+	rc := newTestRunContext(t, stdout, work)
+	defer rc.Close()
+
+	store, err := embedding.OpenStore(context.Background(), rc.Config.Paths.Cache)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if _, err := store.Enqueue(context.Background(), embedding.EnqueueRequest{
+		WorkspaceID: "test-ws",
+		Symbols: []embedding.SymbolInput{{
+			SymbolID:   "main.go:Handler",
+			FilePath:   "main.go",
+			SymbolName: "Handler",
+			Content:    "func Handler() {}",
+		}},
+	}); err != nil {
+		t.Fatalf("enqueue symbol: %v", err)
+	}
+	if _, err := store.EnqueueMemories(context.Background(), embedding.MemoryEnqueueRequest{
+		WorkspaceID: "test-ws",
+		Memories: []embedding.MemoryInput{{
+			Name:    "memory://queue",
+			Content: "memory queue job",
+		}},
+	}); err != nil {
+		t.Fatalf("enqueue memory: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	in := Input{
+		Operation:   "stats",
+		WorkspaceID: "test-ws",
+		Kind:        "memory",
+	}
+	if err := run(context.Background(), rc, in); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var env envelope.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("failed to unmarshal output: %v", err)
+	}
+	if env.Status != "ok" {
+		t.Fatalf("expected status ok, got %s", env.Status)
+	}
+	data := env.Data.(map[string]any)
+	if data["kind"] != "memory" {
+		t.Fatalf("kind=%v want memory", data["kind"])
+	}
+	stats := data["stats"].(map[string]any)
+	if stats["queued_count"].(float64) != 1 {
+		t.Fatalf("queued_count=%v want 1", stats["queued_count"])
+	}
+	if stats["embeddings_count"].(float64) != 0 {
+		t.Fatalf("embeddings_count=%v want 0 for memory stats", stats["embeddings_count"])
+	}
+}
+
+func TestStatsRejectsUnknownKind(t *testing.T) {
+	work := t.TempDir()
+	stdout := &bytes.Buffer{}
+	rc := newTestRunContext(t, stdout, work)
+	defer rc.Close()
+
+	err := run(context.Background(), rc, Input{Operation: "stats", Kind: "semantic_file"})
+	if err == nil {
+		t.Fatal("expected invalid kind error")
+	}
+}
+
 func TestGetNotFound(t *testing.T) {
 	work := t.TempDir()
 	stdout := &bytes.Buffer{}

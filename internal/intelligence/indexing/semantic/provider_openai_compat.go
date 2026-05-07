@@ -245,10 +245,7 @@ func truncateOpenAICompat(text string, max int) string {
 }
 
 func resolveOpenAICompatDimensions(model string, configured int) int {
-	if configured > 0 {
-		return configured
-	}
-	return DimensionsForModel(model)
+	return ResolveDimensionsForModel(model, configured)
 }
 
 var (

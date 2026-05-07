@@ -26,26 +26,35 @@ func TestDefaultMaxDur(t *testing.T) {
 
 func TestInput_AllFields(t *testing.T) {
 	in := Input{
-		BatchSize:   20,
-		MaxDuration: 600,
-		ProcessAll:  true,
-		DryRun:      true,
-		JobDelayMS:  250,
+		WorkspaceID:              "workspace-a",
+		Kind:                     "memory",
+		BatchSize:                20,
+		MaxDuration:              600,
+		ProcessAll:               true,
+		DryRun:                   true,
+		JobDelayMS:               250,
+		RecoverStaleAfterSeconds: 1800,
 	}
 
+	assert.Equal(t, "workspace-a", in.WorkspaceID)
+	assert.Equal(t, "memory", in.Kind)
 	assert.Equal(t, 20, in.BatchSize)
 	assert.Equal(t, 600, in.MaxDuration)
 	assert.True(t, in.ProcessAll)
 	assert.True(t, in.DryRun)
 	assert.Equal(t, 250, in.JobDelayMS)
+	assert.Equal(t, 1800, in.RecoverStaleAfterSeconds)
 }
 
 func TestInput_JSONSerialization(t *testing.T) {
 	in := Input{
-		BatchSize:   15,
-		MaxDuration: 120,
-		ProcessAll:  false,
-		DryRun:      true,
+		WorkspaceID:              "workspace-a",
+		Kind:                     "symbol",
+		BatchSize:                15,
+		MaxDuration:              120,
+		ProcessAll:               false,
+		DryRun:                   true,
+		RecoverStaleAfterSeconds: 60,
 	}
 
 	data, err := json.Marshal(in)
@@ -55,10 +64,13 @@ func TestInput_JSONSerialization(t *testing.T) {
 	err = json.Unmarshal(data, &decoded)
 	assert.NoError(t, err)
 
+	assert.Equal(t, in.WorkspaceID, decoded.WorkspaceID)
+	assert.Equal(t, in.Kind, decoded.Kind)
 	assert.Equal(t, in.BatchSize, decoded.BatchSize)
 	assert.Equal(t, in.MaxDuration, decoded.MaxDuration)
 	assert.Equal(t, in.ProcessAll, decoded.ProcessAll)
 	assert.Equal(t, in.DryRun, decoded.DryRun)
+	assert.Equal(t, in.RecoverStaleAfterSeconds, decoded.RecoverStaleAfterSeconds)
 }
 
 func TestInput_EmptyFields(t *testing.T) {
@@ -119,15 +131,42 @@ func TestInput_CustomValues(t *testing.T) {
 	assert.Equal(t, 60, in.MaxDuration)
 }
 
+func TestNormalizeTaskKind(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{name: "empty", input: "", want: ""},
+		{name: "symbol", input: "symbol", want: "symbol"},
+		{name: "memory", input: " memory ", want: "memory"},
+		{name: "invalid", input: "semantic_file", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := normalizeTaskKind(tt.input)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tt.want, string(got))
+		})
+	}
+}
+
 // Tests for Output structure
 
 func TestOutput_AllFields(t *testing.T) {
 	out := Output{
 		Processed:  50,
+		Kind:       "symbol",
 		Errors:     3,
 		Memories:   7,
 		Remaining:  10,
 		BatchCount: 5,
+		Recovered:  2,
 		Status:     "completed",
 		DurationMs: 12345,
 		LastError:  "some error",
@@ -142,10 +181,12 @@ func TestOutput_AllFields(t *testing.T) {
 	}
 
 	assert.Equal(t, 50, out.Processed)
+	assert.Equal(t, "symbol", out.Kind)
 	assert.Equal(t, 3, out.Errors)
 	assert.Equal(t, 7, out.Memories)
 	assert.Equal(t, 10, out.Remaining)
 	assert.Equal(t, 5, out.BatchCount)
+	assert.Equal(t, int64(2), out.Recovered)
 	assert.Equal(t, "completed", out.Status)
 	assert.Equal(t, int64(12345), out.DurationMs)
 	assert.Equal(t, "some error", out.LastError)

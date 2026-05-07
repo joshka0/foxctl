@@ -806,6 +806,7 @@ func enqueueMemoryEmbeddingJobs(ctx context.Context, cfg config.Config, store st
 	}
 	defer queueStore.Close() //nolint:errcheck
 
+	workspaceID := workspaceutil.CanonicalID(workspace)
 	model := modelForScopeConfig("memory", cfg)
 	batchSize := 1000
 	offset := 0
@@ -813,13 +814,13 @@ func enqueueMemoryEmbeddingJobs(ctx context.Context, cfg config.Config, store st
 	for {
 		var memories []storage.NamedEntry
 		if force {
-			entries, _, err := store.ListFiltered(ctx, workspace, storage.MemoryListFilter{}, batchSize, offset)
+			entries, _, err := store.ListFiltered(ctx, workspaceID, storage.MemoryListFilter{}, batchSize, offset)
 			if err != nil {
 				return totalQueued, fmt.Errorf("list memories: %w", err)
 			}
 			memories = entries
 		} else {
-			entries, err := store.ListWithoutEmbeddingPage(ctx, workspace, batchSize, offset)
+			entries, err := store.ListWithoutEmbeddingPage(ctx, workspaceID, batchSize, offset)
 			if err != nil {
 				return totalQueued, fmt.Errorf("list memories without embeddings: %w", err)
 			}
@@ -830,7 +831,7 @@ func enqueueMemoryEmbeddingJobs(ctx context.Context, cfg config.Config, store st
 		}
 
 		result, err := queueStore.EnqueueMemories(ctx, embedstore.MemoryEnqueueRequest{
-			WorkspaceID: workspace,
+			WorkspaceID: workspaceID,
 			Memories:    memoryEmbeddingInputs(memories),
 			Priority:    embedstore.PriorityNormal,
 			Model:       model,

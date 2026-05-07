@@ -10,6 +10,7 @@ import (
 
 	embedstore "github.com/joshka0/foxctl/internal/intelligence/indexing/embedding"
 	"github.com/joshka0/foxctl/internal/platform/config"
+	workspaceutil "github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/storage/memory"
 )
 
@@ -126,6 +127,11 @@ func TestCreateIndexEmbeddingProviderForScope_OpenAICompat(t *testing.T) {
 func TestEnqueueMemoryEmbeddingJobsQueuesMissingMemories(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
+	workspaceRoot := filepath.Join(root, "workspace")
+	if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	workspaceID := workspaceutil.CanonicalID(workspaceRoot)
 	cfg := config.Config{}
 	cfg.Storage.Root = filepath.Join(root, "storage")
 	cfg.Paths.CAS = filepath.Join(root, "cas")
@@ -139,17 +145,17 @@ func TestEnqueueMemoryEmbeddingJobsQueuesMissingMemories(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 
 	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2026-05-07T00:00:00Z"},"error":{}}`)
-	if _, err := store.SaveFromResult(ctx, "needs-embedding", "decision", "ws", "queue this memory", result); err != nil {
+	if _, err := store.SaveFromResult(ctx, "needs-embedding", "decision", workspaceRoot, "queue this memory", result); err != nil {
 		t.Fatalf("save missing memory: %v", err)
 	}
-	if _, err := store.SaveFromResult(ctx, "already-embedded", "decision", "ws", "skip this memory", result); err != nil {
+	if _, err := store.SaveFromResult(ctx, "already-embedded", "decision", workspaceRoot, "skip this memory", result); err != nil {
 		t.Fatalf("save embedded memory: %v", err)
 	}
-	if err := store.UpdateEmbedding(ctx, "already-embedded", "ws", []float32{0.1, 0.2}); err != nil {
+	if err := store.UpdateEmbedding(ctx, "already-embedded", workspaceRoot, []float32{0.1, 0.2}); err != nil {
 		t.Fatalf("update embedding: %v", err)
 	}
 
-	queued, err := enqueueMemoryEmbeddingJobs(ctx, cfg, store, "ws", false)
+	queued, err := enqueueMemoryEmbeddingJobs(ctx, cfg, store, workspaceRoot, false)
 	if err != nil {
 		t.Fatalf("enqueue memory embeddings: %v", err)
 	}
@@ -171,6 +177,9 @@ func TestEnqueueMemoryEmbeddingJobsQueuesMissingMemories(t *testing.T) {
 	}
 	if job.MemoryName != "needs-embedding" {
 		t.Fatalf("memory name=%q want needs-embedding", job.MemoryName)
+	}
+	if job.WorkspaceID != workspaceID {
+		t.Fatalf("workspace_id=%q want %q", job.WorkspaceID, workspaceID)
 	}
 	if job.Model != "text-embedding-qwen3-embedding-8b" {
 		t.Fatalf("model=%q", job.Model)

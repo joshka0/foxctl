@@ -84,4 +84,8 @@ type Stats struct {
 // ClaimOptions configures job claiming behavior.
 type ClaimOptions struct {
 	GroupID string
+	// PayloadKind restricts claiming to JSON payloads with $.kind equal to this value.
+	// Empty leaves payload shape unrestricted. "symbol" also matches legacy JSON payloads
+	// without a kind field because old embedding jobs decoded as symbol tasks.
+	PayloadKind string
 }

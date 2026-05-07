@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -123,5 +124,26 @@ func TestOpenWithConfigUnknownDriverErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unsupported database driver") {
 		t.Fatalf("OpenWithConfig() error = %v, want unsupported driver error", err)
+	}
+}
+
+func TestFormatTursoOpenErrorAddsLegacyVectorIndexHint(t *testing.T) {
+	err := formatTursoOpenError(dbdriver.TursoConfig{
+		URL:         "libsql://example.turso.io",
+		ReplicaPath: "/tmp/memory.turso",
+	}, errors.New("database sync engine error: invalid expression in CREATE INDEX: libsql_vector_idx (embedding)"))
+	if err == nil {
+		t.Fatal("formatTursoOpenError() = nil, want error")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"legacy libSQL vector index detected",
+		"FOXCTL_MEMORY_DB_URL",
+		"/tmp/memory.turso",
+		"libsql_vector_idx",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("formatTursoOpenError() = %q, want substring %q", msg, want)
+		}
 	}
 }

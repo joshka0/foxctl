@@ -2,10 +2,13 @@ package embedding
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedqueue"
+	"github.com/joshka0/foxctl/internal/storage/sqlutil"
 )
 
 func TestStore_EnqueueAndClaim(t *testing.T) {
@@ -62,6 +65,255 @@ func TestStore_EnqueueAndClaim(t *testing.T) {
 	}
 	if job.WorkspaceID != "test-ws" {
 		t.Errorf("expected workspace test-ws, got %s", job.WorkspaceID)
+	}
+}
+
+func TestStore_ClaimNextInWorkspaceOnlyClaimsMatchingJobs(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	store, err := OpenStore(ctx, root)
+	if err != nil {
+		t.Fatalf("failed to open store: %v", err)
+	}
+	defer store.Close()
+
+	for _, workspaceID := range []string{"workspace-a", "workspace-b"} {
+		_, err := store.Enqueue(ctx, EnqueueRequest{
+			WorkspaceID: workspaceID,
+			Symbols: []SymbolInput{{
+				SymbolID:   workspaceID + ":Handler",
+				FilePath:   "main.go",
+				SymbolName: "Handler",
+				Content:    "func Handler() {}",
+			}},
+		})
+		if err != nil {
+			t.Fatalf("enqueue %s: %v", workspaceID, err)
+		}
+	}
+
+	job, err := store.ClaimNextInWorkspace(ctx, "workspace-b")
+	if err != nil {
+		t.Fatalf("claim scoped: %v", err)
+	}
+	if job == nil || job.WorkspaceID != "workspace-b" {
+		t.Fatalf("job=%+v want workspace-b", job)
+	}
+
+	statsA, err := store.StatsInWorkspace(ctx, "workspace-a")
+	if err != nil {
+		t.Fatalf("stats a: %v", err)
+	}
+	if statsA.QueuedCount != 1 || statsA.RunningCount != 0 {
+		t.Fatalf("stats workspace-a=%+v want queued=1 running=0", statsA)
+	}
+
+	statsB, err := store.StatsInWorkspace(ctx, "workspace-b")
+	if err != nil {
+		t.Fatalf("stats b: %v", err)
+	}
+	if statsB.QueuedCount != 0 || statsB.RunningCount != 1 {
+		t.Fatalf("stats workspace-b=%+v want queued=0 running=1", statsB)
+	}
+}
+
+func TestStore_ClaimNextInWorkspaceKindSkipsOtherKinds(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	store, err := OpenStore(ctx, root)
+	if err != nil {
+		t.Fatalf("failed to open store: %v", err)
+	}
+	defer store.Close()
+
+	if _, err := store.EnqueueMemories(ctx, MemoryEnqueueRequest{
+		WorkspaceID: "workspace-a",
+		Memories: []MemoryInput{{
+			Name:    "memory://first",
+			Type:    "note",
+			Content: "older memory job",
+		}},
+		Model: "model-a",
+	}); err != nil {
+		t.Fatalf("enqueue memory: %v", err)
+	}
+	if _, err := store.Enqueue(ctx, EnqueueRequest{
+		WorkspaceID: "workspace-a",
+		Symbols: []SymbolInput{{
+			SymbolID:   "main.go:Handler",
+			FilePath:   "main.go",
+			SymbolName: "Handler",
+			Content:    "func Handler() {}",
+		}},
+		Model: "model-a",
+	}); err != nil {
+		t.Fatalf("enqueue symbol: %v", err)
+	}
+
+	job, err := store.ClaimNextInWorkspaceKind(ctx, "workspace-a", embedqueue.TaskKindSymbol)
+	if err != nil {
+		t.Fatalf("claim symbol: %v", err)
+	}
+	if job == nil || job.Kind != embedqueue.TaskKindSymbol {
+		t.Fatalf("job=%+v want symbol", job)
+	}
+
+	next, err := store.ClaimNextInWorkspaceKind(ctx, "workspace-a", embedqueue.TaskKindMemory)
+	if err != nil {
+		t.Fatalf("claim memory: %v", err)
+	}
+	if next == nil || next.Kind != embedqueue.TaskKindMemory {
+		t.Fatalf("next=%+v want memory", next)
+	}
+
+	symbolStats, err := store.StatsInWorkspaceKind(ctx, "workspace-a", embedqueue.TaskKindSymbol)
+	if err != nil {
+		t.Fatalf("symbol stats: %v", err)
+	}
+	if symbolStats.RunningCount != 1 || symbolStats.QueuedCount != 0 {
+		t.Fatalf("symbol stats=%+v want running=1 queued=0", symbolStats)
+	}
+
+	memoryStats, err := store.StatsInWorkspaceKind(ctx, "workspace-a", embedqueue.TaskKindMemory)
+	if err != nil {
+		t.Fatalf("memory stats: %v", err)
+	}
+	if memoryStats.RunningCount != 1 || memoryStats.QueuedCount != 0 || memoryStats.EmbeddingsCount != 0 {
+		t.Fatalf("memory stats=%+v want running=1 queued=0 embeddings=0", memoryStats)
+	}
+}
+
+func TestStore_RequeueStaleRunningInWorkspaceOnlyRecoversMatchingJobs(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	store, err := OpenStore(ctx, root)
+	if err != nil {
+		t.Fatalf("failed to open store: %v", err)
+	}
+	defer store.Close()
+
+	for _, workspaceID := range []string{"workspace-a", "workspace-b"} {
+		_, err := store.Enqueue(ctx, EnqueueRequest{
+			WorkspaceID: workspaceID,
+			Symbols: []SymbolInput{{
+				SymbolID:   workspaceID + ":Handler",
+				FilePath:   "main.go",
+				SymbolName: "Handler",
+				Content:    "func Handler() {}",
+			}},
+		})
+		if err != nil {
+			t.Fatalf("enqueue %s: %v", workspaceID, err)
+		}
+		if _, err := store.ClaimNextInWorkspace(ctx, workspaceID); err != nil {
+			t.Fatalf("claim %s: %v", workspaceID, err)
+		}
+	}
+
+	staleUpdatedAt := sqlutil.FormatTimestamp(time.Now().UTC().Add(-2 * time.Hour))
+	if _, err := store.db.ExecContext(ctx, fmt.Sprintf(`
+		UPDATE %s SET updated_at = ?
+		WHERE state = 'running'
+	`, embeddingQueueTable), staleUpdatedAt); err != nil {
+		t.Fatalf("mark stale: %v", err)
+	}
+
+	recovered, err := store.RequeueStaleRunningInWorkspace(ctx, "workspace-a", time.Hour)
+	if err != nil {
+		t.Fatalf("recover scoped: %v", err)
+	}
+	if recovered != 1 {
+		t.Fatalf("recovered=%d want 1", recovered)
+	}
+
+	statsA, err := store.StatsInWorkspace(ctx, "workspace-a")
+	if err != nil {
+		t.Fatalf("stats a: %v", err)
+	}
+	if statsA.QueuedCount != 1 || statsA.RunningCount != 0 {
+		t.Fatalf("stats workspace-a=%+v want queued=1 running=0", statsA)
+	}
+
+	statsB, err := store.StatsInWorkspace(ctx, "workspace-b")
+	if err != nil {
+		t.Fatalf("stats b: %v", err)
+	}
+	if statsB.QueuedCount != 0 || statsB.RunningCount != 1 {
+		t.Fatalf("stats workspace-b=%+v want queued=0 running=1", statsB)
+	}
+}
+
+func TestStore_RequeueStaleRunningInWorkspaceKindOnlyRecoversMatchingKind(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	store, err := OpenStore(ctx, root)
+	if err != nil {
+		t.Fatalf("failed to open store: %v", err)
+	}
+	defer store.Close()
+
+	if _, err := store.EnqueueMemories(ctx, MemoryEnqueueRequest{
+		WorkspaceID: "workspace-a",
+		Memories: []MemoryInput{{
+			Name:    "memory://first",
+			Content: "memory job",
+		}},
+	}); err != nil {
+		t.Fatalf("enqueue memory: %v", err)
+	}
+	if _, err := store.Enqueue(ctx, EnqueueRequest{
+		WorkspaceID: "workspace-a",
+		Symbols: []SymbolInput{{
+			SymbolID:   "main.go:Handler",
+			FilePath:   "main.go",
+			SymbolName: "Handler",
+			Content:    "func Handler() {}",
+		}},
+	}); err != nil {
+		t.Fatalf("enqueue symbol: %v", err)
+	}
+
+	if _, err := store.ClaimNextInWorkspaceKind(ctx, "workspace-a", embedqueue.TaskKindMemory); err != nil {
+		t.Fatalf("claim memory: %v", err)
+	}
+	if _, err := store.ClaimNextInWorkspaceKind(ctx, "workspace-a", embedqueue.TaskKindSymbol); err != nil {
+		t.Fatalf("claim symbol: %v", err)
+	}
+
+	staleUpdatedAt := sqlutil.FormatTimestamp(time.Now().UTC().Add(-2 * time.Hour))
+	if _, err := store.db.ExecContext(ctx, fmt.Sprintf(`
+		UPDATE %s SET updated_at = ?
+		WHERE state = 'running'
+	`, embeddingQueueTable), staleUpdatedAt); err != nil {
+		t.Fatalf("mark stale: %v", err)
+	}
+
+	recovered, err := store.RequeueStaleRunningInWorkspaceKind(ctx, "workspace-a", embedqueue.TaskKindSymbol, time.Hour)
+	if err != nil {
+		t.Fatalf("recover scoped kind: %v", err)
+	}
+	if recovered != 1 {
+		t.Fatalf("recovered=%d want 1", recovered)
+	}
+
+	symbolStats, err := store.StatsInWorkspaceKind(ctx, "workspace-a", embedqueue.TaskKindSymbol)
+	if err != nil {
+		t.Fatalf("symbol stats: %v", err)
+	}
+	if symbolStats.QueuedCount != 1 || symbolStats.RunningCount != 0 {
+		t.Fatalf("symbol stats=%+v want queued=1 running=0", symbolStats)
+	}
+
+	memoryStats, err := store.StatsInWorkspaceKind(ctx, "workspace-a", embedqueue.TaskKindMemory)
+	if err != nil {
+		t.Fatalf("memory stats: %v", err)
+	}
+	if memoryStats.QueuedCount != 0 || memoryStats.RunningCount != 1 {
+		t.Fatalf("memory stats=%+v want queued=0 running=1", memoryStats)
 	}
 }
 

@@ -408,6 +408,51 @@ func TestSearchMemoriesBM25_LabelsCoChangeArtifacts(t *testing.T) {
 	}
 }
 
+func TestSearchMemoriesVectorUsesProvidedStoreAndFiltersCodeChunks(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Config{
+		Database: config.DatabaseSettings{
+			Driver: "turso",
+			Turso: config.TursoSettings{
+				URL: "libsql://configured-store-should-not-be-opened.invalid",
+			},
+			Vector: config.VectorSettings{Enabled: true, Dimensions: 2},
+		},
+	}
+	store, err := memory.Open(ctx, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("open memory: %v", err)
+	}
+	defer store.Close()
+
+	if _, err := store.SaveFromResult(ctx, "file://ws/internal/a.go#chunk-0", "file_embedding_chunk", "ws", "code chunk", []byte(`{"text":"code chunk"}`)); err != nil {
+		t.Fatalf("save chunk memory: %v", err)
+	}
+	if err := store.UpdateEmbedding(ctx, "file://ws/internal/a.go#chunk-0", "ws", []float32{1, 0}); err != nil {
+		t.Fatalf("update chunk embedding: %v", err)
+	}
+	if _, err := store.SaveFromResult(ctx, "note://semantic-commenting", "note", "ws", "semantic commenting note", []byte(`{"text":"semantic commenting note"}`)); err != nil {
+		t.Fatalf("save note memory: %v", err)
+	}
+	if err := store.UpdateEmbedding(ctx, "note://semantic-commenting", "ws", []float32{1, 0}); err != nil {
+		t.Fatalf("update note embedding: %v", err)
+	}
+
+	results, hint, err := searchMemories(ctx, cfg, "ws", "semantic commenting", []float32{1, 0}, 5, &Input{}, store)
+	if err != nil {
+		t.Fatalf("searchMemories: %v", err)
+	}
+	if hint != "" {
+		t.Fatalf("hint=%q want empty", hint)
+	}
+	if len(results) != 1 {
+		t.Fatalf("len(results)=%d want 1: %#v", len(results), results)
+	}
+	if results[0].Name != "note://semantic-commenting" {
+		t.Fatalf("result name=%q want note://semantic-commenting", results[0].Name)
+	}
+}
+
 func TestDetectEmbeddingProviderName_OpenAICompat(t *testing.T) {
 	cfg := config.Config{
 		Embedding: config.EmbeddingSettings{

@@ -378,7 +378,26 @@ func (s *Store) EnqueueMemories(ctx context.Context, req MemoryEnqueueRequest) (
 
 // ClaimNext claims the next available job for processing.
 func (s *Store) ClaimNext(ctx context.Context) (*EmbeddingJob, error) {
-	job, err := s.queue.ClaimNext(ctx, queue.ClaimOptions{})
+	return s.claimNext(ctx, "", "")
+}
+
+// ClaimNextInWorkspace claims the next available job for a workspace/group.
+func (s *Store) ClaimNextInWorkspace(ctx context.Context, workspaceID string) (*EmbeddingJob, error) {
+	return s.claimNext(ctx, strings.TrimSpace(workspaceID), "")
+}
+
+// ClaimNextKind claims the next available job for a task kind.
+func (s *Store) ClaimNextKind(ctx context.Context, kind embedqueue.TaskKind) (*EmbeddingJob, error) {
+	return s.claimNext(ctx, "", string(kind))
+}
+
+// ClaimNextInWorkspaceKind claims the next available job for a workspace/group and task kind.
+func (s *Store) ClaimNextInWorkspaceKind(ctx context.Context, workspaceID string, kind embedqueue.TaskKind) (*EmbeddingJob, error) {
+	return s.claimNext(ctx, strings.TrimSpace(workspaceID), string(kind))
+}
+
+func (s *Store) claimNext(ctx context.Context, workspaceID, kind string) (*EmbeddingJob, error) {
+	job, err := s.queue.ClaimNext(ctx, queue.ClaimOptions{GroupID: workspaceID, PayloadKind: strings.TrimSpace(kind)})
 	if err != nil {
 		return nil, err
 	}
@@ -393,6 +412,26 @@ func (s *Store) ClaimNext(ctx context.Context) (*EmbeddingJob, error) {
 	}
 
 	return buildEmbeddingJob(job, payload), nil
+}
+
+// RequeueStaleRunning moves stale running jobs back to retry after a worker crash.
+func (s *Store) RequeueStaleRunning(ctx context.Context, olderThan time.Duration) (int64, error) {
+	return s.queue.RequeueStaleRunning(ctx, olderThan)
+}
+
+// RequeueStaleRunningKind moves stale running jobs for one task kind back to retry.
+func (s *Store) RequeueStaleRunningKind(ctx context.Context, kind embedqueue.TaskKind, olderThan time.Duration) (int64, error) {
+	return s.queue.RequeueStaleRunningForKind(ctx, olderThan, string(kind))
+}
+
+// RequeueStaleRunningInWorkspace moves stale running jobs for one workspace/group back to retry.
+func (s *Store) RequeueStaleRunningInWorkspace(ctx context.Context, workspaceID string, olderThan time.Duration) (int64, error) {
+	return s.queue.RequeueStaleRunningForGroup(ctx, olderThan, strings.TrimSpace(workspaceID))
+}
+
+// RequeueStaleRunningInWorkspaceKind moves stale running jobs for one workspace/group and task kind back to retry.
+func (s *Store) RequeueStaleRunningInWorkspaceKind(ctx context.Context, workspaceID string, kind embedqueue.TaskKind, olderThan time.Duration) (int64, error) {
+	return s.queue.RequeueStaleRunningForGroupKind(ctx, olderThan, strings.TrimSpace(workspaceID), string(kind))
 }
 
 // Complete stores the embedding result and marks the job as completed.
@@ -565,9 +604,34 @@ func (s *Store) GetEmbeddingsByFile(ctx context.Context, workspaceID, filePath s
 
 // Stats summarizes the queue state.
 func (s *Store) Stats(ctx context.Context) (*QueueStats, error) {
+	return s.stats(ctx, "", "")
+}
+
+// StatsInWorkspace summarizes the queue state for one workspace/group.
+func (s *Store) StatsInWorkspace(ctx context.Context, workspaceID string) (*QueueStats, error) {
+	return s.stats(ctx, strings.TrimSpace(workspaceID), "")
+}
+
+// StatsKind summarizes queue state for one task kind.
+func (s *Store) StatsKind(ctx context.Context, kind embedqueue.TaskKind) (*QueueStats, error) {
+	return s.stats(ctx, "", string(kind))
+}
+
+// StatsInWorkspaceKind summarizes queue state for one workspace/group and task kind.
+func (s *Store) StatsInWorkspaceKind(ctx context.Context, workspaceID string, kind embedqueue.TaskKind) (*QueueStats, error) {
+	return s.stats(ctx, strings.TrimSpace(workspaceID), string(kind))
+}
+
+func (s *Store) stats(ctx context.Context, workspaceID, kind string) (*QueueStats, error) {
 	stats := &QueueStats{}
 
-	queueStats, err := s.queue.Stats(ctx, "")
+	var queueStats *queue.Stats
+	var err error
+	if strings.TrimSpace(kind) == "" {
+		queueStats, err = s.queue.Stats(ctx, workspaceID)
+	} else {
+		queueStats, err = s.queue.StatsForKind(ctx, workspaceID, kind)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -578,7 +642,15 @@ func (s *Store) Stats(ctx context.Context) (*QueueStats, error) {
 	stats.FailedCount = queueStats.FailedCount
 	stats.OldestQueuedAt = queueStats.OldestQueuedAt
 
-	err = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM symbol_embeddings`).Scan(&stats.EmbeddingsCount)
+	if embedqueue.TaskKind(strings.TrimSpace(kind)) == embedqueue.TaskKindMemory {
+		return stats, nil
+	}
+
+	if workspaceID == "" {
+		err = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM symbol_embeddings`).Scan(&stats.EmbeddingsCount)
+	} else {
+		err = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM symbol_embeddings WHERE workspace_id = ?`, workspaceID).Scan(&stats.EmbeddingsCount)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("count embeddings: %w", err)
 	}
