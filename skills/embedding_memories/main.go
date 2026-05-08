@@ -125,7 +125,8 @@ func memoryInputsAndPolicySkips(entries []memory.NamedEntry) ([]embedding.Memory
 
 func nextEligibleMemoryBatch(ctx context.Context, memStore interface {
 	ListWithoutEmbeddingPage(context.Context, string, int, int) ([]memory.NamedEntry, error)
-}, workspace string, batchSize int, seen map[string]bool) ([]memory.NamedEntry, int, error) {
+}, workspace string, batchSize int, seen map[string]bool,
+) ([]memory.NamedEntry, int, error) {
 	var batch []memory.NamedEntry
 	skipped := 0
 	offset := 0

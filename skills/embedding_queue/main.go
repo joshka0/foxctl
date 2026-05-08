@@ -308,9 +308,7 @@ func handleStats(ctx context.Context, cacheRoot string, store *embedding.Store, 
 			scope, semantic.SemanticEmbeddingQueueTable, output.Stats.QueuedCount, output.Stats.RunningCount, output.Stats.CompletedCount, output.Stats.FailedCount, output.Stats.EmbeddingsCount)
 		return nil
 	}
-	var (
-		stats *embedding.QueueStats
-	)
+	var stats *embedding.QueueStats
 	switch {
 	case workspaceID != "" && kind != "":
 		stats, err = store.StatsInWorkspaceKind(ctx, workspaceID, kind)
@@ -443,9 +441,7 @@ func handleRecoverStale(ctx context.Context, cacheRoot string, store *embedding.
 	if err != nil {
 		return err
 	}
-	var (
-		recovered int64
-	)
+	var recovered int64
 	if kind == embedqueue.TaskKindSemanticFile {
 		recovered, err = withSemanticQueue(ctx, cacheRoot, func(semanticStore *semantic.QueueStore) (int64, error) {
 			return semanticStore.RequeueStaleRunningInWorkspace(ctx, workspaceID, olderThan)

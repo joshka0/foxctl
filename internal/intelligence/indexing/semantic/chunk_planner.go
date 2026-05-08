@@ -131,10 +131,6 @@ func (idx *Indexer) planFallbackChunks(path, digest string, content []byte) []Ch
 	return chunks
 }
 
-func isGoLanguage(path, language string) bool {
-	return language == "go" || (language == "" && strings.HasSuffix(path, ".go"))
-}
-
 func receiverTypeName(fn *ast.FuncDecl) string {
 	if fn.Recv == nil || len(fn.Recv.List) == 0 {
 		return ""
