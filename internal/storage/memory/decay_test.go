@@ -153,7 +153,7 @@ func TestRerankScoredEntriesWithDecay_ReturnsCopiedSliceAndPreservesInput(t *tes
 	originalScore := input[0].Score
 	originalID := input[0].Entry.ID
 
-	got := rerankScoredEntriesWithDecay(input, now, cfg, 0)
+	got := RerankScoredEntriesWithDecay(input, now, cfg, 0)
 	if len(got) != len(input) {
 		t.Fatalf("len=%d want %d", len(got), len(input))
 	}
@@ -179,7 +179,7 @@ func TestRerankScoredEntriesWithDecay_DisabledConfigPreservesBaseScoreRanking(t 
 		{Entry: NamedEntry{ID: "mid", Name: "mid", UpdatedAt: now.Add(-3 * time.Hour)}, Score: 2.1},
 	}
 
-	got := rerankScoredEntriesWithDecay(input, now, cfg, 0)
+	got := RerankScoredEntriesWithDecay(input, now, cfg, 0)
 	if len(got) != 3 {
 		t.Fatalf("len=%d want 3", len(got))
 	}
@@ -205,7 +205,7 @@ func TestRerankScoredEntriesWithDecay_DeterministicTieBreakers(t *testing.T) {
 		{Entry: NamedEntry{ID: "newer", Name: "zzz", UpdatedAt: now.Add(-30 * time.Minute)}, Score: 0.7},
 	}
 
-	got := rerankScoredEntriesWithDecay(input, now, cfg, 0)
+	got := RerankScoredEntriesWithDecay(input, now, cfg, 0)
 	if len(got) != len(input) {
 		t.Fatalf("len=%d want %d", len(got), len(input))
 	}
@@ -229,7 +229,7 @@ func TestRerankScoredEntriesWithDecay_UsesLastAccessBeforeNameTieBreak(t *testin
 		{Entry: NamedEntry{ID: "z", Name: "zeta", UpdatedAt: updatedSame, LastAccess: now.Add(-1 * time.Hour)}, Score: 0.7},
 	}
 
-	got := rerankScoredEntriesWithDecay(input, now, cfg, 0)
+	got := RerankScoredEntriesWithDecay(input, now, cfg, 0)
 	if got[0].Entry.ID != "z" || got[1].Entry.ID != "a" {
 		t.Fatalf("last_access tie-break ignored: [%s %s]", got[0].Entry.ID, got[1].Entry.ID)
 	}
@@ -246,7 +246,7 @@ func TestRerankScoredEntriesWithDecay_AppliesLimitAfterRerank(t *testing.T) {
 		{Entry: NamedEntry{ID: "b", Name: "b", UpdatedAt: now}, Score: 0.6},
 	}
 
-	got := rerankScoredEntriesWithDecay(input, now, cfg, 2)
+	got := RerankScoredEntriesWithDecay(input, now, cfg, 2)
 	if len(got) != 2 {
 		t.Fatalf("len=%d want 2", len(got))
 	}
@@ -270,8 +270,8 @@ func TestDecayCandidateLimitWidensWithBounds(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := decayCandidateLimit(tt.limit); got != tt.want {
-				t.Fatalf("decayCandidateLimit(%d)=%d want %d", tt.limit, got, tt.want)
+			if got := DecayCandidateLimit(tt.limit); got != tt.want {
+				t.Fatalf("DecayCandidateLimit(%d)=%d want %d", tt.limit, got, tt.want)
 			}
 		})
 	}

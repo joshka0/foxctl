@@ -169,7 +169,18 @@ type decayRankedEntry struct {
 	baseScore float64
 }
 
-func rerankScoredEntriesWithDecay(
+// RerankScoredEntriesWithDecay applies bounded search-time decay before final truncation.
+//
+// Index:
+//
+//	Purpose: Shared memory decay rerank boundary for retrieval skills and stores.
+//	Keywords: memory decay, recency rerank, candidate widening
+//	Related: ScoreWithDecay, DecayCandidateLimit
+//
+// [[domain:memory-decay-ranking]]
+// [[invariant:memory-decay-relevance-primary]]
+// [[test:internal/storage/memory/decay_test.go#TestRerankScoredEntriesWithDecay_AppliesLimitAfterRerank]]
+func RerankScoredEntriesWithDecay(
 	scored []storage.ScoredEntry,
 	now time.Time,
 	cfg DecayConfig,
@@ -227,7 +238,8 @@ func rerankScoredEntriesWithDecay(
 	return reranked
 }
 
-func decayCandidateLimit(limit int) int {
+// DecayCandidateLimit widens a requested result limit so decay can rerank before truncation.
+func DecayCandidateLimit(limit int) int {
 	if limit <= 0 {
 		return limit
 	}

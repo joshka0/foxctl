@@ -134,18 +134,19 @@ const (
 
 // Input is the expected JSON input for code/semantic_search operations.
 type Input struct {
-	Query          string   `json:"query,omitempty"`           // Empty query with format=tree returns full repo tree
-	Scope          []string `json:"scope,omitempty"`           // ["symbols", "sessions", "memories", "tasks"]
-	Profile        string   `json:"profile,omitempty"`         // "default" or "code"
-	Workspace      string   `json:"workspace,omitempty"`       // Workspace path (defaults to cwd)
-	VaultPath      string   `json:"vault_path,omitempty"`      // Optional knowledge-vault path for context scope
-	Limit          int      `json:"limit,omitempty"`           // Default: 20
-	MinSimilarity  float64  `json:"min_similarity,omitempty"`  // Default: 0.3
-	IncludeContext *bool    `json:"include_context,omitempty"` // Include session context hints (default: true)
-	Summarize      bool     `json:"summarize,omitempty"`       // Send results to LLM for synthesis
-	SummarizeModel string   `json:"summarize_model,omitempty"` // Override default LLM model
-	Format         string   `json:"format,omitempty"`          // Output format: "json" (default), "tree"
-	InlineMode     string   `json:"inline_mode,omitempty"`     // auto, full, preview, artifact_only
+	Query              string   `json:"query,omitempty"`                // Empty query with format=tree returns full repo tree
+	Scope              []string `json:"scope,omitempty"`                // ["symbols", "sessions", "memories", "tasks"]
+	Profile            string   `json:"profile,omitempty"`              // "default" or "code"
+	Workspace          string   `json:"workspace,omitempty"`            // Workspace path (defaults to cwd)
+	VaultPath          string   `json:"vault_path,omitempty"`           // Optional knowledge-vault path for context scope
+	Limit              int      `json:"limit,omitempty"`                // Default: 20
+	MinSimilarity      float64  `json:"min_similarity,omitempty"`       // Default: 0.3
+	IncludeContext     *bool    `json:"include_context,omitempty"`      // Include session context hints (default: true)
+	MemoryDecayEnabled bool     `json:"memory_decay_enabled,omitempty"` // Enable search-time recency decay for memory results
+	Summarize          bool     `json:"summarize,omitempty"`            // Send results to LLM for synthesis
+	SummarizeModel     string   `json:"summarize_model,omitempty"`      // Override default LLM model
+	Format             string   `json:"format,omitempty"`               // Output format: "json" (default), "tree"
+	InlineMode         string   `json:"inline_mode,omitempty"`          // auto, full, preview, artifact_only
 
 	// Remote/cross-workspace options (requires Turso)
 	Remote     bool     `json:"remote,omitempty"`     // Use remote Turso database
@@ -206,21 +207,22 @@ type SynthesisSummary struct {
 
 // Result represents a single search result from any source.
 type Result struct {
-	Source      string           `json:"source"`                 // "symbol", "session", "memory", "cochange"
-	ID          string           `json:"id"`                     // Unique identifier (normalized)
-	Name        string           `json:"name"`                   // Display name
-	Path        string           `json:"path,omitempty"`         // File path (for symbols)
-	Line        int              `json:"line,omitempty"`         // Line number (for symbols)
-	Snippet     string           `json:"snippet,omitempty"`      // Code snippet (for symbols)
-	Summary     string           `json:"summary,omitempty"`      // Summary text (for sessions/memories/cochange)
-	Similarity  float64          `json:"similarity"`             // Similarity score (0-1)
-	Rank        int              `json:"rank"`                   // Final rank after fusion
-	RRFScore    float64          `json:"rrf_score,omitempty"`    // RRF score used for ranking
-	PageRank    float64          `json:"pagerank,omitempty"`     // PageRank authority score (0-1 normalized)
-	FinalScore  float64          `json:"final_score,omitempty"`  // Combined score with PageRank boost
-	RerankScore float64          `json:"rerank_score,omitempty"` // Reranker relevance score (0-1)
-	SourceRank  int              `json:"source_rank,omitempty"`  // Rank within source
-	Timeline    *SessionTimeline `json:"timeline,omitempty"`     // Timeline data (for sessions when timeline=true)
+	Source         string           `json:"source"`                 // "symbol", "session", "memory", "cochange"
+	ID             string           `json:"id"`                     // Unique identifier (normalized)
+	Name           string           `json:"name"`                   // Display name
+	Path           string           `json:"path,omitempty"`         // File path (for symbols)
+	Line           int              `json:"line,omitempty"`         // Line number (for symbols)
+	Snippet        string           `json:"snippet,omitempty"`      // Code snippet (for symbols)
+	Summary        string           `json:"summary,omitempty"`      // Summary text (for sessions/memories/cochange)
+	Similarity     float64          `json:"similarity"`             // Similarity score (0-1)
+	BaseSimilarity float64          `json:"-"`                      // Internal pre-rerank score for threshold checks
+	Rank           int              `json:"rank"`                   // Final rank after fusion
+	RRFScore       float64          `json:"rrf_score,omitempty"`    // RRF score used for ranking
+	PageRank       float64          `json:"pagerank,omitempty"`     // PageRank authority score (0-1 normalized)
+	FinalScore     float64          `json:"final_score,omitempty"`  // Combined score with PageRank boost
+	RerankScore    float64          `json:"rerank_score,omitempty"` // Reranker relevance score (0-1)
+	SourceRank     int              `json:"source_rank,omitempty"`  // Rank within source
+	Timeline       *SessionTimeline `json:"timeline,omitempty"`     // Timeline data (for sessions when timeline=true)
 }
 
 // CandidateBundle is a machine-usable grouping of related code candidates.
@@ -1993,33 +1995,36 @@ func searchMemories(
 			return nil, "", skillerr.Validation("memory store does not support cross-workspace search; Turso required")
 		}
 
+		candidateLimit := semanticSearchMemoryCandidateLimit(limit, in.MemoryDecayEnabled)
 		if in.Remote && in.Global {
-			scoredEntries, err = remoteStore.SearchSimilarGlobal(ctx, queryEmbedding, limit)
+			scoredEntries, err = remoteStore.SearchSimilarGlobal(ctx, queryEmbedding, candidateLimit)
 		} else if in.Remote && len(in.Workspaces) > 0 {
-			scoredEntries, err = remoteStore.SearchSimilarMultiWorkspace(ctx, in.Workspaces, queryEmbedding, limit)
+			scoredEntries, err = remoteStore.SearchSimilarMultiWorkspace(ctx, in.Workspaces, queryEmbedding, candidateLimit)
 		} else {
-			scoredEntries, err = store.SearchSimilar(ctx, workspaceID, queryEmbedding, limit)
+			scoredEntries, err = store.SearchSimilar(ctx, workspaceID, queryEmbedding, candidateLimit)
 		}
 		if err != nil {
 			return nil, "", skillerr.WrapRuntime("memory remote search failed", err)
 		}
 
-		return memoryResultsFromScored(scoredEntries, limit), "", nil
+		baseScores := captureMemoryBaseScores(scoredEntries, in.MemoryDecayEnabled)
+		scoredEntries = applyMemoryDecayPolicy(scoredEntries, in.MemoryDecayEnabled, 0, time.Now())
+		return memoryResultsFromScored(scoredEntries, limit, baseScores), "", nil
 	}
 
 	if queryEmbedding != nil {
-		results, err := searchMemoriesVector(ctx, cfg, workspaceID, queryEmbedding, limit, memStore)
+		results, err := searchMemoriesVector(ctx, cfg, workspaceID, queryEmbedding, limit, in.MemoryDecayEnabled, memStore)
 		if err == nil && len(results) > 0 {
 			return results, "", nil
 		}
 		if err != nil {
 			hint := fmt.Sprintf("memory vector search failed: %v; using BM25 fallback", err)
-			results, bm25Err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit, memStore)
+			results, bm25Err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit, in.MemoryDecayEnabled, memStore)
 			return results, hint, bm25Err
 		}
 	}
 
-	results, err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit, memStore)
+	results, err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit, in.MemoryDecayEnabled, memStore)
 	return results, "", err
 }
 
@@ -2039,7 +2044,7 @@ func ensureSemanticSearchMemoryStore(ctx context.Context, cfg config.Config, mem
 	return store, func() { _ = store.Close() }, nil
 }
 
-func memoryResultsFromScored(scoredEntries []storage.ScoredEntry, limit int) []Result {
+func memoryResultsFromScored(scoredEntries []storage.ScoredEntry, limit int, baseScores map[string]float64) []Result {
 	results := make([]Result, 0, len(scoredEntries))
 	rank := 1
 	for _, scored := range scoredEntries {
@@ -2049,12 +2054,13 @@ func memoryResultsFromScored(scoredEntries []storage.ScoredEntry, limit int) []R
 		}
 
 		result := Result{
-			Source:     "memory",
-			ID:         normalizeMemoryID(entry.Name),
-			Name:       entry.Name,
-			Summary:    skillout.TruncateString(entry.Summary, 200),
-			Similarity: scored.Score,
-			SourceRank: rank,
+			Source:         "memory",
+			ID:             normalizeMemoryID(entry.Name),
+			Name:           entry.Name,
+			Summary:        skillout.TruncateString(entry.Summary, 200),
+			Similarity:     scored.Score,
+			BaseSimilarity: memoryBaseScore(baseScores, entry, scored.Score),
+			SourceRank:     rank,
 		}
 		results = append(results, result)
 		rank++
@@ -2067,11 +2073,62 @@ func memoryResultsFromScored(scoredEntries []storage.ScoredEntry, limit int) []R
 	return results
 }
 
+func captureMemoryBaseScores(scored []storage.ScoredEntry, enabled bool) map[string]float64 {
+	if !enabled {
+		return nil
+	}
+	baseScores := make(map[string]float64, len(scored))
+	for _, scoredEntry := range scored {
+		baseScores[memoryScoreKey(scoredEntry.Entry)] = scoredEntry.Score
+	}
+	return baseScores
+}
+
+func memoryBaseScore(baseScores map[string]float64, entry storage.NamedEntry, fallback float64) float64 {
+	if len(baseScores) == 0 {
+		return 0
+	}
+	if score, ok := baseScores[memoryScoreKey(entry)]; ok {
+		return score
+	}
+	return fallback
+}
+
+func memoryScoreKey(entry storage.NamedEntry) string {
+	if strings.TrimSpace(entry.ID) != "" {
+		return entry.ID
+	}
+	return entry.Workspace + "\x00" + entry.Name
+}
+
+func semanticSearchMemoryCandidateLimit(limit int, decayEnabled bool) int {
+	if decayEnabled {
+		return memory.DecayCandidateLimit(limit)
+	}
+	return limit
+}
+
+func normalizeBM25MemoryScore(score float64) float64 {
+	normalizedScore := 0.3 + (score * 0.7)
+	if normalizedScore > 1.0 {
+		return 1.0
+	}
+	return normalizedScore
+}
+
+func applyMemoryDecayPolicy(scored []storage.ScoredEntry, enabled bool, limit int, now time.Time) []storage.ScoredEntry {
+	if !enabled {
+		return scored
+	}
+	return memory.RerankScoredEntriesWithDecay(scored, now, memory.DefaultDecayConfig(), limit)
+}
+
 // searchMemoriesBM25 uses SQLite BM25-like text search for memories.
 func searchMemoriesBM25(
 	ctx context.Context,
 	cfg config.Config, workspaceID, query string,
 	limit int,
+	decayEnabled bool,
 	memStore storage.MemoryStore,
 ) ([]Result, error) {
 	var err error
@@ -2086,12 +2143,17 @@ func searchMemoriesBM25(
 	// Request more items than limit to account for type filtering
 	// Code-related types (code_symbol, file_embedding, edit) often dominate the memory store
 	fetchLimit := max(limit*10, 100)
+	if decayEnabled {
+		fetchLimit = max(fetchLimit, memory.DecayCandidateLimit(limit))
+	}
 
 	// Use basic text search on memories (BM25-like)
 	scoredEntries, err := memStore.Search(ctx, workspaceID, query, fetchLimit)
 	if err != nil {
 		return nil, skillerr.WrapIO("search memories", err)
 	}
+	baseScores := captureMemoryBaseScores(scoredEntries, decayEnabled)
+	scoredEntries = applyMemoryDecayPolicy(scoredEntries, decayEnabled, 0, time.Now())
 
 	// Filter out symbol-type entries (they're handled by symbol search)
 	results := make([]Result, 0, len(scoredEntries))
@@ -2111,19 +2173,18 @@ func searchMemoriesBM25(
 		// BM25 scores are based on recency/frequency (0-1 range, typically <0.3)
 		// Normalize to 0.3-1.0 range so results pass min_similarity filter
 		// RRF uses ranks for fusion, so score mainly affects threshold filtering
-		normalizedScore := 0.3 + (scored.Score * 0.7)
-		if normalizedScore > 1.0 {
-			normalizedScore = 1.0
-		}
+		baseSimilarity := normalizeBM25MemoryScore(memoryBaseScore(baseScores, entry, scored.Score))
+		normalizedScore := normalizeBM25MemoryScore(scored.Score)
 
 		result := Result{
-			Source:     source,
-			ID:         normalizeMemoryID(entry.Name),
-			Name:       entry.Name,
-			Path:       resultPath,
-			Summary:    skillout.TruncateString(entry.Summary, 200),
-			Similarity: normalizedScore,
-			SourceRank: rank,
+			Source:         source,
+			ID:             normalizeMemoryID(entry.Name),
+			Name:           entry.Name,
+			Path:           resultPath,
+			Summary:        skillout.TruncateString(entry.Summary, 200),
+			Similarity:     normalizedScore,
+			BaseSimilarity: baseSimilarity,
+			SourceRank:     rank,
 		}
 		results = append(results, result)
 		rank++
@@ -2142,6 +2203,7 @@ func searchMemoriesVector(
 	cfg config.Config, workspaceID string,
 	queryEmbedding []float32,
 	limit int,
+	decayEnabled bool,
 	memStore storage.MemoryStore,
 ) ([]Result, error) {
 	var err error
@@ -2156,12 +2218,17 @@ func searchMemoriesVector(
 	// Request more items than limit to account for type filtering
 	// Code-related types (code_symbol, file_embedding, edit) often dominate the memory store
 	fetchLimit := max(limit*10, 100)
+	if decayEnabled {
+		fetchLimit = max(fetchLimit, memory.DecayCandidateLimit(limit))
+	}
 
 	// Use vector similarity search
 	scoredEntries, err := memStore.SearchSimilar(ctx, workspaceID, queryEmbedding, fetchLimit)
 	if err != nil {
 		return nil, skillerr.WrapIO("vector search memories", err)
 	}
+	baseScores := captureMemoryBaseScores(scoredEntries, decayEnabled)
+	scoredEntries = applyMemoryDecayPolicy(scoredEntries, decayEnabled, 0, time.Now())
 
 	// Filter out symbol-type entries (they're handled by symbol search)
 	results := make([]Result, 0, len(scoredEntries))
@@ -2179,13 +2246,14 @@ func searchMemoriesVector(
 		}
 
 		result := Result{
-			Source:     source,
-			ID:         normalizeMemoryID(entry.Name),
-			Name:       entry.Name,
-			Path:       resultPath,
-			Summary:    skillout.TruncateString(entry.Summary, 200),
-			Similarity: scored.Score,
-			SourceRank: rank,
+			Source:         source,
+			ID:             normalizeMemoryID(entry.Name),
+			Name:           entry.Name,
+			Path:           resultPath,
+			Summary:        skillout.TruncateString(entry.Summary, 200),
+			Similarity:     scored.Score,
+			BaseSimilarity: memoryBaseScore(baseScores, entry, scored.Score),
+			SourceRank:     rank,
 		}
 		results = append(results, result)
 		rank++
@@ -2545,7 +2613,7 @@ func reciprocalRankFusion(sourceResults map[string][]Result, minSimilarity float
 
 	for _, results := range sourceResults {
 		for rank, result := range results {
-			if result.Similarity < minSimilarity {
+			if thresholdSimilarity(result) < minSimilarity {
 				continue
 			}
 
@@ -2577,6 +2645,13 @@ func reciprocalRankFusion(sourceResults map[string][]Result, minSimilarity float
 	})
 
 	return results
+}
+
+func thresholdSimilarity(result Result) float64 {
+	if result.BaseSimilarity > 0 {
+		return result.BaseSimilarity
+	}
+	return result.Similarity
 }
 
 func searchContext(ctx context.Context, cfg config.Config, workspacePath, query, inputVaultPath string, semanticProvider semantic.EmbeddingProvider, limit int) ([]Result, string, error) {

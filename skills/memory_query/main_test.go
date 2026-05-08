@@ -128,6 +128,17 @@ func seedMemory(t *testing.T, store *memory.Store, workspace string, opts *seedO
 	return saved
 }
 
+func markMemoryViewed(t *testing.T, store *memory.Store, workspace, name string, at time.Time, count int) {
+	t.Helper()
+	for i := 0; i < count; i++ {
+		_, err := store.UpdateTelemetry(context.Background(), name, workspace, storage.MemoryTelemetryUpdate{
+			Action: "viewed",
+			At:     &at,
+		})
+		require.NoError(t, err)
+	}
+}
+
 type seedOpts struct {
 	Name      string
 	Type      string
@@ -526,6 +537,90 @@ func TestMemoryQuery_FileOnly(t *testing.T) {
 	assert.Len(t, records, 1)
 	mem := records[0].(map[string]any)
 	assert.Contains(t, mem["source_id"], "auth/handler.go")
+}
+
+func TestMemoryQuery_MemoryDecayDisabledPreservesFilterScores(t *testing.T) {
+	var buf bytes.Buffer
+	rc, cleanup := newTestContext(t, &buf)
+	defer cleanup()
+
+	store := openMemoryStore(t, rc)
+	now := time.Now().UTC()
+	seedMemory(t, store, rc.Workspace, &seedOpts{
+		Name:    "decay-disabled-old",
+		Type:    "semantic_fact",
+		Summary: "Old memory",
+	})
+	seedMemory(t, store, rc.Workspace, &seedOpts{
+		Name:    "decay-disabled-recent",
+		Type:    "semantic_fact",
+		Summary: "Recent memory",
+	})
+	markMemoryViewed(t, store, rc.Workspace, "decay-disabled-old", now.Add(-90*24*time.Hour), 1)
+	markMemoryViewed(t, store, rc.Workspace, "decay-disabled-recent", now.Add(-10*time.Minute), 1)
+
+	err := run(context.Background(), rc, Input{
+		Kinds: "semantic_fact",
+		Limit: 2,
+	})
+	require.NoError(t, err)
+
+	env := decodeEnvelope(t, &buf)
+	assertOK(t, env)
+	data := getData(t, env)
+	records := data["records"].([]any)
+	require.Len(t, records, 2)
+
+	scores := scoresBySourceID(records)
+	assert.Equal(t, 1.0, scores["decay-disabled-old"])
+	assert.Equal(t, 1.0, scores["decay-disabled-recent"])
+}
+
+func TestMemoryQuery_MemoryDecayEnabledReranksBeforePagination(t *testing.T) {
+	var buf bytes.Buffer
+	rc, cleanup := newTestContext(t, &buf)
+	defer cleanup()
+
+	store := openMemoryStore(t, rc)
+	now := time.Now().UTC()
+	seedMemory(t, store, rc.Workspace, &seedOpts{
+		Name:    "decay-enabled-old",
+		Type:    "semantic_fact",
+		Summary: "Old memory",
+	})
+	seedMemory(t, store, rc.Workspace, &seedOpts{
+		Name:    "decay-enabled-recent",
+		Type:    "semantic_fact",
+		Summary: "Recent memory",
+	})
+	markMemoryViewed(t, store, rc.Workspace, "decay-enabled-old", now.Add(-90*24*time.Hour), 1)
+	markMemoryViewed(t, store, rc.Workspace, "decay-enabled-recent", now.Add(-10*time.Minute), 1)
+
+	err := run(context.Background(), rc, Input{
+		Kinds:              "semantic_fact",
+		Limit:              1,
+		MemoryDecayEnabled: true,
+	})
+	require.NoError(t, err)
+
+	env := decodeEnvelope(t, &buf)
+	assertOK(t, env)
+	data := getData(t, env)
+	records := data["records"].([]any)
+	require.Len(t, records, 1)
+
+	first := records[0].(map[string]any)
+	assert.Equal(t, "decay-enabled-recent", first["source_id"])
+	assert.Greater(t, first["score"].(float64), 0.9)
+}
+
+func scoresBySourceID(records []any) map[string]float64 {
+	scores := make(map[string]float64, len(records))
+	for _, item := range records {
+		record := item.(map[string]any)
+		scores[record["source_id"].(string)] = record["score"].(float64)
+	}
+	return scores
 }
 
 // Tests for filtering

@@ -53,6 +53,11 @@ signature:
       required: false
       default: true
       description: Include context hints from session matches
+    - name: memory_decay_enabled
+      type: boolean
+      required: false
+      default: false
+      description: Enable opt-in search-time recency decay for memory-scope ranking
     - name: rerank_enabled
       type: boolean
       required: false
@@ -179,6 +184,16 @@ signature:
       6. Combines results using Reciprocal Rank Fusion (RRF)
       7. Extracts context hints from matching sessions
 
+      Memory decay:
+      - memory_decay_enabled=true applies a soft search-time recency rerank only
+        to memory-scope candidates.
+      - It widens the memory candidate pool before reranking and then truncates
+        back to the requested limit.
+      - min_similarity eligibility uses the pre-decay memory score so old strong
+        matches can still enter fusion even when the displayed decayed score is
+        lower.
+      - It does not prune, delete, or promote memories.
+
       Repo-index modes for `scope:["symbols"]`:
       - `auto`: precise default. Uses repo-index search first and only falls back to DAG when search returns no hits.
       - `search`: best for structural queries when you want direct code entrypoints.
@@ -215,6 +230,7 @@ signature:
         foxctl run code/semantic_search --input '{"query":"authentication middleware","scope":["symbols"],"limit":10}'
         foxctl run code/semantic_search --input '{"query":"repo index dag grep","scope":["symbols"],"repo_index_mode":"search"}'
         foxctl skills run code/semantic_search --query "authentication middleware" --scope symbols --limit 10
+        foxctl run code/semantic_search --input '{"query":"current sprint context","scope":["memories"],"memory_decay_enabled":true,"limit":10}'
         foxctl run code/semantic_search --input '{"query":"database migration issues","scope":["sessions"],"include_context":true}'
         foxctl skills run code/semantic_search --query "database migration issues" --scope sessions --include-context
     workflows:
