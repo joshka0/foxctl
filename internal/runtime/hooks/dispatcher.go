@@ -49,6 +49,7 @@ type Result struct {
 type HookResult struct {
 	HookID   string        `json:"hook_id"`
 	Skill    string        `json:"skill,omitempty"`
+	Role     HookRole      `json:"role,omitempty"`
 	Output   Output        `json:"output"`
 	Duration time.Duration `json:"duration_ms"`
 	Error    error         `json:"error,omitempty"`
@@ -96,10 +97,38 @@ type HookMatcher struct {
 // HookRunEntry is a single skill to run within a hook.
 type HookRunEntry struct {
 	Skill     string         `yaml:"skill" json:"skill"`
+	Role      HookRole       `yaml:"role,omitempty" json:"role,omitempty"`
 	TimeoutMS int            `yaml:"timeout_ms,omitempty" json:"timeout_ms,omitempty"`
 	FailOpen  bool           `yaml:"fail_open" json:"fail_open"`
 	Ephemeral *bool          `yaml:"ephemeral,omitempty" json:"ephemeral,omitempty"`
 	Config    map[string]any `yaml:"config,omitempty" json:"config,omitempty"`
+}
+
+// HookRole describes the authority posture of a hook run entry.
+type HookRole string
+
+const (
+	HookRoleAdvisory      HookRole = "advisory"
+	HookRoleProposal      HookRole = "proposal"
+	HookRoleGuard         HookRole = "guard"
+	HookRoleCriticalGuard HookRole = "critical_guard"
+)
+
+// IsValid reports whether r is a known hook role.
+func (r HookRole) IsValid() bool {
+	switch r {
+	case HookRoleAdvisory, HookRoleProposal, HookRoleGuard, HookRoleCriticalGuard:
+		return true
+	default:
+		return false
+	}
+}
+
+func defaultHookRole(failOpen bool) HookRole {
+	if failOpen {
+		return HookRoleAdvisory
+	}
+	return HookRoleCriticalGuard
 }
 
 // DefaultTimeout is the default hook execution timeout.
@@ -199,6 +228,7 @@ func (d *dispatcher) Dispatch(ctx context.Context, input Input) (Result, error) 
 			hookResult := HookResult{
 				HookID:   hook.ID,
 				Skill:    entry.Skill,
+				Role:     entry.Role,
 				Output:   output,
 				Duration: time.Since(hookStart),
 				Error:    err,

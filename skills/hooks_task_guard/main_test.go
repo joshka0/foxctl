@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/context/contextplane"
 	"github.com/joshka0/foxctl/internal/domain/envelope"
 	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/platform/workspace"
@@ -311,6 +313,241 @@ func TestTaskGuard_AutoMode_DoesNotDirtyInProgressTask(t *testing.T) {
 	}
 }
 
+func TestTaskGuard_ProposalMode_NoActiveTask_RecordsProposalNoTask(t *testing.T) {
+	env := newTestEnv(t)
+	t.Setenv("FOXCTL_TASK_GUARD_MODE", "proposal")
+	if err := os.MkdirAll(env.workspaceRoot, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+
+	in := hooks.Input{
+		Event:         hooks.EventPreToolUse,
+		WorkspaceRoot: env.workspaceRoot,
+		SessionID:     "session-proposal-1",
+		ToolName:      "Edit",
+		ToolInput:     json.RawMessage(`{"file_path":"` + filepath.ToSlash(filepath.Join(env.workspaceRoot, "pkg/main.go")) + `"}`),
+	}
+	output := env.run(t, in)
+	if output.Decision != hooks.DecisionApprove {
+		t.Fatalf("expected approve, got %s", output.Decision)
+	}
+	if output.Meta["proposal_recorded"] != true {
+		t.Fatalf("expected proposal_recorded=true, got %v", output.Meta["proposal_recorded"])
+	}
+
+	taskStore, err := tasks.Open(context.Background(), env.cfg.Storage.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer taskStore.Close()
+	_, found, err := taskStore.GetActive(context.Background(), workspace.ID(env.workspaceRoot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found {
+		t.Fatal("expected no active task in proposal mode when none existed")
+	}
+
+	store := contextplane.NewWorkspaceStore(env.workspaceRoot)
+	states, err := store.ListControlProposalStates(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListControlProposalStates: %v", err)
+	}
+	if len(states) != 1 {
+		t.Fatalf("expected 1 proposal state, got %d", len(states))
+	}
+	if states[0].Proposal.Kind != contextplane.ProposalKindTaskProposal {
+		t.Fatalf("proposal kind = %q", states[0].Proposal.Kind)
+	}
+	if states[0].Proposal.Count != 1 {
+		t.Fatalf("proposal count = %d", states[0].Proposal.Count)
+	}
+	if got := states[0].Proposal.Payload["scope_path"]; got != "pkg/main.go" {
+		t.Fatalf("payload.scope_path = %v", got)
+	}
+}
+
+func TestTaskGuard_ProposalMode_DedupeEquivalentEvents(t *testing.T) {
+	env := newTestEnv(t)
+	t.Setenv("FOXCTL_TASK_GUARD_MODE", "proposal")
+	if err := os.MkdirAll(env.workspaceRoot, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+
+	first := hooks.Input{
+		Event:         hooks.EventPreToolUse,
+		WorkspaceRoot: env.workspaceRoot,
+		SessionID:     "session-proposal-dedupe",
+		ToolName:      "Edit",
+		ToolInput:     json.RawMessage(`{"file_path":"` + filepath.ToSlash(filepath.Join(env.workspaceRoot, "pkg/./main.go")) + `"}`),
+	}
+	second := hooks.Input{
+		Event:         hooks.EventPreToolUse,
+		WorkspaceRoot: env.workspaceRoot,
+		SessionID:     "session-proposal-dedupe",
+		ToolName:      "Edit",
+		ToolInput:     json.RawMessage(`{"file_path":"` + filepath.ToSlash(filepath.Join(env.workspaceRoot, "pkg/main.go")) + `"}`),
+	}
+
+	_ = env.run(t, first)
+	_ = env.run(t, second)
+
+	store := contextplane.NewWorkspaceStore(env.workspaceRoot)
+	states, err := store.ListControlProposalStates(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListControlProposalStates: %v", err)
+	}
+	if len(states) != 1 {
+		t.Fatalf("expected 1 proposal state, got %d", len(states))
+	}
+	if states[0].Proposal.Count != 2 {
+		t.Fatalf("proposal count = %d, want 2", states[0].Proposal.Count)
+	}
+}
+
+func TestTaskGuard_ProposalMode_DedupesProviderAliases(t *testing.T) {
+	env := newTestEnv(t)
+	t.Setenv("FOXCTL_TASK_GUARD_MODE", "proposal")
+	if err := os.MkdirAll(env.workspaceRoot, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	path := filepath.ToSlash(filepath.Join(env.workspaceRoot, "pkg/main.go"))
+
+	claudeStyle := hooks.Input{
+		Event:         hooks.EventPreToolUse,
+		WorkspaceRoot: env.workspaceRoot,
+		SessionID:     "session-provider-dedupe",
+		ToolName:      "Edit",
+		ToolKind:      hooks.ToolKindWrite,
+		ToolInput:     json.RawMessage(`{"file_path":"` + path + `"}`),
+	}
+	canonicalStyle := hooks.Input{
+		Event:         hooks.EventPreToolUse,
+		WorkspaceRoot: env.workspaceRoot,
+		SessionID:     "session-provider-dedupe",
+		ToolCanonical: "edit.apply_patch",
+		ToolKind:      hooks.ToolKindWrite,
+		ToolInput:     json.RawMessage(`{"file_path":"` + path + `"}`),
+	}
+
+	_ = env.run(t, claudeStyle)
+	_ = env.run(t, canonicalStyle)
+
+	store := contextplane.NewWorkspaceStore(env.workspaceRoot)
+	states, err := store.ListControlProposalStates(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListControlProposalStates: %v", err)
+	}
+	if len(states) != 1 {
+		t.Fatalf("expected 1 proposal state, got %d", len(states))
+	}
+	if states[0].Proposal.Count != 2 {
+		t.Fatalf("proposal count = %d, want 2", states[0].Proposal.Count)
+	}
+}
+
+func TestTaskGuard_ProposalMode_WithActiveTask_DirtiesAndNoProposal(t *testing.T) {
+	env := newTestEnv(t)
+	workspaceID := workspace.ID(env.workspaceRoot)
+	t.Setenv("FOXCTL_TASK_GUARD_MODE", "proposal")
+	if err := os.MkdirAll(env.workspaceRoot, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+
+	ctx := context.Background()
+	store, err := tasks.Open(ctx, env.cfg.Storage.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := store.Add(ctx, tasks.Task{
+		WorkspaceID:      workspaceID,
+		Title:            "Ready For Review",
+		Status:           tasks.StatusReadyForReview,
+		LastReviewStatus: tasks.ReviewStatusOK,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SetActive(ctx, workspaceID, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	_ = store.Close() //nolint:errcheck
+
+	in := hooks.Input{
+		Event:         hooks.EventPreToolUse,
+		WorkspaceRoot: env.workspaceRoot,
+		ToolName:      "Write",
+		ToolInput:     json.RawMessage(`{"file_path":"` + filepath.ToSlash(filepath.Join(env.workspaceRoot, "pkg/main.go")) + `"}`),
+	}
+	output := env.run(t, in)
+	if output.Decision != hooks.DecisionApprove {
+		t.Fatalf("expected approve, got %s", output.Decision)
+	}
+	if output.Meta["proposal_recorded"] != false {
+		t.Fatalf("expected proposal_recorded=false, got %v", output.Meta["proposal_recorded"])
+	}
+	if output.Meta["dirtied"] != true {
+		t.Fatalf("expected dirtied=true, got %v", output.Meta["dirtied"])
+	}
+
+	controlStore := contextplane.NewWorkspaceStore(env.workspaceRoot)
+	states, err := controlStore.ListControlProposalStates(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListControlProposalStates: %v", err)
+	}
+	if len(states) != 0 {
+		t.Fatalf("expected no control proposals, got %d", len(states))
+	}
+}
+
+func TestTaskGuard_ProposalMode_BlocksUnsafeScope(t *testing.T) {
+	env := newTestEnv(t)
+	t.Setenv("FOXCTL_TASK_GUARD_MODE", "proposal")
+	if err := os.MkdirAll(env.workspaceRoot, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+
+	in := hooks.Input{
+		Event:         hooks.EventPreToolUse,
+		WorkspaceRoot: env.workspaceRoot,
+		ToolName:      "Edit",
+		ToolInput:     json.RawMessage(`{"file_path":"/tmp/outside.txt"}`),
+	}
+	output := env.run(t, in)
+	if output.Decision != hooks.DecisionBlock {
+		t.Fatalf("expected block, got %s", output.Decision)
+	}
+
+	controlStore := contextplane.NewWorkspaceStore(env.workspaceRoot)
+	states, err := controlStore.ListControlProposalStates(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("ListControlProposalStates: %v", err)
+	}
+	if len(states) != 0 {
+		t.Fatalf("expected no control proposals, got %d", len(states))
+	}
+}
+
+func TestTaskGuard_ProposalMode_RequiresExplicitWorkspaceContext(t *testing.T) {
+	env := newTestEnv(t)
+	t.Setenv("FOXCTL_TASK_GUARD_MODE", "proposal")
+	t.Setenv("FOXCTL_WORKSPACE", "")
+	t.Setenv("CLAUDE_PROJECT_DIR", "")
+
+	in := hooks.Input{
+		Event:     hooks.EventPreToolUse,
+		ToolName:  "Edit",
+		ToolInput: json.RawMessage(`{"file_path":"pkg/main.go"}`),
+	}
+	err := env.runError(in)
+	if err == nil {
+		t.Fatal("expected missing workspace context error")
+	}
+	if got := err.Error(); got != "proposal mode requires workspace_root, cwd, FOXCTL_WORKSPACE, or CLAUDE_PROJECT_DIR" {
+		t.Fatalf("unexpected error: %s", got)
+	}
+}
+
 type testEnv struct {
 	ctx           context.Context
 	workspaceRoot string
@@ -385,4 +622,10 @@ func (env *testEnv) run(t *testing.T, in hooks.Input) hooks.Output {
 	}
 
 	return output
+}
+
+func (env *testEnv) runError(in hooks.Input) error {
+	buf := &bytes.Buffer{}
+	env.rc.Stdout = buf
+	return run(env.ctx, env.rc, in)
 }
