@@ -335,6 +335,72 @@ func TestSearchDoesNotIncrementUseTelemetry(t *testing.T) {
 	}
 }
 
+func TestRecordAccessBatchUpdatesAccessOnly(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
+
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
+	if _, err := store.SaveFromResult(ctx, "alpha", "result", "ws", "alpha summary", result); err != nil {
+		t.Fatalf("save alpha: %v", err)
+	}
+	if _, err := store.SaveFromResult(ctx, "beta", "result", "ws", "beta summary", result); err != nil {
+		t.Fatalf("save beta: %v", err)
+	}
+	usedAt := time.Date(2026, 5, 3, 9, 0, 0, 0, time.UTC)
+	if _, err := store.UpdateTelemetry(ctx, "alpha", "ws", TelemetryUpdate{Action: "used", At: &usedAt}); err != nil {
+		t.Fatalf("update used: %v", err)
+	}
+	if _, err := store.UpdateTelemetry(ctx, "alpha", "ws", TelemetryUpdate{Action: "succeeded", At: &usedAt}); err != nil {
+		t.Fatalf("update succeeded: %v", err)
+	}
+	if _, err := store.UpdateTelemetry(ctx, "alpha", "ws", TelemetryUpdate{Action: "failed", At: &usedAt}); err != nil {
+		t.Fatalf("update failed: %v", err)
+	}
+	betaBefore, err := store.getWithoutTracking(ctx, "beta", "ws")
+	if err != nil {
+		t.Fatalf("get beta before: %v", err)
+	}
+
+	accessedAt := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
+	affected, err := store.RecordAccessBatch(ctx, "ws", []string{"alpha", "alpha", "missing"}, accessedAt)
+	if err != nil {
+		t.Fatalf("record access batch: %v", err)
+	}
+	if affected != 1 {
+		t.Fatalf("affected=%d want 1", affected)
+	}
+
+	alpha, err := store.getWithoutTracking(ctx, "alpha", "ws")
+	if err != nil {
+		t.Fatalf("get alpha: %v", err)
+	}
+	if alpha.AccessCount != 1 || !alpha.LastAccess.Equal(accessedAt) {
+		t.Fatalf("access metadata not updated: %#v", alpha)
+	}
+	if alpha.UseCount != 1 || alpha.SuccessCount != 1 || alpha.FailureCount != 1 {
+		t.Fatalf("outcome telemetry changed: %#v", alpha)
+	}
+	if !alpha.LastUsedAt.Equal(usedAt) || !alpha.LastSucceededAt.Equal(usedAt) || !alpha.LastFailedAt.Equal(usedAt) {
+		t.Fatalf("outcome timestamps changed: %#v", alpha)
+	}
+
+	betaAfter, err := store.getWithoutTracking(ctx, "beta", "ws")
+	if err != nil {
+		t.Fatalf("get beta after: %v", err)
+	}
+	if betaAfter.AccessCount != betaBefore.AccessCount || !betaAfter.LastAccess.Equal(betaBefore.LastAccess) {
+		t.Fatalf("untouched entry access changed: before=%#v after=%#v", betaBefore, betaAfter)
+	}
+}
+
 func TestSQLiteSearchResultsProjectToCanonicalMemoryRecord(t *testing.T) {
 	ctx := context.Background()
 	store, err := Open(ctx, t.TempDir(), "")

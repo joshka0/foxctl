@@ -510,6 +510,59 @@ func TestReciprocalRankFusionUsesBaseSimilarityForMemoryDecayThreshold(t *testin
 	}
 }
 
+type semanticSearchAccessRecorder struct {
+	workspace string
+	names     []string
+	err       error
+}
+
+func (r *semanticSearchAccessRecorder) RecordAccessBatch(_ context.Context, workspace string, names []string, _ time.Time) (int, error) {
+	r.workspace = workspace
+	r.names = append([]string(nil), names...)
+	if r.err != nil {
+		return 0, r.err
+	}
+	return len(names), nil
+}
+
+func TestRecordSemanticSearchMemoryAccessDedupeAndSkipRemote(t *testing.T) {
+	recorder := &semanticSearchAccessRecorder{}
+	count := recordSemanticSearchMemoryAccess(context.Background(), recorder, "ws", &Input{}, []Result{
+		{Source: "memory", Name: "alpha"},
+		{Source: "memory", Name: "alpha"},
+		{Source: "cochange", Name: "cochange://path"},
+		{Source: "symbol", Name: "ignored"},
+	})
+	if count != 2 {
+		t.Fatalf("count=%d want 2", count)
+	}
+	if recorder.workspace != "ws" {
+		t.Fatalf("workspace=%q want ws", recorder.workspace)
+	}
+	want := []string{"alpha", "cochange://path"}
+	if !reflect.DeepEqual(recorder.names, want) {
+		t.Fatalf("names=%v want %v", recorder.names, want)
+	}
+
+	remoteRecorder := &semanticSearchAccessRecorder{}
+	remoteCount := recordSemanticSearchMemoryAccess(context.Background(), remoteRecorder, "ws", &Input{Remote: true}, []Result{
+		{Source: "memory", Name: "alpha"},
+	})
+	if remoteCount != 0 || len(remoteRecorder.names) != 0 {
+		t.Fatalf("remote recording happened: count=%d names=%v", remoteCount, remoteRecorder.names)
+	}
+}
+
+func TestRecordSemanticSearchMemoryAccessBestEffort(t *testing.T) {
+	recorder := &semanticSearchAccessRecorder{err: os.ErrInvalid}
+	count := recordSemanticSearchMemoryAccess(context.Background(), recorder, "ws", &Input{}, []Result{
+		{Source: "memory", Name: "alpha"},
+	})
+	if count != 0 {
+		t.Fatalf("count=%d want 0 on best-effort failure", count)
+	}
+}
+
 func seedBM25DecayFixture(t *testing.T, ctx context.Context, store *memory.Store) {
 	t.Helper()
 	if _, err := store.SaveFromResult(ctx, "memory://decay-old-strong", "semantic_fact", "ws", "decay ranking old strong", []byte(`{}`)); err != nil {

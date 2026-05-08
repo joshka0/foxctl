@@ -49,6 +49,7 @@ import (
 	"github.com/joshka0/foxctl/internal/intelligence/searchindex"
 	"github.com/joshka0/foxctl/internal/platform/config"
 	errs "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/platform/timeutil"
 	"github.com/joshka0/foxctl/internal/platform/workspace"
 	llmproviders "github.com/joshka0/foxctl/internal/providers/llm"
 	"github.com/joshka0/foxctl/internal/storage"
@@ -838,6 +839,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 
 	out.Results = fusedResults
 	out.Stats.TotalResults = len(fusedResults)
+	recordSemanticSearchMemoryAccess(ctx, sharedMemoryStore, workspaceID, in, out.Results)
 
 	// Extract context hints from session results
 	if *in.IncludeContext {
@@ -2121,6 +2123,41 @@ func applyMemoryDecayPolicy(scored []storage.ScoredEntry, enabled bool, limit in
 		return scored
 	}
 	return memory.RerankScoredEntriesWithDecay(scored, now, memory.DefaultDecayConfig(), limit)
+}
+
+type accessBatchRecorder interface {
+	RecordAccessBatch(ctx context.Context, workspace string, names []string, at time.Time) (int, error)
+}
+
+func recordSemanticSearchMemoryAccess(ctx context.Context, recorder accessBatchRecorder, workspaceID string, in *Input, results []Result) int {
+	if recorder == nil || in == nil || in.Remote || len(results) == 0 {
+		return 0
+	}
+	names := make([]string, 0, len(results))
+	seen := make(map[string]struct{}, len(results))
+	for _, result := range results {
+		if result.Source != "memory" && result.Source != "cochange" {
+			continue
+		}
+		name := strings.TrimSpace(result.Name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return 0
+	}
+	count, err := recorder.RecordAccessBatch(ctx, workspaceID, names, timeutil.NowUTC())
+	if err != nil {
+		errs.Ignore(err, "code/semantic_search record surfaced memory access")
+		return 0
+	}
+	return count
 }
 
 // searchMemoriesBM25 uses SQLite BM25-like text search for memories.

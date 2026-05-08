@@ -14,6 +14,7 @@ import (
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skilltest"
 	"github.com/joshka0/foxctl/internal/context/contextengine"
+	"github.com/joshka0/foxctl/internal/context/memorycore"
 	"github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/runtime/observability"
 	"github.com/joshka0/foxctl/internal/storage"
@@ -137,6 +138,19 @@ func markMemoryViewed(t *testing.T, store *memory.Store, workspace, name string,
 		})
 		require.NoError(t, err)
 	}
+}
+
+func memoryEntryByName(t *testing.T, store *memory.Store, workspace, name string) storage.NamedEntry {
+	t.Helper()
+	entries, err := store.List(context.Background(), workspace, 1000)
+	require.NoError(t, err)
+	for _, entry := range entries {
+		if entry.Name == name {
+			return entry
+		}
+	}
+	t.Fatalf("memory entry %q not found", name)
+	return storage.NamedEntry{}
 }
 
 type seedOpts struct {
@@ -537,6 +551,109 @@ func TestMemoryQuery_FileOnly(t *testing.T) {
 	assert.Len(t, records, 1)
 	mem := records[0].(map[string]any)
 	assert.Contains(t, mem["source_id"], "auth/handler.go")
+}
+
+func TestMemoryQuery_RecordsAccessForSurfacedNamedMemoryAfterPagination(t *testing.T) {
+	var buf bytes.Buffer
+	rc, cleanup := newTestContext(t, &buf)
+	defer cleanup()
+
+	store := openMemoryStore(t, rc)
+	seedMemory(t, store, rc.Workspace, &seedOpts{
+		Name:    "surfaced-file-memory",
+		Type:    "semantic_fact",
+		Summary: "Surfaced file memory",
+		Result: map[string]any{
+			"file": "internal/auth/handler.go",
+		},
+	})
+	seedMemory(t, store, rc.Workspace, &seedOpts{
+		Name:    "hidden-file-memory",
+		Type:    "semantic_fact",
+		Summary: "Hidden file memory",
+		Result: map[string]any{
+			"file": "internal/api/router.go",
+		},
+	})
+
+	err := run(context.Background(), rc, Input{
+		File:  "internal/auth/handler.go",
+		Limit: 1,
+	})
+	require.NoError(t, err)
+
+	env := decodeEnvelope(t, &buf)
+	assertOK(t, env)
+	data := getData(t, env)
+	records := data["records"].([]any)
+	require.Len(t, records, 1)
+	assert.Equal(t, "surfaced-file-memory", records[0].(map[string]any)["source_id"])
+
+	surfaced := memoryEntryByName(t, store, rc.Workspace, "surfaced-file-memory")
+	hidden := memoryEntryByName(t, store, rc.Workspace, "hidden-file-memory")
+	assert.Equal(t, 1, surfaced.AccessCount)
+	assert.Equal(t, 0, hidden.AccessCount)
+}
+
+type failingAccessRecorder struct{}
+
+func (failingAccessRecorder) RecordAccessBatch(context.Context, string, []string, time.Time) (int, error) {
+	return 0, assert.AnError
+}
+
+func TestRecordSurfacedNamedMemoryAccessBestEffort(t *testing.T) {
+	count := recordSurfacedNamedMemoryAccess(context.Background(), failingAccessRecorder{}, "ws", []memorycore.Record{
+		{
+			SourceLane: memorycore.SourceLaneNamedMemory,
+			SourceID:   "alpha",
+		},
+	})
+	assert.Equal(t, 0, count)
+}
+
+func TestMemoryQuery_RecordAccessFeedsDecayRerank(t *testing.T) {
+	var buf bytes.Buffer
+	rc, cleanup := newTestContext(t, &buf)
+	defer cleanup()
+
+	store := openMemoryStore(t, rc)
+	oldAt := time.Now().UTC().Add(-90 * 24 * time.Hour)
+	seedMemory(t, store, rc.Workspace, &seedOpts{
+		Name:    "decay-chain-alpha",
+		Type:    "semantic_fact",
+		Summary: "Alpha memory",
+		Result: map[string]any{
+			"file": "internal/auth/handler.go",
+		},
+	})
+	seedMemory(t, store, rc.Workspace, &seedOpts{
+		Name:    "decay-chain-beta",
+		Type:    "semantic_fact",
+		Summary: "Beta memory",
+	})
+	markMemoryViewed(t, store, rc.Workspace, "decay-chain-alpha", oldAt, 1)
+	markMemoryViewed(t, store, rc.Workspace, "decay-chain-beta", oldAt, 1)
+
+	err := run(context.Background(), rc, Input{
+		File:  "internal/auth/handler.go",
+		Limit: 1,
+	})
+	require.NoError(t, err)
+
+	buf.Reset()
+	err = run(context.Background(), rc, Input{
+		Kinds:              "semantic_fact",
+		Limit:              1,
+		MemoryDecayEnabled: true,
+	})
+	require.NoError(t, err)
+
+	env := decodeEnvelope(t, &buf)
+	assertOK(t, env)
+	data := getData(t, env)
+	records := data["records"].([]any)
+	require.Len(t, records, 1)
+	assert.Equal(t, "decay-chain-alpha", records[0].(map[string]any)["source_id"])
 }
 
 func TestMemoryQuery_MemoryDecayDisabledPreservesFilterScores(t *testing.T) {

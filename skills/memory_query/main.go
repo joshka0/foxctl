@@ -17,6 +17,8 @@ import (
 	"github.com/joshka0/foxctl/internal/context/memorycore"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
 	"github.com/joshka0/foxctl/internal/platform/config"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/platform/timeutil"
 	"github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/runtime/observability"
 	"github.com/joshka0/foxctl/internal/storage"
@@ -272,6 +274,7 @@ func query(ctx context.Context, rc *skillmain.RunContext, in *Input) (*Output, e
 	for _, candidate := range candidates {
 		out.Records = append(out.Records, candidate.Record)
 	}
+	recordSurfacedNamedMemoryAccess(ctx, memStore, workspacePath, out.Records)
 
 	out.Stats.LatencyMS = int(time.Since(start).Milliseconds())
 
@@ -545,6 +548,41 @@ func sortRecordCandidates(candidates []recordCandidate) {
 		}
 		return candidates[i].Record.ID < candidates[j].Record.ID
 	})
+}
+
+type accessBatchRecorder interface {
+	RecordAccessBatch(ctx context.Context, workspace string, names []string, at time.Time) (int, error)
+}
+
+func recordSurfacedNamedMemoryAccess(ctx context.Context, recorder accessBatchRecorder, workspacePath string, records []memorycore.Record) int {
+	if recorder == nil || len(records) == 0 {
+		return 0
+	}
+	names := make([]string, 0, len(records))
+	seen := make(map[string]struct{}, len(records))
+	for _, record := range records {
+		if record.SourceLane != memorycore.SourceLaneNamedMemory {
+			continue
+		}
+		name := strings.TrimSpace(record.SourceID)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return 0
+	}
+	count, err := recorder.RecordAccessBatch(ctx, workspacePath, names, timeutil.NowUTC())
+	if err != nil {
+		errs.Ignore(err, "memory/query record surfaced memory access")
+		return 0
+	}
+	return count
 }
 
 func sourceCounts(candidates []recordCandidate) map[string]int {
