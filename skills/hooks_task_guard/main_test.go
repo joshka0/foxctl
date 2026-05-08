@@ -362,8 +362,23 @@ func TestTaskGuard_ProposalMode_NoActiveTask_RecordsProposalNoTask(t *testing.T)
 	if states[0].Proposal.Count != 1 {
 		t.Fatalf("proposal count = %d", states[0].Proposal.Count)
 	}
+	if len(states[0].Proposal.SourceRefs) != 3 {
+		t.Fatalf("source refs = %+v, want event/session/tool-call refs", states[0].Proposal.SourceRefs)
+	}
+	if len(states[0].Proposal.EvidenceRefs) != 4 {
+		t.Fatalf("evidence refs = %+v, want event/session/tool-call/path refs", states[0].Proposal.EvidenceRefs)
+	}
 	if got := states[0].Proposal.Payload["scope_path"]; got != "pkg/main.go" {
 		t.Fatalf("payload.scope_path = %v", got)
+	}
+	if got := states[0].Proposal.Payload["event"]; got != string(hooks.EventPreToolUse) {
+		t.Fatalf("payload.event = %v", got)
+	}
+	if got := states[0].Proposal.Payload["tool_name"]; got != "Edit" {
+		t.Fatalf("payload.tool_name = %v", got)
+	}
+	if got := states[0].Proposal.Payload["tool_kind"]; got != string(hooks.ToolKindWrite) {
+		t.Fatalf("payload.tool_kind = %v", got)
 	}
 }
 

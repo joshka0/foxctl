@@ -10,6 +10,7 @@ import (
 	"github.com/joshka0/foxctl/internal/context/memorycore"
 	"github.com/joshka0/foxctl/internal/storage"
 	memorystore "github.com/joshka0/foxctl/internal/storage/memory"
+	taskstore "github.com/joshka0/foxctl/internal/storage/tasks"
 )
 
 func TestRecordControlProposalDedupesByDedupeKey(t *testing.T) {
@@ -374,6 +375,196 @@ func TestListControlProposalStatesDerivesLatestState(t *testing.T) {
 	}
 }
 
+// [[test:internal/context/contextplane/control_plane_test.go#TestApplyTaskProposalAppliesOnePendingTaskIdempotently]]
+func TestApplyTaskProposalAppliesOnePendingTaskIdempotently(t *testing.T) {
+	store := NewWorkspaceStore(t.TempDir())
+	ctx := context.Background()
+	workspaceRoot := t.TempDir()
+	taskDB := mustOpenTaskStore(t)
+	defer func() { _ = taskDB.Close() }()
+
+	proposal := mustRecordControlProposal(t, store, testTaskProposal("ws-task-apply", workspaceRoot, "pkg/main.go", "Edit pkg/main.go", "low"))
+	decision := mustRecordCoordinatorDecision(t, store, CoordinatorDecision{
+		ID:            "decision-task-apply",
+		ProposalID:    proposal.ID,
+		Decision:      DecisionKindApprove,
+		AuthorityMode: AuthorityModeCoordinatorPolicy,
+		PolicyID:      "task-proposal-auto-low-risk-v1",
+		EvidenceRefs:  []contextengine.EvidenceRef{{Type: contextengine.RefTypeEvent, Ref: "evt:task-apply"}},
+	})
+
+	firstApply, firstTask, err := store.ApplyTaskProposal(ctx, taskDB, proposal.ID, decision.ID)
+	if err != nil {
+		t.Fatalf("ApplyTaskProposal first: %v", err)
+	}
+	secondApply, secondTask, err := store.ApplyTaskProposal(ctx, taskDB, proposal.ID, decision.ID)
+	if err != nil {
+		t.Fatalf("ApplyTaskProposal replay: %v", err)
+	}
+	if firstApply.ID != secondApply.ID {
+		t.Fatalf("apply replay id mismatch: %s vs %s", firstApply.ID, secondApply.ID)
+	}
+	if firstTask.ID != secondTask.ID {
+		t.Fatalf("task replay id mismatch: %s vs %s", firstTask.ID, secondTask.ID)
+	}
+	if firstApply.TargetKind != "task" {
+		t.Fatalf("target_kind=%q want task", firstApply.TargetKind)
+	}
+	if firstTask.Status != taskstore.StatusPending {
+		t.Fatalf("task status=%q want pending", firstTask.Status)
+	}
+	tasks, err := taskDB.ListByWorkspace(ctx, proposal.WorkspaceID)
+	if err != nil {
+		t.Fatalf("ListByWorkspace: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("task count=%d want 1", len(tasks))
+	}
+}
+
+func TestApplyTaskProposalWithoutApprovalFailsNoTask(t *testing.T) {
+	store := NewWorkspaceStore(t.TempDir())
+	ctx := context.Background()
+	workspaceRoot := t.TempDir()
+	taskDB := mustOpenTaskStore(t)
+	defer func() { _ = taskDB.Close() }()
+
+	proposal := mustRecordControlProposal(t, store, testTaskProposal("ws-task-no-approval", workspaceRoot, "pkg/main.go", "Edit pkg/main.go", "low"))
+	if _, _, err := store.ApplyTaskProposal(ctx, taskDB, proposal.ID, "missing-decision"); err == nil || !strings.Contains(err.Error(), "no approving decision") {
+		t.Fatalf("ApplyTaskProposal without approval err=%v", err)
+	}
+	tasks, err := taskDB.ListByWorkspace(ctx, proposal.WorkspaceID)
+	if err != nil {
+		t.Fatalf("ListByWorkspace: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("task count=%d want 0", len(tasks))
+	}
+}
+
+func TestApplyTaskProposalRejectDecisionCannotApply(t *testing.T) {
+	store := NewWorkspaceStore(t.TempDir())
+	ctx := context.Background()
+	workspaceRoot := t.TempDir()
+	taskDB := mustOpenTaskStore(t)
+	defer func() { _ = taskDB.Close() }()
+
+	proposal := mustRecordControlProposal(t, store, testTaskProposal("ws-task-reject", workspaceRoot, "pkg/main.go", "Edit pkg/main.go", "low"))
+	mustRecordCoordinatorDecision(t, store, CoordinatorDecision{
+		ID:            "decision-task-approve-before-reject",
+		ProposalID:    proposal.ID,
+		Decision:      DecisionKindApprove,
+		AuthorityMode: AuthorityModeCoordinatorPolicy,
+		PolicyID:      "task-proposal-auto-low-risk-v1",
+		EvidenceRefs:  []contextengine.EvidenceRef{{Type: contextengine.RefTypeEvent, Ref: "evt:task-approve-before-reject"}},
+		CreatedAt:     time.Now().UTC(),
+	})
+	reject := mustRecordCoordinatorDecision(t, store, CoordinatorDecision{
+		ID:            "decision-task-reject",
+		ProposalID:    proposal.ID,
+		Decision:      DecisionKindReject,
+		AuthorityMode: AuthorityModeHumanApproval,
+		EvidenceRefs:  []contextengine.EvidenceRef{{Type: contextengine.RefTypeEvent, Ref: "evt:task-reject"}},
+		CreatedAt:     time.Now().UTC().Add(time.Second),
+	})
+
+	if _, _, err := store.ApplyTaskProposal(ctx, taskDB, proposal.ID, reject.ID); err == nil || !strings.Contains(err.Error(), "does not approve proposal") {
+		t.Fatalf("ApplyTaskProposal rejected decision err=%v", err)
+	}
+	tasks, err := taskDB.ListByWorkspace(ctx, proposal.WorkspaceID)
+	if err != nil {
+		t.Fatalf("ListByWorkspace: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("task count=%d want 0", len(tasks))
+	}
+}
+
+func TestProcessControlProposalsAutoApprovesLowRiskTaskProposal(t *testing.T) {
+	store := NewWorkspaceStore(t.TempDir())
+	ctx := context.Background()
+	workspaceRoot := t.TempDir()
+	taskDB := mustOpenTaskStore(t)
+	defer func() { _ = taskDB.Close() }()
+
+	proposal := mustRecordControlProposal(t, store, testTaskProposal("ws-task-process-low", workspaceRoot, "pkg/main.go", "Edit pkg/main.go", "low"))
+	result, err := store.ProcessControlProposals(ctx, TaskProposalControlProcessInput{
+		TaskStore:  taskDB,
+		ProposalID: proposal.ID,
+	})
+	if err != nil {
+		t.Fatalf("ProcessControlProposals: %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("processed items=%d want 1", len(result.Items))
+	}
+	item := result.Items[0]
+	if item.Decision == nil || item.Decision.Decision != DecisionKindApprove {
+		t.Fatalf("decision=%+v want approve", item.Decision)
+	}
+	if item.Apply == nil || item.Apply.TargetKind != "task" {
+		t.Fatalf("apply=%+v want task apply", item.Apply)
+	}
+	if item.Task == nil || item.Task.Status != taskstore.StatusPending {
+		t.Fatalf("task=%+v want pending task", item.Task)
+	}
+
+	state, err := store.GetControlProposalState(ctx, proposal.ID)
+	if err != nil {
+		t.Fatalf("GetControlProposalState: %v", err)
+	}
+	if state.LatestDecision == nil || state.LatestDecision.Decision != DecisionKindApprove {
+		t.Fatalf("latest decision=%+v", state.LatestDecision)
+	}
+	if state.LatestApplyResult == nil || state.LatestApplyResult.TargetKind != "task" {
+		t.Fatalf("latest apply=%+v", state.LatestApplyResult)
+	}
+	tasks, err := taskDB.ListByWorkspace(ctx, proposal.WorkspaceID)
+	if err != nil {
+		t.Fatalf("ListByWorkspace: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("task count=%d want 1", len(tasks))
+	}
+}
+
+func TestProcessControlProposalsHighBlastRadiusNeedsAuthorityNoTask(t *testing.T) {
+	store := NewWorkspaceStore(t.TempDir())
+	ctx := context.Background()
+	workspaceRoot := t.TempDir()
+	taskDB := mustOpenTaskStore(t)
+	defer func() { _ = taskDB.Close() }()
+
+	proposal := mustRecordControlProposal(t, store, testTaskProposal("ws-task-process-high", workspaceRoot, "pkg/main.go", "Edit pkg/main.go", "high"))
+	result, err := store.ProcessControlProposals(ctx, TaskProposalControlProcessInput{
+		TaskStore:  taskDB,
+		ProposalID: proposal.ID,
+	})
+	if err != nil {
+		t.Fatalf("ProcessControlProposals: %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("processed items=%d want 1", len(result.Items))
+	}
+	item := result.Items[0]
+	if item.Decision == nil || item.Decision.Decision != DecisionKindEscalate {
+		t.Fatalf("decision=%+v want escalate", item.Decision)
+	}
+	if item.Decision.StatusAfter != ProposalStatusNeedsAuthority {
+		t.Fatalf("status_after=%q want needs_authority", item.Decision.StatusAfter)
+	}
+	if item.Apply != nil {
+		t.Fatalf("unexpected apply=%+v", item.Apply)
+	}
+	tasks, err := taskDB.ListByWorkspace(ctx, proposal.WorkspaceID)
+	if err != nil {
+		t.Fatalf("ListByWorkspace: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("task count=%d want 0", len(tasks))
+	}
+}
+
 func TestRecordMemoryCandidateProposalRequiresCoreFields(t *testing.T) {
 	store := NewWorkspaceStore(t.TempDir())
 	ctx := context.Background()
@@ -693,11 +884,49 @@ func testMemoryCandidateInput(workspaceID string) MemoryCandidateInput {
 	}
 }
 
+func testTaskProposal(workspaceID, workspaceRoot, scopePath, title, blastRadius string) ControlProposal {
+	return ControlProposal{
+		DedupeKey:      "task-proposal:" + workspaceID + ":" + scopePath + ":" + title + ":" + blastRadius,
+		Kind:           ProposalKindTaskProposal,
+		WorkspaceID:    workspaceID,
+		Summary:        "task proposal: " + title,
+		BlastRadius:    blastRadius,
+		ReviewRequired: true,
+		SourceRefs: []contextengine.EvidenceRef{
+			{Type: contextengine.RefTypeEvent, Ref: "evt:task-proposal-source"},
+		},
+		EvidenceRefs: []contextengine.EvidenceRef{
+			{Type: contextengine.RefTypePath, Ref: scopePath},
+		},
+		Payload: map[string]any{
+			"title":          title,
+			"scope_path":     scopePath,
+			"workspace_root": workspaceRoot,
+			"intent":         "pre-tool-use write guard proposal",
+			"event":          "PreToolUse",
+			"tool_name":      "Edit",
+			"tool_canonical": "edit.apply_patch",
+			"tool_kind":      "write",
+			"source_tool":    "edit.apply_patch",
+			"source_event":   "PreToolUse",
+		},
+	}
+}
+
 func mustOpenMemoryStore(t *testing.T) *memorystore.Store {
 	t.Helper()
 	store, err := memorystore.Open(context.Background(), t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("memory.Open: %v", err)
+	}
+	return store
+}
+
+func mustOpenTaskStore(t *testing.T) taskstore.Store {
+	t.Helper()
+	store, err := taskstore.Open(context.Background(), t.TempDir())
+	if err != nil {
+		t.Fatalf("tasks.Open: %v", err)
 	}
 	return store
 }

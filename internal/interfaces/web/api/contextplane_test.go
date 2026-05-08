@@ -422,6 +422,66 @@ func TestContextControlProposalDecisionAppendsAndUpdatesLatestState(t *testing.T
 	}
 }
 
+func TestContextControlProposalDecisionPreservesEvidenceAndHarnessMetadata(t *testing.T) {
+	workspace := t.TempDir()
+	cfg := config.Config{Storage: config.StorageSettings{Root: t.TempDir()}}
+	store := contextplane.NewWorkspaceStore(workspace)
+	ctx := context.Background()
+
+	proposal, err := store.RecordControlProposal(ctx, contextplane.ControlProposal{
+		DedupeKey:   "task:evidence-round-trip",
+		Kind:        contextplane.ProposalKindTaskProposal,
+		Status:      contextplane.ProposalStatusOpen,
+		WorkspaceID: workspace,
+		Summary:     "Evidence round-trip proposal",
+		EvidenceRefs: []contextengine.EvidenceRef{
+			{Type: contextengine.RefTypeEvent, Ref: "hook:proposal"},
+		},
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("RecordControlProposal: %v", err)
+	}
+
+	handler := ContextControlProposalsHandler(cfg, zerolog.Nop())
+	body := `{"workspace":"` + workspace + `","decision":"approve","authority_mode":"coordinator_policy","policy_id":"low-risk-task-v1","policy_version":"2026-05-08","policy_hash":"sha256:test-policy","approval_actor":"pi:coordinator","reason":"harness passed","evidence_refs":[{"type":"event","ref":"hook:proposal"},{"type":"path","ref":"tests/regression/002-coordinator-control-plane-mvp/run.sh"}],"harness_run_ids":["run-2","run-1","run-2"],"room_consensus_id":"room-consensus-1","constraints":{"max_apply":1}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/context/control-proposals/"+proposal.ID+"/decisions", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	resp := decodeControlProposalDecisionResponse(t, rr.Body.Bytes())
+	if resp.Decision.PolicyID != "low-risk-task-v1" || resp.Decision.PolicyVersion != "2026-05-08" || resp.Decision.PolicyHash != "sha256:test-policy" {
+		t.Fatalf("policy metadata not preserved: %+v", resp.Decision)
+	}
+	if resp.Decision.RoomConsensusID != "room-consensus-1" {
+		t.Fatalf("room_consensus_id=%q", resp.Decision.RoomConsensusID)
+	}
+	if len(resp.Decision.EvidenceRefs) != 2 || resp.Decision.EvidenceRefs[1].Type != contextengine.RefTypePath || resp.Decision.EvidenceRefs[1].Ref != "tests/regression/002-coordinator-control-plane-mvp/run.sh" {
+		t.Fatalf("evidence refs not preserved: %+v", resp.Decision.EvidenceRefs)
+	}
+	if len(resp.Decision.HarnessRunIDs) != 2 || resp.Decision.HarnessRunIDs[0] != "run-2" || resp.Decision.HarnessRunIDs[1] != "run-1" {
+		t.Fatalf("harness_run_ids not deduped/preserved in order: %+v", resp.Decision.HarnessRunIDs)
+	}
+	if resp.Decision.Constraints["max_apply"] != float64(1) {
+		t.Fatalf("constraints not preserved: %+v", resp.Decision.Constraints)
+	}
+
+	decisions, err := store.ListCoordinatorDecisions(ctx, proposal.ID, 0)
+	if err != nil {
+		t.Fatalf("ListCoordinatorDecisions: %v", err)
+	}
+	if len(decisions) != 1 {
+		t.Fatalf("decision count=%d want 1", len(decisions))
+	}
+	if len(decisions[0].EvidenceRefs) != 2 || len(decisions[0].HarnessRunIDs) != 2 || decisions[0].RoomConsensusID != "room-consensus-1" {
+		t.Fatalf("stored decision lost harness evidence: %+v", decisions[0])
+	}
+}
+
 func TestContextControlProposalDecisionRequiresEvidenceRefs(t *testing.T) {
 	workspace := t.TempDir()
 	cfg := config.Config{Storage: config.StorageSettings{Root: t.TempDir()}}
