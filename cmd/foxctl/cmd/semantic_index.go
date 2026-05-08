@@ -68,9 +68,9 @@ func newSemanticIndexInitCommand() *cobra.Command {
 			"  # Use local LM Studio/OpenAI-compatible embeddings\n" +
 			"  FOXCTL_EMBEDDING_BASE_URL=http://127.0.0.1:1234/v1 foxctl semantic-index init --workspace . --provider lmstudio --model text-embedding-nomic-embed-text-v1.5\n\n" +
 			"  # Slice and throttle local GPU-backed embedding\n" +
-			"  foxctl semantic-index init --workspace . --provider lmstudio --batch-size 1 --batch-delay 30s --chunk-bytes 32768 --chunk-overlap 1024 --chunk-delay 10s --max-file-bytes 1048576\n\n" +
+			"  foxctl semantic-index init --workspace . --provider lmstudio --batch-size 1 --batch-delay 30s --chunk-bytes 32768 --chunk-overlap 1024 --chunk-delay 1s --max-file-bytes 1048576\n\n" +
 			"  # Queue matching files for paced background drain\n" +
-			"  foxctl semantic-index init --workspace . --provider lmstudio --model text-embedding-qwen3-embedding-8b --chunk-bytes 32768 --chunk-overlap 1024 --chunk-delay 10s --enqueue\n\n" +
+			"  foxctl semantic-index init --workspace . --provider lmstudio --model text-embedding-qwen3-embedding-8b --chunk-bytes 32768 --chunk-overlap 1024 --chunk-delay 1s --enqueue\n\n" +
 			"  # Dry run to see what would be indexed\n" +
 			"  foxctl semantic-index init --workspace . --glob '**/*.go' --dry-run",
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -126,9 +126,9 @@ func newSemanticIndexUpdateCommand() *cobra.Command {
 			"  # Mark files as deleted\n" +
 			"  foxctl semantic-index update --workspace . --deleted old_file.go\n\n" +
 			"  # Slice and throttle local GPU-backed embedding\n" +
-			"  foxctl semantic-index update --workspace . --files main.go,utils.go --provider lmstudio --batch-size 1 --batch-delay 30s --chunk-bytes 32768 --chunk-overlap 1024 --chunk-delay 10s --max-file-bytes 1048576\n\n" +
+			"  foxctl semantic-index update --workspace . --files main.go,utils.go --provider lmstudio --batch-size 1 --batch-delay 30s --chunk-bytes 32768 --chunk-overlap 1024 --chunk-delay 1s --max-file-bytes 1048576\n\n" +
 			"  # Queue changed files for paced background drain\n" +
-			"  foxctl semantic-index update --workspace . --files main.go,utils.go --provider lmstudio --model text-embedding-qwen3-embedding-8b --chunk-bytes 32768 --chunk-overlap 1024 --chunk-delay 10s --enqueue\n\n" +
+			"  foxctl semantic-index update --workspace . --files main.go,utils.go --provider lmstudio --model text-embedding-qwen3-embedding-8b --chunk-bytes 32768 --chunk-overlap 1024 --chunk-delay 1s --enqueue\n\n" +
 			"  # Update with provenance\n" +
 			"  foxctl semantic-index update --workspace . --files main.go --task-id task-123 --review-id review-456",
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -695,10 +695,41 @@ func mergeSemanticJobResult(dst, src *semantic.JobResult) {
 	dst.Summary.FilesIndexed += src.Summary.FilesIndexed
 	dst.Summary.ChunksIndexed += src.Summary.ChunksIndexed
 	dst.Summary.FilesSkipped += src.Summary.FilesSkipped
+	if len(src.Summary.ChunkPlannerCounts) > 0 {
+		if dst.Summary.ChunkPlannerCounts == nil {
+			dst.Summary.ChunkPlannerCounts = make(map[string]int, len(src.Summary.ChunkPlannerCounts))
+		}
+		for kind, count := range src.Summary.ChunkPlannerCounts {
+			dst.Summary.ChunkPlannerCounts[kind] += count
+		}
+	}
+	if src.Summary.ChunkSizeBytes != nil {
+		if dst.Summary.ChunkSizeBytes == nil {
+			copied := *src.Summary.ChunkSizeBytes
+			dst.Summary.ChunkSizeBytes = &copied
+		} else {
+			mergeSemanticChunkSizeSummary(dst.Summary.ChunkSizeBytes, *src.Summary.ChunkSizeBytes)
+		}
+	}
 	dst.Failures = append(dst.Failures, src.Failures...)
 	if src.CASArtifact != nil {
 		dst.CASArtifact = src.CASArtifact
 	}
+}
+
+func mergeSemanticChunkSizeSummary(dst *semantic.ChunkSizeSummary, src semantic.ChunkSizeSummary) {
+	if dst == nil || src.Count == 0 {
+		return
+	}
+	if dst.Count == 0 || src.MinBytes < dst.MinBytes {
+		dst.MinBytes = src.MinBytes
+	}
+	if src.MaxBytes > dst.MaxBytes {
+		dst.MaxBytes = src.MaxBytes
+	}
+	dst.Count += src.Count
+	dst.TotalBytes += src.TotalBytes
+	dst.AverageBytes = dst.TotalBytes / int64(dst.Count)
 }
 
 func jobFilesFromPaths(paths []string, changeKind semantic.FileChangeKind) []semantic.JobFileInput {

@@ -663,6 +663,26 @@ func (s *Store) Cleanup(ctx context.Context, olderThan time.Duration) (int64, er
 	return s.queue.Cleanup(ctx, olderThan)
 }
 
+// CleanupInWorkspace deletes completed jobs for one workspace/group.
+func (s *Store) CleanupInWorkspace(ctx context.Context, workspaceID string, olderThan time.Duration) (int64, error) {
+	return s.queue.CleanupForGroup(ctx, olderThan, strings.TrimSpace(workspaceID))
+}
+
+// CleanupKind deletes completed jobs for one task kind.
+func (s *Store) CleanupKind(ctx context.Context, kind embedqueue.TaskKind, olderThan time.Duration) (int64, error) {
+	return s.queue.CleanupForKind(ctx, olderThan, string(kind))
+}
+
+// CleanupInWorkspaceKind deletes completed jobs for one workspace/group and task kind.
+func (s *Store) CleanupInWorkspaceKind(ctx context.Context, workspaceID string, kind embedqueue.TaskKind, olderThan time.Duration) (int64, error) {
+	return s.queue.CleanupForGroupKind(ctx, olderThan, strings.TrimSpace(workspaceID), string(kind))
+}
+
+// Purge deletes queued job records matching the optional workspace and kind filters.
+func (s *Store) Purge(ctx context.Context, workspaceID string, kind embedqueue.TaskKind) (int64, error) {
+	return s.queue.Purge(ctx, strings.TrimSpace(workspaceID), string(kind))
+}
+
 // DeleteEmbedding removes a single embedding.
 func (s *Store) DeleteEmbedding(ctx context.Context, workspaceID, symbolID string) error {
 	_, err := s.db.ExecContext(ctx, `

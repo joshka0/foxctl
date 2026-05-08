@@ -1,15 +1,15 @@
 ---
 name: pi-maestri-live
-description: "Live-test the foxctl Pi extension through a Maestri shell: edit foxctl-pi, reload or restart interactive Pi, and exercise foxctl tools with maestri ask."
+description: "Live-test the tracked foxctl Pi extension through a Maestri shell: edit integrations/pi, reload or restart interactive Pi, and exercise foxctl tools with maestri ask."
 ---
 
 # pi-maestri-live
 
-Use this skill when working on the `foxctl-pi` extension with a live interactive Pi session in Maestri.
+Use this skill when working on the tracked foxctl Pi extension with a live interactive Pi session in Maestri.
 
 The goal is a fast loop:
 
-1. edit `/Users/joshka/repos/personal/foxctl-pi/foxctl.ts`
+1. edit `/Users/joshka/repos/personal/foxctl/integrations/pi/foxctl.ts`
 2. typecheck from `/Users/joshka/repos/githubs/pi-mono`
 3. reload or restart Pi in the active Maestri shell
 4. use `maestri ask "<shell-name>" ...` to make the Pi model exercise the extension tools
@@ -17,7 +17,7 @@ The goal is a fast loop:
 ## Working Paths
 
 - Pi repo: `/Users/joshka/repos/githubs/pi-mono`
-- Extension source: `/Users/joshka/repos/personal/foxctl-pi/foxctl.ts`
+- Extension source: `/Users/joshka/repos/personal/foxctl/integrations/pi/foxctl.ts`
 - Pi project symlink: `/Users/joshka/repos/githubs/pi-mono/.pi/extensions/foxctl.ts`
 - foxctl daemon URL: `http://localhost:8090`
 - foxctl terminal gateway URL: `http://localhost:8765`
@@ -64,12 +64,20 @@ maestri check "Shell #6"
 Expected footer includes:
 
 ```text
-foxctl 0.1.0 libsql room:pi-maestri-interactive
+foxctl 0.1.0 turso room:pi-maestri-interactive
 ```
 
 ## Edit And Verify
 
-Use `apply_patch` for edits. Then typecheck through Pi's local toolchain:
+Use `apply_patch` for edits. Keep the Pi project extension symlink pointed at
+the tracked foxctl source:
+
+```bash
+ln -sfn /Users/joshka/repos/personal/foxctl/integrations/pi/foxctl.ts \
+  /Users/joshka/repos/githubs/pi-mono/.pi/extensions/foxctl.ts
+```
+
+Then typecheck through Pi's local toolchain:
 
 ```bash
 cd /Users/joshka/repos/githubs/pi-mono
@@ -135,9 +143,10 @@ Call foxctl_room_inbox for your configured room. If there are actionable entries
 - If a tool was added after Pi started and is not in `--tools`, Pi will say it is unavailable even after `/reload`. Restart with the expanded allowlist.
 - Use `foxctl_tool_run` as an escape hatch for OpenAPI-enabled skills only; prefer focused read-only wrappers for normal live tests.
 - Repoindex wrapper tests require a current repo graph index for the target workspace.
+- Pi/web repoindex wrappers execute compiled skill artifacts. If a wrapper reports a repoindex schema downgrade or reset, run `make skill SKILL=repo_index_search` from the foxctl repo, then rebuild repoindex.
 - `--foxctl-context` injects workspace/task/room context before each Pi agent turn. Leave `--foxctl-memory-context=true` when dogfooding memory; it adds prompt-keyed `memory/query` and `session/recall` evidence and degrades to error objects if the memory backend is unavailable.
 - Poolside `poolside/laguna-xs.2:free` has worked for tool-call smoke tests through OpenRouter.
-- Direct Node/tsx smokes need `NODE_PATH=/Users/joshka/repos/githubs/pi-mono/node_modules` because the extension source lives outside the repo.
+- Direct Node/tsx smokes need `NODE_PATH=/Users/joshka/repos/githubs/pi-mono/node_modules` because the tracked extension source lives outside the Pi repo.
 - `foxctl_room_bind_pi` must not send role changes in binding updates; foxctl only allows coordinators to change member roles.
 
 ## Current Validated Tools

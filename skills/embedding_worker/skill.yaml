@@ -39,6 +39,11 @@ signature:
       required: false
       default: false
       description: Continue processing batches until the queue is empty or max_duration is reached
+    - name: parallelism
+      type: integer
+      required: false
+      default: 1
+      description: Maximum number of claimed jobs to process concurrently (1-16)
     - name: dry_run
       type: boolean
       required: false
@@ -98,6 +103,9 @@ signature:
     - name: remaining
       type: integer
       description: Jobs still in queue after processing
+    - name: parallelism
+      type: integer
+      description: Effective worker parallelism used for this run
     - name: status
       type: string
       description: "Result status: completed, timeout, no_jobs, error"
@@ -118,7 +126,7 @@ signature:
     long: |
       embedding/worker processes symbol and named-memory jobs from the embedding
       queue, generating embeddings using the configured provider. It runs in batches with
-      configurable size and timeout.
+      configurable size, timeout, and bounded parallelism.
 
       The worker:
       - Claims pending jobs atomically
@@ -126,6 +134,7 @@ signature:
       - Generates embeddings via the configured embedding provider
       - Stores symbol results in the embedding database
       - Stores named-memory embeddings in the configured memory backend
+      - Processes claimed symbol jobs concurrently when parallelism is greater than 1
       - Handles retries with exponential backoff
       - Respects rate limits
 
@@ -138,12 +147,14 @@ signature:
         description: "Process a batch of queued embeddings"
         example_input:
           batch_size: 20
+          parallelism: 4
           max_duration: 120
       - id: process-symbols
         description: "Process only symbol jobs, leaving memory jobs queued"
         example_input:
           kind: symbol
           batch_size: 5
+          parallelism: 2
           max_duration: 180
       - id: drain-queue
         description: "Process all remaining jobs (large batch, long timeout)"

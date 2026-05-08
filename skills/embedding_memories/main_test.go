@@ -1,9 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"testing"
 	"time"
 
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skilltest"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedding"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
 	"github.com/joshka0/foxctl/internal/storage/memory"
 	"github.com/stretchr/testify/assert"
 )
@@ -81,6 +87,186 @@ func TestMemoryInputsFromEntriesUsesFormattedContent(t *testing.T) {
 	assert.Equal(t, "decision:test", inputs[0].Name)
 	assert.Equal(t, "decision", inputs[0].Type)
 	assert.Equal(t, "[May 2026] [decision] Use queued embeddings", inputs[0].Content)
+}
+
+func TestMemoryInputsFromEntriesSkipsCodeOwnedMemoryTypes(t *testing.T) {
+	createdAt := time.Date(2026, 5, 7, 10, 0, 0, 0, time.UTC)
+	entries := []memory.NamedEntry{
+		{
+			Name:      "file://ws/cmd/root.go",
+			Type:      semantic.FileEmbeddingType,
+			Summary:   "cmd/root.go",
+			CreatedAt: createdAt,
+		},
+		{
+			Name:      "file://ws/cmd/root.go#chunk-6",
+			Type:      semantic.FileEmbeddingChunkType,
+			Summary:   "Chunk 6/15 of cmd/root.go",
+			CreatedAt: createdAt,
+		},
+		{
+			Name:      "symbol://ws/go:cmd::func Execute",
+			Type:      symbol.SymbolType,
+			Summary:   "Execute",
+			CreatedAt: createdAt,
+		},
+		{
+			Name:      "symbol-call://ws/go:cmd::Execute->Run",
+			Type:      symbol.CallEdgeType,
+			Summary:   "Execute calls Run",
+			CreatedAt: createdAt,
+		},
+		{
+			Name:      "file-meta://ws/cmd/root.go",
+			Type:      symbol.FileMetaType,
+			Summary:   "cmd/root.go metadata",
+			CreatedAt: createdAt,
+		},
+		{
+			Name:      "file://ws/cmd/root.go",
+			Type:      symbol.FileSummaryType,
+			Summary:   "cmd/root.go summary",
+			CreatedAt: createdAt,
+		},
+		{
+			Name:      "symbol-summary://ws/go:cmd::Execute",
+			Type:      symbol.SymbolSummaryType,
+			Summary:   "Execute summary",
+			CreatedAt: createdAt,
+		},
+		{
+			Name:      "decision:test",
+			Type:      "decision",
+			Summary:   "Use memory embeddings for human-authored memories",
+			CreatedAt: createdAt,
+		},
+	}
+
+	inputs := memoryInputsFromEntries(entries)
+
+	assert.Len(t, inputs, 1)
+	assert.Equal(t, "decision:test", inputs[0].Name)
+	assert.Equal(t, "decision", inputs[0].Type)
+	assert.Equal(t, "[May 2026] [decision] Use memory embeddings for human-authored memories", inputs[0].Content)
+}
+
+func TestMemoryInputsFromEntriesKeepsRealMemoryTypes(t *testing.T) {
+	createdAt := time.Date(2026, 5, 7, 10, 0, 0, 0, time.UTC)
+	entries := []memory.NamedEntry{
+		{Name: "decision:test", Type: "decision", Summary: "decision", CreatedAt: createdAt},
+		{Name: "gotcha:test", Type: "gotcha", Summary: "gotcha", CreatedAt: createdAt},
+		{Name: "learning:test", Type: "learning", Summary: "learning", CreatedAt: createdAt},
+		{Name: "note:test", Type: "note", Summary: "note", CreatedAt: createdAt},
+		{Name: "fact:test", Type: "fact", Summary: "fact", CreatedAt: createdAt},
+	}
+
+	inputs := memoryInputsFromEntries(entries)
+
+	assert.Len(t, inputs, len(entries))
+	for i, input := range inputs {
+		assert.Equal(t, entries[i].Name, input.Name)
+		assert.Equal(t, entries[i].Type, input.Type)
+	}
+}
+
+func TestEmbeddingMemoriesDryRunSkipsCodeOwnedMemoryTypes(t *testing.T) {
+	ctx := context.Background()
+	var stdout bytes.Buffer
+	rc, cleanup := skilltest.NewTestRunContext(t, &stdout, nil)
+	defer cleanup()
+	memStore, err := memory.OpenWithConfig(ctx, rc.Config)
+	if err != nil {
+		t.Fatalf("open memory store: %v", err)
+	}
+	defer memStore.Close()
+	seedMemoryResult := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2026-05-07T00:00:00Z"},"error":{}}`)
+	for _, entry := range []struct {
+		name string
+		typ  string
+	}{
+		{"file://ws/root.go", semantic.FileEmbeddingType},
+		{"symbol://ws/root.go:Run", symbol.SymbolType},
+		{"decision:test", "decision"},
+		{"gotcha:test", "gotcha"},
+	} {
+		if _, err := memStore.SaveFromResult(ctx, entry.name, entry.typ, rc.Workspace, entry.name, seedMemoryResult); err != nil {
+			t.Fatalf("save memory %s: %v", entry.name, err)
+		}
+	}
+
+	if err := run(ctx, rc, Input{Workspace: rc.Workspace, DryRun: true}); err != nil {
+		t.Fatalf("run dry-run: %v", err)
+	}
+
+	_, output, err := skilltest.DecodeEnvelopeData[Output](stdout.Bytes())
+	if err != nil {
+		t.Fatalf("decode output: %v; raw=%s", err, stdout.String())
+	}
+	assert.Equal(t, 4, output.MemoriesFound)
+	assert.Equal(t, 2, output.Skipped)
+	statusByName := map[string]string{}
+	for _, result := range output.Memories {
+		statusByName[result.Name] = result.Status
+	}
+	assert.Equal(t, "skipped", statusByName["file://ws/root.go"])
+	assert.Equal(t, "skipped", statusByName["symbol://ws/root.go:Run"])
+	assert.Equal(t, "dry_run", statusByName["decision:test"])
+	assert.Equal(t, "dry_run", statusByName["gotcha:test"])
+}
+
+func TestEmbeddingMemoriesEnqueueSkipsCodeOwnedMemoryTypes(t *testing.T) {
+	ctx := context.Background()
+	var stdout bytes.Buffer
+	rc, cleanup := skilltest.NewTestRunContext(t, &stdout, nil)
+	defer cleanup()
+	memStore, err := memory.OpenWithConfig(ctx, rc.Config)
+	if err != nil {
+		t.Fatalf("open memory store: %v", err)
+	}
+	defer memStore.Close()
+	seedMemoryResult := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2026-05-07T00:00:00Z"},"error":{}}`)
+	for _, entry := range []struct {
+		name string
+		typ  string
+	}{
+		{"chunk://ws/root.go#1", semantic.FileEmbeddingChunkType},
+		{"learning:test", "learning"},
+		{"note:test", "note"},
+		{"fact:test", "fact"},
+	} {
+		if _, err := memStore.SaveFromResult(ctx, entry.name, entry.typ, rc.Workspace, entry.name, seedMemoryResult); err != nil {
+			t.Fatalf("save memory %s: %v", entry.name, err)
+		}
+	}
+
+	if err := run(ctx, rc, Input{Workspace: rc.Workspace, Enqueue: true, ProcessAll: true, BatchSize: 2}); err != nil {
+		t.Fatalf("run enqueue: %v", err)
+	}
+
+	_, output, err := skilltest.DecodeEnvelopeData[Output](stdout.Bytes())
+	if err != nil {
+		t.Fatalf("decode output: %v; raw=%s", err, stdout.String())
+	}
+	assert.Equal(t, 3, output.Queued)
+	assert.Equal(t, 1, output.Skipped)
+
+	queueStore, err := embedding.OpenStore(ctx, rc.Config.Paths.Cache)
+	if err != nil {
+		t.Fatalf("open queue store: %v", err)
+	}
+	defer queueStore.Close()
+	var queuedNames []string
+	for {
+		job, err := queueStore.ClaimNext(ctx)
+		if err != nil {
+			t.Fatalf("claim job: %v", err)
+		}
+		if job == nil {
+			break
+		}
+		queuedNames = append(queuedNames, job.MemoryName)
+	}
+	assert.ElementsMatch(t, []string{"learning:test", "note:test", "fact:test"}, queuedNames)
 }
 
 func TestFormatMemoryContent_EmptySummaryUsesName(t *testing.T) {

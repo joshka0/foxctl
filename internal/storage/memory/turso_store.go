@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/joshka0/foxctl/internal/platform/timeutil"
 	ws "github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/storage/dbdriver"
+	"github.com/joshka0/foxctl/internal/storage/sqliteutil"
 	"github.com/joshka0/foxctl/internal/storage/sqlutil"
 )
 
@@ -668,6 +670,132 @@ func (s *TursoStore) UpdateEmbedding(ctx context.Context, name, workspace string
 		return fmt.Errorf("memory: update embedding: %w", err)
 	}
 	return nil
+}
+
+// SyncSymbolEmbeddings fills Turso named_memory.embedding from queued symbol embeddings.
+// The embedding queue is SQLite-backed, so Turso cannot rely on ATTACH DATABASE here.
+func (s *TursoStore) SyncSymbolEmbeddings(ctx context.Context, embeddingDBPath string, opts SyncSymbolEmbeddingsOptions) (int, error) {
+	if s == nil {
+		return 0, fmt.Errorf("memory: sync embeddings: nil store")
+	}
+	embeddingDBPath = strings.TrimSpace(embeddingDBPath)
+	if embeddingDBPath == "" {
+		return 0, fmt.Errorf("memory: sync embeddings: embedding db path required")
+	}
+	workspaceID := ws.CanonicalID(strings.TrimSpace(opts.WorkspaceID))
+	if workspaceID == "" {
+		return 0, fmt.Errorf("memory: sync embeddings: workspace required")
+	}
+
+	embeddingDB, err := sqliteutil.OpenDB(ctx, embeddingDBPath, nil)
+	if err != nil {
+		return 0, fmt.Errorf("memory: sync embeddings: open embedding db: %w", err)
+	}
+	defer func() {
+		errs.Ignore(embeddingDB.Close(), "close embedding sync db")
+	}()
+
+	query := `
+SELECT symbol_id, embedding, model, dimensions
+FROM symbol_embeddings
+WHERE workspace_id = ?`
+	args := []any{workspaceID}
+	if len(opts.SymbolIDs) > 0 {
+		ids := make([]string, 0, len(opts.SymbolIDs))
+		for _, id := range opts.SymbolIDs {
+			id = strings.TrimSpace(id)
+			if id != "" {
+				ids = append(ids, id)
+			}
+		}
+		if len(ids) > 0 {
+			placeholders := make([]string, 0, len(ids))
+			for _, id := range ids {
+				placeholders = append(placeholders, "?")
+				args = append(args, id)
+			}
+			query += " AND symbol_id IN (" + strings.Join(placeholders, ", ") + ")"
+		}
+	}
+
+	rows, err := embeddingDB.QueryContext(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("memory: sync embeddings: query symbols: %w", err)
+	}
+	defer func() {
+		errs.Ignore(rows.Close(), "close symbol embedding rows")
+	}()
+
+	updated := 0
+	var firstModel string
+	firstDimensions := 0
+	for rows.Next() {
+		var symbolID string
+		var embeddingBytes []byte
+		var model string
+		var dimensions int
+		if err := rows.Scan(&symbolID, &embeddingBytes, &model, &dimensions); err != nil {
+			return updated, fmt.Errorf("memory: sync embeddings: scan symbol: %w", err)
+		}
+
+		var embedding []float32
+		if err := json.Unmarshal(embeddingBytes, &embedding); err != nil {
+			return updated, fmt.Errorf("memory: sync embeddings: decode %s: %w", symbolID, err)
+		}
+		if len(embedding) == 0 {
+			continue
+		}
+		if dimensions > 0 && dimensions != len(embedding) {
+			return updated, fmt.Errorf("memory: sync embeddings: %s dimensions metadata=%d vector=%d", symbolID, dimensions, len(embedding))
+		}
+		if s.vectorDimension > 0 && len(embedding) != s.vectorDimension {
+			return updated, fmt.Errorf("memory: embedding dimension mismatch: got %d, expected %d", len(embedding), s.vectorDimension)
+		}
+
+		vec := make(dbdriver.Vector, len(embedding))
+		copy(vec, embedding)
+		vectorExpr := s.vh.VectorExpression(vec)
+		where := "name = ? AND workspace = ?"
+		if opts.OnlyMissing {
+			where += " AND (embedding IS NULL OR LENGTH(embedding) = 0)"
+		}
+		stmt := fmt.Sprintf(`
+UPDATE named_memory
+SET embedding = %s, embedding_model = ?, updated_at = ?
+WHERE %s
+`, vectorExpr, where)
+		result, err := s.db.ExecContext(ctx, stmt,
+			model,
+			sqlutil.FormatTimestamp(timeutil.NowUTC()),
+			fmt.Sprintf("symbol://%s/%s", workspaceID, symbolID),
+			workspaceID,
+		)
+		if err != nil {
+			return updated, fmt.Errorf("memory: sync embeddings: update %s: %w", symbolID, err)
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return updated, fmt.Errorf("memory: sync embeddings: rows affected: %w", err)
+		}
+		updated += int(affected)
+		if affected > 0 && firstDimensions == 0 {
+			firstModel = strings.TrimSpace(model)
+			firstDimensions = len(embedding)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return updated, fmt.Errorf("memory: sync embeddings: rows: %w", err)
+	}
+	if updated > 0 && firstDimensions > 0 {
+		if err := s.SetEmbeddingMetadata(ctx, EmbeddingMetadata{
+			Workspace:  workspaceID,
+			Model:      firstModel,
+			Dimensions: firstDimensions,
+		}); err != nil {
+			return updated, err
+		}
+	}
+	return updated, nil
 }
 
 // SearchSimilarGlobal finds entries similar to the given embedding across ALL workspaces.

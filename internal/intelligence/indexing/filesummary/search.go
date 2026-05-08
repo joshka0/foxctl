@@ -11,11 +11,16 @@ import (
 	"github.com/joshka0/foxctl/internal/storage"
 )
 
+type searchStore interface {
+	Search(ctx context.Context, workspace, query string, limit int) ([]storage.ScoredEntry, error)
+	SearchSimilarByType(ctx context.Context, workspace, entryType string, embedding []float32, limit int) ([]storage.ScoredEntry, error)
+}
+
 // SearchFileSummaries searches file_summary entries using vector search when available,
 // falling back to BM25. Results are filtered to file_summary entries only.
 func SearchFileSummaries(
 	ctx context.Context,
-	store storage.MemoryStore,
+	store searchStore,
 	workspace string,
 	query string,
 	queryEmbedding []float32,
@@ -35,7 +40,7 @@ func SearchFileSummaries(
 	var entries []retrieval.FileEntry
 
 	if queryEmbedding != nil {
-		scored, err = store.SearchSimilar(ctx, workspace, queryEmbedding, oversample)
+		scored, err = store.SearchSimilarByType(ctx, workspace, symbol.FileSummaryType, queryEmbedding, oversample)
 		if err != nil {
 			scored = nil
 		}
@@ -64,12 +69,12 @@ func filterFileSummaryEntries(scored []storage.ScoredEntry, limit int) []retriev
 	seen := make(map[string]bool)
 	for _, s := range scored {
 		entry := s.Entry
-		if entry.Type != symbol.FileSummaryType && !strings.HasPrefix(entry.Name, "file://") {
+		if entry.Type != symbol.FileSummaryType {
 			continue
 		}
-		filePath := extractFilePath(entry.Name)
+		filePath := extractFilePathFromEntryPayload(entry.Result)
 		if filePath == "" {
-			filePath = extractFilePathFromEntryPayload(entry.Result)
+			filePath = extractFilePath(entry.Name)
 		}
 		if filePath == "" || seen[filePath] {
 			continue
@@ -93,21 +98,26 @@ func filterFileSummaryEntries(scored []storage.ScoredEntry, limit int) []retriev
 }
 
 func extractFilePath(entryName string) string {
-	parts := strings.SplitN(entryName, "://", 2)
-	if len(parts) != 2 {
+	const prefix = "file://"
+	if !strings.HasPrefix(entryName, prefix) {
 		return ""
 	}
-	trimmed := parts[1]
+	trimmed := strings.TrimPrefix(entryName, prefix)
+	if trimmed == "" || strings.HasPrefix(trimmed, "/") {
+		return ""
+	}
 	slash := strings.Index(trimmed, "/")
 	if slash < 0 {
 		return ""
 	}
-	trimmed = trimmed[slash+1:]
-	nextSlash := strings.Index(trimmed, "/")
-	if nextSlash < 0 {
+	filePath := strings.TrimSpace(trimmed[slash+1:])
+	if filePath == "" || strings.Contains(filePath, "://") {
 		return ""
 	}
-	return trimmed[nextSlash+1:]
+	if hash := strings.Index(filePath, "#"); hash >= 0 {
+		filePath = filePath[:hash]
+	}
+	return filePath
 }
 
 func extractFilePathFromEntryPayload(payload []byte) string {

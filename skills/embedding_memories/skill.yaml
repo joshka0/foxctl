@@ -55,7 +55,10 @@ signature:
       description: Number of memory embedding jobs queued
     - name: skipped
       type: integer
-      description: Number of memories skipped (no content)
+      description: Number of memories skipped by policy, empty content, or queue dedupe
+    - name: policy_skipped
+      type: integer
+      description: Number of memories skipped by the general memory lane policy
     - name: errors
       type: integer
       description: Number of embedding errors

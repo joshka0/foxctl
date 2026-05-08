@@ -16,9 +16,10 @@ import (
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedding"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedqueue"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+	"github.com/joshka0/foxctl/internal/storage/queue"
 )
 
-var allowedOps = []string{"enqueue", "stats", "get", "get_by_file", "job_status", "cleanup", "recover_stale"}
+var allowedOps = []string{"enqueue", "stats", "get", "get_by_file", "job_status", "cleanup", "recover_stale", "purge"}
 
 // Input is the skill input schema for embedding/queue operations.
 type Input struct {
@@ -28,7 +29,7 @@ type Input struct {
 	// WorkspaceID identifies the workspace.
 	WorkspaceID string `json:"workspace_id,omitempty"`
 
-	// Kind restricts stats and stale recovery to one task kind (symbol or memory).
+	// Kind restricts stats and stale recovery to one task kind (symbol, memory, or semantic_file).
 	Kind string `json:"kind,omitempty"`
 
 	// Symbols is the list of symbols to enqueue (for "enqueue" operation).
@@ -106,6 +107,9 @@ type Output struct {
 	// For recover_stale
 	Recovered int64 `json:"recovered,omitempty"`
 
+	// Table names the backing queue table for lane-aware operations.
+	Table string `json:"table,omitempty"`
+
 	// Message provides human-readable info.
 	Message string `json:"message,omitempty"`
 }
@@ -160,7 +164,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		}
 
 	case "stats":
-		if err := handleStats(ctx, store, &in, &output); err != nil {
+		if err := handleStats(ctx, rc.Config.Paths.Cache, store, &in, &output); err != nil {
 			return err
 		}
 
@@ -186,12 +190,20 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		}
 
 	case "cleanup":
-		if err := handleCleanup(ctx, store, &in, &output); err != nil {
+		if err := handleCleanup(ctx, rc.Config.Paths.Cache, store, &in, &output); err != nil {
 			return err
 		}
 
 	case "recover_stale":
-		if err := handleRecoverStale(ctx, store, &in, &output); err != nil {
+		if err := handleRecoverStale(ctx, rc.Config.Paths.Cache, store, &in, &output); err != nil {
+			return err
+		}
+
+	case "purge":
+		if err := requireWorkspaceID(rc, &in, op); err != nil {
+			return err
+		}
+		if err := handlePurge(ctx, rc.Config.Paths.Cache, store, &in, &output); err != nil {
 			return err
 		}
 	}
@@ -275,11 +287,26 @@ func handleEnqueue(ctx context.Context, store *embedding.Store, input *Input, ou
 }
 
 // handleStats retrieves and formats queue statistics for monitoring.
-func handleStats(ctx context.Context, store *embedding.Store, input *Input, output *Output) error {
+func handleStats(ctx context.Context, cacheRoot string, store *embedding.Store, input *Input, output *Output) error {
 	workspaceID := strings.TrimSpace(input.WorkspaceID)
 	kind, err := normalizeTaskKind(input.Kind)
 	if err != nil {
 		return err
+	}
+	if kind == embedqueue.TaskKindSemanticFile {
+		stats, err := withSemanticQueue(ctx, cacheRoot, func(semanticStore *semantic.QueueStore) (*queue.Stats, error) {
+			return semanticStore.Stats(ctx, workspaceID)
+		})
+		if err != nil {
+			return skillerr.WrapIO("semantic file stats", err)
+		}
+		output.Stats = queueStatsFromSemantic(stats)
+		output.Kind = string(kind)
+		output.Table = semantic.SemanticEmbeddingQueueTable
+		scope := describeScope(workspaceID, kind)
+		output.Message = fmt.Sprintf("Queue (%s, table %s): %d pending, %d running, %d completed, %d failed | Embeddings: %d stored",
+			scope, semantic.SemanticEmbeddingQueueTable, output.Stats.QueuedCount, output.Stats.RunningCount, output.Stats.CompletedCount, output.Stats.FailedCount, output.Stats.EmbeddingsCount)
+		return nil
 	}
 	var (
 		stats *embedding.QueueStats
@@ -361,23 +388,51 @@ func handleJobStatus(ctx context.Context, store *embedding.Store, input *Input, 
 }
 
 // handleCleanup removes old completed/failed jobs from the queue.
-func handleCleanup(ctx context.Context, store *embedding.Store, input *Input, output *Output) error {
+func handleCleanup(ctx context.Context, cacheRoot string, store *embedding.Store, input *Input, output *Output) error {
 	hours := input.OlderThanHours
 	if hours <= 0 {
 		hours = 24 // Default: 24 hours
 	}
 
-	deleted, err := store.Cleanup(ctx, time.Duration(hours)*time.Hour)
+	workspaceID := strings.TrimSpace(input.WorkspaceID)
+	kind, err := normalizeTaskKind(input.Kind)
+	if err != nil {
+		return err
+	}
+	olderThan := time.Duration(hours) * time.Hour
+	var deleted int64
+	if kind == embedqueue.TaskKindSemanticFile {
+		deleted, err = withSemanticQueue(ctx, cacheRoot, func(semanticStore *semantic.QueueStore) (int64, error) {
+			return semanticStore.Cleanup(ctx, workspaceID, olderThan)
+		})
+		if err == nil {
+			output.Table = semantic.SemanticEmbeddingQueueTable
+		}
+	} else {
+		switch {
+		case workspaceID != "" && kind != "":
+			deleted, err = store.CleanupInWorkspaceKind(ctx, workspaceID, kind, olderThan)
+		case workspaceID != "":
+			deleted, err = store.CleanupInWorkspace(ctx, workspaceID, olderThan)
+		case kind != "":
+			deleted, err = store.CleanupKind(ctx, kind, olderThan)
+		default:
+			deleted, err = store.Cleanup(ctx, olderThan)
+		}
+	}
 	if err != nil {
 		return skillerr.WrapIO("cleanup", err)
 	}
 
 	output.Deleted = deleted
-	output.Message = fmt.Sprintf("Deleted %d completed/failed jobs older than %d hours", deleted, hours)
+	if kind != "" {
+		output.Kind = string(kind)
+	}
+	output.Message = fmt.Sprintf("Deleted %d completed/failed jobs older than %d hours for %s", deleted, hours, describeScope(workspaceID, kind))
 	return nil
 }
 
-func handleRecoverStale(ctx context.Context, store *embedding.Store, input *Input, output *Output) error {
+func handleRecoverStale(ctx context.Context, cacheRoot string, store *embedding.Store, input *Input, output *Output) error {
 	if input.StaleAfterSeconds <= 0 {
 		return skillerr.Arg("stale_after_seconds must be > 0 for recover_stale")
 	}
@@ -391,15 +446,24 @@ func handleRecoverStale(ctx context.Context, store *embedding.Store, input *Inpu
 	var (
 		recovered int64
 	)
-	switch {
-	case workspaceID != "" && kind != "":
-		recovered, err = store.RequeueStaleRunningInWorkspaceKind(ctx, workspaceID, kind, olderThan)
-	case workspaceID != "":
-		recovered, err = store.RequeueStaleRunningInWorkspace(ctx, workspaceID, olderThan)
-	case kind != "":
-		recovered, err = store.RequeueStaleRunningKind(ctx, kind, olderThan)
-	default:
-		recovered, err = store.RequeueStaleRunning(ctx, olderThan)
+	if kind == embedqueue.TaskKindSemanticFile {
+		recovered, err = withSemanticQueue(ctx, cacheRoot, func(semanticStore *semantic.QueueStore) (int64, error) {
+			return semanticStore.RequeueStaleRunningInWorkspace(ctx, workspaceID, olderThan)
+		})
+		if err == nil {
+			output.Table = semantic.SemanticEmbeddingQueueTable
+		}
+	} else {
+		switch {
+		case workspaceID != "" && kind != "":
+			recovered, err = store.RequeueStaleRunningInWorkspaceKind(ctx, workspaceID, kind, olderThan)
+		case workspaceID != "":
+			recovered, err = store.RequeueStaleRunningInWorkspace(ctx, workspaceID, olderThan)
+		case kind != "":
+			recovered, err = store.RequeueStaleRunningKind(ctx, kind, olderThan)
+		default:
+			recovered, err = store.RequeueStaleRunning(ctx, olderThan)
+		}
 	}
 	if err != nil {
 		return skillerr.WrapIO("recover stale jobs", err)
@@ -414,14 +478,44 @@ func handleRecoverStale(ctx context.Context, store *embedding.Store, input *Inpu
 	return nil
 }
 
+func handlePurge(ctx context.Context, cacheRoot string, store *embedding.Store, input *Input, output *Output) error {
+	workspaceID := strings.TrimSpace(input.WorkspaceID)
+	kind, err := normalizeTaskKind(input.Kind)
+	if err != nil {
+		return err
+	}
+	if kind == "" {
+		return skillerr.Arg("kind is required for purge", skillerr.WithHint("Use kind=symbol, kind=memory, or kind=semantic_file."))
+	}
+	var deleted int64
+	if kind == embedqueue.TaskKindSemanticFile {
+		deleted, err = withSemanticQueue(ctx, cacheRoot, func(semanticStore *semantic.QueueStore) (int64, error) {
+			return semanticStore.Purge(ctx, workspaceID)
+		})
+		if err == nil {
+			output.Table = semantic.SemanticEmbeddingQueueTable
+		}
+	} else {
+		deleted, err = store.Purge(ctx, workspaceID, kind)
+	}
+	if err != nil {
+		return skillerr.WrapIO("purge jobs", err)
+	}
+
+	output.Deleted = deleted
+	output.Kind = string(kind)
+	output.Message = fmt.Sprintf("Purged %d jobs for %s", deleted, describeScope(workspaceID, kind))
+	return nil
+}
+
 func normalizeTaskKind(raw string) (embedqueue.TaskKind, error) {
 	switch kind := embedqueue.TaskKind(strings.TrimSpace(raw)); kind {
 	case "":
 		return "", nil
-	case embedqueue.TaskKindSymbol, embedqueue.TaskKindMemory:
+	case embedqueue.TaskKindSymbol, embedqueue.TaskKindMemory, embedqueue.TaskKindSemanticFile:
 		return kind, nil
 	default:
-		return "", skillerr.Arg("kind must be one of: symbol, memory")
+		return "", skillerr.Arg("kind must be one of: symbol, memory, semantic_file")
 	}
 }
 
@@ -435,4 +529,29 @@ func describeScope(workspaceID string, kind embedqueue.TaskKind) string {
 		scope += ", kind " + string(kind)
 	}
 	return scope
+}
+
+func withSemanticQueue[T any](ctx context.Context, cacheRoot string, fn func(*semantic.QueueStore) (T, error)) (T, error) {
+	var zero T
+	store, err := semantic.OpenQueueStore(ctx, cacheRoot)
+	if err != nil {
+		return zero, err
+	}
+	defer func() {
+		_ = store.Close() //nolint:errcheck
+	}()
+	return fn(store)
+}
+
+func queueStatsFromSemantic(stats *queue.Stats) *embedding.QueueStats {
+	if stats == nil {
+		return &embedding.QueueStats{}
+	}
+	return &embedding.QueueStats{
+		QueuedCount:    stats.QueuedCount,
+		RunningCount:   stats.RunningCount,
+		CompletedCount: stats.CompletedCount,
+		FailedCount:    stats.FailedCount,
+		OldestQueuedAt: stats.OldestQueuedAt,
+	}
 }

@@ -189,3 +189,99 @@ func TestRequeueStaleRunningForGroupKindOnlyRecoversMatchingJSONKind(t *testing.
 		t.Fatalf("memoryStats=%+v want queued=0 running=1", memoryStats)
 	}
 }
+
+func TestCleanupForGroupKindOnlyDeletesMatchingCompletedJobs(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "queue.db"), Options{Table: "test_queue"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	for _, req := range []EnqueueRequest{
+		{GroupID: "workspace", Payload: []byte(`{"kind":"memory","name":"m"}`), DedupeKey: "memory"},
+		{GroupID: "workspace", Payload: []byte(`{"kind":"symbol","name":"s"}`), DedupeKey: "symbol"},
+		{GroupID: "other", Payload: []byte(`{"kind":"memory","name":"m2"}`), DedupeKey: "other-memory"},
+	} {
+		if _, err := store.Enqueue(ctx, req); err != nil {
+			t.Fatalf("enqueue %s: %v", req.DedupeKey, err)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		claimed, err := store.ClaimNext(ctx, ClaimOptions{})
+		if err != nil {
+			t.Fatalf("claim %d: %v", i, err)
+		}
+		if claimed == nil {
+			t.Fatalf("claim %d returned nil", i)
+		}
+		if err := store.Complete(ctx, claimed.ID); err != nil {
+			t.Fatalf("complete %s: %v", claimed.ID, err)
+		}
+	}
+
+	deleted, err := store.CleanupForGroupKind(ctx, 0, "workspace", "memory")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 1 {
+		t.Fatalf("deleted=%d want 1", deleted)
+	}
+
+	workspaceStats, err := store.Stats(ctx, "workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workspaceStats.CompletedCount != 1 {
+		t.Fatalf("workspace stats=%+v want one remaining completed job", workspaceStats)
+	}
+	otherStats, err := store.Stats(ctx, "other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if otherStats.CompletedCount != 1 {
+		t.Fatalf("other stats=%+v want untouched completed job", otherStats)
+	}
+}
+
+func TestPurgeDeletesOnlyMatchingGroupKind(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "queue.db"), Options{Table: "test_queue"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	for _, req := range []EnqueueRequest{
+		{GroupID: "workspace", Payload: []byte(`{"kind":"memory","name":"m"}`), DedupeKey: "memory"},
+		{GroupID: "workspace", Payload: []byte(`{"kind":"symbol","name":"s"}`), DedupeKey: "symbol"},
+		{GroupID: "other", Payload: []byte(`{"kind":"memory","name":"m2"}`), DedupeKey: "other-memory"},
+	} {
+		if _, err := store.Enqueue(ctx, req); err != nil {
+			t.Fatalf("enqueue %s: %v", req.DedupeKey, err)
+		}
+	}
+
+	deleted, err := store.Purge(ctx, "workspace", "memory")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 1 {
+		t.Fatalf("deleted=%d want 1", deleted)
+	}
+
+	workspaceStats, err := store.Stats(ctx, "workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workspaceStats.QueuedCount != 1 {
+		t.Fatalf("workspace stats=%+v want one queued symbol job", workspaceStats)
+	}
+	otherStats, err := store.Stats(ctx, "other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if otherStats.QueuedCount != 1 {
+		t.Fatalf("other stats=%+v want untouched memory job", otherStats)
+	}
+}

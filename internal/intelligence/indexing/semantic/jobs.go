@@ -107,6 +107,21 @@ type JobSummary struct {
 
 	// FilesSkipped is the number of files skipped (e.g., filtered by globs).
 	FilesSkipped int `json:"files_skipped"`
+
+	// ChunkPlannerCounts counts chunks by planner kind.
+	ChunkPlannerCounts map[string]int `json:"chunk_planner_counts,omitempty"`
+
+	// ChunkSizeBytes summarizes semantic chunk sizes.
+	ChunkSizeBytes *ChunkSizeSummary `json:"chunk_size_bytes,omitempty"`
+}
+
+// ChunkSizeSummary captures simple distribution metrics for semantic chunks.
+type ChunkSizeSummary struct {
+	Count        int   `json:"count"`
+	MinBytes     int64 `json:"min_bytes"`
+	MaxBytes     int64 `json:"max_bytes"`
+	TotalBytes   int64 `json:"total_bytes"`
+	AverageBytes int64 `json:"average_bytes"`
 }
 
 // JobFailure describes a per-file failure during indexing.

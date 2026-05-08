@@ -22,6 +22,7 @@ import (
 	"github.com/joshka0/foxctl/internal/platform/fsutil"
 	platformsymbol "github.com/joshka0/foxctl/internal/platform/symbolutil"
 	workspaceutil "github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
 	"github.com/joshka0/foxctl/internal/storage"
 	"github.com/joshka0/foxctl/internal/storage/memory"
 	"github.com/rs/zerolog"
@@ -310,18 +311,20 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 		sym.FileDigest = fileDigest
 		sym.Language = lang
 		symID := sym.EffectiveID()
+		semanticAnchors := semanticAnchorHints(event.WorkspaceID, sym.Documentation)
 
 		skipDigest := sym.BodyDigest
 		if useDocAwareDigest {
 			skipDigest = embeddingtext.BuildSymbolContentDigest(embeddingtext.SymbolDigestInput{
-				Model:      embedModel,
-				Kind:       string(sym.Kind),
-				Name:       sym.Name,
-				SymbolKey:  sym.EffectiveID(),
-				FilePath:   sym.FilePath,
-				Signature:  sym.Signature,
-				Doc:        sym.Documentation,
-				BodyDigest: sym.BodyDigest,
+				Model:           embedModel,
+				Kind:            string(sym.Kind),
+				Name:            sym.Name,
+				SymbolKey:       sym.EffectiveID(),
+				FilePath:        sym.FilePath,
+				Signature:       sym.Signature,
+				Doc:             sym.Documentation,
+				BodyDigest:      sym.BodyDigest,
+				SemanticAnchors: semanticAnchors,
 			})
 		}
 		newDigests[symID] = skipDigest
@@ -354,8 +357,9 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 		savedCount++
 
 		if idx.config.EmbeddingEnabled {
-			content, digest := idx.buildEmbeddingPayload(sym, calls, content, embedMode, embedModel)
+			content, digest, metrics := idx.buildEmbeddingPayload(sym, calls, semanticAnchors, content, embedMode, embedModel)
 			if strings.TrimSpace(content) != "" {
+				idx.emitSymbolEmbeddingMetrics(ctx, event.WorkspaceID, file.Path, sym, metrics)
 				embedInputs = append(embedInputs, embedding.SymbolInput{
 					SymbolID:      symID,
 					FilePath:      sym.FilePath,
@@ -414,10 +418,10 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 	return nil
 }
 
-func (idx *Indexer) buildEmbeddingPayload(sym Symbol, calls []string, fileContent []byte, mode config.EmbedSymbolTextMode, model string) (string, string) {
+func (idx *Indexer) buildEmbeddingPayload(sym Symbol, calls, semanticAnchors []string, fileContent []byte, mode config.EmbedSymbolTextMode, model string) (string, string, embeddingtext.SymbolTextMetrics) {
 	body := extractSymbolBody(fileContent, sym)
 	if strings.TrimSpace(body) == "" {
-		return "", ""
+		return "", "", embeddingtext.SymbolTextMetrics{}
 	}
 
 	switch mode {
@@ -428,34 +432,80 @@ func (idx *Indexer) buildEmbeddingPayload(sym Symbol, calls []string, fileConten
 			Package:  filepath.ToSlash(filepath.Dir(sym.FilePath)),
 		})
 		info := embeddingtext.SymbolInfo{
-			Name:      sym.Name,
-			Kind:      string(sym.Kind),
-			Package:   filepath.ToSlash(filepath.Dir(sym.FilePath)),
-			FilePath:  sym.FilePath,
-			Signature: sym.Signature,
-			Doc:       sym.Documentation,
-			Code:      body,
-			Calls:     calls,
-			Aliases:   aliases,
+			Name:            sym.Name,
+			Kind:            string(sym.Kind),
+			Package:         filepath.ToSlash(filepath.Dir(sym.FilePath)),
+			FilePath:        sym.FilePath,
+			Language:        sym.Language,
+			Signature:       sym.Signature,
+			Doc:             sym.Documentation,
+			Code:            body,
+			Calls:           calls,
+			Aliases:         aliases,
+			SemanticAnchors: semanticAnchors,
 		}
-		content := embeddingtext.BuildSymbolEmbeddingText(info, embeddingtext.DefaultSymbolTextOptionsDocEnriched())
+		content, metrics := embeddingtext.BuildSymbolEmbeddingTextWithMetrics(info, embeddingtext.DefaultSymbolTextOptionsDocEnriched())
 		digest := embeddingtext.BuildSymbolContentDigest(embeddingtext.SymbolDigestInput{
-			Model:      model,
-			Kind:       string(sym.Kind),
-			Name:       sym.Name,
-			SymbolKey:  sym.EffectiveID(),
-			FilePath:   sym.FilePath,
-			Signature:  sym.Signature,
-			Doc:        sym.Documentation,
-			BodyDigest: sym.BodyDigest,
-			Calls:      calls,
-			Aliases:    aliases,
+			Model:           model,
+			Kind:            string(sym.Kind),
+			Name:            sym.Name,
+			SymbolKey:       sym.EffectiveID(),
+			FilePath:        sym.FilePath,
+			Signature:       sym.Signature,
+			Doc:             sym.Documentation,
+			BodyDigest:      sym.BodyDigest,
+			Calls:           calls,
+			Aliases:         aliases,
+			SemanticAnchors: semanticAnchors,
 		})
-		return content, digest
+		return content, digest, metrics
 	default:
 		content := body
-		return content, embeddingtext.DigestSHA256(content)
+		metrics := embeddingtext.SymbolTextMetrics{
+			SourceChars:         len(body),
+			SourceLines:         countLines([]byte(body)),
+			StrippedSourceChars: len(body),
+			StrippedSourceLines: countLines([]byte(body)),
+			EmbeddingTextChars:  len(content),
+			EmbeddingTextLines:  countLines([]byte(content)),
+		}
+		return content, embeddingtext.DigestSHA256(content), metrics
 	}
+}
+
+func (idx *Indexer) emitSymbolEmbeddingMetrics(ctx context.Context, workspaceID, filePath string, sym Symbol, metrics embeddingtext.SymbolTextMetrics) {
+	idx.logger.Debug().
+		Str("path", filePath).
+		Str("symbol", sym.EffectiveID()).
+		Str("kind", string(sym.Kind)).
+		Int("source_chars", metrics.SourceChars).
+		Int("source_lines", metrics.SourceLines).
+		Int("stripped_source_chars", metrics.StrippedSourceChars).
+		Int("stripped_source_lines", metrics.StrippedSourceLines).
+		Int("embedding_text_chars", metrics.EmbeddingTextChars).
+		Int("embedding_text_lines", metrics.EmbeddingTextLines).
+		Int("fields", metrics.ExtractedFieldCount).
+		Int("relationship_hints", metrics.RelationshipHintCount).
+		Int("semantic_anchors", metrics.SemanticAnchorCount).
+		Msg("symbol embedding text metrics")
+
+	observability.Emit(ctx, observability.NewEvent("symbol.embedding_text").
+		WithComponent(observability.ComponentJob).
+		WithWorkspace(workspaceID).
+		WithData("indexer_id", IndexerID).
+		WithData("file_path", filePath).
+		WithData("symbol_id", sym.EffectiveID()).
+		WithData("symbol_kind", string(sym.Kind)).
+		WithData("source_chars", metrics.SourceChars).
+		WithData("source_lines", metrics.SourceLines).
+		WithData("stripped_source_chars", metrics.StrippedSourceChars).
+		WithData("stripped_source_lines", metrics.StrippedSourceLines).
+		WithData("embedding_text_chars", metrics.EmbeddingTextChars).
+		WithData("embedding_text_lines", metrics.EmbeddingTextLines).
+		WithData("field_count", metrics.ExtractedFieldCount).
+		WithData("relationship_hint_count", metrics.RelationshipHintCount).
+		WithData("semantic_anchor_count", metrics.SemanticAnchorCount).
+		Success(0))
 }
 
 func (idx *Indexer) enqueueEmbeddings(ctx context.Context, workspaceID string, inputs []embedding.SymbolInput, model string) error {

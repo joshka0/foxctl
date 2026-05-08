@@ -490,11 +490,70 @@ func (s *Store) stats(ctx context.Context, groupID, payloadKind string) (*Stats,
 
 // Cleanup deletes completed jobs older than the provided duration.
 func (s *Store) Cleanup(ctx context.Context, olderThan time.Duration) (int64, error) {
+	return s.cleanup(ctx, olderThan, "", "")
+}
+
+// CleanupForGroup deletes completed jobs for one group older than the provided duration.
+func (s *Store) CleanupForGroup(ctx context.Context, olderThan time.Duration, groupID string) (int64, error) {
+	if strings.TrimSpace(groupID) == "" {
+		return s.Cleanup(ctx, olderThan)
+	}
+	return s.cleanup(ctx, olderThan, strings.TrimSpace(groupID), "")
+}
+
+// CleanupForKind deletes completed jobs for one JSON payload kind older than the provided duration.
+func (s *Store) CleanupForKind(ctx context.Context, olderThan time.Duration, payloadKind string) (int64, error) {
+	return s.cleanup(ctx, olderThan, "", strings.TrimSpace(payloadKind))
+}
+
+// CleanupForGroupKind deletes completed jobs for one group and JSON payload kind.
+func (s *Store) CleanupForGroupKind(ctx context.Context, olderThan time.Duration, groupID, payloadKind string) (int64, error) {
+	if strings.TrimSpace(groupID) == "" {
+		return s.CleanupForKind(ctx, olderThan, payloadKind)
+	}
+	return s.cleanup(ctx, olderThan, strings.TrimSpace(groupID), strings.TrimSpace(payloadKind))
+}
+
+func (s *Store) cleanup(ctx context.Context, olderThan time.Duration, groupID, payloadKind string) (int64, error) {
 	cutoff := sqlutil.FormatTimestamp(time.Now().UTC().Add(-olderThan))
+	clauses := []string{"state IN ('ok', 'error')", "completed_at < ?"}
+	args := []any{cutoff}
+	if groupID != "" {
+		clauses = append(clauses, "group_id = ?")
+		args = append(args, groupID)
+	}
+	if predicate, predicateArgs := payloadKindPredicate(payloadKind); predicate != "" {
+		clauses = append(clauses, predicate)
+		args = append(args, predicateArgs...)
+	}
 	result, err := s.db.ExecContext(ctx, fmt.Sprintf(`
 		DELETE FROM %s
-		WHERE state IN ('ok', 'error') AND completed_at < ?
-	`, s.table), cutoff)
+		WHERE %s
+	`, s.table, strings.Join(clauses, " AND ")), args...)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+// Purge deletes all queue jobs matching the optional group and payload kind filters.
+func (s *Store) Purge(ctx context.Context, groupID, payloadKind string) (int64, error) {
+	clauses := []string{}
+	args := []any{}
+	groupID = strings.TrimSpace(groupID)
+	if groupID != "" {
+		clauses = append(clauses, "group_id = ?")
+		args = append(args, groupID)
+	}
+	if predicate, predicateArgs := payloadKindPredicate(payloadKind); predicate != "" {
+		clauses = append(clauses, predicate)
+		args = append(args, predicateArgs...)
+	}
+	query := fmt.Sprintf("DELETE FROM %s", s.table)
+	if len(clauses) > 0 {
+		query += " WHERE " + strings.Join(clauses, " AND ")
+	}
+	result, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, err
 	}

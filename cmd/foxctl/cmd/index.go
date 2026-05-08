@@ -16,6 +16,7 @@ import (
 	"github.com/joshka0/foxctl/internal/intelligence/indexing"
 	embedstore "github.com/joshka0/foxctl/internal/intelligence/indexing/embedding"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/filesummary"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/memorylane"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
 	"github.com/joshka0/foxctl/internal/platform/config"
@@ -603,11 +604,6 @@ func indexSymbols(ctx context.Context, cfg config.Config, workspace, glob string
 	}
 	defer store.Close()
 
-	provider, err := createIndexEmbeddingProviderForScope(cfg, "symbols")
-	if err != nil {
-		return 0, err
-	}
-
 	files, err := fsutil.FindFilesRespectingGitignore(workspace, glob, exclude)
 	if err != nil {
 		return 0, fmt.Errorf("find files: %w", err)
@@ -617,18 +613,24 @@ func indexSymbols(ctx context.Context, cfg config.Config, workspace, glob string
 		return 0, nil
 	}
 
-	indexerCfg := semantic.Config{Enabled: true}
-	// TODO: Migrate semantic indexer to use observability instead of zerolog
-	logger := zerolog.New(os.Stderr).With().Timestamp().Logger() //nolint:forbidigo // semantic indexer requires zerolog
-	indexer := semantic.NewIndexer(indexerCfg, store, provider, workspace, logger)
+	symCfg := symbol.DefaultConfig()
+	symCfg.Enabled = true
+	symCfg.EmbeddingEnabled = true
+	symCfg.EmbeddingModel = modelForScopeConfig("symbols", cfg)
+	symCfg.EmbeddingStoreRoot = cfg.Paths.Cache
+	symCfg.EmbeddingTextMode = config.EmbedSymbolTextModeDocEnriched
+
+	// TODO: Migrate indexers to use observability instead of zerolog.
+	logger := zerolog.New(os.Stderr).With().Timestamp().Logger() //nolint:forbidigo // indexers require zerolog
+	indexer := symbol.NewIndexer(symCfg, store, nil, workspace, logger)
 
 	workspaceID := workspaceutil.ID(workspace)
-	args := semantic.JobArgs{
+	args := symbol.JobArgs{
 		WorkspaceID: workspaceID,
-		Reason:      semantic.ReasonInitialIndex,
+		Reason:      symbol.ReasonInitialIndex,
 	}
 	for _, f := range files {
-		args.Files = append(args.Files, semantic.JobFileInput{Path: f})
+		args.Files = append(args.Files, symbol.JobFileInput{Path: f})
 	}
 
 	result, err := indexer.RunInitFilesJob(ctx, args)
@@ -779,7 +781,7 @@ func reembedMemories(ctx context.Context, cfg config.Config, workspace string, f
 	totalCount := 0
 	batchSize := 1000
 	for {
-		memories, err := store.ListWithoutEmbedding(ctx, workspace, batchSize)
+		memories, err := listEligibleMemoriesWithoutEmbedding(ctx, store, workspace, batchSize)
 		if err != nil {
 			return totalCount, fmt.Errorf("list memories without embeddings: %w", err)
 		}
@@ -848,6 +850,9 @@ func enqueueMemoryEmbeddingJobs(ctx context.Context, cfg config.Config, store st
 func memoryEmbeddingInputs(entries []storage.NamedEntry) []embedstore.MemoryInput {
 	inputs := make([]embedstore.MemoryInput, 0, len(entries))
 	for _, entry := range entries {
+		if !memorylane.EligibleType(entry.Type) {
+			continue
+		}
 		inputs = append(inputs, embedstore.MemoryInput{
 			Name:    entry.Name,
 			Type:    entry.Type,
@@ -880,6 +885,9 @@ func embedMemoryEntries(ctx context.Context, cfg config.Config, store storage.Me
 		}
 		batchCount := 0
 		for _, mem := range memories[start:end] {
+			if !memorylane.EligibleType(mem.Type) {
+				continue
+			}
 			embedding, err := provider.Embed(ctx, strings.TrimSpace(mem.Summary))
 			if err != nil {
 				observability.Emit(ctx, observability.NewEvent("index.memory_embed").
@@ -930,6 +938,39 @@ func embedMemoryEntries(ctx context.Context, cfg config.Config, store storage.Me
 	return totalCount, nil
 }
 
+func listEligibleMemoriesWithoutEmbedding(ctx context.Context, store storage.MemoryStore, workspace string, batchSize int) ([]storage.NamedEntry, error) {
+	seen := make(map[string]bool)
+	var result []storage.NamedEntry
+	offset := 0
+	for len(result) < batchSize {
+		entries, err := store.ListWithoutEmbeddingPage(ctx, workspace, batchSize, offset)
+		if err != nil {
+			return nil, err
+		}
+		if len(entries) == 0 {
+			break
+		}
+		for _, entry := range entries {
+			if seen[entry.Name] {
+				continue
+			}
+			seen[entry.Name] = true
+			if !memorylane.EligibleType(entry.Type) {
+				continue
+			}
+			result = append(result, entry)
+			if len(result) == batchSize {
+				break
+			}
+		}
+		offset += len(entries)
+		if len(entries) < batchSize {
+			break
+		}
+	}
+	return result, nil
+}
+
 func listMemoriesForReembedding(ctx context.Context, store storage.MemoryStore, workspace string, batchSize int) ([]storage.NamedEntry, error) {
 	if batchSize <= 0 {
 		batchSize = 1000
@@ -942,7 +983,7 @@ func listMemoriesForReembedding(ctx context.Context, store storage.MemoryStore, 
 			return nil, fmt.Errorf("list memories: %w", err)
 		}
 		for _, entry := range entries {
-			if strings.TrimSpace(entry.Summary) != "" {
+			if memorylane.EligibleType(entry.Type) && strings.TrimSpace(entry.Summary) != "" {
 				result = append(result, entry)
 			}
 		}

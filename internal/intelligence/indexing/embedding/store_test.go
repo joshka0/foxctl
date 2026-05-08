@@ -902,6 +902,91 @@ func TestStore_Cleanup(t *testing.T) {
 	}
 }
 
+func TestStore_CleanupInWorkspaceKindOnlyDeletesMatchingJobs(t *testing.T) {
+	ctx := context.Background()
+	store, err := OpenStore(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to open store: %v", err)
+	}
+	defer store.Close()
+
+	if _, err := store.EnqueueMemories(ctx, MemoryEnqueueRequest{
+		WorkspaceID: "test-ws",
+		Memories:    []MemoryInput{{Name: "memory://one", Content: "remember this"}},
+	}); err != nil {
+		t.Fatalf("enqueue memory: %v", err)
+	}
+	if _, err := store.Enqueue(ctx, EnqueueRequest{
+		WorkspaceID: "test-ws",
+		Symbols:     []SymbolInput{{SymbolID: "x.go:X", FilePath: "x.go", SymbolName: "X", Content: "func X() {}"}},
+	}); err != nil {
+		t.Fatalf("enqueue symbol: %v", err)
+	}
+
+	memoryJob, err := store.ClaimNextInWorkspaceKind(ctx, "test-ws", embedqueue.TaskKindMemory)
+	if err != nil {
+		t.Fatalf("claim memory: %v", err)
+	}
+	if err := store.CompleteJob(ctx, memoryJob.ID); err != nil {
+		t.Fatalf("complete memory: %v", err)
+	}
+	symbolJob, err := store.ClaimNextInWorkspaceKind(ctx, "test-ws", embedqueue.TaskKindSymbol)
+	if err != nil {
+		t.Fatalf("claim symbol: %v", err)
+	}
+	if err := store.Complete(ctx, symbolJob.ID, []float32{0.1}, "test-model"); err != nil {
+		t.Fatalf("complete symbol: %v", err)
+	}
+
+	deleted, err := store.CleanupInWorkspaceKind(ctx, "test-ws", embedqueue.TaskKindMemory, 0)
+	if err != nil {
+		t.Fatalf("cleanup memory: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("deleted=%d want 1", deleted)
+	}
+	if _, err := store.GetJob(ctx, symbolJob.ID); err != nil {
+		t.Fatalf("symbol job should remain: %v", err)
+	}
+}
+
+func TestStore_PurgeInWorkspaceKindOnlyDeletesMatchingJobs(t *testing.T) {
+	ctx := context.Background()
+	store, err := OpenStore(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to open store: %v", err)
+	}
+	defer store.Close()
+
+	if _, err := store.EnqueueMemories(ctx, MemoryEnqueueRequest{
+		WorkspaceID: "test-ws",
+		Memories:    []MemoryInput{{Name: "memory://one", Content: "remember this"}},
+	}); err != nil {
+		t.Fatalf("enqueue memory: %v", err)
+	}
+	if _, err := store.Enqueue(ctx, EnqueueRequest{
+		WorkspaceID: "test-ws",
+		Symbols:     []SymbolInput{{SymbolID: "x.go:X", FilePath: "x.go", SymbolName: "X", Content: "func X() {}"}},
+	}); err != nil {
+		t.Fatalf("enqueue symbol: %v", err)
+	}
+
+	deleted, err := store.Purge(ctx, "test-ws", embedqueue.TaskKindMemory)
+	if err != nil {
+		t.Fatalf("purge memory: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("deleted=%d want 1", deleted)
+	}
+	stats, err := store.StatsInWorkspace(ctx, "test-ws")
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if stats.QueuedCount != 1 {
+		t.Fatalf("stats=%+v want one remaining symbol job", stats)
+	}
+}
+
 func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }

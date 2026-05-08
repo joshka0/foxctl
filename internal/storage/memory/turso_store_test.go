@@ -10,7 +10,9 @@ import (
 
 	"github.com/joshka0/foxctl/internal/context/memorycore"
 	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/platform/symbolutil"
 	"github.com/joshka0/foxctl/internal/storage/dbdriver"
+	"github.com/joshka0/foxctl/internal/storage/sqliteutil"
 )
 
 func TestTursoStoreCloudOpenWhenConfigured(t *testing.T) {
@@ -302,6 +304,84 @@ func TestTursoLocalStoreListWithoutEmbeddingReturnsSavedMemoryFields(t *testing.
 	}
 	if first[0].Name == second[0].Name || first[1].Name == second[0].Name {
 		t.Fatalf("pagination returned duplicate entry: first=%v second=%v", first, second)
+	}
+}
+
+func TestTursoLocalSyncSymbolEmbeddingsSupportsPackageScopedKeyEntries(t *testing.T) {
+	ctx := context.Background()
+	store := openLocalTursoOrSkip(t, ctx)
+	defer func() { _ = store.Close() }()
+
+	workspace := "ws"
+	pkg := "go:pkg/a"
+	key := "helper.go/Helper"
+	entryName := symbolutil.KeyEntryName(workspace, pkg, key)
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2026-05-08T00:00:00Z"},"error":{}}`)
+	if _, err := store.SaveFromResult(ctx, entryName, "code_symbol", workspace, "helper", result); err != nil {
+		t.Fatalf("save symbol memory: %v", err)
+	}
+
+	embeddingDBPath := filepath.Join(t.TempDir(), "embedding_queue.db")
+	embeddingDB, err := sqliteutil.OpenDB(ctx, embeddingDBPath, nil)
+	if err != nil {
+		t.Fatalf("open embedding fixture db: %v", err)
+	}
+	if _, err := embeddingDB.ExecContext(ctx, `
+CREATE TABLE symbol_embeddings (
+	symbol_id TEXT NOT NULL,
+	workspace_id TEXT NOT NULL,
+	file_path TEXT NOT NULL,
+	embedding BLOB NOT NULL,
+	content_digest TEXT NOT NULL,
+	model TEXT NOT NULL,
+	dimensions INTEGER NOT NULL,
+	created_at TEXT NOT NULL,
+	PRIMARY KEY (workspace_id, symbol_id)
+)`); err != nil {
+		t.Fatalf("create embedding fixture table: %v", err)
+	}
+	if _, err := embeddingDB.ExecContext(ctx, `
+INSERT INTO symbol_embeddings
+	(symbol_id, workspace_id, file_path, embedding, content_digest, model, dimensions, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		symbolutil.ScopedSymbolID(pkg, key), workspace, "pkg/a/helper.go", []byte(`[0.1,0.2,0.3,0.4]`), "digest", "test-model", 4, "2026-05-08T00:00:00Z"); err != nil {
+		t.Fatalf("insert embedding fixture: %v", err)
+	}
+	if err := embeddingDB.Close(); err != nil {
+		t.Fatalf("close embedding fixture db: %v", err)
+	}
+
+	synced, err := store.SyncSymbolEmbeddings(ctx, embeddingDBPath, SyncSymbolEmbeddingsOptions{
+		WorkspaceID: workspace,
+		SymbolIDs:   []string{symbolutil.ScopedSymbolID(pkg, key)},
+		OnlyMissing: true,
+	})
+	if err != nil {
+		if isUnavailableLocalTursoError(err) {
+			t.Skipf("local turso vector support unavailable: %v", err)
+		}
+		t.Fatalf("sync symbol embeddings: %v", err)
+	}
+	if synced != 1 {
+		t.Fatalf("synced=%d want 1", synced)
+	}
+	got, err := store.Get(ctx, entryName, workspace)
+	if err != nil {
+		t.Fatalf("get synced entry: %v", err)
+	}
+	if got.Name != entryName {
+		t.Fatalf("synced entry name = %q, want %q", got.Name, entryName)
+	}
+
+	results, err := store.SearchSimilarByType(ctx, workspace, "code_symbol", []float32{0.1, 0.2, 0.3, 0.4}, 10)
+	if err != nil {
+		if isUnavailableLocalTursoError(err) {
+			t.Skipf("local turso vector search unavailable: %v", err)
+		}
+		t.Fatalf("search similar by type: %v", err)
+	}
+	if len(results) != 1 || results[0].Entry.Name != entryName {
+		t.Fatalf("SearchSimilarByType returned %#v, want %s", results, entryName)
 	}
 }
 

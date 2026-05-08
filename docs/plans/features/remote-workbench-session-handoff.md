@@ -789,7 +789,8 @@ Gate: PR-C can start only after PR-A and PR-B have landed.
 Tasks:
 
 - add a hidden client dogfood surface using the hardened protocol; the first
-  path should be `foxctl-pi` registering/showing local or tailnet room-terminal
+  path should be the tracked Pi extension under `integrations/pi`
+  registering/showing local or tailnet room-terminal
   links, not a public workbench route
 - connect only to existing room terminal endpoints, with any browser client
   pointed at the terminal gateway host rather than the plain web API host

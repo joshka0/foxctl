@@ -2,7 +2,7 @@ apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: embedding/queue
-  description: Background queue for generating symbol and named-memory embeddings
+  description: Background queue for generating symbol, named-memory, and semantic-file embeddings
   version: 0.1.0
   author: foxctl
   tags: [embedding, queue, indexing, async]
@@ -19,7 +19,7 @@ signature:
     - name: operation
       type: string
       required: true
-      description: "Operation to perform: enqueue, stats, get, get_by_file, job_status, cleanup, recover_stale"
+      description: "Operation to perform: enqueue, stats, get, get_by_file, job_status, cleanup, recover_stale, purge"
     - name: workspace_id
       type: string
       required: false
@@ -27,7 +27,7 @@ signature:
     - name: kind
       type: string
       required: false
-      description: "Restrict stats or stale recovery to one embedding job kind: symbol or memory"
+      description: "Restrict queue operations to one embedding job kind: symbol, memory, or semantic_file"
     - name: symbols
       type: array
       required: false
@@ -101,15 +101,20 @@ signature:
     - name: recovered
       type: integer
       description: Number of stale running jobs recovered
+    - name: table
+      type: string
+      description: Backing queue table used for lane-aware operations
     - name: message
       type: string
       description: Human-readable summary
   help:
     short: "Manage background embedding generation queue"
     long: |
-      embedding/queue manages a background queue for generating symbol and
-      named-memory embeddings. Integrates with the live-index hook to queue
-      symbols as files are edited, and with memory reembedding for paced drains.
+      embedding/queue manages background queues for symbol, named-memory, and
+      semantic-file embeddings. Integrates with the live-index hook to queue
+      symbols as files are edited, with memory reembedding for paced drains,
+      and with the semantic file queue for first-class stats, cleanup, recovery,
+      and purge.
 
       Operations:
       - enqueue: Add symbols or named memories to the embedding queue
@@ -119,6 +124,7 @@ signature:
       - job_status: Check status of a specific job
       - cleanup: Remove old completed jobs
       - recover_stale: Move stale running jobs back to retry after a worker crash
+      - purge: Delete all queued job records for a required workspace/kind filter
 
       Enable with FOXCTL_EMBED_QUEUE=1 during live indexing.
     workflows:
@@ -156,6 +162,12 @@ signature:
           operation: stats
           workspace_id: myproject
           kind: memory
+      - id: check-semantic-file-stats
+        description: "Check only semantic-file queue statistics"
+        example_input:
+          operation: stats
+          workspace_id: myproject
+          kind: semantic_file
       - id: get-embedding
         description: "Get embedding for a symbol"
         example_input:
@@ -174,6 +186,12 @@ signature:
           workspace_id: myproject
           kind: memory
           stale_after_seconds: 1800
+      - id: purge-semantic-files
+        description: "Purge semantic-file queue jobs for one workspace"
+        example_input:
+          operation: purge
+          workspace_id: myproject
+          kind: semantic_file
 capabilities:
   network: "none"
   filesystem:

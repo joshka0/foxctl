@@ -14,7 +14,9 @@ import (
 	"github.com/joshka0/foxctl/internal/domain/envelope"
 	"github.com/joshka0/foxctl/internal/domain/policy"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedding"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
 	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/storage/cas"
 	"github.com/rs/zerolog"
 )
@@ -273,9 +275,64 @@ func TestStatsRejectsUnknownKind(t *testing.T) {
 	rc := newTestRunContext(t, stdout, work)
 	defer rc.Close()
 
-	err := run(context.Background(), rc, Input{Operation: "stats", Kind: "semantic_file"})
+	err := run(context.Background(), rc, Input{Operation: "stats", Kind: "unknown"})
 	if err == nil {
 		t.Fatal("expected invalid kind error")
+	}
+}
+
+func TestStatsSemanticFileUsesSemanticQueue(t *testing.T) {
+	ctx := context.Background()
+	work := t.TempDir()
+	if err := os.WriteFile(filepath.Join(work, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout := &bytes.Buffer{}
+	rc := newTestRunContext(t, stdout, work)
+	defer rc.Close()
+
+	workspaceID := workspace.ID(work)
+	semanticStore, err := semantic.OpenQueueStore(ctx, rc.Config.Paths.Cache)
+	if err != nil {
+		t.Fatalf("open semantic queue: %v", err)
+	}
+	if _, err := semanticStore.EnqueueFiles(ctx, semantic.FileQueueRequest{
+		Workspace: work,
+		JobType:   semantic.JobTypeUpdateFiles,
+		Args: semantic.JobArgs{
+			WorkspaceID: workspaceID,
+			Files: []semantic.JobFileInput{{
+				Path:       "main.go",
+				ChangeKind: semantic.ChangeKindModified,
+			}},
+			Reason: semantic.ReasonManual,
+		},
+		Model: "test-model",
+	}); err != nil {
+		t.Fatalf("enqueue semantic file: %v", err)
+	}
+	if err := semanticStore.Close(); err != nil {
+		t.Fatalf("close semantic queue: %v", err)
+	}
+
+	if err := run(ctx, rc, Input{Operation: "stats", WorkspaceID: workspaceID, Kind: "semantic_file"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var env envelope.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("failed to unmarshal output: %v", err)
+	}
+	data := env.Data.(map[string]any)
+	if data["kind"] != "semantic_file" {
+		t.Fatalf("kind=%v want semantic_file", data["kind"])
+	}
+	if data["table"] != semantic.SemanticEmbeddingQueueTable {
+		t.Fatalf("table=%v want %s", data["table"], semantic.SemanticEmbeddingQueueTable)
+	}
+	stats := data["stats"].(map[string]any)
+	if stats["queued_count"].(float64) != 1 {
+		t.Fatalf("queued_count=%v want 1", stats["queued_count"])
 	}
 }
 
@@ -334,6 +391,68 @@ func TestCleanup(t *testing.T) {
 
 	if env.Status != "ok" {
 		t.Errorf("expected status ok, got %s", env.Status)
+	}
+}
+
+func TestPurgeSemanticFileRequiresWorkspaceAndKind(t *testing.T) {
+	work := t.TempDir()
+	stdout := &bytes.Buffer{}
+	rc := newTestRunContext(t, stdout, work)
+	defer rc.Close()
+
+	if err := run(context.Background(), rc, Input{Operation: "purge", WorkspaceID: "test-ws"}); err == nil {
+		t.Fatal("expected kind required error")
+	}
+}
+
+func TestPurgeSemanticFileDeletesOnlySemanticQueue(t *testing.T) {
+	ctx := context.Background()
+	work := t.TempDir()
+	if err := os.WriteFile(filepath.Join(work, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout := &bytes.Buffer{}
+	rc := newTestRunContext(t, stdout, work)
+	defer rc.Close()
+
+	workspaceID := workspace.ID(work)
+	semanticStore, err := semantic.OpenQueueStore(ctx, rc.Config.Paths.Cache)
+	if err != nil {
+		t.Fatalf("open semantic queue: %v", err)
+	}
+	if _, err := semanticStore.EnqueueFiles(ctx, semantic.FileQueueRequest{
+		Workspace: work,
+		JobType:   semantic.JobTypeUpdateFiles,
+		Args: semantic.JobArgs{
+			WorkspaceID: workspaceID,
+			Files: []semantic.JobFileInput{{
+				Path:       "main.go",
+				ChangeKind: semantic.ChangeKindModified,
+			}},
+			Reason: semantic.ReasonManual,
+		},
+		Model: "test-model",
+	}); err != nil {
+		t.Fatalf("enqueue semantic file: %v", err)
+	}
+	if err := semanticStore.Close(); err != nil {
+		t.Fatalf("close semantic queue: %v", err)
+	}
+
+	if err := run(ctx, rc, Input{Operation: "purge", WorkspaceID: workspaceID, Kind: "semantic_file"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var env envelope.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("failed to unmarshal output: %v", err)
+	}
+	data := env.Data.(map[string]any)
+	if data["deleted"].(float64) != 1 {
+		t.Fatalf("deleted=%v want 1", data["deleted"])
+	}
+	if data["table"] != semantic.SemanticEmbeddingQueueTable {
+		t.Fatalf("table=%v want %s", data["table"], semantic.SemanticEmbeddingQueueTable)
 	}
 }
 

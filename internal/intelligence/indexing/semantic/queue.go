@@ -230,6 +230,18 @@ func (s *QueueStore) RequeueStaleRunning(ctx context.Context, olderThan time.Dur
 	return s.queue.RequeueStaleRunning(ctx, olderThan)
 }
 
+func (s *QueueStore) RequeueStaleRunningInWorkspace(ctx context.Context, workspaceID string, olderThan time.Duration) (int64, error) {
+	return s.queue.RequeueStaleRunningForGroup(ctx, olderThan, strings.TrimSpace(workspaceID))
+}
+
+func (s *QueueStore) Cleanup(ctx context.Context, workspaceID string, olderThan time.Duration) (int64, error) {
+	return s.queue.CleanupForGroup(ctx, olderThan, strings.TrimSpace(workspaceID))
+}
+
+func (s *QueueStore) Purge(ctx context.Context, workspaceID string) (int64, error) {
+	return s.queue.Purge(ctx, strings.TrimSpace(workspaceID), "")
+}
+
 func (s *QueueStore) Stats(ctx context.Context, workspaceID string) (*queue.Stats, error) {
 	return s.queue.Stats(ctx, workspaceID)
 }

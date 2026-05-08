@@ -73,14 +73,23 @@ type ChunkInfo struct {
 	// ID is a stable identifier for this chunk.
 	ID string `json:"id"`
 
+	// Kind describes how the planner produced this chunk.
+	Kind string `json:"kind,omitempty"`
+
 	// Index is the zero-based chunk index.
 	Index int `json:"index"`
 
 	// Of is the total number of chunks for this file.
 	Of int `json:"of"`
 
+	// SizeBytes is the number of bytes of semantic text embedded for this chunk.
+	SizeBytes int64 `json:"size_bytes,omitempty"`
+
 	// Span describes the byte or line range of this chunk.
 	Span *ChunkSpan `json:"span,omitempty"`
+
+	// SymbolIdentifiers contains language symbols used to produce this chunk.
+	SymbolIdentifiers []string `json:"symbol_identifiers,omitempty"`
 }
 
 // ChunkSpan describes the range of a chunk within a file.
@@ -143,7 +152,7 @@ func (c Config) ChunkingConfigHash() string {
 	if c.ChunkBytes == 0 {
 		return "" // No chunking
 	}
-	data := fmt.Sprintf("chunk_bytes=%d;overlap=%d;model=%s",
+	data := fmt.Sprintf("planner=file-spans-v1;chunk_bytes=%d;overlap=%d;model=%s",
 		c.ChunkBytes, c.ChunkOverlapBytes, c.ProviderModel)
 	hash := sha256.Sum256([]byte(data))
 	return hex.EncodeToString(hash[:8]) // First 8 bytes for brevity

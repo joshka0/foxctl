@@ -37,6 +37,7 @@ import (
 	"github.com/joshka0/foxctl/internal/domain/policy"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/codefilter"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/filesummary"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/memorylane"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/rerank"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
@@ -346,6 +347,8 @@ func semanticPreviewResultsLimit(rc *skillmain.RunContext) int {
 // [[domain:unified-semantic-search]]
 // [[protocol:rrf-pagerank-rerank]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	inputWorkspace := strings.TrimSpace(in.Workspace)
+
 	// Apply defaults
 	in.Profile = normalizeSemanticSearchProfile(in.Profile)
 	if len(in.Scope) == 0 {
@@ -359,6 +362,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if in.IncludeContext == nil {
 		defaultTrue := true
 		in.IncludeContext = &defaultTrue
+	}
+	if err := validateExecutionWorkspace(inputWorkspace, rc.PathValidator.Workspace(), os.Getenv("FOXCTL_WORKSPACE")); err != nil {
+		return err
 	}
 
 	// Handle empty query - return full repo tree if format=tree
@@ -415,6 +421,44 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	return emitSemanticSearchOutput(ctx, rc, &in, out)
+}
+
+func validateExecutionWorkspace(inputWorkspace, executionWorkspace, envWorkspace string) error {
+	inputWorkspace = strings.TrimSpace(inputWorkspace)
+	envWorkspace = strings.TrimSpace(envWorkspace)
+	if inputWorkspace == "" || envWorkspace == "" {
+		return nil
+	}
+	if sameWorkspacePath(inputWorkspace, envWorkspace) {
+		return nil
+	}
+	executionWorkspace = strings.TrimSpace(executionWorkspace)
+	if executionWorkspace != "" && sameWorkspacePath(inputWorkspace, executionWorkspace) {
+		return nil
+	}
+	return skillerr.Validationf(
+		"workspace mismatch: input workspace %q differs from execution workspace %q; pass outer --workspace %q to `foxctl run code/semantic_search` or run the command from that workspace",
+		inputWorkspace,
+		firstNonEmpty(envWorkspace, executionWorkspace),
+		inputWorkspace,
+	)
+}
+
+func sameWorkspacePath(left, right string) bool {
+	left = cleanWorkspacePath(left)
+	right = cleanWorkspacePath(right)
+	return left != "" && right != "" && left == right
+}
+
+func cleanWorkspacePath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	return filepath.Clean(path)
 }
 
 // search performs the core search logic with parallel source queries and result fusion.
@@ -1329,6 +1373,10 @@ func searchSymbolsWithRetrieval(
 		defer func() { _ = memStore.Close() }()
 	}
 
+	if direct, err := searchSymbolsFromMemoryEmbeddings(ctx, memStore, workspaceID, workspacePath, queryEmbedding, limit); err == nil && len(direct) > 0 {
+		return direct, nil, nil
+	}
+
 	indexStore, cleanupIndex, err := searchindex.OpenEphemeral(ctx, cfg.Storage.Root)
 	if err != nil {
 		return nil, nil, skillerr.WrapIO("open ephemeral search index", err)
@@ -1418,13 +1466,62 @@ func searchSymbolsWithRetrieval(
 		return fallback, nil, nil
 	}
 	if len(fallback) > 0 && shouldUsePathFallback(results) {
-		return mergeSymbolResultsWithFallback(fallback, results, limit), nil, nil
+		return mergeSymbolResultsWithFallback(results, fallback, limit), nil, nil
 	}
 	if len(results) == 0 && bootstrapErr != nil {
 		return nil, nil, bootstrapErr
 	}
 
 	return results, resp.Groups, nil
+}
+
+type symbolVectorSearchStore interface {
+	SearchSimilarByType(ctx context.Context, workspace, entryType string, embedding []float32, limit int) ([]storage.ScoredEntry, error)
+}
+
+func searchSymbolsFromMemoryEmbeddings(ctx context.Context, store symbolVectorSearchStore, workspaceID, workspacePath string, queryEmbedding []float32, limit int) ([]Result, error) {
+	if store == nil || len(queryEmbedding) == 0 || limit <= 0 {
+		return nil, nil
+	}
+	scoredEntries, err := store.SearchSimilarByType(ctx, workspaceID, symbol.SymbolType, queryEmbedding, limit)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]Result, 0, len(scoredEntries))
+	for _, scored := range scoredEntries {
+		parsed, err := symbol.UnmarshalResult(scored.Entry.Result)
+		if err != nil || parsed == nil {
+			continue
+		}
+		sym := parsed.Symbol
+		path := strings.TrimSpace(sym.FilePath)
+		if path == "" || codefilter.ShouldSkipPath(path) {
+			continue
+		}
+		line := firstPositive(sym.StartLine, sym.EndLine)
+		result := Result{
+			Source:     ScopeSymbols,
+			ID:         normalizeSearchIndexSymbolID(workspaceID, searchindex.Document{Path: path, Anchor: searchindex.Anchor{StartLine: sym.StartLine, EndLine: sym.EndLine}}),
+			Name:       firstNonEmpty(sym.Name, extractSymbolName(sym.EffectiveID()), filepath.Base(path)),
+			Path:       path,
+			Line:       line,
+			Similarity: scored.Score,
+			SourceRank: len(results) + 1,
+			Summary:    scored.Entry.Summary,
+		}
+		if result.Path != "" && result.Line > 0 {
+			fullPath := result.Path
+			if !filepath.IsAbs(result.Path) {
+				fullPath = filepath.Join(workspacePath, result.Path)
+			}
+			result.Snippet = extractSnippet(fullPath, result.Line, 5)
+		}
+		results = append(results, result)
+		if len(results) >= limit {
+			break
+		}
+	}
+	return results, nil
 }
 
 type repoQueryAdapter struct {
@@ -1505,13 +1602,10 @@ func searchDocumentID(workspaceID string, doc searchindex.Document) string {
 }
 
 func shouldUsePathFallback(results []Result) bool {
-	if len(results) == 0 {
-		return true
-	}
-	return results[0].Similarity < 0.15
+	return len(results) == 0
 }
 
-func mergeSymbolResultsWithFallback(fallback, primary []Result, limit int) []Result {
+func mergeSymbolResultsWithFallback(primary, fallback []Result, limit int) []Result {
 	seen := map[string]struct{}{}
 	merged := make([]Result, 0, len(fallback)+len(primary))
 	appendResult := func(result Result) {
@@ -1529,10 +1623,10 @@ func mergeSymbolResultsWithFallback(fallback, primary []Result, limit int) []Res
 		result.Source = ScopeSymbols
 		merged = append(merged, result)
 	}
-	for _, result := range fallback {
+	for _, result := range primary {
 		appendResult(result)
 	}
-	for _, result := range primary {
+	for _, result := range fallback {
 		appendResult(result)
 	}
 	if limit > 0 && len(merged) > limit {
@@ -1641,23 +1735,31 @@ func scorePathFallbackCandidate(path string, tokens []string) int {
 	lower := strings.ToLower(filepath.ToSlash(path))
 	base := strings.ToLower(filepath.Base(lower))
 	score := 0
+	matchedToken := false
 	for _, token := range tokens {
 		switch {
 		case strings.Contains(base, token):
 			score += 5
+			matchedToken = true
 		case strings.Contains(lower, "/"+token+"/"):
 			score += 4
+			matchedToken = true
 		case strings.Contains(lower, token):
 			score += 2
+			matchedToken = true
 		}
 	}
-	if strings.Contains(lower, "/cmd/") || strings.Contains(lower, "/internal/") {
+	declarativeBoost := looksLikeDeclarativeArtifactPath(path) && querySuggestsDeclarativeArtifact(tokens)
+	if !matchedToken && !declarativeBoost {
+		return 0
+	}
+	if matchedToken && (strings.Contains(lower, "/cmd/") || strings.Contains(lower, "/internal/")) {
 		score++
 	}
-	if looksLikeDeclarativeArtifactPath(path) && querySuggestsDeclarativeArtifact(tokens) {
+	if declarativeBoost {
 		score += 6
 	}
-	if looksLikeCodeLikePath(path) && querySuggestsImplementation(tokens) {
+	if matchedToken && looksLikeCodeLikePath(path) && querySuggestsImplementation(tokens) {
 		score += 2
 	}
 	return score
@@ -2097,12 +2199,7 @@ func searchMemoriesVector(
 }
 
 func isCodeMemoryEntryType(entryType string) bool {
-	switch entryType {
-	case "code_symbol", "symbol", "file_embedding", "file_embedding_chunk", "edit":
-		return true
-	default:
-		return false
-	}
+	return !memorylane.EligibleType(entryType)
 }
 
 // ID normalization functions for canonical IDs
