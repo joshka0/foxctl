@@ -18,6 +18,7 @@ type TaskKind string
 
 const (
 	TaskKindSymbol       TaskKind = "symbol"
+	TaskKindMemory       TaskKind = "memory"
 	TaskKindSemanticFile TaskKind = "semantic_file"
 	TaskKindAnnotation   TaskKind = "annotation"
 )
@@ -28,6 +29,10 @@ type Task struct {
 	Scope         string   `json:"scope,omitempty"`
 	WorkspaceID   string   `json:"workspace_id,omitempty"`
 	TargetID      string   `json:"target_id"`
+	Language      string   `json:"language,omitempty"`
+	PackageID     string   `json:"package_id,omitempty"`
+	SymbolKey     string   `json:"symbol_key,omitempty"`
+	MemoryName    string   `json:"memory_name,omitempty"`
 	ContentDigest string   `json:"content_digest,omitempty"`
 	Provider      string   `json:"provider,omitempty"`
 	Model         string   `json:"model,omitempty"`

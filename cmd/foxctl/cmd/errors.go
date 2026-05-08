@@ -93,7 +93,7 @@ Use --all to include non-error events for the same query shape.`,
 					"workspace":      workspaceID,
 					"workspace_root": workspaceRoot,
 					"since":          strings.TrimSpace(since),
-					"obs_dir":        firstNonEmptyErrorValue(strings.TrimSpace(obsDir), observability.ResolveObsDir()),
+					"obs_dir":        firstNonEmptyValue(strings.TrimSpace(obsDir), observability.ResolveObsDir()),
 				},
 			}
 
@@ -140,7 +140,7 @@ func buildErrorsSummary(entries []observability.EventRecord) errorsSummary {
 	return summary
 }
 
-func firstNonEmptyErrorValue(values ...string) string {
+func firstNonEmptyValue(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
 			return value

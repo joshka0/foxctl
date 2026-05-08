@@ -20,6 +20,7 @@ func newMemoryCommand() *cobra.Command {
 		newMemoryDeleteCommand(),
 		newMemoryRelevantCommand(),
 		newMemoryMigrateWorkspaceCommand(),
+		newMemoryMigrateBackendCommand(),
 	)
 	return cmd
 }

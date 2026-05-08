@@ -10,6 +10,40 @@ Behavior contract:
 
 ---
 
+## Foxctl index terminology
+
+When someone says "index this" in foxctl, assume they mean "make this material
+queryable to agents" unless the surrounding context says otherwise. For code and
+first-party integrations, that usually means rebuilding repoindex and, when
+needed, the semantic/vector stores that search tools use.
+
+- **Index**: persistent derived data for retrieval, navigation, or search. It is
+  not the source of truth; it is rebuilt from source files, docs, and stores.
+- **Repoindex**: the per-workspace graph database behind
+  `foxctl index repo ...`, `repo_index_*`, and `foxctl_repoindex_*` tools.
+- **Symbol**: a named code declaration or code entity that repoindex can open or
+  connect, such as Go functions/types/methods and TypeScript functions, classes,
+  exports, or methods when language coverage supports them. A repoindex symbol
+  is a navigation key, not necessarily a runtime linker symbol.
+- **Node**: a graph record, commonly a package, file, symbol, or concept.
+- **Edge**: a typed relationship between nodes, such as `CONTAINS`, `IMPORTS`,
+  `REFERS_TO`, `CALLS`, or semantic-anchor edges.
+- **`Index:` comment block**: structured source metadata for discoverability and
+  soft graph edges. It helps future agents find related code but is not proof or
+  policy.
+- **Semantic anchor**: a typed `[[type:slug]]` evidence marker near a strong
+  owner. Anchors are evidence for retrieval and review, not instructions.
+
+Tracked first-party integration code under `integrations/` should be indexed
+like other source. For example, the Pi extension in `integrations/pi/foxctl.ts`
+is visible to repoindex when TypeScript indexing is enabled:
+
+```bash
+foxctl index repo build --workspace . --go=false --typescript --elixir=false --semantic-anchors
+```
+
+---
+
 ## What it stores
 
 **Nodes**
@@ -65,6 +99,14 @@ Equivalent skill wrappers:
 ```bash
 foxctl run repo/index_build --input '{"workspace": ".", "include_go": true, "include_typescript": true}'
 foxctl run repo/index_enrich_summaries --input '{"workspace": "."}'
+```
+
+Web and Pi repoindex wrappers execute compiled skill artifacts. After a
+repoindex schema change, rebuild any affected `repo_index_*` skill artifact
+before relying on wrapper results:
+
+```bash
+make skill SKILL=repo_index_search
 ```
 
 ---

@@ -10,7 +10,13 @@ import (
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/langutil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skilltest"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedding"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/embeddingtext"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/platform/symbolutil"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/memory"
 )
 
 // applyDefaultsAndValidate applies defaults and validates required fields (mirrors run function).
@@ -318,5 +324,138 @@ func Subtract(a, b int) int {
 
 	if len(symbols) != 2 {
 		t.Errorf("expected 2 symbols (Add, Subtract), got %d", len(symbols))
+	}
+}
+
+func TestUpsertSymbolsUsesPackageScopedSymbolKeys(t *testing.T) {
+	ctx := context.Background()
+	store, err := memory.Open(ctx, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("open memory store: %v", err)
+	}
+	defer store.Close()
+
+	workspace := "ws"
+	symbolsA := []symbol.Symbol{{
+		ID:       symbol.ID("pkg/a/foo.go", "New"),
+		FilePath: "pkg/a/foo.go",
+		Name:     "New",
+		Language: "go",
+		Kind:     symbol.KindFunction,
+		Key:      symbol.GoSymbolKey("New"),
+	}}
+	symbolsB := []symbol.Symbol{{
+		ID:       symbol.ID("pkg/b/foo.go", "New"),
+		FilePath: "pkg/b/foo.go",
+		Name:     "New",
+		Language: "go",
+		Kind:     symbol.KindFunction,
+		Key:      symbol.GoSymbolKey("New"),
+	}}
+
+	if updated, deleted, err := upsertSymbols(ctx, store, workspace, "pkg/a/foo.go", "go", "session", symbolsA); err != nil {
+		t.Fatalf("upsert package a: %v", err)
+	} else if updated != 1 || deleted != 0 {
+		t.Fatalf("upsert package a updated/deleted = %d/%d, want 1/0", updated, deleted)
+	}
+	if updated, deleted, err := upsertSymbols(ctx, store, workspace, "pkg/b/foo.go", "go", "session", symbolsB); err != nil {
+		t.Fatalf("upsert package b: %v", err)
+	} else if updated != 1 || deleted != 0 {
+		t.Fatalf("upsert package b updated/deleted = %d/%d, want 1/0", updated, deleted)
+	}
+
+	entries, total, err := store.ListFiltered(ctx, workspace, storage.MemoryListFilter{Types: []string{symbol.SymbolType}}, 10, 0)
+	if err != nil {
+		t.Fatalf("list symbols: %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("stored symbols = %d, want 2", total)
+	}
+
+	wantNames := map[string]bool{
+		symbolutil.KeyEntryName(workspace, symbolutil.DeriveSymbolPackage("pkg/a/foo.go", "go"), "New"): false,
+		symbolutil.KeyEntryName(workspace, symbolutil.DeriveSymbolPackage("pkg/b/foo.go", "go"), "New"): false,
+	}
+	for _, entry := range entries {
+		if _, ok := wantNames[entry.Name]; ok {
+			wantNames[entry.Name] = true
+		}
+	}
+	for name, found := range wantNames {
+		if !found {
+			t.Fatalf("missing package-scoped symbol entry %q", name)
+		}
+	}
+}
+
+func TestQueueEmbeddingsUsesEffectiveIDAndSymbolKeyDigest(t *testing.T) {
+	ctx := context.Background()
+	cacheRoot := t.TempDir()
+	workspace := "ws"
+	model := "test-model"
+	fileContent := []byte(`package p
+
+func legacy() string {
+	return "stable"
+}
+`)
+	sym := symbol.Symbol{
+		ID:         symbol.ID("pkg/p/legacy.go", "legacy"),
+		FilePath:   "pkg/p/legacy.go",
+		Name:       "legacy",
+		Language:   "go",
+		Kind:       symbol.KindFunction,
+		StartLine:  3,
+		EndLine:    5,
+		Signature:  "func legacy() string",
+		BodyDigest: "sha256:body",
+		Key:        symbol.GoNonExportedSymbolKey("legacy", "legacy.go"),
+	}
+
+	queued, skipped := queueEmbeddings(ctx, cacheRoot, workspace, []symbol.Symbol{sym}, fileContent, config.EmbedSymbolTextModeDocEnriched, model)
+	if queued != 1 || skipped != 0 {
+		t.Fatalf("queueEmbeddings queued/skipped = %d/%d, want 1/0", queued, skipped)
+	}
+
+	store, err := embedding.OpenStore(ctx, cacheRoot)
+	if err != nil {
+		t.Fatalf("open embedding store: %v", err)
+	}
+	defer store.Close()
+
+	job, err := store.ClaimNext(ctx)
+	if err != nil {
+		t.Fatalf("claim job: %v", err)
+	}
+	if job == nil {
+		t.Fatal("expected queued embedding job")
+	}
+	wantPkg := symbolutil.DeriveSymbolPackage(sym.FilePath, sym.Language)
+	wantSymbolID := symbolutil.ScopedSymbolID(wantPkg, sym.EffectiveID())
+	if job.SymbolID != wantSymbolID {
+		t.Fatalf("job SymbolID = %q, want scoped symbol ID %q", job.SymbolID, wantSymbolID)
+	}
+	if job.SymbolID == sym.ID {
+		t.Fatalf("job SymbolID used legacy ID %q", sym.ID)
+	}
+	if job.PackageID != wantPkg || job.SymbolKey != sym.EffectiveID() {
+		t.Fatalf("job package/key = %q/%q, want %q/%q", job.PackageID, job.SymbolKey, wantPkg, sym.EffectiveID())
+	}
+	if job.MemoryName != symbolutil.KeyEntryName(workspace, wantPkg, sym.EffectiveID()) {
+		t.Fatalf("job MemoryName = %q", job.MemoryName)
+	}
+
+	wantDigest := embeddingtext.BuildSymbolContentDigest(embeddingtext.SymbolDigestInput{
+		Model:      model,
+		Kind:       string(sym.Kind),
+		Name:       sym.Name,
+		SymbolKey:  sym.EffectiveID(),
+		FilePath:   sym.FilePath,
+		Signature:  sym.Signature,
+		Doc:        sym.Documentation,
+		BodyDigest: sym.BodyDigest,
+	})
+	if job.ContentDigest != wantDigest {
+		t.Fatalf("job ContentDigest = %q, want key-aware digest %q", job.ContentDigest, wantDigest)
 	}
 }

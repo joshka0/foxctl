@@ -16,6 +16,14 @@ io:
 signature:
   command: embedding/worker
   parameters:
+    - name: workspace_id
+      type: string
+      required: false
+      description: Restrict queue claiming, stats, and stale recovery to one queue group/workspace ID
+    - name: kind
+      type: string
+      required: false
+      description: "Restrict queue claiming and stats to one embedding job kind: symbol or memory"
     - name: batch_size
       type: integer
       required: false
@@ -26,11 +34,31 @@ signature:
       required: false
       default: 300
       description: Maximum processing time in seconds
+    - name: process_all
+      type: boolean
+      required: false
+      default: false
+      description: Continue processing batches until the queue is empty or max_duration is reached
+    - name: parallelism
+      type: integer
+      required: false
+      default: 1
+      description: Maximum number of claimed jobs to process concurrently (1-16)
     - name: dry_run
       type: boolean
       required: false
       default: false
       description: Claim jobs but skip actual embedding API calls
+    - name: job_delay_ms
+      type: integer
+      required: false
+      default: 0
+      description: Milliseconds to wait between jobs for local GPU-backed embedding
+    - name: recover_stale_after_seconds
+      type: integer
+      required: false
+      default: 0
+      description: Move running jobs older than N seconds back to retry before processing
     - name: sync_memory
       type: boolean
       required: false
@@ -54,18 +82,30 @@ signature:
     - name: processed
       type: integer
       description: Number of embeddings successfully generated
+    - name: kind
+      type: string
+      description: Job kind filter used for this worker run
     - name: errors
       type: integer
       description: Number of jobs that failed
     - name: synced
       type: integer
       description: Number of symbol embeddings synced into named memory
+    - name: memories
+      type: integer
+      description: Number of named memory embedding jobs processed
     - name: sync_errors
       type: integer
       description: Number of sync attempts that failed
+    - name: recovered
+      type: integer
+      description: Number of stale running jobs recovered before processing
     - name: remaining
       type: integer
       description: Jobs still in queue after processing
+    - name: parallelism
+      type: integer
+      description: Effective worker parallelism used for this run
     - name: status
       type: string
       description: "Result status: completed, timeout, no_jobs, error"
@@ -82,20 +122,23 @@ signature:
       type: string
       description: Human-readable summary
   help:
-    short: "Process queued embedding jobs using Gemini API"
+    short: "Process queued embedding jobs using the configured provider"
     long: |
-      embedding/worker processes jobs from the embedding queue, generating
-      embeddings using the Gemini embedding API. It runs in batches with
-      configurable size and timeout.
+      embedding/worker processes symbol and named-memory jobs from the embedding
+      queue, generating embeddings using the configured provider. It runs in batches with
+      configurable size, timeout, and bounded parallelism.
 
       The worker:
       - Claims pending jobs atomically
-      - Generates embeddings via Gemini API
-      - Stores results in the embedding database
+      - Optionally recovers stale running jobs after interrupted workers
+      - Generates embeddings via the configured embedding provider
+      - Stores symbol results in the embedding database
+      - Stores named-memory embeddings in the configured memory backend
+      - Processes claimed symbol jobs concurrently when parallelism is greater than 1
       - Handles retries with exponential backoff
       - Respects rate limits
 
-      Requires GEMINI_API_KEY environment variable.
+      Requires a configured embedding provider.
 
       Typically invoked by the embedding-flush.sh Stop hook to process
       accumulated jobs at session end.
@@ -104,12 +147,24 @@ signature:
         description: "Process a batch of queued embeddings"
         example_input:
           batch_size: 20
+          parallelism: 4
           max_duration: 120
+      - id: process-symbols
+        description: "Process only symbol jobs, leaving memory jobs queued"
+        example_input:
+          kind: symbol
+          batch_size: 5
+          parallelism: 2
+          max_duration: 180
       - id: drain-queue
         description: "Process all remaining jobs (large batch, long timeout)"
         example_input:
-          batch_size: 100
+          kind: memory
+          batch_size: 1
           max_duration: 600
+          process_all: true
+          job_delay_ms: 2000
+          recover_stale_after_seconds: 1800
       - id: dry-run
         description: "Test job claiming without calling API"
         example_input:

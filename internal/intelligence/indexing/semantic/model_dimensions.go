@@ -32,3 +32,17 @@ func DimensionsForModel(model string) int {
 		return dbdriver.GetDefaultVectorDimensions()
 	}
 }
+
+// ResolveDimensionsForModel chooses expected dimensions for a model and optional config.
+// Known non-default model dimensions take precedence over the repository default so
+// OpenAI-compatible local models such as Qwen are not rejected by a stale 1024-dim config.
+func ResolveDimensionsForModel(model string, configured int) int {
+	modelDims := DimensionsForModel(model)
+	if strings.TrimSpace(model) != "" && modelDims > 0 && modelDims != dbdriver.DefaultVectorDimensions {
+		return modelDims
+	}
+	if configured > 0 {
+		return configured
+	}
+	return modelDims
+}

@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/context/memorycore"
+	"github.com/joshka0/foxctl/internal/platform/symbolutil"
+	"github.com/joshka0/foxctl/internal/storage/sqliteutil"
 )
 
 func TestSaveAndGet(t *testing.T) {
@@ -54,6 +56,77 @@ func TestOpenCreatesNestedRoot(t *testing.T) {
 
 	if _, err := os.Stat(root); err != nil {
 		t.Fatalf("expected root directory to exist: %v", err)
+	}
+}
+
+func TestSyncSymbolEmbeddingsSupportsPackageScopedKeyEntries(t *testing.T) {
+	ctx := context.Background()
+	workspace := "ws"
+	memoryStore, err := Open(ctx, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("open memory store: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := memoryStore.Close(); err != nil {
+			t.Fatalf("close memory store: %v", err)
+		}
+	})
+
+	pkg := "go:pkg/a"
+	key := "helper.go/Helper"
+	entryName := symbolutil.KeyEntryName(workspace, pkg, key)
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
+	if _, err := memoryStore.SaveFromResult(ctx, entryName, "code_symbol", workspace, "helper", result); err != nil {
+		t.Fatalf("save symbol memory: %v", err)
+	}
+
+	embeddingDBPath := filepath.Join(t.TempDir(), "embedding_queue.db")
+	embeddingDB, err := sqliteutil.OpenDB(ctx, embeddingDBPath, nil)
+	if err != nil {
+		t.Fatalf("open embedding fixture db: %v", err)
+	}
+	if _, err := embeddingDB.ExecContext(ctx, `
+CREATE TABLE symbol_embeddings (
+	symbol_id TEXT NOT NULL,
+	workspace_id TEXT NOT NULL,
+	file_path TEXT NOT NULL,
+	embedding BLOB NOT NULL,
+	content_digest TEXT NOT NULL,
+	model TEXT NOT NULL,
+	dimensions INTEGER NOT NULL,
+	created_at TEXT NOT NULL,
+	PRIMARY KEY (workspace_id, symbol_id)
+)`); err != nil {
+		t.Fatalf("create embedding fixture table: %v", err)
+	}
+	if _, err := embeddingDB.ExecContext(ctx, `
+INSERT INTO symbol_embeddings
+	(symbol_id, workspace_id, file_path, embedding, content_digest, model, dimensions, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		symbolutil.ScopedSymbolID(pkg, key), workspace, "pkg/a/helper.go", []byte(`[0.1,0.2,0.3]`), "digest", "test-model", 3, "2026-05-07T00:00:00Z"); err != nil {
+		t.Fatalf("insert embedding fixture: %v", err)
+	}
+	if err := embeddingDB.Close(); err != nil {
+		t.Fatalf("close embedding fixture db: %v", err)
+	}
+
+	synced, err := memoryStore.SyncSymbolEmbeddings(ctx, embeddingDBPath, SyncSymbolEmbeddingsOptions{
+		WorkspaceID: workspace,
+		SymbolIDs:   []string{symbolutil.ScopedSymbolID(pkg, key)},
+		OnlyMissing: true,
+	})
+	if err != nil {
+		t.Fatalf("sync symbol embeddings: %v", err)
+	}
+	if synced != 1 {
+		t.Fatalf("synced=%d want 1", synced)
+	}
+	got, err := memoryStore.GetEmbedding(ctx, entryName, workspace)
+	if err != nil {
+		t.Fatalf("get synced embedding: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("embedding dims=%d want 3", len(got))
 	}
 }
 
@@ -647,6 +720,44 @@ func TestEmbeddings(t *testing.T) {
 	_, err = store.GetEmbedding(ctx, "nonexistent", "ws")
 	if err == nil {
 		t.Log("Note: GetEmbedding for nonexistent may return error or nil")
+	}
+}
+
+func TestListWithoutEmbeddingPagePaginatesMissingEmbeddings(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
+
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2026-05-07T00:00:00Z"},"error":{}}`)
+	for _, name := range []string{"missing-1", "missing-2", "missing-3"} {
+		if _, err := store.SaveFromResult(ctx, name, "note", "ws", name+" summary", result); err != nil {
+			t.Fatalf("save %s: %v", name, err)
+		}
+	}
+
+	first, err := store.ListWithoutEmbeddingPage(ctx, "ws", 2, 0)
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	second, err := store.ListWithoutEmbeddingPage(ctx, "ws", 2, 2)
+	if err != nil {
+		t.Fatalf("second page: %v", err)
+	}
+	if len(first) != 2 {
+		t.Fatalf("first page len=%d want 2", len(first))
+	}
+	if len(second) != 1 {
+		t.Fatalf("second page len=%d want 1", len(second))
+	}
+	if first[0].Name == second[0].Name || first[1].Name == second[0].Name {
+		t.Fatalf("pagination returned duplicate entry: first=%v second=%v", first, second)
 	}
 }
 

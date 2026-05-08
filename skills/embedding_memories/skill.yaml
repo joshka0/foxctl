@@ -35,6 +35,11 @@ signature:
       required: false
       default: false
       description: List memories without generating embeddings
+    - name: enqueue
+      type: boolean
+      required: false
+      default: false
+      description: Queue memory embedding jobs instead of embedding inline
   returns:
     - name: workspace
       type: string
@@ -45,9 +50,15 @@ signature:
     - name: embedded
       type: integer
       description: Number of memories successfully embedded
+    - name: queued
+      type: integer
+      description: Number of memory embedding jobs queued
     - name: skipped
       type: integer
-      description: Number of memories skipped (no content)
+      description: Number of memories skipped by policy, empty content, or queue dedupe
+    - name: policy_skipped
+      type: integer
+      description: Number of memories skipped by the general memory lane policy
     - name: errors
       type: integer
       description: Number of embedding errors
@@ -66,24 +77,30 @@ signature:
   help:
     short: "Generate embeddings for memories in a workspace"
     long: |
-      embedding/memories generates embeddings for memories that don't have them.
-      Uses Voyage AI (preferred) or Gemini for embedding generation.
+      embedding/memories generates or queues embeddings for memories that don't
+      have them. Queue mode is preferred for large local GPU-backed runs.
 
       Examples:
       - Process one batch: foxctl run embedding/memories
       - Process all: foxctl run embedding/memories --input '{"process_all": true}'
+      - Queue all: foxctl run embedding/memories --input '{"enqueue": true, "process_all": true}'
       - Dry run: foxctl run embedding/memories --input '{"dry_run": true}'
     workflows:
       - id: embed-all
         description: "Embed all memories in workspace"
         example_input:
           process_all: true
+      - id: queue-all
+        description: "Queue all missing memory embeddings for paced worker drain"
+        example_input:
+          enqueue: true
+          process_all: true
       - id: dry-run
         description: "Preview what would be embedded"
         example_input:
           dry_run: true
 capabilities:
-  network: "none"
+  network: "egress"
   filesystem:
     - type: workdir
   pure: false

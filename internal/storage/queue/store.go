@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	errs "github.com/joshka0/foxctl/internal/platform/errors"
@@ -257,6 +258,11 @@ func (s *Store) ClaimNext(ctx context.Context, opts ClaimOptions) (*Job, error) 
 		groupClause = " AND group_id = ?"
 		args = append(args, opts.GroupID)
 	}
+	kindClause := ""
+	if predicate, predicateArgs := payloadKindPredicate(opts.PayloadKind); predicate != "" {
+		kindClause = " AND " + predicate
+		args = append(args, predicateArgs...)
+	}
 
 	query := fmt.Sprintf(`
 		UPDATE %s
@@ -264,13 +270,13 @@ func (s *Store) ClaimNext(ctx context.Context, opts ClaimOptions) (*Job, error) 
 		WHERE id = (
 			SELECT id FROM %s
 			WHERE state IN (?, ?)
-			AND (scheduled_at IS NULL OR scheduled_at <= ?)%s
+			AND (scheduled_at IS NULL OR scheduled_at <= ?)%s%s
 			ORDER BY priority DESC, created_at ASC
 			LIMIT 1
 		)
 		RETURNING id, group_id, payload, dedupe_key, state, priority, attempts, max_attempts, error,
 		          created_at, updated_at, scheduled_at, completed_at
-	`, s.table, s.table, groupClause)
+	`, s.table, s.table, groupClause, kindClause)
 
 	row := s.db.QueryRowContext(ctx, query, args...)
 	job, err := scanJob(row)
@@ -332,17 +338,52 @@ func (s *Store) Fail(ctx context.Context, jobID string, errMsg string) error {
 // while a job is in progress. It is intentionally opt-in so a second worker
 // does not steal a legitimately long-running job by default.
 func (s *Store) RequeueStaleRunning(ctx context.Context, olderThan time.Duration) (int64, error) {
+	return s.requeueStaleRunning(ctx, olderThan, "", "")
+}
+
+// RequeueStaleRunningForGroup moves stale running jobs for one group back to retry.
+func (s *Store) RequeueStaleRunningForGroup(ctx context.Context, olderThan time.Duration, groupID string) (int64, error) {
+	if groupID == "" {
+		return s.RequeueStaleRunning(ctx, olderThan)
+	}
+	return s.requeueStaleRunning(ctx, olderThan, groupID, "")
+}
+
+// RequeueStaleRunningForKind moves stale running jobs for one JSON payload kind back to retry.
+func (s *Store) RequeueStaleRunningForKind(ctx context.Context, olderThan time.Duration, payloadKind string) (int64, error) {
+	return s.requeueStaleRunning(ctx, olderThan, "", strings.TrimSpace(payloadKind))
+}
+
+// RequeueStaleRunningForGroupKind moves stale running jobs for one group and JSON payload kind back to retry.
+func (s *Store) RequeueStaleRunningForGroupKind(ctx context.Context, olderThan time.Duration, groupID, payloadKind string) (int64, error) {
+	if groupID == "" {
+		return s.RequeueStaleRunningForKind(ctx, olderThan, payloadKind)
+	}
+	return s.requeueStaleRunning(ctx, olderThan, groupID, strings.TrimSpace(payloadKind))
+}
+
+func (s *Store) requeueStaleRunning(ctx context.Context, olderThan time.Duration, groupID, payloadKind string) (int64, error) {
 	if olderThan <= 0 {
 		return 0, nil
 	}
 	now := time.Now().UTC()
 	nowStr := sqlutil.FormatTimestamp(now)
 	cutoff := sqlutil.FormatTimestamp(now.Add(-olderThan))
+	clauses := []string{"state = 'running'", "updated_at < ?"}
+	args := []any{nowStr, "recovered stale running job", cutoff}
+	if groupID != "" {
+		clauses = append(clauses, "group_id = ?")
+		args = append(args, groupID)
+	}
+	if predicate, predicateArgs := payloadKindPredicate(payloadKind); predicate != "" {
+		clauses = append(clauses, predicate)
+		args = append(args, predicateArgs...)
+	}
 	result, err := s.db.ExecContext(ctx, fmt.Sprintf(`
 		UPDATE %s
 		SET state = 'retry', updated_at = ?, scheduled_at = NULL, error = ?
-		WHERE state = 'running' AND updated_at < ?
-	`, s.table), nowStr, "recovered stale running job", cutoff)
+		WHERE %s
+	`, s.table, strings.Join(clauses, " AND ")), args...)
 	if err != nil {
 		return 0, err
 	}
@@ -369,13 +410,32 @@ func (s *Store) GetJob(ctx context.Context, id string) (*Job, error) {
 
 // Stats returns queue state counts, optionally scoped to a group.
 func (s *Store) Stats(ctx context.Context, groupID string) (*Stats, error) {
+	return s.stats(ctx, groupID, "")
+}
+
+// StatsForKind returns queue state counts scoped to a group and JSON payload kind.
+func (s *Store) StatsForKind(ctx context.Context, groupID, payloadKind string) (*Stats, error) {
+	return s.stats(ctx, groupID, strings.TrimSpace(payloadKind))
+}
+
+func (s *Store) stats(ctx context.Context, groupID, payloadKind string) (*Stats, error) {
 	stats := &Stats{}
 
 	query := fmt.Sprintf("SELECT state, COUNT(*) FROM %s", s.table)
 	args := []any{}
+	clauses := []string{}
 	if groupID != "" {
-		query += " WHERE group_id = ?"
+		clauses = append(clauses, "group_id = ?")
 		args = append(args, groupID)
+	}
+	if payloadKind != "" {
+		if predicate, predicateArgs := payloadKindPredicate(payloadKind); predicate != "" {
+			clauses = append(clauses, predicate)
+			args = append(args, predicateArgs...)
+		}
+	}
+	if len(clauses) > 0 {
+		query += " WHERE " + strings.Join(clauses, " AND ")
 	}
 	query += " GROUP BY state"
 
@@ -411,6 +471,12 @@ func (s *Store) Stats(ctx context.Context, groupID string) (*Stats, error) {
 		oldestQuery += " AND group_id = ?"
 		oldestArgs = append(oldestArgs, groupID)
 	}
+	if payloadKind != "" {
+		if predicate, predicateArgs := payloadKindPredicate(payloadKind); predicate != "" {
+			oldestQuery += " AND " + predicate
+			oldestArgs = append(oldestArgs, predicateArgs...)
+		}
+	}
 
 	var oldestStr sql.NullString
 	if err := s.db.QueryRowContext(ctx, oldestQuery, oldestArgs...).Scan(&oldestStr); err == nil && oldestStr.Valid {
@@ -424,11 +490,70 @@ func (s *Store) Stats(ctx context.Context, groupID string) (*Stats, error) {
 
 // Cleanup deletes completed jobs older than the provided duration.
 func (s *Store) Cleanup(ctx context.Context, olderThan time.Duration) (int64, error) {
+	return s.cleanup(ctx, olderThan, "", "")
+}
+
+// CleanupForGroup deletes completed jobs for one group older than the provided duration.
+func (s *Store) CleanupForGroup(ctx context.Context, olderThan time.Duration, groupID string) (int64, error) {
+	if strings.TrimSpace(groupID) == "" {
+		return s.Cleanup(ctx, olderThan)
+	}
+	return s.cleanup(ctx, olderThan, strings.TrimSpace(groupID), "")
+}
+
+// CleanupForKind deletes completed jobs for one JSON payload kind older than the provided duration.
+func (s *Store) CleanupForKind(ctx context.Context, olderThan time.Duration, payloadKind string) (int64, error) {
+	return s.cleanup(ctx, olderThan, "", strings.TrimSpace(payloadKind))
+}
+
+// CleanupForGroupKind deletes completed jobs for one group and JSON payload kind.
+func (s *Store) CleanupForGroupKind(ctx context.Context, olderThan time.Duration, groupID, payloadKind string) (int64, error) {
+	if strings.TrimSpace(groupID) == "" {
+		return s.CleanupForKind(ctx, olderThan, payloadKind)
+	}
+	return s.cleanup(ctx, olderThan, strings.TrimSpace(groupID), strings.TrimSpace(payloadKind))
+}
+
+func (s *Store) cleanup(ctx context.Context, olderThan time.Duration, groupID, payloadKind string) (int64, error) {
 	cutoff := sqlutil.FormatTimestamp(time.Now().UTC().Add(-olderThan))
+	clauses := []string{"state IN ('ok', 'error')", "completed_at < ?"}
+	args := []any{cutoff}
+	if groupID != "" {
+		clauses = append(clauses, "group_id = ?")
+		args = append(args, groupID)
+	}
+	if predicate, predicateArgs := payloadKindPredicate(payloadKind); predicate != "" {
+		clauses = append(clauses, predicate)
+		args = append(args, predicateArgs...)
+	}
 	result, err := s.db.ExecContext(ctx, fmt.Sprintf(`
 		DELETE FROM %s
-		WHERE state IN ('ok', 'error') AND completed_at < ?
-	`, s.table), cutoff)
+		WHERE %s
+	`, s.table, strings.Join(clauses, " AND ")), args...)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+// Purge deletes all queue jobs matching the optional group and payload kind filters.
+func (s *Store) Purge(ctx context.Context, groupID, payloadKind string) (int64, error) {
+	clauses := []string{}
+	args := []any{}
+	groupID = strings.TrimSpace(groupID)
+	if groupID != "" {
+		clauses = append(clauses, "group_id = ?")
+		args = append(args, groupID)
+	}
+	if predicate, predicateArgs := payloadKindPredicate(payloadKind); predicate != "" {
+		clauses = append(clauses, predicate)
+		args = append(args, predicateArgs...)
+	}
+	query := fmt.Sprintf("DELETE FROM %s", s.table)
+	if len(clauses) > 0 {
+		query += " WHERE " + strings.Join(clauses, " AND ")
+	}
+	result, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, err
 	}
@@ -474,4 +599,15 @@ func normalizeTableName(table string) (string, error) {
 		return "", fmt.Errorf("invalid table name: %q", table)
 	}
 	return table, nil
+}
+
+func payloadKindPredicate(payloadKind string) (string, []any) {
+	kind := strings.TrimSpace(payloadKind)
+	if kind == "" {
+		return "", nil
+	}
+	if kind == "symbol" {
+		return "CASE WHEN json_valid(payload) THEN (json_extract(payload, '$.kind') = ? OR json_type(payload, '$.kind') IS NULL) ELSE 0 END", []any{kind}
+	}
+	return "CASE WHEN json_valid(payload) THEN json_extract(payload, '$.kind') = ? ELSE 0 END", []any{kind}
 }

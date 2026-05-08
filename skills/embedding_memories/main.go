@@ -11,6 +11,8 @@ import (
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/workspaceutil"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedding"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/memorylane"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
 	"github.com/joshka0/foxctl/internal/storage/memory"
 )
@@ -34,6 +36,9 @@ type Input struct {
 
 	// DryRun if true, lists memories but doesn't generate embeddings.
 	DryRun bool `json:"dry_run,omitempty"`
+
+	// Enqueue queues memory embedding jobs instead of embedding inline.
+	Enqueue bool `json:"enqueue,omitempty"`
 }
 
 // Output is the skill output for embedding/memories operations.
@@ -41,11 +46,14 @@ type Output struct {
 	Workspace     string         `json:"workspace"`
 	MemoriesFound int            `json:"memories_found"`
 	Embedded      int            `json:"embedded"`
+	Queued        int            `json:"queued,omitempty"`
 	Skipped       int            `json:"skipped"`
+	PolicySkipped int            `json:"policy_skipped,omitempty"`
 	Errors        int            `json:"errors"`
 	Remaining     int            `json:"remaining,omitempty"`
 	BatchCount    int            `json:"batch_count,omitempty"`
 	DurationMs    int64          `json:"duration_ms"`
+	JobIDs        []string       `json:"job_ids,omitempty"`
 	Memories      []MemoryResult `json:"memories,omitempty"`
 	ErrorDetails  []string       `json:"error_details,omitempty"`
 }
@@ -81,6 +89,77 @@ func formatMemoryContent(entry memory.NamedEntry) string {
 	return fmt.Sprintf("[%s] [%s] %s", dateStr, typeStr, content)
 }
 
+func memoryInputsFromEntries(entries []memory.NamedEntry) []embedding.MemoryInput {
+	inputs := make([]embedding.MemoryInput, 0, len(entries))
+	for _, entry := range entries {
+		if !memorylane.EligibleType(entry.Type) {
+			continue
+		}
+		content := formatMemoryContent(entry)
+		inputs = append(inputs, embedding.MemoryInput{
+			Name:    entry.Name,
+			Type:    entry.Type,
+			Content: content,
+		})
+	}
+	return inputs
+}
+
+func memoryInputsAndPolicySkips(entries []memory.NamedEntry) ([]embedding.MemoryInput, int) {
+	inputs := make([]embedding.MemoryInput, 0, len(entries))
+	skipped := 0
+	for _, entry := range entries {
+		if !memorylane.EligibleType(entry.Type) {
+			skipped++
+			continue
+		}
+		content := formatMemoryContent(entry)
+		inputs = append(inputs, embedding.MemoryInput{
+			Name:    entry.Name,
+			Type:    entry.Type,
+			Content: content,
+		})
+	}
+	return inputs, skipped
+}
+
+func nextEligibleMemoryBatch(ctx context.Context, memStore interface {
+	ListWithoutEmbeddingPage(context.Context, string, int, int) ([]memory.NamedEntry, error)
+}, workspace string, batchSize int, seen map[string]bool,
+) ([]memory.NamedEntry, int, error) {
+	var batch []memory.NamedEntry
+	skipped := 0
+	offset := 0
+	for len(batch) < batchSize {
+		page, err := memStore.ListWithoutEmbeddingPage(ctx, workspace, batchSize, offset)
+		if err != nil {
+			return nil, skipped, err
+		}
+		if len(page) == 0 {
+			break
+		}
+		for _, entry := range page {
+			if seen[entry.Name] {
+				continue
+			}
+			if !memorylane.EligibleType(entry.Type) {
+				seen[entry.Name] = true
+				skipped++
+				continue
+			}
+			batch = append(batch, entry)
+			if len(batch) == batchSize {
+				break
+			}
+		}
+		offset += len(page)
+		if len(page) < batchSize {
+			break
+		}
+	}
+	return batch, skipped, nil
+}
+
 // main is the skill entry point for embedding/memories.
 func main() {
 	skillmain.Main(command, run)
@@ -112,13 +191,6 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		Workspace: in.Workspace,
 	}
 
-	// Check for API key
-	voyageKey := os.Getenv("VOYAGE_API_KEY")
-	geminiKey := os.Getenv("GEMINI_API_KEY")
-	if voyageKey == "" && geminiKey == "" && !in.DryRun {
-		return skillerr.Auth("no embedding API key set", skillerr.WithHint("Set VOYAGE_API_KEY or GEMINI_API_KEY"))
-	}
-
 	// Open memory store
 	memStore, err := memory.OpenWithConfig(ctx, rc.Config)
 	if err != nil {
@@ -136,16 +208,78 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Dry run - just list memories
 	if in.DryRun {
 		for _, m := range allMemories {
+			status := "dry_run"
+			message := "Would embed"
+			if !memorylane.EligibleType(m.Type) {
+				status = "skipped"
+				message = "Skipped by memory lane policy"
+				output.Skipped++
+				output.PolicySkipped++
+			}
 			output.Memories = append(output.Memories, MemoryResult{
 				Name:    m.Name,
 				Type:    m.Type,
-				Status:  "dry_run",
-				Message: "Would embed",
+				Status:  status,
+				Message: message,
 			})
 		}
 		output.DurationMs = time.Since(start).Milliseconds()
 		return skillout.Emit(rc, command, output)
 	}
+
+	if in.Enqueue {
+		queueStore, err := embedding.OpenStore(ctx, rc.Config.Paths.Cache)
+		if err != nil {
+			return skillerr.WrapIO("open embedding queue", err)
+		}
+		defer queueStore.Close() //nolint:errcheck
+
+		model := semantic.ResolveModelForScope(semantic.ScopeMemory, rc.Config)
+		offset := 0
+		output.MemoriesFound = 0
+		for {
+			memories, err := memStore.ListWithoutEmbeddingPage(ctx, in.Workspace, in.BatchSize, offset)
+			if err != nil {
+				return skillerr.Runtime("list memories", skillerr.WithCause(err))
+			}
+			if len(memories) == 0 {
+				break
+			}
+			inputs, policySkipped := memoryInputsAndPolicySkips(memories)
+			result, err := queueStore.EnqueueMemories(ctx, embedding.MemoryEnqueueRequest{
+				WorkspaceID: in.Workspace,
+				Memories:    inputs,
+				Priority:    embedding.PriorityNormal,
+				Model:       model,
+			})
+			if err != nil {
+				return skillerr.WrapIO("enqueue memories", err)
+			}
+			output.MemoriesFound += len(memories)
+			output.Queued += result.Queued
+			output.Skipped += policySkipped + result.Skipped
+			output.PolicySkipped += policySkipped
+			if len(output.JobIDs) < 100 {
+				remainingSlots := 100 - len(output.JobIDs)
+				if len(result.JobIDs) < remainingSlots {
+					remainingSlots = len(result.JobIDs)
+				}
+				output.JobIDs = append(output.JobIDs, result.JobIDs[:remainingSlots]...)
+			}
+			output.BatchCount++
+			if !in.ProcessAll {
+				output.Remaining = len(memories) - result.Queued - result.Skipped - policySkipped
+				break
+			}
+			offset += len(memories)
+		}
+		output.DurationMs = time.Since(start).Milliseconds()
+		return skillout.Emit(rc, command, output)
+	}
+
+	// Check embedding provider after queue-only paths, so local queueing works without network credentials.
+	voyageKey := os.Getenv("VOYAGE_API_KEY")
+	geminiKey := os.Getenv("GEMINI_API_KEY")
 
 	embedder, err := semantic.NewEmbedderFromConfig(
 		semantic.ScopeMemory,
@@ -163,18 +297,20 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 	// Process in batches
 	for {
-		// Get fresh list of memories without embeddings each iteration
-		memories, err := memStore.ListWithoutEmbedding(ctx, in.Workspace, in.BatchSize)
+		// Get fresh list of eligible memories without embeddings each iteration.
+		memories, policySkipped, err := nextEligibleMemoryBatch(ctx, memStore, in.Workspace, in.BatchSize, embeddedNames)
 		if err != nil {
 			output.ErrorDetails = append(output.ErrorDetails, "list memories: "+err.Error())
 			output.Errors++
 			break
 		}
+		output.Skipped += policySkipped
+		output.PolicySkipped += policySkipped
 
 		// Filter out already processed in this run
 		var batch []memory.NamedEntry
 		for _, m := range memories {
-			if !embeddedNames[m.Name] {
+			if !embeddedNames[m.Name] && memorylane.EligibleType(m.Type) {
 				batch = append(batch, m)
 			}
 		}

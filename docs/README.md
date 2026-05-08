@@ -15,6 +15,7 @@ This is the canonical map for docs in this repository.
 - [docs/general/](general/) - Core subsystem guides (skills, hooks, memory, storage, sessions).
 - [docs/general/embedding-rebuilds.md](general/embedding-rebuilds.md) - Canonical rebuild commands for embedding-backed stores after provider/model changes.
 - [docs/general/task-continuity.md](general/task-continuity.md) - Deterministic task continuity pack, command/wrapper split, and artifact-backed delivery.
+- [docs/general/repoindex.md](general/repoindex.md) - Repo graph index terminology, build/query commands, language coverage, and storage notes.
 - [docs/general/core-package-coverage.md](general/core-package-coverage.md) - Machine-friendly core package coverage matrix.
 - [docs/general/refactor-scout.md](general/refactor-scout.md) - Local refactor scout/advisor workflow, seam vocabulary, language coverage, and ACA fit.
 - [docs/general/code-search-evals.md](general/code-search-evals.md) - Stable code-search eval suites, checked-in policies, and wrapper commands.

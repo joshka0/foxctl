@@ -98,6 +98,9 @@ type SymbolInfo struct {
 	// FilePath is the file where the symbol is defined
 	FilePath string
 
+	// Language is the normalized source language when the extractor knows it.
+	Language string
+
 	// Signature is the type signature (e.g., "func(ctx context.Context, query string) ([]SearchResult, error)")
 	Signature string
 
@@ -106,6 +109,9 @@ type SymbolInfo struct {
 
 	// Code is the full source code (optional)
 	Code string
+
+	// Fields lists class, struct, or interface members derived for embedding hints.
+	Fields []string
 
 	// Calls lists symbols this symbol calls
 	Calls []string
@@ -121,6 +127,9 @@ type SymbolInfo struct {
 
 	// Aliases are normalized or canonical alternate forms that help semantic retrieval.
 	Aliases []string
+
+	// SemanticAnchors are parsed semantic-commenting anchor hints owned by this symbol.
+	SemanticAnchors []string
 }
 
 // BuildSymbolEmbeddingText creates the text to embed for a symbol.
@@ -140,7 +149,30 @@ type SymbolInfo struct {
 // [[protocol:symbol-embedding-text-build]]
 // [[domain:embedding-text-format]]
 func BuildSymbolEmbeddingText(info SymbolInfo, opts SymbolTextOptions) string {
+	text, _ := BuildSymbolEmbeddingTextWithMetrics(info, opts)
+	return text
+}
+
+// SymbolTextMetrics reports cheap size counters for symbol embedding text.
+type SymbolTextMetrics struct {
+	SourceChars           int
+	SourceLines           int
+	StrippedSourceChars   int
+	StrippedSourceLines   int
+	EmbeddingTextChars    int
+	EmbeddingTextLines    int
+	ExtractedFieldCount   int
+	RelationshipHintCount int
+	SemanticAnchorCount   int
+}
+
+// BuildSymbolEmbeddingTextWithMetrics creates embedding text and returns size counters.
+func BuildSymbolEmbeddingTextWithMetrics(info SymbolInfo, opts SymbolTextOptions) (string, SymbolTextMetrics) {
 	var parts []string
+	metrics := SymbolTextMetrics{
+		SourceChars: len(info.Code),
+		SourceLines: countTextLines(info.Code),
+	}
 
 	// Header: Kind + Name + Package
 	header := fmt.Sprintf("[%s] %s", info.Kind, info.Name)
@@ -162,23 +194,35 @@ func BuildSymbolEmbeddingText(info SymbolInfo, opts SymbolTextOptions) string {
 		}
 	}
 
+	if len(info.SemanticAnchors) > 0 {
+		anchors := truncateList(sortDedup(info.SemanticAnchors), opts.MaxRelationships)
+		if len(anchors) > 0 {
+			parts = append(parts, "Semantic anchors: "+strings.Join(anchors, ", "))
+			metrics.SemanticAnchorCount = len(anchors)
+		}
+	}
+
 	// Relationship hints (sorted + deduped for stability)
 	if opts.IncludeRelationships {
 		if len(info.Calls) > 0 {
 			calls := truncateList(sortDedup(info.Calls), opts.MaxRelationships)
 			parts = append(parts, "Calls: "+strings.Join(calls, ", "))
+			metrics.RelationshipHintCount += len(calls)
 		}
 		if len(info.CalledBy) > 0 {
 			calledBy := truncateList(sortDedup(info.CalledBy), opts.MaxRelationships)
 			parts = append(parts, "Called by: "+strings.Join(calledBy, ", "))
+			metrics.RelationshipHintCount += len(calledBy)
 		}
 		if len(info.Implements) > 0 {
 			impl := truncateList(sortDedup(info.Implements), opts.MaxRelationships)
 			parts = append(parts, "Implements: "+strings.Join(impl, ", "))
+			metrics.RelationshipHintCount += len(impl)
 		}
 		if len(info.ImplementedBy) > 0 {
 			implBy := truncateList(sortDedup(info.ImplementedBy), opts.MaxRelationships)
 			parts = append(parts, "Implemented by: "+strings.Join(implBy, ", "))
+			metrics.RelationshipHintCount += len(implBy)
 		}
 	}
 
@@ -191,11 +235,22 @@ func BuildSymbolEmbeddingText(info SymbolInfo, opts SymbolTextOptions) string {
 
 	// Optional: Include code
 	if opts.IncludeCode && info.Code != "" {
-		code := truncateCode(info.Code, opts.MaxCodeLines)
+		profiled := profileSymbolSource(info)
+		metrics.StrippedSourceChars = len(profiled.Code)
+		metrics.StrippedSourceLines = countTextLines(profiled.Code)
+		fields := truncateList(sortDedup(append(info.Fields, profiled.Members...)), opts.MaxRelationships)
+		if len(fields) > 0 {
+			parts = append(parts, "Members: "+strings.Join(fields, ", "))
+			metrics.ExtractedFieldCount = len(fields)
+		}
+		code := truncateCode(profiled.Code, opts.MaxCodeLines)
 		parts = append(parts, "Source:\n"+code)
 	}
 
-	return strings.Join(parts, "\n")
+	text := strings.Join(parts, "\n")
+	metrics.EmbeddingTextChars = len(text)
+	metrics.EmbeddingTextLines = countTextLines(text)
+	return text, metrics
 }
 
 // BuildSymbolAliases derives normalized alternate forms for semantic retrieval.
@@ -289,6 +344,14 @@ func toEmbeddingSnake(value string) string {
 		prev = r
 	}
 	return strings.Trim(strings.ReplaceAll(string(out), "__", "_"), "_")
+}
+
+func countTextLines(value string) int {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	return strings.Count(value, "\n") + 1
 }
 
 // sortDedup sorts and deduplicates a list for deterministic output.

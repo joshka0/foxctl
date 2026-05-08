@@ -8,6 +8,11 @@ import { createProxyMiddleware } from "http-proxy-middleware";
 
 import { createAuth, getSessionFromHeaders } from "./auth.js";
 import { loadGatewayConfig } from "./config.js";
+import {
+  applySessionIdentityHeaders,
+  sessionIdentityHeaderEntries,
+  trustedIdentityHeaders,
+} from "./identity-headers.js";
 import { renderLoginPage } from "./login-page.js";
 
 const config = loadGatewayConfig();
@@ -139,6 +144,20 @@ const apiProxy = createProxyMiddleware({
   xfwd: true,
   ws: false,
   pathFilter: "/api",
+  on: {
+    proxyReq: (proxyReq, req) => {
+      const session = (req as AuthenticatedRequest).authSession;
+      for (const header of trustedIdentityHeaders) {
+        proxyReq.removeHeader(header);
+      }
+      if (!session) {
+        return;
+      }
+      for (const [header, value] of sessionIdentityHeaderEntries(session)) {
+        proxyReq.setHeader(header, value);
+      }
+    },
+  },
 });
 
 app.use("/api", requireSession());
@@ -188,6 +207,7 @@ server.on("upgrade", async (req, socket, head) => {
       socket.destroy();
       return;
     }
+    applySessionIdentityHeaders(req.headers, session);
     wsProxy.ws(req, socket, head);
   } catch (error) {
     console.error("[gui-auth-gateway] websocket auth failed", error);

@@ -37,6 +37,7 @@ import (
 	"github.com/joshka0/foxctl/internal/domain/policy"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/codefilter"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/filesummary"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/memorylane"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/rerank"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
@@ -346,6 +347,8 @@ func semanticPreviewResultsLimit(rc *skillmain.RunContext) int {
 // [[domain:unified-semantic-search]]
 // [[protocol:rrf-pagerank-rerank]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	inputWorkspace := strings.TrimSpace(in.Workspace)
+
 	// Apply defaults
 	in.Profile = normalizeSemanticSearchProfile(in.Profile)
 	if len(in.Scope) == 0 {
@@ -359,6 +362,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if in.IncludeContext == nil {
 		defaultTrue := true
 		in.IncludeContext = &defaultTrue
+	}
+	if err := validateExecutionWorkspace(inputWorkspace, rc.PathValidator.Workspace(), os.Getenv("FOXCTL_WORKSPACE")); err != nil {
+		return err
 	}
 
 	// Handle empty query - return full repo tree if format=tree
@@ -415,6 +421,44 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	return emitSemanticSearchOutput(ctx, rc, &in, out)
+}
+
+func validateExecutionWorkspace(inputWorkspace, executionWorkspace, envWorkspace string) error {
+	inputWorkspace = strings.TrimSpace(inputWorkspace)
+	envWorkspace = strings.TrimSpace(envWorkspace)
+	if inputWorkspace == "" || envWorkspace == "" {
+		return nil
+	}
+	if sameWorkspacePath(inputWorkspace, envWorkspace) {
+		return nil
+	}
+	executionWorkspace = strings.TrimSpace(executionWorkspace)
+	if executionWorkspace != "" && sameWorkspacePath(inputWorkspace, executionWorkspace) {
+		return nil
+	}
+	return skillerr.Validationf(
+		"workspace mismatch: input workspace %q differs from execution workspace %q; pass outer --workspace %q to `foxctl run code/semantic_search` or run the command from that workspace",
+		inputWorkspace,
+		firstNonEmpty(envWorkspace, executionWorkspace),
+		inputWorkspace,
+	)
+}
+
+func sameWorkspacePath(left, right string) bool {
+	left = cleanWorkspacePath(left)
+	right = cleanWorkspacePath(right)
+	return left != "" && right != "" && left == right
+}
+
+func cleanWorkspacePath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	return filepath.Clean(path)
 }
 
 // search performs the core search logic with parallel source queries and result fusion.
@@ -1329,6 +1373,10 @@ func searchSymbolsWithRetrieval(
 		defer func() { _ = memStore.Close() }()
 	}
 
+	if direct, err := searchSymbolsFromMemoryEmbeddings(ctx, memStore, workspaceID, workspacePath, queryEmbedding, limit); err == nil && len(direct) > 0 {
+		return direct, nil, nil
+	}
+
 	indexStore, cleanupIndex, err := searchindex.OpenEphemeral(ctx, cfg.Storage.Root)
 	if err != nil {
 		return nil, nil, skillerr.WrapIO("open ephemeral search index", err)
@@ -1418,13 +1466,62 @@ func searchSymbolsWithRetrieval(
 		return fallback, nil, nil
 	}
 	if len(fallback) > 0 && shouldUsePathFallback(results) {
-		return mergeSymbolResultsWithFallback(fallback, results, limit), nil, nil
+		return mergeSymbolResultsWithFallback(results, fallback, limit), nil, nil
 	}
 	if len(results) == 0 && bootstrapErr != nil {
 		return nil, nil, bootstrapErr
 	}
 
 	return results, resp.Groups, nil
+}
+
+type symbolVectorSearchStore interface {
+	SearchSimilarByType(ctx context.Context, workspace, entryType string, embedding []float32, limit int) ([]storage.ScoredEntry, error)
+}
+
+func searchSymbolsFromMemoryEmbeddings(ctx context.Context, store symbolVectorSearchStore, workspaceID, workspacePath string, queryEmbedding []float32, limit int) ([]Result, error) {
+	if store == nil || len(queryEmbedding) == 0 || limit <= 0 {
+		return nil, nil
+	}
+	scoredEntries, err := store.SearchSimilarByType(ctx, workspaceID, symbol.SymbolType, queryEmbedding, limit)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]Result, 0, len(scoredEntries))
+	for _, scored := range scoredEntries {
+		parsed, err := symbol.UnmarshalResult(scored.Entry.Result)
+		if err != nil || parsed == nil {
+			continue
+		}
+		sym := parsed.Symbol
+		path := strings.TrimSpace(sym.FilePath)
+		if path == "" || codefilter.ShouldSkipPath(path) {
+			continue
+		}
+		line := firstPositive(sym.StartLine, sym.EndLine)
+		result := Result{
+			Source:     ScopeSymbols,
+			ID:         normalizeSearchIndexSymbolID(workspaceID, searchindex.Document{Path: path, Anchor: searchindex.Anchor{StartLine: sym.StartLine, EndLine: sym.EndLine}}),
+			Name:       firstNonEmpty(sym.Name, extractSymbolName(sym.EffectiveID()), filepath.Base(path)),
+			Path:       path,
+			Line:       line,
+			Similarity: scored.Score,
+			SourceRank: len(results) + 1,
+			Summary:    scored.Entry.Summary,
+		}
+		if result.Path != "" && result.Line > 0 {
+			fullPath := result.Path
+			if !filepath.IsAbs(result.Path) {
+				fullPath = filepath.Join(workspacePath, result.Path)
+			}
+			result.Snippet = extractSnippet(fullPath, result.Line, 5)
+		}
+		results = append(results, result)
+		if len(results) >= limit {
+			break
+		}
+	}
+	return results, nil
 }
 
 type repoQueryAdapter struct {
@@ -1505,13 +1602,10 @@ func searchDocumentID(workspaceID string, doc searchindex.Document) string {
 }
 
 func shouldUsePathFallback(results []Result) bool {
-	if len(results) == 0 {
-		return true
-	}
-	return results[0].Similarity < 0.15
+	return len(results) == 0
 }
 
-func mergeSymbolResultsWithFallback(fallback, primary []Result, limit int) []Result {
+func mergeSymbolResultsWithFallback(primary, fallback []Result, limit int) []Result {
 	seen := map[string]struct{}{}
 	merged := make([]Result, 0, len(fallback)+len(primary))
 	appendResult := func(result Result) {
@@ -1529,10 +1623,10 @@ func mergeSymbolResultsWithFallback(fallback, primary []Result, limit int) []Res
 		result.Source = ScopeSymbols
 		merged = append(merged, result)
 	}
-	for _, result := range fallback {
+	for _, result := range primary {
 		appendResult(result)
 	}
-	for _, result := range primary {
+	for _, result := range fallback {
 		appendResult(result)
 	}
 	if limit > 0 && len(merged) > limit {
@@ -1641,23 +1735,31 @@ func scorePathFallbackCandidate(path string, tokens []string) int {
 	lower := strings.ToLower(filepath.ToSlash(path))
 	base := strings.ToLower(filepath.Base(lower))
 	score := 0
+	matchedToken := false
 	for _, token := range tokens {
 		switch {
 		case strings.Contains(base, token):
 			score += 5
+			matchedToken = true
 		case strings.Contains(lower, "/"+token+"/"):
 			score += 4
+			matchedToken = true
 		case strings.Contains(lower, token):
 			score += 2
+			matchedToken = true
 		}
 	}
-	if strings.Contains(lower, "/cmd/") || strings.Contains(lower, "/internal/") {
+	declarativeBoost := looksLikeDeclarativeArtifactPath(path) && querySuggestsDeclarativeArtifact(tokens)
+	if !matchedToken && !declarativeBoost {
+		return 0
+	}
+	if matchedToken && (strings.Contains(lower, "/cmd/") || strings.Contains(lower, "/internal/")) {
 		score++
 	}
-	if looksLikeDeclarativeArtifactPath(path) && querySuggestsDeclarativeArtifact(tokens) {
+	if declarativeBoost {
 		score += 6
 	}
-	if looksLikeCodeLikePath(path) && querySuggestsImplementation(tokens) {
+	if matchedToken && looksLikeCodeLikePath(path) && querySuggestsImplementation(tokens) {
 		score += 2
 	}
 	return score
@@ -1871,108 +1973,78 @@ func searchMemories(
 	in *Input,
 	memStore storage.MemoryStore,
 ) ([]Result, string, error) {
-	// Check if we should use Turso vector search
-	// Use Turso when remote is requested OR when configured
-	useTurso := in.Remote || (cfg.Database.Driver == "turso" && cfg.Database.Vector.Enabled && cfg.Database.Turso.URL != "" && queryEmbedding != nil)
-
 	var scoredEntries []storage.ScoredEntry
 
-	if useTurso {
-		// Remote mode requires embeddings
+	if in.Remote {
 		if queryEmbedding == nil {
 			return nil, "memory remote search requires embeddings; " + noEmbeddingHint(cfg), nil
 		}
 
-		// Determine vector dimensions from config
-		vectorDims := cfg.Database.Vector.Dimensions
-		if vectorDims == 0 {
-			vectorDims = cfg.Embedding.Dimensions
-		}
-		if vectorDims == 0 {
-			vectorDims = dbdriver.GetDefaultVectorDimensions()
-		}
-
-		// Use Turso for vector search
-		tursoCfg := dbdriver.TursoConfig{
-			URL:              cfg.Database.Turso.URL,
-			AuthToken:        cfg.Database.Turso.AuthToken,
-			VectorDimensions: vectorDims,
-		}
-		tursoStore, err := memory.OpenTurso(ctx, tursoCfg)
+		store, closeStore, err := ensureSemanticSearchMemoryStore(ctx, cfg, memStore)
 		if err != nil {
-			if in.Remote {
-				// Remote mode requires Turso - fail if unavailable
-				return nil, "", skillerr.WrapIO("open turso memory store (remote mode)", err)
-			}
-			// Fallback to BM25 if Turso fails, with hint about the failure
-			hint := fmt.Sprintf("memory vector search unavailable: %v; using BM25 fallback", err)
-			results, bm25Err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit, memStore)
-			return results, hint, bm25Err
+			return nil, "", skillerr.WrapIO("open memory store (remote mode)", err)
 		}
-		defer func() { errs.Ignore(tursoStore.Close(), "close turso memory store") }()
+		if closeStore != nil {
+			defer closeStore()
+		}
 
-		// Use appropriate search method based on remote options
+		remoteStore, ok := store.(remoteMemorySearcher)
+		if !ok && (in.Global || len(in.Workspaces) > 0) {
+			return nil, "", skillerr.Validation("memory store does not support cross-workspace search; Turso required")
+		}
+
 		if in.Remote && in.Global {
-			scoredEntries, err = tursoStore.SearchSimilarGlobal(ctx, queryEmbedding, limit)
+			scoredEntries, err = remoteStore.SearchSimilarGlobal(ctx, queryEmbedding, limit)
 		} else if in.Remote && len(in.Workspaces) > 0 {
-			scoredEntries, err = tursoStore.SearchSimilarMultiWorkspace(ctx, in.Workspaces, queryEmbedding, limit)
+			scoredEntries, err = remoteStore.SearchSimilarMultiWorkspace(ctx, in.Workspaces, queryEmbedding, limit)
 		} else {
-			scoredEntries, err = tursoStore.SearchSimilar(ctx, workspaceID, queryEmbedding, limit)
+			scoredEntries, err = store.SearchSimilar(ctx, workspaceID, queryEmbedding, limit)
 		}
 		if err != nil {
-			if in.Remote {
-				// Remote mode - don't fallback to BM25
-				return nil, "", skillerr.WrapRuntime("memory remote search failed", err)
-			}
-			// Fallback to BM25 on error, with hint about the failure
+			return nil, "", skillerr.WrapRuntime("memory remote search failed", err)
+		}
+
+		return memoryResultsFromScored(scoredEntries, limit), "", nil
+	}
+
+	if queryEmbedding != nil {
+		results, err := searchMemoriesVector(ctx, cfg, workspaceID, queryEmbedding, limit, memStore)
+		if err == nil && len(results) > 0 {
+			return results, "", nil
+		}
+		if err != nil {
 			hint := fmt.Sprintf("memory vector search failed: %v; using BM25 fallback", err)
 			results, bm25Err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit, memStore)
 			return results, hint, bm25Err
 		}
-
-		// Fallback to BM25 if vector search returns empty (may indicate missing vectors)
-		// Skip fallback for remote mode - empty results are valid
-		if len(scoredEntries) == 0 && !in.Remote {
-			hint := "memory vector search returned no results; trying BM25 fallback"
-			results, bm25Err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit, memStore)
-			if bm25Err != nil {
-				return nil, hint, bm25Err
-			}
-			if len(results) > 0 {
-				// BM25 found results, return with hint about vector search being empty
-				return results, hint, nil
-			}
-			// Both searches empty - vector is authoritative
-			return nil, "", nil
-		}
-	} else {
-		// SQLite store - use vector search if embeddings available, otherwise BM25
-		if queryEmbedding != nil {
-			// Use in-memory cosine similarity search
-			results, err := searchMemoriesVector(ctx, cfg, workspaceID, queryEmbedding, limit, memStore)
-			if err == nil && len(results) > 0 {
-				return results, "", nil
-			}
-			// Fall back to BM25 if vector search fails or returns empty
-			if err != nil {
-				hint := fmt.Sprintf("memory vector search failed: %v; using BM25 fallback", err)
-				results, bm25Err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit, memStore)
-				return results, hint, bm25Err
-			}
-		}
-		// Use SQLite BM25 search (no hint needed - this is expected behavior)
-		results, err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit, memStore)
-		return results, "", err
 	}
 
-	// Convert scored entries to results
+	results, err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit, memStore)
+	return results, "", err
+}
+
+type remoteMemorySearcher interface {
+	SearchSimilarGlobal(ctx context.Context, embedding []float32, limit int) ([]storage.ScoredEntry, error)
+	SearchSimilarMultiWorkspace(ctx context.Context, workspaces []string, embedding []float32, limit int) ([]storage.ScoredEntry, error)
+}
+
+func ensureSemanticSearchMemoryStore(ctx context.Context, cfg config.Config, memStore storage.MemoryStore) (storage.MemoryStore, func(), error) {
+	if memStore != nil {
+		return memStore, nil, nil
+	}
+	store, err := openSemanticSearchMemoryStore(ctx, cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	return store, func() { _ = store.Close() }, nil
+}
+
+func memoryResultsFromScored(scoredEntries []storage.ScoredEntry, limit int) []Result {
 	results := make([]Result, 0, len(scoredEntries))
 	rank := 1
 	for _, scored := range scoredEntries {
 		entry := scored.Entry
-		// Skip code-related entries - they're handled by symbol search
-		// Only include semantic memory types: gotcha, pattern, decision, note, etc.
-		if entry.Type == "code_symbol" || entry.Type == "symbol" || entry.Type == "file_embedding" || entry.Type == "edit" {
+		if isCodeMemoryEntryType(entry.Type) {
 			continue
 		}
 
@@ -1992,7 +2064,7 @@ func searchMemories(
 		}
 	}
 
-	return results, "", nil // Vector search succeeded, no hint needed
+	return results
 }
 
 // searchMemoriesBM25 uses SQLite BM25-like text search for memories.
@@ -2026,9 +2098,7 @@ func searchMemoriesBM25(
 	rank := 1
 	for _, scored := range scoredEntries {
 		entry := scored.Entry
-		// Skip code-related entries - they're handled by symbol search
-		// Only include semantic memory types: gotcha, pattern, decision, note, etc.
-		if entry.Type == "code_symbol" || entry.Type == "symbol" || entry.Type == "file_embedding" || entry.Type == "edit" {
+		if isCodeMemoryEntryType(entry.Type) {
 			continue
 		}
 		source := "memory"
@@ -2098,9 +2168,7 @@ func searchMemoriesVector(
 	rank := 1
 	for _, scored := range scoredEntries {
 		entry := scored.Entry
-		// Skip code-related entries - they're handled by symbol search
-		// Only include semantic memory types: gotcha, pattern, decision, note, etc.
-		if entry.Type == "code_symbol" || entry.Type == "symbol" || entry.Type == "file_embedding" || entry.Type == "edit" {
+		if isCodeMemoryEntryType(entry.Type) {
 			continue
 		}
 		source := "memory"
@@ -2128,6 +2196,10 @@ func searchMemoriesVector(
 	}
 
 	return results, nil
+}
+
+func isCodeMemoryEntryType(entryType string) bool {
+	return !memorylane.EligibleType(entryType)
 }
 
 // ID normalization functions for canonical IDs

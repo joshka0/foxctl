@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -87,11 +88,12 @@ func TestIdentityFromRequest_TailscaleHeaders_Minimal(t *testing.T) {
 func TestIdentityFromRequest_BetterAuthHeaders(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/agents", nil)
 	req.Header.Set("X-BetterAuth-Email", "admin@example.com")
+	req.Header.Set("X-BetterAuth-User-ID", "user-123")
 	req.Header.Set("X-BetterAuth-User-Name", "Admin User")
 
 	id := IdentityFromRequest(req)
 	assert.NotNil(t, id)
-	assert.Equal(t, "admin@example.com", id.UserID)
+	assert.Equal(t, "user-123", id.UserID)
 	assert.Equal(t, "admin@example.com", id.UserLogin)
 	assert.Equal(t, "Admin User", id.UserName)
 	assert.Equal(t, "betterauth", id.Source)
@@ -106,6 +108,17 @@ func TestIdentityFromRequest_BetterAuthHeaders_Minimal(t *testing.T) {
 	id := IdentityFromRequest(req)
 	assert.NotNil(t, id)
 	assert.Equal(t, "user@example.com", id.UserID)
+	assert.Equal(t, "betterauth", id.Source)
+}
+
+func TestIdentityFromRequest_BetterAuthHeaders_UserIDOnly(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/agents", nil)
+	req.Header.Set("X-BetterAuth-User-ID", "user-123")
+
+	id := IdentityFromRequest(req)
+	assert.NotNil(t, id)
+	assert.Equal(t, "user-123", id.UserID)
+	assert.Empty(t, id.UserLogin)
 	assert.Equal(t, "betterauth", id.Source)
 }
 
@@ -219,4 +232,84 @@ func TestWithIdentity(t *testing.T) {
 	extracted := IdentityFromRequest(newReq)
 	assert.NotNil(t, extracted)
 	assert.Equal(t, "test", extracted.UserID)
+}
+
+func TestPrincipalFromRequest_BetterAuthHeaders(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/agents", nil)
+	req.Header.Set("X-BetterAuth-Email", "admin@example.com")
+	req.Header.Set("X-BetterAuth-User-ID", "user-123")
+	req.Header.Set("X-BetterAuth-User-Name", "Admin User")
+	req.Header.Set("X-Foxctl-Tenant-ID", "tenant-1")
+	req.Header.Set("X-Foxctl-Workspace-ID", "workspace-1")
+	req.Header.Set("X-Foxctl-Workspace-Root", "/repo")
+	req.Header.Set("X-Foxctl-Session-ID", "session-1")
+
+	principal, err := PrincipalFromRequest(req, PrincipalRequestOptions{RequireTenant: true})
+	assert.NoError(t, err)
+	assert.Equal(t, "tenant-1", principal.TenantID)
+	assert.Equal(t, "user-123", principal.UserID)
+	assert.Equal(t, "Admin User", principal.Username)
+	assert.Equal(t, "web", principal.Platform)
+	assert.Equal(t, "workspace-1", principal.WorkspaceID)
+	assert.Equal(t, "/repo", principal.WorkspaceRoot)
+	assert.Equal(t, "session-1", principal.SessionID)
+	assert.Equal(t, "user:web:user-123", principal.Subject())
+}
+
+func TestPrincipalFromRequest_TailscaleHeaders(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/agents", nil)
+	req.Header.Set("X-Tailscale-User", "user@example.com")
+	req.Header.Set("X-Tailscale-User-Name", "Test User")
+	req.Header.Set("X-Foxctl-Tenant-ID", "tenant-1")
+
+	principal, err := PrincipalFromRequest(req, PrincipalRequestOptions{RequireTenant: true})
+	assert.NoError(t, err)
+	assert.Equal(t, "tenant-1", principal.TenantID)
+	assert.Equal(t, "user@example.com", principal.UserID)
+	assert.Equal(t, "Test User", principal.Username)
+	assert.Equal(t, "tailscale", principal.Platform)
+}
+
+func TestPrincipalFromRequest_Anonymous(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/agents", nil)
+
+	principal, err := PrincipalFromRequest(req, PrincipalRequestOptions{})
+	assert.NoError(t, err)
+	assert.True(t, principal.IsAnonymous())
+	assert.Equal(t, "web", principal.Platform)
+}
+
+func TestPrincipalFromRequest_ConflictingIdentityHeaders(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/agents", nil)
+	req.Header.Set("X-Tailscale-User", "ts-user@example.com")
+	req.Header.Set("X-BetterAuth-Email", "ba-user@example.com")
+
+	_, err := PrincipalFromRequest(req, PrincipalRequestOptions{})
+	assert.True(t, errors.Is(err, ErrPrincipalConflict))
+}
+
+func TestPrincipalFromRequest_RequiresTenant(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/agents", nil)
+	req.Header.Set("X-BetterAuth-Email", "admin@example.com")
+
+	_, err := PrincipalFromRequest(req, PrincipalRequestOptions{RequireTenant: true})
+	assert.True(t, errors.Is(err, ErrPrincipalTenantRequired))
+}
+
+func TestPrincipalFromRequest_WorkspaceMismatch(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/agents", nil)
+	req.Header.Set("X-BetterAuth-Email", "admin@example.com")
+	req.Header.Set("X-Foxctl-Workspace-ID", "workspace-a")
+
+	_, err := PrincipalFromRequest(req, PrincipalRequestOptions{ExpectedWorkspaceID: "workspace-b"})
+	assert.True(t, errors.Is(err, ErrPrincipalWorkspaceMismatch))
+}
+
+func TestPrincipalFromRequest_ExpectedWorkspaceDefault(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/agents", nil)
+	req.Header.Set("X-BetterAuth-Email", "admin@example.com")
+
+	principal, err := PrincipalFromRequest(req, PrincipalRequestOptions{ExpectedWorkspaceID: "workspace-b"})
+	assert.NoError(t, err)
+	assert.Equal(t, "workspace-b", principal.WorkspaceID)
 }

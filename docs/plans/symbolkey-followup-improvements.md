@@ -9,6 +9,7 @@
 2. **Go non-exported symbol collision** (MEDIUM) — `GoSymbolKey(name)` produces identical keys for non-exported functions with the same name in different files within a package (e.g., `helper` in `store.go` and `builder.go`).
 3. **Incremental index skill dual-write alignment** (HIGH) — The incremental skill writes only legacy format entries while the main indexer does dual-write. Needs alignment to key-only writes.
 4. **Missing Python key assignment** (LOW) — `setSymbolKeys()` handles Go and TS but not Python.
+5. **Cross-plane symbol identity drift** (CRITICAL) — Repoindex nodes, named-memory `code_symbol` entries, embedding queue symbol jobs, worker embedding updates, symbol summaries, and semantic-anchor owners must point to the same logical symbol. The queue/worker path must not write embeddings back through legacy `symbol://<workspace>/<file_path>:<symbol_name>` names when the primary symbol entry is key-based. Treat `workspace + language + package_id + symbol_key` as the canonical logical identity and file/name/span as locators.
 
 ## Architecture Decision
 

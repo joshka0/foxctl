@@ -82,6 +82,24 @@ func TestBuildSymbolContentDigestChangesOnAliases(t *testing.T) {
 	}
 }
 
+func TestBuildSymbolContentDigestChangesOnSemanticAnchors(t *testing.T) {
+	base := SymbolDigestInput{
+		Model:      "model-x",
+		Kind:       "function",
+		Name:       "Guard",
+		FilePath:   "internal/terminal/guard.go",
+		Signature:  "func Guard() error",
+		BodyDigest: "sha256:abc123",
+	}
+
+	withAnchors := base
+	withAnchors.SemanticAnchors = []string{"invariant:no-send-without-read"}
+
+	if BuildSymbolContentDigest(withAnchors) == BuildSymbolContentDigest(base) {
+		t.Fatalf("expected digest to change when semantic anchors change")
+	}
+}
+
 func TestBuildSymbolContentDigest_V2SymbolKey(t *testing.T) {
 	// Ensure v2 format is used for content digests.
 	digest := BuildSymbolContentDigest(SymbolDigestInput{

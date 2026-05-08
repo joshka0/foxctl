@@ -2,7 +2,7 @@ apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: embedding/queue
-  description: Background queue for generating symbol embeddings
+  description: Background queue for generating symbol, named-memory, and semantic-file embeddings
   version: 0.1.0
   author: foxctl
   tags: [embedding, queue, indexing, async]
@@ -19,15 +19,23 @@ signature:
     - name: operation
       type: string
       required: true
-      description: "Operation to perform: enqueue, stats, get, get_by_file, job_status, cleanup"
+      description: "Operation to perform: enqueue, stats, get, get_by_file, job_status, cleanup, recover_stale, purge"
     - name: workspace_id
       type: string
       required: false
       description: Workspace identifier (defaults to detected workspace)
+    - name: kind
+      type: string
+      required: false
+      description: "Restrict queue operations to one embedding job kind: symbol, memory, or semantic_file"
     - name: symbols
       type: array
       required: false
-      description: Symbols to enqueue (for enqueue operation) - objects with symbol_id, file_path, symbol_name, content
+      description: Symbols to enqueue (for enqueue operation) - objects with symbol_id, file_path, symbol_name, language, package_id, symbol_key, memory_name, content
+    - name: memories
+      type: array
+      required: false
+      description: Named memories to enqueue (for enqueue operation) - objects with name, type, content
     - name: priority
       type: integer
       required: false
@@ -55,16 +63,23 @@ signature:
       required: false
       default: 24
       description: Delete jobs older than N hours (for cleanup operation)
+    - name: stale_after_seconds
+      type: integer
+      required: false
+      description: Move running jobs older than N seconds back to retry (for recover_stale operation)
   returns:
     - name: operation
       type: string
       description: Operation that was performed
+    - name: kind
+      type: string
+      description: Job kind filter used for this queue operation
     - name: queued
       type: integer
       description: Number of jobs enqueued
     - name: skipped
       type: integer
-      description: Number of symbols skipped (deduplicated)
+      description: Number of jobs skipped (deduplicated or empty)
     - name: job_ids
       type: array
       description: IDs of created jobs
@@ -83,22 +98,33 @@ signature:
     - name: deleted
       type: integer
       description: Number of jobs cleaned up
+    - name: recovered
+      type: integer
+      description: Number of stale running jobs recovered
+    - name: table
+      type: string
+      description: Backing queue table used for lane-aware operations
     - name: message
       type: string
       description: Human-readable summary
   help:
     short: "Manage background embedding generation queue"
     long: |
-      embedding/queue manages a background queue for generating symbol embeddings.
-      Integrates with the live-index hook to queue symbols as files are edited.
+      embedding/queue manages background queues for symbol, named-memory, and
+      semantic-file embeddings. Integrates with the live-index hook to queue
+      symbols as files are edited, with memory reembedding for paced drains,
+      and with the semantic file queue for first-class stats, cleanup, recovery,
+      and purge.
 
       Operations:
-      - enqueue: Add symbols to the embedding queue
+      - enqueue: Add symbols or named memories to the embedding queue
       - stats: Get queue statistics
       - get: Retrieve embedding for a specific symbol
       - get_by_file: Get all embeddings for a file
       - job_status: Check status of a specific job
       - cleanup: Remove old completed jobs
+      - recover_stale: Move stale running jobs back to retry after a worker crash
+      - purge: Delete all queued job records for a required workspace/kind filter
 
       Enable with FOXCTL_EMBED_QUEUE=1 during live indexing.
     workflows:
@@ -111,12 +137,37 @@ signature:
             - symbol_id: "main.go:Handler"
               file_path: "main.go"
               symbol_name: "Handler"
+              language: "go"
+              package_id: "go:root"
+              symbol_key: "func Handler"
+              memory_name: "symbol://myproject/go:root::func Handler"
               content: "func Handler(w http.ResponseWriter, r *http.Request) { ... }"
           deduplicate: true
+      - id: enqueue-memories
+        description: "Enqueue named memories for embedding"
+        example_input:
+          operation: enqueue
+          workspace_id: myproject
+          memories:
+            - name: "decision:memory-backend"
+              type: "decision"
+              content: "[May 2026] [decision] Use local Turso memory backend"
       - id: check-stats
         description: "Check queue statistics"
         example_input:
           operation: stats
+      - id: check-memory-stats
+        description: "Check only named-memory queue statistics"
+        example_input:
+          operation: stats
+          workspace_id: myproject
+          kind: memory
+      - id: check-semantic-file-stats
+        description: "Check only semantic-file queue statistics"
+        example_input:
+          operation: stats
+          workspace_id: myproject
+          kind: semantic_file
       - id: get-embedding
         description: "Get embedding for a symbol"
         example_input:
@@ -128,6 +179,19 @@ signature:
         example_input:
           operation: cleanup
           older_than_hours: 48
+      - id: recover-stale
+        description: "Recover jobs left running after an interrupted worker"
+        example_input:
+          operation: recover_stale
+          workspace_id: myproject
+          kind: memory
+          stale_after_seconds: 1800
+      - id: purge-semantic-files
+        description: "Purge semantic-file queue jobs for one workspace"
+        example_input:
+          operation: purge
+          workspace_id: myproject
+          kind: semantic_file
 capabilities:
   network: "none"
   filesystem:

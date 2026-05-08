@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,31 @@ import (
 	"github.com/joshka0/foxctl/internal/storage/memory"
 	"github.com/rs/zerolog"
 )
+
+type recordingProvider struct {
+	texts []string
+}
+
+func (p *recordingProvider) Embed(_ context.Context, text string) ([]float32, error) {
+	p.texts = append(p.texts, text)
+	return []float32{0}, nil
+}
+
+func (p *recordingProvider) EmbedBatch(ctx context.Context, texts []string) ([][]float32, error) {
+	result := make([][]float32, len(texts))
+	for i, text := range texts {
+		embedding, err := p.Embed(ctx, text)
+		if err != nil {
+			return nil, err
+		}
+		result[i] = embedding
+	}
+	return result, nil
+}
+
+func (p *recordingProvider) Model() string { return "recording" }
+
+func (p *recordingProvider) Dimensions() int { return 1 }
 
 func setupTestIndexer(t *testing.T, cfg Config) (*Indexer, *memory.Store, string, string) {
 	t.Helper()
@@ -196,7 +222,8 @@ func TestIndexer_Index_ChunkedFile(t *testing.T) {
 
 	// Verify chunk entries were saved
 	configHash := cfg.ChunkingConfigHash()
-	chunkName := ChunkEmbeddingName(workspaceID, "large.txt", "0", configHash)
+	chunks := idx.planFileChunks("large.txt", computeDigest([]byte(content)), "text", []byte(content))
+	chunkName := ChunkEmbeddingName(workspaceID, "large.txt", chunks[0].ID, configHash)
 	chunkEntry, err := store.Get(ctx, chunkName, workspaceID)
 	if err != nil {
 		t.Fatalf("Get chunk entry failed: %v", err)
@@ -211,6 +238,12 @@ func TestIndexer_Index_ChunkedFile(t *testing.T) {
 	}
 	if chunkResult.Chunk.Index != 0 {
 		t.Errorf("expected chunk index 0, got %d", chunkResult.Chunk.Index)
+	}
+	if chunkResult.Chunk.Kind != chunkKindFallback {
+		t.Errorf("expected fallback chunk kind, got %q", chunkResult.Chunk.Kind)
+	}
+	if chunkResult.Chunk.SizeBytes == 0 {
+		t.Error("expected chunk size metadata")
 	}
 	if chunkResult.Chunk.Of != fileResult.ChunkCount {
 		t.Errorf("expected chunk.of %d, got %d", fileResult.ChunkCount, chunkResult.Chunk.Of)
@@ -351,12 +384,13 @@ func TestChunkEmbeddingName(t *testing.T) {
 	}
 }
 
-func TestSplitIntoChunks(t *testing.T) {
+func TestPlanFallbackChunks(t *testing.T) {
 	cfg := Config{ChunkBytes: 10, ChunkOverlapBytes: 2}
 	idx := &Indexer{config: cfg}
 
 	content := []byte("0123456789abcdefghij") // 20 bytes
-	chunks := idx.splitIntoChunks(content)
+	digest := computeDigest(content)
+	chunks := idx.planFileChunks("notes.txt", digest, "text", content)
 
 	// Expected: [0:10], [8:18], [16:20]
 	if len(chunks) < 2 {
@@ -372,6 +406,331 @@ func TestSplitIntoChunks(t *testing.T) {
 	lastChunk := chunks[len(chunks)-1]
 	if lastChunk.End != len(content) {
 		t.Errorf("last chunk should end at %d, got %d", len(content), lastChunk.End)
+	}
+	if chunks[0].Kind != chunkKindFallback {
+		t.Errorf("expected fallback chunk kind, got %q", chunks[0].Kind)
+	}
+	again := idx.planFileChunks("notes.txt", digest, "text", content)
+	if chunks[0].ID != again[0].ID {
+		t.Errorf("expected deterministic chunk ID, got %q and %q", chunks[0].ID, again[0].ID)
+	}
+}
+
+func TestPlanGoChunks_FunctionAndMethodSpans(t *testing.T) {
+	idx := &Indexer{config: Config{ChunkBytes: 20}}
+	content := []byte(`package sample
+
+type Runner struct{}
+
+func Build() string {
+	return "ok"
+}
+
+func (r *Runner) Run() {}
+`)
+
+	chunks := idx.planFileChunks("sample.go", computeDigest(content), "go", content)
+	if len(chunks) != 2 {
+		t.Fatalf("expected 2 Go chunks, got %d", len(chunks))
+	}
+	if chunks[0].Kind != chunkKindGoFunc {
+		t.Fatalf("expected first chunk kind %q, got %q", chunkKindGoFunc, chunks[0].Kind)
+	}
+	if got := chunks[0].SymbolIdentifiers; len(got) != 1 || got[0] != "Build" {
+		t.Fatalf("expected Build symbol, got %#v", got)
+	}
+	if chunks[1].Kind != chunkKindGoMethod {
+		t.Fatalf("expected second chunk kind %q, got %q", chunkKindGoMethod, chunks[1].Kind)
+	}
+	if got := chunks[1].SymbolIdentifiers; len(got) != 1 || got[0] != "Runner.Run" {
+		t.Fatalf("expected Runner.Run symbol, got %#v", got)
+	}
+	if !strings.Contains(string(chunks[0].Content), "func Build") {
+		t.Fatalf("expected first chunk content to contain Build function, got %q", string(chunks[0].Content))
+	}
+	if chunks[0].ID == chunks[1].ID {
+		t.Fatal("expected distinct deterministic chunk IDs for distinct Go spans")
+	}
+}
+
+func TestPlanLanguageSymbolChunks_NonGoSupportedLanguages(t *testing.T) {
+	idx := &Indexer{config: Config{ChunkBytes: 1000}}
+	tests := []struct {
+		name     string
+		path     string
+		language string
+		content  string
+		expected map[string]string
+	}{
+		{
+			name:     "typescript",
+			path:     "src/planner.ts",
+			language: "typescript",
+			content: `export function buildName(input: string) {
+  return input.trim()
+}
+
+export class Runner {
+  run() {
+    return buildName("ok")
+  }
+}
+`,
+			expected: map[string]string{
+				"buildName": chunkKindTypeScriptFunction,
+				"Runner":    chunkKindTypeScriptClass,
+			},
+		},
+		{
+			name:     "javascript",
+			path:     "src/planner.js",
+			language: "javascript",
+			content: `export const buildName = (input) => {
+  return input.trim()
+}
+`,
+			expected: map[string]string{
+				"buildName": chunkKindJavaScriptFunction,
+			},
+		},
+		{
+			name:     "python",
+			path:     "planner.py",
+			language: "python",
+			content: `class Runner:
+    def run(self):
+        return "ok"
+
+def build():
+    return Runner()
+`,
+			expected: map[string]string{
+				"Runner":     chunkKindPythonClass,
+				"Runner.run": chunkKindPythonFunction,
+				"build":      chunkKindPythonFunction,
+			},
+		},
+		{
+			name:     "rust",
+			path:     "src/planner.rs",
+			language: "rust",
+			content: `pub struct Runner {
+    value: String,
+}
+
+impl Runner {
+    pub fn run(&self) -> String {
+        self.value.clone()
+    }
+}
+
+pub fn build() -> Runner {
+    Runner { value: String::new() }
+}
+`,
+			expected: map[string]string{
+				"Runner":     chunkKindRustType,
+				"Runner.run": chunkKindRustMethod,
+				"build":      chunkKindRustFunction,
+			},
+		},
+		{
+			name:     "elixir",
+			path:     "lib/planner.ex",
+			language: "elixir",
+			content: `defmodule MyApp.Runner do
+  @type id :: String.t()
+
+  def run(value) do
+    value
+  end
+end
+`,
+			expected: map[string]string{
+				"MyApp.Runner": chunkKindElixirModule,
+				"id":           chunkKindElixirType,
+				"run":          chunkKindElixirFunction,
+			},
+		},
+		{
+			name:     "csharp",
+			path:     "src/Planner.cs",
+			language: "csharp",
+			content: `public class Runner
+{
+    public string Run()
+    {
+        return "ok";
+    }
+}
+`,
+			expected: map[string]string{
+				"Runner":     chunkKindCSharpClass,
+				"Runner.Run": chunkKindCSharpFunction,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content := []byte(tt.content)
+			chunks := idx.planFileChunks(tt.path, computeDigest(content), tt.language, content)
+			bySymbol := chunksBySymbol(chunks)
+			for symbol, kind := range tt.expected {
+				chunk, ok := bySymbol[symbol]
+				if !ok {
+					t.Fatalf("expected symbol chunk %q, got symbols %#v", symbol, chunkSymbols(chunks))
+				}
+				if chunk.Kind != kind {
+					t.Fatalf("chunk %q kind=%q want %q", symbol, chunk.Kind, kind)
+				}
+				if chunk.Kind == chunkKindFallback {
+					t.Fatalf("chunk %q unexpectedly used fallback", symbol)
+				}
+				if chunk.Start < 0 || chunk.End > len(content) || chunk.Start >= chunk.End {
+					t.Fatalf("chunk %q has invalid span [%d:%d] for content length %d", symbol, chunk.Start, chunk.End, len(content))
+				}
+				if string(chunk.Content) != string(content[chunk.Start:chunk.End]) {
+					t.Fatalf("chunk %q content does not match byte span", symbol)
+				}
+			}
+
+			again := chunksBySymbol(idx.planFileChunks(tt.path, computeDigest(content), tt.language, content))
+			for symbol := range tt.expected {
+				if bySymbol[symbol].ID != again[symbol].ID {
+					t.Fatalf("chunk %q ID is not deterministic: %q != %q", symbol, bySymbol[symbol].ID, again[symbol].ID)
+				}
+			}
+		})
+	}
+}
+
+func TestPlanLanguageSymbolChunks_FallsBackWhenNoSymbols(t *testing.T) {
+	idx := &Indexer{config: Config{ChunkBytes: 12, ChunkOverlapBytes: 2}}
+	content := []byte("const value = 1;\n")
+
+	chunks := idx.planFileChunks("src/constants.ts", computeDigest(content), "typescript", content)
+	if len(chunks) == 0 {
+		t.Fatal("expected fallback chunks")
+	}
+	for _, chunk := range chunks {
+		if chunk.Kind != chunkKindFallback {
+			t.Fatalf("expected fallback chunk, got %q", chunk.Kind)
+		}
+	}
+}
+
+func TestIndexer_Index_TypeScriptChunkMetadata(t *testing.T) {
+	cfg := Config{Enabled: true, ChunkBytes: 40, ProviderModel: "test-model"}
+	idx, store, workspaceDir, workspaceID := setupTestIndexer(t, cfg)
+
+	content := `export function buildName(input: string) {
+  return input.trim()
+}
+
+const value = "extra content to force chunking"
+`
+	createTestFile(t, workspaceDir, "src/planner.ts", content)
+
+	event := indexing.PostReviewEvent{
+		WorkspaceID: workspaceID,
+		Files: []indexing.FileChange{
+			{Path: "src/planner.ts", ChangeKind: indexing.ChangeKindAdded, Language: "typescript", SizeBytes: int64(len(content))},
+		},
+	}
+	if _, err := idx.Index(context.Background(), event); err != nil {
+		t.Fatalf("Index failed: %v", err)
+	}
+
+	chunks := idx.planFileChunks("src/planner.ts", computeDigest([]byte(content)), "typescript", []byte(content))
+	if len(chunks) == 0 {
+		t.Fatal("expected planned TypeScript chunks")
+	}
+
+	chunkName := ChunkEmbeddingName(workspaceID, "src/planner.ts", chunks[0].ID, cfg.ChunkingConfigHash())
+	chunkEntry, err := store.Get(context.Background(), chunkName, workspaceID)
+	if err != nil {
+		t.Fatalf("Get chunk entry failed: %v", err)
+	}
+	chunkResult, err := UnmarshalChunkResult(chunkEntry.Result)
+	if err != nil {
+		t.Fatalf("Unmarshal chunk result failed: %v", err)
+	}
+	if chunkResult.Language != "typescript" {
+		t.Fatalf("language=%q want typescript", chunkResult.Language)
+	}
+	if chunkResult.Chunk.Kind != chunkKindTypeScriptFunction {
+		t.Fatalf("chunk kind=%q want %q", chunkResult.Chunk.Kind, chunkKindTypeScriptFunction)
+	}
+	if got := chunkResult.Chunk.SymbolIdentifiers; len(got) != 1 || got[0] != "buildName" {
+		t.Fatalf("symbol identifiers=%#v want [buildName]", got)
+	}
+	if chunkResult.Chunk.Span == nil || chunkResult.Chunk.Span.Unit != "byte" {
+		t.Fatalf("expected byte span metadata, got %#v", chunkResult.Chunk.Span)
+	}
+}
+
+func chunksBySymbol(chunks []Chunk) map[string]Chunk {
+	bySymbol := make(map[string]Chunk, len(chunks))
+	for _, chunk := range chunks {
+		if len(chunk.SymbolIdentifiers) == 0 {
+			continue
+		}
+		bySymbol[chunk.SymbolIdentifiers[0]] = chunk
+	}
+	return bySymbol
+}
+
+func chunkSymbols(chunks []Chunk) []string {
+	symbols := make([]string, 0, len(chunks))
+	for _, chunk := range chunks {
+		if len(chunk.SymbolIdentifiers) == 0 {
+			continue
+		}
+		symbols = append(symbols, chunk.SymbolIdentifiers[0])
+	}
+	return symbols
+}
+
+func TestIndexer_ChunkEmbeddingTextDoesNotUseSyntheticLabels(t *testing.T) {
+	cfg := Config{Enabled: true, ChunkBytes: 40, ProviderModel: "test-model"}
+	idx, store, workspaceDir, workspaceID := setupTestIndexer(t, cfg)
+	provider := &recordingProvider{}
+	idx.provider = provider
+
+	content := "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda"
+	createTestFile(t, workspaceDir, "large.txt", content)
+
+	event := indexing.PostReviewEvent{
+		WorkspaceID: workspaceID,
+		Files: []indexing.FileChange{
+			{Path: "large.txt", ChangeKind: indexing.ChangeKindAdded},
+		},
+	}
+
+	result, err := idx.Index(context.Background(), event)
+	if err != nil {
+		t.Fatalf("Index failed: %v", err)
+	}
+	if result.FilesIndexed != 1 {
+		t.Fatalf("expected file indexed, got %d", result.FilesIndexed)
+	}
+	if len(provider.texts) == 0 {
+		t.Fatal("expected chunk embedding calls")
+	}
+	for _, text := range provider.texts {
+		if strings.Contains(text, "Chunk ") || strings.Contains(text, "Semantic embedding for") {
+			t.Fatalf("embedding text contains synthetic operational label: %q", text)
+		}
+	}
+
+	chunks := idx.planFileChunks("large.txt", computeDigest([]byte(content)), "text", []byte(content))
+	entry, err := store.Get(context.Background(), ChunkEmbeddingName(workspaceID, "large.txt", chunks[0].ID, cfg.ChunkingConfigHash()), workspaceID)
+	if err != nil {
+		t.Fatalf("failed to get chunk entry: %v", err)
+	}
+	if strings.Contains(entry.Summary, "Chunk ") {
+		t.Fatalf("chunk summary should avoid synthetic chunk labels, got %q", entry.Summary)
 	}
 }
 
@@ -466,6 +825,31 @@ func TestIndexer_readFileContent_FileSizeLimit(t *testing.T) {
 		t.Error("expected error for large file")
 	} else if !containsStr(err.Error(), "file too large") {
 		t.Errorf("expected 'file too large' error, got %q", err.Error())
+	}
+}
+
+func TestIndexer_Index_MaxFileKBSkipped(t *testing.T) {
+	idx, _, workspaceDir, workspaceID := setupTestIndexer(t, Config{Enabled: true, MaxFileKB: 1})
+
+	content := strings.Repeat("x", 2*1024)
+	createTestFile(t, workspaceDir, "too-large.txt", content)
+
+	event := indexing.PostReviewEvent{
+		WorkspaceID: workspaceID,
+		Files: []indexing.FileChange{
+			{Path: "too-large.txt", ChangeKind: indexing.ChangeKindAdded, SizeBytes: int64(len(content))},
+		},
+	}
+
+	result, err := idx.Index(context.Background(), event)
+	if err != nil {
+		t.Fatalf("Index failed: %v", err)
+	}
+	if result.FilesSkipped != 1 {
+		t.Fatalf("expected 1 skipped file, got indexed=%d skipped=%d failed=%d", result.FilesIndexed, result.FilesSkipped, result.FilesFailed)
+	}
+	if result.FilesFailed != 0 {
+		t.Fatalf("expected no failures, got %d", result.FilesFailed)
 	}
 }
 
@@ -610,6 +994,18 @@ func TestRunInitFilesJob_ChunkedFile(t *testing.T) {
 	}
 	if result.Summary.ChunksIndexed == 0 {
 		t.Error("expected chunks for large file")
+	}
+	if result.Summary.ChunkPlannerCounts[chunkKindFallback] != result.Summary.ChunksIndexed {
+		t.Fatalf("planner counts=%v want fallback count %d", result.Summary.ChunkPlannerCounts, result.Summary.ChunksIndexed)
+	}
+	if result.Summary.ChunkSizeBytes == nil {
+		t.Fatal("expected chunk size summary")
+	}
+	if result.Summary.ChunkSizeBytes.Count != result.Summary.ChunksIndexed {
+		t.Fatalf("size count=%d want %d", result.Summary.ChunkSizeBytes.Count, result.Summary.ChunksIndexed)
+	}
+	if result.Summary.ChunkSizeBytes.MinBytes <= 0 || result.Summary.ChunkSizeBytes.MaxBytes <= 0 || result.Summary.ChunkSizeBytes.AverageBytes <= 0 {
+		t.Fatalf("invalid chunk size summary=%+v", result.Summary.ChunkSizeBytes)
 	}
 }
 
@@ -806,6 +1202,32 @@ func TestRunInitFilesJob_FileNotFound(t *testing.T) {
 	}
 	if result.Failures[0].File.Path != "nonexistent.go" {
 		t.Errorf("expected failure for nonexistent.go, got %s", result.Failures[0].File.Path)
+	}
+}
+
+func TestRunInitFilesJob_MaxFileKBSkipped(t *testing.T) {
+	idx, _, workspaceDir, workspaceID := setupTestIndexer(t, Config{Enabled: true, MaxFileKB: 1})
+
+	createTestFile(t, workspaceDir, "too-large.txt", strings.Repeat("x", 2*1024))
+
+	args := JobArgs{
+		WorkspaceID: workspaceID,
+		Files: []JobFileInput{
+			{Path: "too-large.txt"},
+		},
+		Reason: ReasonInitialIndex,
+	}
+
+	result, err := idx.RunInitFilesJob(context.Background(), args)
+	if err != nil {
+		t.Fatalf("RunInitFilesJob failed: %v", err)
+	}
+	if result.Summary.FilesSkipped != 1 {
+		t.Fatalf("expected 1 skipped file, got indexed=%d skipped=%d failures=%d",
+			result.Summary.FilesIndexed, result.Summary.FilesSkipped, len(result.Failures))
+	}
+	if len(result.Failures) != 0 {
+		t.Fatalf("expected no failures, got %d", len(result.Failures))
 	}
 }
 

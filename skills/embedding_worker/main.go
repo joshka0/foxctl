@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/memoryutil"
@@ -15,20 +16,30 @@ import (
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/symbolutil"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedding"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedqueue"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+	"github.com/joshka0/foxctl/internal/storage"
 	"github.com/joshka0/foxctl/internal/storage/annotations"
 	"github.com/joshka0/foxctl/internal/storage/sessions"
 	"github.com/joshka0/foxctl/internal/storage/vector"
 )
 
 const (
-	command       = "embedding/worker"
-	defaultBatch  = 10
-	defaultMaxDur = 300 // 5 minutes
+	command            = "embedding/worker"
+	defaultBatch       = 10
+	defaultMaxDur      = 300 // 5 minutes
+	defaultParallelism = 1
+	maxParallelism     = 16
 )
 
 // Input is the skill input schema for embedding/worker operations.
 type Input struct {
+	// WorkspaceID restricts queue claiming, stats, and stale recovery to one queue group.
+	WorkspaceID string `json:"workspace_id,omitempty"`
+
+	// Kind restricts queue claiming and stats to one task kind (symbol or memory).
+	Kind string `json:"kind,omitempty"`
+
 	// BatchSize is the number of jobs to process per batch (default: 10).
 	BatchSize int `json:"batch_size,omitempty"`
 
@@ -39,8 +50,17 @@ type Input struct {
 	// When false, returns after processing BatchSize jobs.
 	ProcessAll bool `json:"process_all,omitempty"`
 
+	// Parallelism is the maximum number of claimed jobs processed concurrently.
+	Parallelism int `json:"parallelism,omitempty"`
+
 	// DryRun if true, claims jobs but doesn't call the embedding API.
 	DryRun bool `json:"dry_run,omitempty"`
+
+	// JobDelayMS pauses between claimed jobs, useful for local GPU-backed embedding.
+	JobDelayMS int `json:"job_delay_ms,omitempty"`
+
+	// RecoverStaleAfterSeconds moves running jobs older than this back to retry before processing.
+	RecoverStaleAfterSeconds int `json:"recover_stale_after_seconds,omitempty"`
 
 	// SyncMemory requests syncing symbol embeddings into named memory after processing.
 	SyncMemory bool `json:"sync_memory,omitempty"`
@@ -71,17 +91,21 @@ type Input struct {
 
 // Output is the skill output for embedding/worker operations.
 type Output struct {
-	Processed  int            `json:"processed"`
-	Errors     int            `json:"errors"`
-	Synced     int            `json:"synced,omitempty"`
-	SyncErrors int            `json:"sync_errors,omitempty"`
-	Remaining  int            `json:"remaining"`
-	BatchCount int            `json:"batch_count,omitempty"`
-	Status     string         `json:"status"` // "completed", "timeout", "no_jobs", "error"
-	DurationMs int64          `json:"duration_ms"`
-	LastError  string         `json:"last_error,omitempty"`
-	Stats      *QueueSnapshot `json:"stats,omitempty"`
-	Message    string         `json:"message"`
+	Processed   int            `json:"processed"`
+	Kind        string         `json:"kind,omitempty"`
+	Errors      int            `json:"errors"`
+	Memories    int            `json:"memories,omitempty"`
+	Synced      int            `json:"synced,omitempty"`
+	SyncErrors  int            `json:"sync_errors,omitempty"`
+	Recovered   int64          `json:"recovered,omitempty"`
+	Remaining   int            `json:"remaining"`
+	BatchCount  int            `json:"batch_count,omitempty"`
+	Parallelism int            `json:"parallelism,omitempty"`
+	Status      string         `json:"status"` // "completed", "timeout", "no_jobs", "error"
+	DurationMs  int64          `json:"duration_ms"`
+	LastError   string         `json:"last_error,omitempty"`
+	Stats       *QueueSnapshot `json:"stats,omitempty"`
+	Message     string         `json:"message"`
 }
 
 // QueueSnapshot is a summary of queue state after processing.
@@ -105,11 +129,11 @@ func main() {
 // Index:
 //
 //	Purpose: Process queued embedding jobs with batch processing, timeout handling, and error recovery
-//	Flow: configure embedder → open store → claim jobs → generate embeddings → store results → repeat until done
-//	SideEffects: embedding API calls; job state transitions; queue statistics; dimension validation
+//	Flow: configure embedder → open queue store → claim workspace/kind-scoped jobs → generate embeddings → store results → lazy-open memory backend when needed
+//	SideEffects: embedding API calls; job state transitions; queue statistics; dimension validation; optional named-memory updates
 //	FailureModes: missing API keys, store errors, embedding failures, dimension mismatches, timeouts
 //	Observability: emits processing statistics, error details, queue snapshots, and timing metrics
-//	Keywords: embedding/worker, background, jobs, batch_processing, timeout, error_recovery
+//	Keywords: embedding/worker, background, jobs, batch_processing, kind_filter, timeout, error_recovery
 //
 // [[domain:background-embedding-worker]]
 // [[protocol:embedding-job-lifecycle]]
@@ -123,19 +147,30 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if in.MaxDuration <= 0 {
 		in.MaxDuration = defaultMaxDur
 	}
-
-	// Determine embedding provider (prefer Voyage, fall back to Gemini).
-	var embeddingModel string
-	var expectedDims int
+	parallelism, err := normalizeParallelism(in.Parallelism, in.BatchSize)
+	if err != nil {
+		return err
+	}
+	in.Parallelism = parallelism
 
 	voyageKey := os.Getenv("VOYAGE_API_KEY")
 	geminiKey := os.Getenv("GEMINI_API_KEY")
-	model := semantic.ResolveModelForScope(semantic.ScopeSymbols, rc.Config)
 
-	var embedder *semantic.Embedder
-	if !in.DryRun {
+	var symbolEmbedder *semantic.Embedder
+	symbolEmbeddingModel := semantic.ResolveModelForScope(semantic.ScopeSymbols, rc.Config)
+	symbolExpectedDims := semantic.ResolveDimensionsForModel(symbolEmbeddingModel, rc.Config.Embedding.Dimensions)
+	var symbolEmbedderMu sync.Mutex
+	getSymbolEmbedder := func() (*semantic.Embedder, int, error) {
+		if in.DryRun {
+			return nil, symbolExpectedDims, nil
+		}
+		symbolEmbedderMu.Lock()
+		defer symbolEmbedderMu.Unlock()
+		if symbolEmbedder != nil {
+			return symbolEmbedder, symbolExpectedDims, nil
+		}
 		var err error
-		embedder, err = semantic.NewEmbedderFromConfig(
+		symbolEmbedder, err = semantic.NewEmbedderFromConfig(
 			semantic.ScopeSymbols,
 			rc.Config,
 			semantic.WithVoyageKey(voyageKey),
@@ -143,45 +178,48 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 			skillmain.EmbeddingGuard(rc),
 		)
 		if err != nil {
-			return skillerr.Auth(
-				"VOYAGE_API_KEY or GEMINI_API_KEY required",
-				skillerr.WithCause(err),
-				skillerr.WithHint("set VOYAGE_API_KEY (preferred) or GEMINI_API_KEY environment variable"),
-			)
+			return nil, 0, err
 		}
-	} else {
-		embedder, _ = semantic.NewEmbedderFromConfig(
-			semantic.ScopeSymbols,
+		symbolExpectedDims = semantic.ResolveDimensionsForModel(symbolEmbedder.Model(), rc.Config.Embedding.Dimensions)
+		log.Info().
+			Str("provider", symbolEmbedder.Provider()).
+			Str("model", symbolEmbedder.Model()).
+			Int("dims", symbolExpectedDims).
+			Msg("using symbol embeddings")
+		return symbolEmbedder, symbolExpectedDims, nil
+	}
+
+	var memoryEmbedder *semantic.Embedder
+	memoryEmbeddingModel := semantic.ResolveModelForScope(semantic.ScopeMemory, rc.Config)
+	memoryExpectedDims := semantic.ResolveDimensionsForModel(memoryEmbeddingModel, rc.Config.Embedding.Dimensions)
+	var memoryEmbedderMu sync.Mutex
+	getMemoryEmbedder := func() (*semantic.Embedder, int, error) {
+		if in.DryRun {
+			return nil, memoryExpectedDims, nil
+		}
+		memoryEmbedderMu.Lock()
+		defer memoryEmbedderMu.Unlock()
+		if memoryEmbedder != nil {
+			return memoryEmbedder, memoryExpectedDims, nil
+		}
+		var err error
+		memoryEmbedder, err = semantic.NewEmbedderFromConfig(
+			semantic.ScopeMemory,
 			rc.Config,
 			semantic.WithVoyageKey(voyageKey),
 			semantic.WithGeminiKey(geminiKey),
 			skillmain.EmbeddingGuard(rc),
 		)
-	}
-
-	if embedder != nil {
-		embeddingModel = embedder.Model()
-		expectedDims = embedder.Dimensions()
-		log.Info().
-			Str("provider", embedder.Provider()).
-			Str("model", embeddingModel).
-			Int("dims", expectedDims).
-			Msg("using embeddings")
-	} else {
-		embeddingModel = model
-		if embeddingModel == "" {
-			embeddingModel = "gemini-embedding-001"
+		if err != nil {
+			return nil, 0, err
 		}
-		expectedDims = semantic.DimensionsForModel(embeddingModel)
+		memoryExpectedDims = semantic.ResolveDimensionsForModel(memoryEmbedder.Model(), rc.Config.Embedding.Dimensions)
 		log.Info().
-			Str("provider", "dry-run").
-			Str("model", embeddingModel).
-			Int("dims", expectedDims).
-			Msg("using embeddings")
-	}
-
-	if rc.Config.Embedding.Dimensions > 0 {
-		expectedDims = rc.Config.Embedding.Dimensions
+			Str("provider", memoryEmbedder.Provider()).
+			Str("model", memoryEmbedder.Model()).
+			Int("dims", memoryExpectedDims).
+			Msg("using memory embeddings")
+		return memoryEmbedder, memoryExpectedDims, nil
 	}
 
 	// Open store using cache path from config
@@ -193,14 +231,63 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	defer store.Close()
 
 	var memoryStore memoryutil.Store
-	if ms, memErr := memoryutil.OpenFromConfig(ctx, rc.Config); memErr != nil {
-		log.Warn().Err(memErr).Msg("failed to open memory store for embedding updates")
-	} else {
+	var memoryStoreMu sync.Mutex
+	openMemoryStore := func() (memoryutil.Store, error) {
+		memoryStoreMu.Lock()
+		defer memoryStoreMu.Unlock()
+		if memoryStore != nil {
+			return memoryStore, nil
+		}
+		ms, memErr := memoryutil.OpenFromConfig(ctx, rc.Config)
+		if memErr != nil {
+			return nil, memErr
+		}
 		memoryStore = ms
-		defer memoryStore.Close()
+		return memoryStore, nil
 	}
+	defer func() {
+		if memoryStore != nil {
+			_ = memoryStore.Close()
+		}
+	}()
 
 	embeddingDBPath := filepath.Join(rc.Config.Paths.Cache, "embedding_queue.db")
+	workspaceID := strings.TrimSpace(in.WorkspaceID)
+	kind, err := normalizeTaskKind(in.Kind)
+	if err != nil {
+		return err
+	}
+	recoveredStale := int64(0)
+	if in.RecoverStaleAfterSeconds < 0 {
+		return skillerr.Arg("recover_stale_after_seconds must be >= 0")
+	}
+	if in.RecoverStaleAfterSeconds > 0 {
+		olderThan := time.Duration(in.RecoverStaleAfterSeconds) * time.Second
+		var recoverErr error
+		switch {
+		case workspaceID != "" && kind != "":
+			recoveredStale, recoverErr = store.RequeueStaleRunningInWorkspaceKind(ctx, workspaceID, kind, olderThan)
+		case workspaceID != "":
+			recoveredStale, recoverErr = store.RequeueStaleRunningInWorkspace(ctx, workspaceID, olderThan)
+		case kind != "":
+			recoveredStale, recoverErr = store.RequeueStaleRunningKind(ctx, kind, olderThan)
+		default:
+			recoveredStale, recoverErr = store.RequeueStaleRunning(ctx, olderThan)
+		}
+		if recoverErr != nil {
+			return skillerr.IO("recover stale embedding jobs", skillerr.WithCause(recoverErr))
+		}
+		if recoveredStale > 0 {
+			logEvent := log.Info().Int64("recovered", recoveredStale)
+			if workspaceID != "" {
+				logEvent = logEvent.Str("workspace_id", workspaceID)
+			}
+			if kind != "" {
+				logEvent = logEvent.Str("kind", string(kind))
+			}
+			logEvent.Msg("recovered stale embedding jobs")
+		}
+	}
 	syncTargets := make(map[string]map[string]struct{})
 	processedWorkspaces := make(map[string]struct{})
 	addSyncTarget := func(workspaceID, symbolID string) {
@@ -223,23 +310,141 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	defer cancel()
 
 	start := time.Now()
-	output := Output{Status: "completed"}
+	output := Output{Status: "completed", Recovered: recoveredStale, Parallelism: in.Parallelism}
+	if kind != "" {
+		output.Kind = string(kind)
+	}
 
-	// Process symbol queue jobs in batches
+	var memoryJobMu sync.Mutex
+	processJob := func(ctx context.Context, job *embedding.EmbeddingJob) embeddingJobResult {
+		result := embeddingJobResult{}
+		if ws := strings.TrimSpace(job.WorkspaceID); ws != "" {
+			result.ProcessedWorkspaces = append(result.ProcessedWorkspaces, ws)
+		}
+
+		if job.Kind == embedqueue.TaskKindMemory {
+			memoryJobMu.Lock()
+			defer memoryJobMu.Unlock()
+
+			var ms memoryutil.Store
+			if !in.DryRun {
+				var memErr error
+				ms, memErr = openMemoryStore()
+				if memErr != nil {
+					err := fmt.Errorf("open memory store: %w", memErr)
+					log.Error().Err(err).Str("job_id", job.ID).Str("memory", job.MemoryName).Msg("memory embedding job failed")
+					return failEmbeddingJob(ctx, store, job.ID, "fail memory job", err)
+				}
+			}
+			if err := processMemoryEmbeddingJob(ctx, store, ms, job, in.DryRun, getMemoryEmbedder); err != nil {
+				log.Error().Err(err).Str("job_id", job.ID).Str("memory", job.MemoryName).Msg("memory embedding job failed")
+				return failEmbeddingJob(ctx, store, job.ID, "fail memory job", err)
+			}
+			log.Info().Str("job_id", job.ID).Str("memory", job.MemoryName).Str("status", "completed").Msg("memory job completed")
+			result.Processed = 1
+			result.Memories = 1
+			if err := waitEmbeddingJobDelay(ctx, in.JobDelayMS); err != nil {
+				result.Timeout = true
+				result.LastError = err.Error()
+			}
+			return result
+		}
+		if job.Kind != "" && job.Kind != embedqueue.TaskKindSymbol {
+			errMsg := fmt.Sprintf("unsupported embedding job kind %q", job.Kind)
+			log.Error().Str("job_id", job.ID).Msg(errMsg)
+			return failEmbeddingJob(ctx, store, job.ID, "fail job", fmt.Errorf("%s", errMsg))
+		}
+
+		if in.DryRun {
+			_, expectedDims, err := getSymbolEmbedder()
+			if err != nil {
+				log.Error().Err(err).Str("job_id", job.ID).Msg("failed to resolve dry-run embedding dimensions")
+				return embeddingJobResult{Errors: 1, LastError: err.Error()}
+			}
+			fakeEmbed := make([]float32, expectedDims)
+			if err := store.Complete(ctx, job.ID, fakeEmbed, "dry-run"); err != nil {
+				log.Error().Err(err).Str("job_id", job.ID).Msg("failed to complete dry-run job")
+				return embeddingJobResult{Errors: 1, LastError: err.Error()}
+			}
+			log.Info().Str("job_id", job.ID).Str("status", "dry-run").Int("dims", expectedDims).Msg("job completed")
+		} else {
+			embedder, expectedDims, err := getSymbolEmbedder()
+			if err != nil {
+				errMsg := fmt.Sprintf("symbol embedding provider: %v", err)
+				log.Error().Err(err).Str("job_id", job.ID).Msg("symbol embedding provider unavailable")
+				return failEmbeddingJob(ctx, store, job.ID, "fail job", fmt.Errorf("%s", errMsg))
+			}
+
+			embedResult, err := embedder.Embed(ctx, job.Content)
+			if err != nil {
+				log.Error().Err(err).Str("job_id", job.ID).Msg("embedding generation failed")
+				return failEmbeddingJob(ctx, store, job.ID, "fail job", err)
+			}
+
+			embed := embedResult.Vec
+			model := embedResult.Model
+			if len(embed) != expectedDims {
+				errMsg := fmt.Sprintf("dimension mismatch: got %d, expected %d from config; update embedding.model or embedding.dimensions", len(embed), expectedDims)
+				log.Error().Str("job_id", job.ID).Msg(errMsg)
+				return failEmbeddingJob(ctx, store, job.ID, "fail job", fmt.Errorf("%s", errMsg))
+			}
+
+			log.Info().
+				Str("job_id", job.ID).
+				Int("embedding_dim", len(embed)).
+				Msg("embedding generated")
+
+			if err := store.Complete(ctx, job.ID, embed, model); err != nil {
+				log.Error().Err(err).Str("job_id", job.ID).Msg("failed to store embedding")
+				return embeddingJobResult{Errors: 1, LastError: err.Error()}
+			}
+			if in.SyncMemory {
+				workspaceID := strings.TrimSpace(job.WorkspaceID)
+				entryName := symbolMemoryEntryName(job)
+				if workspaceID == "" || entryName == "" {
+					log.Warn().
+						Str("job_id", job.ID).
+						Str("symbol_id", job.SymbolID).
+						Msg("skipping embedding update due to missing workspace/symbol identity")
+					result.SyncTargets = append(result.SyncTargets, embeddingSyncTarget{WorkspaceID: workspaceID, SymbolID: job.SymbolID})
+				} else {
+					memoryJobMu.Lock()
+					ms, memErr := openMemoryStore()
+					if memErr != nil {
+						log.Warn().Err(memErr).Str("job_id", job.ID).Str("symbol_id", job.SymbolID).Msg("failed to open memory store for symbol embedding update")
+						result.SyncTargets = append(result.SyncTargets, embeddingSyncTarget{WorkspaceID: workspaceID, SymbolID: job.SymbolID})
+					} else if err := ms.UpdateEmbedding(ctx, entryName, workspaceID, embed); err != nil {
+						log.Warn().Err(err).Str("job_id", job.ID).Str("symbol_id", job.SymbolID).Msg("failed to update symbol embedding")
+						result.SyncTargets = append(result.SyncTargets, embeddingSyncTarget{WorkspaceID: workspaceID, SymbolID: job.SymbolID})
+					}
+					memoryJobMu.Unlock()
+				}
+			}
+			log.Info().Str("job_id", job.ID).Str("status", "completed").Str("model", model).Msg("job completed")
+		}
+
+		result.Processed = 1
+		if err := waitEmbeddingJobDelay(ctx, in.JobDelayMS); err != nil {
+			result.Timeout = true
+			result.LastError = err.Error()
+		}
+		return result
+	}
+
+	// Claim jobs sequentially to preserve queue ordering, then process each claimed
+	// batch with bounded parallelism.
 	for {
-		batchProcessed := 0
 		noMoreJobs := false
+		jobs := make([]*embedding.EmbeddingJob, 0, in.BatchSize)
 
 		for i := 0; i < in.BatchSize; i++ {
-			// Check deadline
 			if time.Now().After(deadline.Add(-5 * time.Second)) {
 				output.Status = "timeout"
 				log.Warn().Msg("approaching deadline, stopping processing")
 				break
 			}
 
-			// Claim next job
-			job, err := store.ClaimNext(ctx)
+			job, err := claimNextEmbeddingJob(ctx, store, workspaceID, kind)
 			if err != nil {
 				log.Error().Err(err).Msg("failed to claim job")
 				output.LastError = err.Error()
@@ -257,7 +462,6 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 				break
 			}
 
-			// Log job claimed with content preview
 			contentPreview := job.Content
 			if len(contentPreview) > 100 {
 				contentPreview = contentPreview[:100] + "..."
@@ -266,99 +470,29 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 				Str("job_id", job.ID).
 				Str("content_preview", contentPreview).
 				Msg("claimed job")
-
-			if ws := strings.TrimSpace(job.WorkspaceID); ws != "" {
-				processedWorkspaces[ws] = struct{}{}
-			}
-
-			// Generate embedding
-			if in.DryRun {
-				// Dry run: mark as complete with fake embedding using config dimensions
-				fakeEmbed := make([]float32, expectedDims)
-				if err := store.Complete(ctx, job.ID, fakeEmbed, "dry-run"); err != nil {
-					log.Error().Err(err).Str("job_id", job.ID).Msg("failed to complete dry-run job")
-					output.LastError = err.Error()
-					output.Errors++
-					continue
-				}
-				log.Info().Str("job_id", job.ID).Str("status", "dry-run").Int("dims", expectedDims).Msg("job completed")
-			} else {
-				if embedder == nil {
-					output.LastError = "embedding provider not available"
-					output.Errors++
-					log.Error().Str("job_id", job.ID).Msg("embedding provider not available")
-					continue
-				}
-
-				result, err := embedder.Embed(ctx, job.Content)
-				if err != nil {
-					log.Error().Err(err).Str("job_id", job.ID).Msg("embedding generation failed")
-					// Rate limit or API error - fail with retry
-					if failErr := store.Fail(ctx, job.ID, err.Error()); failErr != nil {
-						output.LastError = fmt.Sprintf("fail job: %v (original: %v)", failErr, err)
-					} else {
-						output.LastError = err.Error()
-					}
-					output.Errors++
-					continue
-				}
-
-				embed := result.Vec
-				model := result.Model
-
-				// Validate embedding dimensions match config
-				if len(embed) != expectedDims {
-					errMsg := fmt.Sprintf("dimension mismatch: got %d, expected %d from config; update embedding.model or embedding.dimensions", len(embed), expectedDims)
-					log.Error().Str("job_id", job.ID).Msg(errMsg)
-					if failErr := store.Fail(ctx, job.ID, errMsg); failErr != nil {
-						output.LastError = fmt.Sprintf("fail job: %v (original: %v)", failErr, errMsg)
-					} else {
-						output.LastError = errMsg
-					}
-					output.Errors++
-					continue
-				}
-
-				log.Info().
-					Str("job_id", job.ID).
-					Int("embedding_dim", len(embed)).
-					Msg("embedding generated")
-
-				// Store the embedding with the model used for generation.
-				if err := store.Complete(ctx, job.ID, embed, model); err != nil {
-					log.Error().Err(err).Str("job_id", job.ID).Msg("failed to store embedding")
-					output.LastError = err.Error()
-					output.Errors++
-					continue
-				}
-				if memoryStore != nil {
-					workspaceID := strings.TrimSpace(job.WorkspaceID)
-					filePath := strings.TrimSpace(job.FilePath)
-					symbolName := strings.TrimSpace(job.SymbolName)
-					if workspaceID == "" || filePath == "" || symbolName == "" {
-						log.Warn().
-							Str("job_id", job.ID).
-							Str("symbol_id", job.SymbolID).
-							Msg("skipping embedding update due to missing workspace/file/symbol")
-						addSyncTarget(workspaceID, job.SymbolID)
-					} else {
-						entryName := symbolutil.EntryName(workspaceID, filePath, symbolName)
-						if err := memoryStore.UpdateEmbedding(ctx, entryName, workspaceID, embed); err != nil {
-							log.Warn().Err(err).Str("job_id", job.ID).Str("symbol_id", job.SymbolID).Msg("failed to update symbol embedding")
-							addSyncTarget(workspaceID, job.SymbolID)
-						}
-					}
-				}
-				log.Info().Str("job_id", job.ID).Str("status", "completed").Str("model", model).Msg("job completed")
-			}
-
-			output.Processed++
-			batchProcessed++
+			jobs = append(jobs, job)
 		}
 
-		// Only count batch if we processed at least one job
-		if batchProcessed > 0 {
-			output.BatchCount++
+		if len(jobs) > 0 {
+			batchResult := processEmbeddingJobBatch(ctx, jobs, in.Parallelism, processJob)
+			output.Processed += batchResult.Processed
+			output.Memories += batchResult.Memories
+			output.Errors += batchResult.Errors
+			if batchResult.LastError != "" {
+				output.LastError = batchResult.LastError
+			}
+			if batchResult.Timeout {
+				output.Status = "timeout"
+			}
+			for _, ws := range batchResult.ProcessedWorkspaces {
+				processedWorkspaces[ws] = struct{}{}
+			}
+			for _, target := range batchResult.SyncTargets {
+				addSyncTarget(target.WorkspaceID, target.SymbolID)
+			}
+			if batchResult.Processed > 0 {
+				output.BatchCount++
+			}
 		}
 
 		// If not process_all, return after one batch
@@ -585,15 +719,22 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		}
 	}
 
-	if memoryStore != nil {
+	if in.SyncMemory {
 		syncOnlyMissing := true
 		if in.SyncOnlyMissing != nil {
 			syncOnlyMissing = *in.SyncOnlyMissing
 		}
 
-		if in.SyncMemory {
-			if in.DryRun {
-				log.Warn().Msg("sync_memory requested during dry_run; skipping sync")
+		if in.DryRun {
+			log.Warn().Msg("sync_memory requested during dry_run; skipping sync")
+		} else {
+			ms, memErr := openMemoryStore()
+			if memErr != nil {
+				output.SyncErrors++
+				output.LastError = memErr.Error()
+				log.Warn().Err(memErr).Msg("sync_memory requested but memory store could not be opened")
+			} else if syncStore, ok := ms.(memoryutil.SymbolSyncStore); !ok {
+				log.Warn().Msg("sync_memory requested but memory store does not support symbol sync")
 			} else {
 				if len(syncTargets) > 0 {
 					for ws, symbols := range syncTargets {
@@ -601,7 +742,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 						for id := range symbols {
 							ids = append(ids, id)
 						}
-						updated, err := memoryStore.SyncSymbolEmbeddings(ctx, embeddingDBPath, memoryutil.SyncSymbolEmbeddingsOptions{
+						updated, err := syncStore.SyncSymbolEmbeddings(ctx, embeddingDBPath, memoryutil.SyncSymbolEmbeddingsOptions{
 							WorkspaceID: ws,
 							SymbolIDs:   ids,
 							OnlyMissing: syncOnlyMissing,
@@ -630,7 +771,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 					log.Warn().Msg("no workspaces available for sync_memory")
 				} else if in.SyncAll {
 					for ws := range syncWorkspaces {
-						updated, err := memoryStore.SyncSymbolEmbeddings(ctx, embeddingDBPath, memoryutil.SyncSymbolEmbeddingsOptions{
+						updated, err := syncStore.SyncSymbolEmbeddings(ctx, embeddingDBPath, memoryutil.SyncSymbolEmbeddingsOptions{
 							WorkspaceID: ws,
 							OnlyMissing: syncOnlyMissing,
 						})
@@ -646,7 +787,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 					}
 				} else if len(syncTargets) == 0 {
 					if ws := strings.TrimSpace(in.SyncWorkspace); ws != "" {
-						updated, err := memoryStore.SyncSymbolEmbeddings(ctx, embeddingDBPath, memoryutil.SyncSymbolEmbeddingsOptions{
+						updated, err := syncStore.SyncSymbolEmbeddings(ctx, embeddingDBPath, memoryutil.SyncSymbolEmbeddingsOptions{
 							WorkspaceID: ws,
 							OnlyMissing: syncOnlyMissing,
 						})
@@ -666,7 +807,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	output.DurationMs = time.Since(start).Milliseconds()
 
 	// Get final stats
-	stats, err := store.Stats(ctx)
+	stats, err := embeddingQueueStats(ctx, store, workspaceID, kind)
 	if err == nil {
 		output.Stats = &QueueSnapshot{
 			Queued:     stats.QueuedCount,
@@ -691,6 +832,244 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	default:
 		output.Message = fmt.Sprintf("Worker finished: %s", output.Status)
 	}
+	if output.Recovered > 0 {
+		output.Message = fmt.Sprintf("%s; recovered %d stale jobs", output.Message, output.Recovered)
+	}
 
 	return skillout.Emit(rc, command, output)
+}
+
+func normalizeTaskKind(raw string) (embedqueue.TaskKind, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	kind := embedqueue.TaskKind(raw)
+	switch kind {
+	case embedqueue.TaskKindSymbol, embedqueue.TaskKindMemory:
+		return kind, nil
+	default:
+		return "", skillerr.Arg("kind must be one of: symbol, memory")
+	}
+}
+
+func claimNextEmbeddingJob(ctx context.Context, store *embedding.Store, workspaceID string, kind embedqueue.TaskKind) (*embedding.EmbeddingJob, error) {
+	if kind != "" {
+		if strings.TrimSpace(workspaceID) == "" {
+			return store.ClaimNextKind(ctx, kind)
+		}
+		return store.ClaimNextInWorkspaceKind(ctx, workspaceID, kind)
+	}
+	if strings.TrimSpace(workspaceID) == "" {
+		return store.ClaimNext(ctx)
+	}
+	return store.ClaimNextInWorkspace(ctx, workspaceID)
+}
+
+func embeddingQueueStats(ctx context.Context, store *embedding.Store, workspaceID string, kind embedqueue.TaskKind) (*embedding.QueueStats, error) {
+	if kind != "" {
+		if strings.TrimSpace(workspaceID) == "" {
+			return store.StatsKind(ctx, kind)
+		}
+		return store.StatsInWorkspaceKind(ctx, workspaceID, kind)
+	}
+	if strings.TrimSpace(workspaceID) == "" {
+		return store.Stats(ctx)
+	}
+	return store.StatsInWorkspace(ctx, workspaceID)
+}
+
+type embeddingSyncTarget struct {
+	WorkspaceID string
+	SymbolID    string
+}
+
+type embeddingJobResult struct {
+	Processed           int
+	Memories            int
+	Errors              int
+	LastError           string
+	Timeout             bool
+	ProcessedWorkspaces []string
+	SyncTargets         []embeddingSyncTarget
+}
+
+func processEmbeddingJobBatch(
+	ctx context.Context,
+	jobs []*embedding.EmbeddingJob,
+	parallelism int,
+	process func(context.Context, *embedding.EmbeddingJob) embeddingJobResult,
+) embeddingJobResult {
+	if len(jobs) == 0 {
+		return embeddingJobResult{}
+	}
+	if parallelism <= 1 || len(jobs) == 1 {
+		var batch embeddingJobResult
+		for _, job := range jobs {
+			batch.merge(process(ctx, job))
+		}
+		return batch
+	}
+	if parallelism > len(jobs) {
+		parallelism = len(jobs)
+	}
+
+	jobCh := make(chan *embedding.EmbeddingJob)
+	resultCh := make(chan embeddingJobResult, len(jobs))
+	var wg sync.WaitGroup
+	for i := 0; i < parallelism; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range jobCh {
+				resultCh <- process(ctx, job)
+			}
+		}()
+	}
+	for _, job := range jobs {
+		jobCh <- job
+	}
+	close(jobCh)
+	wg.Wait()
+	close(resultCh)
+
+	var batch embeddingJobResult
+	for result := range resultCh {
+		batch.merge(result)
+	}
+	return batch
+}
+
+func (r *embeddingJobResult) merge(other embeddingJobResult) {
+	r.Processed += other.Processed
+	r.Memories += other.Memories
+	r.Errors += other.Errors
+	if other.LastError != "" {
+		r.LastError = other.LastError
+	}
+	r.Timeout = r.Timeout || other.Timeout
+	r.ProcessedWorkspaces = append(r.ProcessedWorkspaces, other.ProcessedWorkspaces...)
+	r.SyncTargets = append(r.SyncTargets, other.SyncTargets...)
+}
+
+func failEmbeddingJob(ctx context.Context, store *embedding.Store, jobID, action string, err error) embeddingJobResult {
+	if failErr := store.Fail(ctx, jobID, err.Error()); failErr != nil {
+		return embeddingJobResult{
+			Errors:    1,
+			LastError: fmt.Sprintf("%s: %v (original: %v)", action, failErr, err),
+		}
+	}
+	return embeddingJobResult{Errors: 1, LastError: err.Error()}
+}
+
+func normalizeParallelism(raw, batchSize int) (int, error) {
+	if raw < 0 {
+		return 0, skillerr.Arg("parallelism must be >= 0")
+	}
+	if raw == 0 {
+		raw = defaultParallelism
+	}
+	if raw > maxParallelism {
+		return 0, skillerr.Arg(fmt.Sprintf("parallelism must be <= %d", maxParallelism))
+	}
+	if batchSize > 0 && raw > batchSize {
+		return batchSize, nil
+	}
+	return raw, nil
+}
+
+func processMemoryEmbeddingJob(
+	ctx context.Context,
+	store *embedding.Store,
+	memoryStore memoryutil.Store,
+	job *embedding.EmbeddingJob,
+	dryRun bool,
+	getEmbedder func() (*semantic.Embedder, int, error),
+) error {
+	if strings.TrimSpace(job.MemoryName) == "" {
+		return fmt.Errorf("memory_name is required")
+	}
+	if strings.TrimSpace(job.WorkspaceID) == "" {
+		return fmt.Errorf("workspace_id is required")
+	}
+	if dryRun {
+		return store.CompleteJob(ctx, job.ID)
+	}
+	if memoryStore == nil {
+		return fmt.Errorf("memory store unavailable")
+	}
+	embedder, expectedDims, err := getEmbedder()
+	if err != nil {
+		return fmt.Errorf("memory embedding provider: %w", err)
+	}
+	if embedder == nil {
+		return fmt.Errorf("memory embedding provider not available")
+	}
+	result, err := embedder.Embed(ctx, job.Content)
+	if err != nil {
+		return fmt.Errorf("embed memory: %w", err)
+	}
+	if expectedDims > 0 && len(result.Vec) != expectedDims {
+		return fmt.Errorf("memory dimension mismatch: got %d, expected %d", len(result.Vec), expectedDims)
+	}
+	if err := memoryStore.ValidateEmbeddingDimensions(ctx, job.WorkspaceID, len(result.Vec)); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	createdAt := job.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = now
+	}
+	if err := memoryStore.SetEmbeddingMetadata(ctx, storage.EmbeddingMetadata{
+		Workspace:  job.WorkspaceID,
+		Provider:   embedder.Provider(),
+		Model:      result.Model,
+		Dimensions: len(result.Vec),
+		CreatedAt:  createdAt,
+		UpdatedAt:  now,
+	}); err != nil {
+		return fmt.Errorf("set memory embedding metadata: %w", err)
+	}
+	if err := memoryStore.UpdateEmbedding(ctx, job.MemoryName, job.WorkspaceID, result.Vec); err != nil {
+		return fmt.Errorf("update memory embedding: %w", err)
+	}
+	if err := store.CompleteJob(ctx, job.ID); err != nil {
+		return fmt.Errorf("complete memory job: %w", err)
+	}
+	return nil
+}
+
+func symbolMemoryEntryName(job *embedding.EmbeddingJob) string {
+	if job == nil {
+		return ""
+	}
+	if name := strings.TrimSpace(job.MemoryName); name != "" {
+		return name
+	}
+	workspaceID := strings.TrimSpace(job.WorkspaceID)
+	packageID := strings.TrimSpace(job.PackageID)
+	symbolKey := strings.TrimSpace(job.SymbolKey)
+	if workspaceID != "" && packageID != "" && symbolKey != "" {
+		return symbolutil.KeyEntryName(workspaceID, packageID, symbolKey)
+	}
+	filePath := strings.TrimSpace(job.FilePath)
+	symbolName := strings.TrimSpace(job.SymbolName)
+	if workspaceID != "" && filePath != "" && symbolName != "" {
+		return symbolutil.EntryName(workspaceID, filePath, symbolName)
+	}
+	return ""
+}
+
+func waitEmbeddingJobDelay(ctx context.Context, delayMS int) error {
+	if delayMS <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(time.Duration(delayMS) * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }

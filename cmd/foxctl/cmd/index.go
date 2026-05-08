@@ -14,7 +14,9 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/intelligence/indexing"
+	embedstore "github.com/joshka0/foxctl/internal/intelligence/indexing/embedding"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/filesummary"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/memorylane"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
 	"github.com/joshka0/foxctl/internal/platform/config"
@@ -38,23 +40,29 @@ import (
 // modelForScope returns the recommended model for a scope.
 // Delegates to semantic.ScopeModelRecommendation to avoid duplication.
 func modelForScope(scope string) string {
-	var s semantic.EmbeddingScope
+	model, _ := semantic.ScopeModelRecommendation(embeddingScopeForIndexScope(scope))
+	return model
+}
+
+func modelForScopeConfig(scope string, cfg config.Config) string {
+	return semantic.ResolveModelForScope(embeddingScopeForIndexScope(scope), cfg)
+}
+
+func embeddingScopeForIndexScope(scope string) semantic.EmbeddingScope {
 	switch scope {
 	case "symbols":
-		s = semantic.ScopeSymbols
+		return semantic.ScopeSymbols
 	case "memory":
-		s = semantic.ScopeMemory
+		return semantic.ScopeMemory
 	case "tasks":
-		s = semantic.ScopeTasks
+		return semantic.ScopeTasks
 	case "sessions":
-		s = semantic.ScopeSessions
+		return semantic.ScopeSessions
 	case "file_summaries":
-		s = semantic.ScopeFileSummaries
+		return semantic.ScopeFileSummaries
 	default:
-		s = semantic.ScopeDefault
+		return semantic.ScopeDefault
 	}
-	model, _ := semantic.ScopeModelRecommendation(s)
-	return model
 }
 
 func indexEmbeddingProviderHint(cfg config.Config) string {
@@ -68,13 +76,9 @@ func indexEmbeddingProviderHint(cfg config.Config) string {
 }
 
 func createIndexEmbeddingProviderForScope(cfg config.Config, scope string) (semantic.EmbeddingProvider, error) {
-	model := modelForScope(scope)
-	provider, err := semantic.NewProviderForModel(
-		model,
+	provider, err := semantic.NewProviderForScope(
+		embeddingScopeForIndexScope(scope),
 		cfg,
-		semantic.WithProvider(cfg.Embedding.Provider),
-		semantic.WithAPIKey(cfg.Embedding.APIKey),
-		semantic.WithBaseURL(cfg.Embedding.BaseURL),
 		semantic.WithVoyageKey(os.Getenv("VOYAGE_API_KEY")),
 		semantic.WithGeminiKey(os.Getenv("GEMINI_API_KEY")),
 	)
@@ -249,6 +253,8 @@ func newIndexInitCommand() *cobra.Command {
 	var exclude []string
 	var dryRun bool
 	var parallel bool
+	var force bool
+	var memoryEnqueue bool
 
 	cmd := &cobra.Command{
 		Use:   "init",
@@ -279,9 +285,12 @@ Override with FOXCTL_EMBEDDING_MODEL_<SCOPE> or _CODE/_TEXT env vars.`,
   foxctl index init --glob '**/*.go' --exclude '*_test.go,vendor/**'
 
   # Dry run to see what would be indexed
-  foxctl index init --dry-run`,
+  foxctl index init --dry-run
+
+  # Queue missing memory embeddings for paced background worker drain
+  foxctl index init --scope memory --memory-enqueue`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runIndexInit(cmd, workspace, scopes, glob, exclude, dryRun, parallel)
+			return runIndexInit(cmd, workspace, scopes, glob, exclude, dryRun, parallel, force, memoryEnqueue)
 		},
 	}
 
@@ -291,6 +300,8 @@ Override with FOXCTL_EMBEDDING_MODEL_<SCOPE> or _CODE/_TEXT env vars.`,
 	cmd.Flags().StringSliceVar(&exclude, "exclude", []string{"*_test.go", "vendor/**"}, "Glob patterns to exclude for symbols")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be indexed without making changes")
 	cmd.Flags().BoolVar(&parallel, "parallel", false, "Index scopes in parallel (faster but uses more API quota)")
+	cmd.Flags().BoolVar(&force, "force", false, "Rebuild existing memory embeddings instead of only filling missing embeddings")
+	cmd.Flags().BoolVar(&memoryEnqueue, "memory-enqueue", false, "Queue memory embedding jobs instead of embedding memory inline")
 
 	return cmd
 }
@@ -363,12 +374,13 @@ func newIndexStatusCommand() *cobra.Command {
 type scopeResult struct {
 	Scope    string `json:"scope"`
 	Model    string `json:"model"`
+	Mode     string `json:"mode,omitempty"`
 	Count    int    `json:"count"`
 	Duration int64  `json:"duration_ms"`
 	Error    string `json:"error,omitempty"`
 }
 
-func runIndexInit(cmd *cobra.Command, workspace string, scopes []string, glob string, exclude []string, dryRun, parallel bool) error {
+func runIndexInit(cmd *cobra.Command, workspace string, scopes []string, glob string, exclude []string, dryRun, parallel, force, memoryEnqueue bool) error {
 	start := time.Now()
 	ctx := cmd.Context()
 
@@ -393,7 +405,7 @@ func runIndexInit(cmd *cobra.Command, workspace string, scopes []string, glob st
 	}
 
 	if dryRun {
-		return runIndexDryRun(cmd, absWorkspace, scopes, glob, exclude)
+		return runIndexDryRun(cmd, cfg, absWorkspace, scopes, glob, exclude)
 	}
 
 	results := make([]scopeResult, 0, len(scopes))
@@ -405,7 +417,7 @@ func runIndexInit(cmd *cobra.Command, workspace string, scopes []string, glob st
 
 		switch scope {
 		case "symbols":
-			result.Model = modelForScope("symbols")
+			result.Model = modelForScopeConfig("symbols", cfg)
 			count, err := indexSymbols(ctx, cfg, absWorkspace, glob, exclude)
 			result.Count = count
 			if err != nil {
@@ -413,15 +425,18 @@ func runIndexInit(cmd *cobra.Command, workspace string, scopes []string, glob st
 			}
 
 		case "memory":
-			result.Model = modelForScope("memory")
-			count, err := reembedMemories(ctx, cfg, absWorkspace)
+			result.Model = modelForScopeConfig("memory", cfg)
+			count, err := reembedMemories(ctx, cfg, absWorkspace, force, memoryEnqueue)
+			if memoryEnqueue {
+				result.Mode = "queued"
+			}
 			result.Count = count
 			if err != nil {
 				result.Error = err.Error()
 			}
 
 		case "tasks":
-			result.Model = modelForScope("tasks")
+			result.Model = modelForScopeConfig("tasks", cfg)
 			count, err := reembedTasks(ctx, cfg, absWorkspace)
 			result.Count = count
 			if err != nil {
@@ -429,7 +444,7 @@ func runIndexInit(cmd *cobra.Command, workspace string, scopes []string, glob st
 			}
 
 		case "sessions":
-			result.Model = modelForScope("sessions")
+			result.Model = modelForScopeConfig("sessions", cfg)
 			count, err := reembedSessions(ctx, cfg)
 			result.Count = count
 			if err != nil {
@@ -456,7 +471,7 @@ func runIndexInit(cmd *cobra.Command, workspace string, scopes []string, glob st
 		wg.Wait()
 	} else {
 		for _, scope := range scopes {
-			fmt.Fprintf(os.Stderr, "Indexing %s with %s...\n", scope, modelForScope(scope)) //nolint:forbidigo // CLI progress output
+			fmt.Fprintf(os.Stderr, "Indexing %s with %s...\n", scope, modelForScopeConfig(scope, cfg)) //nolint:forbidigo // CLI progress output
 			result := indexScope(scope)
 			results = append(results, result)
 			if result.Error != "" {
@@ -478,7 +493,7 @@ func runIndexInit(cmd *cobra.Command, workspace string, scopes []string, glob st
 	return protocol.Write(cmd.OutOrStdout(), env)
 }
 
-func runIndexDryRun(cmd *cobra.Command, workspace string, scopes []string, glob string, exclude []string) error {
+func runIndexDryRun(cmd *cobra.Command, cfg config.Config, workspace string, scopes []string, glob string, exclude []string) error {
 	data := map[string]any{
 		"dry_run":   true,
 		"workspace": workspace,
@@ -489,7 +504,7 @@ func runIndexDryRun(cmd *cobra.Command, workspace string, scopes []string, glob 
 	for _, scope := range scopes {
 		info := map[string]any{
 			"scope": scope,
-			"model": modelForScope(scope),
+			"model": modelForScopeConfig(scope, cfg),
 		}
 
 		if scope == "symbols" {
@@ -539,7 +554,7 @@ func runIndexStatus(cmd *cobra.Command, workspace string) error {
 		stats, _ := memStore.Stats(ctx)
 		scopes = append(scopes, map[string]any{
 			"scope":             "symbols",
-			"recommended_model": modelForScope("symbols"),
+			"recommended_model": modelForScopeConfig("symbols", cfg),
 			"total_memories":    stats.Named,
 		})
 	}
@@ -547,7 +562,7 @@ func runIndexStatus(cmd *cobra.Command, workspace string) error {
 	// Memory count
 	scopes = append(scopes, map[string]any{
 		"scope":             "memory",
-		"recommended_model": modelForScope("memory"),
+		"recommended_model": modelForScopeConfig("memory", cfg),
 		"status":            "use 'foxctl memory stats' for details",
 	})
 
@@ -558,7 +573,7 @@ func runIndexStatus(cmd *cobra.Command, workspace string) error {
 		all, _ := taskStore.ListAll(ctx, 1000)
 		scopes = append(scopes, map[string]any{
 			"scope":             "tasks",
-			"recommended_model": modelForScope("tasks"),
+			"recommended_model": modelForScopeConfig("tasks", cfg),
 			"total_count":       len(all),
 		})
 	}
@@ -571,7 +586,7 @@ func runIndexStatus(cmd *cobra.Command, workspace string) error {
 		recent, _ := sessStore.List(ctx, opts)
 		scopes = append(scopes, map[string]any{
 			"scope":             "sessions",
-			"recommended_model": modelForScope("sessions"),
+			"recommended_model": modelForScopeConfig("sessions", cfg),
 			"recent_count":      len(recent),
 		})
 	}
@@ -589,11 +604,6 @@ func indexSymbols(ctx context.Context, cfg config.Config, workspace, glob string
 	}
 	defer store.Close()
 
-	provider, err := createIndexEmbeddingProviderForScope(cfg, "symbols")
-	if err != nil {
-		return 0, err
-	}
-
 	files, err := fsutil.FindFilesRespectingGitignore(workspace, glob, exclude)
 	if err != nil {
 		return 0, fmt.Errorf("find files: %w", err)
@@ -603,18 +613,24 @@ func indexSymbols(ctx context.Context, cfg config.Config, workspace, glob string
 		return 0, nil
 	}
 
-	indexerCfg := semantic.Config{Enabled: true}
-	// TODO: Migrate semantic indexer to use observability instead of zerolog
-	logger := zerolog.New(os.Stderr).With().Timestamp().Logger() //nolint:forbidigo // semantic indexer requires zerolog
-	indexer := semantic.NewIndexer(indexerCfg, store, provider, workspace, logger)
+	symCfg := symbol.DefaultConfig()
+	symCfg.Enabled = true
+	symCfg.EmbeddingEnabled = true
+	symCfg.EmbeddingModel = modelForScopeConfig("symbols", cfg)
+	symCfg.EmbeddingStoreRoot = cfg.Paths.Cache
+	symCfg.EmbeddingTextMode = config.EmbedSymbolTextModeDocEnriched
+
+	// TODO: Migrate indexers to use observability instead of zerolog.
+	logger := zerolog.New(os.Stderr).With().Timestamp().Logger() //nolint:forbidigo // indexers require zerolog
+	indexer := symbol.NewIndexer(symCfg, store, nil, workspace, logger)
 
 	workspaceID := workspaceutil.ID(workspace)
-	args := semantic.JobArgs{
+	args := symbol.JobArgs{
 		WorkspaceID: workspaceID,
-		Reason:      semantic.ReasonInitialIndex,
+		Reason:      symbol.ReasonInitialIndex,
 	}
 	for _, f := range files {
-		args.Files = append(args.Files, semantic.JobFileInput{Path: f})
+		args.Files = append(args.Files, symbol.JobFileInput{Path: f})
 	}
 
 	result, err := indexer.RunInitFilesJob(ctx, args)
@@ -738,41 +754,165 @@ func runIndexSymbolIndex(cmd *cobra.Command, workspace, glob string, exclude []s
 	return protocol.Write(cmd.OutOrStdout(), env)
 }
 
-func reembedMemories(ctx context.Context, cfg config.Config, workspace string) (int, error) {
+func reembedMemories(ctx context.Context, cfg config.Config, workspace string, force, enqueue bool) (int, error) {
 	store, err := memory.OpenWithConfig(ctx, cfg)
 	if err != nil {
 		return 0, fmt.Errorf("open memory store: %w", err)
 	}
 	defer store.Close()
 
+	if enqueue {
+		return enqueueMemoryEmbeddingJobs(ctx, cfg, store, workspace, force)
+	}
+
 	provider, err := createIndexEmbeddingProviderForScope(cfg, "memory")
 	if err != nil {
 		return 0, err
 	}
 
-	// Get memories without embeddings and generate them
-	// Process in batches to handle large stores
+	if force {
+		memories, err := listMemoriesForReembedding(ctx, store, workspace, 1000)
+		if err != nil {
+			return 0, err
+		}
+		return embedMemoryEntries(ctx, cfg, store, provider, workspace, memories)
+	}
+
 	totalCount := 0
 	batchSize := 1000
 	for {
-		memories, err := store.ListWithoutEmbedding(ctx, workspace, batchSize)
+		memories, err := listEligibleMemoriesWithoutEmbedding(ctx, store, workspace, batchSize)
 		if err != nil {
-			return totalCount, fmt.Errorf("list memories: %w", err)
+			return totalCount, fmt.Errorf("list memories without embeddings: %w", err)
 		}
-
 		if len(memories) == 0 {
-			break // All memories have embeddings
+			break
+		}
+		batchCount, err := embedMemoryEntries(ctx, cfg, store, provider, workspace, memories)
+		totalCount += batchCount
+		if err != nil {
+			return totalCount, err
+		}
+		if batchCount == 0 {
+			break
+		}
+	}
+
+	return totalCount, nil
+}
+
+func enqueueMemoryEmbeddingJobs(ctx context.Context, cfg config.Config, store storage.MemoryStore, workspace string, force bool) (int, error) {
+	queueStore, err := embedstore.OpenStore(ctx, cfg.Paths.Cache)
+	if err != nil {
+		return 0, fmt.Errorf("open embedding queue: %w", err)
+	}
+	defer queueStore.Close() //nolint:errcheck
+
+	workspaceID := workspaceutil.CanonicalID(workspace)
+	model := modelForScopeConfig("memory", cfg)
+	batchSize := 1000
+	offset := 0
+	totalQueued := 0
+	for {
+		var memories []storage.NamedEntry
+		if force {
+			entries, _, err := store.ListFiltered(ctx, workspaceID, storage.MemoryListFilter{}, batchSize, offset)
+			if err != nil {
+				return totalQueued, fmt.Errorf("list memories: %w", err)
+			}
+			memories = entries
+		} else {
+			entries, err := store.ListWithoutEmbeddingPage(ctx, workspaceID, batchSize, offset)
+			if err != nil {
+				return totalQueued, fmt.Errorf("list memories without embeddings: %w", err)
+			}
+			memories = entries
+		}
+		if len(memories) == 0 {
+			break
 		}
 
+		result, err := queueStore.EnqueueMemories(ctx, embedstore.MemoryEnqueueRequest{
+			WorkspaceID: workspaceID,
+			Memories:    memoryEmbeddingInputs(memories),
+			Priority:    embedstore.PriorityNormal,
+			Model:       model,
+		})
+		if err != nil {
+			return totalQueued, fmt.Errorf("enqueue memory embeddings: %w", err)
+		}
+		totalQueued += result.Queued
+		offset += len(memories)
+	}
+	return totalQueued, nil
+}
+
+func memoryEmbeddingInputs(entries []storage.NamedEntry) []embedstore.MemoryInput {
+	inputs := make([]embedstore.MemoryInput, 0, len(entries))
+	for _, entry := range entries {
+		if !memorylane.EligibleType(entry.Type) {
+			continue
+		}
+		inputs = append(inputs, embedstore.MemoryInput{
+			Name:    entry.Name,
+			Type:    entry.Type,
+			Content: formatMemoryEmbeddingContent(entry),
+		})
+	}
+	return inputs
+}
+
+func formatMemoryEmbeddingContent(entry storage.NamedEntry) string {
+	dateStr := entry.CreatedAt.Format("Jan 2006")
+	typeStr := strings.TrimSpace(entry.Type)
+	if typeStr == "" {
+		typeStr = "note"
+	}
+	content := strings.TrimSpace(entry.Summary)
+	if content == "" {
+		content = strings.TrimSpace(entry.Name)
+	}
+	return fmt.Sprintf("[%s] [%s] %s", dateStr, typeStr, content)
+}
+
+func embedMemoryEntries(ctx context.Context, cfg config.Config, store storage.MemoryStore, provider semantic.EmbeddingProvider, workspace string, memories []storage.NamedEntry) (int, error) {
+	totalCount := 0
+	batchSize := 1000
+	for start := 0; start < len(memories); start += batchSize {
+		end := start + batchSize
+		if end > len(memories) {
+			end = len(memories)
+		}
 		batchCount := 0
-		for _, mem := range memories {
-			embedding, err := provider.Embed(ctx, mem.Summary)
+		for _, mem := range memories[start:end] {
+			if !memorylane.EligibleType(mem.Type) {
+				continue
+			}
+			embedding, err := provider.Embed(ctx, strings.TrimSpace(mem.Summary))
 			if err != nil {
 				observability.Emit(ctx, observability.NewEvent("index.memory_embed").
 					WithComponent(observability.ComponentCLI).
 					WithData("memory", mem.Name).
 					Error(err, 0))
 				continue // Skip on error, don't fail entire batch
+			}
+			if len(embedding) == 0 {
+				continue
+			}
+			if _, ok := store.(*memory.TursoStore); ok {
+				if err := store.ValidateEmbeddingDimensions(ctx, workspace, len(embedding)); err != nil {
+					return totalCount, err
+				}
+			}
+			if err := store.SetEmbeddingMetadata(ctx, storage.EmbeddingMetadata{
+				Workspace:  workspace,
+				Provider:   semantic.DetectProviderForConfig(cfg, os.Getenv("VOYAGE_API_KEY"), os.Getenv("GEMINI_API_KEY")),
+				Model:      provider.Model(),
+				Dimensions: len(embedding),
+				CreatedAt:  mem.CreatedAt,
+				UpdatedAt:  mem.UpdatedAt,
+			}); err != nil {
+				return totalCount, fmt.Errorf("set memory embedding metadata: %w", err)
 			}
 
 			if err := store.UpdateEmbedding(ctx, mem.Name, workspace, embedding); err != nil {
@@ -795,8 +935,64 @@ func reembedMemories(ctx context.Context, cfg config.Config, workspace string) (
 			WithData("batch_count", batchCount).
 			Success(0))
 	}
-
 	return totalCount, nil
+}
+
+func listEligibleMemoriesWithoutEmbedding(ctx context.Context, store storage.MemoryStore, workspace string, batchSize int) ([]storage.NamedEntry, error) {
+	seen := make(map[string]bool)
+	var result []storage.NamedEntry
+	offset := 0
+	for len(result) < batchSize {
+		entries, err := store.ListWithoutEmbeddingPage(ctx, workspace, batchSize, offset)
+		if err != nil {
+			return nil, err
+		}
+		if len(entries) == 0 {
+			break
+		}
+		for _, entry := range entries {
+			if seen[entry.Name] {
+				continue
+			}
+			seen[entry.Name] = true
+			if !memorylane.EligibleType(entry.Type) {
+				continue
+			}
+			result = append(result, entry)
+			if len(result) == batchSize {
+				break
+			}
+		}
+		offset += len(entries)
+		if len(entries) < batchSize {
+			break
+		}
+	}
+	return result, nil
+}
+
+func listMemoriesForReembedding(ctx context.Context, store storage.MemoryStore, workspace string, batchSize int) ([]storage.NamedEntry, error) {
+	if batchSize <= 0 {
+		batchSize = 1000
+	}
+	var result []storage.NamedEntry
+	offset := 0
+	for {
+		entries, total, err := store.ListFiltered(ctx, workspace, storage.MemoryListFilter{}, batchSize, offset)
+		if err != nil {
+			return nil, fmt.Errorf("list memories: %w", err)
+		}
+		for _, entry := range entries {
+			if memorylane.EligibleType(entry.Type) && strings.TrimSpace(entry.Summary) != "" {
+				result = append(result, entry)
+			}
+		}
+		if len(entries) == 0 || offset+len(entries) >= total {
+			break
+		}
+		offset += len(entries)
+	}
+	return result, nil
 }
 
 func reembedTasks(ctx context.Context, cfg config.Config, defaultWorkspace string) (int, error) {

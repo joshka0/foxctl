@@ -14,7 +14,6 @@ import (
 )
 
 // [[protocol:semantic-anchor-graph-emission]]
-// [[doc:docs/plans/features/semantic-code-anchors.md#Current Branch Status]]
 // [[test:internal/intelligence/indexing/repoindex/semantic_anchor_build_test.go#TestBuilderEmitsSemanticAnchorEdgesBehindFlag]]
 func applySemanticAnchorEdges(ctx context.Context, opts BuildOptions, nodes map[string]Node, edges map[string]Edge) error {
 	resolver := newSemanticAnchorBuildResolver(opts, nodes)
@@ -174,7 +173,10 @@ func anchorOwnerForNode(node Node, stableKey string) semanticanchors.AnchorOwner
 }
 
 func semanticAnchorSymbolStableKey(node Node) string {
-	return strings.Join([]string{"symbol", node.Pkg, filepath.ToSlash(node.File), node.Name}, ":")
+	if id := strings.TrimSpace(node.ID); id != "" {
+		return "symbol:" + id
+	}
+	return strings.Join([]string{"symbol", node.Pkg, node.Name}, ":")
 }
 
 type semanticAnchorFileTargetResolver struct {

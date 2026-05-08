@@ -13,6 +13,7 @@ import (
 	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/storage/cache"
+	"github.com/joshka0/foxctl/internal/storage/dbdriver"
 	memstore "github.com/joshka0/foxctl/internal/storage/memory"
 	"github.com/spf13/cobra"
 )
@@ -244,6 +245,7 @@ func TestMemoryStatsCommand(t *testing.T) {
 
 	statsCmd := newMemoryCommand()
 	out := &bytes.Buffer{}
+	statsCmd.SetContext(config.WithContext(context.Background(), cfg))
 	statsCmd.SetOut(out)
 	statsCmd.SetErr(&bytes.Buffer{})
 	statsCmd.SetArgs([]string{"stats"})
@@ -265,6 +267,56 @@ func TestMemoryStatsCommand(t *testing.T) {
 	memoryData := data["memory"].(map[string]any)
 	if memoryData["entries"].(float64) < 1 {
 		t.Fatalf("expected memory entries recorded")
+	}
+}
+
+func TestMemoryMigrateBackendCopiesSQLiteToTurso(t *testing.T) {
+	cfg := setupMemoryTestEnv(t)
+	workspaceID := workspace.ID(cfg.Home)
+	ctx := context.Background()
+
+	source, err := memstore.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
+	if err != nil {
+		t.Fatalf("open source memory store: %v", err)
+	}
+	defer requireClose(t, source, "source memory store")
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{"value":1},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
+	if _, err := source.SaveFromResult(ctx, "migrate-entry", "result", workspaceID, "copy me", result); err != nil {
+		t.Fatalf("seed source memory: %v", err)
+	}
+
+	targetPath := filepath.Join(t.TempDir(), "memory.turso")
+	migration, err := runMemoryBackendMigration(ctx, cfg, memoryBackendMigrationOptions{
+		WorkspaceID:  workspaceID,
+		SourceDriver: "sqlite",
+		TargetDriver: "turso",
+		TargetPath:   targetPath,
+		VectorDims:   4,
+		Apply:        true,
+	})
+	if err != nil {
+		t.Fatalf("migrate backend: %v", err)
+	}
+	if migration.Scanned != 1 || migration.Copied != 1 {
+		t.Fatalf("migration counts = scanned %d copied %d, want 1/1", migration.Scanned, migration.Copied)
+	}
+
+	target, err := memstore.OpenTurso(ctx, dbdriver.TursoConfig{
+		Path:               targetPath,
+		ReplicaPath:        targetPath,
+		EnableVectorSearch: true,
+		VectorDimensions:   4,
+	})
+	if err != nil {
+		t.Fatalf("open target memory store: %v", err)
+	}
+	defer requireClose(t, target, "target memory store")
+	entry, err := target.Get(ctx, "migrate-entry", workspaceID)
+	if err != nil {
+		t.Fatalf("get migrated memory: %v", err)
+	}
+	if entry.Summary != "copy me" {
+		t.Fatalf("summary = %q, want copy me", entry.Summary)
 	}
 }
 
@@ -464,6 +516,7 @@ func setupMemoryTestEnv(t *testing.T) config.Config {
 	if err != nil {
 		t.Fatalf("config load: %v", err)
 	}
+	cfg.Database.Driver = "sqlite"
 	dirs := []string{cfg.Home, cfg.Paths.CAS, cfg.Paths.Jobs, cfg.Paths.Cache, cfg.Paths.Skills, cfg.Storage.Root}
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0o755); err != nil {

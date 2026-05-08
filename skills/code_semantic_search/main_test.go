@@ -10,8 +10,10 @@ import (
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/context/contextplane"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
 	"github.com/joshka0/foxctl/internal/intelligence/retrieval"
 	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/storage"
 	"github.com/joshka0/foxctl/internal/storage/memory"
 )
 
@@ -258,6 +260,35 @@ func TestSearchStatsHintPopulation(t *testing.T) {
 	}
 }
 
+func TestValidateExecutionWorkspaceReturnsActionableMismatch(t *testing.T) {
+	err := validateExecutionWorkspace("/tmp/target-workspace", "/tmp/current-workspace", "/tmp/current-workspace")
+	if err == nil {
+		t.Fatal("expected workspace mismatch error")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"workspace mismatch",
+		`--workspace "/tmp/target-workspace"`,
+		"foxctl run code/semantic_search",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q missing %q", msg, want)
+		}
+	}
+}
+
+func TestValidateExecutionWorkspaceAllowsJSONWorkspaceWithoutRunWorkspaceEnv(t *testing.T) {
+	if err := validateExecutionWorkspace("/tmp/target-workspace", "/tmp/current-workspace", ""); err != nil {
+		t.Fatalf("validate workspace: %v", err)
+	}
+}
+
+func TestValidateExecutionWorkspaceAllowsMatchingWorkspace(t *testing.T) {
+	if err := validateExecutionWorkspace("/tmp/target-workspace/.", "/tmp/target-workspace", "/tmp/target-workspace"); err != nil {
+		t.Fatalf("validate workspace: %v", err)
+	}
+}
+
 func TestDefaultConfigDimensions(t *testing.T) {
 	// Default dimensions should be 3072 (Gemini gemini-embedding-001)
 	expectedDefault := 3072
@@ -408,6 +439,57 @@ func TestSearchMemoriesBM25_LabelsCoChangeArtifacts(t *testing.T) {
 	}
 }
 
+func TestSearchMemoriesVectorUsesProvidedStoreAndFiltersCodeChunks(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Config{
+		Database: config.DatabaseSettings{
+			Driver: "turso",
+			Turso: config.TursoSettings{
+				URL: "libsql://configured-store-should-not-be-opened.invalid",
+			},
+			Vector: config.VectorSettings{Enabled: true, Dimensions: 2},
+		},
+	}
+	store, err := memory.Open(ctx, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("open memory: %v", err)
+	}
+	defer store.Close()
+
+	if _, err := store.SaveFromResult(ctx, "file://ws/internal/a.go", "file_summary", "ws", "file summary", []byte(`{"text":"file summary"}`)); err != nil {
+		t.Fatalf("save file summary: %v", err)
+	}
+	if err := store.UpdateEmbedding(ctx, "file://ws/internal/a.go", "ws", []float32{1, 0}); err != nil {
+		t.Fatalf("update file summary embedding: %v", err)
+	}
+	if _, err := store.SaveFromResult(ctx, "file://ws/internal/a.go#chunk-0", "file_embedding_chunk", "ws", "code chunk", []byte(`{"text":"code chunk"}`)); err != nil {
+		t.Fatalf("save chunk memory: %v", err)
+	}
+	if err := store.UpdateEmbedding(ctx, "file://ws/internal/a.go#chunk-0", "ws", []float32{1, 0}); err != nil {
+		t.Fatalf("update chunk embedding: %v", err)
+	}
+	if _, err := store.SaveFromResult(ctx, "note://semantic-commenting", "note", "ws", "semantic commenting note", []byte(`{"text":"semantic commenting note"}`)); err != nil {
+		t.Fatalf("save note memory: %v", err)
+	}
+	if err := store.UpdateEmbedding(ctx, "note://semantic-commenting", "ws", []float32{1, 0}); err != nil {
+		t.Fatalf("update note embedding: %v", err)
+	}
+
+	results, hint, err := searchMemories(ctx, cfg, "ws", "semantic commenting", []float32{1, 0}, 5, &Input{}, store)
+	if err != nil {
+		t.Fatalf("searchMemories: %v", err)
+	}
+	if hint != "" {
+		t.Fatalf("hint=%q want empty", hint)
+	}
+	if len(results) != 1 {
+		t.Fatalf("len(results)=%d want 1: %#v", len(results), results)
+	}
+	if results[0].Name != "note://semantic-commenting" {
+		t.Fatalf("result name=%q want note://semantic-commenting", results[0].Name)
+	}
+}
+
 func TestDetectEmbeddingProviderName_OpenAICompat(t *testing.T) {
 	cfg := config.Config{
 		Embedding: config.EmbeddingSettings{
@@ -503,6 +585,126 @@ func TestSearchPathFallback(t *testing.T) {
 	}
 	if !foundManifest {
 		t.Fatalf("expected skill manifest in results: %v", results)
+	}
+}
+
+func TestSearchPathFallbackRequiresTokenMatchForCodePaths(t *testing.T) {
+	workspace := t.TempDir()
+	mustWrite := func(rel string) {
+		path := filepath.Join(workspace, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", path, err)
+		}
+		if err := os.WriteFile(path, []byte("package main\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	mustWrite("archive/cmd/foxctl_viewer/actions.go")
+	mustWrite("cmd/foxctl/cmd/agent.go")
+	mustWrite("internal/platform/config/config.go")
+
+	results := searchPathFallback(context.Background(), workspace, "normalizeParallelism", 10)
+	if len(results) != 0 {
+		t.Fatalf("expected no arbitrary code-path fallback hits, got %v", results)
+	}
+}
+
+func TestMergeSymbolResultsWithFallbackKeepsPrimaryFirst(t *testing.T) {
+	primary := []Result{{
+		ID:         "symbol:workspace:skills/embedding_worker/main.go/normalizeParallelism",
+		Path:       "skills/embedding_worker/main.go",
+		Similarity: 0.016,
+		SourceRank: 1,
+	}}
+	fallback := []Result{{
+		ID:         "symbol:path_fallback:archive/cmd/foxctl_viewer/actions.go",
+		Path:       "archive/cmd/foxctl_viewer/actions.go",
+		Similarity: 0.6,
+		SourceRank: 1,
+	}}
+
+	results := mergeSymbolResultsWithFallback(primary, fallback, 2)
+	if len(results) != 2 {
+		t.Fatalf("len(results)=%d want 2", len(results))
+	}
+	if results[0].ID != primary[0].ID {
+		t.Fatalf("top result id=%q want primary %q", results[0].ID, primary[0].ID)
+	}
+	if results[1].ID != fallback[0].ID {
+		t.Fatalf("fallback result id=%q want %q", results[1].ID, fallback[0].ID)
+	}
+}
+
+type fakeSymbolVectorSearchStore struct {
+	workspace string
+	entryType string
+	limit     int
+	entries   []storage.ScoredEntry
+}
+
+func (f *fakeSymbolVectorSearchStore) SearchSimilarByType(_ context.Context, workspace, entryType string, _ []float32, limit int) ([]storage.ScoredEntry, error) {
+	f.workspace = workspace
+	f.entryType = entryType
+	f.limit = limit
+	return f.entries, nil
+}
+
+func TestSearchSymbolsFromMemoryEmbeddingsUsesStoredSymbolVectors(t *testing.T) {
+	workspace := t.TempDir()
+	path := filepath.Join(workspace, "skills/embedding_worker/main.go")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("package main\n\nfunc normalizeParallelism() int {\n\treturn 4\n}\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	resultBytes, err := symbol.MarshalResult(symbol.Result{
+		Symbol: symbol.Symbol{
+			ID:        "skills/embedding_worker/main.go:normalizeParallelism",
+			FilePath:  "skills/embedding_worker/main.go",
+			Name:      "normalizeParallelism",
+			Language:  "go",
+			Kind:      symbol.KindFunction,
+			StartLine: 3,
+			EndLine:   5,
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	store := &fakeSymbolVectorSearchStore{entries: []storage.ScoredEntry{{
+		Entry: storage.NamedEntry{
+			Name:      "symbol://workspace/go:skills/embedding_worker::main.go/normalizeParallelism",
+			Type:      symbol.SymbolType,
+			Workspace: "workspace",
+			Summary:   "function normalizeParallelism in skills/embedding_worker/main.go",
+			Result:    resultBytes,
+		},
+		Score: 0.72,
+	}}}
+
+	results, err := searchSymbolsFromMemoryEmbeddings(context.Background(), store, "workspace", workspace, []float32{1, 0}, 5)
+	if err != nil {
+		t.Fatalf("search symbols: %v", err)
+	}
+	if store.workspace != "workspace" || store.entryType != symbol.SymbolType || store.limit != 5 {
+		t.Fatalf("unexpected search args workspace=%q type=%q limit=%d", store.workspace, store.entryType, store.limit)
+	}
+	if len(results) != 1 {
+		t.Fatalf("len(results)=%d want 1", len(results))
+	}
+	if results[0].Path != "skills/embedding_worker/main.go" {
+		t.Fatalf("path=%q", results[0].Path)
+	}
+	if results[0].Name != "normalizeParallelism" {
+		t.Fatalf("name=%q", results[0].Name)
+	}
+	if results[0].Similarity != 0.72 {
+		t.Fatalf("similarity=%v", results[0].Similarity)
+	}
+	if !strings.Contains(results[0].Snippet, "func normalizeParallelism") {
+		t.Fatalf("snippet=%q", results[0].Snippet)
 	}
 }
 

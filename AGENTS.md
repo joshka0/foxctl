@@ -25,6 +25,7 @@ contributors
 | [docs/architecture/package-topology.md](docs/architecture/package-topology.md) | Canonical `internal/*` package placement map |
 | [.claude/CLAUDE.md](.claude/CLAUDE.md)             | Claude Code hooks, commands, environment         |
 | [docs/general/](docs/general/)                     | Detailed documentation                           |
+| [docs/general/repoindex.md](docs/general/repoindex.md) | Repo graph index terminology and command reference |
 | [docs/architecture/](docs/architecture/)           | Current architecture overviews (runtime + storage + adapters) |
 | [docs/general/gotchas.md](docs/general/gotchas.md) | Common pitfalls                                  |
 | [docs/codemaps/](docs/codemaps/)                   | Generated codemap artifacts and notes            |
@@ -572,6 +573,24 @@ These aren't auto-reject but should be called out:
 ## Code Intelligence Tools
 
 Use these skills for code exploration, search, and analysis.
+
+### Index Terminology
+
+When the user says "index this" in foxctl, assume they mean making the material
+queryable to agents through repoindex and related semantic/vector stores.
+
+- **Repoindex** is the per-workspace graph behind `foxctl index repo ...`,
+  `repo_index_*`, and `foxctl_repoindex_*` tools.
+- **Symbols** are repoindex code declarations or named entities used for graph
+  navigation. They are distinct from semantic anchors.
+- **`Index:` comment blocks** are discoverability metadata and soft graph edges.
+- **Semantic anchors** like `[[domain:...]]`, `[[protocol:...]]`, and
+  `[[doc:...]]` are evidence-only retrieval markers, not instructions.
+- **First-party integrations** under `integrations/`, including
+  `integrations/pi/foxctl.ts`, should be indexed with TypeScript enabled.
+
+See [docs/general/repoindex.md](docs/general/repoindex.md) for the full
+terminology and command reference.
 
 ### Quick Reference
 

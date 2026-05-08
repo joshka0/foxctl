@@ -7,8 +7,8 @@ import (
 // ResizeMessage is a JSON control message sent from the browser to resize the PTY.
 type ResizeMessage struct {
 	Type string `json:"type"` // "resize"
-	Cols uint16 `json:"cols"`
-	Rows uint16 `json:"rows"`
+	Cols int    `json:"cols"`
+	Rows int    `json:"rows"`
 }
 
 // ControlMessage is the envelope for JSON control messages over the WebSocket.
@@ -40,7 +40,20 @@ const (
 
 	// TmuxAttachTimeout is the timeout for tmux attach to produce output.
 	TmuxAttachTimeout = 10 * time.Second
+
+	// MaxTerminalCols is the largest accepted terminal column count.
+	MaxTerminalCols = 1000
+
+	// MaxTerminalRows is the largest accepted terminal row count.
+	MaxTerminalRows = 1000
 )
+
+// ControlErrorMessage is a JSON control message sent to report invalid client controls.
+type ControlErrorMessage struct {
+	Type    string `json:"type"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
 
 // HubConfig holds hub-level configuration.
 type HubConfig struct {

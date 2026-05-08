@@ -73,6 +73,9 @@ type SymbolDigestInput struct {
 
 	// Aliases lists normalized alternate forms used in embedding text.
 	Aliases []string
+
+	// SemanticAnchors lists parsed semantic-commenting anchors owned by the symbol.
+	SemanticAnchors []string
 }
 
 type SemanticEnvelopeDigestInput struct {
@@ -155,6 +158,13 @@ func BuildSymbolContentDigest(input SymbolDigestInput) string {
 		if len(aliases) > 0 {
 			builder.WriteString("\naliases:")
 			builder.WriteString(strings.Join(aliases, ","))
+		}
+	}
+	if len(input.SemanticAnchors) > 0 {
+		anchors := sortDedupStrings(input.SemanticAnchors)
+		if len(anchors) > 0 {
+			builder.WriteString("\nsemantic_anchors:")
+			builder.WriteString(strings.Join(anchors, ","))
 		}
 	}
 

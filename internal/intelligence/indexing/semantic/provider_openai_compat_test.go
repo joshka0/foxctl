@@ -69,6 +69,20 @@ func TestOpenAICompatProviderEmbedBatch(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatProviderPrefersKnownModelDimensionsOverDefaultConfig(t *testing.T) {
+	provider, err := NewOpenAICompatProvider(OpenAICompatConfig{
+		Model:      "text-embedding-qwen3-embedding-8b",
+		BaseURL:    "http://127.0.0.1:1234/v1",
+		Dimensions: 1024,
+	})
+	if err != nil {
+		t.Fatalf("NewOpenAICompatProvider: %v", err)
+	}
+	if provider.Dimensions() != 4096 {
+		t.Fatalf("dimensions=%d want 4096", provider.Dimensions())
+	}
+}
+
 func TestOpenAICompatProviderConnectionRefusedIsActionable(t *testing.T) {
 	provider, err := NewOpenAICompatProvider(OpenAICompatConfig{
 		Model:   "text-embedding-embeddinggemma-300m-qat",

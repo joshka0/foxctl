@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedding"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -21,28 +25,47 @@ func TestDefaultMaxDur(t *testing.T) {
 	assert.Equal(t, 300, defaultMaxDur) // 5 minutes
 }
 
+func TestDefaultParallelism(t *testing.T) {
+	assert.Equal(t, 1, defaultParallelism)
+	assert.Equal(t, 16, maxParallelism)
+}
+
 // Tests for Input structure
 
 func TestInput_AllFields(t *testing.T) {
 	in := Input{
-		BatchSize:   20,
-		MaxDuration: 600,
-		ProcessAll:  true,
-		DryRun:      true,
+		WorkspaceID:              "workspace-a",
+		Kind:                     "memory",
+		BatchSize:                20,
+		MaxDuration:              600,
+		ProcessAll:               true,
+		Parallelism:              4,
+		DryRun:                   true,
+		JobDelayMS:               250,
+		RecoverStaleAfterSeconds: 1800,
 	}
 
+	assert.Equal(t, "workspace-a", in.WorkspaceID)
+	assert.Equal(t, "memory", in.Kind)
 	assert.Equal(t, 20, in.BatchSize)
 	assert.Equal(t, 600, in.MaxDuration)
 	assert.True(t, in.ProcessAll)
+	assert.Equal(t, 4, in.Parallelism)
 	assert.True(t, in.DryRun)
+	assert.Equal(t, 250, in.JobDelayMS)
+	assert.Equal(t, 1800, in.RecoverStaleAfterSeconds)
 }
 
 func TestInput_JSONSerialization(t *testing.T) {
 	in := Input{
-		BatchSize:   15,
-		MaxDuration: 120,
-		ProcessAll:  false,
-		DryRun:      true,
+		WorkspaceID:              "workspace-a",
+		Kind:                     "symbol",
+		BatchSize:                15,
+		MaxDuration:              120,
+		ProcessAll:               false,
+		Parallelism:              3,
+		DryRun:                   true,
+		RecoverStaleAfterSeconds: 60,
 	}
 
 	data, err := json.Marshal(in)
@@ -52,10 +75,14 @@ func TestInput_JSONSerialization(t *testing.T) {
 	err = json.Unmarshal(data, &decoded)
 	assert.NoError(t, err)
 
+	assert.Equal(t, in.WorkspaceID, decoded.WorkspaceID)
+	assert.Equal(t, in.Kind, decoded.Kind)
 	assert.Equal(t, in.BatchSize, decoded.BatchSize)
 	assert.Equal(t, in.MaxDuration, decoded.MaxDuration)
 	assert.Equal(t, in.ProcessAll, decoded.ProcessAll)
+	assert.Equal(t, in.Parallelism, decoded.Parallelism)
 	assert.Equal(t, in.DryRun, decoded.DryRun)
+	assert.Equal(t, in.RecoverStaleAfterSeconds, decoded.RecoverStaleAfterSeconds)
 }
 
 func TestInput_EmptyFields(t *testing.T) {
@@ -63,6 +90,7 @@ func TestInput_EmptyFields(t *testing.T) {
 
 	assert.Zero(t, in.BatchSize)
 	assert.Zero(t, in.MaxDuration)
+	assert.Zero(t, in.Parallelism)
 	assert.False(t, in.ProcessAll)
 	assert.False(t, in.DryRun)
 }
@@ -79,6 +107,8 @@ func TestInput_JSONOmitEmpty(t *testing.T) {
 	assert.NotContains(t, string(data), "max_duration")
 	// process_all should be omitted when false
 	assert.NotContains(t, string(data), "process_all")
+	// parallelism should be omitted when 0
+	assert.NotContains(t, string(data), "parallelism")
 	// dry_run should be omitted when false
 	assert.NotContains(t, string(data), "dry_run")
 }
@@ -93,15 +123,20 @@ func TestInput_DefaultsApplied(t *testing.T) {
 	if in.MaxDuration <= 0 {
 		in.MaxDuration = defaultMaxDur
 	}
+	parallelism, err := normalizeParallelism(in.Parallelism, in.BatchSize)
+	assert.NoError(t, err)
+	in.Parallelism = parallelism
 
 	assert.Equal(t, defaultBatch, in.BatchSize)
 	assert.Equal(t, defaultMaxDur, in.MaxDuration)
+	assert.Equal(t, defaultParallelism, in.Parallelism)
 }
 
 func TestInput_CustomValues(t *testing.T) {
 	in := Input{
 		BatchSize:   5,
 		MaxDuration: 60,
+		Parallelism: 3,
 	}
 
 	// Should not change if positive
@@ -111,22 +146,110 @@ func TestInput_CustomValues(t *testing.T) {
 	if in.MaxDuration <= 0 {
 		in.MaxDuration = defaultMaxDur
 	}
+	parallelism, err := normalizeParallelism(in.Parallelism, in.BatchSize)
+	assert.NoError(t, err)
+	in.Parallelism = parallelism
 
 	assert.Equal(t, 5, in.BatchSize)
 	assert.Equal(t, 60, in.MaxDuration)
+	assert.Equal(t, 3, in.Parallelism)
+}
+
+func TestNormalizeParallelism(t *testing.T) {
+	tests := []struct {
+		name      string
+		raw       int
+		batchSize int
+		want      int
+		wantErr   bool
+	}{
+		{name: "default", raw: 0, batchSize: 10, want: 1},
+		{name: "custom", raw: 4, batchSize: 10, want: 4},
+		{name: "batch cap", raw: 8, batchSize: 3, want: 3},
+		{name: "no batch cap", raw: 8, batchSize: 0, want: 8},
+		{name: "negative", raw: -1, batchSize: 10, wantErr: true},
+		{name: "too high", raw: maxParallelism + 1, batchSize: 100, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := normalizeParallelism(tt.raw, tt.batchSize)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestProcessEmbeddingJobBatchRespectsParallelism(t *testing.T) {
+	jobs := []*embedding.EmbeddingJob{
+		{ID: "job-1"},
+		{ID: "job-2"},
+		{ID: "job-3"},
+		{ID: "job-4"},
+	}
+	var current int32
+	var maxSeen int32
+	result := processEmbeddingJobBatch(context.Background(), jobs, 2, func(context.Context, *embedding.EmbeddingJob) embeddingJobResult {
+		now := atomic.AddInt32(&current, 1)
+		for {
+			old := atomic.LoadInt32(&maxSeen)
+			if now <= old || atomic.CompareAndSwapInt32(&maxSeen, old, now) {
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+		atomic.AddInt32(&current, -1)
+		return embeddingJobResult{Processed: 1}
+	})
+
+	assert.Equal(t, 4, result.Processed)
+	assert.LessOrEqual(t, atomic.LoadInt32(&maxSeen), int32(2))
+	assert.GreaterOrEqual(t, atomic.LoadInt32(&maxSeen), int32(2))
+}
+
+func TestNormalizeTaskKind(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{name: "empty", input: "", want: ""},
+		{name: "symbol", input: "symbol", want: "symbol"},
+		{name: "memory", input: " memory ", want: "memory"},
+		{name: "invalid", input: "semantic_file", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := normalizeTaskKind(tt.input)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tt.want, string(got))
+		})
+	}
 }
 
 // Tests for Output structure
 
 func TestOutput_AllFields(t *testing.T) {
 	out := Output{
-		Processed:  50,
-		Errors:     3,
-		Remaining:  10,
-		BatchCount: 5,
-		Status:     "completed",
-		DurationMs: 12345,
-		LastError:  "some error",
+		Processed:   50,
+		Kind:        "symbol",
+		Errors:      3,
+		Memories:    7,
+		Remaining:   10,
+		BatchCount:  5,
+		Parallelism: 4,
+		Recovered:   2,
+		Status:      "completed",
+		DurationMs:  12345,
+		LastError:   "some error",
 		Stats: &QueueSnapshot{
 			Queued:     10,
 			Running:    0,
@@ -138,9 +261,13 @@ func TestOutput_AllFields(t *testing.T) {
 	}
 
 	assert.Equal(t, 50, out.Processed)
+	assert.Equal(t, "symbol", out.Kind)
 	assert.Equal(t, 3, out.Errors)
+	assert.Equal(t, 7, out.Memories)
 	assert.Equal(t, 10, out.Remaining)
 	assert.Equal(t, 5, out.BatchCount)
+	assert.Equal(t, 4, out.Parallelism)
+	assert.Equal(t, int64(2), out.Recovered)
 	assert.Equal(t, "completed", out.Status)
 	assert.Equal(t, int64(12345), out.DurationMs)
 	assert.Equal(t, "some error", out.LastError)
@@ -447,4 +574,39 @@ func TestOutput_FullJSONRoundTrip(t *testing.T) {
 	assert.Equal(t, out.Status, decoded.Status)
 	assert.NotNil(t, decoded.Stats)
 	assert.Equal(t, out.Stats.Queued, decoded.Stats.Queued)
+}
+
+func TestSymbolMemoryEntryNamePrefersQueuedCanonicalName(t *testing.T) {
+	job := &embedding.EmbeddingJob{
+		WorkspaceID: "test-ws",
+		FilePath:    "legacy.go",
+		SymbolName:  "Handler",
+		PackageID:   "go:pkg/foo",
+		SymbolKey:   "func Handler",
+		MemoryName:  "symbol://test-ws/go:pkg/foo::func Handler",
+	}
+
+	assert.Equal(t, "symbol://test-ws/go:pkg/foo::func Handler", symbolMemoryEntryName(job))
+}
+
+func TestSymbolMemoryEntryNameBuildsKeyedNameFromPackageIdentity(t *testing.T) {
+	job := &embedding.EmbeddingJob{
+		WorkspaceID: "test-ws",
+		FilePath:    "legacy.go",
+		SymbolName:  "Handler",
+		PackageID:   "go:pkg/foo",
+		SymbolKey:   "func Handler",
+	}
+
+	assert.Equal(t, "symbol://test-ws/go:pkg/foo::func Handler", symbolMemoryEntryName(job))
+}
+
+func TestSymbolMemoryEntryNameFallsBackToLegacyLocator(t *testing.T) {
+	job := &embedding.EmbeddingJob{
+		WorkspaceID: "test-ws",
+		FilePath:    "legacy.go",
+		SymbolName:  "Handler",
+	}
+
+	assert.Equal(t, "symbol://test-ws/legacy.go:Handler", symbolMemoryEntryName(job))
 }

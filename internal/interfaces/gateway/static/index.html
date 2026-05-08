@@ -90,8 +90,11 @@
                 // Server acknowledged resize
                 return;
               }
-            } catch (e) { /* not JSON, write as text */ }
-            term.write(event.data);
+              if (msg.type === 'error') {
+                showStatus(msg.message || 'terminal protocol error');
+                return;
+              }
+            } catch (e) { /* Ignore invalid server text controls. */ }
           } else {
             // Binary (ArrayBuffer) — raw terminal output
             var bytes = new Uint8Array(event.data);
@@ -128,7 +131,7 @@
       // Send keyboard input to the WebSocket
       term.onData(function (data) {
         if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(data);
+          ws.send(new TextEncoder().encode(data));
         }
       });
 

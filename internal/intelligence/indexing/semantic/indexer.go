@@ -23,6 +23,8 @@ import (
 // IndexerID is the canonical identifier for the semantic file indexer.
 const IndexerID = "semantic_file_index"
 
+var errFileSkipped = errors.New("semantic file skipped")
+
 // Indexer implements the indexing.Indexer interface for semantic file embeddings.
 type Indexer struct {
 	config        Config
@@ -116,6 +118,10 @@ func (idx *Indexer) Index(ctx context.Context, event indexing.PostReviewEvent) (
 
 		// Index or update the file
 		if err := idx.indexFile(ctx, event, file); err != nil {
+			if errors.Is(err, errFileSkipped) {
+				result.FilesSkipped++
+				continue
+			}
 			idx.logger.Warn().Err(err).Str("path", file.Path).Msg("failed to index file")
 			result.FilesFailed++
 			result.Failures = append(result.Failures, indexing.IndexerFailure{
@@ -144,6 +150,23 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 	content, err := idx.readFileContent(file.Path)
 	if err != nil {
 		return fmt.Errorf("read file: %w", err)
+	}
+	if file.Language == "" {
+		file.Language = fsutil.DetectLanguage(file.Path)
+	}
+	if file.Digest == "" {
+		file.Digest = computeDigest(content)
+	}
+	if file.SizeBytes == 0 {
+		file.SizeBytes = int64(len(content))
+	}
+	if idx.exceedsMaxFileKB(len(content)) {
+		idx.logger.Debug().
+			Str("path", file.Path).
+			Int("size_kb", len(content)/1024).
+			Int("max_kb", idx.config.MaxFileKB).
+			Msg("file exceeds semantic index size limit, skipping")
+		return errFileSkipped
 	}
 
 	// Check if chunking is needed
@@ -211,7 +234,7 @@ func (idx *Indexer) indexSingleFile(ctx context.Context, event indexing.PostRevi
 // indexChunkedFile creates multiple chunk embeddings for a large file.
 // It implements cleanup on failure to prevent partial index state.
 func (idx *Indexer) indexChunkedFile(ctx context.Context, event indexing.PostReviewEvent, file indexing.FileChange, content []byte, configHash string) error {
-	chunks := idx.splitIntoChunks(content)
+	chunks := idx.planFileChunks(file.Path, file.Digest, file.Language, content)
 	chunkCount := len(chunks)
 
 	idx.logger.Debug().
@@ -273,17 +296,18 @@ func (idx *Indexer) indexChunkedFile(ctx context.Context, event indexing.PostRev
 	var saveErr error
 
 	for i, chunk := range chunks {
-		chunkID := fmt.Sprintf("%d", i)
-
 		chunkResult := ChunkEmbeddingResult{
 			Path:      file.Path,
 			Digest:    file.Digest,
 			Language:  file.Language,
 			Embedding: chunkEmbeddings[i],
 			Chunk: ChunkInfo{
-				ID:    chunkID,
-				Index: i,
-				Of:    chunkCount,
+				ID:                chunk.ID,
+				Kind:              chunk.Kind,
+				Index:             i,
+				Of:                chunkCount,
+				SizeBytes:         int64(len(chunk.Content)),
+				SymbolIdentifiers: chunk.SymbolIdentifiers,
 				Span: &ChunkSpan{
 					Unit:  "byte",
 					Start: chunk.Start,
@@ -304,12 +328,12 @@ func (idx *Indexer) indexChunkedFile(ctx context.Context, event indexing.PostRev
 			break
 		}
 
-		chunkName := ChunkEmbeddingName(event.WorkspaceID, file.Path, chunkID, configHash)
+		chunkName := ChunkEmbeddingName(event.WorkspaceID, file.Path, chunk.ID, configHash)
 		chunkEntry := storage.NamedEntry{
 			Name:      chunkName,
 			Type:      FileEmbeddingChunkType,
 			Workspace: event.WorkspaceID,
-			Summary:   fmt.Sprintf("Chunk %d/%d of %s", i+1, chunkCount, file.Path),
+			Summary:   file.Path,
 			Result:    chunkResultBytes,
 		}
 
@@ -351,48 +375,6 @@ func (idx *Indexer) indexChunkedFile(ctx context.Context, event indexing.PostRev
 	}
 
 	return nil
-}
-
-// Chunk represents a portion of file content.
-type Chunk struct {
-	Content []byte
-	Start   int
-	End     int
-}
-
-// splitIntoChunks divides content into fixed-size overlapping chunks.
-func (idx *Indexer) splitIntoChunks(content []byte) []Chunk {
-	chunkSize := idx.config.ChunkBytes
-	overlap := idx.config.ChunkOverlapBytes
-
-	if chunkSize <= 0 {
-		return []Chunk{{Content: content, Start: 0, End: len(content)}}
-	}
-
-	var chunks []Chunk
-	start := 0
-	for start < len(content) {
-		end := start + chunkSize
-		if end > len(content) {
-			end = len(content)
-		}
-
-		chunks = append(chunks, Chunk{
-			Content: content[start:end],
-			Start:   start,
-			End:     end,
-		})
-
-		// Move start forward, accounting for overlap
-		nextStart := end - overlap
-		if nextStart <= start {
-			// overlap >= chunkSize would cause no progress
-			break
-		}
-		start = nextStart
-	}
-
-	return chunks
 }
 
 // deleteFileEmbedding removes a file's embedding entries (both single-file and chunks).
@@ -470,14 +452,19 @@ func (idx *Indexer) runIndexJob(ctx context.Context, args JobArgs, isInit bool) 
 		}
 
 		// Index the file
-		chunksIndexed, err := idx.indexFileForJob(ctx, args, file, configHash)
+		chunksIndexed, chunkStats, err := idx.indexFileForJob(ctx, args, file, configHash)
 		if err != nil {
+			if errors.Is(err, errFileSkipped) {
+				result.Summary.FilesSkipped++
+				continue
+			}
 			idx.addJobFailure(result, file, idx.classifyError(err), err)
 			continue
 		}
 
 		result.Summary.FilesIndexed++
 		result.Summary.ChunksIndexed += chunksIndexed
+		mergeChunkPlanStats(&result.Summary, chunkStats)
 	}
 
 	idx.logger.Info().
@@ -491,11 +478,19 @@ func (idx *Indexer) runIndexJob(ctx context.Context, args JobArgs, isInit bool) 
 }
 
 // indexFileForJob indexes a single file for a job, returning chunk count.
-func (idx *Indexer) indexFileForJob(ctx context.Context, args JobArgs, file JobFileInput, configHash string) (chunksIndexed int, err error) {
+func (idx *Indexer) indexFileForJob(ctx context.Context, args JobArgs, file JobFileInput, configHash string) (chunksIndexed int, chunkStats chunkPlanStats, err error) {
 	// Read file content
 	content, err := idx.readFileContent(file.Path)
 	if err != nil {
-		return 0, fmt.Errorf("read file: %w", err)
+		return 0, chunkPlanStats{}, fmt.Errorf("read file: %w", err)
+	}
+	if idx.exceedsMaxFileKB(len(content)) {
+		idx.logger.Debug().
+			Str("path", file.Path).
+			Int("size_kb", len(content)/1024).
+			Int("max_kb", idx.config.MaxFileKB).
+			Msg("file exceeds semantic index size limit, skipping")
+		return 0, chunkPlanStats{}, errFileSkipped
 	}
 
 	// Determine language (use provided or detect)
@@ -525,8 +520,9 @@ func (idx *Indexer) indexFileForJob(ctx context.Context, args JobArgs, file JobF
 
 	// Check if chunking is needed
 	if idx.config.ChunkBytes > 0 && len(content) > idx.config.ChunkBytes {
-		chunks := idx.splitIntoChunks(content)
+		chunks := idx.planFileChunks(file.Path, digest, language, content)
 		chunkCount := len(chunks)
+		chunkStats = summarizeChunkPlan(chunks)
 
 		idx.logger.Info().Str("path", file.Path).Int("chunks", chunkCount).Msg("indexing chunked file")
 
@@ -535,11 +531,11 @@ func (idx *Indexer) indexFileForJob(ctx context.Context, args JobArgs, file JobF
 		for i, chunk := range chunks {
 			embedding, err := idx.provider.Embed(ctx, string(chunk.Content))
 			if err != nil {
-				return 0, fmt.Errorf("embed chunk %d: %w", i, err)
+				return 0, chunkPlanStats{}, fmt.Errorf("embed chunk %d: %w", i, err)
 			}
 			chunkEmbeddings[i] = embedding
 			if err := idx.waitBetweenChunkEmbeddings(ctx, file.Path, i, chunkCount); err != nil {
-				return 0, fmt.Errorf("wait after chunk %d: %w", i, err)
+				return 0, chunkPlanStats{}, fmt.Errorf("wait after chunk %d: %w", i, err)
 			}
 		}
 
@@ -555,21 +551,23 @@ func (idx *Indexer) indexFileForJob(ctx context.Context, args JobArgs, file JobF
 		}
 
 		if err := idx.saveFileEntry(ctx, args.WorkspaceID, file.Path, fileResult); err != nil {
-			return 0, err
+			return 0, chunkPlanStats{}, err
 		}
 
 		// Phase 3: Save all chunks
 		for i, chunk := range chunks {
-			chunkID := fmt.Sprintf("%d", i)
 			chunkResult := ChunkEmbeddingResult{
 				Path:      file.Path,
 				Digest:    digest,
 				Language:  language,
 				Embedding: chunkEmbeddings[i],
 				Chunk: ChunkInfo{
-					ID:    chunkID,
-					Index: i,
-					Of:    chunkCount,
+					ID:                chunk.ID,
+					Kind:              chunk.Kind,
+					Index:             i,
+					Of:                chunkCount,
+					SizeBytes:         int64(len(chunk.Content)),
+					SymbolIdentifiers: chunk.SymbolIdentifiers,
 					Span: &ChunkSpan{
 						Unit:  "byte",
 						Start: chunk.Start,
@@ -579,21 +577,21 @@ func (idx *Indexer) indexFileForJob(ctx context.Context, args JobArgs, file JobF
 				Source: source,
 			}
 
-			if err := idx.saveChunkEntry(ctx, args.WorkspaceID, file.Path, chunkID, configHash, chunkResult); err != nil {
+			if err := idx.saveChunkEntry(ctx, args.WorkspaceID, file.Path, chunk.ID, configHash, chunkResult); err != nil {
 				// Cleanup on failure; error is not actionable.
 				_ = idx.deleteFileEmbedding(ctx, args.WorkspaceID, file.Path) //nolint:errcheck
-				return 0, err
+				return 0, chunkPlanStats{}, err
 			}
 		}
 
-		return chunkCount, nil
+		return chunkCount, chunkStats, nil
 	}
 
 	// Single file embedding
 	idx.logger.Info().Str("path", file.Path).Int("size", len(content)).Msg("indexing file")
 	embedding, err := idx.provider.Embed(ctx, string(content))
 	if err != nil {
-		return 0, fmt.Errorf("embed: %w", err)
+		return 0, chunkPlanStats{}, fmt.Errorf("embed: %w", err)
 	}
 
 	fileResult := FileEmbeddingResult{
@@ -606,10 +604,10 @@ func (idx *Indexer) indexFileForJob(ctx context.Context, args JobArgs, file JobF
 	}
 
 	if err := idx.saveFileEntry(ctx, args.WorkspaceID, file.Path, fileResult); err != nil {
-		return 0, err
+		return 0, chunkPlanStats{}, err
 	}
 
-	return 0, nil
+	return 0, chunkPlanStats{}, nil
 }
 
 func (idx *Indexer) waitBetweenChunkEmbeddings(ctx context.Context, path string, chunkIndex, chunkCount int) error {
@@ -633,6 +631,10 @@ func (idx *Indexer) waitBetweenChunkEmbeddings(ctx context.Context, path string,
 	case <-timer.C:
 		return nil
 	}
+}
+
+func (idx *Indexer) exceedsMaxFileKB(sizeBytes int) bool {
+	return idx.config.MaxFileKB > 0 && sizeBytes > idx.config.MaxFileKB*1024
 }
 
 // saveFileEntry saves a file embedding entry to the memory store.
@@ -682,7 +684,7 @@ func (idx *Indexer) saveChunkEntry(ctx context.Context, workspace, path, chunkID
 		Name:      name,
 		Type:      FileEmbeddingChunkType,
 		Workspace: workspace,
-		Summary:   fmt.Sprintf("Chunk %d/%d of %s", result.Chunk.Index+1, result.Chunk.Of, path),
+		Summary:   path,
 		Result:    resultBytes,
 	}
 

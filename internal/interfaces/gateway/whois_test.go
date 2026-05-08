@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -70,4 +71,63 @@ func TestIdentityFromRequest_TypeAssertion(t *testing.T) {
 // withIdentityContext is a test helper to inject identity into context directly.
 func withIdentityContext(ctx context.Context, info *sshterm.IdentityInfo) context.Context {
 	return context.WithValue(ctx, identityContextKey, info)
+}
+
+func TestPrincipalFromRequest_TailscaleContext(t *testing.T) {
+	expected := &sshterm.IdentityInfo{
+		NodeName:  "test-node",
+		NodeID:    "node-123",
+		UserID:    "user-456",
+		UserLogin: "test@example.com",
+		UserName:  "Test User",
+	}
+
+	ctx := withIdentityContext(context.Background(), expected)
+	req := httptest.NewRequest(http.MethodGet, "/api/agents", nil).WithContext(ctx)
+	req.Header.Set("X-Foxctl-Tenant-ID", "tenant-1")
+	req.Header.Set("X-Foxctl-Workspace-ID", "workspace-1")
+	req.Header.Set("X-Foxctl-Workspace-Root", "/repo")
+	req.Header.Set("X-Foxctl-Session-ID", "session-1")
+
+	principal, err := PrincipalFromRequest(req, PrincipalRequestOptions{RequireTenant: true})
+	assert.NoError(t, err)
+	assert.Equal(t, "tenant-1", principal.TenantID)
+	assert.Equal(t, "user-456", principal.UserID)
+	assert.Equal(t, "Test User", principal.Username)
+	assert.Equal(t, "tailscale", principal.Platform)
+	assert.Equal(t, "workspace-1", principal.WorkspaceID)
+	assert.Equal(t, "/repo", principal.WorkspaceRoot)
+	assert.Equal(t, "session-1", principal.SessionID)
+}
+
+func TestPrincipalFromRequest_Anonymous(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/agents", nil)
+
+	principal, err := PrincipalFromRequest(req, PrincipalRequestOptions{})
+	assert.NoError(t, err)
+	assert.True(t, principal.IsAnonymous())
+	assert.Equal(t, "tailscale", principal.Platform)
+}
+
+func TestPrincipalFromRequest_RequiresTenant(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/agents", nil)
+
+	_, err := PrincipalFromRequest(req, PrincipalRequestOptions{RequireTenant: true})
+	assert.True(t, errors.Is(err, ErrPrincipalTenantRequired))
+}
+
+func TestPrincipalFromRequest_WorkspaceMismatch(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/agents", nil)
+	req.Header.Set("X-Foxctl-Workspace-ID", "workspace-a")
+
+	_, err := PrincipalFromRequest(req, PrincipalRequestOptions{ExpectedWorkspaceID: "workspace-b"})
+	assert.True(t, errors.Is(err, ErrPrincipalWorkspaceMismatch))
+}
+
+func TestPrincipalFromRequest_ExpectedWorkspaceDefault(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/agents", nil)
+
+	principal, err := PrincipalFromRequest(req, PrincipalRequestOptions{ExpectedWorkspaceID: "workspace-b"})
+	assert.NoError(t, err)
+	assert.Equal(t, "workspace-b", principal.WorkspaceID)
 }
