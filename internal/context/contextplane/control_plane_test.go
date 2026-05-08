@@ -220,6 +220,15 @@ func TestRejectsInvalidControlTransitions(t *testing.T) {
 		ProposalID:    proposal.ID,
 		Decision:      DecisionKindApprove,
 		AuthorityMode: AuthorityModeCoordinatorPolicy,
+		PolicyID:      "low-risk-task-v1",
+		EvidenceRefs:  []contextengine.EvidenceRef{{Type: "", Ref: ""}},
+	}); err == nil || !strings.Contains(err.Error(), "invalid ref type") {
+		t.Fatalf("approval with invalid evidence err=%v", err)
+	}
+	if _, err := store.RecordCoordinatorDecision(ctx, CoordinatorDecision{
+		ProposalID:    proposal.ID,
+		Decision:      DecisionKindApprove,
+		AuthorityMode: AuthorityModeCoordinatorPolicy,
 		EvidenceRefs:  []contextengine.EvidenceRef{{Type: contextengine.RefTypeEvent, Ref: "hook:no-policy"}},
 	}); err == nil || !strings.Contains(err.Error(), "policy_id") {
 		t.Fatalf("coordinator approval without policy err=%v", err)

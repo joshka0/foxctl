@@ -150,6 +150,9 @@ pi --extension /path/to/foxctl.ts \
 
 ### Context Plane
 - `foxctl_context` — Get context overview
+- `foxctl_control_inbox` — List coordinator control proposals (`/api/context/control-proposals`)
+- `foxctl_control_inspect` — Inspect one control proposal (`/api/context/control-proposals/{id}`)
+- `foxctl_control_decide` — Append typed coordinator decisions (`/api/context/control-proposals/{id}/decisions`)
 
 ### Mux (tmux/zellij)
 - `foxctl_mux_list` — List panes
@@ -231,6 +234,12 @@ cd /Users/joshka/repos/githubs/pi-mono
   --target ES2022 --strict --skipLibCheck \
   .pi/extensions/foxctl.ts
 ```
+
+Coordinator cockpit dogfood path:
+- Use `foxctl_control_inbox` to triage proposals.
+- Use `foxctl_control_inspect` to inspect one proposal before deciding.
+- Use `foxctl_control_decide` to persist each approve/reject/clarification/override decision as a backend `CoordinatorDecision`.
+- `/reload` may not expand Pi's initial tool allowlist; restart Pi if these tools are missing from the current session.
 
 After source or docs changes, index the tracked integration from the foxctl
 workspace with TypeScript enabled:

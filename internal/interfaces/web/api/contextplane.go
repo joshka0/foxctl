@@ -10,6 +10,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/context/contextplane"
 	"github.com/joshka0/foxctl/internal/domain/envelope"
 	"github.com/joshka0/foxctl/internal/platform/config"
@@ -45,6 +46,181 @@ type contextProposalMergeRequest struct {
 	DraftPath  string `json:"draft_path,omitempty"`
 	TargetPath string `json:"target_path,omitempty"`
 	Heading    string `json:"heading,omitempty"`
+}
+
+type contextControlProposalDecisionRequest struct {
+	Workspace       string                      `json:"workspace,omitempty"`
+	Decision        contextplane.DecisionKind   `json:"decision"`
+	AuthorityMode   contextplane.AuthorityMode  `json:"authority_mode,omitempty"`
+	ApprovalActor   string                      `json:"approval_actor,omitempty"`
+	Reason          string                      `json:"reason,omitempty"`
+	EvidenceRefs    []contextengine.EvidenceRef `json:"evidence_refs,omitempty"`
+	PolicyID        string                      `json:"policy_id,omitempty"`
+	PolicyVersion   string                      `json:"policy_version,omitempty"`
+	PolicyHash      string                      `json:"policy_hash,omitempty"`
+	HarnessRunIDs   []string                    `json:"harness_run_ids,omitempty"`
+	RoomConsensusID string                      `json:"room_consensus_id,omitempty"`
+	Constraints     map[string]any              `json:"constraints,omitempty"`
+}
+
+// ContextControlProposalsHandler serves the Pi cockpit read-model boundary.
+//
+// [[domain:pi-coordinator-cockpit-read-model]]
+func ContextControlProposalsHandler(_ config.Config, _ zerolog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/api/context/control-proposals")
+		path = strings.Trim(path, "/")
+
+		if path == "" {
+			handleContextControlProposalList(w, r)
+			return
+		}
+		if strings.HasSuffix(path, "/decisions") {
+			proposalID := strings.Trim(strings.TrimSuffix(path, "/decisions"), "/")
+			handleContextControlProposalDecision(w, r, proposalID)
+			return
+		}
+		handleContextControlProposalInspect(w, r, path)
+	}
+}
+
+func handleContextControlProposalList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	workspacePath := strings.TrimSpace(r.URL.Query().Get("workspace"))
+	if workspacePath == "" {
+		httpError(w, http.StatusBadRequest, "workspace is required")
+		return
+	}
+	limit := 50
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := parsePositiveInt(raw)
+		if err != nil {
+			httpError(w, http.StatusBadRequest, "invalid limit")
+			return
+		}
+		limit = parsed
+	}
+	statusFilter := contextplane.ProposalStatus(strings.ToLower(strings.TrimSpace(r.URL.Query().Get("status"))))
+	if statusFilter != "" && !statusFilter.IsValid() {
+		httpError(w, http.StatusBadRequest, "invalid status")
+		return
+	}
+	store := contextplane.NewWorkspaceStore(workspacePath)
+	readLimit := limit
+	if statusFilter != "" {
+		readLimit = 0
+	}
+	states, err := store.ListControlProposalStates(r.Context(), readLimit)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, "list control proposals failed: "+err.Error())
+		return
+	}
+	if statusFilter != "" {
+		filtered := make([]contextplane.ControlProposalState, 0, len(states))
+		for _, state := range states {
+			if state.DerivedStatus == statusFilter {
+				filtered = append(filtered, state)
+			}
+		}
+		states = filtered
+	}
+	if limit > 0 && len(states) > limit {
+		states = states[:limit]
+	}
+	writeJSON(w, http.StatusOK, envelope.OK("context.control_proposals", states))
+}
+
+func handleContextControlProposalInspect(w http.ResponseWriter, r *http.Request, proposalID string) {
+	if r.Method != http.MethodGet {
+		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	proposalID = strings.TrimSpace(proposalID)
+	if proposalID == "" {
+		httpError(w, http.StatusBadRequest, "proposal id is required")
+		return
+	}
+	workspacePath := strings.TrimSpace(r.URL.Query().Get("workspace"))
+	if workspacePath == "" {
+		httpError(w, http.StatusBadRequest, "workspace is required")
+		return
+	}
+	store := contextplane.NewWorkspaceStore(workspacePath)
+	state, err := store.GetControlProposalState(r.Context(), proposalID)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, "get control proposal failed: "+err.Error())
+		return
+	}
+	if state == nil {
+		httpError(w, http.StatusNotFound, "control proposal not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope.OK("context.control_proposal", state))
+}
+
+func handleContextControlProposalDecision(w http.ResponseWriter, r *http.Request, proposalID string) {
+	if r.Method != http.MethodPost {
+		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	proposalID = strings.TrimSpace(proposalID)
+	if proposalID == "" {
+		httpError(w, http.StatusBadRequest, "proposal id is required")
+		return
+	}
+	var body contextControlProposalDecisionRequest
+	if err := readJSON(w, r, &body); err != nil {
+		httpError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	workspacePath := strings.TrimSpace(body.Workspace)
+	if workspacePath == "" {
+		workspacePath = strings.TrimSpace(r.URL.Query().Get("workspace"))
+	}
+	if workspacePath == "" {
+		httpError(w, http.StatusBadRequest, "workspace is required")
+		return
+	}
+	if len(body.EvidenceRefs) == 0 {
+		httpError(w, http.StatusBadRequest, "evidence_refs are required")
+		return
+	}
+	authorityMode := body.AuthorityMode
+	if authorityMode == "" {
+		authorityMode = contextplane.AuthorityModeHumanApproval
+	}
+	store := contextplane.NewWorkspaceStore(workspacePath)
+	decision, err := store.RecordCoordinatorDecision(r.Context(), contextplane.CoordinatorDecision{
+		ProposalID:      proposalID,
+		WorkspaceID:     workspacePath,
+		Decision:        body.Decision,
+		AuthorityMode:   authorityMode,
+		ApprovalActor:   strings.TrimSpace(body.ApprovalActor),
+		PolicyID:        strings.TrimSpace(body.PolicyID),
+		PolicyVersion:   strings.TrimSpace(body.PolicyVersion),
+		PolicyHash:      strings.TrimSpace(body.PolicyHash),
+		EvidenceRefs:    body.EvidenceRefs,
+		HarnessRunIDs:   body.HarnessRunIDs,
+		RoomConsensusID: strings.TrimSpace(body.RoomConsensusID),
+		Reason:          strings.TrimSpace(body.Reason),
+		Constraints:     body.Constraints,
+	})
+	if err != nil {
+		httpError(w, classifyContextProposalStatus(err), "record coordinator decision failed: "+err.Error())
+		return
+	}
+	state, err := store.GetControlProposalState(r.Context(), proposalID)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, "reload control proposal state failed: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope.OK("context.control_proposal_decision", map[string]any{
+		"decision": decision,
+		"state":    state,
+	}))
 }
 
 func ContextOverviewHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
@@ -428,6 +604,14 @@ func classifyContextProposalStatus(err error) int {
 		return http.StatusNotFound
 	case strings.Contains(text, "not claimed"),
 		strings.Contains(text, "not prepared"),
+		strings.Contains(text, "proposal_id is required"),
+		strings.Contains(text, "invalid decision"),
+		strings.Contains(text, "invalid authority mode"),
+		strings.Contains(text, "invalid status_after"),
+		strings.Contains(text, "evidence_refs are required"),
+		strings.Contains(text, "invalid ref type"),
+		strings.Contains(text, "empty ref value"),
+		strings.Contains(text, "coordinator_policy approvals require"),
 		strings.Contains(text, "does not support direct merge"),
 		strings.Contains(text, "has no draft_path"),
 		strings.Contains(text, "has no target path"),

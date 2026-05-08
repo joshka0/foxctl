@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/context/contextplane"
 	"github.com/joshka0/foxctl/internal/domain/envelope"
 	"github.com/joshka0/foxctl/internal/platform/config"
@@ -208,4 +210,362 @@ reviewed merge actions, and GUI control-plane integration.
 	if !ok || len(jobs) != 1 {
 		t.Fatalf("unexpected promotion_jobs=%v", data["promotion_jobs"])
 	}
+}
+
+func TestContextControlProposalsListFiltersDerivedStatus(t *testing.T) {
+	workspace := t.TempDir()
+	cfg := config.Config{Storage: config.StorageSettings{Root: t.TempDir()}}
+	store := contextplane.NewWorkspaceStore(workspace)
+	ctx := context.Background()
+
+	openProposal, err := store.RecordControlProposal(ctx, contextplane.ControlProposal{
+		DedupeKey:   "task:open",
+		Kind:        contextplane.ProposalKindTaskProposal,
+		Status:      contextplane.ProposalStatusOpen,
+		WorkspaceID: workspace,
+		Summary:     "Open proposal",
+		EvidenceRefs: []contextengine.EvidenceRef{
+			{Type: contextengine.RefTypeEvent, Ref: "hook:open"},
+		},
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("RecordControlProposal(open): %v", err)
+	}
+
+	approvedProposal, err := store.RecordControlProposal(ctx, contextplane.ControlProposal{
+		DedupeKey:   "task:approved",
+		Kind:        contextplane.ProposalKindTaskProposal,
+		Status:      contextplane.ProposalStatusOpen,
+		WorkspaceID: workspace,
+		Summary:     "Approved proposal",
+		EvidenceRefs: []contextengine.EvidenceRef{
+			{Type: contextengine.RefTypeEvent, Ref: "hook:approved"},
+		},
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("RecordControlProposal(approved): %v", err)
+	}
+	if _, err := store.RecordCoordinatorDecision(ctx, contextplane.CoordinatorDecision{
+		ProposalID:    approvedProposal.ID,
+		WorkspaceID:   workspace,
+		Decision:      contextplane.DecisionKindApprove,
+		AuthorityMode: contextplane.AuthorityModeHumanApproval,
+		ApprovalActor: "human:test",
+		EvidenceRefs: []contextengine.EvidenceRef{
+			{Type: contextengine.RefTypeEvent, Ref: "decision:approved"},
+		},
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("RecordCoordinatorDecision: %v", err)
+	}
+
+	handler := ContextControlProposalsHandler(cfg, zerolog.Nop())
+	req := httptest.NewRequest(http.MethodGet, "/api/context/control-proposals?workspace="+url.QueryEscape(workspace), nil)
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	allStates := decodeControlProposalStateList(t, rr.Body.Bytes())
+	if len(allStates) != 2 {
+		t.Fatalf("state count=%d want 2", len(allStates))
+	}
+
+	filterReq := httptest.NewRequest(http.MethodGet, "/api/context/control-proposals?workspace="+url.QueryEscape(workspace)+"&status=approved", nil)
+	filterRR := httptest.NewRecorder()
+	handler(filterRR, filterReq)
+	if filterRR.Code != http.StatusOK {
+		t.Fatalf("filter status=%d body=%s", filterRR.Code, filterRR.Body.String())
+	}
+	filtered := decodeControlProposalStateList(t, filterRR.Body.Bytes())
+	if len(filtered) != 1 {
+		t.Fatalf("filtered count=%d want 1", len(filtered))
+	}
+	if filtered[0].Proposal.ID != approvedProposal.ID {
+		t.Fatalf("filtered proposal id=%q want %q", filtered[0].Proposal.ID, approvedProposal.ID)
+	}
+	if filtered[0].DerivedStatus != contextplane.ProposalStatusApproved {
+		t.Fatalf("derived status=%q want approved", filtered[0].DerivedStatus)
+	}
+	if filtered[0].Proposal.ID == openProposal.ID && filtered[0].DerivedStatus == contextplane.ProposalStatusOpen {
+		t.Fatalf("expected approved proposal, got open proposal")
+	}
+}
+
+func TestContextControlProposalInspectReturnsNotFound(t *testing.T) {
+	workspace := t.TempDir()
+	cfg := config.Config{Storage: config.StorageSettings{Root: t.TempDir()}}
+	handler := ContextControlProposalsHandler(cfg, zerolog.Nop())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/context/control-proposals/missing-id?workspace="+url.QueryEscape(workspace), nil)
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestContextControlProposalsRequireExplicitWorkspace(t *testing.T) {
+	workspace := t.TempDir()
+	cfg := config.Config{Storage: config.StorageSettings{Root: t.TempDir()}}
+	store := contextplane.NewWorkspaceStore(workspace)
+	proposal, err := store.RecordControlProposal(context.Background(), contextplane.ControlProposal{
+		DedupeKey:   "task:workspace-required",
+		Kind:        contextplane.ProposalKindTaskProposal,
+		Status:      contextplane.ProposalStatusOpen,
+		WorkspaceID: workspace,
+		Summary:     "Workspace required proposal",
+		EvidenceRefs: []contextengine.EvidenceRef{
+			{Type: contextengine.RefTypeEvent, Ref: "hook:workspace"},
+		},
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("RecordControlProposal: %v", err)
+	}
+
+	handler := ContextControlProposalsHandler(cfg, zerolog.Nop())
+	cases := []struct {
+		name   string
+		method string
+		target string
+		body   string
+	}{
+		{name: "list", method: http.MethodGet, target: "/api/context/control-proposals"},
+		{name: "inspect", method: http.MethodGet, target: "/api/context/control-proposals/" + proposal.ID},
+		{
+			name:   "decision",
+			method: http.MethodPost,
+			target: "/api/context/control-proposals/" + proposal.ID + "/decisions",
+			body:   `{"decision":"approve","evidence_refs":[{"type":"event","ref":"decision:workspace"}]}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.target, strings.NewReader(tc.body))
+			rr := httptest.NewRecorder()
+			handler(rr, req)
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestContextControlProposalDecisionAppendsAndUpdatesLatestState(t *testing.T) {
+	workspace := t.TempDir()
+	cfg := config.Config{Storage: config.StorageSettings{Root: t.TempDir()}}
+	store := contextplane.NewWorkspaceStore(workspace)
+	ctx := context.Background()
+
+	proposal, err := store.RecordControlProposal(ctx, contextplane.ControlProposal{
+		DedupeKey:   "task:append-decision",
+		Kind:        contextplane.ProposalKindTaskProposal,
+		Status:      contextplane.ProposalStatusOpen,
+		WorkspaceID: workspace,
+		Summary:     "Append decision proposal",
+		EvidenceRefs: []contextengine.EvidenceRef{
+			{Type: contextengine.RefTypeEvent, Ref: "hook:proposal"},
+		},
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("RecordControlProposal: %v", err)
+	}
+
+	handler := ContextControlProposalsHandler(cfg, zerolog.Nop())
+	firstBody := `{"workspace":"` + workspace + `","decision":"approve","approval_actor":"pi:coordinator","reason":"safe to proceed","evidence_refs":[{"type":"event","ref":"decision:1"}]}`
+	firstReq := httptest.NewRequest(http.MethodPost, "/api/context/control-proposals/"+proposal.ID+"/decisions", strings.NewReader(firstBody))
+	firstRR := httptest.NewRecorder()
+	handler(firstRR, firstReq)
+	if firstRR.Code != http.StatusOK {
+		t.Fatalf("first post status=%d body=%s", firstRR.Code, firstRR.Body.String())
+	}
+	firstResp := decodeControlProposalDecisionResponse(t, firstRR.Body.Bytes())
+	if firstResp.Decision.AuthorityMode != contextplane.AuthorityModeHumanApproval {
+		t.Fatalf("authority mode=%q want human_approval", firstResp.Decision.AuthorityMode)
+	}
+	if firstResp.State.DerivedStatus != contextplane.ProposalStatusApproved {
+		t.Fatalf("derived status after first=%q want approved", firstResp.State.DerivedStatus)
+	}
+
+	secondBody := `{"workspace":"` + workspace + `","decision":"defer","approval_actor":"human:reviewer","reason":"need more context","evidence_refs":[{"type":"event","ref":"decision:2"}]}`
+	secondReq := httptest.NewRequest(http.MethodPost, "/api/context/control-proposals/"+proposal.ID+"/decisions", strings.NewReader(secondBody))
+	secondRR := httptest.NewRecorder()
+	handler(secondRR, secondReq)
+	if secondRR.Code != http.StatusOK {
+		t.Fatalf("second post status=%d body=%s", secondRR.Code, secondRR.Body.String())
+	}
+	secondResp := decodeControlProposalDecisionResponse(t, secondRR.Body.Bytes())
+	if secondResp.State.DerivedStatus != contextplane.ProposalStatusEvaluating {
+		t.Fatalf("derived status after second=%q want evaluating", secondResp.State.DerivedStatus)
+	}
+	if secondResp.State.LatestDecision == nil || secondResp.State.LatestDecision.Decision != contextplane.DecisionKindDefer {
+		t.Fatalf("latest decision=%+v want defer", secondResp.State.LatestDecision)
+	}
+
+	decisions, err := store.ListCoordinatorDecisions(ctx, proposal.ID, 0)
+	if err != nil {
+		t.Fatalf("ListCoordinatorDecisions: %v", err)
+	}
+	if len(decisions) != 2 {
+		t.Fatalf("decision count=%d want 2", len(decisions))
+	}
+	if decisions[0].Decision != contextplane.DecisionKindDefer || decisions[1].Decision != contextplane.DecisionKindApprove {
+		t.Fatalf("decision order=%+v", decisions)
+	}
+}
+
+func TestContextControlProposalDecisionRequiresEvidenceRefs(t *testing.T) {
+	workspace := t.TempDir()
+	cfg := config.Config{Storage: config.StorageSettings{Root: t.TempDir()}}
+	store := contextplane.NewWorkspaceStore(workspace)
+	ctx := context.Background()
+
+	proposal, err := store.RecordControlProposal(ctx, contextplane.ControlProposal{
+		DedupeKey:   "task:missing-evidence",
+		Kind:        contextplane.ProposalKindTaskProposal,
+		Status:      contextplane.ProposalStatusOpen,
+		WorkspaceID: workspace,
+		Summary:     "Evidence required proposal",
+		EvidenceRefs: []contextengine.EvidenceRef{
+			{Type: contextengine.RefTypeEvent, Ref: "hook:proposal"},
+		},
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("RecordControlProposal: %v", err)
+	}
+
+	handler := ContextControlProposalsHandler(cfg, zerolog.Nop())
+	req := httptest.NewRequest(http.MethodPost, "/api/context/control-proposals/"+proposal.ID+"/decisions", strings.NewReader(`{"workspace":"`+workspace+`","decision":"approve"}`))
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestContextControlProposalDecisionRejectsInvalidEvidenceRefs(t *testing.T) {
+	workspace := t.TempDir()
+	cfg := config.Config{Storage: config.StorageSettings{Root: t.TempDir()}}
+	store := contextplane.NewWorkspaceStore(workspace)
+	ctx := context.Background()
+
+	proposal, err := store.RecordControlProposal(ctx, contextplane.ControlProposal{
+		DedupeKey:   "task:invalid-evidence",
+		Kind:        contextplane.ProposalKindTaskProposal,
+		Status:      contextplane.ProposalStatusOpen,
+		WorkspaceID: workspace,
+		Summary:     "Invalid evidence proposal",
+		EvidenceRefs: []contextengine.EvidenceRef{
+			{Type: contextengine.RefTypeEvent, Ref: "hook:proposal"},
+		},
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("RecordControlProposal: %v", err)
+	}
+
+	handler := ContextControlProposalsHandler(cfg, zerolog.Nop())
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/context/control-proposals/"+proposal.ID+"/decisions",
+		strings.NewReader(`{"workspace":"`+workspace+`","decision":"approve","evidence_refs":[{"type":"","ref":""}]}`),
+	)
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestContextControlProposalDecisionDoesNotCreateApplyResults(t *testing.T) {
+	workspace := t.TempDir()
+	cfg := config.Config{Storage: config.StorageSettings{Root: t.TempDir()}}
+	store := contextplane.NewWorkspaceStore(workspace)
+	ctx := context.Background()
+
+	proposal, err := store.RecordControlProposal(ctx, contextplane.ControlProposal{
+		DedupeKey:   "task:no-apply",
+		Kind:        contextplane.ProposalKindTaskProposal,
+		Status:      contextplane.ProposalStatusOpen,
+		WorkspaceID: workspace,
+		Summary:     "No apply side effect proposal",
+		EvidenceRefs: []contextengine.EvidenceRef{
+			{Type: contextengine.RefTypeEvent, Ref: "hook:proposal"},
+		},
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("RecordControlProposal: %v", err)
+	}
+
+	handler := ContextControlProposalsHandler(cfg, zerolog.Nop())
+	body := `{"workspace":"` + workspace + `","decision":"approve","approval_actor":"pi:coordinator","reason":"approved","evidence_refs":[{"type":"event","ref":"decision:no-apply"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/context/control-proposals/"+proposal.ID+"/decisions", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	handler(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	state, err := store.GetControlProposalState(ctx, proposal.ID)
+	if err != nil {
+		t.Fatalf("GetControlProposalState: %v", err)
+	}
+	if state == nil {
+		t.Fatalf("state is nil")
+	}
+	if state.LatestApplyResult != nil {
+		t.Fatalf("expected no apply result, got %+v", state.LatestApplyResult)
+	}
+}
+
+func decodeControlProposalStateList(t *testing.T, body []byte) []contextplane.ControlProposalState {
+	t.Helper()
+	var env envelope.Envelope
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	raw, err := json.Marshal(env.Data)
+	if err != nil {
+		t.Fatalf("marshal envelope data: %v", err)
+	}
+	var states []contextplane.ControlProposalState
+	if err := json.Unmarshal(raw, &states); err != nil {
+		t.Fatalf("decode states: %v", err)
+	}
+	return states
+}
+
+type contextControlProposalDecisionResponse struct {
+	Decision contextplane.CoordinatorDecision  `json:"decision"`
+	State    contextplane.ControlProposalState `json:"state"`
+}
+
+func decodeControlProposalDecisionResponse(t *testing.T, body []byte) contextControlProposalDecisionResponse {
+	t.Helper()
+	var env envelope.Envelope
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	raw, err := json.Marshal(env.Data)
+	if err != nil {
+		t.Fatalf("marshal envelope data: %v", err)
+	}
+	var data contextControlProposalDecisionResponse
+	if err := json.Unmarshal(raw, &data); err != nil {
+		t.Fatalf("decode decision response: %v", err)
+	}
+	return data
 }

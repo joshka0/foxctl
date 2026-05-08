@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/platform/timeutil"
 )
 
@@ -210,6 +211,12 @@ func normalizeControlProposal(proposal ControlProposal) (ControlProposal, error)
 	proposal.BlastRadius = firstNonEmpty(strings.TrimSpace(proposal.BlastRadius), "medium")
 	proposal.SourceRefs = uniqueEvidenceRefs(proposal.SourceRefs)
 	proposal.EvidenceRefs = uniqueEvidenceRefs(proposal.EvidenceRefs)
+	if err := validateControlEvidenceRefs("source_refs", proposal.SourceRefs, false); err != nil {
+		return ControlProposal{}, err
+	}
+	if err := validateControlEvidenceRefs("evidence_refs", proposal.EvidenceRefs, false); err != nil {
+		return ControlProposal{}, err
+	}
 	if proposal.Payload == nil {
 		proposal.Payload = map[string]any{}
 	}
@@ -227,8 +234,9 @@ func normalizeCoordinatorDecision(decision CoordinatorDecision, proposal Control
 	if !decision.AuthorityMode.IsValid() {
 		return CoordinatorDecision{}, fmt.Errorf("invalid authority mode %q", decision.AuthorityMode)
 	}
-	if len(uniqueEvidenceRefs(decision.EvidenceRefs)) == 0 {
-		return CoordinatorDecision{}, fmt.Errorf("evidence_refs are required")
+	decision.EvidenceRefs = uniqueEvidenceRefs(decision.EvidenceRefs)
+	if err := validateControlEvidenceRefs("evidence_refs", decision.EvidenceRefs, true); err != nil {
+		return CoordinatorDecision{}, err
 	}
 	if decision.Decision == DecisionKindApprove &&
 		decision.AuthorityMode == AuthorityModeCoordinatorPolicy &&
@@ -256,7 +264,6 @@ func normalizeCoordinatorDecision(decision CoordinatorDecision, proposal Control
 	decision.HarnessRunIDs = uniqueStrings(decision.HarnessRunIDs)
 	decision.RoomConsensusID = strings.TrimSpace(decision.RoomConsensusID)
 	decision.Reason = strings.TrimSpace(decision.Reason)
-	decision.EvidenceRefs = uniqueEvidenceRefs(decision.EvidenceRefs)
 	if decision.Constraints == nil {
 		decision.Constraints = map[string]any{}
 	}
@@ -296,6 +303,9 @@ func normalizeApplyResult(result ApplyResult, proposal ControlProposal, decision
 	result.Summary = strings.TrimSpace(result.Summary)
 	result.ErrorMessage = strings.TrimSpace(result.ErrorMessage)
 	result.EvidenceRefs = uniqueEvidenceRefs(result.EvidenceRefs)
+	if err := validateControlEvidenceRefs("evidence_refs", result.EvidenceRefs, false); err != nil {
+		return ApplyResult{}, err
+	}
 	if result.Result == nil {
 		result.Result = map[string]any{}
 	}
@@ -303,6 +313,21 @@ func normalizeApplyResult(result ApplyResult, proposal ControlProposal, decision
 		return ApplyResult{}, fmt.Errorf("decision %s does not belong to proposal %s", decision.ID, proposal.ID)
 	}
 	return result, nil
+}
+
+func validateControlEvidenceRefs(field string, refs []contextengine.EvidenceRef, required bool) error {
+	if len(refs) == 0 {
+		if required {
+			return fmt.Errorf("%s are required", field)
+		}
+		return nil
+	}
+	for i, ref := range refs {
+		if err := contextengine.ValidateEvidenceRef(ref); err != nil {
+			return fmt.Errorf("%s[%d]: %w", field, i, err)
+		}
+	}
+	return nil
 }
 
 func buildControlProposalState(ctx context.Context, db *sql.DB, proposal ControlProposal) (ControlProposalState, error) {
