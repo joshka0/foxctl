@@ -89,7 +89,7 @@ static-analysis:
       fi
     - make fmt
     - git -c core.filemode=false diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
-    - make lint GOLANGCI_FLAGS='--concurrency=2' LINT_TARGETS='./cmd/... ./internal/... ./plugins/... ./scripts/... ./test/...'
+    - GOGC=50 GOMEMLIMIT=1800MiB make lint GOLANGCI_FLAGS='--concurrency=1' LINT_TARGETS='./cmd/... ./internal/... ./plugins/... ./scripts/... ./test/...'
     - make check-large-files
     - make check-tech-debt
 
