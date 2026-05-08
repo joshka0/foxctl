@@ -43,6 +43,119 @@ func ParsePolicyKind(s string) (PolicyKind, error) {
 	return k, nil
 }
 
+// ProposalKind is a typed enum for coordinator control-plane proposals.
+type ProposalKind string
+
+const (
+	ProposalKindTaskProposal    ProposalKind = "task_proposal"
+	ProposalKindMemoryCandidate ProposalKind = "memory_candidate"
+)
+
+// IsValid reports whether k is a known ProposalKind.
+func (k ProposalKind) IsValid() bool {
+	switch k {
+	case ProposalKindTaskProposal, ProposalKindMemoryCandidate:
+		return true
+	default:
+		return false
+	}
+}
+
+// ProposalStatus is a typed enum for control proposal lifecycle status.
+type ProposalStatus string
+
+const (
+	ProposalStatusOpen                ProposalStatus = "open"
+	ProposalStatusEvaluating          ProposalStatus = "evaluating"
+	ProposalStatusNeedsClarification  ProposalStatus = "needs_clarification"
+	ProposalStatusNeedsAuthority      ProposalStatus = "needs_authority"
+	ProposalStatusNeedsHarness        ProposalStatus = "needs_harness"
+	ProposalStatusConflictingEvidence ProposalStatus = "conflicting_evidence"
+	ProposalStatusUnsafeSideEffects   ProposalStatus = "unsafe_side_effects"
+	ProposalStatusApproved            ProposalStatus = "approved"
+	ProposalStatusApplying            ProposalStatus = "applying"
+	ProposalStatusApplied             ProposalStatus = "applied"
+	ProposalStatusRejected            ProposalStatus = "rejected"
+	ProposalStatusSuperseded          ProposalStatus = "superseded"
+	ProposalStatusFailed              ProposalStatus = "failed"
+)
+
+// IsValid reports whether s is a known ProposalStatus.
+func (s ProposalStatus) IsValid() bool {
+	switch s {
+	case ProposalStatusOpen, ProposalStatusEvaluating, ProposalStatusNeedsClarification,
+		ProposalStatusNeedsAuthority, ProposalStatusNeedsHarness, ProposalStatusConflictingEvidence,
+		ProposalStatusUnsafeSideEffects, ProposalStatusApproved, ProposalStatusApplying,
+		ProposalStatusApplied, ProposalStatusRejected, ProposalStatusSuperseded, ProposalStatusFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+// DecisionKind is a typed enum for coordinator decisions.
+type DecisionKind string
+
+const (
+	DecisionKindApprove            DecisionKind = "approve"
+	DecisionKindReject             DecisionKind = "reject"
+	DecisionKindDefer              DecisionKind = "defer"
+	DecisionKindEscalate           DecisionKind = "escalate"
+	DecisionKindNeedsClarification DecisionKind = "needs_clarification"
+	DecisionKindRequestHarness     DecisionKind = "request_harness"
+)
+
+// IsValid reports whether k is a known DecisionKind.
+func (k DecisionKind) IsValid() bool {
+	switch k {
+	case DecisionKindApprove, DecisionKindReject, DecisionKindDefer, DecisionKindEscalate,
+		DecisionKindNeedsClarification, DecisionKindRequestHarness:
+		return true
+	default:
+		return false
+	}
+}
+
+// AuthorityMode is a typed enum for decision authority sources.
+type AuthorityMode string
+
+const (
+	AuthorityModeCoordinatorPolicy AuthorityMode = "coordinator_policy"
+	AuthorityModeRoomConsensus     AuthorityMode = "room_consensus"
+	AuthorityModeHumanApproval     AuthorityMode = "human_approval"
+	AuthorityModeHumanOverride     AuthorityMode = "human_override"
+)
+
+// IsValid reports whether m is a known AuthorityMode.
+func (m AuthorityMode) IsValid() bool {
+	switch m {
+	case AuthorityModeCoordinatorPolicy, AuthorityModeRoomConsensus,
+		AuthorityModeHumanApproval, AuthorityModeHumanOverride:
+		return true
+	default:
+		return false
+	}
+}
+
+// ApplyResultStatus is the result state for an idempotent proposal apply.
+type ApplyResultStatus string
+
+const (
+	ApplyResultStatusApplied ApplyResultStatus = "applied"
+	ApplyResultStatusSkipped ApplyResultStatus = "skipped"
+	ApplyResultStatusFailed  ApplyResultStatus = "failed"
+)
+
+// IsValid reports whether s is a known ApplyResultStatus.
+func (s ApplyResultStatus) IsValid() bool {
+	switch s {
+	case ApplyResultStatusApplied, ApplyResultStatusSkipped, ApplyResultStatusFailed:
+		return true
+	default:
+		return false
+	}
+}
+
 // RecentDecision captures a bounded decision item in top-of-mind.
 type RecentDecision struct {
 	ID   string `json:"id"`
@@ -217,6 +330,72 @@ type MemoryProposal struct {
 	Count            int                         `json:"count"`
 	CreatedAt        time.Time                   `json:"created_at"`
 	UpdatedAt        time.Time                   `json:"updated_at"`
+}
+
+// ControlProposal records a deduplicated coordinator proposal signal.
+type ControlProposal struct {
+	ID             string                      `json:"id"`
+	DedupeKey      string                      `json:"dedupe_key"`
+	Kind           ProposalKind                `json:"kind"`
+	Status         ProposalStatus              `json:"status"`
+	WorkspaceID    string                      `json:"workspace_id,omitempty"`
+	SessionID      string                      `json:"session_id,omitempty"`
+	AgentID        string                      `json:"agent_id,omitempty"`
+	RoomID         string                      `json:"room_id,omitempty"`
+	Summary        string                      `json:"summary"`
+	SourceRefs     []contextengine.EvidenceRef `json:"source_refs,omitempty"`
+	EvidenceRefs   []contextengine.EvidenceRef `json:"evidence_refs,omitempty"`
+	Payload        map[string]any              `json:"payload,omitempty"`
+	Confidence     float64                     `json:"confidence"`
+	BlastRadius    string                      `json:"blast_radius,omitempty"`
+	ReviewRequired bool                        `json:"review_required"`
+	Count          int                         `json:"count"`
+	CreatedAt      time.Time                   `json:"created_at"`
+	UpdatedAt      time.Time                   `json:"updated_at"`
+}
+
+// CoordinatorDecision records one append-only decision for a control proposal.
+type CoordinatorDecision struct {
+	ID              string                      `json:"id"`
+	ProposalID      string                      `json:"proposal_id"`
+	WorkspaceID     string                      `json:"workspace_id,omitempty"`
+	Decision        DecisionKind                `json:"decision"`
+	AuthorityMode   AuthorityMode               `json:"authority_mode"`
+	StatusAfter     ProposalStatus              `json:"status_after"`
+	ApprovalActor   string                      `json:"approval_actor,omitempty"`
+	PolicyID        string                      `json:"policy_id,omitempty"`
+	PolicyVersion   string                      `json:"policy_version,omitempty"`
+	PolicyHash      string                      `json:"policy_hash,omitempty"`
+	EvidenceRefs    []contextengine.EvidenceRef `json:"evidence_refs,omitempty"`
+	HarnessRunIDs   []string                    `json:"harness_run_ids,omitempty"`
+	RoomConsensusID string                      `json:"room_consensus_id,omitempty"`
+	Reason          string                      `json:"reason,omitempty"`
+	Constraints     map[string]any              `json:"constraints,omitempty"`
+	CreatedAt       time.Time                   `json:"created_at"`
+}
+
+// ApplyResult records one idempotent apply attempt/result for a control proposal.
+type ApplyResult struct {
+	ID             string                      `json:"id"`
+	ProposalID     string                      `json:"proposal_id"`
+	DecisionID     string                      `json:"decision_id"`
+	IdempotencyKey string                      `json:"idempotency_key"`
+	TargetKind     string                      `json:"target_kind"`
+	TargetID       string                      `json:"target_id,omitempty"`
+	Status         ApplyResultStatus           `json:"status"`
+	Summary        string                      `json:"summary,omitempty"`
+	Result         map[string]any              `json:"result,omitempty"`
+	ErrorMessage   string                      `json:"error_message,omitempty"`
+	EvidenceRefs   []contextengine.EvidenceRef `json:"evidence_refs,omitempty"`
+	CreatedAt      time.Time                   `json:"created_at"`
+}
+
+// ControlProposalState is the latest read-model state for a control proposal.
+type ControlProposalState struct {
+	Proposal          ControlProposal      `json:"proposal"`
+	DerivedStatus     ProposalStatus       `json:"derived_status"`
+	LatestDecision    *CoordinatorDecision `json:"latest_decision,omitempty"`
+	LatestApplyResult *ApplyResult         `json:"latest_apply_result,omitempty"`
 }
 
 // EvidenceImportRun records one external-evidence intake into the ACA inbox.
