@@ -2,13 +2,19 @@ package memory
 
 import (
 	"math"
+	"sort"
 	"time"
+
+	"github.com/joshka0/foxctl/internal/storage"
 )
 
 const (
 	decayBucketRecent = "recent"
 	decayBucketWarm   = "warm"
 	decayBucketIdle   = "idle"
+
+	decayCandidateMin = 100
+	decayCandidateMax = 5000
 )
 
 // DecayConfig controls bounded rerank decay behavior.
@@ -156,4 +162,81 @@ func clampFloat(v, minV, maxV float64) float64 {
 		return maxV
 	}
 	return v
+}
+
+type decayRankedEntry struct {
+	entry     storage.ScoredEntry
+	baseScore float64
+}
+
+func rerankScoredEntriesWithDecay(
+	scored []storage.ScoredEntry,
+	now time.Time,
+	cfg DecayConfig,
+	limit int,
+) []storage.ScoredEntry {
+	if len(scored) == 0 {
+		return nil
+	}
+
+	ranked := make([]decayRankedEntry, len(scored))
+	for i, candidate := range scored {
+		baseScore := candidate.Score
+		decay := ScoreWithDecay(
+			baseScore,
+			candidate.Entry.LastAccess,
+			candidate.Entry.UpdatedAt,
+			now,
+			candidate.Entry.AccessCount,
+			cfg,
+		)
+		candidate.Score = decay.FinalScore
+		ranked[i] = decayRankedEntry{
+			entry:     candidate,
+			baseScore: baseScore,
+		}
+	}
+
+	sort.SliceStable(ranked, func(i, j int) bool {
+		if ranked[i].entry.Score != ranked[j].entry.Score {
+			return ranked[i].entry.Score > ranked[j].entry.Score
+		}
+		if ranked[i].baseScore != ranked[j].baseScore {
+			return ranked[i].baseScore > ranked[j].baseScore
+		}
+		if !ranked[i].entry.Entry.UpdatedAt.Equal(ranked[j].entry.Entry.UpdatedAt) {
+			return ranked[i].entry.Entry.UpdatedAt.After(ranked[j].entry.Entry.UpdatedAt)
+		}
+		if !ranked[i].entry.Entry.LastAccess.Equal(ranked[j].entry.Entry.LastAccess) {
+			return ranked[i].entry.Entry.LastAccess.After(ranked[j].entry.Entry.LastAccess)
+		}
+		if ranked[i].entry.Entry.Name != ranked[j].entry.Entry.Name {
+			return ranked[i].entry.Entry.Name < ranked[j].entry.Entry.Name
+		}
+		return ranked[i].entry.Entry.ID < ranked[j].entry.Entry.ID
+	})
+
+	if limit > 0 && len(ranked) > limit {
+		ranked = ranked[:limit]
+	}
+
+	reranked := make([]storage.ScoredEntry, len(ranked))
+	for i, candidate := range ranked {
+		reranked[i] = candidate.entry
+	}
+	return reranked
+}
+
+func decayCandidateLimit(limit int) int {
+	if limit <= 0 {
+		return limit
+	}
+	candidateLimit := limit * 3
+	if candidateLimit < decayCandidateMin {
+		return decayCandidateMin
+	}
+	if candidateLimit > decayCandidateMax {
+		return decayCandidateMax
+	}
+	return candidateLimit
 }

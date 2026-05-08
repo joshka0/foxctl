@@ -122,3 +122,157 @@ func TestScoreWithDecay_ClampsPublicFinalScoreToUnitInterval(t *testing.T) {
 		t.Fatalf("expected decay factor <= max (%f), got %f", cfg.MaxFactor, high.DecayFactor)
 	}
 }
+
+func TestRerankScoredEntriesWithDecay_ReturnsCopiedSliceAndPreservesInput(t *testing.T) {
+	now := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
+	cfg := DefaultDecayConfig()
+
+	input := []ScoredEntry{
+		{
+			Entry: NamedEntry{
+				ID:          "a",
+				Name:        "alpha",
+				UpdatedAt:   now.Add(-12 * time.Hour),
+				LastAccess:  now.Add(-12 * time.Hour),
+				AccessCount: 0,
+			},
+			Score: 0.65,
+		},
+		{
+			Entry: NamedEntry{
+				ID:          "b",
+				Name:        "beta",
+				UpdatedAt:   now.Add(-20 * time.Minute),
+				LastAccess:  now.Add(-20 * time.Minute),
+				AccessCount: 2,
+			},
+			Score: 0.45,
+		},
+	}
+
+	originalScore := input[0].Score
+	originalID := input[0].Entry.ID
+
+	got := rerankScoredEntriesWithDecay(input, now, cfg, 0)
+	if len(got) != len(input) {
+		t.Fatalf("len=%d want %d", len(got), len(input))
+	}
+	if &got[0] == &input[0] {
+		t.Fatalf("expected rerank to return a copied slice")
+	}
+	if input[0].Score != originalScore || input[0].Entry.ID != originalID {
+		t.Fatalf("input mutated: score=%f id=%q", input[0].Score, input[0].Entry.ID)
+	}
+	if got[0].Score < 0 || got[0].Score > 1 || got[1].Score < 0 || got[1].Score > 1 {
+		t.Fatalf("expected reranked scores to be clamped into [0,1], got %f and %f", got[0].Score, got[1].Score)
+	}
+}
+
+func TestRerankScoredEntriesWithDecay_DisabledConfigPreservesBaseScoreRanking(t *testing.T) {
+	now := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
+	cfg := DefaultDecayConfig()
+	cfg.Enabled = false
+
+	input := []ScoredEntry{
+		{Entry: NamedEntry{ID: "low", Name: "low", UpdatedAt: now.Add(-1 * time.Hour)}, Score: 1.2},
+		{Entry: NamedEntry{ID: "high", Name: "high", UpdatedAt: now.Add(-2 * time.Hour)}, Score: 9.3},
+		{Entry: NamedEntry{ID: "mid", Name: "mid", UpdatedAt: now.Add(-3 * time.Hour)}, Score: 2.1},
+	}
+
+	got := rerankScoredEntriesWithDecay(input, now, cfg, 0)
+	if len(got) != 3 {
+		t.Fatalf("len=%d want 3", len(got))
+	}
+	if got[0].Entry.ID != "high" || got[1].Entry.ID != "mid" || got[2].Entry.ID != "low" {
+		t.Fatalf("unexpected ranking order: [%s %s %s]", got[0].Entry.ID, got[1].Entry.ID, got[2].Entry.ID)
+	}
+	if got[0].Score != 1 || got[1].Score != 1 || got[2].Score != 1 {
+		t.Fatalf("expected disabled rerank to clamp visible scores to 1, got [%f %f %f]", got[0].Score, got[1].Score, got[2].Score)
+	}
+}
+
+func TestRerankScoredEntriesWithDecay_DeterministicTieBreakers(t *testing.T) {
+	now := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
+	cfg := DefaultDecayConfig()
+	cfg.Enabled = false
+
+	updatedSame := now.Add(-2 * time.Hour)
+	input := []ScoredEntry{
+		{Entry: NamedEntry{ID: "9", Name: "same", UpdatedAt: updatedSame}, Score: 0.7},
+		{Entry: NamedEntry{ID: "1", Name: "same", UpdatedAt: updatedSame}, Score: 0.7},
+		{Entry: NamedEntry{ID: "x", Name: "beta", UpdatedAt: now.Add(-1 * time.Hour)}, Score: 0.7},
+		{Entry: NamedEntry{ID: "y", Name: "alpha", UpdatedAt: now.Add(-1 * time.Hour)}, Score: 0.7},
+		{Entry: NamedEntry{ID: "newer", Name: "zzz", UpdatedAt: now.Add(-30 * time.Minute)}, Score: 0.7},
+	}
+
+	got := rerankScoredEntriesWithDecay(input, now, cfg, 0)
+	if len(got) != len(input) {
+		t.Fatalf("len=%d want %d", len(got), len(input))
+	}
+
+	want := []string{"newer", "y", "x", "1", "9"}
+	for i := range want {
+		if got[i].Entry.ID != want[i] {
+			t.Fatalf("index=%d id=%q want=%q", i, got[i].Entry.ID, want[i])
+		}
+	}
+}
+
+func TestRerankScoredEntriesWithDecay_UsesLastAccessBeforeNameTieBreak(t *testing.T) {
+	now := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
+	cfg := DefaultDecayConfig()
+	cfg.Enabled = false
+	updatedSame := now.Add(-2 * time.Hour)
+
+	input := []ScoredEntry{
+		{Entry: NamedEntry{ID: "a", Name: "alpha", UpdatedAt: updatedSame, LastAccess: now.Add(-2 * time.Hour)}, Score: 0.7},
+		{Entry: NamedEntry{ID: "z", Name: "zeta", UpdatedAt: updatedSame, LastAccess: now.Add(-1 * time.Hour)}, Score: 0.7},
+	}
+
+	got := rerankScoredEntriesWithDecay(input, now, cfg, 0)
+	if got[0].Entry.ID != "z" || got[1].Entry.ID != "a" {
+		t.Fatalf("last_access tie-break ignored: [%s %s]", got[0].Entry.ID, got[1].Entry.ID)
+	}
+}
+
+func TestRerankScoredEntriesWithDecay_AppliesLimitAfterRerank(t *testing.T) {
+	now := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
+	cfg := DefaultDecayConfig()
+	cfg.Enabled = false
+
+	input := []ScoredEntry{
+		{Entry: NamedEntry{ID: "c", Name: "c", UpdatedAt: now}, Score: 0.3},
+		{Entry: NamedEntry{ID: "a", Name: "a", UpdatedAt: now}, Score: 0.9},
+		{Entry: NamedEntry{ID: "b", Name: "b", UpdatedAt: now}, Score: 0.6},
+	}
+
+	got := rerankScoredEntriesWithDecay(input, now, cfg, 2)
+	if len(got) != 2 {
+		t.Fatalf("len=%d want 2", len(got))
+	}
+	if got[0].Entry.ID != "a" || got[1].Entry.ID != "b" {
+		t.Fatalf("unexpected limited order: [%s %s]", got[0].Entry.ID, got[1].Entry.ID)
+	}
+}
+
+func TestDecayCandidateLimitWidensWithBounds(t *testing.T) {
+	tests := []struct {
+		name  string
+		limit int
+		want  int
+	}{
+		{name: "unbounded preserved", limit: 0, want: 0},
+		{name: "negative preserved", limit: -1, want: -1},
+		{name: "floor", limit: 10, want: decayCandidateMin},
+		{name: "triple", limit: 200, want: 600},
+		{name: "cap", limit: 10000, want: decayCandidateMax},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := decayCandidateLimit(tt.limit); got != tt.want {
+				t.Fatalf("decayCandidateLimit(%d)=%d want %d", tt.limit, got, tt.want)
+			}
+		})
+	}
+}
