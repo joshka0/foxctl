@@ -354,6 +354,45 @@ type ControlProposal struct {
 	UpdatedAt      time.Time                   `json:"updated_at"`
 }
 
+// MemoryCandidateInput captures proposal metadata plus a typed candidate payload.
+type MemoryCandidateInput struct {
+	WorkspaceID    string                      `json:"workspace_id"`
+	SessionID      string                      `json:"session_id,omitempty"`
+	AgentID        string                      `json:"agent_id,omitempty"`
+	RoomID         string                      `json:"room_id,omitempty"`
+	Name           string                      `json:"name"`
+	Kind           string                      `json:"kind"`
+	Summary        string                      `json:"summary"`
+	Content        string                      `json:"content,omitempty"`
+	ResultArtifact string                      `json:"result_artifact,omitempty"`
+	FileRefs       []contextengine.EvidenceRef `json:"file_refs,omitempty"`
+	TemporalScope  string                      `json:"temporal_scope,omitempty"`
+	SourceRefs     []contextengine.EvidenceRef `json:"source_refs"`
+	EvidenceRefs   []contextengine.EvidenceRef `json:"evidence_refs"`
+	// Generated candidates are evidence only until a separate promotion path
+	// validates them as policy or instruction.
+	InstructionEligible bool    `json:"instruction_eligible"`
+	EvidenceOnly        bool    `json:"evidence_only"`
+	Confidence          float64 `json:"confidence,omitempty"`
+	BlastRadius         string  `json:"blast_radius,omitempty"`
+	ReviewRequired      *bool   `json:"review_required,omitempty"`
+}
+
+// MemoryCandidatePayload is the typed payload persisted on memory_candidate proposals.
+type MemoryCandidatePayload struct {
+	Name                string                      `json:"name"`
+	Kind                string                      `json:"kind"`
+	Summary             string                      `json:"summary"`
+	Content             string                      `json:"content,omitempty"`
+	ResultArtifact      string                      `json:"result_artifact,omitempty"`
+	FileRefs            []contextengine.EvidenceRef `json:"file_refs,omitempty"`
+	TemporalScope       string                      `json:"temporal_scope,omitempty"`
+	SourceRefs          []contextengine.EvidenceRef `json:"source_refs"`
+	EvidenceRefs        []contextengine.EvidenceRef `json:"evidence_refs"`
+	InstructionEligible bool                        `json:"instruction_eligible"`
+	EvidenceOnly        bool                        `json:"evidence_only"`
+}
+
 // CoordinatorDecision records one append-only decision for a control proposal.
 type CoordinatorDecision struct {
 	ID              string                      `json:"id"`

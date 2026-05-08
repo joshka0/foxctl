@@ -7,6 +7,9 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/context/contextengine"
+	"github.com/joshka0/foxctl/internal/context/memorycore"
+	"github.com/joshka0/foxctl/internal/storage"
+	memorystore "github.com/joshka0/foxctl/internal/storage/memory"
 )
 
 func TestRecordControlProposalDedupesByDedupeKey(t *testing.T) {
@@ -371,6 +374,291 @@ func TestListControlProposalStatesDerivesLatestState(t *testing.T) {
 	}
 }
 
+func TestRecordMemoryCandidateProposalRequiresCoreFields(t *testing.T) {
+	store := NewWorkspaceStore(t.TempDir())
+	ctx := context.Background()
+	valid := MemoryCandidateInput{
+		WorkspaceID: "ws-candidate",
+		Name:        "memory.candidate.test",
+		Kind:        "decision",
+		Summary:     "Candidate summary",
+		FileRefs: []contextengine.EvidenceRef{
+			{Type: contextengine.RefTypePath, Ref: "internal/context/contextplane/control_plane.go"},
+		},
+		SourceRefs: []contextengine.EvidenceRef{
+			{Type: contextengine.RefTypeEvent, Ref: "evt:candidate"},
+		},
+		EvidenceRefs: []contextengine.EvidenceRef{
+			{Type: contextengine.RefTypePath, Ref: "docs/candidate.md"},
+		},
+	}
+
+	if _, err := store.RecordMemoryCandidateProposal(ctx, MemoryCandidateInput{}); err == nil || !strings.Contains(err.Error(), "workspace_id") {
+		t.Fatalf("missing workspace err=%v", err)
+	}
+	missingName := valid
+	missingName.Name = ""
+	if _, err := store.RecordMemoryCandidateProposal(ctx, missingName); err == nil || !strings.Contains(err.Error(), "name is required") {
+		t.Fatalf("missing name err=%v", err)
+	}
+	missingKind := valid
+	missingKind.Kind = ""
+	if _, err := store.RecordMemoryCandidateProposal(ctx, missingKind); err == nil || !strings.Contains(err.Error(), "kind is required") {
+		t.Fatalf("missing kind err=%v", err)
+	}
+	invalidKind := valid
+	invalidKind.Kind = "not_a_memory_kind"
+	if _, err := store.RecordMemoryCandidateProposal(ctx, invalidKind); err == nil || !strings.Contains(err.Error(), "invalid memory candidate kind") {
+		t.Fatalf("invalid kind err=%v", err)
+	}
+	missingSummary := valid
+	missingSummary.Summary = ""
+	if _, err := store.RecordMemoryCandidateProposal(ctx, missingSummary); err == nil || !strings.Contains(err.Error(), "summary is required") {
+		t.Fatalf("missing summary err=%v", err)
+	}
+	missingSource := valid
+	missingSource.SourceRefs = nil
+	if _, err := store.RecordMemoryCandidateProposal(ctx, missingSource); err == nil || !strings.Contains(err.Error(), "source_refs") {
+		t.Fatalf("missing source refs err=%v", err)
+	}
+	missingEvidence := valid
+	missingEvidence.EvidenceRefs = nil
+	if _, err := store.RecordMemoryCandidateProposal(ctx, missingEvidence); err == nil || !strings.Contains(err.Error(), "evidence_refs") {
+		t.Fatalf("missing evidence refs err=%v", err)
+	}
+
+	stored, err := store.RecordMemoryCandidateProposal(ctx, valid)
+	if err != nil {
+		t.Fatalf("RecordMemoryCandidateProposal valid: %v", err)
+	}
+	if stored.Kind != ProposalKindMemoryCandidate {
+		t.Fatalf("kind=%q want memory_candidate", stored.Kind)
+	}
+	if stored.Payload["name"] != valid.Name {
+		t.Fatalf("payload name=%v want %s", stored.Payload["name"], valid.Name)
+	}
+	if stored.Payload["instruction_eligible"] != false || stored.Payload["evidence_only"] != true {
+		t.Fatalf("candidate usage payload=%v", stored.Payload)
+	}
+}
+
+func TestApplyMemoryCandidateRequiresApprovalDecision(t *testing.T) {
+	store := NewWorkspaceStore(t.TempDir())
+	ctx := context.Background()
+	mem := mustOpenMemoryStore(t)
+	defer func() { _ = mem.Close() }()
+
+	proposal, err := store.RecordMemoryCandidateProposal(ctx, testMemoryCandidateInput("ws-apply-no-approval"))
+	if err != nil {
+		t.Fatalf("RecordMemoryCandidateProposal: %v", err)
+	}
+	if _, _, err := store.ApplyMemoryCandidate(ctx, mem, proposal.ID, "missing-decision"); err == nil || !strings.Contains(err.Error(), "no approving decision") {
+		t.Fatalf("ApplyMemoryCandidate without approval err=%v", err)
+	}
+	entries, err := mem.List(ctx, proposal.WorkspaceID, 10)
+	if err != nil {
+		t.Fatalf("memory list: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("unexpected memories written without approval: %d", len(entries))
+	}
+}
+
+func TestApplyMemoryCandidateAppliesOneNamedMemoryIdempotently(t *testing.T) {
+	store := NewWorkspaceStore(t.TempDir())
+	ctx := context.Background()
+	mem := mustOpenMemoryStore(t)
+	defer func() { _ = mem.Close() }()
+
+	in := testMemoryCandidateInput("ws-apply-candidate")
+	proposal, err := store.RecordMemoryCandidateProposal(ctx, in)
+	if err != nil {
+		t.Fatalf("RecordMemoryCandidateProposal: %v", err)
+	}
+	decision := mustRecordCoordinatorDecision(t, store, CoordinatorDecision{
+		ID:            "decision-apply-candidate",
+		ProposalID:    proposal.ID,
+		Decision:      DecisionKindApprove,
+		AuthorityMode: AuthorityModeCoordinatorPolicy,
+		PolicyID:      "memory-candidate-v1",
+		EvidenceRefs:  []contextengine.EvidenceRef{{Type: contextengine.RefTypeEvent, Ref: "evt:approve-candidate"}},
+	})
+
+	firstApply, firstEntry, err := store.ApplyMemoryCandidate(ctx, mem, proposal.ID, decision.ID)
+	if err != nil {
+		t.Fatalf("ApplyMemoryCandidate first: %v", err)
+	}
+	secondApply, secondEntry, err := store.ApplyMemoryCandidate(ctx, mem, proposal.ID, decision.ID)
+	if err != nil {
+		t.Fatalf("ApplyMemoryCandidate replay: %v", err)
+	}
+	if firstApply.ID != secondApply.ID {
+		t.Fatalf("apply replay ID mismatch: %s vs %s", firstApply.ID, secondApply.ID)
+	}
+	if firstEntry.ID != secondEntry.ID || firstEntry.Name != secondEntry.Name {
+		t.Fatalf("entry replay mismatch: first=%+v second=%+v", firstEntry, secondEntry)
+	}
+	if firstApply.TargetKind != "named_memory" {
+		t.Fatalf("target_kind=%q want named_memory", firstApply.TargetKind)
+	}
+
+	entries, err := mem.List(ctx, proposal.WorkspaceID, 10)
+	if err != nil {
+		t.Fatalf("memory list: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("named memory count=%d want 1", len(entries))
+	}
+	if entries[0].LifecycleState != "candidate" {
+		t.Fatalf("lifecycle=%q want candidate", entries[0].LifecycleState)
+	}
+	if entries[0].ReviewStatus != "needs_review" {
+		t.Fatalf("review_status=%q want needs_review", entries[0].ReviewStatus)
+	}
+	record := memorycore.RecordFromNamedEntry(entries[0], memorycore.NamedEntryOptions{})
+	if record.Usage.InstructionEligible {
+		t.Fatalf("instruction eligibility should remain false for named memory projection")
+	}
+	if !record.Usage.EvidenceOnly {
+		t.Fatalf("evidence_only should remain true for named memory projection")
+	}
+	if entries[0].Name == in.Name {
+		t.Fatalf("candidate apply should not overwrite requested active memory name")
+	}
+}
+
+func TestApplyMemoryCandidateDoesNotOverwriteExistingNamedMemory(t *testing.T) {
+	store := NewWorkspaceStore(t.TempDir())
+	ctx := context.Background()
+	mem := mustOpenMemoryStore(t)
+	defer func() { _ = mem.Close() }()
+
+	in := testMemoryCandidateInput("ws-apply-no-overwrite")
+	if _, err := mem.Save(ctx, storage.NamedEntry{
+		Name:           in.Name,
+		Type:           "decision",
+		Workspace:      in.WorkspaceID,
+		Summary:        "Existing trusted memory",
+		Result:         []byte(`{"version":1,"status":"ok","command":"manual","data":{},"meta":{"ts":"2026-05-08T00:00:00Z"},"error":{}}`),
+		LifecycleState: "active",
+		ReviewStatus:   "reviewed",
+	}); err != nil {
+		t.Fatalf("save existing memory: %v", err)
+	}
+
+	proposal, err := store.RecordMemoryCandidateProposal(ctx, in)
+	if err != nil {
+		t.Fatalf("RecordMemoryCandidateProposal: %v", err)
+	}
+	decision := mustRecordCoordinatorDecision(t, store, CoordinatorDecision{
+		ID:            "decision-apply-no-overwrite",
+		ProposalID:    proposal.ID,
+		Decision:      DecisionKindApprove,
+		AuthorityMode: AuthorityModeCoordinatorPolicy,
+		PolicyID:      "memory-candidate-v1",
+		EvidenceRefs:  []contextengine.EvidenceRef{{Type: contextengine.RefTypeEvent, Ref: "evt:approve-no-overwrite"}},
+	})
+
+	_, candidate, err := store.ApplyMemoryCandidate(ctx, mem, proposal.ID, decision.ID)
+	if err != nil {
+		t.Fatalf("ApplyMemoryCandidate: %v", err)
+	}
+	if candidate.Name == in.Name {
+		t.Fatalf("candidate name should be isolated from existing memory name")
+	}
+	existing, err := mem.Get(ctx, in.Name, in.WorkspaceID)
+	if err != nil {
+		t.Fatalf("get existing memory: %v", err)
+	}
+	if existing.LifecycleState != "active" || existing.ReviewStatus != "reviewed" {
+		t.Fatalf("existing memory lifecycle changed: %+v", existing)
+	}
+	entries, err := mem.List(ctx, in.WorkspaceID, 10)
+	if err != nil {
+		t.Fatalf("memory list: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("named memory count=%d want 2", len(entries))
+	}
+}
+
+func TestApplyMemoryCandidateSupportsUnreviewedCandidates(t *testing.T) {
+	store := NewWorkspaceStore(t.TempDir())
+	ctx := context.Background()
+	mem := mustOpenMemoryStore(t)
+	defer func() { _ = mem.Close() }()
+
+	reviewRequired := false
+	in := testMemoryCandidateInput("ws-apply-unreviewed")
+	in.ReviewRequired = &reviewRequired
+	proposal, err := store.RecordMemoryCandidateProposal(ctx, in)
+	if err != nil {
+		t.Fatalf("RecordMemoryCandidateProposal: %v", err)
+	}
+	decision := mustRecordCoordinatorDecision(t, store, CoordinatorDecision{
+		ID:            "decision-apply-unreviewed",
+		ProposalID:    proposal.ID,
+		Decision:      DecisionKindApprove,
+		AuthorityMode: AuthorityModeCoordinatorPolicy,
+		PolicyID:      "memory-candidate-v1",
+		EvidenceRefs:  []contextengine.EvidenceRef{{Type: contextengine.RefTypeEvent, Ref: "evt:approve-unreviewed"}},
+	})
+
+	if _, _, err := store.ApplyMemoryCandidate(ctx, mem, proposal.ID, decision.ID); err != nil {
+		t.Fatalf("ApplyMemoryCandidate: %v", err)
+	}
+	entries, err := mem.List(ctx, proposal.WorkspaceID, 10)
+	if err != nil {
+		t.Fatalf("memory list: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("named memory count=%d want 1", len(entries))
+	}
+	if entries[0].ReviewStatus != "unreviewed" {
+		t.Fatalf("review_status=%q want unreviewed", entries[0].ReviewStatus)
+	}
+}
+
+func TestApplyMemoryCandidateRejectDecisionCannotApply(t *testing.T) {
+	store := NewWorkspaceStore(t.TempDir())
+	ctx := context.Background()
+	mem := mustOpenMemoryStore(t)
+	defer func() { _ = mem.Close() }()
+
+	proposal, err := store.RecordMemoryCandidateProposal(ctx, testMemoryCandidateInput("ws-apply-reject"))
+	if err != nil {
+		t.Fatalf("RecordMemoryCandidateProposal: %v", err)
+	}
+	mustRecordCoordinatorDecision(t, store, CoordinatorDecision{
+		ID:            "decision-approve-before-reject",
+		ProposalID:    proposal.ID,
+		Decision:      DecisionKindApprove,
+		AuthorityMode: AuthorityModeCoordinatorPolicy,
+		PolicyID:      "memory-candidate-v1",
+		EvidenceRefs:  []contextengine.EvidenceRef{{Type: contextengine.RefTypeEvent, Ref: "evt:approve-before-reject"}},
+		CreatedAt:     time.Now().UTC(),
+	})
+	reject := mustRecordCoordinatorDecision(t, store, CoordinatorDecision{
+		ID:            "decision-reject-candidate",
+		ProposalID:    proposal.ID,
+		Decision:      DecisionKindReject,
+		AuthorityMode: AuthorityModeHumanApproval,
+		EvidenceRefs:  []contextengine.EvidenceRef{{Type: contextengine.RefTypeEvent, Ref: "evt:reject-candidate"}},
+		CreatedAt:     time.Now().UTC().Add(time.Second),
+	})
+
+	if _, _, err := store.ApplyMemoryCandidate(ctx, mem, proposal.ID, reject.ID); err == nil || !strings.Contains(err.Error(), "does not approve proposal") {
+		t.Fatalf("ApplyMemoryCandidate rejected decision err=%v", err)
+	}
+	entries, err := mem.List(ctx, proposal.WorkspaceID, 10)
+	if err != nil {
+		t.Fatalf("memory list: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("unexpected memories written after rejection: %d", len(entries))
+	}
+}
+
 func testControlProposal(workspaceID, dedupeKey, summary string) ControlProposal {
 	return ControlProposal{
 		DedupeKey:   dedupeKey,
@@ -383,6 +671,35 @@ func testControlProposal(workspaceID, dedupeKey, summary string) ControlProposal
 		},
 		Payload: map[string]any{"title": summary},
 	}
+}
+
+func testMemoryCandidateInput(workspaceID string) MemoryCandidateInput {
+	return MemoryCandidateInput{
+		WorkspaceID:   workspaceID,
+		Name:          "memory.candidate.example",
+		Kind:          "decision",
+		Summary:       "Capture the reviewed memory candidate for follow-up.",
+		Content:       "Candidate memory body for review.",
+		TemporalScope: "sprint",
+		FileRefs: []contextengine.EvidenceRef{
+			{Type: contextengine.RefTypePath, Ref: "internal/context/contextplane/control_plane.go"},
+		},
+		SourceRefs: []contextengine.EvidenceRef{
+			{Type: contextengine.RefTypeEvent, Ref: "evt:memory-candidate"},
+		},
+		EvidenceRefs: []contextengine.EvidenceRef{
+			{Type: contextengine.RefTypePath, Ref: "docs/spec/memory-candidate.md"},
+		},
+	}
+}
+
+func mustOpenMemoryStore(t *testing.T) *memorystore.Store {
+	t.Helper()
+	store, err := memorystore.Open(context.Background(), t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("memory.Open: %v", err)
+	}
+	return store
 }
 
 func mustRecordControlProposal(t *testing.T, store *WorkspaceStore, proposal ControlProposal) ControlProposal {
