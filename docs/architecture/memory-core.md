@@ -134,6 +134,25 @@ stale evidence
 quarantined evidence
 ```
 
+## Memory Decay Ranking
+
+Memory decay is a search-time ranking adjustment for named-memory retrieval. It
+is a soft rerank, not pruning, lifecycle mutation, curator promotion, or memory
+deletion. A stale-but-strong match can still surface when lifecycle policy
+allows it and the base relevance score is strong enough.
+
+Decay runs after base query eligibility and lifecycle/trust/provenance filtering.
+The reranker widens the candidate pool, applies a bounded recency/access factor,
+then truncates to the requested result window. Public scores remain clamped to
+`[0, 1]`, and relevance remains primary: recency boosts near-ties but should not
+turn weak matches into authoritative context.
+
+Retrieval access is its own telemetry signal. When a memory is surfaced, foxctl
+may update `last_accessed` and `access_count` so later opt-in decay can prefer
+recently surfaced near-ties. That does not mean the agent selected, used,
+validated, succeeded with, or failed with the memory. Outcome telemetry stays in
+the explicit use/success/failure fields.
+
 ## Write Path
 
 Writes should be append-first and provenance-bearing:

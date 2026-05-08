@@ -255,6 +255,34 @@ func TestRerankScoredEntriesWithDecay_AppliesLimitAfterRerank(t *testing.T) {
 	}
 }
 
+func TestRerankScoredEntriesWithDecayStatsReportsFactorsAndCandidateCounts(t *testing.T) {
+	now := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
+	cfg := DefaultDecayConfig()
+	input := []ScoredEntry{
+		{Entry: NamedEntry{ID: "old", Name: "old", UpdatedAt: now.Add(-60 * 24 * time.Hour), LastAccess: now.Add(-60 * 24 * time.Hour)}, Score: 0.8},
+		{Entry: NamedEntry{ID: "recent", Name: "recent", UpdatedAt: now.Add(-30 * time.Minute), LastAccess: now.Add(-30 * time.Minute), AccessCount: 2}, Score: 0.7},
+		{Entry: NamedEntry{ID: "warm", Name: "warm", UpdatedAt: now.Add(-2 * 24 * time.Hour), LastAccess: now.Add(-2 * 24 * time.Hour)}, Score: 0.6},
+	}
+
+	got, stats := RerankScoredEntriesWithDecayStats(input, now, cfg, 2)
+
+	if len(got) != 2 {
+		t.Fatalf("len(got)=%d want 2", len(got))
+	}
+	if !stats.Enabled {
+		t.Fatalf("stats.Enabled=false want true")
+	}
+	if stats.CandidatesBefore != 3 || stats.CandidatesAfter != 2 {
+		t.Fatalf("candidate counts before=%d after=%d want 3/2", stats.CandidatesBefore, stats.CandidatesAfter)
+	}
+	if stats.FactorMin < cfg.MinFactor || stats.FactorMax > cfg.MaxFactor || stats.FactorMin >= stats.FactorMax {
+		t.Fatalf("factor bounds min=%f max=%f want within [%f,%f] with spread", stats.FactorMin, stats.FactorMax, cfg.MinFactor, cfg.MaxFactor)
+	}
+	if stats.FactorAvg <= stats.FactorMin || stats.FactorAvg >= stats.FactorMax {
+		t.Fatalf("factor avg=%f outside expected min/max (%f,%f)", stats.FactorAvg, stats.FactorMin, stats.FactorMax)
+	}
+}
+
 func TestDecayCandidateLimitWidensWithBounds(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -70,19 +70,34 @@ type Pagination struct {
 
 // QueryStats provides query statistics with performance metrics and filter information.
 type QueryStats struct {
-	TotalFound          int            `json:"total_found"`
-	Filtered            int            `json:"filtered"`
-	SearchMethod        string         `json:"search_method"`
-	LatencyMS           int            `json:"latency_ms"`
-	KindsFilter         string         `json:"kinds_filter,omitempty"`
-	LifecycleFilter     string         `json:"lifecycle_filter,omitempty"`
-	LifecyclePolicy     string         `json:"lifecycle_policy,omitempty"`
-	FileFilter          string         `json:"file_filter,omitempty"`
-	SessionIDFilter     string         `json:"session_id_filter,omitempty"`
-	Hint                string         `json:"hint,omitempty"`
-	SourceCounts        map[string]int `json:"source_counts,omitempty"`
-	UnavailableSources  []string       `json:"unavailable_sources,omitempty"`
-	SuppressedLifecycle int            `json:"suppressed_by_lifecycle,omitempty"`
+	TotalFound          int               `json:"total_found"`
+	Filtered            int               `json:"filtered"`
+	SearchMethod        string            `json:"search_method"`
+	LatencyMS           int               `json:"latency_ms"`
+	KindsFilter         string            `json:"kinds_filter,omitempty"`
+	LifecycleFilter     string            `json:"lifecycle_filter,omitempty"`
+	LifecyclePolicy     string            `json:"lifecycle_policy,omitempty"`
+	FileFilter          string            `json:"file_filter,omitempty"`
+	SessionIDFilter     string            `json:"session_id_filter,omitempty"`
+	Hint                string            `json:"hint,omitempty"`
+	SourceCounts        map[string]int    `json:"source_counts,omitempty"`
+	UnavailableSources  []string          `json:"unavailable_sources,omitempty"`
+	SuppressedLifecycle int               `json:"suppressed_by_lifecycle,omitempty"`
+	MemoryDecay         *MemoryDecayStats `json:"memory_decay,omitempty"`
+	AccessRecorded      int               `json:"-"`
+	AccessFailed        bool              `json:"-"`
+}
+
+// MemoryDecayStats summarizes opt-in decay ranking and retrieval-access reinforcement.
+type MemoryDecayStats struct {
+	Enabled          bool    `json:"enabled"`
+	CandidatesBefore int     `json:"candidates_before"`
+	CandidatesAfter  int     `json:"candidates_after"`
+	FactorMin        float64 `json:"factor_min,omitempty"`
+	FactorMax        float64 `json:"factor_max,omitempty"`
+	FactorAvg        float64 `json:"factor_avg,omitempty"`
+	AccessRecorded   int     `json:"access_recorded,omitempty"`
+	AccessFailed     bool    `json:"access_failed,omitempty"`
 }
 
 type recordCandidate struct {
@@ -160,6 +175,7 @@ func emitMemoryQueryTelemetry(ctx context.Context, rc *skillmain.RunContext, in 
 		WithData("lifecycle_filter_present", strings.TrimSpace(in.LifecycleStates) != "").
 		WithData("session_filter_present", strings.TrimSpace(in.SessionID) != "").
 		WithData("include_content", in.IncludeContent).
+		WithData("memory_decay_enabled", in.MemoryDecayEnabled).
 		WithData("limit", in.Limit).
 		WithData("offset", in.Offset).
 		WithData("min_similarity", in.MinSimilarity)
@@ -174,7 +190,16 @@ func emitMemoryQueryTelemetry(ctx context.Context, rc *skillmain.RunContext, in 
 			WithData("unavailable_sources", len(out.Stats.UnavailableSources)).
 			WithData("record_kind_counts", recordKindCounts(out.Records)).
 			WithData("record_lifecycle_counts", recordLifecycleCounts(out.Records)).
+			WithData("memory_access_recorded", out.Stats.AccessRecorded).
+			WithData("memory_access_failed", out.Stats.AccessFailed).
 			WithData("has_more", out.Pagination.HasMore)
+		if out.Stats.MemoryDecay != nil {
+			builder.WithData("memory_decay_candidates_before", out.Stats.MemoryDecay.CandidatesBefore).
+				WithData("memory_decay_candidates_after", out.Stats.MemoryDecay.CandidatesAfter).
+				WithData("memory_decay_factor_min", out.Stats.MemoryDecay.FactorMin).
+				WithData("memory_decay_factor_max", out.Stats.MemoryDecay.FactorMax).
+				WithData("memory_decay_factor_avg", out.Stats.MemoryDecay.FactorAvg)
+		}
 	}
 	if err != nil {
 		observability.Emit(ctx, builder.Error(err, duration))
@@ -236,10 +261,11 @@ func query(ctx context.Context, rc *skillmain.RunContext, in *Input) (*Output, e
 		return nil, skillerr.WrapIO("open memory store", err)
 	}
 
-	namedRecords, totalNamed, suppressedNamed, searchMethod, searchHint, err := queryNamedMemoryRecords(ctx, memStore, rc, workspacePath, in, kindFilters, lifecycleFilters)
+	namedRecords, totalNamed, suppressedNamed, searchMethod, searchHint, decayStats, err := queryNamedMemoryRecords(ctx, memStore, rc, workspacePath, in, kindFilters, lifecycleFilters)
 	if err != nil {
 		return nil, err
 	}
+	out.Stats.MemoryDecay = decayStats
 	out.Stats.SearchMethod = searchMethod
 	if searchHint != "" {
 		out.Stats.Hint = searchHint
@@ -274,7 +300,13 @@ func query(ctx context.Context, rc *skillmain.RunContext, in *Input) (*Output, e
 	for _, candidate := range candidates {
 		out.Records = append(out.Records, candidate.Record)
 	}
-	recordSurfacedNamedMemoryAccess(ctx, memStore, workspacePath, out.Records)
+	accessStats := recordSurfacedNamedMemoryAccess(ctx, memStore, workspacePath, out.Records)
+	out.Stats.AccessRecorded = accessStats.Count
+	out.Stats.AccessFailed = accessStats.Failed
+	if out.Stats.MemoryDecay != nil {
+		out.Stats.MemoryDecay.AccessRecorded = accessStats.Count
+		out.Stats.MemoryDecay.AccessFailed = accessStats.Failed
+	}
 
 	out.Stats.LatencyMS = int(time.Since(start).Milliseconds())
 
@@ -289,10 +321,10 @@ func query(ctx context.Context, rc *skillmain.RunContext, in *Input) (*Output, e
 	return out, nil
 }
 
-func queryNamedMemoryRecords(ctx context.Context, memStore storage.MemoryStore, rc *skillmain.RunContext, workspacePath string, in *Input, kindFilters []memorycore.Kind, lifecycleFilters []memorycore.LifecycleState) ([]recordCandidate, int, int, string, string, error) {
+func queryNamedMemoryRecords(ctx context.Context, memStore storage.MemoryStore, rc *skillmain.RunContext, workspacePath string, in *Input, kindFilters []memorycore.Kind, lifecycleFilters []memorycore.LifecycleState) ([]recordCandidate, int, int, string, string, *MemoryDecayStats, error) {
 	scoredEntries, searchMethod, hint, err := namedMemoryScoredEntries(ctx, memStore, rc, workspacePath, in)
 	if err != nil {
-		return nil, 0, 0, searchMethod, hint, err
+		return nil, 0, 0, searchMethod, hint, nil, err
 	}
 
 	baseFiltered := make([]storage.ScoredEntry, 0, len(scoredEntries))
@@ -327,7 +359,7 @@ func queryNamedMemoryRecords(ctx context.Context, memStore storage.MemoryStore, 
 		baseFiltered = append(baseFiltered, scored)
 	}
 
-	rankedEntries := applyMemoryQueryDecay(baseFiltered, in.MemoryDecayEnabled, time.Now())
+	rankedEntries, decayStats := applyMemoryQueryDecay(baseFiltered, in.MemoryDecayEnabled, time.Now())
 	filtered := make([]recordCandidate, 0, len(rankedEntries))
 	for _, scored := range rankedEntries {
 		entry := scored.Entry
@@ -339,7 +371,7 @@ func queryNamedMemoryRecords(ctx context.Context, memStore storage.MemoryStore, 
 		})
 		filtered = append(filtered, recordCandidate{Record: record, Score: scored.Score})
 	}
-	return filtered, len(scoredEntries), suppressed, searchMethod, hint, nil
+	return filtered, len(scoredEntries), suppressed, searchMethod, hint, decayStats, nil
 }
 
 func namedMemoryScoredEntries(ctx context.Context, memStore storage.MemoryStore, rc *skillmain.RunContext, workspacePath string, in *Input) ([]storage.ScoredEntry, string, string, error) {
@@ -394,11 +426,23 @@ func memoryQueryCandidateLimit(in *Input) int {
 	return limit
 }
 
-func applyMemoryQueryDecay(scored []storage.ScoredEntry, enabled bool, now time.Time) []storage.ScoredEntry {
+func applyMemoryQueryDecay(scored []storage.ScoredEntry, enabled bool, now time.Time) ([]storage.ScoredEntry, *MemoryDecayStats) {
 	if !enabled {
-		return scored
+		return scored, nil
 	}
-	return memorystore.RerankScoredEntriesWithDecay(scored, now, memorystore.DefaultDecayConfig(), 0)
+	ranked, stats := memorystore.RerankScoredEntriesWithDecayStats(scored, now, memorystore.DefaultDecayConfig(), 0)
+	return ranked, memoryDecayStatsFromRerank(stats)
+}
+
+func memoryDecayStatsFromRerank(stats memorystore.DecayRerankStats) *MemoryDecayStats {
+	return &MemoryDecayStats{
+		Enabled:          stats.Enabled,
+		CandidatesBefore: stats.CandidatesBefore,
+		CandidatesAfter:  stats.CandidatesAfter,
+		FactorMin:        stats.FactorMin,
+		FactorMax:        stats.FactorMax,
+		FactorAvg:        stats.FactorAvg,
+	}
 }
 
 func memoryQueryVectorContext(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -554,9 +598,14 @@ type accessBatchRecorder interface {
 	RecordAccessBatch(ctx context.Context, workspace string, names []string, at time.Time) (int, error)
 }
 
-func recordSurfacedNamedMemoryAccess(ctx context.Context, recorder accessBatchRecorder, workspacePath string, records []memorycore.Record) int {
+type accessRecordStats struct {
+	Count  int
+	Failed bool
+}
+
+func recordSurfacedNamedMemoryAccess(ctx context.Context, recorder accessBatchRecorder, workspacePath string, records []memorycore.Record) accessRecordStats {
 	if recorder == nil || len(records) == 0 {
-		return 0
+		return accessRecordStats{}
 	}
 	names := make([]string, 0, len(records))
 	seen := make(map[string]struct{}, len(records))
@@ -575,14 +624,14 @@ func recordSurfacedNamedMemoryAccess(ctx context.Context, recorder accessBatchRe
 		names = append(names, name)
 	}
 	if len(names) == 0 {
-		return 0
+		return accessRecordStats{}
 	}
 	count, err := recorder.RecordAccessBatch(ctx, workspacePath, names, timeutil.NowUTC())
 	if err != nil {
 		errs.Ignore(err, "memory/query record surfaced memory access")
-		return 0
+		return accessRecordStats{Failed: true}
 	}
-	return count
+	return accessRecordStats{Count: count}
 }
 
 func sourceCounts(candidates []recordCandidate) map[string]int {

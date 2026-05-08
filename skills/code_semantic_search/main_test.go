@@ -425,9 +425,12 @@ func TestSearchMemoriesBM25_LabelsCoChangeArtifacts(t *testing.T) {
 		t.Fatalf("save cochange artifact: %v", err)
 	}
 
-	results, err := searchMemoriesBM25(ctx, cfg, "ws", "dispatch", 5, false, store)
+	results, decayStats, err := searchMemoriesBM25(ctx, cfg, "ws", "dispatch", 5, false, store)
 	if err != nil {
 		t.Fatalf("searchMemoriesBM25: %v", err)
+	}
+	if decayStats != nil {
+		t.Fatalf("decayStats=%#v want nil when disabled", decayStats)
 	}
 	if len(results) == 0 {
 		t.Fatalf("expected results")
@@ -451,9 +454,12 @@ func TestSearchMemoriesBM25_DecayDisabledPreservesCurrentOrder(t *testing.T) {
 
 	seedBM25DecayFixture(t, ctx, store)
 
-	results, err := searchMemoriesBM25(ctx, cfg, "ws", "decay ranking", 1, false, store)
+	results, decayStats, err := searchMemoriesBM25(ctx, cfg, "ws", "decay ranking", 1, false, store)
 	if err != nil {
 		t.Fatalf("searchMemoriesBM25: %v", err)
+	}
+	if decayStats != nil {
+		t.Fatalf("decayStats=%#v want nil when disabled", decayStats)
 	}
 	if len(results) != 1 {
 		t.Fatalf("len(results)=%d want 1", len(results))
@@ -474,9 +480,18 @@ func TestSearchMemoriesBM25_DecayOptInReranksBeforeLimit(t *testing.T) {
 
 	seedBM25DecayFixture(t, ctx, store)
 
-	results, err := searchMemoriesBM25(ctx, cfg, "ws", "decay ranking", 1, true, store)
+	results, decayStats, err := searchMemoriesBM25(ctx, cfg, "ws", "decay ranking", 1, true, store)
 	if err != nil {
 		t.Fatalf("searchMemoriesBM25: %v", err)
+	}
+	if decayStats == nil {
+		t.Fatalf("decayStats=nil want stats when enabled")
+	}
+	if !decayStats.Enabled || decayStats.CandidatesBefore < 2 || decayStats.CandidatesAfter < 2 {
+		t.Fatalf("unexpected decay stats: %#v", decayStats)
+	}
+	if decayStats.FactorMax <= decayStats.FactorMin || decayStats.FactorAvg <= 0 {
+		t.Fatalf("unexpected decay factors: %#v", decayStats)
 	}
 	if len(results) != 1 {
 		t.Fatalf("len(results)=%d want 1", len(results))
@@ -527,14 +542,14 @@ func (r *semanticSearchAccessRecorder) RecordAccessBatch(_ context.Context, work
 
 func TestRecordSemanticSearchMemoryAccessDedupeAndSkipRemote(t *testing.T) {
 	recorder := &semanticSearchAccessRecorder{}
-	count := recordSemanticSearchMemoryAccess(context.Background(), recorder, "ws", &Input{}, []Result{
+	stats := recordSemanticSearchMemoryAccess(context.Background(), recorder, "ws", &Input{}, []Result{
 		{Source: "memory", Name: "alpha"},
 		{Source: "memory", Name: "alpha"},
 		{Source: "cochange", Name: "cochange://path"},
 		{Source: "symbol", Name: "ignored"},
 	})
-	if count != 2 {
-		t.Fatalf("count=%d want 2", count)
+	if stats.Count != 2 || stats.Failed {
+		t.Fatalf("stats=%#v want count=2 failed=false", stats)
 	}
 	if recorder.workspace != "ws" {
 		t.Fatalf("workspace=%q want ws", recorder.workspace)
@@ -545,21 +560,21 @@ func TestRecordSemanticSearchMemoryAccessDedupeAndSkipRemote(t *testing.T) {
 	}
 
 	remoteRecorder := &semanticSearchAccessRecorder{}
-	remoteCount := recordSemanticSearchMemoryAccess(context.Background(), remoteRecorder, "ws", &Input{Remote: true}, []Result{
+	remoteStats := recordSemanticSearchMemoryAccess(context.Background(), remoteRecorder, "ws", &Input{Remote: true}, []Result{
 		{Source: "memory", Name: "alpha"},
 	})
-	if remoteCount != 0 || len(remoteRecorder.names) != 0 {
-		t.Fatalf("remote recording happened: count=%d names=%v", remoteCount, remoteRecorder.names)
+	if remoteStats.Count != 0 || remoteStats.Failed || len(remoteRecorder.names) != 0 {
+		t.Fatalf("remote recording happened: stats=%#v names=%v", remoteStats, remoteRecorder.names)
 	}
 }
 
 func TestRecordSemanticSearchMemoryAccessBestEffort(t *testing.T) {
 	recorder := &semanticSearchAccessRecorder{err: os.ErrInvalid}
-	count := recordSemanticSearchMemoryAccess(context.Background(), recorder, "ws", &Input{}, []Result{
+	stats := recordSemanticSearchMemoryAccess(context.Background(), recorder, "ws", &Input{}, []Result{
 		{Source: "memory", Name: "alpha"},
 	})
-	if count != 0 {
-		t.Fatalf("count=%d want 0 on best-effort failure", count)
+	if stats.Count != 0 || !stats.Failed {
+		t.Fatalf("stats=%#v want count=0 failed=true on best-effort failure", stats)
 	}
 }
 
@@ -626,9 +641,12 @@ func TestSearchMemoriesVectorUsesProvidedStoreAndFiltersCodeChunks(t *testing.T)
 		t.Fatalf("update note embedding: %v", err)
 	}
 
-	results, hint, err := searchMemories(ctx, cfg, "ws", "semantic commenting", []float32{1, 0}, 5, &Input{}, store)
+	results, hint, decayStats, err := searchMemories(ctx, cfg, "ws", "semantic commenting", []float32{1, 0}, 5, &Input{}, store)
 	if err != nil {
 		t.Fatalf("searchMemories: %v", err)
+	}
+	if decayStats != nil {
+		t.Fatalf("decayStats=%#v want nil when disabled", decayStats)
 	}
 	if hint != "" {
 		t.Fatalf("hint=%q want empty", hint)

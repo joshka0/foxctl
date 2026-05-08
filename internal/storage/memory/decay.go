@@ -38,6 +38,16 @@ type DecayScore struct {
 	TimestampSource string
 }
 
+// DecayRerankStats summarizes a search-time decay pass without exposing memory content.
+type DecayRerankStats struct {
+	Enabled          bool
+	CandidatesBefore int
+	CandidatesAfter  int
+	FactorMin        float64
+	FactorMax        float64
+	FactorAvg        float64
+}
+
 // DefaultDecayConfig returns conservative defaults where relevance remains primary.
 func DefaultDecayConfig() DecayConfig {
 	return DecayConfig{
@@ -175,10 +185,11 @@ type decayRankedEntry struct {
 //
 //	Purpose: Shared memory decay rerank boundary for retrieval skills and stores.
 //	Keywords: memory decay, recency rerank, candidate widening
-//	Related: ScoreWithDecay, DecayCandidateLimit
+//	Related: ScoreWithDecay, RerankScoredEntriesWithDecayStats, DecayCandidateLimit
 //
 // [[domain:memory-decay-ranking]]
 // [[invariant:memory-decay-relevance-primary]]
+// [[doc:docs/architecture/memory-core.md#Memory Decay Ranking]]
 // [[test:internal/storage/memory/decay_test.go#TestRerankScoredEntriesWithDecay_AppliesLimitAfterRerank]]
 func RerankScoredEntriesWithDecay(
 	scored []storage.ScoredEntry,
@@ -186,11 +197,28 @@ func RerankScoredEntriesWithDecay(
 	cfg DecayConfig,
 	limit int,
 ) []storage.ScoredEntry {
+	reranked, _ := RerankScoredEntriesWithDecayStats(scored, now, cfg, limit)
+	return reranked
+}
+
+// RerankScoredEntriesWithDecayStats applies decay and returns aggregate factor stats.
+func RerankScoredEntriesWithDecayStats(
+	scored []storage.ScoredEntry,
+	now time.Time,
+	cfg DecayConfig,
+	limit int,
+) ([]storage.ScoredEntry, DecayRerankStats) {
+	cfg = normalizeDecayConfig(cfg)
+	stats := DecayRerankStats{
+		Enabled:          cfg.Enabled,
+		CandidatesBefore: len(scored),
+	}
 	if len(scored) == 0 {
-		return nil
+		return nil, stats
 	}
 
 	ranked := make([]decayRankedEntry, len(scored))
+	var factorSum float64
 	for i, candidate := range scored {
 		baseScore := candidate.Score
 		decay := ScoreWithDecay(
@@ -201,6 +229,13 @@ func RerankScoredEntriesWithDecay(
 			candidate.Entry.AccessCount,
 			cfg,
 		)
+		if i == 0 || decay.DecayFactor < stats.FactorMin {
+			stats.FactorMin = decay.DecayFactor
+		}
+		if i == 0 || decay.DecayFactor > stats.FactorMax {
+			stats.FactorMax = decay.DecayFactor
+		}
+		factorSum += decay.DecayFactor
 		candidate.Score = decay.FinalScore
 		ranked[i] = decayRankedEntry{
 			entry:     candidate,
@@ -230,12 +265,14 @@ func RerankScoredEntriesWithDecay(
 	if limit > 0 && len(ranked) > limit {
 		ranked = ranked[:limit]
 	}
+	stats.CandidatesAfter = len(ranked)
+	stats.FactorAvg = factorSum / float64(len(scored))
 
 	reranked := make([]storage.ScoredEntry, len(ranked))
 	for i, candidate := range ranked {
 		reranked[i] = candidate.entry
 	}
-	return reranked
+	return reranked, stats
 }
 
 // DecayCandidateLimit widens a requested result limit so decay can rerank before truncation.

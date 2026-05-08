@@ -966,6 +966,9 @@ func (s *Store) UpdateTelemetry(ctx context.Context, name, workspace string, upd
 }
 
 // RecordAccessBatch records surfaced retrieval access without touching outcome telemetry.
+//
+// [[domain:memory-decay-ranking]]
+// [[invariant:retrieval-access-not-outcome-telemetry]]
 func (s *Store) RecordAccessBatch(ctx context.Context, workspace string, names []string, at time.Time) (int, error) {
 	workspace = ws.CanonicalID(workspace)
 	names = normalizedAccessBatchNames(names)

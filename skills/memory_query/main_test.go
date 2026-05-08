@@ -259,7 +259,7 @@ func TestMemoryQueryEmitsEventTelemetry(t *testing.T) {
 		Summary: "Telemetry should record memory query counts",
 	})
 
-	err := run(context.Background(), rc, Input{Query: "telemetry"})
+	err := run(context.Background(), rc, Input{Query: "telemetry", MemoryDecayEnabled: true})
 	require.NoError(t, err)
 
 	var found *observability.Event
@@ -277,6 +277,12 @@ func TestMemoryQueryEmitsEventTelemetry(t *testing.T) {
 	require.Equal(t, true, found.Data["query_present"])
 	require.Equal(t, float64(1), found.Data["records_returned"])
 	require.NotEmpty(t, found.Data["search_method"])
+	require.Equal(t, true, found.Data["memory_decay_enabled"])
+	require.Equal(t, float64(1), found.Data["memory_decay_candidates_before"])
+	require.Equal(t, float64(1), found.Data["memory_decay_candidates_after"])
+	require.Equal(t, float64(1), found.Data["memory_access_recorded"])
+	require.Equal(t, false, found.Data["memory_access_failed"])
+	require.Greater(t, found.Data["memory_decay_factor_max"].(float64), 0.0)
 }
 
 func TestMemoryQuery_KindsOnly(t *testing.T) {
@@ -602,13 +608,14 @@ func (failingAccessRecorder) RecordAccessBatch(context.Context, string, []string
 }
 
 func TestRecordSurfacedNamedMemoryAccessBestEffort(t *testing.T) {
-	count := recordSurfacedNamedMemoryAccess(context.Background(), failingAccessRecorder{}, "ws", []memorycore.Record{
+	stats := recordSurfacedNamedMemoryAccess(context.Background(), failingAccessRecorder{}, "ws", []memorycore.Record{
 		{
 			SourceLane: memorycore.SourceLaneNamedMemory,
 			SourceID:   "alpha",
 		},
 	})
-	assert.Equal(t, 0, count)
+	assert.Equal(t, 0, stats.Count)
+	assert.True(t, stats.Failed)
 }
 
 func TestMemoryQuery_RecordAccessFeedsDecayRerank(t *testing.T) {
@@ -687,6 +694,8 @@ func TestMemoryQuery_MemoryDecayDisabledPreservesFilterScores(t *testing.T) {
 	data := getData(t, env)
 	records := data["records"].([]any)
 	require.Len(t, records, 2)
+	stats := data["stats"].(map[string]any)
+	assert.NotContains(t, stats, "memory_decay")
 
 	scores := scoresBySourceID(records)
 	assert.Equal(t, 1.0, scores["decay-disabled-old"])
@@ -729,6 +738,16 @@ func TestMemoryQuery_MemoryDecayEnabledReranksBeforePagination(t *testing.T) {
 	first := records[0].(map[string]any)
 	assert.Equal(t, "decay-enabled-recent", first["source_id"])
 	assert.Greater(t, first["score"].(float64), 0.9)
+
+	stats := data["stats"].(map[string]any)
+	decay := stats["memory_decay"].(map[string]any)
+	assert.Equal(t, true, decay["enabled"])
+	assert.Equal(t, float64(2), decay["candidates_before"])
+	assert.Equal(t, float64(2), decay["candidates_after"])
+	assert.Equal(t, float64(1), decay["access_recorded"])
+	assert.NotContains(t, decay, "access_failed")
+	assert.Greater(t, decay["factor_max"].(float64), decay["factor_min"].(float64))
+	assert.Greater(t, decay["factor_avg"].(float64), 0.0)
 }
 
 func scoresBySourceID(records []any) map[string]float64 {

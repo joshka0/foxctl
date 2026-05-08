@@ -250,18 +250,31 @@ type ContextHint struct {
 
 // SearchStats contains search statistics and performance metrics.
 type SearchStats struct {
-	TotalResults        int            `json:"total_results"`
-	SourceCounts        map[string]int `json:"source_counts"`
-	SourceLatencies     map[string]int `json:"source_latencies_ms"` // Per-source latency
-	SourcesMissing      []string       `json:"sources_missing,omitempty"`
-	EmbeddingDimensions int            `json:"embedding_dimensions,omitempty"`
-	Hint                string         `json:"hint,omitempty"` // Remediation hint
+	TotalResults        int               `json:"total_results"`
+	SourceCounts        map[string]int    `json:"source_counts"`
+	SourceLatencies     map[string]int    `json:"source_latencies_ms"` // Per-source latency
+	SourcesMissing      []string          `json:"sources_missing,omitempty"`
+	EmbeddingDimensions int               `json:"embedding_dimensions,omitempty"`
+	Hint                string            `json:"hint,omitempty"` // Remediation hint
+	MemoryDecay         *MemoryDecayStats `json:"memory_decay,omitempty"`
 
 	// Reranking stats (populated when reranking is enabled)
 	RerankEnabled   bool   `json:"rerank_enabled,omitempty"`
 	RerankModel     string `json:"rerank_model,omitempty"`
 	RerankLatencyMS int    `json:"rerank_latency_ms,omitempty"`
 	RerankCount     int    `json:"rerank_count,omitempty"` // Number of candidates reranked
+}
+
+// MemoryDecayStats summarizes opt-in memory decay ranking and access reinforcement.
+type MemoryDecayStats struct {
+	Enabled          bool    `json:"enabled"`
+	CandidatesBefore int     `json:"candidates_before"`
+	CandidatesAfter  int     `json:"candidates_after"`
+	FactorMin        float64 `json:"factor_min,omitempty"`
+	FactorMax        float64 `json:"factor_max,omitempty"`
+	FactorAvg        float64 `json:"factor_avg,omitempty"`
+	AccessRecorded   int     `json:"access_recorded,omitempty"`
+	AccessFailed     bool    `json:"access_failed,omitempty"`
 }
 
 // SessionTimeline contains timeline data for a session with chunks and learnings.
@@ -676,13 +689,14 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 				return
 			}
 
-			results, hint, err := searchMemories(sourceCtx, cfg, workspaceID, in.Query, memoryEmbedding, in.Limit*2, in, sharedMemoryStore)
+			results, hint, memoryDecayStats, err := searchMemories(sourceCtx, cfg, workspaceID, in.Query, memoryEmbedding, in.Limit*2, in, sharedMemoryStore)
 			resultsCh <- sourceResults{
-				source:  ScopeMemories,
-				results: results,
-				err:     err,
-				latency: time.Since(start),
-				hint:    hint,
+				source:      ScopeMemories,
+				results:     results,
+				err:         err,
+				latency:     time.Since(start),
+				hint:        hint,
+				memoryDecay: memoryDecayStats,
 			}
 		}()
 	}
@@ -798,6 +812,9 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 		if sr.source == ScopeSymbols && len(sr.groups) > 0 {
 			symbolGroups = sr.groups
 		}
+		if sr.source == ScopeMemories && sr.memoryDecay != nil {
+			out.Stats.MemoryDecay = sr.memoryDecay
+		}
 	}
 	// Append source hints if main hint not already set
 	if out.Stats.Hint == "" && len(sourceHints) > 0 {
@@ -839,7 +856,11 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 
 	out.Results = fusedResults
 	out.Stats.TotalResults = len(fusedResults)
-	recordSemanticSearchMemoryAccess(ctx, sharedMemoryStore, workspaceID, in, out.Results)
+	accessStats := recordSemanticSearchMemoryAccess(ctx, sharedMemoryStore, workspaceID, in, out.Results)
+	if out.Stats.MemoryDecay != nil {
+		out.Stats.MemoryDecay.AccessRecorded = accessStats.Count
+		out.Stats.MemoryDecay.AccessFailed = accessStats.Failed
+	}
 
 	// Extract context hints from session results
 	if *in.IncludeContext {
@@ -1157,12 +1178,13 @@ func emitSemanticSearchOutput(ctx context.Context, rc *skillmain.RunContext, in 
 
 // sourceResults holds results from a single search source with timing and error information.
 type sourceResults struct {
-	source  string
-	results []Result
-	groups  []retrievalv2.Group
-	err     error
-	latency time.Duration
-	hint    string // Optional hint when source unavailable but not an error
+	source      string
+	results     []Result
+	groups      []retrievalv2.Group
+	err         error
+	latency     time.Duration
+	hint        string // Optional hint when source unavailable but not an error
+	memoryDecay *MemoryDecayStats
 }
 
 // scopedEmbeddings holds query embeddings for different scope groups.
@@ -1976,17 +1998,17 @@ func searchMemories(
 	limit int,
 	in *Input,
 	memStore storage.MemoryStore,
-) ([]Result, string, error) {
+) ([]Result, string, *MemoryDecayStats, error) {
 	var scoredEntries []storage.ScoredEntry
 
 	if in.Remote {
 		if queryEmbedding == nil {
-			return nil, "memory remote search requires embeddings; " + noEmbeddingHint(cfg), nil
+			return nil, "memory remote search requires embeddings; " + noEmbeddingHint(cfg), nil, nil
 		}
 
 		store, closeStore, err := ensureSemanticSearchMemoryStore(ctx, cfg, memStore)
 		if err != nil {
-			return nil, "", skillerr.WrapIO("open memory store (remote mode)", err)
+			return nil, "", nil, skillerr.WrapIO("open memory store (remote mode)", err)
 		}
 		if closeStore != nil {
 			defer closeStore()
@@ -1994,7 +2016,7 @@ func searchMemories(
 
 		remoteStore, ok := store.(remoteMemorySearcher)
 		if !ok && (in.Global || len(in.Workspaces) > 0) {
-			return nil, "", skillerr.Validation("memory store does not support cross-workspace search; Turso required")
+			return nil, "", nil, skillerr.Validation("memory store does not support cross-workspace search; Turso required")
 		}
 
 		candidateLimit := semanticSearchMemoryCandidateLimit(limit, in.MemoryDecayEnabled)
@@ -2006,28 +2028,28 @@ func searchMemories(
 			scoredEntries, err = store.SearchSimilar(ctx, workspaceID, queryEmbedding, candidateLimit)
 		}
 		if err != nil {
-			return nil, "", skillerr.WrapRuntime("memory remote search failed", err)
+			return nil, "", nil, skillerr.WrapRuntime("memory remote search failed", err)
 		}
 
 		baseScores := captureMemoryBaseScores(scoredEntries, in.MemoryDecayEnabled)
-		scoredEntries = applyMemoryDecayPolicy(scoredEntries, in.MemoryDecayEnabled, 0, time.Now())
-		return memoryResultsFromScored(scoredEntries, limit, baseScores), "", nil
+		scoredEntries, decayStats := applyMemoryDecayPolicy(scoredEntries, in.MemoryDecayEnabled, 0, time.Now())
+		return memoryResultsFromScored(scoredEntries, limit, baseScores), "", decayStats, nil
 	}
 
 	if queryEmbedding != nil {
-		results, err := searchMemoriesVector(ctx, cfg, workspaceID, queryEmbedding, limit, in.MemoryDecayEnabled, memStore)
+		results, decayStats, err := searchMemoriesVector(ctx, cfg, workspaceID, queryEmbedding, limit, in.MemoryDecayEnabled, memStore)
 		if err == nil && len(results) > 0 {
-			return results, "", nil
+			return results, "", decayStats, nil
 		}
 		if err != nil {
 			hint := fmt.Sprintf("memory vector search failed: %v; using BM25 fallback", err)
-			results, bm25Err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit, in.MemoryDecayEnabled, memStore)
-			return results, hint, bm25Err
+			results, decayStats, bm25Err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit, in.MemoryDecayEnabled, memStore)
+			return results, hint, decayStats, bm25Err
 		}
 	}
 
-	results, err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit, in.MemoryDecayEnabled, memStore)
-	return results, "", err
+	results, decayStats, err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit, in.MemoryDecayEnabled, memStore)
+	return results, "", decayStats, err
 }
 
 type remoteMemorySearcher interface {
@@ -2118,20 +2140,37 @@ func normalizeBM25MemoryScore(score float64) float64 {
 	return normalizedScore
 }
 
-func applyMemoryDecayPolicy(scored []storage.ScoredEntry, enabled bool, limit int, now time.Time) []storage.ScoredEntry {
+func applyMemoryDecayPolicy(scored []storage.ScoredEntry, enabled bool, limit int, now time.Time) ([]storage.ScoredEntry, *MemoryDecayStats) {
 	if !enabled {
-		return scored
+		return scored, nil
 	}
-	return memory.RerankScoredEntriesWithDecay(scored, now, memory.DefaultDecayConfig(), limit)
+	ranked, stats := memory.RerankScoredEntriesWithDecayStats(scored, now, memory.DefaultDecayConfig(), limit)
+	return ranked, memoryDecayStatsFromRerank(stats)
+}
+
+func memoryDecayStatsFromRerank(stats memory.DecayRerankStats) *MemoryDecayStats {
+	return &MemoryDecayStats{
+		Enabled:          stats.Enabled,
+		CandidatesBefore: stats.CandidatesBefore,
+		CandidatesAfter:  stats.CandidatesAfter,
+		FactorMin:        stats.FactorMin,
+		FactorMax:        stats.FactorMax,
+		FactorAvg:        stats.FactorAvg,
+	}
 }
 
 type accessBatchRecorder interface {
 	RecordAccessBatch(ctx context.Context, workspace string, names []string, at time.Time) (int, error)
 }
 
-func recordSemanticSearchMemoryAccess(ctx context.Context, recorder accessBatchRecorder, workspaceID string, in *Input, results []Result) int {
+type accessRecordStats struct {
+	Count  int
+	Failed bool
+}
+
+func recordSemanticSearchMemoryAccess(ctx context.Context, recorder accessBatchRecorder, workspaceID string, in *Input, results []Result) accessRecordStats {
 	if recorder == nil || in == nil || in.Remote || len(results) == 0 {
-		return 0
+		return accessRecordStats{}
 	}
 	names := make([]string, 0, len(results))
 	seen := make(map[string]struct{}, len(results))
@@ -2150,14 +2189,14 @@ func recordSemanticSearchMemoryAccess(ctx context.Context, recorder accessBatchR
 		names = append(names, name)
 	}
 	if len(names) == 0 {
-		return 0
+		return accessRecordStats{}
 	}
 	count, err := recorder.RecordAccessBatch(ctx, workspaceID, names, timeutil.NowUTC())
 	if err != nil {
 		errs.Ignore(err, "code/semantic_search record surfaced memory access")
-		return 0
+		return accessRecordStats{Failed: true}
 	}
-	return count
+	return accessRecordStats{Count: count}
 }
 
 // searchMemoriesBM25 uses SQLite BM25-like text search for memories.
@@ -2167,12 +2206,12 @@ func searchMemoriesBM25(
 	limit int,
 	decayEnabled bool,
 	memStore storage.MemoryStore,
-) ([]Result, error) {
+) ([]Result, *MemoryDecayStats, error) {
 	var err error
 	if memStore == nil {
 		memStore, err = openSemanticSearchMemoryStore(ctx, cfg)
 		if err != nil {
-			return nil, skillerr.WrapIO("open memory store", err)
+			return nil, nil, skillerr.WrapIO("open memory store", err)
 		}
 		defer func() { _ = memStore.Close() }()
 	}
@@ -2187,10 +2226,10 @@ func searchMemoriesBM25(
 	// Use basic text search on memories (BM25-like)
 	scoredEntries, err := memStore.Search(ctx, workspaceID, query, fetchLimit)
 	if err != nil {
-		return nil, skillerr.WrapIO("search memories", err)
+		return nil, nil, skillerr.WrapIO("search memories", err)
 	}
 	baseScores := captureMemoryBaseScores(scoredEntries, decayEnabled)
-	scoredEntries = applyMemoryDecayPolicy(scoredEntries, decayEnabled, 0, time.Now())
+	scoredEntries, decayStats := applyMemoryDecayPolicy(scoredEntries, decayEnabled, 0, time.Now())
 
 	// Filter out symbol-type entries (they're handled by symbol search)
 	results := make([]Result, 0, len(scoredEntries))
@@ -2231,7 +2270,7 @@ func searchMemoriesBM25(
 		}
 	}
 
-	return results, nil
+	return results, decayStats, nil
 }
 
 // searchMemoriesVector uses SQLite in-memory cosine similarity search.
@@ -2242,12 +2281,12 @@ func searchMemoriesVector(
 	limit int,
 	decayEnabled bool,
 	memStore storage.MemoryStore,
-) ([]Result, error) {
+) ([]Result, *MemoryDecayStats, error) {
 	var err error
 	if memStore == nil {
 		memStore, err = openSemanticSearchMemoryStore(ctx, cfg)
 		if err != nil {
-			return nil, skillerr.WrapIO("open memory store", err)
+			return nil, nil, skillerr.WrapIO("open memory store", err)
 		}
 		defer func() { _ = memStore.Close() }()
 	}
@@ -2262,10 +2301,10 @@ func searchMemoriesVector(
 	// Use vector similarity search
 	scoredEntries, err := memStore.SearchSimilar(ctx, workspaceID, queryEmbedding, fetchLimit)
 	if err != nil {
-		return nil, skillerr.WrapIO("vector search memories", err)
+		return nil, nil, skillerr.WrapIO("vector search memories", err)
 	}
 	baseScores := captureMemoryBaseScores(scoredEntries, decayEnabled)
-	scoredEntries = applyMemoryDecayPolicy(scoredEntries, decayEnabled, 0, time.Now())
+	scoredEntries, decayStats := applyMemoryDecayPolicy(scoredEntries, decayEnabled, 0, time.Now())
 
 	// Filter out symbol-type entries (they're handled by symbol search)
 	results := make([]Result, 0, len(scoredEntries))
@@ -2300,7 +2339,7 @@ func searchMemoriesVector(
 		}
 	}
 
-	return results, nil
+	return results, decayStats, nil
 }
 
 func isCodeMemoryEntryType(entryType string) bool {
