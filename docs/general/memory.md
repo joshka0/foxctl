@@ -76,7 +76,25 @@ Important `named_memory` constraints:
 | Mode | Command path | Notes |
 |-----|---------------|-------|
 | Lexical | `foxctl memory search --query ...` | String match in memory store |
+| Canonical records | `foxctl run memory/query --input ...` | Returns typed memorycore records with lifecycle/trust/provenance labels |
 | Semantic | `foxctl run code/semantic_search --input '{"query":"...","scope":["memories"]}'` | Uses embedding-backed retrieval pipeline |
+
+### Memory Decay
+
+`memory/query` and `code/semantic_search` memory scope support
+`memory_decay_enabled`. The default is disabled, so existing retrieval order is
+unchanged unless a caller opts in.
+
+When enabled, memory decay widens named-memory candidates before final
+truncation, applies a bounded recency/access factor, and then returns the final
+window. It is a soft rerank, not pruning: old memories remain eligible when they
+are strong matches. Lifecycle filtering remains separate; deprecated,
+quarantined, archived, or stale records follow the memory-core lifecycle policy
+before decay ranking is applied.
+
+Surfacing a named memory can update `last_accessed` and `access_count`. That is
+a retrieval signal only. It does not update `use_count`, success/failure
+telemetry, lifecycle state, or curator promotion state.
 
 ## Embedding and Model Selection
 
@@ -97,6 +115,8 @@ foxctl memory search --query "oauth callback" --limit 10
 foxctl memory get gotcha-oauth-state
 foxctl memory put --name gotcha-oauth-state --type gotcha --summary "state must be validated" --data '{"note":"..."}'
 foxctl run code/semantic_search --input '{"query":"oauth gotcha","scope":["memories"],"limit":5}'
+foxctl run memory/query --input '{"query":"oauth gotcha","memory_decay_enabled":true,"limit":5}'
+foxctl run code/semantic_search --input '{"query":"oauth gotcha","scope":["memories"],"memory_decay_enabled":true,"limit":5}'
 ```
 
 ## Invariants

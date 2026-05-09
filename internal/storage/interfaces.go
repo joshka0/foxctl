@@ -234,6 +234,9 @@ type MemoryStore interface {
 	Delete(ctx context.Context, name, workspace string) error
 	DeleteByNamePrefix(ctx context.Context, workspace, namePrefix string) (int, error)
 	Search(ctx context.Context, workspace, query string, limit int) ([]ScoredEntry, error)
+	// RecordAccessBatch records retrieval access for surfaced search results.
+	// Implementations update only access_count/last_accessed, not outcome telemetry.
+	RecordAccessBatch(ctx context.Context, workspace string, names []string, at time.Time) (int, error)
 	Update(ctx context.Context, name, workspace string, summary, typ *string) (NamedEntry, error)
 	UpdateLifecycle(ctx context.Context, name, workspace string, update MemoryLifecycleUpdate) (NamedEntry, error)
 	UpdateTelemetry(ctx context.Context, name, workspace string, update MemoryTelemetryUpdate) (NamedEntry, error)

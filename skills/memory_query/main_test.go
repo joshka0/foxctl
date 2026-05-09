@@ -14,6 +14,7 @@ import (
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skilltest"
 	"github.com/joshka0/foxctl/internal/context/contextengine"
+	"github.com/joshka0/foxctl/internal/context/memorycore"
 	"github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/runtime/observability"
 	"github.com/joshka0/foxctl/internal/storage"
@@ -128,6 +129,30 @@ func seedMemory(t *testing.T, store *memory.Store, workspace string, opts *seedO
 	return saved
 }
 
+func markMemoryViewed(t *testing.T, store *memory.Store, workspace, name string, at time.Time, count int) {
+	t.Helper()
+	for i := 0; i < count; i++ {
+		_, err := store.UpdateTelemetry(context.Background(), name, workspace, storage.MemoryTelemetryUpdate{
+			Action: "viewed",
+			At:     &at,
+		})
+		require.NoError(t, err)
+	}
+}
+
+func memoryEntryByName(t *testing.T, store *memory.Store, workspace, name string) storage.NamedEntry {
+	t.Helper()
+	entries, err := store.List(context.Background(), workspace, 1000)
+	require.NoError(t, err)
+	for _, entry := range entries {
+		if entry.Name == name {
+			return entry
+		}
+	}
+	t.Fatalf("memory entry %q not found", name)
+	return storage.NamedEntry{}
+}
+
 type seedOpts struct {
 	Name      string
 	Type      string
@@ -234,7 +259,7 @@ func TestMemoryQueryEmitsEventTelemetry(t *testing.T) {
 		Summary: "Telemetry should record memory query counts",
 	})
 
-	err := run(context.Background(), rc, Input{Query: "telemetry"})
+	err := run(context.Background(), rc, Input{Query: "telemetry", MemoryDecayEnabled: true})
 	require.NoError(t, err)
 
 	var found *observability.Event
@@ -252,6 +277,12 @@ func TestMemoryQueryEmitsEventTelemetry(t *testing.T) {
 	require.Equal(t, true, found.Data["query_present"])
 	require.Equal(t, float64(1), found.Data["records_returned"])
 	require.NotEmpty(t, found.Data["search_method"])
+	require.Equal(t, true, found.Data["memory_decay_enabled"])
+	require.Equal(t, float64(1), found.Data["memory_decay_candidates_before"])
+	require.Equal(t, float64(1), found.Data["memory_decay_candidates_after"])
+	require.Equal(t, float64(1), found.Data["memory_access_recorded"])
+	require.Equal(t, false, found.Data["memory_access_failed"])
+	require.Greater(t, found.Data["memory_decay_factor_max"].(float64), 0.0)
 }
 
 func TestMemoryQuery_KindsOnly(t *testing.T) {
@@ -526,6 +557,206 @@ func TestMemoryQuery_FileOnly(t *testing.T) {
 	assert.Len(t, records, 1)
 	mem := records[0].(map[string]any)
 	assert.Contains(t, mem["source_id"], "auth/handler.go")
+}
+
+func TestMemoryQuery_RecordsAccessForSurfacedNamedMemoryAfterPagination(t *testing.T) {
+	var buf bytes.Buffer
+	rc, cleanup := newTestContext(t, &buf)
+	defer cleanup()
+
+	store := openMemoryStore(t, rc)
+	seedMemory(t, store, rc.Workspace, &seedOpts{
+		Name:    "surfaced-file-memory",
+		Type:    "semantic_fact",
+		Summary: "Surfaced file memory",
+		Result: map[string]any{
+			"file": "internal/auth/handler.go",
+		},
+	})
+	seedMemory(t, store, rc.Workspace, &seedOpts{
+		Name:    "hidden-file-memory",
+		Type:    "semantic_fact",
+		Summary: "Hidden file memory",
+		Result: map[string]any{
+			"file": "internal/api/router.go",
+		},
+	})
+
+	err := run(context.Background(), rc, Input{
+		File:  "internal/auth/handler.go",
+		Limit: 1,
+	})
+	require.NoError(t, err)
+
+	env := decodeEnvelope(t, &buf)
+	assertOK(t, env)
+	data := getData(t, env)
+	records := data["records"].([]any)
+	require.Len(t, records, 1)
+	assert.Equal(t, "surfaced-file-memory", records[0].(map[string]any)["source_id"])
+
+	surfaced := memoryEntryByName(t, store, rc.Workspace, "surfaced-file-memory")
+	hidden := memoryEntryByName(t, store, rc.Workspace, "hidden-file-memory")
+	assert.Equal(t, 1, surfaced.AccessCount)
+	assert.Equal(t, 0, hidden.AccessCount)
+}
+
+type failingAccessRecorder struct{}
+
+func (failingAccessRecorder) RecordAccessBatch(context.Context, string, []string, time.Time) (int, error) {
+	return 0, assert.AnError
+}
+
+func TestRecordSurfacedNamedMemoryAccessBestEffort(t *testing.T) {
+	stats := recordSurfacedNamedMemoryAccess(context.Background(), failingAccessRecorder{}, "ws", []memorycore.Record{
+		{
+			SourceLane: memorycore.SourceLaneNamedMemory,
+			SourceID:   "alpha",
+		},
+	})
+	assert.Equal(t, 0, stats.Count)
+	assert.True(t, stats.Failed)
+}
+
+func TestMemoryQuery_RecordAccessFeedsDecayRerank(t *testing.T) {
+	var buf bytes.Buffer
+	rc, cleanup := newTestContext(t, &buf)
+	defer cleanup()
+
+	store := openMemoryStore(t, rc)
+	oldAt := time.Now().UTC().Add(-90 * 24 * time.Hour)
+	seedMemory(t, store, rc.Workspace, &seedOpts{
+		Name:    "decay-chain-alpha",
+		Type:    "semantic_fact",
+		Summary: "Alpha memory",
+		Result: map[string]any{
+			"file": "internal/auth/handler.go",
+		},
+	})
+	seedMemory(t, store, rc.Workspace, &seedOpts{
+		Name:    "decay-chain-beta",
+		Type:    "semantic_fact",
+		Summary: "Beta memory",
+	})
+	markMemoryViewed(t, store, rc.Workspace, "decay-chain-alpha", oldAt, 1)
+	markMemoryViewed(t, store, rc.Workspace, "decay-chain-beta", oldAt, 1)
+
+	err := run(context.Background(), rc, Input{
+		File:  "internal/auth/handler.go",
+		Limit: 1,
+	})
+	require.NoError(t, err)
+
+	buf.Reset()
+	err = run(context.Background(), rc, Input{
+		Kinds:              "semantic_fact",
+		Limit:              1,
+		MemoryDecayEnabled: true,
+	})
+	require.NoError(t, err)
+
+	env := decodeEnvelope(t, &buf)
+	assertOK(t, env)
+	data := getData(t, env)
+	records := data["records"].([]any)
+	require.Len(t, records, 1)
+	assert.Equal(t, "decay-chain-alpha", records[0].(map[string]any)["source_id"])
+}
+
+func TestMemoryQuery_MemoryDecayDisabledPreservesFilterScores(t *testing.T) {
+	var buf bytes.Buffer
+	rc, cleanup := newTestContext(t, &buf)
+	defer cleanup()
+
+	store := openMemoryStore(t, rc)
+	now := time.Now().UTC()
+	seedMemory(t, store, rc.Workspace, &seedOpts{
+		Name:    "decay-disabled-old",
+		Type:    "semantic_fact",
+		Summary: "Old memory",
+	})
+	seedMemory(t, store, rc.Workspace, &seedOpts{
+		Name:    "decay-disabled-recent",
+		Type:    "semantic_fact",
+		Summary: "Recent memory",
+	})
+	markMemoryViewed(t, store, rc.Workspace, "decay-disabled-old", now.Add(-90*24*time.Hour), 1)
+	markMemoryViewed(t, store, rc.Workspace, "decay-disabled-recent", now.Add(-10*time.Minute), 1)
+
+	err := run(context.Background(), rc, Input{
+		Kinds: "semantic_fact",
+		Limit: 2,
+	})
+	require.NoError(t, err)
+
+	env := decodeEnvelope(t, &buf)
+	assertOK(t, env)
+	data := getData(t, env)
+	records := data["records"].([]any)
+	require.Len(t, records, 2)
+	stats := data["stats"].(map[string]any)
+	assert.NotContains(t, stats, "memory_decay")
+
+	scores := scoresBySourceID(records)
+	assert.Equal(t, 1.0, scores["decay-disabled-old"])
+	assert.Equal(t, 1.0, scores["decay-disabled-recent"])
+}
+
+func TestMemoryQuery_MemoryDecayEnabledReranksBeforePagination(t *testing.T) {
+	var buf bytes.Buffer
+	rc, cleanup := newTestContext(t, &buf)
+	defer cleanup()
+
+	store := openMemoryStore(t, rc)
+	now := time.Now().UTC()
+	seedMemory(t, store, rc.Workspace, &seedOpts{
+		Name:    "decay-enabled-old",
+		Type:    "semantic_fact",
+		Summary: "Old memory",
+	})
+	seedMemory(t, store, rc.Workspace, &seedOpts{
+		Name:    "decay-enabled-recent",
+		Type:    "semantic_fact",
+		Summary: "Recent memory",
+	})
+	markMemoryViewed(t, store, rc.Workspace, "decay-enabled-old", now.Add(-90*24*time.Hour), 1)
+	markMemoryViewed(t, store, rc.Workspace, "decay-enabled-recent", now.Add(-10*time.Minute), 1)
+
+	err := run(context.Background(), rc, Input{
+		Kinds:              "semantic_fact",
+		Limit:              1,
+		MemoryDecayEnabled: true,
+	})
+	require.NoError(t, err)
+
+	env := decodeEnvelope(t, &buf)
+	assertOK(t, env)
+	data := getData(t, env)
+	records := data["records"].([]any)
+	require.Len(t, records, 1)
+
+	first := records[0].(map[string]any)
+	assert.Equal(t, "decay-enabled-recent", first["source_id"])
+	assert.Greater(t, first["score"].(float64), 0.9)
+
+	stats := data["stats"].(map[string]any)
+	decay := stats["memory_decay"].(map[string]any)
+	assert.Equal(t, true, decay["enabled"])
+	assert.Equal(t, float64(2), decay["candidates_before"])
+	assert.Equal(t, float64(2), decay["candidates_after"])
+	assert.Equal(t, float64(1), decay["access_recorded"])
+	assert.NotContains(t, decay, "access_failed")
+	assert.Greater(t, decay["factor_max"].(float64), decay["factor_min"].(float64))
+	assert.Greater(t, decay["factor_avg"].(float64), 0.0)
+}
+
+func scoresBySourceID(records []any) map[string]float64 {
+	scores := make(map[string]float64, len(records))
+	for _, item := range records {
+		record := item.(map[string]any)
+		scores[record["source_id"].(string)] = record["score"].(float64)
+	}
+	return scores
 }
 
 // Tests for filtering

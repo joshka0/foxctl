@@ -44,6 +44,7 @@ Source of truth: `skills/code_semantic_search/main.go`.
 | `scope` | string[] | Valid values: `symbols`, `sessions`, `memories`, `tasks`, `codemaps` |
 | `limit` | int | Default `20` |
 | `min_similarity` | float | Default `0.3` |
+| `memory_decay_enabled` | bool | Optional local recency/access rerank for memory-scope results |
 | `rerank_enabled` | bool | Optional Voyage reranking |
 | `rerank_top_k` | int | Candidate size before rerank |
 | `rerank_model` | string | Default `rerank-2.5` |
@@ -93,6 +94,18 @@ Source of truth: `internal/intelligence/indexing/rerank/config.go`.
 | `FOXCTL_RERANK_TIMEOUT` | Request timeout |
 | `FOXCTL_RERANK_RATE_LIMIT` | Requests/minute (`0` disables) |
 | `FOXCTL_RERANK_RATE_LIMIT_WAIT` | Wait vs fail when throttled |
+
+## Memory Decay Rerank
+
+`memory_decay_enabled` is separate from Voyage reranking. Voyage rerank is a
+model-based relevance pass over fused candidates. Memory decay is a local
+named-memory recency/access rerank that only affects memory-scope candidates.
+
+When enabled, the memory lane fetches a wider candidate pool, applies bounded
+decay factors from memory access metadata, and then truncates. Base relevance
+and lifecycle eligibility still gate the candidate set, so old strong matches
+remain visible and weak recent memories do not become authoritative just because
+they are fresh.
 
 ## Hybrid Scoring (BM25 + Vector)
 
