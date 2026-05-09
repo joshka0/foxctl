@@ -90,6 +90,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	if err != nil {
 		return fmt.Errorf("dispatch hooks: %w", err)
 	}
+	emittedActions := append([]hooks.Action(nil), result.Output.Actions...)
+	actionAccounting := buildActionAccounting(emittedActions, in.SessionID != "")
 
 	// Emit hook.dispatch observability event for GUI visibility
 	emitHookDispatchEvent(ctx, in, &result, workspaceID, time.Since(start))
@@ -106,17 +108,19 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 			bufferStats = map[string]any{"error": err.Error()}
 		}
 	}
+	applyContextBufferAccounting(&actionAccounting, bufferStats)
 
 	// Build response data
 	data := map[string]any{
-		"hook_output":   result.Output,
-		"matched_hooks": buildMatchedHooksInfo(hooksCfg, in),
-		"steps":         buildStepsInfo(result.HookResults),
-		"config_files":  existingConfigFiles(workspaceRoot),
-		"blocked":       result.Blocked,
-		"blocked_by":    result.BlockedBy,
-		"hooks_run":     result.HooksRun,
-		"duration_ms":   time.Since(start).Milliseconds(),
+		"hook_output":       result.Output,
+		"matched_hooks":     buildMatchedHooksInfo(hooksCfg, in),
+		"steps":             buildStepsInfo(result.HookResults),
+		"config_files":      existingConfigFiles(workspaceRoot),
+		"blocked":           result.Blocked,
+		"blocked_by":        result.BlockedBy,
+		"hooks_run":         result.HooksRun,
+		"duration_ms":       time.Since(start).Milliseconds(),
+		"action_accounting": actionAccounting,
 	}
 
 	if bufferStats != nil {
@@ -124,6 +128,105 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	}
 
 	return skillout.Emit(rc, skillName, data)
+}
+
+type actionAccounting struct {
+	ActionsEmitted     int                      `json:"actions_emitted"`
+	ActionsExecuted    int                      `json:"actions_executed"`
+	ActionsSkipped     int                      `json:"actions_skipped"`
+	ActionsUnavailable int                      `json:"actions_unavailable"`
+	EmittedByType      map[hooks.ActionType]int `json:"emitted_by_type,omitempty"`
+	ExecutedByType     map[hooks.ActionType]int `json:"executed_by_type,omitempty"`
+	Skipped            []actionAccountingDetail `json:"skipped,omitempty"`
+	Unavailable        []actionAccountingDetail `json:"unavailable,omitempty"`
+	pendingEnqueue     []actionAccountingDetail
+}
+
+type actionAccountingDetail struct {
+	Type   hooks.ActionType `json:"type"`
+	Reason string           `json:"reason"`
+	Source string           `json:"source,omitempty"`
+	Skill  string           `json:"skill,omitempty"`
+	ToNS   string           `json:"to_ns,omitempty"`
+	Topic  string           `json:"topic,omitempty"`
+}
+
+// buildActionAccounting reports which hook actions this provider executed or left visible.
+//
+// [[protocol:hook-action-accounting]]
+func buildActionAccounting(actions []hooks.Action, hasSession bool) actionAccounting {
+	accounting := actionAccounting{
+		ActionsEmitted: len(actions),
+		EmittedByType:  map[hooks.ActionType]int{},
+		ExecutedByType: map[hooks.ActionType]int{},
+	}
+	for _, action := range actions {
+		accounting.EmittedByType[action.Type]++
+		detail := actionAccountingDetail{
+			Type:   action.Type,
+			Source: action.Source,
+			Skill:  action.Skill,
+			ToNS:   action.ToNS,
+			Topic:  action.Topic,
+		}
+		switch action.Type {
+		case hooks.ActionEnqueueContext:
+			detail.Reason = "context_buffer_pending"
+			if hasSession {
+				accounting.pendingEnqueue = append(accounting.pendingEnqueue, detail)
+			} else {
+				detail.Reason = "session_id_required"
+				accounting.ActionsUnavailable++
+				accounting.Unavailable = append(accounting.Unavailable, detail)
+			}
+		case hooks.ActionInjectContext, hooks.ActionRunSkill, hooks.ActionSendMailbox, hooks.ActionBBPost, hooks.ActionBBClaim:
+			detail.Reason = "left_for_provider_or_runtime"
+			accounting.ActionsSkipped++
+			accounting.Skipped = append(accounting.Skipped, detail)
+		default:
+			detail.Reason = "unknown_action_type"
+			accounting.ActionsUnavailable++
+			accounting.Unavailable = append(accounting.Unavailable, detail)
+		}
+	}
+	return accounting
+}
+
+func applyContextBufferAccounting(accounting *actionAccounting, bufferStats map[string]any) {
+	if accounting == nil || len(accounting.pendingEnqueue) == 0 {
+		return
+	}
+	enqueued := intFromAny(bufferStats["enqueued"])
+	if enqueued > len(accounting.pendingEnqueue) {
+		enqueued = len(accounting.pendingEnqueue)
+	}
+	for i, detail := range accounting.pendingEnqueue {
+		if i < enqueued {
+			accounting.ActionsExecuted++
+			accounting.ExecutedByType[hooks.ActionEnqueueContext]++
+			continue
+		}
+		detail.Reason = "context_buffer_unavailable"
+		if errText, ok := bufferStats["error"].(string); ok && errText != "" {
+			detail.Reason = "context_buffer_error"
+		}
+		accounting.ActionsUnavailable++
+		accounting.Unavailable = append(accounting.Unavailable, detail)
+	}
+	accounting.pendingEnqueue = nil
+}
+
+func intFromAny(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	default:
+		return 0
+	}
 }
 
 // processContextBuffer handles enqueue_context actions and drains buffer when possible.
@@ -263,6 +366,7 @@ func buildStepsInfo(results []hooks.HookResult) []map[string]any {
 			"idx":         i + 1,
 			"hook_id":     r.HookID,
 			"skill":       r.Skill,
+			"role":        string(r.Role),
 			"decision":    string(r.Output.Decision),
 			"duration_ms": r.Duration.Milliseconds(),
 		}

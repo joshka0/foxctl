@@ -67,6 +67,9 @@ func TestConfigFromHooks(t *testing.T) {
 	if cfg.Hooks[0].Run[0].TimeoutMS != 2000 {
 		t.Errorf("expected default timeout 2000, got %d", cfg.Hooks[0].Run[0].TimeoutMS)
 	}
+	if cfg.Hooks[0].Run[0].Role != HookRoleCriticalGuard {
+		t.Errorf("expected default role %s, got %s", HookRoleCriticalGuard, cfg.Hooks[0].Run[0].Role)
+	}
 
 	// Index should be built
 	pre := cfg.HooksForEvent(EventPreToolUse)
@@ -141,6 +144,9 @@ hooks:
 	if !cfg.Hooks[0].Run[0].FailOpen {
 		t.Error("expected fail_open=true by default")
 	}
+	if cfg.Hooks[0].Run[0].Role != HookRoleAdvisory {
+		t.Errorf("expected default role %s, got %s", HookRoleAdvisory, cfg.Hooks[0].Run[0].Role)
+	}
 	if cfg.Hooks[0].Run[0].TimeoutMS != 2000 {
 		t.Errorf("expected timeout 2000, got %d", cfg.Hooks[0].Run[0].TimeoutMS)
 	}
@@ -178,6 +184,100 @@ hooks:
 	}
 	if cfg.Hooks[0].Run[0].FailOpen {
 		t.Error("expected fail_open=false from defaults.fail_mode=closed")
+	}
+	if cfg.Hooks[0].Run[0].Role != HookRoleCriticalGuard {
+		t.Errorf("expected role %s from fail-closed default, got %s", HookRoleCriticalGuard, cfg.Hooks[0].Run[0].Role)
+	}
+}
+
+func TestLoadConfig_HookRoles(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "hooks.yaml")
+
+	configContent := `version: 1
+hooks:
+  - id: proposal-hook
+    event: PreToolUse
+    run:
+      - skill: hooks/task_guard
+        role: proposal
+  - id: critical-hook
+    event: PreToolUse
+    run:
+      - skill: hooks/task_guard
+        role: critical-guard
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0o644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+	if cfg.Hooks[0].Run[0].Role != HookRoleProposal {
+		t.Fatalf("expected proposal role, got %s", cfg.Hooks[0].Run[0].Role)
+	}
+	if cfg.Hooks[0].Run[0].FailOpen != true {
+		t.Fatalf("expected proposal hook to keep default fail_open=true")
+	}
+	if cfg.Hooks[1].Run[0].Role != HookRoleCriticalGuard {
+		t.Fatalf("expected critical_guard role, got %s", cfg.Hooks[1].Run[0].Role)
+	}
+	if cfg.Hooks[1].Run[0].FailOpen {
+		t.Fatalf("expected critical_guard hook to fail closed")
+	}
+}
+
+func TestLoadConfig_CriticalGuardRejectsExplicitFailOpen(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "hooks.yaml")
+
+	configContent := `version: 1
+hooks:
+  - id: critical-hook
+    event: PreToolUse
+    run:
+      - skill: hooks/task_guard
+        role: critical_guard
+        fail_open: true
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0o644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	if _, err := LoadConfig(configPath); err == nil {
+		t.Fatal("expected critical_guard + fail_open=true to fail validation")
+	}
+}
+
+func TestLoadConfig_CriticalGuardDefaultOverridesFailOpenDefault(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "hooks.yaml")
+
+	configContent := `version: 1
+defaults:
+  role: critical_guard
+  fail_mode: open
+hooks:
+  - id: critical-default-hook
+    event: PreToolUse
+    run:
+      - skill: hooks/task_guard
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0o644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+	if cfg.Hooks[0].Run[0].Role != HookRoleCriticalGuard {
+		t.Fatalf("expected critical_guard role, got %s", cfg.Hooks[0].Run[0].Role)
+	}
+	if cfg.Hooks[0].Run[0].FailOpen {
+		t.Fatal("expected critical_guard default role to force fail_open=false")
 	}
 }
 

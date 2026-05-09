@@ -322,6 +322,46 @@ async function runOptionalFoxctlSkill(pi: ExtensionAPI, skill: string, input: Re
 	}
 }
 
+async function listControlProposals(
+	pi: ExtensionAPI,
+	signal?: AbortSignal,
+	options?: { workspace?: string; limit?: number; status?: string },
+): Promise<Record<string, unknown>> {
+	const workspace = options?.workspace?.trim() || getWorkspace(pi);
+	const limit = options?.limit ?? 12;
+	const status = options?.status?.trim();
+	const client = getClient(pi);
+	const inbox = await client.get<Record<string, unknown>>(
+		`/api/context/control-proposals${query({ workspace, limit, status })}`,
+		signal,
+	);
+	return {
+		source: {
+			inbox: "web:/api/context/control-proposals",
+			proposal: "web:/api/context/control-proposals/{id}",
+			decision: "web:/api/context/control-proposals/{id}/decisions",
+		},
+		workspace,
+		filters: {
+			limit,
+			status: status || "all",
+		},
+		inbox,
+	};
+}
+
+async function listActiveJobs(pi: ExtensionAPI, signal?: AbortSignal, limit = 12): Promise<Record<string, unknown>> {
+	const client = getClient(pi);
+	const jobs = await client.get<Record<string, unknown>>(
+		`/api/jobs${query({ state: "running", limit })}`,
+		signal,
+	);
+	return {
+		source: "web:/api/jobs?state=running",
+		jobs,
+	};
+}
+
 async function getFoxctlSnapshot(pi: ExtensionAPI, signal?: AbortSignal, prompt = ""): Promise<Record<string, unknown>> {
 	const client = getClient(pi);
 	const workspace = getWorkspace(pi);
@@ -346,6 +386,8 @@ async function getFoxctlSnapshot(pi: ExtensionAPI, signal?: AbortSignal, prompt 
 		`/api/rooms${query({ workspace_id: workspace, actor_id: actor, limit: 12 })}`,
 		signal,
 	);
+	snapshot.control_proposals = await listControlProposals(pi, signal, { workspace, limit: 6 });
+	snapshot.active_jobs = await listActiveJobs(pi, signal, 6);
 	if (room) {
 		snapshot.room_inbox = await client.get<Record<string, unknown>>(
 			`/api/rooms/${path(room)}/inbox${query({ workspace_id: workspace, actor_id: actor, limit: 8 })}`,
@@ -391,6 +433,8 @@ async function gatherFoxctlContext(pi: ExtensionAPI, signal?: AbortSignal): Prom
 		`/api/tasks${query({ workspace, limit: 20 })}`,
 		signal,
 	);
+	result.control_proposals = await listControlProposals(pi, signal, { workspace, limit: 20 });
+	result.active_jobs = await listActiveJobs(pi, signal, 20);
 	if (room) {
 		result.room_status = await client.get<Record<string, unknown>>(
 			`/api/rooms/${path(room)}/status${query({ workspace_id: workspace, actor_id: actor })}`,
@@ -1823,6 +1867,124 @@ const foxctlContextTool = defineTool({
 	},
 });
 
+const ControlDecisionKindEnum = StringEnum(
+	["approve", "reject", "defer", "escalate", "needs_clarification", "request_harness"] as const,
+);
+const ControlAuthorityModeEnum = StringEnum(
+	["coordinator_policy", "room_consensus", "human_approval", "human_override"] as const,
+);
+
+const ControlEvidenceRefSchema = Type.Object({
+	type: Type.String({ description: "Evidence ref kind, e.g. path, task, session, artifact" }),
+	ref: Type.String({ description: "Opaque evidence ref value" }),
+	workspace_id: Type.Optional(Type.String({ description: "Optional workspace ID override" })),
+	title: Type.Optional(Type.String({ description: "Optional human-readable evidence title" })),
+	excerpt: Type.Optional(Type.String({ description: "Optional evidence snippet" })),
+});
+
+const FoxctlControlInboxParams = Type.Object({
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+	limit: Type.Optional(Type.Number({ description: "Maximum proposals to return", default: 20 })),
+	status: Type.Optional(Type.String({ description: "Optional proposal status filter" })),
+});
+
+const foxctlControlInboxTool = defineTool({
+	name: "foxctl_control_inbox",
+	label: "Foxctl Control Inbox",
+	description: "List coordinator control proposals for cockpit triage.",
+	parameters: FoxctlControlInboxParams,
+	async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+		const pi = getPi();
+		const result = await listControlProposals(pi, signal, {
+			workspace: params.workspace,
+			limit: params.limit ?? 20,
+			status: params.status,
+		});
+		return {
+			content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+			details: result,
+		};
+	},
+});
+
+const FoxctlControlInspectParams = Type.Object({
+	proposal_id: Type.String({ description: "Control proposal ID" }),
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+});
+
+const foxctlControlInspectTool = defineTool({
+	name: "foxctl_control_inspect",
+	label: "Foxctl Control Inspect",
+	description: "Inspect one coordinator control proposal by ID.",
+	parameters: FoxctlControlInspectParams,
+	async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+		const pi = getPi();
+		const workspace = params.workspace?.trim() || getWorkspace(pi);
+		const client = getClient(pi);
+		const proposal = await client.get<Record<string, unknown>>(
+			`/api/context/control-proposals/${path(params.proposal_id)}${query({ workspace })}`,
+			signal,
+		);
+		const result = {
+			source: "web:/api/context/control-proposals/{id}",
+			workspace,
+			proposal,
+		};
+		return {
+			content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+			details: result,
+		};
+	},
+});
+
+const FoxctlControlDecideParams = Type.Object({
+	proposal_id: Type.String({ description: "Control proposal ID" }),
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+	decision: ControlDecisionKindEnum,
+	authority_mode: ControlAuthorityModeEnum,
+	approval_actor: Type.Optional(Type.String({ description: "Actor recording the decision; defaults to --foxctl-actor" })),
+	reason: Type.Optional(Type.String({ description: "Decision rationale for coordinator auditability" })),
+	evidence_refs: Type.Array(ControlEvidenceRefSchema, { description: "Supporting evidence refs (required)" }),
+	policy_id: Type.Optional(Type.String({ description: "Optional policy ID (required for coordinator_policy approvals unless policy_hash is set)" })),
+	policy_version: Type.Optional(Type.String({ description: "Optional policy version" })),
+	policy_hash: Type.Optional(Type.String({ description: "Optional policy hash (required with coordinator_policy approvals when policy_id is omitted)" })),
+	room_consensus_id: Type.Optional(Type.String({ description: "Optional room consensus artifact ID" })),
+	harness_run_ids: Type.Optional(Type.Array(Type.String(), { description: "Optional harness run IDs backing this decision" })),
+});
+
+const foxctlControlDecideTool = defineTool({
+	name: "foxctl_control_decide",
+	label: "Foxctl Control Decide",
+	description: "Append a typed CoordinatorDecision for a control proposal (approve/reject/clarify/override by authority_mode).",
+	parameters: FoxctlControlDecideParams,
+	async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+		const pi = getPi();
+		const workspace = params.workspace?.trim() || getWorkspace(pi);
+		const client = getClient(pi);
+		const result = await client.post<Record<string, unknown>>(
+			`/api/context/control-proposals/${path(params.proposal_id)}/decisions`,
+			{
+				workspace,
+				decision: params.decision,
+				authority_mode: params.authority_mode,
+				approval_actor: params.approval_actor?.trim() || getActor(pi),
+				reason: params.reason,
+				evidence_refs: params.evidence_refs,
+				policy_id: params.policy_id,
+				policy_version: params.policy_version,
+				policy_hash: params.policy_hash,
+				room_consensus_id: params.room_consensus_id,
+				harness_run_ids: params.harness_run_ids,
+			},
+			signal,
+		);
+		return {
+			content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+			details: result,
+		};
+	},
+});
+
 const GatherContextParams = Type.Object({});
 
 const gatherContextTool = defineTool({
@@ -2495,6 +2657,9 @@ export default function foxctlExtension(pi: ExtensionAPI) {
 		foxctlCompanionMemoryTool,
 		// Context Plane
 		foxctlContextTool,
+		foxctlControlInboxTool,
+		foxctlControlInspectTool,
+		foxctlControlDecideTool,
 		gatherContextTool,
 		foxctlGatherContextTool,
 		// Mux
@@ -2557,6 +2722,9 @@ export default function foxctlExtension(pi: ExtensionAPI) {
 		"foxctl_memory_query",
 		"foxctl_memory_search",
 		"foxctl_session_recall",
+		"foxctl_control_inbox",
+		"foxctl_control_inspect",
+		"foxctl_control_decide",
 	];
 
 	const notifyGatherContext = async (ctx: Parameters<Parameters<typeof pi.registerCommand>[1]["handler"]>[1]) => {

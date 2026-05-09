@@ -137,6 +137,67 @@ CREATE TABLE IF NOT EXISTS aca_memory_proposals (
 CREATE INDEX IF NOT EXISTS idx_aca_memory_proposals_updated_at ON aca_memory_proposals(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_aca_memory_proposals_status ON aca_memory_proposals(status, updated_at DESC);
 
+CREATE TABLE IF NOT EXISTS aca_control_proposals (
+	id TEXT PRIMARY KEY,
+	dedupe_key TEXT NOT NULL UNIQUE,
+	kind TEXT NOT NULL,
+	status TEXT NOT NULL,
+	workspace_id TEXT,
+	session_id TEXT,
+	agent_id TEXT,
+	room_id TEXT,
+	summary TEXT NOT NULL,
+	source_refs TEXT NOT NULL DEFAULT '[]',
+	evidence_refs TEXT NOT NULL DEFAULT '[]',
+	payload_json TEXT NOT NULL DEFAULT '{}',
+	confidence REAL NOT NULL DEFAULT 0,
+	blast_radius TEXT NOT NULL DEFAULT 'medium',
+	review_required INTEGER NOT NULL DEFAULT 0,
+	count INTEGER NOT NULL DEFAULT 1,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_aca_control_proposals_updated_at ON aca_control_proposals(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_aca_control_proposals_status ON aca_control_proposals(status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_aca_control_proposals_kind ON aca_control_proposals(kind, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS aca_coordinator_decisions (
+	id TEXT PRIMARY KEY,
+	proposal_id TEXT NOT NULL,
+	workspace_id TEXT,
+	decision_kind TEXT NOT NULL,
+	authority_mode TEXT NOT NULL,
+	status_after TEXT NOT NULL,
+	approval_actor TEXT,
+	policy_id TEXT,
+	policy_version TEXT,
+	policy_hash TEXT,
+	evidence_refs TEXT NOT NULL DEFAULT '[]',
+	harness_run_ids TEXT NOT NULL DEFAULT '[]',
+	room_consensus_id TEXT,
+	reason TEXT,
+	constraints_json TEXT NOT NULL DEFAULT '{}',
+	created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_aca_coordinator_decisions_proposal ON aca_coordinator_decisions(proposal_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS aca_apply_results (
+	id TEXT PRIMARY KEY,
+	proposal_id TEXT NOT NULL,
+	decision_id TEXT NOT NULL,
+	idempotency_key TEXT NOT NULL UNIQUE,
+	target_kind TEXT NOT NULL,
+	target_id TEXT,
+	status TEXT NOT NULL,
+	summary TEXT,
+	result_json TEXT NOT NULL DEFAULT '{}',
+	error_message TEXT,
+	evidence_refs TEXT NOT NULL DEFAULT '[]',
+	created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_aca_apply_results_proposal ON aca_apply_results(proposal_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_aca_apply_results_created_at ON aca_apply_results(created_at DESC);
+
 CREATE TABLE IF NOT EXISTS aca_evidence_import_runs (
 	id TEXT PRIMARY KEY,
 	source_kind TEXT NOT NULL,
@@ -259,7 +320,9 @@ func importLegacyMaintenanceTasks(ctx context.Context, db *sql.DB, path string) 
 
 func tableEmpty(ctx context.Context, db *sql.DB, table string) (bool, error) {
 	switch table {
-	case "aca_observations", "aca_tensions", "aca_promotion_jobs", "aca_maintenance_tasks", "aca_retrieval_correction_runs", "aca_graph_correction_runs", "aca_memory_proposals", "aca_evidence_import_runs":
+	case "aca_observations", "aca_tensions", "aca_promotion_jobs", "aca_maintenance_tasks",
+		"aca_retrieval_correction_runs", "aca_graph_correction_runs", "aca_memory_proposals",
+		"aca_control_proposals", "aca_coordinator_decisions", "aca_apply_results", "aca_evidence_import_runs":
 	default:
 		return false, fmt.Errorf("contextplane: unsupported table %q", table)
 	}
@@ -948,6 +1011,315 @@ WHERE id = ?
 	return err
 }
 
+func upsertControlProposalRow(ctx context.Context, db *sql.DB, proposal ControlProposal) error {
+	now := timeutil.NowUTC()
+	if proposal.CreatedAt.IsZero() {
+		proposal.CreatedAt = now
+	}
+	if proposal.UpdatedAt.IsZero() {
+		proposal.UpdatedAt = proposal.CreatedAt
+	}
+	if proposal.ID == "" {
+		proposal.ID = buildRecordID("CP", proposal.CreatedAt)
+	}
+	if proposal.Count <= 0 {
+		proposal.Count = 1
+	}
+	sourceJSON, err := json.Marshal(evidenceRefsToStrings(uniqueEvidenceRefs(proposal.SourceRefs)))
+	if err != nil {
+		return fmt.Errorf("marshal control proposal refs: %w", err)
+	}
+	evidenceJSON, err := json.Marshal(evidenceRefsToStrings(uniqueEvidenceRefs(proposal.EvidenceRefs)))
+	if err != nil {
+		return fmt.Errorf("marshal control proposal evidence refs: %w", err)
+	}
+	payloadJSON, err := json.Marshal(proposal.Payload)
+	if err != nil {
+		return fmt.Errorf("marshal control proposal payload: %w", err)
+	}
+	_, err = db.ExecContext(ctx, `
+INSERT INTO aca_control_proposals (
+	id, dedupe_key, kind, status, workspace_id, session_id, agent_id, room_id,
+	summary, source_refs, evidence_refs, payload_json, confidence, blast_radius,
+	review_required, count, created_at, updated_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(dedupe_key) DO UPDATE SET
+	status = CASE
+		WHEN aca_control_proposals.status IN ('applied', 'rejected', 'superseded') THEN aca_control_proposals.status
+		ELSE excluded.status
+	END,
+	workspace_id = COALESCE(aca_control_proposals.workspace_id, excluded.workspace_id),
+	session_id = COALESCE(aca_control_proposals.session_id, excluded.session_id),
+	agent_id = COALESCE(aca_control_proposals.agent_id, excluded.agent_id),
+	room_id = COALESCE(aca_control_proposals.room_id, excluded.room_id),
+	summary = CASE
+		WHEN excluded.summary != '' THEN excluded.summary
+		ELSE aca_control_proposals.summary
+	END,
+	source_refs = CASE
+		WHEN aca_control_proposals.source_refs = '[]' THEN excluded.source_refs
+		ELSE aca_control_proposals.source_refs
+	END,
+	evidence_refs = CASE
+		WHEN aca_control_proposals.evidence_refs = '[]' THEN excluded.evidence_refs
+		ELSE aca_control_proposals.evidence_refs
+	END,
+	payload_json = CASE
+		WHEN aca_control_proposals.payload_json = '{}' THEN excluded.payload_json
+		ELSE aca_control_proposals.payload_json
+	END,
+	confidence = CASE
+		WHEN excluded.confidence > aca_control_proposals.confidence THEN excluded.confidence
+		ELSE aca_control_proposals.confidence
+	END,
+	blast_radius = excluded.blast_radius,
+	review_required = CASE
+		WHEN excluded.review_required != 0 THEN excluded.review_required
+		ELSE aca_control_proposals.review_required
+	END,
+	count = aca_control_proposals.count + excluded.count,
+	updated_at = excluded.updated_at
+`,
+		proposal.ID,
+		effectiveControlProposalKey(proposal),
+		proposal.Kind,
+		proposal.Status,
+		nullableString(strings.TrimSpace(proposal.WorkspaceID)),
+		nullableString(strings.TrimSpace(proposal.SessionID)),
+		nullableString(strings.TrimSpace(proposal.AgentID)),
+		nullableString(strings.TrimSpace(proposal.RoomID)),
+		proposal.Summary,
+		string(sourceJSON),
+		string(evidenceJSON),
+		string(payloadJSON),
+		proposal.Confidence,
+		firstNonEmpty(strings.TrimSpace(proposal.BlastRadius), "medium"),
+		boolToInt(proposal.ReviewRequired),
+		proposal.Count,
+		timeutil.FormatRFC3339Nano(proposal.CreatedAt),
+		timeutil.FormatRFC3339Nano(proposal.UpdatedAt),
+	)
+	return err
+}
+
+func listControlProposalRows(ctx context.Context, db *sql.DB, limit int) ([]ControlProposal, error) {
+	query := `
+SELECT id, dedupe_key, kind, status, workspace_id, session_id, agent_id, room_id,
+       summary, source_refs, evidence_refs, payload_json, confidence, blast_radius,
+       review_required, count, created_at, updated_at
+FROM aca_control_proposals
+ORDER BY updated_at DESC`
+	var rows *sql.Rows
+	var err error
+	if limit > 0 {
+		rows, err = db.QueryContext(ctx, query+` LIMIT ?`, limit)
+	} else {
+		rows, err = db.QueryContext(ctx, query)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query control proposals: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []ControlProposal
+	for rows.Next() {
+		item, err := scanControlProposalRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func findControlProposalRow(ctx context.Context, db *sql.DB, id string) (*ControlProposal, error) {
+	row := db.QueryRowContext(ctx, `
+SELECT id, dedupe_key, kind, status, workspace_id, session_id, agent_id, room_id,
+       summary, source_refs, evidence_refs, payload_json, confidence, blast_radius,
+       review_required, count, created_at, updated_at
+FROM aca_control_proposals
+WHERE id = ?
+LIMIT 1
+`, strings.TrimSpace(id))
+	item, err := scanControlProposalRow(row)
+	if err != nil {
+		if dbutil.IsNoRows(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &item, nil
+}
+
+func findControlProposalRowByKey(ctx context.Context, db *sql.DB, key string) (*ControlProposal, error) {
+	row := db.QueryRowContext(ctx, `
+SELECT id, dedupe_key, kind, status, workspace_id, session_id, agent_id, room_id,
+       summary, source_refs, evidence_refs, payload_json, confidence, blast_radius,
+       review_required, count, created_at, updated_at
+FROM aca_control_proposals
+WHERE dedupe_key = ?
+LIMIT 1
+`, strings.TrimSpace(key))
+	item, err := scanControlProposalRow(row)
+	if err != nil {
+		if dbutil.IsNoRows(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &item, nil
+}
+
+func insertCoordinatorDecisionRow(ctx context.Context, db *sql.DB, decision CoordinatorDecision) error {
+	evidenceJSON, err := json.Marshal(evidenceRefsToStrings(uniqueEvidenceRefs(decision.EvidenceRefs)))
+	if err != nil {
+		return fmt.Errorf("marshal coordinator decision refs: %w", err)
+	}
+	harnessJSON, err := json.Marshal(uniqueStrings(decision.HarnessRunIDs))
+	if err != nil {
+		return fmt.Errorf("marshal coordinator decision harness runs: %w", err)
+	}
+	constraintsJSON, err := json.Marshal(decision.Constraints)
+	if err != nil {
+		return fmt.Errorf("marshal coordinator decision constraints: %w", err)
+	}
+	_, err = db.ExecContext(ctx, `
+INSERT INTO aca_coordinator_decisions (
+	id, proposal_id, workspace_id, decision_kind, authority_mode, status_after,
+	approval_actor, policy_id, policy_version, policy_hash, evidence_refs,
+	harness_run_ids, room_consensus_id, reason, constraints_json, created_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`,
+		decision.ID,
+		decision.ProposalID,
+		nullableString(strings.TrimSpace(decision.WorkspaceID)),
+		decision.Decision,
+		decision.AuthorityMode,
+		decision.StatusAfter,
+		nullableString(strings.TrimSpace(decision.ApprovalActor)),
+		nullableString(strings.TrimSpace(decision.PolicyID)),
+		nullableString(strings.TrimSpace(decision.PolicyVersion)),
+		nullableString(strings.TrimSpace(decision.PolicyHash)),
+		string(evidenceJSON),
+		string(harnessJSON),
+		nullableString(strings.TrimSpace(decision.RoomConsensusID)),
+		nullableString(strings.TrimSpace(decision.Reason)),
+		string(constraintsJSON),
+		timeutil.FormatRFC3339Nano(decision.CreatedAt),
+	)
+	return err
+}
+
+func listCoordinatorDecisionRows(ctx context.Context, db *sql.DB, proposalID string, limit int) ([]CoordinatorDecision, error) {
+	query := `
+SELECT id, proposal_id, workspace_id, decision_kind, authority_mode, status_after,
+       approval_actor, policy_id, policy_version, policy_hash, evidence_refs,
+       harness_run_ids, room_consensus_id, reason, constraints_json, created_at
+FROM aca_coordinator_decisions
+WHERE proposal_id = ?
+ORDER BY created_at DESC, id DESC`
+	var rows *sql.Rows
+	var err error
+	if limit > 0 {
+		rows, err = db.QueryContext(ctx, query+` LIMIT ?`, strings.TrimSpace(proposalID), limit)
+	} else {
+		rows, err = db.QueryContext(ctx, query, strings.TrimSpace(proposalID))
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query coordinator decisions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []CoordinatorDecision
+	for rows.Next() {
+		item, err := scanCoordinatorDecisionRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func findApplyResultRowByIdempotencyKey(ctx context.Context, db *sql.DB, key string) (*ApplyResult, error) {
+	row := db.QueryRowContext(ctx, `
+SELECT id, proposal_id, decision_id, idempotency_key, target_kind, target_id, status,
+       summary, result_json, error_message, evidence_refs, created_at
+FROM aca_apply_results
+WHERE idempotency_key = ?
+LIMIT 1
+`, strings.TrimSpace(key))
+	item, err := scanApplyResultRow(row)
+	if err != nil {
+		if dbutil.IsNoRows(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &item, nil
+}
+
+func insertApplyResultRow(ctx context.Context, db *sql.DB, result ApplyResult) error {
+	resultJSON, err := json.Marshal(result.Result)
+	if err != nil {
+		return fmt.Errorf("marshal apply result payload: %w", err)
+	}
+	evidenceJSON, err := json.Marshal(evidenceRefsToStrings(uniqueEvidenceRefs(result.EvidenceRefs)))
+	if err != nil {
+		return fmt.Errorf("marshal apply result refs: %w", err)
+	}
+	_, err = db.ExecContext(ctx, `
+INSERT OR IGNORE INTO aca_apply_results (
+	id, proposal_id, decision_id, idempotency_key, target_kind, target_id, status,
+	summary, result_json, error_message, evidence_refs, created_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`,
+		result.ID,
+		result.ProposalID,
+		result.DecisionID,
+		result.IdempotencyKey,
+		result.TargetKind,
+		nullableString(strings.TrimSpace(result.TargetID)),
+		result.Status,
+		nullableString(strings.TrimSpace(result.Summary)),
+		string(resultJSON),
+		nullableString(strings.TrimSpace(result.ErrorMessage)),
+		string(evidenceJSON),
+		timeutil.FormatRFC3339Nano(result.CreatedAt),
+	)
+	return err
+}
+
+func listApplyResultRows(ctx context.Context, db *sql.DB, proposalID string, limit int) ([]ApplyResult, error) {
+	query := `
+SELECT id, proposal_id, decision_id, idempotency_key, target_kind, target_id, status,
+       summary, result_json, error_message, evidence_refs, created_at
+FROM aca_apply_results
+WHERE proposal_id = ?
+ORDER BY created_at DESC`
+	var rows *sql.Rows
+	var err error
+	if limit > 0 {
+		rows, err = db.QueryContext(ctx, query+` LIMIT ?`, strings.TrimSpace(proposalID), limit)
+	} else {
+		rows, err = db.QueryContext(ctx, query, strings.TrimSpace(proposalID))
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query apply results: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []ApplyResult
+	for rows.Next() {
+		item, err := scanApplyResultRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
 func updateMaintenanceTaskStatus(ctx context.Context, db *sql.DB, id, status string) error {
 	_, err := db.ExecContext(ctx, `
 UPDATE aca_maintenance_tasks
@@ -1207,6 +1579,190 @@ func scanMemoryProposalRow(scanner interface{ Scan(dest ...any) error }) (Memory
 	item.ReviewRequired = reviewRequired != 0
 	item.CreatedAt = timeutil.MustParseRFC3339Nano(createdAt)
 	item.UpdatedAt = timeutil.MustParseRFC3339Nano(updatedAt)
+	return item, nil
+}
+
+func scanControlProposalRow(scanner interface{ Scan(dest ...any) error }) (ControlProposal, error) {
+	var item ControlProposal
+	var workspaceID, sessionID, agentID, roomID sql.NullString
+	var sourceJSON string
+	var evidenceJSON string
+	var payloadJSON string
+	var createdAt, updatedAt string
+	var reviewRequired int
+	if err := scanner.Scan(
+		&item.ID,
+		&item.DedupeKey,
+		&item.Kind,
+		&item.Status,
+		&workspaceID,
+		&sessionID,
+		&agentID,
+		&roomID,
+		&item.Summary,
+		&sourceJSON,
+		&evidenceJSON,
+		&payloadJSON,
+		&item.Confidence,
+		&item.BlastRadius,
+		&reviewRequired,
+		&item.Count,
+		&createdAt,
+		&updatedAt,
+	); err != nil {
+		return ControlProposal{}, fmt.Errorf("scan control proposal: %w", err)
+	}
+	if workspaceID.Valid {
+		item.WorkspaceID = workspaceID.String
+	}
+	if sessionID.Valid {
+		item.SessionID = sessionID.String
+	}
+	if agentID.Valid {
+		item.AgentID = agentID.String
+	}
+	if roomID.Valid {
+		item.RoomID = roomID.String
+	}
+	if sourceJSON != "" {
+		var rawRefs []string
+		if err := json.Unmarshal([]byte(sourceJSON), &rawRefs); err != nil {
+			return ControlProposal{}, fmt.Errorf("decode control proposal refs: %w", err)
+		}
+		item.SourceRefs = stringsToEvidenceRefs(rawRefs)
+	}
+	if evidenceJSON != "" {
+		var rawRefs []string
+		if err := json.Unmarshal([]byte(evidenceJSON), &rawRefs); err != nil {
+			return ControlProposal{}, fmt.Errorf("decode control proposal evidence refs: %w", err)
+		}
+		item.EvidenceRefs = stringsToEvidenceRefs(rawRefs)
+	}
+	if payloadJSON != "" {
+		if err := json.Unmarshal([]byte(payloadJSON), &item.Payload); err != nil {
+			return ControlProposal{}, fmt.Errorf("decode control proposal payload: %w", err)
+		}
+	}
+	item.ReviewRequired = reviewRequired != 0
+	item.CreatedAt = timeutil.MustParseRFC3339Nano(createdAt)
+	item.UpdatedAt = timeutil.MustParseRFC3339Nano(updatedAt)
+	return item, nil
+}
+
+func scanCoordinatorDecisionRow(scanner interface{ Scan(dest ...any) error }) (CoordinatorDecision, error) {
+	var item CoordinatorDecision
+	var workspaceID, approvalActor, policyID, policyVersion, policyHash sql.NullString
+	var roomConsensusID, reason sql.NullString
+	var refsJSON string
+	var harnessJSON string
+	var constraintsJSON string
+	var createdAt string
+	if err := scanner.Scan(
+		&item.ID,
+		&item.ProposalID,
+		&workspaceID,
+		&item.Decision,
+		&item.AuthorityMode,
+		&item.StatusAfter,
+		&approvalActor,
+		&policyID,
+		&policyVersion,
+		&policyHash,
+		&refsJSON,
+		&harnessJSON,
+		&roomConsensusID,
+		&reason,
+		&constraintsJSON,
+		&createdAt,
+	); err != nil {
+		return CoordinatorDecision{}, fmt.Errorf("scan coordinator decision: %w", err)
+	}
+	if workspaceID.Valid {
+		item.WorkspaceID = workspaceID.String
+	}
+	if approvalActor.Valid {
+		item.ApprovalActor = approvalActor.String
+	}
+	if policyID.Valid {
+		item.PolicyID = policyID.String
+	}
+	if policyVersion.Valid {
+		item.PolicyVersion = policyVersion.String
+	}
+	if policyHash.Valid {
+		item.PolicyHash = policyHash.String
+	}
+	if roomConsensusID.Valid {
+		item.RoomConsensusID = roomConsensusID.String
+	}
+	if reason.Valid {
+		item.Reason = reason.String
+	}
+	if refsJSON != "" {
+		var rawRefs []string
+		if err := json.Unmarshal([]byte(refsJSON), &rawRefs); err != nil {
+			return CoordinatorDecision{}, fmt.Errorf("decode coordinator decision refs: %w", err)
+		}
+		item.EvidenceRefs = stringsToEvidenceRefs(rawRefs)
+	}
+	if harnessJSON != "" {
+		if err := json.Unmarshal([]byte(harnessJSON), &item.HarnessRunIDs); err != nil {
+			return CoordinatorDecision{}, fmt.Errorf("decode coordinator decision harness runs: %w", err)
+		}
+	}
+	if constraintsJSON != "" {
+		if err := json.Unmarshal([]byte(constraintsJSON), &item.Constraints); err != nil {
+			return CoordinatorDecision{}, fmt.Errorf("decode coordinator decision constraints: %w", err)
+		}
+	}
+	item.CreatedAt = timeutil.MustParseRFC3339Nano(createdAt)
+	return item, nil
+}
+
+func scanApplyResultRow(scanner interface{ Scan(dest ...any) error }) (ApplyResult, error) {
+	var item ApplyResult
+	var targetID, summary, errorMessage sql.NullString
+	var resultJSON string
+	var refsJSON string
+	var createdAt string
+	if err := scanner.Scan(
+		&item.ID,
+		&item.ProposalID,
+		&item.DecisionID,
+		&item.IdempotencyKey,
+		&item.TargetKind,
+		&targetID,
+		&item.Status,
+		&summary,
+		&resultJSON,
+		&errorMessage,
+		&refsJSON,
+		&createdAt,
+	); err != nil {
+		return ApplyResult{}, fmt.Errorf("scan apply result: %w", err)
+	}
+	if targetID.Valid {
+		item.TargetID = targetID.String
+	}
+	if summary.Valid {
+		item.Summary = summary.String
+	}
+	if errorMessage.Valid {
+		item.ErrorMessage = errorMessage.String
+	}
+	if strings.TrimSpace(resultJSON) != "" && strings.TrimSpace(resultJSON) != "null" {
+		if err := json.Unmarshal([]byte(resultJSON), &item.Result); err != nil {
+			return ApplyResult{}, fmt.Errorf("decode apply result payload: %w", err)
+		}
+	}
+	if refsJSON != "" {
+		var rawRefs []string
+		if err := json.Unmarshal([]byte(refsJSON), &rawRefs); err != nil {
+			return ApplyResult{}, fmt.Errorf("decode apply result refs: %w", err)
+		}
+		item.EvidenceRefs = stringsToEvidenceRefs(rawRefs)
+	}
+	item.CreatedAt = timeutil.MustParseRFC3339Nano(createdAt)
 	return item, nil
 }
 

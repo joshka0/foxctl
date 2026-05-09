@@ -1,10 +1,18 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/runtime/hooks"
 	"github.com/stretchr/testify/assert"
 )
@@ -21,6 +29,7 @@ func TestBuildStepsInfo_SingleResult(t *testing.T) {
 		{
 			HookID:   "hook-1",
 			Skill:    "hooks/test_feedback",
+			Role:     hooks.HookRoleAdvisory,
 			Duration: 100 * time.Millisecond,
 			Output: hooks.Output{
 				Decision: hooks.DecisionNone,
@@ -34,6 +43,7 @@ func TestBuildStepsInfo_SingleResult(t *testing.T) {
 	assert.Equal(t, 1, steps[0]["idx"])
 	assert.Equal(t, "hook-1", steps[0]["hook_id"])
 	assert.Equal(t, "hooks/test_feedback", steps[0]["skill"])
+	assert.Equal(t, "advisory", steps[0]["role"])
 	assert.Equal(t, "none", steps[0]["decision"])
 	assert.Equal(t, int64(100), steps[0]["duration_ms"])
 }
@@ -347,6 +357,175 @@ func TestActionStructure(t *testing.T) {
 	assert.True(t, action.Dedupe)
 }
 
+func TestRun_ReportsRolesAndActionAccounting(t *testing.T) {
+	tmp := t.TempDir()
+	workspaceRoot := filepath.Join(tmp, "workspace")
+	hooksDir := filepath.Join(workspaceRoot, ".foxctl")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatalf("mkdir hooks dir: %v", err)
+	}
+
+	scriptsDir := filepath.Join(tmp, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatalf("mkdir scripts dir: %v", err)
+	}
+	advisory := writeHookScript(t, scriptsDir, "advisory.sh", `{"decision":"none","actions":[{"type":"inject_context","text":"inline context","priority":1}]}`)
+	proposal := writeHookScript(t, scriptsDir, "proposal.sh", `{"decision":"approve","actions":[{"type":"enqueue_context","source":"proposal-hook","text":"queued context","priority":1,"dedupe":true}]}`)
+	guard := writeHookScript(t, scriptsDir, "guard.sh", `{"decision":"approve","actions":[{"type":"send_mailbox","to_ns":"actor:agent:reviewer","message_type":"event"}]}`)
+	critical := writeHookScript(t, scriptsDir, "critical.sh", `{"decision":"approve","actions":[{"type":"unknown_action"}]}`)
+
+	configBody := `version: 1
+hooks:
+  - id: advisory-hook
+    event: PreToolUse
+    priority: 1
+    run:
+      - skill: ` + advisory + `
+        role: advisory
+  - id: proposal-hook
+    event: PreToolUse
+    priority: 2
+    run:
+      - skill: ` + proposal + `
+        role: proposal
+  - id: guard-hook
+    event: PreToolUse
+    priority: 3
+    run:
+      - skill: ` + guard + `
+        role: guard
+  - id: critical-hook
+    event: PreToolUse
+    priority: 4
+    run:
+      - skill: ` + critical + `
+        role: critical_guard
+`
+	if err := os.WriteFile(filepath.Join(hooksDir, "hooks.yaml"), []byte(configBody), 0o644); err != nil {
+		t.Fatalf("write hooks config: %v", err)
+	}
+
+	cfg := config.Config{
+		Home:           tmp,
+		InlineOutputKB: config.DefaultInlineOutputKB,
+		MaxCaptureKB:   config.DefaultMaxCaptureKB,
+		Paths: config.Paths{
+			CAS:    filepath.Join(tmp, "cas"),
+			Jobs:   filepath.Join(tmp, "jobs"),
+			Cache:  filepath.Join(tmp, "cache"),
+			Skills: filepath.Join(tmp, "skills"),
+		},
+		Storage: config.StorageSettings{
+			Root: filepath.Join(tmp, "storage"),
+		},
+	}
+	buf := &bytes.Buffer{}
+	rc, err := skillmain.BuildRunContext(cfg, buf)
+	if err != nil {
+		t.Fatalf("runner context: %v", err)
+	}
+	t.Cleanup(func() { _ = rc.Close() })
+
+	in := hooks.Input{
+		Event:         hooks.EventPreToolUse,
+		WorkspaceRoot: workspaceRoot,
+		SessionID:     "session-dispatch-shape",
+		ToolName:      "Edit",
+		ToolInput:     json.RawMessage(`{"file_path":"` + filepath.ToSlash(filepath.Join(workspaceRoot, "pkg/main.go")) + `"}`),
+	}
+	if err := run(context.Background(), rc, in); err != nil {
+		t.Fatalf("run dispatch: %v", err)
+	}
+
+	var env envelope.Envelope
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal envelope: %v", err)
+	}
+	data := env.Data.(map[string]any)
+	steps := data["steps"].([]any)
+	if len(steps) != 4 {
+		t.Fatalf("expected 4 steps, got %d", len(steps))
+	}
+	assert.Equal(t, "advisory", steps[0].(map[string]any)["role"])
+	assert.Equal(t, "proposal", steps[1].(map[string]any)["role"])
+	assert.Equal(t, "guard", steps[2].(map[string]any)["role"])
+	assert.Equal(t, "critical_guard", steps[3].(map[string]any)["role"])
+
+	accounting := data["action_accounting"].(map[string]any)
+	assert.Equal(t, float64(4), accounting["actions_emitted"])
+	assert.Equal(t, float64(1), accounting["actions_executed"])
+	assert.Equal(t, float64(2), accounting["actions_skipped"])
+	assert.Equal(t, float64(1), accounting["actions_unavailable"])
+}
+
+func writeHookScript(t *testing.T, dir, name, output string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	body := "#!/bin/sh\ncat <<'JSON'\n" + output + "\nJSON\n"
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("write hook script: %v", err)
+	}
+	return path
+}
+
+func TestBuildActionAccounting_ReportsExecutedEnqueueContext(t *testing.T) {
+	accounting := buildActionAccounting([]hooks.Action{
+		hooks.EnqueueContextAction("task-continuity", "context", 1, 60, true),
+	}, true)
+
+	applyContextBufferAccounting(&accounting, map[string]any{"enqueued": 1})
+
+	assert.Equal(t, 1, accounting.ActionsEmitted)
+	assert.Equal(t, 1, accounting.ActionsExecuted)
+	assert.Equal(t, 0, accounting.ActionsSkipped)
+	assert.Equal(t, 0, accounting.ActionsUnavailable)
+	assert.Equal(t, 1, accounting.EmittedByType[hooks.ActionEnqueueContext])
+	assert.Equal(t, 1, accounting.ExecutedByType[hooks.ActionEnqueueContext])
+}
+
+func TestBuildActionAccounting_ReportsValidProviderActionsSkipped(t *testing.T) {
+	accounting := buildActionAccounting([]hooks.Action{
+		hooks.InjectContextAction("inline context", 1),
+		hooks.SendMailboxAction("actor:agent:reviewer", "ask", nil, nil),
+		hooks.RunSkillAction("todo/manage", nil),
+	}, true)
+
+	assert.Equal(t, 3, accounting.ActionsEmitted)
+	assert.Equal(t, 0, accounting.ActionsExecuted)
+	assert.Equal(t, 3, accounting.ActionsSkipped)
+	assert.Equal(t, 0, accounting.ActionsUnavailable)
+	assert.Len(t, accounting.Skipped, 3)
+	assert.Equal(t, "left_for_provider_or_runtime", accounting.Skipped[0].Reason)
+}
+
+func TestBuildActionAccounting_ReportsUnknownActionsUnavailable(t *testing.T) {
+	accounting := buildActionAccounting([]hooks.Action{
+		{Type: hooks.ActionType("unknown_action")},
+	}, true)
+
+	assert.Equal(t, 1, accounting.ActionsEmitted)
+	assert.Equal(t, 0, accounting.ActionsExecuted)
+	assert.Equal(t, 0, accounting.ActionsSkipped)
+	assert.Equal(t, 1, accounting.ActionsUnavailable)
+	assert.Len(t, accounting.Unavailable, 1)
+	assert.Equal(t, "unknown_action_type", accounting.Unavailable[0].Reason)
+}
+
+func TestBuildActionAccounting_ReportsEnqueueUnavailableWithoutSession(t *testing.T) {
+	accounting := buildActionAccounting([]hooks.Action{
+		hooks.EnqueueContextAction("task-continuity", "context", 1, 60, true),
+	}, false)
+
+	applyContextBufferAccounting(&accounting, nil)
+
+	assert.Equal(t, 1, accounting.ActionsEmitted)
+	assert.Equal(t, 0, accounting.ActionsExecuted)
+	assert.Equal(t, 0, accounting.ActionsSkipped)
+	assert.Equal(t, 1, accounting.ActionsUnavailable)
+	assert.Len(t, accounting.Unavailable, 1)
+	assert.Equal(t, "session_id_required", accounting.Unavailable[0].Reason)
+}
+
 // Tests for HookDef structure
 
 func TestHookDefStructure(t *testing.T) {
@@ -373,6 +552,7 @@ func TestHookRunEntryStructure(t *testing.T) {
 	ephemeral := true
 	entry := hooks.HookRunEntry{
 		Skill:     "hooks/custom_skill",
+		Role:      hooks.HookRoleProposal,
 		TimeoutMS: 5000,
 		FailOpen:  true,
 		Ephemeral: &ephemeral,
@@ -380,6 +560,7 @@ func TestHookRunEntryStructure(t *testing.T) {
 	}
 
 	assert.Equal(t, "hooks/custom_skill", entry.Skill)
+	assert.Equal(t, hooks.HookRoleProposal, entry.Role)
 	assert.Equal(t, 5000, entry.TimeoutMS)
 	assert.True(t, entry.FailOpen)
 	assert.True(t, *entry.Ephemeral)

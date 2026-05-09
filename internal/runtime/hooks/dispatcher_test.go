@@ -187,6 +187,9 @@ func TestDispatcher_FailOpen(t *testing.T) {
 	if !result.HookResults[0].FailOpen {
 		t.Error("expected fail_open=true in hook result")
 	}
+	if result.HookResults[0].Role != HookRoleAdvisory {
+		t.Errorf("expected role %s, got %s", HookRoleAdvisory, result.HookResults[0].Role)
+	}
 }
 
 func TestDispatcher_FailClosed(t *testing.T) {
@@ -223,6 +226,9 @@ func TestDispatcher_FailClosed(t *testing.T) {
 	expectedReason := "hook_failed:test/critical:critical hook failed"
 	if result.Output.Reason != expectedReason {
 		t.Fatalf("expected reason %q, got %q", expectedReason, result.Output.Reason)
+	}
+	if result.HookResults[0].Role != HookRoleCriticalGuard {
+		t.Fatalf("expected role %s, got %s", HookRoleCriticalGuard, result.HookResults[0].Role)
 	}
 }
 
