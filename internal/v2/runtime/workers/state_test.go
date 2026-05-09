@@ -164,6 +164,27 @@ func TestStateComponent_BlockBackpressure(t *testing.T) {
 	}
 }
 
+func TestStateComponent_PublishAfterRunStopsReturnsClosed(t *testing.T) {
+	t.Parallel()
+
+	component := NewStateComponent(Config{Buffer: 1})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- component.Run(ctx)
+	}()
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	err := component.Publish(context.Background(), coreworker.LifecycleEvent{WorkerID: "worker-after-stop"})
+	if err != ErrClosed {
+		t.Fatalf("Publish() error = %v want %v", err, ErrClosed)
+	}
+}
+
 func waitForWorker(t *testing.T, component *StateComponent, workerID string) Snapshot {
 	t.Helper()
 	deadline := time.Now().Add(500 * time.Millisecond)

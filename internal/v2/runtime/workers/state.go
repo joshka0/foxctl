@@ -236,8 +236,9 @@ func (s *StateComponent) closeQueue() {
 	if s.closed {
 		return
 	}
+	// Publishers may still be racing with shutdown; mark closed without closing
+	// the channel so in-flight sends cannot panic or trip the race detector.
 	s.closed = true
-	close(s.queue)
 }
 
 func applyEvent(workers map[string]coreworker.Record, children map[string][]string, evt coreworker.LifecycleEvent) {
