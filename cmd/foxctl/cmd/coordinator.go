@@ -50,9 +50,6 @@ type coordinatorProcessInput struct {
 }
 
 // coordinatorProcessAdapter owns the CLI's one-shot coordinator boundary.
-//
-// [[protocol:coordinator-one-shot-process]]
-// [[test:cmd/foxctl/cmd/coordinator_test.go#TestCoordinatorProcessSeedsLowRiskTaskProposal]]
 type coordinatorProcessAdapter interface {
 	Process(ctx context.Context, input coordinatorProcessInput) (coordinatorProcessResult, error)
 }
@@ -132,6 +129,10 @@ func newCoordinatorProcessAdapter() coordinatorProcessAdapter {
 
 type coordinatorProcessMVPAdapter struct{}
 
+// Process applies the one-shot coordinator policy to open control proposals.
+//
+// [[protocol:coordinator-one-shot-process]]
+// [[test:cmd/foxctl/cmd/coordinator_test.go#TestCoordinatorProcessSeedsLowRiskTaskProposal]]
 func (coordinatorProcessMVPAdapter) Process(ctx context.Context, input coordinatorProcessInput) (coordinatorProcessResult, error) {
 	core, err := input.ControlStore.ProcessControlProposals(ctx, contextplane.TaskProposalControlProcessInput{
 		TaskStore: input.TaskStore,
