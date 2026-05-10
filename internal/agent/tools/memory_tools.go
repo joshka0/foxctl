@@ -10,6 +10,8 @@ import (
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	tooling "github.com/joshka0/foxctl/internal/tooling"
 
+	"github.com/joshka0/foxctl/internal/context/contextengine"
+	"github.com/joshka0/foxctl/internal/context/contextplane"
 	"github.com/joshka0/foxctl/internal/context/memorycore"
 	"github.com/joshka0/foxctl/internal/domain/skill"
 	"github.com/joshka0/foxctl/internal/platform/buildinfo"
@@ -291,14 +293,35 @@ func evidenceOnlyMessage(record memorycore.Record) string {
 // memoryPutInput matches the memory/put skill input.
 type memoryPutInput struct {
 	Name      string `json:"name"`
-	Type      string `json:"type"`
+	Kind      string `json:"kind"`
 	Summary   string `json:"summary"`
 	Content   string `json:"content,omitempty"`
 	File      string `json:"file,omitempty"`
 	Workspace string `json:"workspace,omitempty"`
 }
 
-// memoryPut implements the memory.put tool by invoking the memory/put skill.
+func memoryCandidateSourceRefs(workspaceID, sessionID string) []contextengine.EvidenceRef {
+	refs := []contextengine.EvidenceRef{
+		{Type: contextengine.RefTypeToolCall, Ref: "memory.put", WorkspaceID: workspaceID},
+	}
+	if sid := strings.TrimSpace(sessionID); sid != "" {
+		refs = append(refs, contextengine.EvidenceRef{Type: contextengine.RefTypeSession, Ref: sid, WorkspaceID: workspaceID})
+	}
+	return refs
+}
+
+func memoryCandidateEvidenceRefs(workspaceID, file string) []contextengine.EvidenceRef {
+	refs := []contextengine.EvidenceRef{
+		{Type: contextengine.RefTypeToolCall, Ref: "memory.put", WorkspaceID: workspaceID},
+	}
+	path := strings.TrimSpace(file)
+	if path == "" {
+		return refs
+	}
+	return append(refs, contextengine.EvidenceRef{Type: contextengine.RefTypePath, Ref: path, WorkspaceID: workspaceID})
+}
+
+// memoryPut implements the memory.put tool by recording a memory_candidate control proposal.
 func (r *Registry) memoryPut(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 	name, ok := args["name"].(string)
 	if !ok || name == "" {
@@ -322,7 +345,7 @@ func (r *Registry) memoryPut(ctx context.Context, args map[string]any) (*models.
 
 	input := memoryPutInput{
 		Name:      name,
-		Type:      kind,
+		Kind:      kind,
 		Summary:   summary,
 		Workspace: r.config.WorkspaceRoot,
 	}
@@ -335,50 +358,41 @@ func (r *Registry) memoryPut(ctx context.Context, args map[string]any) (*models.
 		input.File = file
 	}
 
-	inputBytes, err := json.Marshal(input)
-	if err != nil {
-		return errorResult(fmt.Sprintf("marshal input: %v", err)), nil
+	workspaceID := strings.TrimSpace(r.config.WorkspaceID)
+	if workspaceID == "" {
+		return errorResult("workspace_id is required to record memory candidate proposal"), nil
 	}
 
-	resolver := skill.NewResolver(skill.WithSearchPaths(
-		r.config.WorkspaceRoot+"/dist/skills",
-		r.config.WorkspaceRoot+"/skills",
-	))
-
-	ctx = workspace.WithContext(ctx, r.config.WorkspaceRoot)
-
-	var payload struct {
-		ID      string `json:"id"`
-		Name    string `json:"name"`
-		Type    string `json:"type"`
-		Status  string `json:"status"`
-		Message string `json:"message"`
+	workspaceRoot := strings.TrimSpace(r.config.WorkspaceRoot)
+	if workspaceRoot == "" {
+		return errorResult("workspace_root is required to record memory candidate proposal"), nil
 	}
 
-	_, err = skillrun.RunAndDecodeInto(ctx, resolver, "memory/put", inputBytes, skillrun.Options{
-		PreferCGO: buildinfo.IsCGO(),
-		EntryRoot: r.config.WorkspaceRoot,
-	}, &payload)
+	store := contextplane.NewWorkspaceStore(workspaceRoot)
+	stored, err := store.RecordMemoryCandidateProposal(ctx, contextplane.MemoryCandidateInput{
+		WorkspaceID:         workspaceID,
+		SessionID:           strings.TrimSpace(r.config.SessionID),
+		AgentID:             strings.TrimSpace(r.config.ActorID),
+		Name:                input.Name,
+		Kind:                input.Kind,
+		Summary:             input.Summary,
+		Content:             input.Content,
+		SourceRefs:          memoryCandidateSourceRefs(workspaceID, r.config.SessionID),
+		EvidenceRefs:        memoryCandidateEvidenceRefs(workspaceID, input.File),
+		InstructionEligible: false,
+		EvidenceOnly:        true,
+		Confidence:          0.5,
+		BlastRadius:         "low",
+	})
 	if err != nil {
-		if errors.Is(err, skill.ErrArtifactsMissing) {
-			return errorResult("memory/put skill not found (ensure skill is installed)"), nil
-		}
-		var runErr skillrun.RunError
-		if errors.As(err, &runErr) {
-			errMsg := fmt.Sprintf("skill execution failed: %v", runErr.Err)
-			if len(runErr.Stderr) > 0 {
-				errMsg += fmt.Sprintf(" (stderr: %s)", string(runErr.Stderr))
-			}
-			return errorResult(errMsg), nil
-		}
-		return errorResult(fmt.Sprintf("skill error: %v", err)), nil
+		return errorResult(fmt.Sprintf("record memory_candidate proposal: %v", err)), nil
 	}
 
 	return successResult(map[string]any{
-		"id":      payload.ID,
-		"name":    payload.Name,
-		"type":    payload.Type,
-		"status":  payload.Status,
-		"message": payload.Message,
+		"proposal_id": stored.ID,
+		"status":      string(stored.Status),
+		"count":       stored.Count,
+		"kind":        string(stored.Kind),
+		"message":     "Recorded memory candidate proposal for coordinator review; active named memory was not saved.",
 	}), nil
 }

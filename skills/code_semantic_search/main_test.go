@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/context/contextplane"
@@ -424,9 +425,12 @@ func TestSearchMemoriesBM25_LabelsCoChangeArtifacts(t *testing.T) {
 		t.Fatalf("save cochange artifact: %v", err)
 	}
 
-	results, err := searchMemoriesBM25(ctx, cfg, "ws", "dispatch", 5, store)
+	results, decayStats, err := searchMemoriesBM25(ctx, cfg, "ws", "dispatch", 5, false, store)
 	if err != nil {
 		t.Fatalf("searchMemoriesBM25: %v", err)
+	}
+	if decayStats != nil {
+		t.Fatalf("decayStats=%#v want nil when disabled", decayStats)
 	}
 	if len(results) == 0 {
 		t.Fatalf("expected results")
@@ -436,6 +440,168 @@ func TestSearchMemoriesBM25_LabelsCoChangeArtifacts(t *testing.T) {
 	}
 	if results[0].Path != "internal/context/contextplane/dispatch.go" {
 		t.Fatalf("path=%q want internal/context/contextplane/dispatch.go", results[0].Path)
+	}
+}
+
+func TestSearchMemoriesBM25_DecayDisabledPreservesCurrentOrder(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Config{}
+	store, err := memory.Open(ctx, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("open memory: %v", err)
+	}
+	defer store.Close()
+
+	seedBM25DecayFixture(t, ctx, store)
+
+	results, decayStats, err := searchMemoriesBM25(ctx, cfg, "ws", "decay ranking", 1, false, store)
+	if err != nil {
+		t.Fatalf("searchMemoriesBM25: %v", err)
+	}
+	if decayStats != nil {
+		t.Fatalf("decayStats=%#v want nil when disabled", decayStats)
+	}
+	if len(results) != 1 {
+		t.Fatalf("len(results)=%d want 1", len(results))
+	}
+	if results[0].Name != "memory://decay-old-strong" {
+		t.Fatalf("result name=%q want memory://decay-old-strong", results[0].Name)
+	}
+}
+
+func TestSearchMemoriesBM25_DecayOptInReranksBeforeLimit(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Config{}
+	store, err := memory.Open(ctx, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("open memory: %v", err)
+	}
+	defer store.Close()
+
+	seedBM25DecayFixture(t, ctx, store)
+
+	results, decayStats, err := searchMemoriesBM25(ctx, cfg, "ws", "decay ranking", 1, true, store)
+	if err != nil {
+		t.Fatalf("searchMemoriesBM25: %v", err)
+	}
+	if decayStats == nil {
+		t.Fatalf("decayStats=nil want stats when enabled")
+	}
+	if !decayStats.Enabled || decayStats.CandidatesBefore < 2 || decayStats.CandidatesAfter < 2 {
+		t.Fatalf("unexpected decay stats: %#v", decayStats)
+	}
+	if decayStats.FactorMax <= decayStats.FactorMin || decayStats.FactorAvg <= 0 {
+		t.Fatalf("unexpected decay factors: %#v", decayStats)
+	}
+	if len(results) != 1 {
+		t.Fatalf("len(results)=%d want 1", len(results))
+	}
+	if results[0].Name != "memory://decay-recent-near-tie" {
+		t.Fatalf("result name=%q want memory://decay-recent-near-tie", results[0].Name)
+	}
+	if results[0].Similarity <= 0.9 {
+		t.Fatalf("similarity=%f want boosted decayed score", results[0].Similarity)
+	}
+}
+
+func TestReciprocalRankFusionUsesBaseSimilarityForMemoryDecayThreshold(t *testing.T) {
+	results := reciprocalRankFusion(map[string][]Result{
+		ScopeMemories: {
+			{
+				Source:         ScopeMemories,
+				ID:             "memory:stale-strong",
+				Name:           "stale strong memory",
+				Similarity:     0.25,
+				BaseSimilarity: 0.95,
+			},
+		},
+	}, 0.9)
+
+	if len(results) != 1 {
+		t.Fatalf("len(results)=%d want 1", len(results))
+	}
+	if results[0].ID != "memory:stale-strong" {
+		t.Fatalf("id=%q want memory:stale-strong", results[0].ID)
+	}
+}
+
+type semanticSearchAccessRecorder struct {
+	workspace string
+	names     []string
+	err       error
+}
+
+func (r *semanticSearchAccessRecorder) RecordAccessBatch(_ context.Context, workspace string, names []string, _ time.Time) (int, error) {
+	r.workspace = workspace
+	r.names = append([]string(nil), names...)
+	if r.err != nil {
+		return 0, r.err
+	}
+	return len(names), nil
+}
+
+func TestRecordSemanticSearchMemoryAccessDedupeAndSkipRemote(t *testing.T) {
+	recorder := &semanticSearchAccessRecorder{}
+	stats := recordSemanticSearchMemoryAccess(context.Background(), recorder, "ws", &Input{}, []Result{
+		{Source: "memory", Name: "alpha"},
+		{Source: "memory", Name: "alpha"},
+		{Source: "cochange", Name: "cochange://path"},
+		{Source: "symbol", Name: "ignored"},
+	})
+	if stats.Count != 2 || stats.Failed {
+		t.Fatalf("stats=%#v want count=2 failed=false", stats)
+	}
+	if recorder.workspace != "ws" {
+		t.Fatalf("workspace=%q want ws", recorder.workspace)
+	}
+	want := []string{"alpha", "cochange://path"}
+	if !reflect.DeepEqual(recorder.names, want) {
+		t.Fatalf("names=%v want %v", recorder.names, want)
+	}
+
+	remoteRecorder := &semanticSearchAccessRecorder{}
+	remoteStats := recordSemanticSearchMemoryAccess(context.Background(), remoteRecorder, "ws", &Input{Remote: true}, []Result{
+		{Source: "memory", Name: "alpha"},
+	})
+	if remoteStats.Count != 0 || remoteStats.Failed || len(remoteRecorder.names) != 0 {
+		t.Fatalf("remote recording happened: stats=%#v names=%v", remoteStats, remoteRecorder.names)
+	}
+}
+
+func TestRecordSemanticSearchMemoryAccessBestEffort(t *testing.T) {
+	recorder := &semanticSearchAccessRecorder{err: os.ErrInvalid}
+	stats := recordSemanticSearchMemoryAccess(context.Background(), recorder, "ws", &Input{}, []Result{
+		{Source: "memory", Name: "alpha"},
+	})
+	if stats.Count != 0 || !stats.Failed {
+		t.Fatalf("stats=%#v want count=0 failed=true on best-effort failure", stats)
+	}
+}
+
+func seedBM25DecayFixture(t *testing.T, ctx context.Context, store *memory.Store) {
+	t.Helper()
+	if _, err := store.SaveFromResult(ctx, "memory://decay-old-strong", "semantic_fact", "ws", "decay ranking old strong", []byte(`{}`)); err != nil {
+		t.Fatalf("save old memory: %v", err)
+	}
+	if _, err := store.SaveFromResult(ctx, "memory://decay-recent-near-tie", "semantic_fact", "ws", "decay ranking recent near tie", []byte(`{}`)); err != nil {
+		t.Fatalf("save recent memory: %v", err)
+	}
+	now := time.Now().UTC()
+	oldAt := now.Add(-90 * 24 * time.Hour)
+	for i := 0; i < 10; i++ {
+		if _, err := store.UpdateTelemetry(ctx, "memory://decay-old-strong", "ws", storage.MemoryTelemetryUpdate{
+			Action: "viewed",
+			At:     &oldAt,
+		}); err != nil {
+			t.Fatalf("mark old viewed: %v", err)
+		}
+	}
+	recentAt := now.Add(-10 * time.Minute)
+	if _, err := store.UpdateTelemetry(ctx, "memory://decay-recent-near-tie", "ws", storage.MemoryTelemetryUpdate{
+		Action: "viewed",
+		At:     &recentAt,
+	}); err != nil {
+		t.Fatalf("mark recent viewed: %v", err)
 	}
 }
 
@@ -475,9 +641,12 @@ func TestSearchMemoriesVectorUsesProvidedStoreAndFiltersCodeChunks(t *testing.T)
 		t.Fatalf("update note embedding: %v", err)
 	}
 
-	results, hint, err := searchMemories(ctx, cfg, "ws", "semantic commenting", []float32{1, 0}, 5, &Input{}, store)
+	results, hint, decayStats, err := searchMemories(ctx, cfg, "ws", "semantic commenting", []float32{1, 0}, 5, &Input{}, store)
 	if err != nil {
 		t.Fatalf("searchMemories: %v", err)
+	}
+	if decayStats != nil {
+		t.Fatalf("decayStats=%#v want nil when disabled", decayStats)
 	}
 	if hint != "" {
 		t.Fatalf("hint=%q want empty", hint)

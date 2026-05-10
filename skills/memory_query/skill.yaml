@@ -60,6 +60,11 @@ signature:
       required: false
       default: false
       description: Include full memory content in results (can be large)
+    - name: memory_decay_enabled
+      type: boolean
+      required: false
+      default: false
+      description: Enable opt-in search-time recency decay for named-memory ranking
   returns:
     - name: records
       type: array
@@ -106,6 +111,8 @@ signature:
       - Only records marked usage.instruction_eligible=true should shape behavior as instructions.
       - Use source_lane to distinguish named_memory from context_claim records.
       - Default lifecycle policy returns active records. Candidate/stale records are only surfaced by default when a query match is strong; deprecated/quarantined records require explicit lifecycle_states.
+      - memory_decay_enabled=true applies a soft search-time recency rerank to
+        named-memory records after base query/lifecycle eligibility checks.
 
       File Association:
       Memories can be associated with files through:
@@ -116,6 +123,7 @@ signature:
       Examples:
       - Query semantic facts for a file: { "file": "internal/storage/memory/store.go", "kinds": "semantic_fact,decision" }
       - Search procedural records semantically: { "query": "error handling patterns", "kinds": "procedural_skill" }
+      - Search with recency-aware memory decay: { "query": "current sprint context", "memory_decay_enabled": true, "limit": 10 }
       - Get all decisions: { "kinds": "decision", "limit": 20 }
       - Audit stale claims: { "lifecycle_states": "stale", "limit": 20 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	errs "github.com/joshka0/foxctl/internal/platform/errors"
 	"github.com/joshka0/foxctl/internal/platform/timeutil"
@@ -1062,6 +1063,42 @@ func (s *TursoStore) UpdateTelemetry(ctx context.Context, name, workspace string
 		return NamedEntry{}, fmt.Errorf("memory: update telemetry: %w", err)
 	}
 	return s.getWithoutTracking(ctx, name, workspace)
+}
+
+// RecordAccessBatch records surfaced retrieval access without touching outcome telemetry.
+func (s *TursoStore) RecordAccessBatch(ctx context.Context, workspace string, names []string, at time.Time) (int, error) {
+	workspace = ws.CanonicalID(workspace)
+	names = normalizedAccessBatchNames(names)
+	if len(names) == 0 {
+		return 0, nil
+	}
+	if at.IsZero() {
+		at = timeutil.NowUTC()
+	} else {
+		at = at.UTC()
+	}
+
+	placeholders := make([]string, len(names))
+	args := make([]any, 0, len(names)+2)
+	args = append(args, sqlutil.FormatTimestamp(at), workspace)
+	for i, name := range names {
+		placeholders[i] = "?"
+		args = append(args, name)
+	}
+
+	result, err := s.db.ExecContext(ctx, fmt.Sprintf(`
+		UPDATE named_memory
+		SET last_accessed = ?,
+		    access_count = access_count + 1
+		WHERE workspace = ? AND name IN (%s)`, strings.Join(placeholders, ",")), args...)
+	if err != nil {
+		return 0, fmt.Errorf("memory: record access batch: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, nil
+	}
+	return int(affected), nil
 }
 
 // Relevant returns the most relevant entries for the workspace based on recency and access patterns.

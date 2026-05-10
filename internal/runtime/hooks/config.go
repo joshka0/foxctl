@@ -156,6 +156,9 @@ func setHookDefaults(h *HookDef) {
 		if h.Run[i].TimeoutMS == 0 {
 			h.Run[i].TimeoutMS = 2000 // 2 second default
 		}
+		if h.Run[i].Role == "" {
+			h.Run[i].Role = defaultHookRole(h.Run[i].FailOpen)
+		}
 	}
 }
 
@@ -214,6 +217,7 @@ type HookConfigYAML struct {
 // HookDefaultsYAML holds default values for hook execution.
 type HookDefaultsYAML struct {
 	TimeoutMS int    `yaml:"timeout_ms,omitempty"`
+	Role      string `yaml:"role,omitempty"`
 	FailOpen  *bool  `yaml:"fail_open,omitempty"`
 	FailMode  string `yaml:"fail_mode,omitempty"`
 	Required  *bool  `yaml:"required,omitempty"`
@@ -243,12 +247,23 @@ func toHookDef(h HookDefYAML, defaults HookDefaultsYAML) (HookDef, error) {
 		if err != nil {
 			return HookDef{}, err
 		}
+		role, err := resolveHookRole(entry, defaults, failOpen)
+		if err != nil {
+			return HookDef{}, err
+		}
+		if role == HookRoleCriticalGuard {
+			failOpen, err = resolveCriticalGuardFailOpen(entry, failOpen)
+			if err != nil {
+				return HookDef{}, err
+			}
+		}
 		timeoutMS := entry.TimeoutMS
 		if timeoutMS == 0 {
 			timeoutMS = defaults.TimeoutMS
 		}
 		run[i] = HookRunEntry{
 			Skill:     entry.Skill,
+			Role:      role,
 			TimeoutMS: timeoutMS,
 			FailOpen:  failOpen,
 			Ephemeral: resolveEphemeral(entry, defaults),
@@ -269,6 +284,7 @@ func toHookDef(h HookDefYAML, defaults HookDefaultsYAML) (HookDef, error) {
 // HookRunEntryYAML is the YAML representation of a hook run entry.
 type HookRunEntryYAML struct {
 	Skill     string         `yaml:"skill"`
+	Role      string         `yaml:"role,omitempty"`
 	TimeoutMS int            `yaml:"timeout_ms,omitempty"`
 	FailOpen  *bool          `yaml:"fail_open,omitempty"` // Pointer to distinguish unset from false
 	FailMode  string         `yaml:"fail_mode,omitempty"`
@@ -297,6 +313,49 @@ func resolveFailOpen(entry HookRunEntryYAML, defaults HookDefaultsYAML) (bool, e
 		return !*defaults.Required, nil
 	}
 	return true, nil
+}
+
+func resolveHookRole(entry HookRunEntryYAML, defaults HookDefaultsYAML, failOpen bool) (HookRole, error) {
+	raw := entry.Role
+	if raw == "" {
+		raw = defaults.Role
+	}
+	if raw == "" {
+		return defaultHookRole(failOpen), nil
+	}
+	role := parseHookRole(raw)
+	if !role.IsValid() {
+		return "", fmt.Errorf("invalid role: %s", raw)
+	}
+	return role, nil
+}
+
+func parseHookRole(value string) HookRole {
+	role := strings.ToLower(strings.TrimSpace(value))
+	role = strings.ReplaceAll(role, "-", "_")
+	return HookRole(role)
+}
+
+func resolveCriticalGuardFailOpen(entry HookRunEntryYAML, resolvedFailOpen bool) (bool, error) {
+	if entry.FailOpen != nil && *entry.FailOpen {
+		return false, fmt.Errorf("critical_guard role cannot set fail_open=true")
+	}
+	if entry.FailMode != "" {
+		failOpen, err := parseFailMode(entry.FailMode)
+		if err != nil {
+			return false, err
+		}
+		if failOpen {
+			return false, fmt.Errorf("critical_guard role cannot set fail_mode=open")
+		}
+	}
+	if entry.Required != nil && !*entry.Required {
+		return false, fmt.Errorf("critical_guard role cannot set required=false")
+	}
+	if resolvedFailOpen {
+		return false, nil
+	}
+	return resolvedFailOpen, nil
 }
 
 func resolveEphemeral(entry HookRunEntryYAML, defaults HookDefaultsYAML) *bool {
@@ -341,6 +400,9 @@ func validateHook(h *HookDef) error {
 	for i, entry := range h.Run {
 		if entry.Skill == "" {
 			return fmt.Errorf("run[%d].skill is required", i)
+		}
+		if entry.Role != "" && !entry.Role.IsValid() {
+			return fmt.Errorf("run[%d].role is invalid: %s", i, entry.Role)
 		}
 	}
 	return nil

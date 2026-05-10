@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
+	"github.com/joshka0/foxctl/internal/context/contextengine"
+	"github.com/joshka0/foxctl/internal/context/contextplane"
 	"github.com/joshka0/foxctl/internal/context/memorycore"
 	"github.com/stretchr/testify/require"
 )
@@ -30,6 +34,25 @@ func parseMemoryToolResult(t *testing.T, result *models.CallToolResult) map[stri
 		return unwrapped
 	}
 	return data
+}
+
+func parseMemoryToolErrorText(t *testing.T, result *models.CallToolResult) string {
+	t.Helper()
+	require.True(t, result.IsError, "expected tool error")
+	require.NotEmpty(t, result.Content, "missing error content")
+	text, ok := result.Content[0].(models.TextContent)
+	require.True(t, ok, "expected TextContent, got %T", result.Content[0])
+	return text.Text
+}
+
+func requireContainsEvidenceRef(t *testing.T, refs []contextengine.EvidenceRef, typ contextengine.RefType, ref string) {
+	t.Helper()
+	for _, item := range refs {
+		if item.Type == typ && item.Ref == ref {
+			return
+		}
+	}
+	t.Fatalf("missing evidence ref type=%q ref=%q in %#v", typ, ref, refs)
 }
 
 func TestCanonicalMemoryQueryResultExposesLaneContract(t *testing.T) {
@@ -144,6 +167,147 @@ func requireNoMemoryWarning(t *testing.T, warnings []memoryRecordWarning, record
 			t.Fatalf("unexpected warning record_id=%q code=%q in %#v", recordID, code, warnings)
 		}
 	}
+}
+
+func TestMemoryPutRecordsMemoryCandidateProposal(t *testing.T) {
+	workspace := t.TempDir()
+	registry, err := NewRegistry(Config{
+		WorkspaceRoot: workspace,
+		WorkspaceID:   "ws-memory-put",
+		SessionID:     "sess-memory-put",
+		ActorID:       "actor:agent:memory-put",
+	}, nil)
+	require.NoError(t, err)
+
+	result, err := registry.memoryPut(context.Background(), map[string]any{
+		"name":    "sqlite-wal-mode",
+		"kind":    "semantic_fact",
+		"summary": "SQLite WAL mode improves write concurrency in this repo.",
+		"content": "Prefer WAL where local DB write concurrency is expected.",
+		"file":    "internal/context/contextplane/mutable_store.go",
+	})
+	require.NoError(t, err)
+
+	data := parseMemoryToolResult(t, result)
+	require.Equal(t, "memory_candidate", data["kind"])
+	require.Equal(t, "open", data["status"])
+	require.Equal(t, float64(1), data["count"])
+	require.Contains(t, data["message"], "candidate")
+	require.Contains(t, data["message"], "not saved")
+
+	proposalID, ok := data["proposal_id"].(string)
+	require.True(t, ok)
+	require.NotEmpty(t, proposalID)
+
+	store := contextplane.NewWorkspaceStore(workspace)
+	state, err := store.GetControlProposalState(context.Background(), proposalID)
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	require.Equal(t, contextplane.ProposalKindMemoryCandidate, state.Proposal.Kind)
+	require.Equal(t, "ws-memory-put", state.Proposal.WorkspaceID)
+	require.Equal(t, "sess-memory-put", state.Proposal.SessionID)
+	require.Equal(t, "actor:agent:memory-put", state.Proposal.AgentID)
+	require.Equal(t, contextplane.ProposalStatusOpen, state.Proposal.Status)
+	require.True(t, state.Proposal.ReviewRequired)
+
+	requireContainsEvidenceRef(t, state.Proposal.SourceRefs, contextengine.RefTypeToolCall, "memory.put")
+	requireContainsEvidenceRef(t, state.Proposal.SourceRefs, contextengine.RefTypeSession, "sess-memory-put")
+	requireContainsEvidenceRef(t, state.Proposal.EvidenceRefs, contextengine.RefTypePath, "internal/context/contextplane/mutable_store.go")
+
+	require.Equal(t, false, state.Proposal.Payload["instruction_eligible"])
+	require.Equal(t, true, state.Proposal.Payload["evidence_only"])
+}
+
+func TestMemoryPutDedupesByStableInputAndIncrementsCount(t *testing.T) {
+	workspace := t.TempDir()
+	registry, err := NewRegistry(Config{
+		WorkspaceRoot: workspace,
+		WorkspaceID:   "ws-memory-put-dedupe",
+		SessionID:     "sess-memory-put-dedupe",
+		ActorID:       "actor:agent:memory-put-dedupe",
+	}, nil)
+	require.NoError(t, err)
+
+	args := map[string]any{
+		"name":    "sqlite-wal-mode",
+		"kind":    "semantic_fact",
+		"summary": "SQLite WAL mode improves write concurrency in this repo.",
+		"content": "Prefer WAL where local DB write concurrency is expected.",
+		"file":    "internal/context/contextplane/mutable_store.go",
+	}
+
+	first, err := registry.memoryPut(context.Background(), args)
+	require.NoError(t, err)
+	second, err := registry.memoryPut(context.Background(), args)
+	require.NoError(t, err)
+
+	firstData := parseMemoryToolResult(t, first)
+	secondData := parseMemoryToolResult(t, second)
+	require.Equal(t, firstData["proposal_id"], secondData["proposal_id"])
+	require.Equal(t, float64(2), secondData["count"])
+
+	store := contextplane.NewWorkspaceStore(workspace)
+	states, err := store.ListControlProposalStates(context.Background(), 10)
+	require.NoError(t, err)
+	require.Len(t, states, 1)
+	require.Equal(t, 2, states[0].Proposal.Count)
+}
+
+func TestMemoryPutRejectsInvalidKind(t *testing.T) {
+	registry, err := NewRegistry(Config{
+		WorkspaceRoot: t.TempDir(),
+		WorkspaceID:   "ws-memory-put-invalid-kind",
+	}, nil)
+	require.NoError(t, err)
+
+	result, err := registry.memoryPut(context.Background(), map[string]any{
+		"name":    "bad-kind",
+		"kind":    "not_a_kind",
+		"summary": "invalid kind should fail",
+	})
+	require.NoError(t, err)
+
+	errText := parseMemoryToolErrorText(t, result)
+	require.Contains(t, errText, "kind must be one canonical memory kind")
+}
+
+func TestMemoryPutRequiresWorkspaceID(t *testing.T) {
+	registry, err := NewRegistry(Config{
+		WorkspaceRoot: t.TempDir(),
+	}, nil)
+	require.NoError(t, err)
+
+	result, err := registry.memoryPut(context.Background(), map[string]any{
+		"name":    "missing-workspace-id",
+		"kind":    "semantic_fact",
+		"summary": "missing workspace id should fail",
+	})
+	require.NoError(t, err)
+
+	errText := parseMemoryToolErrorText(t, result)
+	require.Contains(t, errText, "workspace_id is required")
+}
+
+func TestMemoryPutSurfacesContextplaneRecordFailure(t *testing.T) {
+	workspace := t.TempDir()
+	badWorkspace := filepath.Join(workspace, "not-a-directory")
+	require.NoError(t, os.WriteFile(badWorkspace, []byte("x"), 0o644))
+
+	registry, err := NewRegistry(Config{
+		WorkspaceRoot: badWorkspace,
+		WorkspaceID:   "ws-memory-put-fail",
+	}, nil)
+	require.NoError(t, err)
+
+	result, err := registry.memoryPut(context.Background(), map[string]any{
+		"name":    "record-failure",
+		"kind":    "semantic_fact",
+		"summary": "recording should fail",
+	})
+	require.NoError(t, err)
+
+	errText := parseMemoryToolErrorText(t, result)
+	require.Contains(t, strings.ToLower(errText), "record memory_candidate proposal")
 }
 
 func TestMemoryQuery_Integration(t *testing.T) {

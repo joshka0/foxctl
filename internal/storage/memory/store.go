@@ -87,6 +87,7 @@ const (
 	defaultMaxIdleConns    = 5                // Idle connections kept ready
 	defaultConnMaxLifetime = 10 * time.Minute // Connection recycling interval (SQLite best practice: 5-15 minutes)
 	defaultConnMaxIdleTime = 15 * time.Minute // Idle connection timeout
+	maxAccessBatchNames    = 100
 )
 
 // Open initializes a memory-backed Store rooted at the provided filesystem path.
@@ -962,6 +963,72 @@ func (s *Store) UpdateTelemetry(ctx context.Context, name, workspace string, upd
 		return NamedEntry{}, fmt.Errorf("memory: update telemetry: %w", err)
 	}
 	return s.getWithoutTracking(ctx, name, workspace)
+}
+
+// RecordAccessBatch records surfaced retrieval access without touching outcome telemetry.
+//
+// [[domain:memory-decay-ranking]]
+// [[invariant:retrieval-access-not-outcome-telemetry]]
+func (s *Store) RecordAccessBatch(ctx context.Context, workspace string, names []string, at time.Time) (int, error) {
+	workspace = ws.CanonicalID(workspace)
+	names = normalizedAccessBatchNames(names)
+	if len(names) == 0 {
+		return 0, nil
+	}
+	if at.IsZero() {
+		at = timeutil.NowUTC()
+	} else {
+		at = at.UTC()
+	}
+
+	placeholders := make([]string, len(names))
+	args := make([]any, 0, len(names)+2)
+	args = append(args, sqlutil.FormatTimestamp(at), workspace)
+	for i, name := range names {
+		placeholders[i] = fmt.Sprintf("$%d", i+3)
+		args = append(args, name)
+	}
+
+	result, err := s.db.ExecContext(ctx, fmt.Sprintf(`
+		UPDATE named_memory
+		SET last_accessed = $1,
+		    access_count = access_count + 1
+		WHERE workspace = $2 AND name IN (%s)`, strings.Join(placeholders, ",")), args...)
+	if err != nil {
+		return 0, fmt.Errorf("memory: record access batch: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, nil
+	}
+	return int(affected), nil
+}
+
+func normalizedAccessBatchNames(names []string) []string {
+	if len(names) == 0 {
+		return nil
+	}
+	capacity := len(names)
+	if capacity > maxAccessBatchNames {
+		capacity = maxAccessBatchNames
+	}
+	out := make([]string, 0, capacity)
+	seen := make(map[string]struct{}, capacity)
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+		if len(out) >= maxAccessBatchNames {
+			break
+		}
+	}
+	return out
 }
 
 func telemetryColumnsForAction(action string) (string, string, error) {

@@ -131,6 +131,12 @@ func TestMemoryPutCommand(t *testing.T) {
 	if entry.Summary == "" {
 		t.Fatalf("expected summary set")
 	}
+	if entry.LifecycleState != "active" {
+		t.Fatalf("manual memory lifecycle = %q, want active", entry.LifecycleState)
+	}
+	if entry.ReviewStatus != "unreviewed" {
+		t.Fatalf("manual memory review_status = %q, want unreviewed", entry.ReviewStatus)
+	}
 }
 
 func TestMemoryPutCommandUsesWorkspaceFlag(t *testing.T) {
