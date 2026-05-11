@@ -59,6 +59,7 @@ func TestLadybugQueryProofScripts(t *testing.T) {
 
 	smartContext := runLadybugProofScript(t, "ladybug_smart_context.sh", lbugBin, dbPath, homeDir,
 		"--node-id", "repo-fixture::sym:go:example:A",
+		"--limit", "1",
 	)
 	assertContainsAll(t, smartContext, []string{
 		`"section":"self"`,
