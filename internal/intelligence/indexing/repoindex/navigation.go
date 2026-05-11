@@ -89,12 +89,15 @@ func (q *QueryEngine) TracePath(ctx context.Context, opts TracePathOptions) (Tra
 	if opts.SrcID == "" || opts.DstID == "" {
 		return TracePathResult{}, ErrNotFound
 	}
+	srcNode, err := q.store.GetNode(ctx, opts.SrcID)
+	if err != nil {
+		return TracePathResult{}, err
+	}
 	if opts.SrcID == opts.DstID {
-		node, err := q.store.GetNode(ctx, opts.SrcID)
-		if err != nil {
-			return TracePathResult{}, err
-		}
-		return TracePathResult{Found: true, Nodes: []Node{node}}, nil
+		return TracePathResult{Found: true, Nodes: []Node{srcNode}}, nil
+	}
+	if _, err := q.store.GetNode(ctx, opts.DstID); err != nil {
+		return TracePathResult{}, err
 	}
 
 	type pathState struct {

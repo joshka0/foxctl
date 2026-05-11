@@ -2,6 +2,7 @@ package repoindex
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -27,6 +28,25 @@ func TestTracePathFindsShortestStoredPath(t *testing.T) {
 	}
 	if len(got.Edges) != 1 || got.Edges[0].Type != EdgeCalls {
 		t.Fatalf("TracePath edges=%+v want one CALLS edge", got.Edges)
+	}
+}
+
+func TestTracePathRejectsMissingEndpoint(t *testing.T) {
+	_, qe, ids := setupNavigationStore(t)
+
+	if _, err := qe.TracePath(context.Background(), TracePathOptions{
+		SrcID:    "missing-source",
+		DstID:    ids.writeExport,
+		MaxDepth: 2,
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("TracePath missing source error=%v want %v", err, ErrNotFound)
+	}
+	if _, err := qe.TracePath(context.Background(), TracePathOptions{
+		SrcID:    ids.testWriter,
+		DstID:    "missing-destination",
+		MaxDepth: 2,
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("TracePath missing destination error=%v want %v", err, ErrNotFound)
 	}
 }
 

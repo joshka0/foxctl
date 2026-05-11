@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -97,6 +98,90 @@ func TestIndexRepoTracePathCommandUsesFreshStore(t *testing.T) {
 	}
 }
 
+func TestIndexRepoTracePathCommandRejectsMissingEndpoint(t *testing.T) {
+	ctx := context.Background()
+	cfg, workspace, nodes := setupIndexRepoNavigationCommandFixture(t, ctx)
+
+	env, stdout, err := executeIndexRepoNavigationCommand(ctx, cfg, newIndexRepoTracePathCommand(),
+		"--workspace", workspace,
+		"--src-id", "missing-source",
+		"--dst-id", nodes["callee"].ID,
+	)
+	if err == nil {
+		t.Fatalf("trace-path command succeeded, want missing endpoint error\nstdout:\n%s", stdout)
+	}
+	if env.Status != envelope.StatusError || env.Command != "index.repo.trace_path" {
+		t.Fatalf("unexpected envelope: %+v\nstdout:\n%s", env, stdout)
+	}
+	if !strings.Contains(stdout, "--src-id") || !strings.Contains(stdout, "was not found") {
+		t.Fatalf("trace-path missing endpoint output lacks source detail:\n%s", stdout)
+	}
+}
+
+func TestIndexRepoTracePathCommandResolvesQueries(t *testing.T) {
+	ctx := context.Background()
+	cfg, workspace, nodes := setupIndexRepoNavigationCommandFixture(t, ctx)
+
+	env, stdout, err := executeIndexRepoNavigationCommand(ctx, cfg, newIndexRepoTracePathCommand(),
+		"--workspace", workspace,
+		"--src-query", "Caller",
+		"--dst-query", "Callee",
+	)
+	if err != nil {
+		t.Fatalf("trace-path command failed: %v\nstdout:\n%s", err, stdout)
+	}
+	if env.Status != envelope.StatusOK || env.Command != "index.repo.trace_path" {
+		t.Fatalf("unexpected envelope: %+v\nstdout:\n%s", env, stdout)
+	}
+	for _, want := range []string{`"found":true`, nodes["caller"].ID, nodes["callee"].ID, `"src_query":"Caller"`, `"dst_query":"Callee"`} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("trace-path query output missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestIndexRepoSmartContextCommandResolvesQuery(t *testing.T) {
+	ctx := context.Background()
+	cfg, workspace, nodes := setupIndexRepoNavigationCommandFixture(t, ctx)
+
+	env, stdout, err := executeIndexRepoNavigationCommand(ctx, cfg, newIndexRepoSmartContextCommand(),
+		"--workspace", workspace,
+		"--query", "Caller",
+	)
+	if err != nil {
+		t.Fatalf("smart-context command failed: %v\nstdout:\n%s", err, stdout)
+	}
+	if env.Status != envelope.StatusOK || env.Command != "index.repo.smart_context" {
+		t.Fatalf("unexpected envelope: %+v\nstdout:\n%s", env, stdout)
+	}
+	for _, want := range []string{nodes["caller"].ID, `"query":"Caller"`, `"sections"`} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("smart-context query output missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestIndexRepoBlastRadiusCommandResolvesQuery(t *testing.T) {
+	ctx := context.Background()
+	cfg, workspace, nodes := setupIndexRepoNavigationCommandFixture(t, ctx)
+
+	env, stdout, err := executeIndexRepoNavigationCommand(ctx, cfg, newIndexRepoBlastRadiusCommand(),
+		"--workspace", workspace,
+		"--query", "Caller",
+	)
+	if err != nil {
+		t.Fatalf("blast-radius command failed: %v\nstdout:\n%s", err, stdout)
+	}
+	if env.Status != envelope.StatusOK || env.Command != "index.repo.blast_radius" {
+		t.Fatalf("unexpected envelope: %+v\nstdout:\n%s", env, stdout)
+	}
+	for _, want := range []string{nodes["caller"].ID, nodes["callee"].ID, `"query":"Caller"`} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("blast-radius query output missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
 func TestIndexRepoSmartContextCommandRejectsDirtyIndex(t *testing.T) {
 	ctx := context.Background()
 	cfg, workspace, nodes := setupIndexRepoNavigationCommandFixture(t, ctx)
@@ -131,6 +216,44 @@ func TestRepoIndexNavigationFreshnessOKAllowsCurrentBehindAndExplicitStale(t *te
 	}
 	if !repoIndexNavigationFreshnessOK(repoindex.IndexFreshnessStatus{Level: repoindex.FreshnessStale}, true) {
 		t.Fatal("allow-stale should explicitly accept stale freshness")
+	}
+}
+
+func TestOpenRepoIndexStoreWithRetryRetriesBusyOpen(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	attempts := 0
+	_, err := openRepoIndexStoreWithRetryFunc(ctx, "storage", "repo", func(context.Context, string, string) (*repoindex.Store, error) {
+		attempts++
+		if attempts < 3 {
+			return nil, errors.New("repoindex: open db: database is locked (5) (SQLITE_BUSY)")
+		}
+		return nil, nil
+	}, 200*time.Millisecond, time.Nanosecond)
+	if err != nil {
+		t.Fatalf("openRepoIndexStoreWithRetryFunc() error = %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("attempts=%d want 3", attempts)
+	}
+}
+
+func TestOpenRepoIndexStoreWithRetryStopsOnNonBusyError(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	want := errors.New("permission denied")
+	attempts := 0
+	_, err := openRepoIndexStoreWithRetryFunc(ctx, "storage", "repo", func(context.Context, string, string) (*repoindex.Store, error) {
+		attempts++
+		return nil, want
+	}, 200*time.Millisecond, time.Nanosecond)
+	if !errors.Is(err, want) {
+		t.Fatalf("openRepoIndexStoreWithRetryFunc() error = %v want %v", err, want)
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts=%d want 1", attempts)
 	}
 }
 
