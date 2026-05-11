@@ -556,10 +556,11 @@ func checkEnvironment() []envStatus {
 		name     string
 		required bool
 	}{
-		{"VOYAGE_API_KEY", true},
+		{"FOXCTL_EMBEDDING_PROVIDER", false},
+		{"FOXCTL_EMBEDDING_MODEL", false},
+		{"FOXCTL_EMBEDDING_BASE_URL", false},
 		{"ANTHROPIC_API_KEY", false},
 		{"FOXCTL_HOME", false},
-		{"FOXCTL_SEMANTIC_RERANK", false},
 	}
 
 	var statuses []envStatus

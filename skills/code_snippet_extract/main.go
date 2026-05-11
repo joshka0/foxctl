@@ -392,21 +392,18 @@ func searchRelatedSessions(ctx context.Context, rc *skillmain.RunContext, worksp
 // createEmbeddingProvider creates an embedding provider from config/env.
 // Returns provider (or nil) and a hint when unavailable.
 func createEmbeddingProvider(cfg config.Config) (semantic.EmbeddingProvider, string) {
-	voyageKey := os.Getenv("VOYAGE_API_KEY")
 	geminiKey := os.Getenv("GEMINI_API_KEY")
 
-	switch semantic.DetectProviderForConfig(cfg, voyageKey, geminiKey) {
+	switch semantic.DetectProviderForConfig(cfg, geminiKey) {
 	case "":
 		return nil, "no embedding provider configured; session context disabled"
 	case "openai_compat":
-		// Local/OpenAI-compatible providers are configured via embedding.provider/base_url/model
-		// and do not require VOYAGE_API_KEY or GEMINI_API_KEY.
+		// Local/OpenAI-compatible providers are configured via embedding.provider/base_url/model.
 	}
 
 	provider, err := semantic.NewProviderForScope(
 		semantic.ScopeSessions,
 		cfg,
-		semantic.WithVoyageKey(voyageKey),
 		semantic.WithGeminiKey(geminiKey),
 	)
 	if err != nil {

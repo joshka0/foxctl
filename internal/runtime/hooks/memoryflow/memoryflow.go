@@ -209,7 +209,7 @@ func HandleLifecycle(ctx context.Context, deps Dependencies, req LifecycleReques
 				return response, err
 			}
 		}
-		if envEnabledInverse("FOXCTL_MEMORY_EMBED", true) && (strings.TrimSpace(deps.Config.Embedding.APIKey) != "" || strings.TrimSpace(deps.Config.Embedding.VoyageAPIKey) != "" || strings.TrimSpace(os.Getenv("GEMINI_API_KEY")) != "" || strings.TrimSpace(deps.Config.Embedding.Provider) != "") {
+		if envEnabledInverse("FOXCTL_MEMORY_EMBED", true) && (strings.TrimSpace(deps.Config.Embedding.APIKey) != "" || strings.TrimSpace(os.Getenv("GEMINI_API_KEY")) != "" || strings.TrimSpace(deps.Config.Embedding.Provider) != "") {
 			_ = refreshMemoryEmbedding(ctx, deps, target, req.Payload)
 		}
 		// Best-effort: emit a code.changed_dirty event into the contextengine

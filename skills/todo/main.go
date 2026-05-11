@@ -1044,18 +1044,12 @@ func handleSearch(ctx context.Context, store tasks.Store, cfg config.Config, wor
 		Query: req.Query,
 	}
 
-	// Check for API key
 	geminiKey := os.Getenv("GEMINI_API_KEY")
-	voyageKey := os.Getenv("VOYAGE_API_KEY")
-	if geminiKey == "" && voyageKey == "" {
-		return nil, skillerr.Auth("no embedding API key set", skillerr.WithHint("Set GEMINI_API_KEY or VOYAGE_API_KEY."))
-	}
 
 	embedder, err := semantic.NewEmbedderFromConfig(
 		semantic.ScopeTasks,
 		cfg,
 		append([]semantic.EmbedderOption{
-			semantic.WithVoyageKey(voyageKey),
 			semantic.WithGeminiKey(geminiKey),
 		}, embedOpts...)...,
 	)

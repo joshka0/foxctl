@@ -51,7 +51,6 @@ func TestDoctorRedactsConfigSecrets(t *testing.T) {
 		MaxCaptureKB:   1024,
 	}
 	cfg.Embedding.APIKey = "embedding-private-value-1234567890"
-	cfg.Embedding.VoyageAPIKey = "voyage-private-value-1234567890"
 	cfg.Search.ExaAPIKey = "exa-private-value-1234567890"
 	cfg.LLM.OpenRouterAPIKey = "openrouter-private-value-1234567890"
 	cfg.LLM.OpenAIAPIKey = "openai-private-value-1234567890"
@@ -69,7 +68,6 @@ func TestDoctorRedactsConfigSecrets(t *testing.T) {
 	out := buf.String()
 	for _, leaked := range []string{
 		cfg.Embedding.APIKey,
-		cfg.Embedding.VoyageAPIKey,
 		cfg.Search.ExaAPIKey,
 		cfg.LLM.OpenRouterAPIKey,
 		cfg.LLM.OpenAIAPIKey,

@@ -6993,6 +6993,9 @@ func (a *ReadOnlyAdapter) gatherDocsContext(ctx context.Context, args json.RawMe
 	if strings.TrimSpace(input.TaskType) == "" {
 		input.TaskType = "documentation_map"
 	}
+	if len(cleanStringList(input.PathPrefixes)) == 0 {
+		input.PathPrefixes = appendGatherDocsDefaultPathPrefixes(input.PathPrefixes)
+	}
 	input.ExcludedPaths = appendGatherDocsDefaultExcludedPaths(input.ExcludedPaths)
 	return a.gatherContextWithInput(ctx, input)
 }
@@ -7082,6 +7085,16 @@ func appendIfMissingStringEnv(values []string, value string) []string {
 		}
 	}
 	return append(values, value)
+}
+
+func appendGatherDocsDefaultPathPrefixes(values []string) []string {
+	for _, value := range []string{
+		"docs", "README.md", "AGENTS.md", "CLAUDE.md", "CONTEXT.md",
+		"CHANGELOG.md", "CONTRIBUTING.md", "LICENSE", "NOTICE",
+	} {
+		values = appendIfMissingStringEnv(values, value)
+	}
+	return values
 }
 
 func appendGatherDocsDefaultExcludedPaths(values []string) []string {

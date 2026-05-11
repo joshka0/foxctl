@@ -1,8 +1,10 @@
 package rerank
 
 import (
+	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -10,6 +12,9 @@ import (
 // FC/IS: Constants ensure consistency between FromEnv and ConfigFromMap.
 const (
 	EnvRerankEnabled       = "FOXCTL_RERANK_ENABLED"
+	EnvRerankProvider      = "FOXCTL_RERANK_PROVIDER"
+	EnvRerankBaseURL       = "FOXCTL_RERANK_BASE_URL"
+	EnvRerankAPIKey        = "FOXCTL_RERANK_API_KEY"
 	EnvRerankTopK          = "FOXCTL_RERANK_TOP_K"
 	EnvRerankFinalK        = "FOXCTL_RERANK_FINAL_K"
 	EnvRerankScoreBlend    = "FOXCTL_RERANK_SCORE_BLEND"
@@ -24,6 +29,17 @@ type Config struct {
 	// Enabled controls whether reranking is active.
 	// Default: false (opt-in feature)
 	Enabled bool
+
+	// Provider is the reranking provider family.
+	// Default: qwen (OpenAI-compatible /rerank endpoint)
+	Provider string
+
+	// BaseURL is the rerank endpoint base URL. The provider posts to baseURL + "/rerank"
+	// unless the base already ends with /rerank.
+	BaseURL string
+
+	// APIKey is optional for local servers and sent as Bearer auth when present.
+	APIKey string
 
 	// TopK is the number of candidates to rerank.
 	// More candidates = better recall but higher cost/latency.
@@ -41,13 +57,11 @@ type Config struct {
 	// 0.3 = 70% rerank + 30% original
 	ScoreBlend *float64
 
-	// Instruction is an optional instruction for the reranker.
-	// Rerank-2.5 supports instruction-following for domain-specific tuning.
+	// Instruction is an optional instruction for instruction-aware rerankers.
 	// Example: "Rank code snippets by relevance to the programming question"
 	Instruction string
 
 	// Model is the reranking model to use.
-	// Default: "rerank-2.5"
 	Model string
 
 	// Timeout is the HTTP request timeout.
@@ -71,10 +85,11 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		Enabled:    false,
+		Provider:   "qwen",
 		TopK:       50,
 		FinalK:     10,
 		ScoreBlend: nil, // Pure rerank score (nil means use 0.0)
-		Model:      "rerank-2.5",
+		Model:      DefaultQwenRerankModel,
 		Timeout:    60 * time.Second,
 		RateLimit:  nil, // nil = no rate limit
 	}
@@ -83,6 +98,9 @@ func DefaultConfig() Config {
 // FromEnv creates a Config from environment variables.
 // Environment variables:
 //   - FOXCTL_RERANK_ENABLED: "true" or "1" to enable
+//   - FOXCTL_RERANK_PROVIDER: rerank provider (default: qwen)
+//   - FOXCTL_RERANK_BASE_URL: base URL for the OpenAI-compatible rerank server
+//   - FOXCTL_RERANK_API_KEY: optional bearer token for the rerank server
 //   - FOXCTL_RERANK_TOP_K: number of candidates to rerank
 //   - FOXCTL_RERANK_FINAL_K: number of results to return
 //   - FOXCTL_RERANK_SCORE_BLEND: blend factor (0.0-1.0)
@@ -94,6 +112,9 @@ func FromEnv() Config {
 	// FC/IS: Collect env values at boundary, delegate parsing to pure function.
 	envMap := map[string]string{
 		EnvRerankEnabled:       os.Getenv(EnvRerankEnabled),
+		EnvRerankProvider:      os.Getenv(EnvRerankProvider),
+		EnvRerankBaseURL:       os.Getenv(EnvRerankBaseURL),
+		EnvRerankAPIKey:        os.Getenv(EnvRerankAPIKey),
 		EnvRerankTopK:          os.Getenv(EnvRerankTopK),
 		EnvRerankFinalK:        os.Getenv(EnvRerankFinalK),
 		EnvRerankScoreBlend:    os.Getenv(EnvRerankScoreBlend),
@@ -113,6 +134,18 @@ func ConfigFromMap(envMap map[string]string) Config {
 
 	if v := envMap[EnvRerankEnabled]; v != "" {
 		cfg.Enabled = v == "true" || v == "1"
+	}
+
+	if v := envMap[EnvRerankProvider]; v != "" {
+		cfg.Provider = v
+	}
+
+	if v := envMap[EnvRerankBaseURL]; v != "" {
+		cfg.BaseURL = v
+	}
+
+	if v := envMap[EnvRerankAPIKey]; v != "" {
+		cfg.APIKey = v
 	}
 
 	if v := envMap[EnvRerankTopK]; v != "" {
@@ -176,6 +209,15 @@ func (c Config) Merge(other Config) Config {
 		result.Enabled = true
 	}
 
+	if other.Provider != "" {
+		result.Provider = other.Provider
+	}
+	if other.BaseURL != "" {
+		result.BaseURL = other.BaseURL
+	}
+	if other.APIKey != "" {
+		result.APIKey = other.APIKey
+	}
 	if other.TopK > 0 {
 		result.TopK = other.TopK
 	}
@@ -204,23 +246,32 @@ func (c Config) Merge(other Config) Config {
 	return result
 }
 
-// ToVoyageConfig converts Config to VoyageConfig for provider creation.
-// Default RateLimitWait is true (wait for slot rather than fail immediately).
-func (c Config) ToVoyageConfig() VoyageConfig {
-	// Default to true if not explicitly configured
-	rateLimitWait := true
-	if c.RateLimitWait != nil {
-		rateLimitWait = *c.RateLimitWait
-	}
-	var scoreBlend float64
+// ToQwenConfig converts shared rerank config into the canonical local reranker config.
+func (c Config) ToQwenConfig() QwenConfig {
+	scoreBlend := 0.0
 	if c.ScoreBlend != nil {
 		scoreBlend = *c.ScoreBlend
 	}
-	return VoyageConfig{
+	return QwenConfig{
+		APIKey:        c.APIKey,
 		Model:         c.Model,
+		BaseURL:       c.BaseURL,
 		Timeout:       c.Timeout,
 		RateLimit:     c.RateLimit,
-		RateLimitWait: &rateLimitWait,
+		RateLimitWait: c.RateLimitWait,
 		ScoreBlend:    scoreBlend,
+	}
+}
+
+// NewProviderFromConfig constructs the configured rerank provider.
+func NewProviderFromConfig(cfg Config) (Provider, error) {
+	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
+	switch provider {
+	case "", "qwen", "openai_compat", "openai-compatible", "local":
+		return NewQwenProvider(cfg.ToQwenConfig())
+	case "noop":
+		return NewNoOpProvider(), nil
+	default:
+		return nil, fmt.Errorf("unsupported rerank provider %q: use qwen, openai_compat, local, or noop", cfg.Provider)
 	}
 }

@@ -641,9 +641,6 @@ func embeddingConfigured(cfg config.Config) bool {
 	if strings.TrimSpace(cfg.Embedding.APIKey) != "" {
 		return true
 	}
-	if strings.TrimSpace(cfg.Embedding.VoyageAPIKey) != "" {
-		return true
-	}
 	if strings.TrimSpace(cfg.Embedding.Provider) != "" {
 		return true
 	}

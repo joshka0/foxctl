@@ -386,13 +386,6 @@ func readCASPage(reader io.Reader, page, pageSize int) ([]byte, int64, error) {
 	}
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func formatInt(n int64) string {
 	return strconv.FormatInt(n, 10)
 }

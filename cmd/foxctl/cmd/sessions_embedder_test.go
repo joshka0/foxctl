@@ -11,8 +11,8 @@ func TestResolveResynthesizeEmbedder_DisabledReturnsNilEmbedder(t *testing.T) {
 	t.Parallel()
 
 	embedder, resolved, err := resolveResynthesizeEmbedder(false, sourceimport.EmbedderConfig{
-		Provider: "voyage",
-		Model:    "voyage-3.5",
+		Provider: "lmstudio",
+		Model:    "text-embedding-qwen3-embedding-8b",
 	})
 	if err != nil {
 		t.Fatalf("resolveResynthesizeEmbedder() error = %v", err)
@@ -20,11 +20,11 @@ func TestResolveResynthesizeEmbedder_DisabledReturnsNilEmbedder(t *testing.T) {
 	if embedder != nil {
 		t.Fatal("embedder should be nil when includeEmbedding=false")
 	}
-	if resolved.Provider != sourceimport.EmbeddingProviderVoyage {
-		t.Fatalf("provider=%q want %q", resolved.Provider, sourceimport.EmbeddingProviderVoyage)
+	if resolved.Provider != sourceimport.EmbeddingProviderOpenAICompat {
+		t.Fatalf("provider=%q want %q", resolved.Provider, sourceimport.EmbeddingProviderOpenAICompat)
 	}
-	if resolved.Model != "voyage-3.5" {
-		t.Fatalf("model=%q want voyage-3.5", resolved.Model)
+	if resolved.Model != "text-embedding-qwen3-embedding-8b" {
+		t.Fatalf("model=%q want text-embedding-qwen3-embedding-8b", resolved.Model)
 	}
 }
 

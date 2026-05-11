@@ -5,19 +5,18 @@ description: Semantic code search using embeddings and vector similarity. Search
 
 # Semantic Search with foxctl
 
-Vector-based semantic search across multiple content types using Voyage AI embeddings.
+Vector-based semantic search across multiple content types using local
+OpenAI-compatible embeddings by default.
 
 ## Quick Usage
 
 ```bash
-# JSON output (default)
 foxctl run code/semantic_search --input '{
   "query": "authentication middleware",
   "scope": ["symbols", "memories", "codemaps"],
   "limit": 10
 }'
 
-# Tree view - shows related files grouped by directory
 foxctl run code/semantic_search --input '{
   "query": "authentication middleware",
   "format": "tree"
@@ -26,13 +25,13 @@ foxctl run code/semantic_search --input '{
 
 ## Scopes
 
-| Scope | Content Type | Model | Description |
-|-------|--------------|-------|-------------|
-| `symbols` | Code | voyage-code-3 | Functions, classes, variables from codebase |
-| `memories` | Text | voyage-3.5 | Gotchas, learnings, notes |
-| `tasks` | Text | voyage-3.5 | Task descriptions and notes |
-| `sessions` | Text | voyage-3.5 | Session summaries and context |
-| `codemaps` | Text | voyage-3.5 | Semantic code relationship maps |
+| Scope | Content Type | Default Model | Description |
+|-------|--------------|---------------|-------------|
+| `symbols` | Code | `text-embedding-qwen3-embedding-8b` | Functions, classes, variables from codebase |
+| `memories` | Text | `text-embedding-qwen3-embedding-8b` | Gotchas, learnings, notes |
+| `tasks` | Text | `text-embedding-qwen3-embedding-8b` | Task descriptions and notes |
+| `sessions` | Text | `text-embedding-qwen3-embedding-8b` | Session summaries and context |
+| `codemaps` | Text | `text-embedding-qwen3-embedding-8b` | Semantic code relationship maps |
 
 ## Parameters
 
@@ -41,30 +40,31 @@ foxctl run code/semantic_search --input '{
 | `query` | string | required | Natural language search query |
 | `scope` | string[] | all scopes | Content types to search |
 | `limit` | int | 10 | Max results per scope |
-| `format` | string | json | Output: `json` or `tree` (directory tree of related files) |
-| `path` | string | workspace | Directory to scope symbol search |
-| `threshold` | float | 0.0 | Minimum similarity score (0-1) |
+| `format` | string | json | Output: `json` or `tree` |
+| `repo_index_mode` | string | auto | Repoindex contribution mode for symbol/code scope |
+| `memory_decay_enabled` | bool | false | Apply memory recency/access rerank to memory-scope candidates |
+| `rerank_enabled` | bool | false | Apply local Qwen/OpenAI-compatible model rerank after fusion |
+| `rerank_top_k` | int | 50 | Candidate count passed to the reranker |
+| `rerank_model` | string | `Qwen/Qwen3-Reranker-0.6B` | Reranker model override |
 
 ## Embedding Strategy
 
-Two embedding models are used for optimal retrieval:
-
-- **voyage-code-3** ($0.18/1M tokens): Optimized for code, 13.8% better than OpenAI
-- **voyage-3.5** ($0.06/1M tokens): Best price/performance for text
-
-The skill automatically generates separate embeddings for code (symbols) and text (everything else) scopes.
+The default provider is `openai_compat`, using
+`text-embedding-qwen3-embedding-8b` for code and text scopes. Per-scope
+overrides are still supported when a smaller or specialized model is needed.
 
 ## Configuration
 
-Environment variables:
-
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `VOYAGE_API_KEY` | - | Required for Voyage embeddings |
-| `GEMINI_API_KEY` | - | Alternative: Gemini embeddings |
-| `EMBEDDING_MODEL_CODE` | voyage-code-3 | Override code embedding model |
-| `EMBEDDING_MODEL_TEXT` | voyage-3.5 | Override text embedding model |
-| `EMBEDDING_MODEL` | - | Fallback for both |
+| `FOXCTL_EMBEDDING_PROVIDER` | `openai_compat` | Embedding provider |
+| `FOXCTL_EMBEDDING_MODEL` | `text-embedding-qwen3-embedding-8b` | Default embedding model |
+| `FOXCTL_EMBEDDING_BASE_URL` | `http://127.0.0.1:1234/v1` | OpenAI-compatible embedding endpoint |
+| `FOXCTL_EMBEDDING_API_KEY` | - | Optional bearer token for the embedding endpoint |
+| `FOXCTL_EMBEDDING_MODEL_<SCOPE>` | - | Per-scope embedding model override |
+| `FOXCTL_RERANK_ENABLED` | false | Enable model reranking |
+| `FOXCTL_RERANK_BASE_URL` | inherits embedding base URL | OpenAI-compatible rerank endpoint |
+| `FOXCTL_RERANK_MODEL` | `Qwen/Qwen3-Reranker-0.6B` | Rerank model |
 
 ## Examples
 
@@ -74,7 +74,7 @@ Environment variables:
 foxctl run code/semantic_search --input '{
   "query": "rate limiting",
   "scope": ["symbols"],
-  "path": "internal/api/"
+  "repo_index_mode": "search"
 }'
 ```
 
@@ -83,16 +83,8 @@ foxctl run code/semantic_search --input '{
 ```bash
 foxctl run code/semantic_search --input '{
   "query": "authentication gotchas",
-  "scope": ["memories"]
-}'
-```
-
-### Search Codemaps
-
-```bash
-foxctl run code/semantic_search --input '{
-  "query": "how does auth work",
-  "scope": ["codemaps"]
+  "scope": ["memories"],
+  "memory_decay_enabled": true
 }'
 ```
 
@@ -107,32 +99,12 @@ foxctl run code/semantic_search --input '{
 
 ### Tree View of Related Files
 
-Show semantically related files grouped by directory structure:
-
 ```bash
 foxctl run code/semantic_search --input '{
   "query": "embedding vector search",
   "scope": ["symbols"],
   "format": "tree"
 }'
-```
-
-Output:
-```
-.
-├── internal/
-│   ├── indexing/
-│   │   └── semantic/
-│   │       ├── indexer.go
-│   │       └── provider_voyage.go
-│   └── storage/
-│       └── vector/
-│           └── store.go
-└── skills/
-    └── code_semantic_search/
-        └── main.go
-
-📂 5 related files
 ```
 
 ## Output Format
@@ -142,7 +114,7 @@ Output:
   "results": [
     {
       "source": "symbols",
-      "id": "symbol:///path/file.go:FunctionName",
+      "id": "symbol:/workspace/internal/file.go#L42",
       "name": "FunctionName",
       "snippet": "func FunctionName(...) { ... }",
       "similarity": 0.85,
@@ -152,25 +124,7 @@ Output:
   "stats": {
     "total_results": 5,
     "source_counts": {"symbols": 3, "memories": 2},
-    "embedding_dimensions": 1024
-  }
-}
-```
-
-## Hooks Integration
-
-The `semantic-search` hook automatically runs on Grep/Glob operations to surface relevant context:
-
-```yaml
-# .claude/settings.json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Grep|Glob",
-        "command": "foxctl run code/semantic_search ..."
-      }
-    ]
+    "embedding_dimensions": 4096
   }
 }
 ```
@@ -180,8 +134,10 @@ The `semantic-search` hook automatically runs on Grep/Glob operations to surface
 Enable reranking for improved precision:
 
 ```bash
-export FOXCTL_SEMANTIC_RERANK=1
-foxctl run code/semantic_search --input '{"query": "...", "rerank": true}'
+export FOXCTL_RERANK_ENABLED=true
+export FOXCTL_RERANK_BASE_URL=http://127.0.0.1:8000/v1
+foxctl run code/semantic_search --input '{"query": "...", "rerank_enabled": true}'
 ```
 
-Uses Voyage rerank-2.5 to reorder results by relevance.
+The reranker posts fused candidates to a local OpenAI-compatible `/rerank`
+endpoint and uses the returned relevance scores to reorder the top candidates.

@@ -54,7 +54,6 @@ func newContextCoChangeBuildCommand() *cobra.Command {
 				provider, _ = semantic.NewProviderForScope(
 					semantic.ScopeMemory,
 					cfg,
-					semantic.WithVoyageKey(os.Getenv("VOYAGE_API_KEY")),
 					semantic.WithGeminiKey(os.Getenv("GEMINI_API_KEY")),
 				)
 			}
@@ -115,7 +114,6 @@ func newContextCoChangeSearchCommand() *cobra.Command {
 				provider, _ = semantic.NewProviderForScope(
 					semantic.ScopeMemory,
 					cfg,
-					semantic.WithVoyageKey(os.Getenv("VOYAGE_API_KEY")),
 					semantic.WithGeminiKey(os.Getenv("GEMINI_API_KEY")),
 				)
 			}

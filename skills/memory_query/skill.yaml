@@ -90,7 +90,7 @@ signature:
       - Get file-specific context for AI assistants
 
       Search Methods:
-      1. If query is provided: semantic vector search (requires VOYAGE_API_KEY/GEMINI_API_KEY)
+      1. If query is provided: semantic vector search (requires a configured embedding provider)
       2. If only file is provided: filter by file association
       3. If only kinds is provided: filter by canonical memory kind
       4. If lifecycle_states is provided: return only explicit lifecycle states

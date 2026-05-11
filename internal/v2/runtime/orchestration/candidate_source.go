@@ -183,10 +183,3 @@ func retryDue(card coreorchestration.Card, now time.Time) bool {
 	}
 	return !card.RetryDueAt.UTC().After(now.UTC())
 }
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}

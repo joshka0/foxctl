@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	defaultOpenAICompatBaseURL = "http://127.0.0.1:1234/v1"
-	defaultOpenAICompatTimeout = 20 * time.Second
+	defaultOpenAICompatBaseURL        = "http://127.0.0.1:1234/v1"
+	defaultOpenAICompatEmbeddingModel = "text-embedding-qwen3-embedding-8b"
+	defaultOpenAICompatTimeout        = 20 * time.Second
 )
 
 // OpenAICompatEmbedder uses an OpenAI-compatible embeddings endpoint.

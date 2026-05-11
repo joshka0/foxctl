@@ -1000,7 +1000,7 @@ func TestMemoryQuery_BM25Fallback(t *testing.T) {
 	data := getData(t, env)
 
 	stats := data["stats"].(map[string]any)
-	// Without VOYAGE_API_KEY, should fall back to BM25
+	// Without a configured embedding endpoint, should fall back to BM25
 	// Either "bm25" or "vector" is valid - we just want success
 	method := stats["search_method"].(string)
 	assert.True(t, method == "bm25" || method == "vector")

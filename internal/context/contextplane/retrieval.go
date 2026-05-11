@@ -302,11 +302,11 @@ func (s *WorkspaceStore) RetrieveWithOptionsAndMemory(ctx context.Context, index
 	})
 	rerankCfg := rerank.FromEnv()
 	if rerankCfg.Enabled {
-		if provider, err := rerank.NewVoyageProvider(rerankCfg.ToVoyageConfig()); err == nil {
+		if provider, err := rerank.NewProviderFromConfig(rerankCfg); err == nil {
 			if reranked, used, model, err := rerankVaultHits(ctx, query, vaultHits, result.Weights, provider, rerankCfg); err == nil {
 				vaultHits = reranked
-				result.SemanticUsed = used
-				result.SemanticModel = model
+				result.SemanticUsed = result.SemanticUsed || used
+				result.SemanticModel = firstNonEmpty(result.SemanticModel, model)
 			}
 		}
 	}

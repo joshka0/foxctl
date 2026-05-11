@@ -102,7 +102,7 @@ Defaults and overrides come from config + semantic provider logic.
 
 | Setting | Meaning |
 |--------|---------|
-| `VOYAGE_API_KEY` / `GEMINI_API_KEY` | Embedding provider keys |
+| `FOXCTL_EMBEDDING_BASE_URL` / `FOXCTL_EMBEDDING_API_KEY` | OpenAI-compatible embedding endpoint and optional key |
 | `FOXCTL_EMBEDDING_MODEL_<SCOPE>` | Per-scope override (for example `..._MEMORY`) |
 | `FOXCTL_EMBEDDING_MODEL_TEXT` | Text-scope fallback override |
 | `FOXCTL_EMBEDDING_RATE_LIMIT` | Provider-side request rate control |

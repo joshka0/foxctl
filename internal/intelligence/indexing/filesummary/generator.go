@@ -424,8 +424,8 @@ func truncate(s string, maxLen int) string {
 func providerNameFromModel(model string) string {
 	model = strings.ToLower(strings.TrimSpace(model))
 	switch {
-	case strings.HasPrefix(model, "voyage"):
-		return "voyage"
+	case strings.HasPrefix(model, "text-embedding-"), strings.Contains(model, "qwen3-embedding"), strings.Contains(model, "embeddinggemma"):
+		return "openai_compat"
 	case strings.HasPrefix(model, "gemini"):
 		return "gemini"
 	case strings.HasPrefix(model, "openai"):

@@ -126,7 +126,7 @@ type ServiceConfig struct {
 
 	// Config is the platform config for embedder creation (optional).
 	// When set along with MemoryStore, an embedder will be created automatically
-	// using the configured embedding provider (VOYAGE_API_KEY from .env).
+	// using the configured embedding provider.
 	Config *config.Config
 
 	// SessionRecallProvider injects related prior sessions into the prompt when configured.
@@ -283,7 +283,7 @@ func NewService(store contextvar.Store, cfg ServiceConfig, turnLock Locker) *Ser
 		if cfg.MemoryStore != nil && cfg.MemoryWorkspace != "" {
 			opts = append(opts, WithMemoryStore(cfg.MemoryStore, cfg.MemoryWorkspace))
 
-			// Create embedder from config for vector search (requires VOYAGE_API_KEY in .env)
+			// Create embedder from config for vector search.
 			if cfg.Config != nil {
 				embedder, embErr := semantic.NewEmbedderFromConfig(semantic.ScopeMemory, *cfg.Config)
 				if embErr != nil {

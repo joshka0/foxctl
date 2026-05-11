@@ -552,7 +552,7 @@ func isTranscriptOpsInfra(userLower, responseLower string) bool {
 		"daemon",
 		"session",
 		"lmstudio",
-		"voyage",
+		"qwen",
 		"gemma",
 		"scout",
 		"annotation",

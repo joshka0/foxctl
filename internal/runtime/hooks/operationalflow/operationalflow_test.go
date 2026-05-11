@@ -219,14 +219,14 @@ func TestMaintainGraphSyncKeepsWarningsNonFatal(t *testing.T) {
 }
 
 func TestNewDependenciesCopiesLifecycleRunnerAndConfig(t *testing.T) {
-	cfg := config.Config{Embedding: config.EmbeddingSettings{Provider: "voyage"}}
+	cfg := config.Config{Embedding: config.EmbeddingSettings{Provider: "openai_compat"}}
 	life := lifecycle.Dependencies{}
 	deps := NewDependencies(cfg, life)
 	if deps.RunSkill != nil {
 		t.Fatalf("expected nil run skill copy, got %#v", deps.RunSkill)
 	}
-	if deps.Config.Embedding.Provider != "voyage" {
-		t.Fatalf("provider=%q want voyage", deps.Config.Embedding.Provider)
+	if deps.Config.Embedding.Provider != "openai_compat" {
+		t.Fatalf("provider=%q want openai_compat", deps.Config.Embedding.Provider)
 	}
 }
 

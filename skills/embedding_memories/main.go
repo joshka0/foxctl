@@ -278,13 +278,11 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Check embedding provider after queue-only paths, so local queueing works without network credentials.
-	voyageKey := os.Getenv("VOYAGE_API_KEY")
 	geminiKey := os.Getenv("GEMINI_API_KEY")
 
 	embedder, err := semantic.NewEmbedderFromConfig(
 		semantic.ScopeMemory,
 		rc.Config,
-		semantic.WithVoyageKey(voyageKey),
 		semantic.WithGeminiKey(geminiKey),
 		skillmain.EmbeddingGuard(rc),
 	)

@@ -341,7 +341,7 @@ func TestContextWindow_UpdateSummary(t *testing.T) {
 	// Create test embedding (small for test)
 	embedding := serializeEmbedding([]float32{0.1, 0.2, 0.3, 0.4})
 
-	if err := store.UpdateWindowSummary(ctx, "cw-update", "Updated summary", embedding, "voyage-3.5"); err != nil {
+	if err := store.UpdateWindowSummary(ctx, "cw-update", "Updated summary", embedding, "text-embedding-qwen3-embedding-8b"); err != nil {
 		t.Fatalf("update summary: %v", err)
 	}
 
@@ -352,8 +352,8 @@ func TestContextWindow_UpdateSummary(t *testing.T) {
 	if got.Summary != "Updated summary" {
 		t.Errorf("summary: got %q, want %q", got.Summary, "Updated summary")
 	}
-	if got.EmbeddingModel != "voyage-3.5" {
-		t.Errorf("embedding_model: got %q, want %q", got.EmbeddingModel, "voyage-3.5")
+	if got.EmbeddingModel != "text-embedding-qwen3-embedding-8b" {
+		t.Errorf("embedding_model: got %q, want %q", got.EmbeddingModel, "text-embedding-qwen3-embedding-8b")
 	}
 }
 
@@ -548,7 +548,7 @@ func TestSession_SearchSimilar(t *testing.T) {
 			WorkspacePath:  "/workspace",
 			Summary:        "Session about authentication",
 			Embedding:      serializeEmbedding(vec1),
-			EmbeddingModel: "voyage-3.5",
+			EmbeddingModel: "text-embedding-qwen3-embedding-8b",
 			Status:         storage.SessionStatusOK,
 		},
 		{
@@ -556,7 +556,7 @@ func TestSession_SearchSimilar(t *testing.T) {
 			WorkspacePath:  "/workspace",
 			Summary:        "Session about database",
 			Embedding:      serializeEmbedding(vec2),
-			EmbeddingModel: "voyage-3.5",
+			EmbeddingModel: "text-embedding-qwen3-embedding-8b",
 			Status:         storage.SessionStatusOK,
 		},
 		{
@@ -564,7 +564,7 @@ func TestSession_SearchSimilar(t *testing.T) {
 			WorkspacePath:  "/workspace",
 			Summary:        "Session about auth and db",
 			Embedding:      serializeEmbedding(vec3),
-			EmbeddingModel: "voyage-3.5",
+			EmbeddingModel: "text-embedding-qwen3-embedding-8b",
 			Status:         storage.SessionStatusOK,
 		},
 	}
@@ -611,7 +611,7 @@ func TestSession_SearchSimilar_DimensionMismatchFails(t *testing.T) {
 		WorkspacePath:  "/workspace",
 		Summary:        "Session about authentication",
 		Embedding:      serializeEmbedding([]float32{1, 0, 0, 0}),
-		EmbeddingModel: "voyage-3.5",
+		EmbeddingModel: "text-embedding-qwen3-embedding-8b",
 		Status:         storage.SessionStatusOK,
 	}
 	if _, err := store.Save(ctx, session); err != nil {
@@ -634,7 +634,7 @@ func TestSession_SearchSimilar_AllowsMixedWorkspaceDimensions(t *testing.T) {
 			WorkspacePath:  "/workspace/a",
 			Summary:        "Workspace A session",
 			Embedding:      serializeEmbedding([]float32{1, 0, 0, 0}),
-			EmbeddingModel: "voyage-3.5",
+			EmbeddingModel: "text-embedding-qwen3-embedding-8b",
 			Status:         storage.SessionStatusOK,
 		},
 		{
@@ -752,7 +752,7 @@ func TestContextWindow_SearchSimilar_DimensionMismatchSkips(t *testing.T) {
 		WindowIndex:      0,
 		Summary:          "Window with embedding",
 		Embedding:        serializeEmbedding([]float32{1, 0, 0, 0}),
-		EmbeddingModel:   "voyage-3.5",
+		EmbeddingModel:   "text-embedding-qwen3-embedding-8b",
 		PreCompactTokens: 10,
 	}
 	if _, err := store.SaveContextWindow(ctx, window); err != nil {
@@ -791,7 +791,7 @@ func TestChunk_SearchSimilar_DimensionMismatchScopedFails(t *testing.T) {
 		ContentHash:    "hash-1",
 		ContentPreview: "chunk with embedding",
 		Embedding:      serializeEmbedding([]float32{1, 0, 0, 0}),
-		EmbeddingModel: "voyage-3.5",
+		EmbeddingModel: "text-embedding-qwen3-embedding-8b",
 	}
 	if _, err := store.SaveChunk(ctx, chunk); err != nil {
 		t.Fatalf("save chunk: %v", err)

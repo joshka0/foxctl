@@ -83,7 +83,7 @@ func renderTopOfMindPrompt(top contextplane.TopOfMind) string {
 }
 
 // CompanionProvidersHandler returns a handler for GET /api/companion/providers.
-// It reports which LLM providers have API keys configured, the default provider, and Voyage availability.
+// It reports which LLM providers have API keys configured plus the embedding provider.
 func CompanionProvidersHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -123,10 +123,12 @@ func CompanionProvidersHandler(cfg config.Config, log zerolog.Logger) http.Handl
 		}
 
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":               true,
-			"providers":        providers,
-			"default_provider": cfg.LLM.Provider,
-			"voyage_available": cfg.Embedding.VoyageAPIKey != "",
+			"ok":                   true,
+			"providers":            providers,
+			"default_provider":     cfg.LLM.Provider,
+			"embedding_provider":   semantic.DetectProviderForConfig(cfg, cfg.LLM.GeminiAPIKey),
+			"embedding_model":      semantic.ResolveModelForScope(semantic.ScopeDefault, cfg),
+			"embedding_configured": strings.TrimSpace(cfg.Embedding.Provider) != "" || strings.TrimSpace(cfg.Embedding.BaseURL) != "" || strings.TrimSpace(cfg.Embedding.Model) != "",
 		})
 	}
 }
@@ -228,7 +230,6 @@ func CompanionCoChangeHandler(cfg config.Config, log zerolog.Logger) http.Handle
 		provider, _ := semantic.NewProviderForScope(
 			semantic.ScopeMemory,
 			cfg,
-			semantic.WithVoyageKey(cfg.Embedding.VoyageAPIKey),
 			semantic.WithGeminiKey(cfg.LLM.GeminiAPIKey),
 		)
 

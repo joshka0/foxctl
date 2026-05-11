@@ -1241,7 +1241,6 @@ func (s *Service) startContextUpdater(ctx context.Context) error {
 	embedder, err = semantic.NewProviderForScope(
 		semantic.ScopeMemory,
 		s.cfg,
-		semantic.WithVoyageKey(os.Getenv("VOYAGE_API_KEY")),
 		semantic.WithGeminiKey(os.Getenv("GEMINI_API_KEY")),
 	)
 	if err != nil {
@@ -1434,13 +1433,11 @@ func (s *Service) startFileSummaryWorker(ctx context.Context) error {
 
 	// Get embedding provider (optional) with config-aware model selection
 	var embedProvider semantic.EmbeddingProvider
-	voyageKey := os.Getenv("VOYAGE_API_KEY")
 	geminiKey := os.Getenv("GEMINI_API_KEY")
-	if voyageKey != "" || geminiKey != "" {
+	if semantic.DetectProviderForConfig(s.cfg, geminiKey) != "" {
 		provider, err := semantic.NewProviderForScope(
 			semantic.ScopeFileSummaries,
 			s.cfg,
-			semantic.WithVoyageKey(voyageKey),
 			semantic.WithGeminiKey(geminiKey),
 		)
 		if err != nil {

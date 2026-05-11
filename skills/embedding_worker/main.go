@@ -153,7 +153,6 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 	in.Parallelism = parallelism
 
-	voyageKey := os.Getenv("VOYAGE_API_KEY")
 	geminiKey := os.Getenv("GEMINI_API_KEY")
 
 	var symbolEmbedder *semantic.Embedder
@@ -173,7 +172,6 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		symbolEmbedder, err = semantic.NewEmbedderFromConfig(
 			semantic.ScopeSymbols,
 			rc.Config,
-			semantic.WithVoyageKey(voyageKey),
 			semantic.WithGeminiKey(geminiKey),
 			skillmain.EmbeddingGuard(rc),
 		)
@@ -206,7 +204,6 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		memoryEmbedder, err = semantic.NewEmbedderFromConfig(
 			semantic.ScopeMemory,
 			rc.Config,
-			semantic.WithVoyageKey(voyageKey),
 			semantic.WithGeminiKey(geminiKey),
 			skillmain.EmbeddingGuard(rc),
 		)
@@ -543,15 +540,14 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 			annotationEmbedder, err = semantic.NewEmbedderFromConfig(
 				semantic.ScopeSessions,
 				rc.Config,
-				semantic.WithVoyageKey(voyageKey),
 				semantic.WithGeminiKey(geminiKey),
 				skillmain.EmbeddingGuard(rc),
 			)
 			if err != nil {
 				return skillerr.Auth(
-					"VOYAGE_API_KEY or GEMINI_API_KEY required for annotation embedding",
+					"embedding provider required for annotation embedding",
 					skillerr.WithCause(err),
-					skillerr.WithHint("set VOYAGE_API_KEY (preferred) or GEMINI_API_KEY environment variable"),
+					skillerr.WithHint("configure FOXCTL_EMBEDDING_PROVIDER=openai_compat or set GEMINI_API_KEY"),
 				)
 			}
 		}
@@ -646,7 +642,6 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 					annEmbedder, err = semantic.NewEmbedderFromConfig(
 						semantic.ScopeSessions,
 						rc.Config,
-						semantic.WithVoyageKey(voyageKey),
 						semantic.WithGeminiKey(geminiKey),
 						skillmain.EmbeddingGuard(rc),
 					)

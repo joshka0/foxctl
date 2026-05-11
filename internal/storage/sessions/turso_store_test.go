@@ -112,7 +112,7 @@ func TestTursoStoreIntegration(t *testing.T) {
 
 	// Test SearchSimilar (needs an embedding to test with)
 	t.Run("SearchSimilar", func(t *testing.T) {
-		// Use a 1024-dim test vector (Voyage default)
+		// Use a 1024-dim test vector to exercise explicit dimension configuration.
 		testEmbedding := make([]float32, 1024)
 		for i := range testEmbedding {
 			testEmbedding[i] = 0.01
@@ -158,7 +158,7 @@ func TestTursoConfigWithDimensions(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Test with explicit dimensions (1024 = Voyage default)
+	// Test with explicit dimensions.
 	cfg := dbdriver.TursoConfig{
 		URL:              url,
 		AuthToken:        token,

@@ -110,7 +110,7 @@ func TestOutput_AllFields(t *testing.T) {
 			Version: "1.0.0",
 		},
 		Environment: []envStatus{
-			{Name: "VOYAGE_API_KEY", Set: true, Required: true},
+			{Name: "FOXCTL_EMBEDDING_PROVIDER", Set: true, Required: false},
 		},
 		Errors:       []string{"error1"},
 		Warnings:     []string{"warning1"},
@@ -350,14 +350,14 @@ func TestBinaryStatus_JSONFieldNames(t *testing.T) {
 
 func TestEnvStatus_AllFields(t *testing.T) {
 	es := envStatus{
-		Name:     "VOYAGE_API_KEY",
+		Name:     "FOXCTL_EMBEDDING_PROVIDER",
 		Set:      true,
-		Required: true,
+		Required: false,
 	}
 
-	assert.Equal(t, "VOYAGE_API_KEY", es.Name)
+	assert.Equal(t, "FOXCTL_EMBEDDING_PROVIDER", es.Name)
 	assert.True(t, es.Set)
-	assert.True(t, es.Required)
+	assert.False(t, es.Required)
 }
 
 func TestEnvStatus_JSONSerialization(t *testing.T) {
@@ -404,14 +404,14 @@ func TestEnvStatus_JSONFieldNames(t *testing.T) {
 }
 
 func TestEnvStatus_RequiredEnvVars(t *testing.T) {
-	requiredVars := []envStatus{
-		{Name: "VOYAGE_API_KEY", Required: true},
-	}
+	requiredVars := []envStatus{}
 
 	optionalVars := []envStatus{
+		{Name: "FOXCTL_EMBEDDING_PROVIDER", Required: false},
+		{Name: "FOXCTL_EMBEDDING_MODEL", Required: false},
+		{Name: "FOXCTL_EMBEDDING_BASE_URL", Required: false},
 		{Name: "ANTHROPIC_API_KEY", Required: false},
 		{Name: "FOXCTL_HOME", Required: false},
-		{Name: "FOXCTL_SEMANTIC_RERANK", Required: false},
 	}
 
 	for _, v := range requiredVars {
@@ -528,10 +528,10 @@ func TestOutput_MultipleDirectories(t *testing.T) {
 
 func TestOutput_MultipleEnvironmentVars(t *testing.T) {
 	envs := []envStatus{
-		{Name: "VOYAGE_API_KEY", Set: true, Required: true},
+		{Name: "FOXCTL_EMBEDDING_PROVIDER", Set: true, Required: false},
 		{Name: "ANTHROPIC_API_KEY", Set: false, Required: false},
 		{Name: "FOXCTL_HOME", Set: true, Required: false},
-		{Name: "FOXCTL_SEMANTIC_RERANK", Set: false, Required: false},
+		{Name: "FOXCTL_EMBEDDING_BASE_URL", Set: false, Required: false},
 	}
 
 	out := output{

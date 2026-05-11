@@ -145,8 +145,8 @@ func TestOutput_AllFields(t *testing.T) {
 		KeyFiles:           []string{"file1.go", "file2.go"},
 		ToolsPattern:       "read-edit-test",
 		HasEmbedding:       true,
-		EmbeddingModel:     "voyage-3.5",
-		EmbeddingDims:      1024,
+		EmbeddingModel:     "text-embedding-qwen3-embedding-8b",
+		EmbeddingDims:      4096,
 		SeedPrompt:         "Seed prompt content",
 		WindowsSummarized:  5,
 		WindowsQueued:      3,
@@ -168,8 +168,8 @@ func TestOutput_AllFields(t *testing.T) {
 	assert.Len(t, out.UserInsights, 1)
 	assert.Len(t, out.Tags, 2)
 	assert.True(t, out.HasEmbedding)
-	assert.Equal(t, "voyage-3.5", out.EmbeddingModel)
-	assert.Equal(t, 1024, out.EmbeddingDims)
+	assert.Equal(t, "text-embedding-qwen3-embedding-8b", out.EmbeddingModel)
+	assert.Equal(t, 4096, out.EmbeddingDims)
 	assert.Equal(t, 5, out.WindowsSummarized)
 	assert.NotNil(t, out.Stats)
 	assert.Equal(t, "completed", out.Status)
@@ -850,8 +850,8 @@ func TestOutput_FullJSONRoundTrip(t *testing.T) {
 		KeyFiles:           []string{"file1.go"},
 		ToolsPattern:       "read-edit-test",
 		HasEmbedding:       true,
-		EmbeddingModel:     "voyage-3.5",
-		EmbeddingDims:      1024,
+		EmbeddingModel:     "text-embedding-qwen3-embedding-8b",
+		EmbeddingDims:      4096,
 		SeedPrompt:         "Seed prompt",
 		WindowsSummarized:  10,
 		WindowsQueued:      5,

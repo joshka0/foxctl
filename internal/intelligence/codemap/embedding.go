@@ -215,7 +215,6 @@ func StoreEmbeddingPlan(ctx context.Context, store storage.MemoryStore, cfg conf
 	embedder, err := semantic.NewEmbedderFromConfig(
 		semantic.ScopeCodemaps,
 		cfg,
-		semantic.WithVoyageKey(os.Getenv("VOYAGE_API_KEY")),
 		semantic.WithGeminiKey(os.Getenv("GEMINI_API_KEY")),
 	)
 	if err != nil {

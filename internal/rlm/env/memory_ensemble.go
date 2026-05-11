@@ -363,10 +363,3 @@ func lanesForRoles(roles []string) []string {
 	}
 	return uniqueStrings(out)
 }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

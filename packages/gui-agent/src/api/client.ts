@@ -2086,13 +2086,15 @@ export interface ProvidersResponse {
   ok: boolean;
   providers: ProviderAvailability[];
   default_provider: string;
-  voyage_available: boolean;
+  embedding_provider: string;
+  embedding_model: string;
+  embedding_configured: boolean;
 }
 
 /**
  * Fetches which LLM providers have API keys configured on the server.
  *
- * @returns A ProvidersResponse with availability info per provider, the default provider, and Voyage status
+ * @returns A ProvidersResponse with availability info per provider, the default provider, and embedding status
  */
 export async function getProviderAvailability(): Promise<ProvidersResponse> {
   return request<ProvidersResponse>("/companion/providers");

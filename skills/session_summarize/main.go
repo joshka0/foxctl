@@ -584,7 +584,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	if needsSummarize {
-		// Generate embedding using unified Embedder (handles provider selection and fallback)
+		// Generate embedding using the configured provider.
 		embeddingText := buildEmbeddingText(summaryResp, session.StartedAt, session.KeyFiles)
 		var embeddingResult semantic.EmbedResult
 		var embeddingErr error
@@ -592,7 +592,6 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		embedder, err := semantic.NewEmbedderFromConfig(
 			semantic.ScopeSessions,
 			rc.Config,
-			semantic.WithAllowFallback(true),
 			skillmain.EmbeddingGuard(rc),
 		)
 		if err != nil {
@@ -650,14 +649,12 @@ func persistSessionLearnings(ctx context.Context, rc *skillmain.RunContext, sess
 
 	// Initialize embedding provider (optional - learnings work without embeddings)
 	var embedProvider semantic.EmbeddingProvider
-	voyageKey := os.Getenv("VOYAGE_API_KEY")
 	geminiKey := os.Getenv("GEMINI_API_KEY")
-	if semantic.DetectProviderForConfig(rc.Config, voyageKey, geminiKey) != "" {
+	if semantic.DetectProviderForConfig(rc.Config, geminiKey) != "" {
 		waitOnLimit := true
 		embedProvider, _ = semantic.NewProviderForScope(
 			semantic.ScopeMemory,
 			rc.Config,
-			semantic.WithVoyageKey(voyageKey),
 			semantic.WithGeminiKey(geminiKey),
 			semantic.WithRateLimitWait(waitOnLimit),
 		)
@@ -1616,12 +1613,10 @@ func embedSeedQuery(ctx context.Context, text string, cfg config.Config, embedOp
 		return nil, "", nil
 	}
 
-	// Use Embedder with Gemini fallback for query embedding
-	opts := append([]semantic.EmbedderOption{semantic.WithAllowFallback(true)}, embedOpts...)
 	embedder, err := semantic.NewEmbedderFromConfig(
 		semantic.ScopeSessions,
 		cfg,
-		opts...,
+		embedOpts...,
 	)
 	if err != nil {
 		return nil, "", nil
@@ -1708,7 +1703,7 @@ func sampleChunkIndices(start, end, max int) []int {
 
 // reembedAll re-embeds sessions and context windows that have wrong embedding model/dimensions.
 // This is a no-LLM operation - it only calls the embedding API using existing summaries.
-// Skips items that already have correct embeddings (voyage-3.5, 1024 dims = 4096 bytes).
+// Skips items that already have embeddings matching the configured model dimensions.
 func reembedAll(ctx context.Context, sessionStore *sessions.Store, input Input, cfg config.Config, embedOpts ...semantic.EmbedderOption) Output {
 	output := Output{
 		Status: "reembed_complete",
@@ -1955,7 +1950,7 @@ func summarizeWindowsQueued(ctx context.Context, sessionStore *sessions.Store, s
 	embedder, embedderErr := semantic.NewEmbedderFromConfig(
 		semantic.ScopeSessions,
 		cfg,
-		append([]semantic.EmbedderOption{semantic.WithAllowFallback(true)}, embedOpts...)...,
+		embedOpts...,
 	)
 
 	totalSummarized := 0
@@ -2136,7 +2131,7 @@ func summarizeWindows(ctx context.Context, sessionStore *sessions.Store, session
 	embedder, embedderErr := semantic.NewEmbedderFromConfig(
 		semantic.ScopeSessions,
 		cfg,
-		append([]semantic.EmbedderOption{semantic.WithAllowFallback(true)}, embedOpts...)...,
+		embedOpts...,
 	)
 
 	// Totals across all batches

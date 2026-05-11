@@ -245,8 +245,8 @@ func providerNameFromModel(model string) string {
 	switch {
 	case strings.HasPrefix(lower, "gemini-"):
 		return "gemini"
-	case strings.HasPrefix(lower, "voyage-"):
-		return "voyage"
+	case strings.HasPrefix(lower, "text-embedding-"), strings.Contains(lower, "qwen3-embedding"), strings.Contains(lower, "embeddinggemma"):
+		return "openai_compat"
 	default:
 		return ""
 	}

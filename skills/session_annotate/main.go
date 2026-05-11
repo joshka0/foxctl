@@ -269,7 +269,6 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	var doEmbed embedFunc
 	if !in.SkipEmbedding {
 		if in.EmbeddingModel != "" {
-			// Local LM Studio embeddings
 			le := &localEmbedder{
 				endpoint: strings.TrimRight(in.LLMEndpoint, "/"),
 				model:    in.EmbeddingModel,
@@ -280,12 +279,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 				return vec, le.Model(), err
 			}
 		} else {
-			// Voyage API
-			voyageKey := os.Getenv("VOYAGE_API_KEY")
 			embedder, err := semantic.NewEmbedderFromConfig(
 				semantic.ScopeSessions,
 				rc.Config,
-				semantic.WithVoyageKey(voyageKey),
 				skillmain.EmbeddingGuard(rc),
 			)
 			if err != nil {

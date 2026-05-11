@@ -311,9 +311,9 @@ func TestMemoryPutSurfacesContextplaneRecordFailure(t *testing.T) {
 }
 
 func TestMemoryQuery_Integration(t *testing.T) {
-	// Skip in CI - requires VOYAGE_API_KEY and local memory.db
-	if os.Getenv("VOYAGE_API_KEY") == "" {
-		t.Skip("VOYAGE_API_KEY not set")
+	// Skip in CI unless a local embedding provider is explicitly configured.
+	if os.Getenv("FOXCTL_EMBEDDING_PROVIDER") == "" && os.Getenv("GEMINI_API_KEY") == "" {
+		t.Skip("embedding provider not configured")
 	}
 
 	// Use FOXCTL_TEST_WORKSPACE or current working directory

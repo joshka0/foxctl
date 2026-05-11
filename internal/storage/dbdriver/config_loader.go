@@ -368,7 +368,7 @@ func (cl *ConfigLoader) ConfigFromPlatformSettings(settings PlatformDatabaseSett
 // For vector search (memory database only):
 //   FOXCTL_MEMORY_VECTOR_SEARCH=true   # Enable vector search
 //   FOXCTL_MEMORY_VECTOR_DIMS=1024     # Per-database dimensions override
-//   FOXCTL_VECTOR_DIMS=1024            # Global default (1024 for Voyage, 3072 for Gemini)
+//   FOXCTL_VECTOR_DIMS=4096            # Global default (4096 for Qwen3 Embedding 8B)
 //
 // Where <DB> is one of: CACHE, JOBS, or MEMORY
 //

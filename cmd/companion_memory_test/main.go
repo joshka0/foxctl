@@ -28,7 +28,7 @@ import (
 func main() {
 	ctx := context.Background()
 
-	// Load platform config (reads .env, includes VOYAGE_API_KEY)
+	// Load platform config.
 	platformCfg, err := config.Load(ctx)
 	if err != nil {
 		fmt.Printf("Failed to load config: %v\n", err)
@@ -161,7 +161,7 @@ func main() {
 	// Now simulate running hybrid maintenance
 	fmt.Println("\n━━━ Running Hybrid Maintenance ━━━")
 
-	// Try to create an embedder for vector search (uses VOYAGE_API_KEY from config/.env)
+	// Try to create an embedder for vector search from config.
 	var embedder *semantic.Embedder
 	embedder, err = semantic.NewEmbedderFromConfig(semantic.ScopeMemory, platformCfg)
 	if err != nil {
@@ -232,7 +232,7 @@ func main() {
 			fmt.Println("   foxctl run code/semantic_search --input '{\"query\": \"hobbies\", \"scope\": [\"memories\"]}'")
 			fmt.Println("   foxctl run code/semantic_search --input '{\"query\": \"guitar learning\", \"scope\": [\"memories\"]}'")
 		} else {
-			fmt.Println("\n⚠️  No embeddings generated. Set VOYAGE_API_KEY to enable vector search.")
+			fmt.Println("\n⚠️  No embeddings generated. Configure FOXCTL_EMBEDDING_PROVIDER to enable vector search.")
 			fmt.Println("   Without embeddings, only text search (not semantic/vector) will work.")
 		}
 	}

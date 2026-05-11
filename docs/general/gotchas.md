@@ -107,7 +107,7 @@ import "github.com/joshka0/foxctl/internal/platform/config"
 
 func main() {
     config.LoadDotEnv() // BEFORE os.Getenv()
-    apiKey := os.Getenv("VOYAGE_API_KEY")
+    baseURL := os.Getenv("FOXCTL_EMBEDDING_BASE_URL")
     // ...
 }
 ```
@@ -169,9 +169,10 @@ foxctl run memory/query --input '{"workspace": "/path/to/project"}'
 
 | Provider | Dimensions |
 |----------|------------|
-| Voyage AI | 1024 |
+| Qwen3 Embedding 8B | 4096 |
+| Qwen3 Embedding 4B | 2560 |
+| Qwen3 Embedding 0.6B | 1024 |
 | Gemini | 3072 |
-| Mistral/Codestral | 1024 |
 
 **Solution:** Use the same provider for storage and query, then rebuild the
 affected scope. See [docs/general/embedding-rebuilds.md](embedding-rebuilds.md)

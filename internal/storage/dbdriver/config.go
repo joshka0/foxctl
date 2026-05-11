@@ -22,8 +22,8 @@ const (
 const (
 	// DefaultVectorDimensions is the fallback when no dimensions are configured.
 	// This can be overridden via FOXCTL_VECTOR_DIMS environment variable.
-	// Common sizes: 384 (MiniLM), 768 (BERT), 1024 (Voyage), 1536 (OpenAI), 3072 (Gemini)
-	DefaultVectorDimensions = 1024
+	// Common sizes: 384 (MiniLM), 768 (BERT), 1536/3072 (OpenAI), 3072 (Gemini), 4096 (Qwen)
+	DefaultVectorDimensions = 4096
 )
 
 // GetDefaultVectorDimensions returns the default vector dimensions from environment
@@ -94,7 +94,7 @@ type TursoConfig struct {
 
 	// VectorDimensions specifies the dimension of vector embeddings.
 	// If 0, uses GetDefaultVectorDimensions() (configurable via FOXCTL_VECTOR_DIMS).
-	// Common sizes: 384 (MiniLM), 768 (BERT), 1024 (Voyage), 1536 (OpenAI), 3072 (Gemini)
+	// Common sizes: 384 (MiniLM), 768 (BERT), 1536/3072 (OpenAI), 3072 (Gemini), 4096 (Qwen)
 	VectorDimensions int `json:"vector_dimensions" yaml:"vector_dimensions"`
 }
 
