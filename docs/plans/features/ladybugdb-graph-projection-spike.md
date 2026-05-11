@@ -465,6 +465,11 @@ Exit:
 
 - projection can be deleted and rebuilt from canonical export alone
 
+Result:
+
+- Passed on 2026-05-11 with `Lbug 0.16.1`; see
+  [LadybugDB Phase 2 Import Rebuild Proof](../../research/ladybugdb-phase2-import-rebuild.md).
+
 ### Phase 3: Query Proof Scripts
 
 Deliverables:
