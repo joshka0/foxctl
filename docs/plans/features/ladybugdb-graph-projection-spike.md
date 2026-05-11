@@ -375,6 +375,11 @@ Exit:
 
 - proceed only if all Phase 0 gates pass without Go dependency or cgo setup
 
+Result:
+
+- Passed on 2026-05-11 with `Lbug 0.16.1`; see
+  [LadybugDB Phase 0 CLI Gate](../../research/ladybugdb-phase0-cli-gate.md).
+
 ### Phase 1: Repoindex Export Files
 
 Deliverables:
