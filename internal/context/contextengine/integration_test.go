@@ -13,8 +13,8 @@ import (
 // ---------------------------------------------------------------------------
 
 var (
-	integrationNow           = time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC)
-	integrationIDCounter     atomic.Int64
+	integrationNow       = time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC)
+	integrationIDCounter atomic.Int64
 )
 
 func integrationIDGen() string {

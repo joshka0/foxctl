@@ -221,7 +221,7 @@ type Session struct {
 	ToolCalls       []types.ToolCall
 	Children        []string       // IDs of spawned child sessions
 	SystemPrompt    string         // Role-specific system prompt
-	TurnCounter     atomic.Uint64   // Monotonically increasing turn index
+	TurnCounter     atomic.Uint64  // Monotonically increasing turn index
 	InputTokens     int            // Accumulated prompt/input tokens across completed turns
 	OutputTokens    int            // Accumulated completion/output tokens across completed turns
 	TotalTokens     int            // Accumulated total tokens across completed turns

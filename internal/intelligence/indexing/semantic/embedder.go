@@ -52,7 +52,7 @@ type embedderConfig struct {
 func newEmbedderConfig(opts ...EmbedderOption) *embedderConfig {
 	// FC/IS compliant: no os.Getenv in core. Callers pass keys loaded at the boundary.
 	cfg := &embedderConfig{
-		rateLimitWait: true,  // Default to waiting for rate limits
+		rateLimitWait: true, // Default to waiting for rate limits
 	}
 
 	for _, opt := range opts {
