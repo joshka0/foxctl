@@ -85,8 +85,10 @@ signature:
          - masked: Full file with irrelevant sections redacted
 
       Environment Variables:
-      - VOYAGE_API_KEY: Enables semantic search for better file selection
-      - GEMINI_API_KEY: Alternative for semantic search
+      - FOXCTL_EMBEDDING_PROVIDER: Enables semantic search for better file selection
+      - FOXCTL_EMBEDDING_MODEL: Embedding model override
+      - FOXCTL_EMBEDDING_BASE_URL: OpenAI-compatible embedding endpoint
+      - GEMINI_API_KEY: Alternative cloud embedding provider
 
       Example commands:
         # Auto-select files and extract snippets

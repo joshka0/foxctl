@@ -32,7 +32,7 @@ const (
 
 	// defaultV2TurnsVectorDims is the local-testing default for v2 turns
 	// embeddings. Override with FOXCTL_V2_TURNS_VECTOR_DIMS (preferred) or
-	// FOXCTL_VECTOR_DIMS for provider-specific dimensions (e.g. Voyage).
+	// FOXCTL_VECTOR_DIMS for provider-specific dimensions.
 	defaultV2TurnsVectorDims = 768
 
 	defaultArtifactVersion = "v1"

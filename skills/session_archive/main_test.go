@@ -93,7 +93,7 @@ func TestOutput_AllFields(t *testing.T) {
 		ChunkCount:      50,
 		WindowCount:     5,
 		EmbeddedWindows: 5,
-		EmbeddingModel:  "voyage-3-large",
+		EmbeddingModel:  "text-embedding-qwen3-embedding-8b",
 		Status:          "ok",
 		Message:         "Archive complete",
 	}
@@ -105,7 +105,7 @@ func TestOutput_AllFields(t *testing.T) {
 	assert.Equal(t, 50, output.ChunkCount)
 	assert.Equal(t, 5, output.WindowCount)
 	assert.Equal(t, 5, output.EmbeddedWindows)
-	assert.Equal(t, "voyage-3-large", output.EmbeddingModel)
+	assert.Equal(t, "text-embedding-qwen3-embedding-8b", output.EmbeddingModel)
 	assert.Equal(t, "ok", output.Status)
 	assert.Equal(t, "Archive complete", output.Message)
 }

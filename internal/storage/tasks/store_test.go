@@ -628,7 +628,7 @@ func TestStore_SetEmbedding(t *testing.T) {
 	}
 
 	embedding := []byte{0x01, 0x02, 0x03}
-	model := "voyage-code-3"
+	model := "text-embedding-qwen3-embedding-8b"
 
 	if err := store.SetEmbedding(ctx, task.ID, embedding, model); err != nil {
 		t.Fatalf("SetEmbedding failed: %v", err)

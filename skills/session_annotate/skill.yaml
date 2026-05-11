@@ -46,7 +46,7 @@ signature:
     - name: embedding_model
       type: string
       required: false
-      description: Local embedding model name (uses LM Studio endpoint; omit for Voyage API)
+      description: Local embedding model name (uses the configured OpenAI-compatible endpoint)
     - name: queue_embedding
       type: boolean
       required: false

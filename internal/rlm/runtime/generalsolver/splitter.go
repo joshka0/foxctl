@@ -542,10 +542,3 @@ func RenderSplitMergePayload(artifacts map[string]WorkArtifact, solveIDs []strin
 		"solve_count": len(solveIDs),
 	}
 }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

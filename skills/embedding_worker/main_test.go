@@ -190,24 +190,24 @@ func TestProcessEmbeddingJobBatchRespectsParallelism(t *testing.T) {
 		{ID: "job-3"},
 		{ID: "job-4"},
 	}
-	var current int32
-	var maxSeen int32
+	var current atomic.Int32
+	var maxSeen atomic.Int32
 	result := processEmbeddingJobBatch(context.Background(), jobs, 2, func(context.Context, *embedding.EmbeddingJob) embeddingJobResult {
-		now := atomic.AddInt32(&current, 1)
+		now := current.Add(1)
 		for {
-			old := atomic.LoadInt32(&maxSeen)
-			if now <= old || atomic.CompareAndSwapInt32(&maxSeen, old, now) {
+			old := maxSeen.Load()
+			if now <= old || maxSeen.CompareAndSwap(old, now) {
 				break
 			}
 		}
 		time.Sleep(20 * time.Millisecond)
-		atomic.AddInt32(&current, -1)
+		current.Add(-1)
 		return embeddingJobResult{Processed: 1}
 	})
 
 	assert.Equal(t, 4, result.Processed)
-	assert.LessOrEqual(t, atomic.LoadInt32(&maxSeen), int32(2))
-	assert.GreaterOrEqual(t, atomic.LoadInt32(&maxSeen), int32(2))
+	assert.LessOrEqual(t, maxSeen.Load(), int32(2))
+	assert.GreaterOrEqual(t, maxSeen.Load(), int32(2))
 }
 
 func TestNormalizeTaskKind(t *testing.T) {

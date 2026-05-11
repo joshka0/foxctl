@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -656,8 +657,8 @@ func syncProviders(sc *syncConfig, dryRun bool) (*output, error) {
 	var errors []string
 
 	// What to sync
-	syncMCP := contains(sc.What, "mcp") || contains(sc.What, "all")
-	syncSkills := contains(sc.What, "skills") || contains(sc.What, "all")
+	syncMCP := slices.Contains(sc.What, "mcp") || slices.Contains(sc.What, "all")
+	syncSkills := slices.Contains(sc.What, "skills") || slices.Contains(sc.What, "all")
 
 	// Get source MCP servers
 	var sourceMCPs map[string]interface{}
@@ -1019,13 +1020,4 @@ func dirExists(path string) bool {
 }
 
 // contains checks if a string slice contains a specific item with linear search.
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
-}
-
 const command = "providers/config"

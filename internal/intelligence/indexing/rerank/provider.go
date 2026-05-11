@@ -6,7 +6,7 @@ import (
 )
 
 // Provider reranks candidate documents for a query.
-// Implementations call external APIs (e.g., Voyage rerank-2.5) or local models.
+// Implementations may call local models or deterministic test providers.
 type Provider interface {
 	// Rerank reorders candidates by relevance to the query.
 	// Returns ranked results in descending order of relevance.
@@ -74,10 +74,10 @@ type UsageTrackingProvider interface {
 
 // Usage tracks API usage for reranking providers.
 type Usage struct {
-	// Provider identifies the reranking provider (e.g., "voyage").
+	// Provider identifies the reranking provider.
 	Provider string `json:"provider"`
 
-	// Model is the specific model used (e.g., "rerank-2.5").
+	// Model is the specific model used.
 	Model string `json:"model"`
 
 	// Requests is the number of API requests made.

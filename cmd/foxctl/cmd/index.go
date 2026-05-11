@@ -71,7 +71,7 @@ func indexEmbeddingProviderHint(cfg config.Config) string {
 	case "openai_compat", "openai-compatible", "lmstudio":
 		return "set FOXCTL_EMBEDDING_PROVIDER=openai_compat with FOXCTL_EMBEDDING_MODEL and FOXCTL_EMBEDDING_BASE_URL for embeddings"
 	default:
-		return "set FOXCTL_EMBEDDING_PROVIDER=openai_compat or VOYAGE_API_KEY / GEMINI_API_KEY for embeddings"
+		return "set FOXCTL_EMBEDDING_PROVIDER=openai_compat or GEMINI_API_KEY for embeddings"
 	}
 }
 
@@ -79,7 +79,6 @@ func createIndexEmbeddingProviderForScope(cfg config.Config, scope string) (sema
 	provider, err := semantic.NewProviderForScope(
 		embeddingScopeForIndexScope(scope),
 		cfg,
-		semantic.WithVoyageKey(os.Getenv("VOYAGE_API_KEY")),
 		semantic.WithGeminiKey(os.Getenv("GEMINI_API_KEY")),
 	)
 	if err != nil {
@@ -219,14 +218,14 @@ This is a simplified interface for full-repo embedding management.
 For fine-grained control, use 'foxctl semantic-index'.
 
 Scopes (model selection via semantic.ScopeModelRecommendation):
-  symbols   - Code files (voyage-code-3)
-  memory    - Gotchas/notes (voyage-3.5)
-  tasks     - Task descriptions (voyage-3.5)
-  sessions  - Session context (voyage-3.5)
+  symbols   - Code files
+  memory    - Gotchas/notes
+  tasks     - Task descriptions
+  sessions  - Session context
 
 Override with FOXCTL_EMBEDDING_MODEL_<SCOPE> or _CODE/_TEXT env vars.
 Provider selection follows the configured embedding provider and supports
-OpenAI-compatible endpoints as well as Voyage/Gemini.
+OpenAI-compatible endpoints as well as Gemini.
 
 Remote sync:
   Use 'index sync push' to push local embeddings to remote Turso for
@@ -264,13 +263,13 @@ func newIndexInitCommand() *cobra.Command {
 This command performs one-time full embedding generation using the
 recommended models for each scope (see semantic.ScopeModelRecommendation):
 
-  symbols   → voyage-code-3   (code files)
-  memory    → voyage-3.5      (gotchas, notes)
-  tasks     → voyage-3.5      (task descriptions)
-  sessions  → voyage-3.5      (session summaries)
+  symbols   → text-embedding-qwen3-embedding-8b   (code files)
+  memory    → text-embedding-qwen3-embedding-8b   (gotchas, notes)
+  tasks     → text-embedding-qwen3-embedding-8b   (task descriptions)
+  sessions  → text-embedding-qwen3-embedding-8b   (session summaries)
 
 Provider selection follows the configured embedding provider and supports
-OpenAI-compatible endpoints as well as Voyage/Gemini.
+OpenAI-compatible endpoints as well as Gemini.
 Override with FOXCTL_EMBEDDING_MODEL_<SCOPE> or _CODE/_TEXT env vars.`,
 		Example: `  # Index everything (all scopes)
   foxctl index init
@@ -906,7 +905,7 @@ func embedMemoryEntries(ctx context.Context, cfg config.Config, store storage.Me
 			}
 			if err := store.SetEmbeddingMetadata(ctx, storage.EmbeddingMetadata{
 				Workspace:  workspace,
-				Provider:   semantic.DetectProviderForConfig(cfg, os.Getenv("VOYAGE_API_KEY"), os.Getenv("GEMINI_API_KEY")),
+				Provider:   semantic.DetectProviderForConfig(cfg, os.Getenv("GEMINI_API_KEY")),
 				Model:      provider.Model(),
 				Dimensions: len(embedding),
 				CreatedAt:  mem.CreatedAt,
@@ -1498,7 +1497,7 @@ func syncMemoryToTurso(ctx context.Context, cfg config.Config, workspace, remote
 	defer remoteStore.Close()
 
 	// Get model from metadata
-	model := "voyage-code-3" // default
+	model := semantic.DefaultEmbeddingModel
 	if meta, _ := embedStore.GetEmbeddingMetadata(ctx, workspace); meta != nil && meta.Model != "" {
 		model = meta.Model
 	}

@@ -523,7 +523,6 @@ func newEvalRetrievalCommand() *cobra.Command {
 				cochangeProvider, _ = semantic.NewProviderForScope(
 					semantic.ScopeMemory,
 					cfg,
-					semantic.WithVoyageKey(os.Getenv("VOYAGE_API_KEY")),
 					semantic.WithGeminiKey(os.Getenv("GEMINI_API_KEY")),
 				)
 				if _, err := contextplane.BuildCoChangeArtifacts(ctx, target, memStore, cochangeProvider, contextplane.DefaultCoChangeArtifactBuildOptions()); err != nil {

@@ -256,8 +256,9 @@ embedding:
 	}
 	if err := os.WriteFile(filepath.Join(workspaceDir, ".foxctl", "config.yaml"), []byte(`
 embedding:
-  provider: voyage
-  model: voyage-3.5
+  provider: lmstudio
+  model: text-embedding-qwen3-embedding-8b
+  base_url: http://127.0.0.1:1234/v1
 `), 0o644); err != nil {
 		t.Fatalf("write workspace config: %v", err)
 	}
@@ -280,11 +281,11 @@ embedding:
 	}
 	defer func() { _ = rc.Close() }()
 
-	if rc.Config.Embedding.Provider != "voyage" {
-		t.Fatalf("embedding provider = %q, want voyage", rc.Config.Embedding.Provider)
+	if rc.Config.Embedding.Provider != "lmstudio" {
+		t.Fatalf("embedding provider = %q, want lmstudio", rc.Config.Embedding.Provider)
 	}
-	if rc.Config.Embedding.Model != "voyage-3.5" {
-		t.Fatalf("embedding model = %q, want voyage-3.5", rc.Config.Embedding.Model)
+	if rc.Config.Embedding.Model != "text-embedding-qwen3-embedding-8b" {
+		t.Fatalf("embedding model = %q, want text-embedding-qwen3-embedding-8b", rc.Config.Embedding.Model)
 	}
 }
 

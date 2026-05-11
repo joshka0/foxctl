@@ -109,7 +109,7 @@ func main() {
 	memoryConfig.RecentWindowDays = 7  // Summarize last week
 
 	// Create companion executor with memory enabled
-	// Embedder is created internally from config (uses VOYAGE_API_KEY from .env)
+	// Embedder is created internally from config.
 	executor, err := companion.NewExecutor(companion.ExecutorConfig{
 		ContextStore: contextStore,
 		BoardStore:   boardStore,

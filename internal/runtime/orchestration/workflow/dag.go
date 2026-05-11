@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 )
 
@@ -73,7 +74,7 @@ func (d *DAG) inferDependencies(steps []Step) error {
 			// Check if this is a step ID reference
 			if _, exists := d.nodes[ref]; exists {
 				// Add implicit dependency if not already explicit
-				if !contains(d.edges[step.ID], ref) && ref != step.ID {
+				if !slices.Contains(d.edges[step.ID], ref) && ref != step.ID {
 					d.edges[step.ID] = append(d.edges[step.ID], ref)
 					d.reverse[ref] = append(d.reverse[ref], step.ID)
 				}
@@ -344,15 +345,6 @@ func (d *DAG) Ready(completed map[string]bool) []string {
 }
 
 // Helper functions
-
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
-}
 
 func indexOf(s, substr string) int {
 	for i := 0; i <= len(s)-len(substr); i++ {

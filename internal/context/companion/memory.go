@@ -38,7 +38,7 @@ type ConversationMemory struct {
 	config               MemoryConfig
 	clock                skilltest.Clock
 	idGenerator          func() string
-	idSeq                uint64
+	idSeq                atomic.Uint64
 	mu                   sync.RWMutex
 	extractionPolicy     ExtractionPolicy // Typed extraction policy (replaces keyword heuristics)
 	signalExtractor      SignalExtractor  // Typed episode boundary signals (replaces isRetractionSignal/isUserRedirectSignal)
@@ -143,7 +143,7 @@ func NewConversationMemory(db *sql.DB, opts ...MemoryOption) (*ConversationMemor
 		tokenCounter: NewTikTokenCounter(""),
 	}
 	m.idGenerator = func() string {
-		seq := atomic.AddUint64(&m.idSeq, 1)
+		seq := m.idSeq.Add(1)
 		return fmt.Sprintf("%d-%d", m.clock.Now().UnixNano(), seq)
 	}
 
@@ -159,7 +159,7 @@ func NewConversationMemory(db *sql.DB, opts ...MemoryOption) (*ConversationMemor
 	}
 	if m.idGenerator == nil {
 		m.idGenerator = func() string {
-			seq := atomic.AddUint64(&m.idSeq, 1)
+			seq := m.idSeq.Add(1)
 			return fmt.Sprintf("%d-%d", m.clock.Now().UnixNano(), seq)
 		}
 	}

@@ -59,14 +59,14 @@ func newSemanticIndexInitCommand() *cobra.Command {
 		Use:   "init",
 		Short: "Initialize semantic index for workspace files",
 		Long:  "Initialize the semantic file index by generating embeddings for all matching files in the workspace.",
-		Example: "  # Index all Go files with Voyage (default, 200M free tokens)\n" +
+		Example: "  # Index all Go files with the configured local embedding model\n" +
 			"  foxctl semantic-index init --workspace . --glob '**/*.go'\n\n" +
 			"  # Index Go source files, excluding tests\n" +
 			"  foxctl semantic-index init --workspace . --glob '**/*.go' --exclude '*_test.go'\n\n" +
-			"  # Use Gemini instead of Voyage\n" +
+			"  # Use Gemini instead of the local OpenAI-compatible endpoint\n" +
 			"  foxctl semantic-index init --workspace . --provider gemini\n\n" +
 			"  # Use local LM Studio/OpenAI-compatible embeddings\n" +
-			"  FOXCTL_EMBEDDING_BASE_URL=http://127.0.0.1:1234/v1 foxctl semantic-index init --workspace . --provider lmstudio --model text-embedding-nomic-embed-text-v1.5\n\n" +
+			"  FOXCTL_EMBEDDING_BASE_URL=http://127.0.0.1:1234/v1 foxctl semantic-index init --workspace . --provider lmstudio --model text-embedding-qwen3-embedding-8b\n\n" +
 			"  # Slice and throttle local GPU-backed embedding\n" +
 			"  foxctl semantic-index init --workspace . --provider lmstudio --batch-size 1 --batch-delay 30s --chunk-bytes 32768 --chunk-overlap 1024 --chunk-delay 1s --max-file-bytes 1048576\n\n" +
 			"  # Queue matching files for paced background drain\n" +
@@ -90,8 +90,8 @@ func newSemanticIndexInitCommand() *cobra.Command {
 	cmd.Flags().IntVar(&chunkBytes, "chunk-bytes", 0, "Chunk size in bytes (0 = no chunking)")
 	cmd.Flags().IntVar(&chunkOverlap, "chunk-overlap", 0, "Chunk overlap in bytes")
 	cmd.Flags().DurationVar(&chunkDelay, "chunk-delay", 0, "Delay between chunk embedding requests, useful for large files with local GPU-backed embedding")
-	cmd.Flags().StringVar(&model, "model", "", "Embedding model name (default: voyage-code-3 or gemini-embedding-001)")
-	cmd.Flags().StringVar(&provider, "provider", "", "Embedding provider: voyage (default), gemini, lmstudio/openai_compat, or noop")
+	cmd.Flags().StringVar(&model, "model", "", "Embedding model name (default: text-embedding-qwen3-embedding-8b or gemini-embedding-001)")
+	cmd.Flags().StringVar(&provider, "provider", "", "Embedding provider: lmstudio/openai_compat (default), gemini, or noop")
 	cmd.Flags().IntVar(&batchSize, "batch-size", 0, "Maximum files per indexing batch (0 = all files in one batch)")
 	cmd.Flags().DurationVar(&batchDelay, "batch-delay", 0, "Delay between indexing batches, useful for local GPU-backed embedding")
 	cmd.Flags().Int64Var(&maxFileBytes, "max-file-bytes", 0, "Hard-skip files larger than this before embedding (0 = no extra limit). Use --chunk-bytes to slice large files")
@@ -149,8 +149,8 @@ func newSemanticIndexUpdateCommand() *cobra.Command {
 	cmd.Flags().IntVar(&chunkBytes, "chunk-bytes", 0, "Chunk size in bytes (0 = no chunking)")
 	cmd.Flags().IntVar(&chunkOverlap, "chunk-overlap", 0, "Chunk overlap in bytes")
 	cmd.Flags().DurationVar(&chunkDelay, "chunk-delay", 0, "Delay between chunk embedding requests, useful for large files with local GPU-backed embedding")
-	cmd.Flags().StringVar(&model, "model", "", "Embedding model name (default: voyage-code-3 or gemini-embedding-001)")
-	cmd.Flags().StringVar(&provider, "provider", "", "Embedding provider: voyage (default), gemini, lmstudio/openai_compat, or noop")
+	cmd.Flags().StringVar(&model, "model", "", "Embedding model name (default: text-embedding-qwen3-embedding-8b or gemini-embedding-001)")
+	cmd.Flags().StringVar(&provider, "provider", "", "Embedding provider: lmstudio/openai_compat (default), gemini, or noop")
 	cmd.Flags().IntVar(&batchSize, "batch-size", 0, "Maximum files per indexing batch (0 = all files in one batch)")
 	cmd.Flags().DurationVar(&batchDelay, "batch-delay", 0, "Delay between indexing batches, useful for local GPU-backed embedding")
 	cmd.Flags().Int64Var(&maxFileBytes, "max-file-bytes", 0, "Hard-skip files larger than this before embedding (0 = no extra limit). Use --chunk-bytes to slice large files")
@@ -198,7 +198,7 @@ func newSemanticIndexDrainCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root directory")
 	cmd.Flags().StringVar(&model, "model", "", "Embedding model override for drained jobs")
-	cmd.Flags().StringVar(&provider, "provider", "", "Embedding provider override: voyage, gemini, lmstudio/openai_compat, or noop")
+	cmd.Flags().StringVar(&provider, "provider", "", "Embedding provider override: lmstudio/openai_compat, gemini, or noop")
 	cmd.Flags().IntVar(&batchSize, "batch-size", 1, "Maximum queued files to process in this drain run")
 	cmd.Flags().DurationVar(&maxDuration, "max-duration", 5*time.Minute, "Maximum drain duration")
 	cmd.Flags().BoolVar(&processAll, "process-all", false, "Process until queue is empty or max-duration is reached")
@@ -787,16 +787,14 @@ func createSemanticIndexer(ctx context.Context, workspace string, chunkBytes, ch
 		return nil, nil, fmt.Errorf("load config: %w", err)
 	}
 
-	// Create embedding provider based on preference
-	// Priority: explicit --provider flag > config/env provider > VOYAGE_API_KEY > GEMINI_API_KEY > noop
+	// Create embedding provider based on preference.
 	var provider semantic.EmbeddingProvider
 
-	voyageKey := os.Getenv("VOYAGE_API_KEY")
 	geminiKey := os.Getenv("GEMINI_API_KEY")
 
 	// Determine provider to use
 	if providerName == "" {
-		if detected := semantic.DetectProviderForConfig(cfg, voyageKey, geminiKey); detected != "" {
+		if detected := semantic.DetectProviderForConfig(cfg, geminiKey); detected != "" {
 			providerName = detected
 		} else {
 			providerName = "noop"
@@ -805,22 +803,6 @@ func createSemanticIndexer(ctx context.Context, workspace string, chunkBytes, ch
 	providerName = normalizeSemanticIndexProvider(providerName)
 
 	switch providerName {
-	case "voyage":
-		if voyageKey == "" {
-			return nil, nil, fmt.Errorf("voyage provider requires VOYAGE_API_KEY environment variable")
-		}
-		if model == "" {
-			model = "voyage-code-3" // Best for code (1024 dims, 200M free tokens)
-		}
-		provider, err = semantic.NewVoyageProvider(semantic.VoyageConfig{
-			APIKey: voyageKey,
-			Model:  model,
-		})
-		if err != nil {
-			return nil, nil, fmt.Errorf("create voyage provider: %w", err)
-		}
-		fmt.Fprintf(os.Stderr, "Using Voyage AI %s (1024 dims)\n", model)
-
 	case "gemini":
 		if geminiKey == "" {
 			return nil, nil, fmt.Errorf("gemini provider requires GEMINI_API_KEY environment variable")
@@ -838,11 +820,11 @@ func createSemanticIndexer(ctx context.Context, workspace string, chunkBytes, ch
 		fmt.Fprintf(os.Stderr, "Using Gemini %s (3072 dims)\n", model)
 
 	case "openai_compat":
-		if model == "" || strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "voyage-") {
+		if model == "" {
 			model = strings.TrimSpace(cfg.Embedding.Model)
 		}
-		if model == "" || strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "voyage-") {
-			model = "text-embedding-nomic-embed-text-v1.5"
+		if model == "" {
+			model = semantic.DefaultEmbeddingModel
 		}
 		dimensions := semanticIndexOpenAICompatDimensions(model, cfg.Embedding.Dimensions)
 		provider, err = semantic.NewOpenAICompatProvider(semantic.OpenAICompatConfig{
@@ -857,7 +839,7 @@ func createSemanticIndexer(ctx context.Context, workspace string, chunkBytes, ch
 		fmt.Fprintf(os.Stderr, "Using OpenAI-compatible embeddings %s (%d dims)\n", model, provider.Dimensions())
 
 	case "noop":
-		dims := 1024 // Default to Voyage dimensions
+		dims := semantic.ResolveDimensionsForModel(model, cfg.Embedding.Dimensions)
 		if model != "" && (model == "gemini-embedding-001" || model == "text-embedding-004") {
 			dims = 3072
 		}
@@ -865,7 +847,7 @@ func createSemanticIndexer(ctx context.Context, workspace string, chunkBytes, ch
 		fmt.Fprintf(os.Stderr, "Using no-op provider (%d dims) - embeddings will be zero vectors\n", dims)
 
 	default:
-		return nil, nil, fmt.Errorf("unknown provider %q: use voyage, gemini, lmstudio/openai_compat, or noop", providerName)
+		return nil, nil, fmt.Errorf("unknown provider %q: use lmstudio/openai_compat, gemini, or noop", providerName)
 	}
 
 	if dims := provider.Dimensions(); dims > 0 {
@@ -908,15 +890,7 @@ func normalizeSemanticIndexProvider(provider string) string {
 }
 
 func semanticIndexOpenAICompatDimensions(model string, configured int) int {
-	modelDims := semantic.DimensionsForModel(model)
-	defaultDims := semantic.DimensionsForModel("")
-	if modelDims > 0 && modelDims != defaultDims {
-		return modelDims
-	}
-	if configured > 0 {
-		return configured
-	}
-	return modelDims
+	return semantic.ResolveDimensionsForModel(model, configured)
 }
 
 func writeSemanticResult(cmd *cobra.Command, command string, result *semantic.JobResult, workspace string, start time.Time) error {

@@ -1197,9 +1197,9 @@ func TestCountMessagesByTaskCountsSurfaced(t *testing.T) {
 }
 
 func TestRetryBoardBusyRetriesBusyErrors(t *testing.T) {
-	var calls int32
+	var calls atomic.Int32
 	err := retryBoardBusy(context.Background(), func() error {
-		if atomic.AddInt32(&calls, 1) < 3 {
+		if calls.Add(1) < 3 {
 			return errors.New("database is locked")
 		}
 		return nil
@@ -1207,22 +1207,22 @@ func TestRetryBoardBusyRetriesBusyErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("retryBoardBusy: %v", err)
 	}
-	if got := atomic.LoadInt32(&calls); got != 3 {
+	if got := calls.Load(); got != 3 {
 		t.Fatalf("calls=%d want 3", got)
 	}
 }
 
 func TestRetryBoardBusyDoesNotRetryNonBusyErrors(t *testing.T) {
-	var calls int32
+	var calls atomic.Int32
 	want := errors.New("boom")
 	err := retryBoardBusy(context.Background(), func() error {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		return want
 	})
 	if !errors.Is(err, want) {
 		t.Fatalf("err=%v want %v", err, want)
 	}
-	if got := atomic.LoadInt32(&calls); got != 1 {
+	if got := calls.Load(); got != 1 {
 		t.Fatalf("calls=%d want 1", got)
 	}
 }

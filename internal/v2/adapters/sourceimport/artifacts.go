@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	defaultEmbeddingDims = 1024
+	defaultEmbeddingDims = 4096
 	hashEmbeddingModel   = "deterministic-hash-v1"
 )
 

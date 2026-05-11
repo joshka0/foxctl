@@ -279,13 +279,13 @@ func TestOutput_DryRun(t *testing.T) {
 func TestOutput_WithHint(t *testing.T) {
 	output := Output{
 		Status:  "error",
-		Message: "No embedding API key set",
-		Hint:    "Set VOYAGE_API_KEY (preferred) or GEMINI_API_KEY",
+		Message: "No embedding provider configured",
+		Hint:    "Set FOXCTL_EMBEDDING_PROVIDER=openai_compat or GEMINI_API_KEY",
 	}
 
 	assert.Equal(t, "error", output.Status)
 	assert.NotEmpty(t, output.Hint)
-	assert.Contains(t, output.Hint, "VOYAGE_API_KEY")
+	assert.Contains(t, output.Hint, "FOXCTL_EMBEDDING_PROVIDER")
 }
 
 // Tests for constants

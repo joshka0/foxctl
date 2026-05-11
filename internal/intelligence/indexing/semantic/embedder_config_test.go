@@ -6,12 +6,12 @@ import (
 	"github.com/joshka0/foxctl/internal/platform/config"
 )
 
-func TestNewEmbedderFromConfigUsesConfigVoyageKey(t *testing.T) {
+func TestNewEmbedderFromConfigUsesOpenAICompatConfig(t *testing.T) {
 	cfg := config.Config{
 		Embedding: config.EmbeddingSettings{
-			Provider:     "voyage",
-			Model:        "voyage-3.5",
-			VoyageAPIKey: "test-voyage-key",
+			Provider: "lmstudio",
+			Model:    "text-embedding-qwen3-embedding-8b",
+			BaseURL:  "http://127.0.0.1:1234/v1",
 		},
 	}
 
@@ -19,8 +19,8 @@ func TestNewEmbedderFromConfigUsesConfigVoyageKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewProviderForScope: %v", err)
 	}
-	if provider.Model() != "voyage-3.5" {
-		t.Fatalf("model = %q, want voyage-3.5", provider.Model())
+	if provider.Model() != "text-embedding-qwen3-embedding-8b" {
+		t.Fatalf("model = %q, want text-embedding-qwen3-embedding-8b", provider.Model())
 	}
 }
 
@@ -48,6 +48,20 @@ func TestResolveDimensionsForModelPrefersKnownNonDefaultModel(t *testing.T) {
 	got := ResolveDimensionsForModel("text-embedding-qwen3-embedding-8b", 1024)
 	if got != 4096 {
 		t.Fatalf("dimensions = %d, want 4096", got)
+	}
+}
+
+func TestResolveDimensionsForModelSupportsQwenThreeSmallEmbedding(t *testing.T) {
+	got := ResolveDimensionsForModel("qwen3-embedding-0.6b", 4096)
+	if got != 1024 {
+		t.Fatalf("dimensions = %d, want 1024", got)
+	}
+}
+
+func TestResolveDimensionsForModelSupportsQwenThreeFourBEmbedding(t *testing.T) {
+	got := ResolveDimensionsForModel("qwen3-embedding-4b", 4096)
+	if got != 2560 {
+		t.Fatalf("dimensions = %d, want 2560", got)
 	}
 }
 

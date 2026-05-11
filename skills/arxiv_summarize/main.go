@@ -785,10 +785,3 @@ func sha256Hex(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
 }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

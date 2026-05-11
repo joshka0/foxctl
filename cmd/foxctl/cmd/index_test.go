@@ -129,7 +129,6 @@ func TestIndexInit_DryRun(t *testing.T) {
 }
 
 func TestCreateIndexEmbeddingProviderForScope_OpenAICompat(t *testing.T) {
-	t.Setenv("VOYAGE_API_KEY", "")
 	t.Setenv("GEMINI_API_KEY", "")
 
 	cfg := config.Config{

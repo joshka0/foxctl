@@ -108,12 +108,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		Scope: in.Scope,
 	}
 
-	// Check for API key
 	geminiKey := os.Getenv("GEMINI_API_KEY")
-	voyageKey := os.Getenv("VOYAGE_API_KEY")
-	if geminiKey == "" && voyageKey == "" && !in.DryRun {
-		return skillerr.Auth("no embedding API key set", skillerr.WithHint("Set GEMINI_API_KEY or VOYAGE_API_KEY"))
-	}
 
 	// Open task store
 	taskStore, err := rc.Stores.Tasks(ctx)
@@ -162,7 +157,6 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	embedder, err := semantic.NewEmbedderFromConfig(
 		semantic.ScopeTasks,
 		rc.Config,
-		semantic.WithVoyageKey(voyageKey),
 		semantic.WithGeminiKey(geminiKey),
 		skillmain.EmbeddingGuard(rc),
 	)

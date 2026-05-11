@@ -916,9 +916,9 @@ func newTestSession(eng *engine.LLMChatEngine) *Session {
 
 func TestEngineRetryOnFirstError(t *testing.T) {
 	// Mock server: first call returns 500 (engine error), second call succeeds.
-	var callCount int64
+	var callCount atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt64(&callCount, 1)
+		n := callCount.Add(1)
 		if n == 1 {
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = w.Write([]byte("temporary failure"))
@@ -943,16 +943,16 @@ func TestEngineRetryOnFirstError(t *testing.T) {
 	if session.Status != types.StatusOK {
 		t.Errorf("expected StatusOK after retry, got %s (error: %s)", session.Status, session.Error)
 	}
-	if atomic.LoadInt64(&callCount) < 2 {
-		t.Errorf("expected at least 2 LLM calls (1 failure + 1 success), got %d", atomic.LoadInt64(&callCount))
+	if callCount.Load() < 2 {
+		t.Errorf("expected at least 2 LLM calls (1 failure + 1 success), got %d", callCount.Load())
 	}
 }
 
 func TestEngineRetryExhausted(t *testing.T) {
 	// Mock server: always returns 500 — both attempts fail.
-	var callCount int64
+	var callCount atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt64(&callCount, 1)
+		callCount.Add(1)
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte("persistent failure"))
 	}))
@@ -975,7 +975,7 @@ func TestEngineRetryExhausted(t *testing.T) {
 	if session.Error == "" {
 		t.Error("expected non-empty error message")
 	}
-	calls := atomic.LoadInt64(&callCount)
+	calls := callCount.Load()
 	if calls < 2 {
 		t.Errorf("expected at least 2 LLM calls (original + 1 retry), got %d", calls)
 	}
@@ -986,9 +986,9 @@ func TestEngineMaxIterationsDoesNotRetry(t *testing.T) {
 	// 1) First call returns a tool call with no assistant text.
 	// 2) Finalize call returns assistant text.
 	// Any additional call indicates runtime retried the engine run.
-	var callCount int64
+	var callCount atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt64(&callCount, 1)
+		n := callCount.Add(1)
 		w.WriteHeader(http.StatusOK)
 
 		switch n {
@@ -1031,7 +1031,7 @@ func TestEngineMaxIterationsDoesNotRetry(t *testing.T) {
 	if session.Summary == "" {
 		t.Error("expected non-empty summary from finalize output")
 	}
-	calls := atomic.LoadInt64(&callCount)
+	calls := callCount.Load()
 	if calls != 2 {
 		t.Errorf("expected exactly 2 LLM calls (tool-call + finalize) with no retry, got %d", calls)
 	}
@@ -1039,9 +1039,9 @@ func TestEngineMaxIterationsDoesNotRetry(t *testing.T) {
 
 func TestEngineRetrySkipsContextErrors(t *testing.T) {
 	// Mock server: returns 500, but context is canceled so no retry should happen.
-	var callCount int64
+	var callCount atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt64(&callCount, 1)
+		callCount.Add(1)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(mockLLMResponse("should not reach here"))
 	}))

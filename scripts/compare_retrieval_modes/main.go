@@ -104,13 +104,11 @@ func main() {
 	}
 	defer indexStore.Close()
 
-	var embedder semantic.EmbeddingProvider
-	if key := strings.TrimSpace(os.Getenv("VOYAGE_API_KEY")); key != "" {
-		provider, err := semantic.NewProviderForScope(semantic.ScopeSymbols, cfg, semantic.WithVoyageKey(key))
-		if err == nil {
-			embedder = provider
-		}
-	}
+	embedder, _ := semantic.NewProviderForScope(
+		semantic.ScopeSymbols,
+		cfg,
+		semantic.WithGeminiKey(os.Getenv("GEMINI_API_KEY")),
+	)
 
 	if os.Getenv("SEARCHINDEX_SKIP_REINDEX") != "1" {
 		if err := indexStore.DeleteWorkspace(ctx, workspace); err != nil {

@@ -45,9 +45,9 @@ Source of truth: `skills/code_semantic_search/main.go`.
 | `limit` | int | Default `20` |
 | `min_similarity` | float | Default `0.3` |
 | `memory_decay_enabled` | bool | Optional local recency/access rerank for memory-scope results |
-| `rerank_enabled` | bool | Optional Voyage reranking |
+| `rerank_enabled` | bool | Optional local Qwen/OpenAI-compatible reranking |
 | `rerank_top_k` | int | Candidate size before rerank |
-| `rerank_model` | string | Default `rerank-2.5` |
+| `rerank_model` | string | Default `Qwen/Qwen3-Reranker-0.6B` |
 | `remote` / `global` / `workspaces` | bool/string[] | Cross-workspace remote search mode |
 | `format` | string | `json` or `tree` |
 | `repo_index_mode` | string | Symbol/code scopes only: `auto`, `search`, `dag`, `off` |
@@ -71,8 +71,8 @@ Source of truth: `internal/intelligence/indexing/semantic/provider.go`.
 
 | Scope category | Default model |
 |---------------|---------------|
-| `symbols` and file summaries | `voyage-code-3` |
-| `memory`, `tasks`, `sessions`, `codemaps` | `voyage-3.5` |
+| `symbols` and file summaries | `text-embedding-qwen3-embedding-8b` |
+| `memory`, `tasks`, `sessions`, `codemaps` | `text-embedding-qwen3-embedding-8b` |
 
 Override order:
 
@@ -87,9 +87,12 @@ Source of truth: `internal/intelligence/indexing/rerank/config.go`.
 | Env var | Purpose |
 |--------|---------|
 | `FOXCTL_RERANK_ENABLED` | Enable reranking |
+| `FOXCTL_RERANK_PROVIDER` | Rerank provider (`qwen` / OpenAI-compatible local endpoint) |
+| `FOXCTL_RERANK_BASE_URL` | Rerank endpoint base URL |
+| `FOXCTL_RERANK_API_KEY` | Optional bearer token for the rerank endpoint |
 | `FOXCTL_RERANK_TOP_K` | Candidates passed to reranker |
 | `FOXCTL_RERANK_FINAL_K` | Final result count |
-| `FOXCTL_RERANK_MODEL` | Reranker model (default `rerank-2.5`) |
+| `FOXCTL_RERANK_MODEL` | Reranker model (default `Qwen/Qwen3-Reranker-0.6B`) |
 | `FOXCTL_RERANK_SCORE_BLEND` | Blend original and rerank score |
 | `FOXCTL_RERANK_TIMEOUT` | Request timeout |
 | `FOXCTL_RERANK_RATE_LIMIT` | Requests/minute (`0` disables) |
@@ -97,7 +100,7 @@ Source of truth: `internal/intelligence/indexing/rerank/config.go`.
 
 ## Memory Decay Rerank
 
-`memory_decay_enabled` is separate from Voyage reranking. Voyage rerank is a
+`memory_decay_enabled` is separate from model reranking. Qwen rerank is a
 model-based relevance pass over fused candidates. Memory decay is a local
 named-memory recency/access rerank that only affects memory-scope candidates.
 
@@ -141,7 +144,7 @@ foxctl index repo enrich summaries --workspace .
 
 | Symptom | Likely cause |
 |--------|---------------|
-| Empty semantic matches for vector-only scopes | Missing embedding provider key (`VOYAGE_API_KEY` / `GEMINI_API_KEY`) |
+| Empty semantic matches for vector-only scopes | Missing or unreachable OpenAI-compatible embedding endpoint |
 | Dimension mismatch | Model/store dimension drift; rebuild the affected scope using [docs/general/embedding-rebuilds.md](embedding-rebuilds.md) |
 | Rerank unavailable | Missing key or `FOXCTL_RERANK_ENABLED` not enabled |
 | Remote/global search unavailable | Missing Turso remote configuration |

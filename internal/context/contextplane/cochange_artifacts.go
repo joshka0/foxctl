@@ -383,10 +383,3 @@ func shortenStrings(items []string, limit int) []string {
 	}
 	return append([]string(nil), items[:limit]...)
 }
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}

@@ -281,10 +281,6 @@ type EmbeddingSettings struct {
 	Dimensions int               `mapstructure:"dimensions" json:"dimensions"`
 	Models     map[string]string `mapstructure:"models" json:"models"`
 	Flags      EmbeddingFlags    `mapstructure:"flags" json:"flags"`
-
-	// VoyageAPIKey is the Voyage AI API key (from VOYAGE_API_KEY)
-	// Required for embeddings with voyage-code-3, voyage-3.5, etc.
-	VoyageAPIKey string `mapstructure:"voyage_api_key" json:"voyage_api_key"`
 }
 
 // MarshalJSON implements json.Marshaler to redact embedding provider secrets.
@@ -293,9 +289,6 @@ func (e EmbeddingSettings) MarshalJSON() ([]byte, error) {
 	redacted := Alias(e)
 	if redacted.APIKey != "" {
 		redacted.APIKey = "[REDACTED]"
-	}
-	if redacted.VoyageAPIKey != "" {
-		redacted.VoyageAPIKey = "[REDACTED]"
 	}
 	return json.Marshal(redacted)
 }
@@ -406,7 +399,7 @@ type VectorSettings struct {
 	Enabled bool `mapstructure:"enabled" json:"enabled"`
 
 	// Dimensions specifies the embedding vector dimensions.
-	// Default: 1024 (Voyage). Override via FOXCTL_VECTOR_DIMS or config file.
+	// Default: 4096 (Qwen). Override via FOXCTL_VECTOR_DIMS or config file.
 	Dimensions int `mapstructure:"dimensions" json:"dimensions"`
 }
 
@@ -821,8 +814,8 @@ func applyDefaults(v *viper.Viper, defaultHome string) {
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.format", "text")
 	v.SetDefault("logging.output", "")
-	v.SetDefault("embedding.provider", "voyage")
-	v.SetDefault("embedding.model", "voyage-code-3")
+	v.SetDefault("embedding.provider", "openai_compat")
+	v.SetDefault("embedding.model", "text-embedding-qwen3-embedding-8b")
 	v.SetDefault("embedding.dimensions", dbdriver.DefaultVectorDimensions)
 	v.SetDefault("openapi.plugin_path", filepath.Join(defaultHome, "plugins"))
 	v.SetDefault("indexing.post_review.enabled", false)
@@ -943,7 +936,6 @@ func overlayEmbeddingSettings(dst *EmbeddingSettings, src EmbeddingSettings) {
 	overlayString(&dst.Model, src.Model)
 	overlayString(&dst.BaseURL, src.BaseURL)
 	overlayString(&dst.APIKey, src.APIKey)
-	overlayString(&dst.VoyageAPIKey, src.VoyageAPIKey)
 	if src.Dimensions > 0 {
 		dst.Dimensions = src.Dimensions
 	}
@@ -1203,10 +1195,6 @@ func finalizeConfig(cfg Config, home string) Config {
 	if cfg.Embedding.Provider == "" && (cfg.Embedding.BaseURL != "" || strings.EqualFold(os.Getenv("FOXCTL_OBSIDIAN_SEMANTIC_PROVIDER"), "openai_compat") || strings.EqualFold(os.Getenv("FOXCTL_OBSIDIAN_SEMANTIC_PROVIDER"), "openai-compatible")) {
 		cfg.Embedding.Provider = "openai_compat"
 	}
-	if key := os.Getenv("VOYAGE_API_KEY"); key != "" && cfg.Embedding.VoyageAPIKey == "" {
-		cfg.Embedding.VoyageAPIKey = key
-	}
-
 	// Search API key env var overrides (FC/IS compliant)
 	if key := os.Getenv("TAVILY_API_KEY"); key != "" && cfg.Search.TavilyAPIKey == "" {
 		cfg.Search.TavilyAPIKey = key

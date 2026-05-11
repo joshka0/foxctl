@@ -720,7 +720,9 @@ check_var() {
 
 echo ""
 echo "Embedding providers (at least one required for vector search):"
-check_var "VOYAGE_API_KEY" "optional" "Voyage AI - recommended for code/text embeddings"
+check_var "FOXCTL_EMBEDDING_PROVIDER" "optional" "Embedding provider (openai_compat/lmstudio recommended)"
+check_var "FOXCTL_EMBEDDING_BASE_URL" "optional" "OpenAI-compatible embedding endpoint"
+check_var "FOXCTL_EMBEDDING_MODEL" "optional" "Embedding model (text-embedding-qwen3-embedding-8b by default)"
 check_var "GEMINI_API_KEY" "optional" "Google Gemini - alternative embedding provider"
 check_var "MISTRAL_API_KEY" "optional" "Mistral AI - alternative embedding provider"
 

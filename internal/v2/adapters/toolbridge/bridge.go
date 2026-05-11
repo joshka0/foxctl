@@ -336,7 +336,6 @@ func (d *Delegate) openObsidianSemanticProvider() semantic.EmbeddingProvider {
 	provider, err := semantic.NewProviderForScope(
 		semantic.ScopeMemory,
 		d.cfg.AppConfig,
-		semantic.WithVoyageKey(d.lookupEnv("VOYAGE_API_KEY")),
 		semantic.WithGeminiKey(d.lookupEnv("GEMINI_API_KEY")),
 	)
 	if err != nil {

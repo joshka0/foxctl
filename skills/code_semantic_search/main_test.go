@@ -370,32 +370,32 @@ func TestErrorCodeConstants(t *testing.T) {
 func TestEmbeddingModelConfig_UsesOverrides(t *testing.T) {
 	cfg := config.Config{
 		Embedding: config.EmbeddingSettings{
-			Model: "voyage-3.5",
+			Model: "text-embedding-qwen3-embedding-8b",
 			Models: map[string]string{
-				"symbols":  "voyage-code-3",
-				"memory":   "voyage-3-large",
-				"tasks":    "voyage-3.5",
-				"sessions": "voyage-3.5",
+				"symbols":  "text-embedding-qwen3-embedding-8b",
+				"memory":   "qwen3-embedding-0.6b",
+				"tasks":    "text-embedding-qwen3-embedding-8b",
+				"sessions": "text-embedding-qwen3-embedding-8b",
 			},
 		},
 	}
 
-	codeModel, memoryModel, textModel, _ := embeddingModelConfig("voyage", cfg)
-	if codeModel != "voyage-code-3" {
-		t.Fatalf("code model = %q, want voyage-code-3", codeModel)
+	codeModel, memoryModel, textModel, _ := embeddingModelConfig("openai_compat", cfg)
+	if codeModel != "text-embedding-qwen3-embedding-8b" {
+		t.Fatalf("code model = %q, want text-embedding-qwen3-embedding-8b", codeModel)
 	}
-	if memoryModel != "voyage-3-large" {
-		t.Fatalf("memory model = %q, want voyage-3-large", memoryModel)
+	if memoryModel != "qwen3-embedding-0.6b" {
+		t.Fatalf("memory model = %q, want qwen3-embedding-0.6b", memoryModel)
 	}
-	if textModel != "voyage-3.5" {
-		t.Fatalf("text model = %q, want voyage-3.5", textModel)
+	if textModel != "text-embedding-qwen3-embedding-8b" {
+		t.Fatalf("text model = %q, want text-embedding-qwen3-embedding-8b", textModel)
 	}
 }
 
 func TestEmbeddingModelConfig_GeminiFallback(t *testing.T) {
 	cfg := config.Config{
 		Embedding: config.EmbeddingSettings{
-			Model: "voyage-3.5",
+			Model: "text-embedding-qwen3-embedding-8b",
 		},
 	}
 
@@ -667,7 +667,7 @@ func TestDetectEmbeddingProviderName_OpenAICompat(t *testing.T) {
 			BaseURL:  "http://127.0.0.1:1234/v1",
 		},
 	}
-	if got := detectEmbeddingProviderName(cfg, "", ""); got != "openai_compat" {
+	if got := detectEmbeddingProviderName(cfg, ""); got != "openai_compat" {
 		t.Fatalf("provider=%q want openai_compat", got)
 	}
 }

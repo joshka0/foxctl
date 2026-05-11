@@ -10,7 +10,7 @@
 #   FOXCTL_BIN - Path to foxctl binary (default: foxctl)
 #   FOXCTL_SEMANTIC_DISABLED - Set to 1 to disable
 #   FOXCTL_SEMANTIC_MAX_RESULTS - Max results per scope (default: 3)
-#   FOXCTL_SEMANTIC_RERANK - Set to 1 to enable Voyage rerank-2.5 (requires VOYAGE_API_KEY)
+#   FOXCTL_SEMANTIC_RERANK - Set to 1 to enable local Qwen/OpenAI-compatible rerank
 
 set -euo pipefail
 

@@ -7,10 +7,8 @@ import (
 )
 
 // DetectProviderForConfig resolves the effective embedding provider for a repo/workspace config.
-// Priority: explicit provider > model family > base URL/API key shape > env-backed fallback.
-// This keeps provider selection repo-scoped, while still allowing env-only setups when no
-// embedding config is present.
-func DetectProviderForConfig(cfg config.Config, voyageKey, geminiKey string) string {
+// Priority: explicit provider > model family > base URL/API key shape > Gemini key > local default.
+func DetectProviderForConfig(cfg config.Config, geminiKey string) string {
 	provider := normalizeEmbeddingProviderName(cfg.Embedding.Provider)
 	if provider != "" {
 		return provider
@@ -21,13 +19,10 @@ func DetectProviderForConfig(cfg config.Config, voyageKey, geminiKey string) str
 	if strings.TrimSpace(cfg.Embedding.BaseURL) != "" || strings.TrimSpace(cfg.Embedding.APIKey) != "" {
 		return "openai_compat"
 	}
-	if strings.TrimSpace(voyageKey) != "" {
-		return "voyage"
-	}
 	if strings.TrimSpace(geminiKey) != "" {
 		return "gemini"
 	}
-	return ""
+	return DefaultEmbeddingProvider
 }
 
 // ResolveModelForScope returns the configured model for a scope.
@@ -51,7 +46,6 @@ func NewEmbedderFromConfig(scope EmbeddingScope, cfg config.Config, opts ...Embe
 		WithProvider(strings.TrimSpace(cfg.Embedding.Provider)),
 		WithAPIKey(strings.TrimSpace(cfg.Embedding.APIKey)),
 		WithBaseURL(strings.TrimSpace(cfg.Embedding.BaseURL)),
-		WithVoyageKey(strings.TrimSpace(cfg.Embedding.VoyageAPIKey)),
 		WithGeminiKey(strings.TrimSpace(cfg.LLM.GeminiAPIKey)),
 	)
 	configOpts = applyProviderPreference(model, cfg, configOpts)
@@ -97,11 +91,8 @@ func applyProviderPreference(model string, cfg config.Config, opts []EmbedderOpt
 	}
 	switch provider {
 	case "gemini":
-		opts = append(opts, WithVoyageKey(""))
 	case "openai_compat":
-		opts = append(opts, WithVoyageKey(""), WithGeminiKey(""))
-	case "voyage":
-		// Default selection already prefers Voyage when configured.
+		opts = append(opts, WithGeminiKey(""))
 	}
 	return opts
 }
@@ -111,8 +102,6 @@ func providerFromModel(model string) string {
 	switch {
 	case strings.HasPrefix(lower, "gemini-"):
 		return "gemini"
-	case strings.HasPrefix(lower, "voyage-"):
-		return "voyage"
 	case strings.HasPrefix(lower, "text-embedding-"), strings.HasPrefix(lower, "nomic-embed-"), strings.Contains(lower, "embeddinggemma"):
 		return "openai_compat"
 	default:

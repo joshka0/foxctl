@@ -10,7 +10,7 @@ import (
 // Well-known circuit breaker names for external service calls.
 // Skills should use these constants with rc.Breakers.Execute(ctx, name, fn).
 const (
-	// BreakerEmbeddingAPI guards calls to embedding providers (Voyage, Gemini).
+	// BreakerEmbeddingAPI guards calls to embedding providers.
 	BreakerEmbeddingAPI = "embedding_api"
 
 	// BreakerLLMProvider guards calls to LLM chat/completion providers.

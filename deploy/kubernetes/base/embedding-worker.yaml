@@ -59,12 +59,37 @@ spec:
               name: foxctl-secrets
               key: turso-token
 
-        # Embedding providers
-        - name: VOYAGE_API_KEY
+        # Embedding provider
+        - name: FOXCTL_EMBEDDING_PROVIDER
+          value: "openai_compat"
+        - name: FOXCTL_EMBEDDING_MODEL
+          value: "text-embedding-qwen3-embedding-8b"
+        - name: FOXCTL_EMBEDDING_BASE_URL
           valueFrom:
             secretKeyRef:
               name: foxctl-secrets
-              key: voyage-key
+              key: embedding-base-url
+              optional: true
+        - name: FOXCTL_EMBEDDING_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: foxctl-secrets
+              key: embedding-api-key
+              optional: true
+        - name: FOXCTL_RERANK_PROVIDER
+          value: "qwen"
+        - name: FOXCTL_RERANK_BASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: foxctl-secrets
+              key: rerank-base-url
+              optional: true
+        - name: FOXCTL_RERANK_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: foxctl-secrets
+              key: rerank-api-key
+              optional: true
 
         # Pod identity
         - name: POD_NAME

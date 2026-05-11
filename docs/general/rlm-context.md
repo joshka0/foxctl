@@ -302,7 +302,8 @@ systemPrompt, _ := ep.BuildSystemPrompt(ctx, basePrompt)
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `FOXCTL_HOME` | `~/.foxctl` | Storage root |
-| `VOYAGE_API_KEY` | - | Semantic embeddings |
+| `FOXCTL_EMBEDDING_BASE_URL` | - | OpenAI-compatible semantic embedding endpoint |
+| `FOXCTL_EMBEDDING_API_KEY` | - | Optional embedding endpoint bearer token |
 
 ## Related
 

@@ -51,7 +51,7 @@ spec:
     - protocol: UDP
       port: 53
 
-  # Allow HTTPS to external services (Turso, Voyage, GitHub, S3)
+  # Allow HTTPS to external services (Turso, embedding/rerank endpoints, GitHub, S3)
   - to:
     - ipBlock:
         cidr: 0.0.0.0/0

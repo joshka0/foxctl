@@ -278,10 +278,3 @@ func emitExpandOutput(ctx context.Context, rc *skillmain.RunContext, in Input, o
 		})
 	}
 }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

@@ -154,10 +154,10 @@ type Input struct {
 	Global     bool     `json:"global,omitempty"`     // Search across ALL workspaces (requires remote)
 	Workspaces []string `json:"workspaces,omitempty"` // Specific workspaces to search (requires remote)
 
-	// Reranking options (requires VOYAGE_API_KEY)
+	// Reranking options use the local Qwen/OpenAI-compatible reranker.
 	RerankEnabled bool   `json:"rerank_enabled,omitempty"`  // Enable reranking (default: from env)
 	RerankTopK    int    `json:"rerank_top_k,omitempty"`    // Candidates to rerank (default: 50)
-	RerankModel   string `json:"rerank_model,omitempty"`    // Override model (default: rerank-2.5)
+	RerankModel   string `json:"rerank_model,omitempty"`    // Override rerank model
 	RepoIndexMode string `json:"repo_index_mode,omitempty"` // off, search, dag for symbol/code path
 
 	// Timeline options (enriches session results with chunk summaries and learnings)
@@ -216,7 +216,7 @@ type Result struct {
 	Snippet        string           `json:"snippet,omitempty"`      // Code snippet (for symbols)
 	Summary        string           `json:"summary,omitempty"`      // Summary text (for sessions/memories/cochange)
 	Similarity     float64          `json:"similarity"`             // Similarity score (0-1)
-	BaseSimilarity float64          `json:"-"`                      // Internal pre-rerank score for threshold checks
+	BaseSimilarity float64          `json:"-"`                      // Internal first-stage score for threshold checks
 	Rank           int              `json:"rank"`                   // Final rank after fusion
 	RRFScore       float64          `json:"rrf_score,omitempty"`    // RRF score used for ranking
 	PageRank       float64          `json:"pagerank,omitempty"`     // PageRank authority score (0-1 normalized)
@@ -262,7 +262,7 @@ type SearchStats struct {
 	RerankEnabled   bool   `json:"rerank_enabled,omitempty"`
 	RerankModel     string `json:"rerank_model,omitempty"`
 	RerankLatencyMS int    `json:"rerank_latency_ms,omitempty"`
-	RerankCount     int    `json:"rerank_count,omitempty"` // Number of candidates reranked
+	RerankCount     int    `json:"rerank_count,omitempty"`
 }
 
 // MemoryDecayStats summarizes opt-in memory decay ranking and access reinforcement.
@@ -353,15 +353,15 @@ func semanticPreviewResultsLimit(rc *skillmain.RunContext) int {
 // Index:
 //
 //	Purpose: Perform unified semantic search across symbols, sessions, memories, tasks, and codemaps with RRF fusion
-//	Flow: validate input → generate scoped embeddings → parallel search sources → fuse results → apply PageRank boost → rerank (optional) → synthesize (optional)
+//	Flow: validate input → generate scoped embeddings → parallel search sources → fuse results → apply PageRank boost → synthesize (optional)
 //	SideEffects: embedding API calls; database queries; LLM API calls (synthesis); artifact persistence
 //	FailureModes: missing API keys, database errors, embedding failures, LLM errors, timeout errors
 //	Observability: emits query/results/context_hints/timelines/stats/summary/tree_text/tree/artifact
-//	Related: search, generateScopedEmbeddings, reciprocalRankFusion, applyPageRankBoost, applyReranking, synthesizeResults, buildFullRepoTree
-//	Keywords: code/semantic_search, unified, symbols, sessions, memories, tasks, codemaps, rrf, pagerank, rerank, synthesis, tree
+//	Related: search, generateScopedEmbeddings, reciprocalRankFusion, applyPageRankBoost, synthesizeResults, buildFullRepoTree
+//	Keywords: code/semantic_search, unified, symbols, sessions, memories, tasks, codemaps, rrf, pagerank, synthesis, tree
 //
 // [[domain:unified-semantic-search]]
-// [[protocol:rrf-pagerank-rerank]]
+// [[protocol:rrf-pagerank-synthesis]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	inputWorkspace := strings.TrimSpace(in.Workspace)
 
@@ -428,10 +428,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	rc.Config = cfg
 
 	// FC/IS: Provider config and keys are resolved at the boundary from config/env.
-	voyageKey := os.Getenv("VOYAGE_API_KEY")
 	geminiKey := os.Getenv("GEMINI_API_KEY")
 
-	out, err := search(ctx, rc, &in, voyageKey, geminiKey)
+	out, err := search(ctx, rc, &in, geminiKey)
 	if err != nil {
 		return err
 	}
@@ -478,7 +477,7 @@ func cleanWorkspacePath(path string) string {
 }
 
 // search performs the core search logic with parallel source queries and result fusion.
-func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey, geminiKey string) (*Output, error) {
+func search(ctx context.Context, rc *skillmain.RunContext, in *Input, geminiKey string) (*Output, error) {
 	logger := rc.Logger
 	cfg := rc.Config
 	out := &Output{
@@ -518,7 +517,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 	}
 
 	// Detect provider and get scope-specific model configuration.
-	providerName := detectEmbeddingProviderName(cfg, voyageKey, geminiKey)
+	providerName := detectEmbeddingProviderName(cfg, geminiKey)
 
 	// Generate scope-specific query embeddings in parallel
 	// Model selection is configurable via EMBEDDING_MODEL_CODE, EMBEDDING_MODEL_MEMORY, EMBEDDING_MODEL_TEXT
@@ -532,7 +531,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 
 		start := time.Now()
 		var embErr error
-		scopedEmb, embErr = generateScopedEmbeddings(ctx, cfg, in.Query, scopeSet, codeModel, memoryModel, textModel, voyageKey, geminiKey)
+		scopedEmb, embErr = generateScopedEmbeddings(ctx, cfg, in.Query, scopeSet, codeModel, memoryModel, textModel, geminiKey)
 		if embErr != nil {
 			out.Stats.Hint = fmt.Sprintf("embedding failed: %v; using BM25-only", embErr)
 		} else {
@@ -546,7 +545,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 
 			// Create a code provider for backward compat with searchSymbolsWithRetrieval
 			if len(scopedEmb.code) > 0 {
-				embedProvider, _ = createProviderWithModel(codeModel, cfg, voyageKey, geminiKey)
+				embedProvider, _ = createProviderWithModel(codeModel, cfg, geminiKey)
 				embedProvider = skillmain.GuardProvider(rc, embedProvider)
 			}
 		}
@@ -566,7 +565,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 		}
 
 		if fileSummaryProvider == nil && strings.TrimSpace(fileSummaryModel) != "" {
-			provider, err := createProviderWithModel(fileSummaryModel, cfg, voyageKey, geminiKey)
+			provider, err := createProviderWithModel(fileSummaryModel, cfg, geminiKey)
 			if err != nil {
 				logger.Debug().Err(err).Msg("file summary embedding provider unavailable")
 			} else {
@@ -586,8 +585,8 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 
 	// Use appropriate embedding per scope
 	queryEmbedding := scopedEmb.code    // For symbols scope
-	memoryEmbedding := scopedEmb.memory // For memories scope (voyage-3.5)
-	textEmbedding := scopedEmb.text     // For tasks, sessions, codemaps scopes (voyage-3.5)
+	memoryEmbedding := scopedEmb.memory // For memories scope
+	textEmbedding := scopedEmb.text     // For tasks, sessions, codemaps scopes
 
 	var sharedMemoryStore storage.MemoryStore
 	if scopeSet[ScopeSymbols] || scopeSet[ScopeMemories] || scopeSet[ScopeTasks] || scopeSet[ScopeCodemaps] {
@@ -677,7 +676,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 			sourceCtx, sourceCancel := context.WithTimeout(ctx, DefaultSourceTimeout)
 			defer sourceCancel()
 
-			// Memory search requires embeddings for vector similarity (uses memory model: voyage-3.5)
+			// Memory search requires embeddings for vector similarity.
 			if memoryEmbedding == nil {
 				resultsCh <- sourceResults{
 					source:  ScopeMemories,
@@ -827,7 +826,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 	// Apply PageRank boost from dependency graph
 	fusedResults = applyPageRankBoost(ctx, cfg, workspaceID, fusedResults)
 
-	// Apply reranking if enabled
+	// Apply optional local Qwen reranking after fusion and structural boosts.
 	fusedResults, rerankStats := applyReranking(ctx, rc, logger, *in, fusedResults)
 	if rerankStats.enabled {
 		out.Stats.RerankEnabled = true
@@ -839,10 +838,10 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 	// Build grouped candidate bundles before truncating flat results.
 	// This keeps the wide stage recall-oriented while giving downstream tools a better narrowing surface.
 	bundleSource := fusedResults
-	if len(bundleSource) > maxInt(in.Limit*3, 24) {
-		bundleSource = bundleSource[:maxInt(in.Limit*3, 24)]
+	if len(bundleSource) > max(in.Limit*3, 24) {
+		bundleSource = bundleSource[:max(in.Limit*3, 24)]
 	}
-	out.CandidateBundles = buildCandidateBundles(workspacePath, bundleSource, minInt(maxInt(in.Limit, 6), 12))
+	out.CandidateBundles = buildCandidateBundles(workspacePath, bundleSource, min(max(in.Limit, 6), 12))
 
 	// Limit results
 	if len(fusedResults) > in.Limit {
@@ -1190,21 +1189,21 @@ type sourceResults struct {
 // scopedEmbeddings holds query embeddings for different scope groups.
 // Different scopes may use different embedding models optimized for that content type.
 type scopedEmbeddings struct {
-	code   []float32 // For symbols scope (voyage-code-3)
-	memory []float32 // For memories scope (voyage-3.5)
-	text   []float32 // For tasks, sessions, codemaps (voyage-3.5)
+	code   []float32 // For symbols scope
+	memory []float32 // For memories scope
+	text   []float32 // For tasks, sessions, codemaps
 }
 
-func detectEmbeddingProviderName(cfg config.Config, voyageKey, geminiKey string) string {
-	return semantic.DetectProviderForConfig(cfg, voyageKey, geminiKey)
+func detectEmbeddingProviderName(cfg config.Config, geminiKey string) string {
+	return semantic.DetectProviderForConfig(cfg, geminiKey)
 }
 
 func noEmbeddingHint(cfg config.Config) string {
-	switch detectEmbeddingProviderName(cfg, os.Getenv("VOYAGE_API_KEY"), os.Getenv("GEMINI_API_KEY")) {
+	switch detectEmbeddingProviderName(cfg, os.Getenv("GEMINI_API_KEY")) {
 	case "openai_compat":
 		return "set FOXCTL_EMBEDDING_PROVIDER=openai_compat with FOXCTL_EMBEDDING_MODEL and FOXCTL_EMBEDDING_BASE_URL for vector search"
 	default:
-		return "set FOXCTL_EMBEDDING_PROVIDER=openai_compat or VOYAGE_API_KEY / GEMINI_API_KEY for vector search"
+		return "set FOXCTL_EMBEDDING_PROVIDER=openai_compat or GEMINI_API_KEY for vector search"
 	}
 }
 
@@ -1237,16 +1236,14 @@ func embeddingModelConfig(providerName string, cfg config.Config) (codeModel, me
 }
 
 // createProviderWithModel creates an embedding provider with a specific model.
-// Supports both Voyage and Gemini based on available API keys.
 // FC/IS: API keys passed from boundary instead of os.Getenv.
-func createProviderWithModel(model string, cfg config.Config, voyageKey, geminiKey string) (semantic.EmbeddingProvider, error) {
+func createProviderWithModel(model string, cfg config.Config, geminiKey string) (semantic.EmbeddingProvider, error) {
 	provider, err := semantic.NewProviderForModel(
 		model,
 		cfg,
 		semantic.WithProvider(cfg.Embedding.Provider),
 		semantic.WithAPIKey(cfg.Embedding.APIKey),
 		semantic.WithBaseURL(cfg.Embedding.BaseURL),
-		semantic.WithVoyageKey(voyageKey),
 		semantic.WithGeminiKey(geminiKey),
 	)
 	if err != nil {
@@ -1257,11 +1254,8 @@ func createProviderWithModel(model string, cfg config.Config, voyageKey, geminiK
 
 // generateScopedEmbeddings creates query embeddings for the requested scopes.
 // Only generates embeddings for scope groups that are actually requested.
-// Uses scope-specific models:
-//   - code model for symbols (voyage-code-3)
-//   - memory model for memories (voyage-3.5)
-//   - text model for tasks, sessions, codemaps (voyage-3.5)
-func generateScopedEmbeddings(ctx context.Context, cfg config.Config, query string, scopeSet map[string]bool, codeModel, memoryModel, textModel, voyageKey, geminiKey string) (scopedEmbeddings, error) {
+// Uses scope-specific models for code, memory, and general text lanes.
+func generateScopedEmbeddings(ctx context.Context, cfg config.Config, query string, scopeSet map[string]bool, codeModel, memoryModel, textModel, geminiKey string) (scopedEmbeddings, error) {
 	var emb scopedEmbeddings
 	var wg sync.WaitGroup
 	var codeErr, memoryErr, textErr error
@@ -1293,7 +1287,7 @@ func generateScopedEmbeddings(ctx context.Context, cfg config.Config, query stri
 	}
 
 	if allSameModel && baseModel != "" {
-		provider, err := createProviderWithModel(baseModel, cfg, voyageKey, geminiKey)
+		provider, err := createProviderWithModel(baseModel, cfg, geminiKey)
 		if err != nil {
 			return emb, err
 		}
@@ -1318,7 +1312,7 @@ func generateScopedEmbeddings(ctx context.Context, cfg config.Config, query stri
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			provider, err := createProviderWithModel(codeModel, cfg, voyageKey, geminiKey)
+			provider, err := createProviderWithModel(codeModel, cfg, geminiKey)
 			if err != nil {
 				codeErr = err
 				return
@@ -1332,7 +1326,7 @@ func generateScopedEmbeddings(ctx context.Context, cfg config.Config, query stri
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			provider, err := createProviderWithModel(memoryModel, cfg, voyageKey, geminiKey)
+			provider, err := createProviderWithModel(memoryModel, cfg, geminiKey)
 			if err != nil {
 				memoryErr = err
 				return
@@ -1346,7 +1340,7 @@ func generateScopedEmbeddings(ctx context.Context, cfg config.Config, query stri
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			provider, err := createProviderWithModel(textModel, cfg, voyageKey, geminiKey)
+			provider, err := createProviderWithModel(textModel, cfg, geminiKey)
 			if err != nil {
 				textErr = err
 				return
@@ -3028,13 +3022,12 @@ type rerankStatsResult struct {
 	count     int
 }
 
-// applyReranking applies Voyage rerank-2.5 to improve result relevance.
-// Reranking uses cross-attention between query and documents for better precision.
-// Returns original results unchanged if reranking is disabled or fails.
+// applyReranking applies local Qwen reranking to improve result precision.
+// Reranking uses cross-attention between query and documents and leaves the first-stage
+// results unchanged when rerank is disabled or the local endpoint is unavailable.
 func applyReranking(ctx context.Context, rc *skillmain.RunContext, logger zerolog.Logger, in Input, results []Result) ([]Result, rerankStatsResult) {
 	stats := rerankStatsResult{}
 
-	// Check if reranking is enabled
 	rerankCfg := rerank.FromEnv()
 	if in.RerankEnabled {
 		rerankCfg.Enabled = true
@@ -3050,28 +3043,24 @@ func applyReranking(ctx context.Context, rc *skillmain.RunContext, logger zerolo
 		return results, stats
 	}
 
-	// Create reranker provider
-	inner, err := rerank.NewVoyageProvider(rerankCfg.ToVoyageConfig())
+	inner, err := rerank.NewProviderFromConfig(rerankCfg)
 	if err != nil {
-		// Reranking unavailable (no API key) - return original results silently
+		logger.Debug().Err(err).Msg("rerank provider unavailable")
 		return results, stats
 	}
 	provider := skillmain.GuardReranker(rc, inner)
 
-	// Determine how many candidates to rerank
 	topK := rerankCfg.TopK
 	if topK <= 0 || topK > len(results) {
 		topK = len(results)
 	}
 
-	// Convert results to rerank candidates
 	candidates := make([]rerank.Candidate, topK)
 	for i := 0; i < topK; i++ {
 		r := results[i]
-		content := buildRerankContent(r)
 		candidates[i] = rerank.Candidate{
 			ID:            r.ID,
-			Content:       content,
+			Content:       buildRerankContent(r),
 			OriginalScore: r.FinalScore,
 			Metadata: map[string]any{
 				"index": i,
@@ -3079,49 +3068,39 @@ func applyReranking(ctx context.Context, rc *skillmain.RunContext, logger zerolo
 		}
 	}
 
-	// Rerank candidates
 	start := time.Now()
 	reranked, err := provider.Rerank(ctx, in.Query, candidates, 0)
 	latencyMS := int(time.Since(start).Milliseconds())
-
 	if err != nil {
-		// Reranking failed - return original results silently
+		logger.Debug().Err(err).Msg("rerank failed")
 		return results, stats
 	}
 
-	// Build reranked results
-	rerankedResults := make([]Result, 0, len(reranked))
+	rerankedResults := make([]Result, 0, len(results))
 	for _, rr := range reranked {
 		val, ok := rr.Metadata["index"]
 		if !ok {
-			logger.Warn().
-				Str("rerank_id", rr.ID).
-				Msg("rerank: missing index in metadata; skipping")
+			logger.Warn().Str("rerank_id", rr.ID).Msg("rerank: missing index in metadata; skipping")
 			continue
 		}
 		idx, ok := val.(int)
 		if !ok {
-			logger.Warn().
-				Str("rerank_id", rr.ID).
-				Interface("index_value", val).
-				Msg("rerank: index is not int; skipping")
+			logger.Warn().Str("rerank_id", rr.ID).Interface("index_value", val).Msg("rerank: index is not int; skipping")
 			continue
 		}
 		if idx < 0 || idx >= len(results) {
-			logger.Warn().
-				Str("rerank_id", rr.ID).
-				Int("index", idx).
-				Int("results_len", len(results)).
-				Msg("rerank: index out of bounds; skipping")
+			logger.Warn().Str("rerank_id", rr.ID).Int("index", idx).Int("results_len", len(results)).Msg("rerank: index out of bounds; skipping")
 			continue
 		}
 		r := results[idx]
 		r.RerankScore = rr.RerankScore
-		r.FinalScore = rr.FinalScore // Use reranker's final score
+		r.FinalScore = rr.FinalScore
 		rerankedResults = append(rerankedResults, r)
 	}
+	if len(rerankedResults) == 0 {
+		return results, stats
+	}
 
-	// Append remaining results that weren't reranked (keep original order)
 	if topK < len(results) {
 		rerankedResults = append(rerankedResults, results[topK:]...)
 	}
@@ -3130,7 +3109,6 @@ func applyReranking(ctx context.Context, rc *skillmain.RunContext, logger zerolo
 	stats.model = provider.Model()
 	stats.latencyMS = latencyMS
 	stats.count = len(candidates)
-
 	return rerankedResults, stats
 }
 
@@ -3697,20 +3675,6 @@ func uniqueStrings(items []string) []string {
 		out = append(out, item)
 	}
 	return out
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 func symbolGroupsToFileEntries(groups []retrievalv2.Group) []retrieval.FileEntry {

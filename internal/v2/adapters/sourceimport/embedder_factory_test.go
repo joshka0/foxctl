@@ -86,26 +86,6 @@ func TestResolveEmbedderConfig_OpenAICompatFromEnv(t *testing.T) {
 	}
 }
 
-func TestResolveEmbedderConfig_VoyageFallbackChain(t *testing.T) {
-	t.Parallel()
-
-	env := map[string]string{
-		"FOXCTL_EMBEDDING_MODEL_TEXT": "voyage-text-fallback",
-	}
-	got, err := ResolveEmbedderConfig(EmbedderConfig{
-		Provider: "voyage",
-		EnvLookup: func(k string) string {
-			return env[k]
-		},
-	})
-	if err != nil {
-		t.Fatalf("ResolveEmbedderConfig() error = %v", err)
-	}
-	if got.Model != "voyage-text-fallback" {
-		t.Fatalf("model=%q want voyage-text-fallback", got.Model)
-	}
-}
-
 func TestResolveEmbedderConfig_InvalidProvider(t *testing.T) {
 	t.Parallel()
 

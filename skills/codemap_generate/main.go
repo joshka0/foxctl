@@ -170,15 +170,6 @@ func emitCodemapError(ctx context.Context, rc *skillmain.RunContext, query, work
 
 // storeCodemapWithEmbedding saves the codemap to memory store with chunked embeddings for semantic search.
 func storeCodemapWithEmbedding(ctx context.Context, logger zerolog.Logger, cfg *config.Config, cm *codemap.Codemap, workspace string) error {
-	voyageKey := os.Getenv("VOYAGE_API_KEY")
-	geminiKey := os.Getenv("GEMINI_API_KEY")
-	if voyageKey == "" && geminiKey == "" {
-		return skillerr.Auth(
-			"no embedding API key set; embedding skipped",
-			skillerr.WithHint("Set VOYAGE_API_KEY or GEMINI_API_KEY to enable codemap embeddings."),
-		)
-	}
-
 	// Open memory store
 	memStore, err := memory.OpenWithConfig(ctx, *cfg)
 	if err != nil {

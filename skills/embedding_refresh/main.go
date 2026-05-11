@@ -81,16 +81,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		Name:  in.Name,
 	}
 
-	// Check for API key - prefer Voyage, fall back to Gemini
-	voyageKey := os.Getenv("VOYAGE_API_KEY")
 	geminiKey := os.Getenv("GEMINI_API_KEY")
-	if voyageKey == "" && geminiKey == "" && !in.DryRun {
-		output.Status = "error"
-		output.Message = "No embedding API key set"
-		output.Hint = "Set VOYAGE_API_KEY (preferred) or GEMINI_API_KEY"
-		output.DurationMs = time.Since(start).Milliseconds()
-		return skillout.Emit(rc, command, output)
-	}
 
 	// Get content based on scope
 	var content string
@@ -140,7 +131,6 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	embedder, err := semantic.NewEmbedderFromConfig(
 		scope,
 		rc.Config,
-		semantic.WithVoyageKey(voyageKey),
 		semantic.WithGeminiKey(geminiKey),
 		skillmain.EmbeddingGuard(rc),
 	)

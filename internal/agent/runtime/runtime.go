@@ -221,7 +221,7 @@ type Session struct {
 	ToolCalls       []types.ToolCall
 	Children        []string       // IDs of spawned child sessions
 	SystemPrompt    string         // Role-specific system prompt
-	TurnCounter     uint64         // Monotonically increasing turn index
+	TurnCounter     atomic.Uint64  // Monotonically increasing turn index
 	InputTokens     int            // Accumulated prompt/input tokens across completed turns
 	OutputTokens    int            // Accumulated completion/output tokens across completed turns
 	TotalTokens     int            // Accumulated total tokens across completed turns
@@ -237,7 +237,7 @@ type Session struct {
 
 // nextTurnIndex atomically increments and returns the next turn index for this session.
 func (s *Session) nextTurnIndex() int {
-	return int(atomic.AddUint64(&s.TurnCounter, 1) - 1)
+	return int(s.TurnCounter.Add(1) - 1)
 }
 
 // buildEngineInput creates an EngineInput that includes the session's accumulated

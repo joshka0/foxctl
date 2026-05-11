@@ -11,10 +11,10 @@ type EmbedResult struct {
 	// Vec is the embedding vector.
 	Vec []float32
 
-	// Provider is the provider name (e.g., "voyage", "gemini").
+	// Provider is the provider name.
 	Provider string
 
-	// Model is the model identifier used (e.g., "voyage-3.5", "gemini-embedding-001").
+	// Model is the model identifier used.
 	Model string
 
 	// Dims is the vector dimensions.
@@ -43,20 +43,16 @@ type embedderConfig struct {
 	provider      string
 	apiKey        string
 	baseURL       string
-	voyageKey     string
 	geminiKey     string
 	modelOverride string
 	rateLimitWait bool
-	allowFallback bool
 	guard         GuardFunc
 }
 
 func newEmbedderConfig(opts ...EmbedderOption) *embedderConfig {
-	// FC/IS compliant: no os.Getenv in core. Callers must pass keys via
-	// WithVoyageKey/WithGeminiKey options (loaded from config at boundary).
+	// FC/IS compliant: no os.Getenv in core. Callers pass keys loaded at the boundary.
 	cfg := &embedderConfig{
-		rateLimitWait: true,  // Default to waiting for rate limits
-		allowFallback: false, // Default to no fallback
+		rateLimitWait: true, // Default to waiting for rate limits
 	}
 
 	for _, opt := range opts {
@@ -64,13 +60,6 @@ func newEmbedderConfig(opts ...EmbedderOption) *embedderConfig {
 	}
 
 	return cfg
-}
-
-// WithVoyageKey sets the Voyage API key.
-func WithVoyageKey(key string) EmbedderOption {
-	return func(c *embedderConfig) {
-		c.voyageKey = key
-	}
 }
 
 // WithProvider sets the preferred provider name.
@@ -115,13 +104,6 @@ func WithRateLimitWait(wait bool) EmbedderOption {
 	}
 }
 
-// WithAllowFallback enables falling back to Gemini if Voyage fails.
-func WithAllowFallback(allow bool) EmbedderOption {
-	return func(c *embedderConfig) {
-		c.allowFallback = allow
-	}
-}
-
 // WithGuardFunc sets a guard function that wraps each API call (e.g. circuit breaker).
 func WithGuardFunc(fn GuardFunc) EmbedderOption {
 	return func(c *embedderConfig) {
@@ -134,17 +116,15 @@ func WithGuardFunc(fn GuardFunc) EmbedderOption {
 // and scope-based model recommendations.
 //
 // Provider selection priority:
-//  1. Voyage (preferred for all scopes due to quality)
-//  2. Gemini (fallback if Voyage unavailable)
-//
-// If no API keys are available, returns an error.
+//  1. Explicit provider/model config
+//  2. OpenAI-compatible local endpoint (LM Studio by default)
+//  3. Gemini when explicitly selected
 func NewEmbedder(scope EmbeddingScope, opts ...EmbedderOption) (*Embedder, error) {
 	cfg := newEmbedderConfig(opts...)
 
 	e := &Embedder{
 		scope:         scope,
 		rateLimitWait: cfg.rateLimitWait,
-		allowFallback: cfg.allowFallback,
 		guard:         cfg.guard,
 	}
 
@@ -178,6 +158,10 @@ func NewEmbedder(scope EmbeddingScope, opts ...EmbedderOption) (*Embedder, error
 		return nil
 	}
 
+	if preferredProvider == "" {
+		preferredProvider = DefaultEmbeddingProvider
+	}
+
 	if preferredProvider == "openai_compat" {
 		if err := tryOpenAICompat(); err != nil {
 			return nil, fmt.Errorf("openai-compatible provider: %w", err)
@@ -185,28 +169,13 @@ func NewEmbedder(scope EmbeddingScope, opts ...EmbedderOption) (*Embedder, error
 		return e, nil
 	}
 
-	// Try Voyage first (preferred)
-	if cfg.voyageKey != "" {
-		vp, err := NewVoyageProvider(VoyageConfig{
-			APIKey:        cfg.voyageKey,
-			Model:         model,
-			RateLimitWait: &cfg.rateLimitWait,
-		})
-		if err == nil {
-			e.provider = vp
-			e.providerName = "voyage"
-			return e, nil
+	if preferredProvider == "gemini" {
+		if cfg.geminiKey == "" {
+			return nil, fmt.Errorf("gemini provider requires GEMINI_API_KEY")
 		}
-		// If Voyage creation fails and we can't fallback, return error
-		if !cfg.allowFallback || cfg.geminiKey == "" {
-			return nil, fmt.Errorf("voyage provider: %w", err)
-		}
-	}
-
-	// Try Gemini as fallback
-	if cfg.geminiKey != "" {
 		gp, err := NewGeminiProvider(GeminiConfig{
 			APIKey: cfg.geminiKey,
+			Model:  model,
 		})
 		if err == nil {
 			e.provider = gp
@@ -216,14 +185,13 @@ func NewEmbedder(scope EmbeddingScope, opts ...EmbedderOption) (*Embedder, error
 		return nil, fmt.Errorf("gemini provider: %w", err)
 	}
 
-	if strings.TrimSpace(cfg.baseURL) != "" || strings.TrimSpace(cfg.apiKey) != "" {
-		if err := tryOpenAICompat(); err != nil {
-			return nil, fmt.Errorf("openai-compatible provider: %w", err)
-		}
+	if preferredProvider == "noop" {
+		e.provider = NewNoOpProvider(model, ResolveDimensionsForModel(model, 0))
+		e.providerName = "noop"
 		return e, nil
 	}
 
-	return nil, fmt.Errorf("no embedding provider available: set FOXCTL_EMBEDDING_PROVIDER/openai-compatible config, VOYAGE_API_KEY, or GEMINI_API_KEY")
+	return nil, fmt.Errorf("unsupported embedding provider %q: use lmstudio/openai_compat, gemini, or noop", preferredProvider)
 }
 
 // NewEmbedderWithModel creates an Embedder while honoring a model override.

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
 	"github.com/joshka0/foxctl/internal/intelligence/searchindex"
@@ -65,17 +64,13 @@ func main() {
 	}
 	defer indexStore.Close()
 
-	var embedder semantic.EmbeddingProvider
-	if key := strings.TrimSpace(os.Getenv("VOYAGE_API_KEY")); key != "" {
-		provider, err := semantic.NewProviderForScope(semantic.ScopeSymbols, cfg, semantic.WithVoyageKey(key))
-		if err == nil {
-			embedder = provider
-		} else {
-			panic(err)
-		}
-	}
-	if embedder == nil {
-		panic("VOYAGE_API_KEY missing or provider unavailable")
+	embedder, err := semantic.NewProviderForScope(
+		semantic.ScopeSymbols,
+		cfg,
+		semantic.WithGeminiKey(os.Getenv("GEMINI_API_KEY")),
+	)
+	if err != nil {
+		panic(err)
 	}
 
 	if err := indexStore.DeleteWorkspace(ctx, workspace); err != nil {

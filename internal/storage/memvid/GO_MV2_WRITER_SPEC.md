@@ -204,7 +204,7 @@ Required:
 
 Optional:
 - `github.com/blevesearch/bleve/v2` - Full-text indexing (if Option B)
-- Voyage/OpenAI client - Embedding generation
+- OpenAI-compatible client - Embedding generation
 
 ## Implementation Order
 

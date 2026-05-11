@@ -623,7 +623,7 @@ does not require running the legacy v1 runtime path.`,
 							cmd.OutOrStdout(),
 							"foxctl.sessions.resynthesize_v2",
 							embedErr.Error(),
-							"Set --embedding-provider to hash, lmstudio, or voyage.",
+							"Set --embedding-provider to hash, lmstudio, or openai_compat.",
 						)
 					}
 
@@ -828,11 +828,11 @@ does not require running the legacy v1 runtime path.`,
 	cmd.Flags().StringVar(&actorID, "actor-id", "actor:system:source-import", "Actor ID for synthesized turns")
 	cmd.Flags().BoolVar(&includeTodos, "include-todos", true, "Include Claude todo snapshot in synthesized artifacts")
 	cmd.Flags().BoolVar(&includeEmbedding, "include-embedding", true, "Emit embedding artifacts")
-	cmd.Flags().StringVar(&embeddingProvider, "embedding-provider", "hash", "Embedding backend: hash, lmstudio, or voyage")
-	cmd.Flags().StringVar(&embeddingBaseURL, "embedding-base-url", "", "Embeddings API base URL override (lmstudio: LMSTUDIO_BASE_URL/default localhost; voyage: VOYAGE_BASE_URL/default api.voyageai.com)")
-	cmd.Flags().StringVar(&embeddingModel, "embedding-model", "", "Embedding model override (lmstudio default: text-embedding-nomic-embed-text-v1.5; voyage default: voyage-3.5)")
-	cmd.Flags().StringVar(&embeddingAPIKey, "embedding-api-key", "", "Embedding API key override (lmstudio: LMSTUDIO_API_KEY, voyage: VOYAGE_API_KEY)")
-	cmd.Flags().DurationVar(&embeddingTimeout, "embedding-timeout", 20*time.Second, "Embedding request timeout (lmstudio/voyage)")
+	cmd.Flags().StringVar(&embeddingProvider, "embedding-provider", "hash", "Embedding backend: hash, lmstudio, or openai_compat")
+	cmd.Flags().StringVar(&embeddingBaseURL, "embedding-base-url", "", "Embeddings API base URL override (lmstudio/openai_compat default localhost)")
+	cmd.Flags().StringVar(&embeddingModel, "embedding-model", "", "Embedding model override (lmstudio default: text-embedding-qwen3-embedding-8b)")
+	cmd.Flags().StringVar(&embeddingAPIKey, "embedding-api-key", "", "Embedding API key override (lmstudio: LMSTUDIO_API_KEY)")
+	cmd.Flags().DurationVar(&embeddingTimeout, "embedding-timeout", 20*time.Second, "Embedding request timeout (lmstudio/openai_compat)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Parse and synthesize without persisting")
 	return cmd
 }
@@ -866,20 +866,12 @@ func resolveResynthesizeEmbedder(
 	includeEmbedding bool,
 	cfg sourceimport.EmbedderConfig,
 ) (sourceimport.Embedder, sourceimport.ResolvedEmbedderConfig, error) {
-	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
-	if provider == "" {
-		provider = sourceimport.EmbeddingProviderHash
-	}
-	if !includeEmbedding {
-		return nil, sourceimport.ResolvedEmbedderConfig{
-			Provider: provider,
-			Model:    strings.TrimSpace(cfg.Model),
-		}, nil
-	}
-
 	resolved, err := sourceimport.ResolveEmbedderConfig(cfg)
 	if err != nil {
 		return nil, sourceimport.ResolvedEmbedderConfig{}, err
+	}
+	if !includeEmbedding {
+		return nil, resolved, nil
 	}
 	embedder, err := sourceimport.NewEmbedderFromResolvedConfig(resolved)
 	if err != nil {

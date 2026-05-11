@@ -63,8 +63,8 @@ Add keys to the `EnvironmentVariables` dict:
 ```xml
 <key>EnvironmentVariables</key>
 <dict>
-    <key>VOYAGE_API_KEY</key>
-    <string>your-api-key</string>
+    <key>FOXCTL_EMBEDDING_BASE_URL</key>
+    <string>http://127.0.0.1:1234/v1</string>
 </dict>
 ```
 

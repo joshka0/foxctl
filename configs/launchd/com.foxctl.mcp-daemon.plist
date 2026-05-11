@@ -42,9 +42,9 @@
     <dict>
         <key>PATH</key>
         <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-        <!-- Add any required API keys here -->
-        <!-- <key>VOYAGE_API_KEY</key> -->
-        <!-- <string>your-key-here</string> -->
+        <!-- Add local embedding endpoint config here if needed -->
+        <!-- <key>FOXCTL_EMBEDDING_BASE_URL</key> -->
+        <!-- <string>http://127.0.0.1:1234/v1</string> -->
     </dict>
 
     <!-- Logging -->

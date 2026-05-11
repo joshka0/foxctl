@@ -21,7 +21,6 @@ func openObsidianSemanticProvider(cfg config.Config) semantic.EmbeddingProvider 
 	provider, err := semantic.NewProviderForScope(
 		semantic.ScopeMemory,
 		cfg,
-		semantic.WithVoyageKey(os.Getenv("VOYAGE_API_KEY")),
 		semantic.WithGeminiKey(os.Getenv("GEMINI_API_KEY")),
 	)
 	if err != nil {

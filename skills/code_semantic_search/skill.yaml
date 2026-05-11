@@ -62,17 +62,17 @@ signature:
       type: boolean
       required: false
       default: false
-      description: Enable Voyage rerank-2.5 for improved relevance (requires VOYAGE_API_KEY)
+      description: Enable local Qwen/OpenAI-compatible reranking after first-stage fusion
     - name: rerank_top_k
       type: integer
       required: false
       default: 50
-      description: Number of candidates to rerank
+      description: Number of fused candidates to send to the reranker
     - name: rerank_model
       type: string
       required: false
-      default: rerank-2.5
-      description: Reranking model (rerank-2.5, rerank-2, rerank-lite-1)
+      default: Qwen/Qwen3-Reranker-0.6B
+      description: Reranker model override
     - name: remote
       type: boolean
       required: false
@@ -201,7 +201,12 @@ signature:
       - `off`: disable repo-index contribution.
 
       Environment Variables:
-      - VOYAGE_API_KEY: Enables vector search (required for all scopes)
+      - FOXCTL_EMBEDDING_PROVIDER: Embedding provider (openai_compat/lmstudio by default)
+      - FOXCTL_EMBEDDING_MODEL: Embedding model (text-embedding-qwen3-embedding-8b by default)
+      - FOXCTL_EMBEDDING_BASE_URL: OpenAI-compatible embedding endpoint
+      - FOXCTL_RERANK_ENABLED: Enable local Qwen/OpenAI-compatible reranking
+      - FOXCTL_RERANK_BASE_URL: OpenAI-compatible rerank endpoint
+      - FOXCTL_RERANK_MODEL: Reranker model (Qwen/Qwen3-Reranker-0.6B by default)
       - TURSO_DATABASE_URL: Remote Turso database URL (required for remote=true)
       - TURSO_AUTH_TOKEN: Remote Turso auth token (required for remote=true)
       - FOXCTL_ACA_VAULT_PATH or FOXCTL_OBSIDIAN_VAULT_PATH: Vault path for scope=["context"]
@@ -224,7 +229,7 @@ signature:
       - remote=true, global=true: Search across ALL workspaces
       - remote=true, workspaces=["ws1","ws2"]: Search specific workspaces
       - Requires TURSO_DATABASE_URL and TURSO_AUTH_TOKEN environment variables
-      - Embedding dimensions must match (all 1024 for Voyage)
+      - Embedding dimensions must match the configured model and vector store
 
       Example commands:
         foxctl run code/semantic_search --input '{"query":"authentication middleware","scope":["symbols"],"limit":10}'

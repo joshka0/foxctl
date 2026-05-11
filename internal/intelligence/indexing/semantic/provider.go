@@ -7,52 +7,47 @@ import (
 	"sync"
 )
 
+const (
+	// DefaultEmbeddingProvider is the canonical local embedding provider.
+	DefaultEmbeddingProvider = "openai_compat"
+	// DefaultEmbeddingModel is the canonical local embedding model used by LM Studio/OpenAI-compatible endpoints.
+	DefaultEmbeddingModel = "text-embedding-qwen3-embedding-8b"
+)
+
 // EmbeddingScope identifies the type of content being embedded.
 // Different scopes may use different embedding models optimized for that content type.
 type EmbeddingScope string
 
 const (
 	// ScopeSymbols is for code symbols (functions, classes, variables).
-	// Best model: voyage-code-3 (optimized for code retrieval).
 	ScopeSymbols EmbeddingScope = "symbols"
 
 	// ScopeMemory is for memories, gotchas, and learnings.
-	// Best model: voyage-3.5 (good general-purpose, $0.06/1M tokens).
 	ScopeMemory EmbeddingScope = "memory"
 
 	// ScopeTasks is for task descriptions and notes.
-	// Best model: voyage-3.5 (good general-purpose, $0.06/1M tokens).
 	ScopeTasks EmbeddingScope = "tasks"
 
 	// ScopeSessions is for session summaries and context.
-	// Best model: voyage-3.5 (good general-purpose, $0.06/1M tokens).
 	ScopeSessions EmbeddingScope = "sessions"
 
 	// ScopeCodemaps is for semantic codemaps (code relationship maps).
-	// Best model: voyage-3.5 (good general-purpose, $0.06/1M tokens).
 	ScopeCodemaps EmbeddingScope = "codemaps"
 
 	// ScopeFileSummaries is for file-level summaries used in tree search.
-	// Best model: voyage-code-3 (optimized for code retrieval).
 	ScopeFileSummaries EmbeddingScope = "file_summaries"
 
 	// ScopeDefault is the fallback scope for unspecified content.
 	ScopeDefault EmbeddingScope = "default"
 )
 
-// ScopeModelRecommendation returns the recommended Voyage model for a scope.
-// Returns (model, isCodeModel) where isCodeModel indicates if voyage-code-3 should be used.
+// ScopeModelRecommendation returns the recommended local embedding model for a scope.
+// Returns (model, isCodeModel) where isCodeModel indicates code-oriented scopes.
 //
 // Environment variable overrides (checked in order):
 //  1. Per-scope vars: FOXCTL_EMBEDDING_MODEL_SYMBOLS, _MEMORY, _TASKS, _SESSIONS, _CODEMAPS
 //  2. Category vars: FOXCTL_EMBEDDING_MODEL_CODE (symbols), FOXCTL_EMBEDDING_MODEL_TEXT (others)
-//  3. Defaults: voyage-code-3 (symbols), voyage-3.5 (memory, tasks, sessions, codemaps)
-//
-// Model strategy (Feb 2025):
-// - voyage-code-3: Best for code retrieval (13.80% better than OpenAI), $0.06/1M
-// - voyage-3.5: Best quality for general text (2.66% better than voyage-3), $0.06/1M
-//
-// All models use 1024 dimensions by default, ensuring storage compatibility.
+//  3. Default: text-embedding-qwen3-embedding-8b through an OpenAI-compatible endpoint.
 func ScopeModelRecommendation(scope EmbeddingScope) (model string, isCodeModel bool) {
 	// Check per-scope env var first
 	scopeEnvVar := "FOXCTL_EMBEDDING_MODEL_" + strings.ToUpper(string(scope))
@@ -65,32 +60,31 @@ func ScopeModelRecommendation(scope EmbeddingScope) (model string, isCodeModel b
 		if env := os.Getenv("FOXCTL_EMBEDDING_MODEL_CODE"); env != "" {
 			return env, true
 		}
-		return "voyage-code-3", true
+		return DefaultEmbeddingModel, true
 	case ScopeFileSummaries:
 		if env := os.Getenv("FOXCTL_EMBEDDING_MODEL_CODE"); env != "" {
 			return env, true
 		}
-		return "voyage-code-3", true
+		return DefaultEmbeddingModel, true
 	case ScopeMemory:
 		if env := os.Getenv("FOXCTL_EMBEDDING_MODEL_TEXT"); env != "" {
 			return env, false
 		}
-		return "voyage-3.5", false
+		return DefaultEmbeddingModel, false
 	case ScopeCodemaps, ScopeTasks, ScopeSessions:
 		if env := os.Getenv("FOXCTL_EMBEDDING_MODEL_TEXT"); env != "" {
 			return env, false
 		}
-		return "voyage-3.5", false
+		return DefaultEmbeddingModel, false
 	default:
 		if env := os.Getenv("FOXCTL_EMBEDDING_MODEL_TEXT"); env != "" {
 			return env, false
 		}
-		return "voyage-3.5", false
+		return DefaultEmbeddingModel, false
 	}
 }
 
-// ScopeInputType returns the appropriate Voyage input_type for a scope.
-// Using input_type improves retrieval quality by adding scope-specific prompts.
+// ScopeInputType returns the query/document role for providers that support asymmetric embeddings.
 func ScopeInputType(scope EmbeddingScope, isQuery bool) string {
 	if isQuery {
 		return "query"
@@ -103,14 +97,10 @@ func ScopeInputType(scope EmbeddingScope, isQuery bool) string {
 func ScopePricePerMillionTokens(scope EmbeddingScope) float64 {
 	model, _ := ScopeModelRecommendation(scope)
 	switch model {
-	case "voyage-code-3":
-		return 0.18
-	case "voyage-3.5":
-		return 0.06
-	case "voyage-3.5-lite":
-		return 0.02
+	case DefaultEmbeddingModel:
+		return 0
 	default:
-		return 0.06 // Default to voyage-3.5 pricing
+		return 0
 	}
 }
 
@@ -165,10 +155,10 @@ type UsageTrackingProvider interface {
 
 // EmbeddingUsage tracks API usage for embedding providers.
 type EmbeddingUsage struct {
-	// Provider identifies the embedding provider (e.g., "gemini", "voyage").
+	// Provider identifies the embedding provider (e.g., "openai_compat", "gemini").
 	Provider string `json:"provider"`
 
-	// Model is the specific model used (e.g., "gemini-embedding-001").
+	// Model is the specific model used.
 	Model string `json:"model"`
 
 	// Requests is the number of API requests made.
@@ -180,7 +170,7 @@ type EmbeddingUsage struct {
 	TokensEstimated int64 `json:"tokens_estimated"`
 
 	// TokensActual is the actual token count returned by the API.
-	// Only populated for providers that return this info (like Voyage).
+	// Only populated for providers that return this info.
 	TokensActual int64 `json:"tokens_actual,omitempty"`
 
 	// TextsProcessed is the number of individual texts embedded.
