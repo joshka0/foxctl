@@ -59,5 +59,11 @@ fi
 cat <<EOF | "$LBUG_BIN" "$DB_PATH" -r -b -s -m json
 MATCH p = (a:GraphNode)-[e:Contains|:Imports|:UsesSymbol|:RefersTo|:Calls|:Implements|:Embeds|:Tests|:DescribedBy|:VerifiedBy|:Enforces|:CoChangesWith* SHORTEST 1..${MAX_DEPTH}]->(b:GraphNode)
 WHERE a.id = "${SRC_ID}" AND b.id = "${DST_ID}"
-RETURN length(e) AS path_len, properties(nodes(p), 'id') AS node_ids;
+RETURN length(e) AS path_len,
+  properties(nodes(p), 'id') AS node_ids,
+  properties(nodes(p), 'kind') AS node_kinds,
+  properties(nodes(p), 'name') AS node_names,
+  properties(nodes(p), 'file') AS node_files,
+  properties(nodes(p), 'span_start') AS node_span_starts,
+  properties(nodes(p), 'span_end') AS node_span_ends;
 EOF

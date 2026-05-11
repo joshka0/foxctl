@@ -51,6 +51,8 @@ func TestLadybugQueryProofScripts(t *testing.T) {
 	)
 	assertContainsAll(t, trace, []string{
 		`"path_len":1`,
+		`"node_names":["A","B"]`,
+		`"node_files":["internal/a.go","internal/b.go"]`,
 		`repo-fixture::sym:go:example:A`,
 		`repo-fixture::sym:go:example:B`,
 	})
@@ -64,13 +66,18 @@ func TestLadybugQueryProofScripts(t *testing.T) {
 		`"section":"docs_concepts"`,
 		`"edge_type":"CALLS"`,
 		`"edge_type":"DESCRIBED_BY"`,
+		`"src_name":"A"`,
+		`"dst_name":"B"`,
+		`"dst_name":"alpha"`,
 	})
 
 	blastRadius := runLadybugProofScript(t, "ladybug_blast_radius.sh", lbugBin, dbPath, homeDir,
 		"--node-id", "repo-fixture::file:go:example:internal/a.go",
 		"--max-depth", "3",
+		"--limit", "10",
 	)
 	assertContainsAll(t, blastRadius, []string{
+		`"node_names":["a.go","A","B"]`,
 		`repo-fixture::sym:go:example:B`,
 		`"edge_type":"CO_CHANGES_WITH"`,
 		`repo-fixture::file:go:example:internal/b.go`,
