@@ -151,12 +151,12 @@ The spike proceeds only if all of these are true.
 
 ## Projection Shape
 
-Prefer strict, typed tables rather than one generic `nodes.csv` and
-`edges.csv`. Ladybug relationship tables are typed, so per-label/per-edge CSVs
-should map better to schema and query readability.
+Prefer one strict `GraphNode` CSV plus typed relationship CSVs. Phase 0 proved
+that a single strict node table keeps relationship endpoint resolution simple
+while preserving typed relationship tables for schema and query readability.
 
 Phase 1 uses this typed CSV shape from the start. It should emit only files for
-node kinds and edge types that have source rows.
+edge types that have source rows.
 
 The exporter should read from a dedicated repoindex export snapshot rather than
 from query expansion APIs. Expansion is budgeted and per-node capped for
@@ -168,11 +168,7 @@ Initial export directory:
 ```text
 .foxctl/projections/ladybug/<repo-key>/export/
   meta.json
-  nodes_repo.csv
-  nodes_package.csv
-  nodes_file.csv
-  nodes_symbol.csv
-  nodes_concept.csv
+  nodes_graph.csv
   edges_contains.csv
   edges_imports.csv
   edges_calls.csv
@@ -207,26 +203,24 @@ relationship columns in Phase 1; mark relationship properties as the first
 schema expansion point if proof queries need stronger filtering or explanation
 fields.
 
-Phase 1 node CSVs should be kind-specific files with mostly shared columns:
+Phase 1 node export uses one strict graph-node CSV:
 
 ```text
-id,pkg,file,name,signature,span_start,span_end,exported,doc,summary,hash,updated_at,meta_json
+id,kind,repo_key,repo_root_identity,pkg,file,name,signature,span_start,span_end,exported,doc,summary,hash,updated_at,meta_json
 ```
 
-`nodes_repo.csv` is the exception because `Repo` is export-only:
-
-```text
-id,repo_key,repo_root_identity,head_sha,worktree_dirty,dirty_status_hash,default_ref,default_ref_sha,merge_base_sha,commits_ahead,commits_behind,schema_version,indexed_at,languages_json
-```
+`kind` distinguishes `repo`, `package`, `file`, `symbol`, and `concept`.
+`Repo` remains an export-only row with `kind=repo`; do not add a repo node kind
+to canonical repoindex. Keep repo/git/index metadata in `meta.json`.
 
 Do not add custom typed columns for every node family in Phase 1. Preserve
 kind-specific details in `meta_json` and treat promoted node properties as a
 later schema expansion point if proof queries require them.
 
 JSON export fields must be canonicalized. Empty metadata stays empty. Non-empty
-`meta_json` and `languages_json` values should be decoded and re-encoded as
-compact JSON so golden files are byte-stable. Invalid repoindex metadata should
-fail the export rather than being passed through silently.
+`meta_json` values should be decoded and re-encoded as compact JSON so golden
+files are byte-stable. Invalid repoindex metadata should fail the export rather
+than being passed through silently.
 
 ## Source Mapping
 
@@ -416,7 +410,7 @@ callers can supply the current UTC time at the shell boundary.
 
 Keep deterministic export metadata portable. Do not include absolute local
 storage paths such as the repoindex DB path or absolute workspace root in
-`meta.json` or `nodes_repo.csv`. Use `repo_root_identity` for a portable root
+`meta.json` or `nodes_graph.csv`. Use `repo_root_identity` for a portable root
 identity in the projection artifact. In Phase 1, `repo_root_identity` should be
 the `repo_key` because that already namespaces every repoindex ID and stays
 stable across checkout path changes. If a later user-facing command needs local
@@ -441,12 +435,12 @@ specific projection export directory; it must not delete broader `.foxctl`
 state.
 
 The Phase 1 golden fixture should be a synthetic repoindex export snapshot, not
-a temporary repository build. Include one export-only repo row, one package, two
-files, two symbols, one concept, and representative `CONTAINS`, `IMPORTS`,
-`CALLS`, `DESCRIBED_BY`, and optional `CO_CHANGES_WITH` edges. Include
-intentionally unordered JSON metadata in the input to prove canonicalization,
-use a fixed export time, and assert exact CSV/`meta.json` bytes plus omission of
-empty files.
+a temporary repository build. Include one `nodes_graph.csv` export-only repo
+row, one package, two files, two symbols, one concept, and representative
+`CONTAINS`, `IMPORTS`, `CALLS`, `DESCRIBED_BY`, and optional
+`CO_CHANGES_WITH` edges. Include intentionally unordered JSON metadata in the
+input to prove canonicalization, use a fixed export time, and assert exact
+CSV/`meta.json` bytes plus omission of empty relationship files.
 
 Test at both layers: unit-test the in-memory export artifact for grouping and
 canonicalization, then golden-test the filesystem writer by writing to a temp

@@ -21,11 +21,7 @@ func TestBuildLadybugExportGroupsTypedCSVFiles(t *testing.T) {
 
 	wantFiles := []string{
 		"meta.json",
-		"nodes_repo.csv",
-		"nodes_package.csv",
-		"nodes_file.csv",
-		"nodes_symbol.csv",
-		"nodes_concept.csv",
+		"nodes_graph.csv",
 		"edges_calls.csv",
 		"edges_contains.csv",
 		"edges_co_changes_with.csv",
@@ -37,11 +33,20 @@ func TestBuildLadybugExportGroupsTypedCSVFiles(t *testing.T) {
 	if _, ok := ladybugArtifactFile(artifact, "edges_imports.csv"); ok {
 		t.Fatalf("empty edge file was emitted")
 	}
+	if _, ok := ladybugArtifactFile(artifact, "nodes_package.csv"); ok {
+		t.Fatalf("per-kind node file was emitted")
+	}
 
-	wantPackageCSV := "id,pkg,file,name,signature,span_start,span_end,exported,doc,summary,hash,updated_at,meta_json\n" +
-		"repo-fixture::pkg:go:example,go:example,,example,,0,0,false,,package summary,pkg-hash,2026-05-11T12:00:00Z,\"{\"\"a\"\":1,\"\"z\"\":2}\"\n"
-	if got := string(mustLadybugArtifactFile(t, artifact, "nodes_package.csv")); got != wantPackageCSV {
-		t.Fatalf("nodes_package.csv:\n%s\nwant:\n%s", got, wantPackageCSV)
+	wantGraphCSV := "id,kind,repo_key,repo_root_identity,pkg,file,name,signature,span_start,span_end,exported,doc,summary,hash,updated_at,meta_json\n" +
+		"repo-fixture,repo,repo-fixture,repo-fixture,,,repo-fixture,,0,0,false,,,,,\n" +
+		"repo-fixture::pkg:go:example,package,repo-fixture,repo-fixture,go:example,,example,,0,0,false,,package summary,pkg-hash,2026-05-11T12:00:00Z,\"{\"\"a\"\":1,\"\"z\"\":2}\"\n" +
+		"repo-fixture::file:go:example:internal/a.go,file,repo-fixture,repo-fixture,go:example,internal/a.go,a.go,,0,0,false,,,file-a-hash,2026-05-11T12:00:00Z,\n" +
+		"repo-fixture::file:go:example:internal/b.go,file,repo-fixture,repo-fixture,go:example,internal/b.go,b.go,,0,0,false,,,file-b-hash,2026-05-11T12:00:00Z,\n" +
+		"repo-fixture::sym:go:example:A,symbol,repo-fixture,repo-fixture,go:example,internal/a.go,A,func A(),3,5,true,A docs,,symbol-a-hash,2026-05-11T12:00:00Z,\n" +
+		"repo-fixture::sym:go:example:B,symbol,repo-fixture,repo-fixture,go:example,internal/b.go,B,func B(),7,9,true,,,symbol-b-hash,2026-05-11T12:00:00Z,\n" +
+		"repo-fixture::kw:alpha,concept,repo-fixture,repo-fixture,,,alpha,,0,0,false,,,,2026-05-11T12:00:00Z,\"{\"\"kind\"\":\"\"keyword\"\"}\"\n"
+	if got := string(mustLadybugArtifactFile(t, artifact, "nodes_graph.csv")); got != wantGraphCSV {
+		t.Fatalf("nodes_graph.csv:\n%s\nwant:\n%s", got, wantGraphCSV)
 	}
 
 	wantCoChangeCSV := "src_id,dst_id,weight,source,meta_json\n" +
@@ -70,10 +75,9 @@ func TestBuildLadybugExportCanonicalMetadataAndRepoIdentity(t *testing.T) {
 		t.Fatalf("meta.json:\n%s\nwant:\n%s", got, wantMetaJSON)
 	}
 
-	wantRepoCSV := "id,repo_key,repo_root_identity,head_sha,worktree_dirty,dirty_status_hash,default_ref,default_ref_sha,merge_base_sha,commits_ahead,commits_behind,schema_version,indexed_at,languages_json\n" +
-		"repo-fixture,repo-fixture,repo-fixture,abc123,true,dirty-hash,origin/main,def456,base789,2,1,4,2026-05-10T09:08:07Z,\"[\"\"go\"\",\"\"typescript\"\"]\"\n"
-	if got := string(mustLadybugArtifactFile(t, artifact, "nodes_repo.csv")); got != wantRepoCSV {
-		t.Fatalf("nodes_repo.csv:\n%s\nwant:\n%s", got, wantRepoCSV)
+	wantRepoRow := "repo-fixture,repo,repo-fixture,repo-fixture,,,repo-fixture,,0,0,false,,,,,"
+	if got := string(mustLadybugArtifactFile(t, artifact, "nodes_graph.csv")); !strings.Contains(got, wantRepoRow) {
+		t.Fatalf("nodes_graph.csv missing portable repo row:\n%s", got)
 	}
 }
 
@@ -142,8 +146,8 @@ func TestWriteLadybugExportReplaceAll(t *testing.T) {
 		t.Fatalf("stale file still exists, stat err=%v", err)
 	}
 	first := readLadybugExportDir(t, dir)
-	if got := string(first["nodes_repo.csv"]); !strings.Contains(got, "repo-fixture,repo-fixture,repo-fixture") {
-		t.Fatalf("nodes_repo.csv missing repo identity row:\n%s", got)
+	if got := string(first["nodes_graph.csv"]); !strings.Contains(got, "repo-fixture,repo,repo-fixture,repo-fixture") {
+		t.Fatalf("nodes_graph.csv missing repo identity row:\n%s", got)
 	}
 
 	if err := WriteLadybugExport(dir, artifact); err != nil {

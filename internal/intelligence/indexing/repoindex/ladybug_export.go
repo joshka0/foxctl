@@ -13,22 +13,22 @@ import (
 )
 
 const (
-	ladybugMetaFile     = "meta.json"
-	ladybugRepoNodeFile = "nodes_repo.csv"
+	ladybugMetaFile      = "meta.json"
+	ladybugGraphNodeFile = "nodes_graph.csv"
 )
 
-var ladybugNodeKinds = []struct {
-	kind NodeKind
-	file string
-}{
-	{kind: NodePackage, file: "nodes_package.csv"},
-	{kind: NodeFile, file: "nodes_file.csv"},
-	{kind: NodeSymbol, file: "nodes_symbol.csv"},
-	{kind: NodeConcept, file: "nodes_concept.csv"},
+var ladybugNodeKinds = []NodeKind{
+	NodePackage,
+	NodeFile,
+	NodeSymbol,
+	NodeConcept,
 }
 
-var ladybugNodeHeader = []string{
+var ladybugGraphNodeHeader = []string{
 	"id",
+	"kind",
+	"repo_key",
+	"repo_root_identity",
 	"pkg",
 	"file",
 	"name",
@@ -41,23 +41,6 @@ var ladybugNodeHeader = []string{
 	"hash",
 	"updated_at",
 	"meta_json",
-}
-
-var ladybugRepoNodeHeader = []string{
-	"id",
-	"repo_key",
-	"repo_root_identity",
-	"head_sha",
-	"worktree_dirty",
-	"dirty_status_hash",
-	"default_ref",
-	"default_ref_sha",
-	"merge_base_sha",
-	"commits_ahead",
-	"commits_behind",
-	"schema_version",
-	"indexed_at",
-	"languages_json",
 }
 
 var ladybugEdgeHeader = []string{
@@ -111,31 +94,18 @@ func BuildLadybugExport(snapshot ExportSnapshot, exportedAt time.Time) (LadybugE
 		return LadybugExportArtifact{}, fmt.Errorf("repoindex: export time is required for ladybug export")
 	}
 
-	files := make([]LadybugExportFile, 0, 2+len(ladybugNodeKinds))
+	files := make([]LadybugExportFile, 0, 2)
 	meta, err := buildLadybugMeta(snapshot, exportedAt)
 	if err != nil {
 		return LadybugExportArtifact{}, err
 	}
 	files = append(files, meta)
 
-	repoCSV, err := buildLadybugRepoNodeCSV(snapshot)
+	nodesCSV, err := buildLadybugGraphNodeCSV(snapshot)
 	if err != nil {
 		return LadybugExportArtifact{}, err
 	}
-	files = append(files, repoCSV)
-
-	nodesByKind := groupLadybugNodes(snapshot.Nodes)
-	for _, entry := range ladybugNodeKinds {
-		nodes := nodesByKind[entry.kind]
-		if len(nodes) == 0 {
-			continue
-		}
-		file, err := buildLadybugNodeCSV(entry.file, nodes)
-		if err != nil {
-			return LadybugExportArtifact{}, err
-		}
-		files = append(files, file)
-	}
+	files = append(files, nodesCSV)
 
 	edgesByType := groupLadybugEdges(snapshot.Edges)
 	edgeTypes := make([]EdgeType, 0, len(edgesByType))
@@ -183,69 +153,63 @@ func buildLadybugMeta(snapshot ExportSnapshot, exportedAt time.Time) (LadybugExp
 	return LadybugExportFile{Name: ladybugMetaFile, Data: data}, nil
 }
 
-func buildLadybugRepoNodeCSV(snapshot ExportSnapshot) (LadybugExportFile, error) {
-	languagesJSON := ""
-	if snapshot.Meta.Languages != nil {
-		data, err := json.Marshal(snapshot.Meta.Languages)
-		if err != nil {
-			return LadybugExportFile{}, fmt.Errorf("repoindex: encode languages json: %w", err)
-		}
-		languagesJSON = string(data)
-	}
+func buildLadybugGraphNodeCSV(snapshot ExportSnapshot) (LadybugExportFile, error) {
 	rows := [][]string{{
 		snapshot.RepoKey,
+		"repo",
 		snapshot.RepoKey,
 		snapshot.RepoKey,
-		snapshot.Meta.HeadSHA,
-		strconv.FormatBool(snapshot.Meta.WorktreeDirty),
-		snapshot.Meta.DirtyStatusHash,
-		snapshot.Meta.DefaultRef,
-		snapshot.Meta.DefaultRefSHA,
-		snapshot.Meta.MergeBaseSHA,
-		strconv.Itoa(snapshot.Meta.CommitsAhead),
-		strconv.Itoa(snapshot.Meta.CommitsBehind),
-		strconv.Itoa(snapshot.Meta.SchemaVersion),
-		formatLadybugTime(snapshot.Meta.IndexedAt),
-		languagesJSON,
+		"",
+		"",
+		snapshot.RepoKey,
+		"",
+		"0",
+		"0",
+		"false",
+		"",
+		"",
+		"",
+		"",
+		"",
 	}}
-	data, err := encodeLadybugCSV(ladybugRepoNodeHeader, rows)
-	if err != nil {
-		return LadybugExportFile{}, err
-	}
-	return LadybugExportFile{Name: ladybugRepoNodeFile, Data: data}, nil
-}
 
-func buildLadybugNodeCSV(name string, nodes []Node) (LadybugExportFile, error) {
-	sort.Slice(nodes, func(i, j int) bool {
-		return compareLadybugNodes(nodes[i], nodes[j]) < 0
-	})
-	rows := make([][]string, 0, len(nodes))
-	for _, node := range nodes {
-		metaJSON, err := canonicalLadybugJSON(node.Meta, "node meta "+node.ID)
-		if err != nil {
-			return LadybugExportFile{}, err
-		}
-		rows = append(rows, []string{
-			node.ID,
-			node.Pkg,
-			node.File,
-			node.Name,
-			node.Signature,
-			strconv.Itoa(node.SpanStart),
-			strconv.Itoa(node.SpanEnd),
-			strconv.FormatBool(node.Exported),
-			node.Doc,
-			node.Summary,
-			node.Hash,
-			formatLadybugTime(node.UpdatedAt),
-			metaJSON,
+	nodesByKind := groupLadybugNodes(snapshot.Nodes)
+	for _, kind := range ladybugNodeKinds {
+		nodes := nodesByKind[kind]
+		sort.Slice(nodes, func(i, j int) bool {
+			return compareLadybugNodes(nodes[i], nodes[j]) < 0
 		})
+		for _, node := range nodes {
+			metaJSON, err := canonicalLadybugJSON(node.Meta, "node meta "+node.ID)
+			if err != nil {
+				return LadybugExportFile{}, err
+			}
+			rows = append(rows, []string{
+				node.ID,
+				string(node.Kind),
+				snapshot.RepoKey,
+				snapshot.RepoKey,
+				node.Pkg,
+				node.File,
+				node.Name,
+				node.Signature,
+				strconv.Itoa(node.SpanStart),
+				strconv.Itoa(node.SpanEnd),
+				strconv.FormatBool(node.Exported),
+				node.Doc,
+				node.Summary,
+				node.Hash,
+				formatLadybugTime(node.UpdatedAt),
+				metaJSON,
+			})
+		}
 	}
-	data, err := encodeLadybugCSV(ladybugNodeHeader, rows)
+
+	data, err := encodeLadybugCSV(ladybugGraphNodeHeader, rows)
 	if err != nil {
 		return LadybugExportFile{}, err
 	}
-	return LadybugExportFile{Name: name, Data: data}, nil
+	return LadybugExportFile{Name: ladybugGraphNodeFile, Data: data}, nil
 }
 
 func buildLadybugEdgeCSV(edgeType EdgeType, edges []Edge) (LadybugExportFile, error) {

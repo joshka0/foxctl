@@ -40,19 +40,19 @@ creates `~/.lbdb` on startup.
 
 The proof uses one strict node table and two typed relationship tables. This
 validates strict table creation, CSV import, relationship endpoint resolution,
-read-only reopen, bounded traversal, and shortest-path traversal. It does not
-yet validate direct import of Phase 1's per-kind node CSV files.
+read-only reopen, bounded traversal, and shortest-path traversal. Phase 1 now
+uses the same single graph-node CSV shape.
 
 `nodes_graph.csv`:
 
 ```csv
-id,kind,pkg,file,name
-repo-fixture,repo,,,foxctl
-repo-fixture::pkg:go:example,package,go:example,,example
-repo-fixture::file:go:example:internal/a.go,file,go:example,internal/a.go,a.go
-repo-fixture::file:go:example:internal/b.go,file,go:example,internal/b.go,b.go
-repo-fixture::sym:go:example:A,symbol,go:example,internal/a.go,A
-repo-fixture::sym:go:example:B,symbol,go:example,internal/b.go,B
+id,kind,repo_key,repo_root_identity,pkg,file,name,signature,span_start,span_end,exported,doc,summary,hash,updated_at,meta_json
+repo-fixture,repo,repo-fixture,repo-fixture,,,repo-fixture,,0,0,false,,,,,
+repo-fixture::pkg:go:example,package,repo-fixture,repo-fixture,go:example,,example,,0,0,false,,package summary,pkg-hash,2026-05-11T12:00:00Z,"{""a"":1,""z"":2}"
+repo-fixture::file:go:example:internal/a.go,file,repo-fixture,repo-fixture,go:example,internal/a.go,a.go,,0,0,false,,,file-a-hash,2026-05-11T12:00:00Z,
+repo-fixture::file:go:example:internal/b.go,file,repo-fixture,repo-fixture,go:example,internal/b.go,b.go,,0,0,false,,,file-b-hash,2026-05-11T12:00:00Z,
+repo-fixture::sym:go:example:A,symbol,repo-fixture,repo-fixture,go:example,internal/a.go,A,func A(),3,5,true,A docs,,symbol-a-hash,2026-05-11T12:00:00Z,
+repo-fixture::sym:go:example:B,symbol,repo-fixture,repo-fixture,go:example,internal/b.go,B,func B(),7,9,true,,,symbol-b-hash,2026-05-11T12:00:00Z,
 ```
 
 `edges_contains.csv`:
@@ -82,9 +82,20 @@ Script:
 CREATE NODE TABLE GraphNode(
   id STRING PRIMARY KEY,
   kind STRING,
+  repo_key STRING,
+  repo_root_identity STRING,
   pkg STRING,
   file STRING,
-  name STRING
+  name STRING,
+  signature STRING,
+  span_start STRING,
+  span_end STRING,
+  exported STRING,
+  doc STRING,
+  summary STRING,
+  hash STRING,
+  updated_at STRING,
+  meta_json STRING
 );
 CREATE REL TABLE Contains(
   FROM GraphNode TO GraphNode,
@@ -111,7 +122,7 @@ Command:
 ```bash
 HOME=/private/tmp/ladybug-phase0 \
   /private/tmp/ladybug-phase0/bin/lbug \
-  /private/tmp/ladybug-phase0/proof-rerun.lbug -b -s \
+  /private/tmp/ladybug-phase0/proof-graphnode16.lbug -b -s \
   < /private/tmp/ladybug-phase0/schema_import.cypher
 ```
 
@@ -232,7 +243,6 @@ Phase 0 passed for a CLI-only proof:
 - no Go dependency, cgo setup, Go binding, or foxctl runtime integration was
   required
 
-The remaining Phase 2 design question is import shape: the proof used one
-strict `GraphNode` table, while Phase 1 emits per-kind node CSVs. Phase 2
-should either generate a unified import CSV from the Phase 1 artifact or revise
-the export/import contract before adding durable import scripts.
+The Phase 1 export contract was revised after this proof: `nodes_graph.csv`
+now matches the strict `GraphNode` shape proven here, while relationship CSVs
+remain typed by edge kind.

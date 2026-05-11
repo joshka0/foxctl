@@ -57,7 +57,7 @@ CLI gate passes.
   edges.
 - Do not read the system clock in export-building core logic.
 - Do not include absolute local store paths or workspace paths in exported
-  `meta.json` or `nodes_repo.csv`.
+  `meta.json` or `nodes_graph.csv`.
 - Preserve public behavior of repoindex search, expand, DAG grep, build, and
   existing tests.
 - Preserve AGENTS.md invariants: canonical envelope fields, WASI
@@ -88,14 +88,12 @@ Done when:
 - Export building accepts a snapshot and injected export time.
 - Export building returns an in-memory artifact representing `meta.json` and
   CSV files.
-- Node CSVs are kind-specific with shared columns:
-  `id,pkg,file,name,signature,span_start,span_end,exported,doc,summary,hash,updated_at,meta_json`.
-- `nodes_repo.csv` uses:
-  `id,repo_key,repo_root_identity,head_sha,worktree_dirty,dirty_status_hash,default_ref,default_ref_sha,merge_base_sha,commits_ahead,commits_behind,schema_version,indexed_at,languages_json`.
+- `nodes_graph.csv` uses one strict graph-node shape:
+  `id,kind,repo_key,repo_root_identity,pkg,file,name,signature,span_start,span_end,exported,doc,summary,hash,updated_at,meta_json`.
 - Relationship CSVs use:
   `src_id,dst_id,weight,source,meta_json`.
-- Empty node-kind and edge-type files are omitted.
-- `meta_json` and `languages_json` are canonical compact JSON when non-empty.
+- Empty edge-type files are omitted.
+- `meta_json` is canonical compact JSON when non-empty.
 - Invalid JSON metadata fails export with a clear error.
 - `repo_root_identity` is exactly the repo key.
 - Export-only repo-to-package containment, if present, is marked with
@@ -119,7 +117,7 @@ Done when:
 
 - Tests use a synthetic export snapshot, not a temporary parsed repository.
 - Tests cover:
-  - exact artifact grouping by node kind and edge type
+  - exact artifact grouping by graph nodes and edge type
   - exact CSV headers and rows
   - omission of empty files
   - canonical JSON output from intentionally unordered input metadata
