@@ -758,6 +758,21 @@ func (s *Store) GetIncomingEdges(ctx context.Context, dstID string, types []Edge
 	return getEdges(ctx, s.db, s.repoKey, "dst", dstID, types, limit)
 }
 
+// ListAllEdges returns every stored edge for this repository in deterministic export order.
+func (s *Store) ListAllEdges(ctx context.Context) ([]Edge, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT src, dst, type, weight, meta_json
+		FROM edges
+		WHERE repo_key = ?
+		ORDER BY type ASC, src ASC, dst ASC
+	`, s.repoKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanEdges(rows)
+}
+
 // Stats returns aggregate node and edge counts.
 func (s *Store) Stats(ctx context.Context) (Stats, error) {
 	stats := Stats{NodesByKind: make(map[NodeKind]int)}
@@ -1320,6 +1335,10 @@ func getEdges(ctx context.Context, db *sql.DB, repoKey, field, id string, types 
 	}
 	defer rows.Close()
 
+	return scanEdges(rows)
+}
+
+func scanEdges(rows *sql.Rows) ([]Edge, error) {
 	var edges []Edge
 	for rows.Next() {
 		var edge Edge
