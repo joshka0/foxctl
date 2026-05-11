@@ -81,6 +81,9 @@ func TestLadybugRebuildScriptRoundTrip(t *testing.T) {
 	if !strings.Contains(string(output), `"node_count":7`) {
 		t.Fatalf("rebuild output missing node count:\n%s", output)
 	}
+	if _, err := os.Stat(dbPath + ".meta.json"); err != nil {
+		t.Fatalf("projection metadata sidecar missing: %v", err)
+	}
 
 	query := `:mode json
 MATCH (n:GraphNode) RETURN count(n) AS node_count;

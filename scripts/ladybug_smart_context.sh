@@ -20,6 +20,9 @@ validate_id() {
 LBUG_BIN=${LBUG_BIN:-lbug}
 DB_PATH=${DB_PATH:-}
 LADYBUG_HOME=${LADYBUG_HOME:-}
+PROJECTION_META=${PROJECTION_META:-}
+REPO_ROOT=${REPO_ROOT:-}
+ALLOW_STALE=${LADYBUG_ALLOW_STALE:-}
 NODE_ID=${NODE_ID:-}
 LIMIT=${LIMIT:-50}
 
@@ -28,11 +31,14 @@ while [ "$#" -gt 0 ]; do
     --lbug-bin) LBUG_BIN=$2; shift 2 ;;
     --db-path) DB_PATH=$2; shift 2 ;;
     --home) LADYBUG_HOME=$2; shift 2 ;;
+    --projection-meta) PROJECTION_META=$2; shift 2 ;;
+    --repo-root) REPO_ROOT=$2; shift 2 ;;
+    --allow-stale) ALLOW_STALE=1; shift ;;
     --node-id) NODE_ID=$2; shift 2 ;;
     --limit) LIMIT=$2; shift 2 ;;
     -h|--help)
       cat <<'EOF'
-Usage: ladybug_smart_context.sh --db-path PATH --node-id ID [--limit N] [--lbug-bin PATH] [--home DIR]
+Usage: ladybug_smart_context.sh --db-path PATH --node-id ID [--limit N] [--lbug-bin PATH] [--home DIR] [--projection-meta PATH] [--repo-root DIR] [--allow-stale]
 EOF
       exit 0
       ;;
@@ -47,6 +53,11 @@ case "$LIMIT" in
   ''|*[!0-9]*) fail "LIMIT must be a positive integer" ;;
 esac
 [ "$LIMIT" -gt 0 ] || fail "LIMIT must be greater than zero"
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+# shellcheck source=scripts/ladybug_freshness.sh
+. "${SCRIPT_DIR}/ladybug_freshness.sh"
+ladybug_check_projection_freshness "$DB_PATH" "$PROJECTION_META" "$REPO_ROOT" "$ALLOW_STALE" "ladybug_smart_context"
 
 if [ -n "$LADYBUG_HOME" ]; then
   mkdir -p "$LADYBUG_HOME"

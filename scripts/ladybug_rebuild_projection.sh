@@ -98,6 +98,7 @@ case "$DB_PATH" in
 esac
 
 DB_DIR=$(dirname "$DB_PATH")
+PROJECTION_META_PATH="${DB_PATH}.meta.json"
 mkdir -p "$DB_DIR"
 
 LADYBUG_HOME=${LADYBUG_HOME:-"${DB_DIR}/.ladybug-home"}
@@ -330,9 +331,11 @@ MATCH (n:GraphNode) RETURN count(n) AS node_count;
 EOF
 
 rm -rf "$DB_PATH"
+rm -f "$PROJECTION_META_PATH"
 IMPORT_OUTPUT=$(HOME="$LADYBUG_HOME" "$LBUG_BIN" "$DB_PATH" -b -s <"$IMPORT_SCRIPT")
 printf '%s\n' "$IMPORT_OUTPUT"
 case "$IMPORT_OUTPUT" in
   *"\"node_count\":${EXPECTED_NODE_COUNT}"*) ;;
   *) fail "imported node count did not match nodes_graph.csv row count ${EXPECTED_NODE_COUNT}" ;;
 esac
+cp "${EXPORT_DIR_ABS}/meta.json" "$PROJECTION_META_PATH"

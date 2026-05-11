@@ -91,6 +91,7 @@ func runLadybugProofScript(t *testing.T, scriptName, lbugBin, dbPath, homeDir st
 		"--lbug-bin", lbugBin,
 		"--db-path", dbPath,
 		"--home", homeDir,
+		"--allow-stale",
 	}
 	cmd := exec.Command(ladybugScriptPath(t, scriptName), append(baseArgs, args...)...)
 	output, err := cmd.CombinedOutput()
