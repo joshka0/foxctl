@@ -19,7 +19,7 @@ copy_rel_if_present() {
     printf 'ladybug_rebuild_projection: skip missing %s\n' "$file_name" >&2
     return
   fi
-  printf 'COPY %s FROM "%s" (header=true);\n' "$table_name" "$csv_path" >>"$IMPORT_SCRIPT"
+  printf "COPY %s FROM \"%s\" (HEADER=true, DELIM=\",\", QUOTE='\"', ESCAPE='\"', AUTO_DETECT=false);\n" "$table_name" "$csv_path" >>"$IMPORT_SCRIPT"
 }
 
 allow_edge_file() {
@@ -89,6 +89,7 @@ command -v "$LBUG_BIN" >/dev/null 2>&1 || fail "lbug binary not found: $LBUG_BIN
 EXPORT_DIR_ABS=$(cd "$EXPORT_DIR" 2>/dev/null && pwd -P) || fail "export directory not found: $EXPORT_DIR"
 require_file "${EXPORT_DIR_ABS}/meta.json"
 require_file "${EXPORT_DIR_ABS}/nodes_graph.csv"
+EXPECTED_NODE_COUNT=$(($(wc -l <"${EXPORT_DIR_ABS}/nodes_graph.csv") - 1))
 
 case "$DB_PATH" in
   ""|"/"|".")
@@ -269,7 +270,7 @@ CREATE REL TABLE CoChangesWith(
   source STRING,
   meta_json STRING
 );
-COPY GraphNode FROM "${EXPORT_DIR_ABS}/nodes_graph.csv" (header=true);
+COPY GraphNode FROM "${EXPORT_DIR_ABS}/nodes_graph.csv" (HEADER=true, DELIM=",", QUOTE='"', ESCAPE='"', AUTO_DETECT=false);
 EOF
 
 allow_edge_file "edges_contains.csv"
@@ -329,4 +330,9 @@ MATCH (n:GraphNode) RETURN count(n) AS node_count;
 EOF
 
 rm -rf "$DB_PATH"
-HOME="$LADYBUG_HOME" "$LBUG_BIN" "$DB_PATH" -b -s <"$IMPORT_SCRIPT"
+IMPORT_OUTPUT=$(HOME="$LADYBUG_HOME" "$LBUG_BIN" "$DB_PATH" -b -s <"$IMPORT_SCRIPT")
+printf '%s\n' "$IMPORT_OUTPUT"
+case "$IMPORT_OUTPUT" in
+  *"\"node_count\":${EXPECTED_NODE_COUNT}"*) ;;
+  *) fail "imported node count did not match nodes_graph.csv row count ${EXPECTED_NODE_COUNT}" ;;
+esac

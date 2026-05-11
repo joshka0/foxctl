@@ -191,13 +191,13 @@ func buildLadybugGraphNodeCSV(snapshot ExportSnapshot) (LadybugExportFile, error
 				snapshot.RepoKey,
 				node.Pkg,
 				node.File,
-				node.Name,
-				node.Signature,
+				cleanLadybugCSVField(node.Name),
+				cleanLadybugCSVField(node.Signature),
 				strconv.Itoa(node.SpanStart),
 				strconv.Itoa(node.SpanEnd),
 				strconv.FormatBool(node.Exported),
-				node.Doc,
-				node.Summary,
+				cleanLadybugCSVField(node.Doc),
+				cleanLadybugCSVField(node.Summary),
 				node.Hash,
 				formatLadybugTime(node.UpdatedAt),
 				metaJSON,
@@ -335,4 +335,10 @@ func formatLadybugTime(value time.Time) string {
 		return ""
 	}
 	return value.UTC().Format(time.RFC3339Nano)
+}
+
+func cleanLadybugCSVField(value string) string {
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\r", "\n")
+	return strings.ReplaceAll(value, "\n", `\n`)
 }

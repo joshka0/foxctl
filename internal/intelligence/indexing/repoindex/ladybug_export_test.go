@@ -42,7 +42,7 @@ func TestBuildLadybugExportGroupsTypedCSVFiles(t *testing.T) {
 		"repo-fixture::pkg:go:example,package,repo-fixture,repo-fixture,go:example,,example,,0,0,false,,package summary,pkg-hash,2026-05-11T12:00:00Z,\"{\"\"a\"\":1,\"\"z\"\":2}\"\n" +
 		"repo-fixture::file:go:example:internal/a.go,file,repo-fixture,repo-fixture,go:example,internal/a.go,a.go,,0,0,false,,,file-a-hash,2026-05-11T12:00:00Z,\n" +
 		"repo-fixture::file:go:example:internal/b.go,file,repo-fixture,repo-fixture,go:example,internal/b.go,b.go,,0,0,false,,,file-b-hash,2026-05-11T12:00:00Z,\n" +
-		"repo-fixture::sym:go:example:A,symbol,repo-fixture,repo-fixture,go:example,internal/a.go,A,func A(),3,5,true,A docs,,symbol-a-hash,2026-05-11T12:00:00Z,\n" +
+		"repo-fixture::sym:go:example:A,symbol,repo-fixture,repo-fixture,go:example,internal/a.go,A,func A(),3,5,true,\"A docs, with \"\"quote\"\"\",,symbol-a-hash,2026-05-11T12:00:00Z,\n" +
 		"repo-fixture::sym:go:example:B,symbol,repo-fixture,repo-fixture,go:example,internal/b.go,B,func B(),7,9,true,,,symbol-b-hash,2026-05-11T12:00:00Z,\n" +
 		"repo-fixture::kw:alpha,concept,repo-fixture,repo-fixture,,,alpha,,0,0,false,,,,2026-05-11T12:00:00Z,\"{\"\"kind\"\":\"\"keyword\"\"}\"\n"
 	if got := string(mustLadybugArtifactFile(t, artifact, "nodes_graph.csv")); got != wantGraphCSV {
@@ -126,6 +126,49 @@ func TestBuildLadybugExportRejectsInvalidJSONMetadata(t *testing.T) {
 			t.Fatalf("error=%q want invalid edge meta", err.Error())
 		}
 	})
+}
+
+func TestBuildLadybugExportNormalizesMultilineTextForLadybugCopy(t *testing.T) {
+	exportedAt := time.Date(2026, 5, 11, 15, 4, 5, 0, time.UTC)
+	snapshot := ExportSnapshot{
+		RepoKey: "repo-fixture",
+		Meta: IndexMeta{
+			SchemaVersion: SchemaVersion(),
+		},
+		Nodes: []Node{
+			{
+				ID:   "repo-fixture::sym:go:example:Multiline",
+				Kind: NodeSymbol,
+				Pkg:  "go:example",
+				File: "internal/multiline.go",
+				Name: "Multiline",
+				Signature: `func Multiline(
+input string, option string) "value"`,
+				Doc: "first line\nsecond, line\r\nthird line",
+				Summary: `summary one
+summary two, "quoted"`,
+			},
+		},
+	}
+
+	artifact, err := BuildLadybugExport(snapshot, exportedAt)
+	if err != nil {
+		t.Fatalf("build export: %v", err)
+	}
+
+	got := string(mustLadybugArtifactFile(t, artifact, "nodes_graph.csv"))
+	for _, want := range []string{
+		`func Multiline(\ninput string, option string) ""value""`,
+		`first line\nsecond, line\nthird line`,
+		`summary one\nsummary two, ""quoted""`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("nodes_graph.csv missing normalized field %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "first line\nsecond") || strings.Contains(got, "summary one\rsummary two") {
+		t.Fatalf("nodes_graph.csv contains raw multiline text:\n%s", got)
+	}
 }
 
 func TestWriteLadybugExportReplaceAll(t *testing.T) {
@@ -221,7 +264,7 @@ func ladybugExportFixture() (ExportSnapshot, time.Time, string) {
 		SpanStart: 3,
 		SpanEnd:   5,
 		Exported:  true,
-		Doc:       "A docs",
+		Doc:       `A docs, with "quote"`,
 		Hash:      "symbol-a-hash",
 		UpdatedAt: updatedAt,
 	}

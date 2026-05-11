@@ -84,6 +84,13 @@ The next safe slice is a real-repo measurement goal, not runtime integration:
    fallback behavior.
 5. Only then decide whether an experimental user-facing command is justified.
 
+Follow-up:
+
+- [LadybugDB Real Repo Navigation Evaluation](ladybugdb-real-repo-navigation-evaluation.md)
+  ran this measurement against the foxctl checkout and found that Ladybug is a
+  useful exact graph microscope, but not a complete navigation interface without
+  repoindex-backed resolution, ranking, line hints, and output shaping.
+
 ## Final Recommendation
 
 Stop before runtime integration.
