@@ -161,6 +161,129 @@ func NewOpenRequest(id string) (OpenRequest, error) {
 	return OpenRequest{ID: id}, nil
 }
 
+// TracePathRequest captures a typed repo-index path trace request.
+type TracePathRequest struct {
+	SrcID         string
+	DstID         string
+	EdgeTypes     []repoindex.EdgeType
+	EdgeTypeNames []string
+	MaxDepth      int
+	PerNodeCap    int
+}
+
+type tracePathRequestInput struct {
+	SrcID      string   `json:"src_id"`
+	DstID      string   `json:"dst_id"`
+	EdgeTypes  []string `json:"edge_types,omitempty"`
+	MaxDepth   int      `json:"max_depth,omitempty"`
+	PerNodeCap int      `json:"per_node_cap,omitempty"`
+}
+
+func ParseTracePathRequest(raw json.RawMessage) (TracePathRequest, error) {
+	var input tracePathRequestInput
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return TracePathRequest{}, err
+	}
+	return NewTracePathRequest(input.SrcID, input.DstID, input.EdgeTypes, input.MaxDepth, input.PerNodeCap)
+}
+
+func NewTracePathRequest(srcID, dstID string, edgeTypes []string, maxDepth, perNodeCap int) (TracePathRequest, error) {
+	srcID = strings.TrimSpace(srcID)
+	dstID = strings.TrimSpace(dstID)
+	if srcID == "" {
+		return TracePathRequest{}, errors.New("src_id is required")
+	}
+	if dstID == "" {
+		return TracePathRequest{}, errors.New("dst_id is required")
+	}
+	normalizedEdgeTypes := NormalizeEdgeTypes(edgeTypes)
+	parsedEdgeTypes, err := ParseEdgeTypes(normalizedEdgeTypes)
+	if err != nil {
+		return TracePathRequest{}, err
+	}
+	return TracePathRequest{
+		SrcID:         srcID,
+		DstID:         dstID,
+		EdgeTypes:     repoindex.CopyEdgeSet(parsedEdgeTypes),
+		EdgeTypeNames: normalizedEdgeTypes,
+		MaxDepth:      maxDepth,
+		PerNodeCap:    perNodeCap,
+	}, nil
+}
+
+// SmartContextRequest captures a typed repo-index smart context request.
+type SmartContextRequest struct {
+	NodeID string
+	Limit  int
+}
+
+type smartContextRequestInput struct {
+	NodeID string `json:"node_id"`
+	Limit  int    `json:"limit,omitempty"`
+}
+
+func ParseSmartContextRequest(raw json.RawMessage) (SmartContextRequest, error) {
+	var input smartContextRequestInput
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return SmartContextRequest{}, err
+	}
+	return NewSmartContextRequest(input.NodeID, input.Limit)
+}
+
+func NewSmartContextRequest(nodeID string, limit int) (SmartContextRequest, error) {
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return SmartContextRequest{}, errors.New("node_id is required")
+	}
+	return SmartContextRequest{NodeID: nodeID, Limit: limit}, nil
+}
+
+// BlastRadiusRequest captures a typed repo-index blast radius request.
+type BlastRadiusRequest struct {
+	NodeID        string
+	EdgeTypes     []repoindex.EdgeType
+	EdgeTypeNames []string
+	MaxDepth      int
+	Limit         int
+	PerNodeCap    int
+}
+
+type blastRadiusRequestInput struct {
+	NodeID     string   `json:"node_id"`
+	EdgeTypes  []string `json:"edge_types,omitempty"`
+	MaxDepth   int      `json:"max_depth,omitempty"`
+	Limit      int      `json:"limit,omitempty"`
+	PerNodeCap int      `json:"per_node_cap,omitempty"`
+}
+
+func ParseBlastRadiusRequest(raw json.RawMessage) (BlastRadiusRequest, error) {
+	var input blastRadiusRequestInput
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return BlastRadiusRequest{}, err
+	}
+	return NewBlastRadiusRequest(input.NodeID, input.EdgeTypes, input.MaxDepth, input.Limit, input.PerNodeCap)
+}
+
+func NewBlastRadiusRequest(nodeID string, edgeTypes []string, maxDepth, limit, perNodeCap int) (BlastRadiusRequest, error) {
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return BlastRadiusRequest{}, errors.New("node_id is required")
+	}
+	normalizedEdgeTypes := NormalizeEdgeTypes(edgeTypes)
+	parsedEdgeTypes, err := ParseEdgeTypes(normalizedEdgeTypes)
+	if err != nil {
+		return BlastRadiusRequest{}, err
+	}
+	return BlastRadiusRequest{
+		NodeID:        nodeID,
+		EdgeTypes:     repoindex.CopyEdgeSet(parsedEdgeTypes),
+		EdgeTypeNames: normalizedEdgeTypes,
+		MaxDepth:      maxDepth,
+		Limit:         limit,
+		PerNodeCap:    perNodeCap,
+	}, nil
+}
+
 // DAGGrepRequest captures a typed repo-index DAG request.
 type DAGGrepRequest struct {
 	Query                  string
@@ -650,6 +773,86 @@ func (s *QueryService) OpenWithProjection(ctx context.Context, req OpenRequest) 
 	return OpenOutput{Node: node, Anchor: &anchor}, nil
 }
 
+// TracePath executes a typed shortest-path request.
+func (s *QueryService) TracePath(ctx context.Context, req TracePathRequest) (repoindex.TracePathResult, error) {
+	if s == nil || s.Engine == nil {
+		return repoindex.TracePathResult{}, errors.New("repo query service is not configured")
+	}
+	if strings.TrimSpace(req.SrcID) == "" {
+		return repoindex.TracePathResult{}, errors.New("src_id is required")
+	}
+	if strings.TrimSpace(req.DstID) == "" {
+		return repoindex.TracePathResult{}, errors.New("dst_id is required")
+	}
+	return s.Engine.TracePath(ctx, repoindex.TracePathOptions{
+		SrcID:      req.SrcID,
+		DstID:      req.DstID,
+		EdgeTypes:  req.EdgeTypes,
+		MaxDepth:   req.MaxDepth,
+		PerNodeCap: req.PerNodeCap,
+	})
+}
+
+// TracePathWithProjection executes a typed shortest-path request and projects anchors.
+func (s *QueryService) TracePathWithProjection(ctx context.Context, req TracePathRequest) (TracePathOutput, error) {
+	result, err := s.TracePath(ctx, req)
+	if err != nil {
+		return TracePathOutput{}, err
+	}
+	return TracePathOutput{Result: result, Anchors: ProjectAnchors(result.Nodes, nil)}, nil
+}
+
+// SmartContext executes a typed one-hop context request.
+func (s *QueryService) SmartContext(ctx context.Context, req SmartContextRequest) (repoindex.SmartContextResult, error) {
+	if s == nil || s.Engine == nil {
+		return repoindex.SmartContextResult{}, errors.New("repo query service is not configured")
+	}
+	if strings.TrimSpace(req.NodeID) == "" {
+		return repoindex.SmartContextResult{}, errors.New("node_id is required")
+	}
+	return s.Engine.SmartContext(ctx, repoindex.SmartContextOptions{
+		NodeID: req.NodeID,
+		Limit:  req.Limit,
+	})
+}
+
+// SmartContextWithProjection executes a context request and projects anchors for section nodes.
+func (s *QueryService) SmartContextWithProjection(ctx context.Context, req SmartContextRequest) (SmartContextOutput, error) {
+	result, err := s.SmartContext(ctx, req)
+	if err != nil {
+		return SmartContextOutput{}, err
+	}
+	return SmartContextOutput{Result: result, Anchors: ProjectAnchors(contextNodes(result.Sections), nil)}, nil
+}
+
+// BlastRadius executes a typed bounded impact request.
+func (s *QueryService) BlastRadius(ctx context.Context, req BlastRadiusRequest) (repoindex.BlastRadiusResult, error) {
+	if s == nil || s.Engine == nil {
+		return repoindex.BlastRadiusResult{}, errors.New("repo query service is not configured")
+	}
+	if strings.TrimSpace(req.NodeID) == "" {
+		return repoindex.BlastRadiusResult{}, errors.New("node_id is required")
+	}
+	return s.Engine.BlastRadius(ctx, repoindex.BlastRadiusOptions{
+		NodeID:     req.NodeID,
+		EdgeTypes:  req.EdgeTypes,
+		MaxDepth:   req.MaxDepth,
+		Limit:      req.Limit,
+		PerNodeCap: req.PerNodeCap,
+	})
+}
+
+// BlastRadiusWithProjection executes a blast-radius request and projects anchors for graph and section nodes.
+func (s *QueryService) BlastRadiusWithProjection(ctx context.Context, req BlastRadiusRequest) (BlastRadiusOutput, error) {
+	result, err := s.BlastRadius(ctx, req)
+	if err != nil {
+		return BlastRadiusOutput{}, err
+	}
+	nodes := append([]repoindex.Node(nil), result.Graph.Nodes...)
+	nodes = append(nodes, contextNodes(result.Sections)...)
+	return BlastRadiusOutput{Result: result, Anchors: ProjectAnchors(nodes, nil)}, nil
+}
+
 // DAGGrep executes a typed DAG request.
 func (s *QueryService) DAGGrep(ctx context.Context, req DAGGrepRequest) (repoindex.DAGGrepResult, error) {
 	if s == nil || s.Engine == nil {
@@ -717,6 +920,14 @@ func (s *QueryService) DAGGrepWithProjection(ctx context.Context, req DAGGrepReq
 	}
 
 	return output, nil
+}
+
+func contextNodes(sections []repoindex.ContextSection) []repoindex.Node {
+	var nodes []repoindex.Node
+	for _, section := range sections {
+		nodes = append(nodes, section.Nodes...)
+	}
+	return nodes
 }
 
 // ParseDirection parses and validates traversal direction values.

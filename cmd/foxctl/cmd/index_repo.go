@@ -35,6 +35,9 @@ func newIndexRepoCommand() *cobra.Command {
 		newIndexRepoSearchCommand(),
 		newIndexRepoExpandCommand(),
 		newIndexRepoOpenCommand(),
+		newIndexRepoTracePathCommand(),
+		newIndexRepoSmartContextCommand(),
+		newIndexRepoBlastRadiusCommand(),
 		newIndexRepoAskCommand(),
 	)
 	return cmd
@@ -198,6 +201,91 @@ func newIndexRepoOpenCommand() *cobra.Command {
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root directory")
 	cmd.Flags().StringVar(&id, "id", "", "Node ID")
 	_ = cmd.MarkFlagRequired("id")
+
+	return cmd
+}
+
+func newIndexRepoTracePathCommand() *cobra.Command {
+	var workspace string
+	var srcID string
+	var dstID string
+	var edgeTypes []string
+	var maxDepth int
+	var perNodeCap int
+	var allowStale bool
+
+	cmd := &cobra.Command{
+		Use:     "trace-path",
+		Aliases: []string{"trace"},
+		Short:   "Find a shortest stored repo graph path between two nodes",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runIndexRepoTracePath(cmd, workspace, srcID, dstID, edgeTypes, maxDepth, perNodeCap, allowStale)
+		},
+	}
+
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root directory")
+	cmd.Flags().StringVar(&srcID, "src-id", "", "Source node ID")
+	cmd.Flags().StringVar(&dstID, "dst-id", "", "Destination node ID")
+	cmd.Flags().StringSliceVar(&edgeTypes, "edge", nil, "Edge types to traverse (repeatable)")
+	cmd.Flags().IntVar(&maxDepth, "max-depth", 5, "Maximum path depth")
+	cmd.Flags().IntVar(&perNodeCap, "per-node", 50, "Max outgoing edges per node")
+	cmd.Flags().BoolVar(&allowStale, "allow-stale", false, "Allow querying a stale or dirty repo index")
+	_ = cmd.MarkFlagRequired("src-id")
+	_ = cmd.MarkFlagRequired("dst-id")
+
+	return cmd
+}
+
+func newIndexRepoSmartContextCommand() *cobra.Command {
+	var workspace string
+	var nodeID string
+	var limit int
+	var allowStale bool
+
+	cmd := &cobra.Command{
+		Use:     "smart-context",
+		Aliases: []string{"context"},
+		Short:   "Return stable one-hop repo graph context sections for a node",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runIndexRepoSmartContext(cmd, workspace, nodeID, limit, allowStale)
+		},
+	}
+
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root directory")
+	cmd.Flags().StringVar(&nodeID, "node-id", "", "Node ID")
+	cmd.Flags().IntVar(&limit, "limit", 50, "Maximum edges per context section")
+	cmd.Flags().BoolVar(&allowStale, "allow-stale", false, "Allow querying a stale or dirty repo index")
+	_ = cmd.MarkFlagRequired("node-id")
+
+	return cmd
+}
+
+func newIndexRepoBlastRadiusCommand() *cobra.Command {
+	var workspace string
+	var nodeID string
+	var edgeTypes []string
+	var maxDepth int
+	var limit int
+	var perNodeCap int
+	var allowStale bool
+
+	cmd := &cobra.Command{
+		Use:     "blast-radius",
+		Aliases: []string{"blast"},
+		Short:   "Expand bounded downstream repo graph impact for a node",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runIndexRepoBlastRadius(cmd, workspace, nodeID, edgeTypes, maxDepth, limit, perNodeCap, allowStale)
+		},
+	}
+
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root directory")
+	cmd.Flags().StringVar(&nodeID, "node-id", "", "Node ID")
+	cmd.Flags().StringSliceVar(&edgeTypes, "edge", nil, "Edge types to traverse (repeatable)")
+	cmd.Flags().IntVar(&maxDepth, "max-depth", 3, "Maximum expansion depth")
+	cmd.Flags().IntVar(&limit, "limit", 50, "Maximum nodes to return")
+	cmd.Flags().IntVar(&perNodeCap, "per-node", 50, "Max outgoing edges per node")
+	cmd.Flags().BoolVar(&allowStale, "allow-stale", false, "Allow querying a stale or dirty repo index")
+	_ = cmd.MarkFlagRequired("node-id")
 
 	return cmd
 }
@@ -1100,6 +1188,205 @@ func runIndexRepoOpen(cmd *cobra.Command, workspace, id string) error {
 
 	env := protocol.OK("index.repo.open", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	return protocol.Write(cmd.OutOrStdout(), env)
+}
+
+type repoIndexQueryContext struct {
+	Workspace string
+	Store     *repoindex.Store
+	Freshness repoindex.IndexFreshnessStatus
+}
+
+func openFreshRepoIndexQueryContext(ctx context.Context, workspace, command string, allowStale bool, out io.Writer) (repoIndexQueryContext, error) {
+	absWorkspace, err := filepath.Abs(workspace)
+	if err != nil {
+		return repoIndexQueryContext{}, fmt.Errorf("resolve workspace: %w", err)
+	}
+
+	cfg, err := loadConfig(ctx)
+	if err != nil {
+		return repoIndexQueryContext{}, fmt.Errorf("load config: %w", err)
+	}
+
+	store, err := repoindex.Open(ctx, cfg.Storage.Root, absWorkspace)
+	if err != nil {
+		return repoIndexQueryContext{}, fmt.Errorf("open repoindex store: %w", err)
+	}
+
+	meta, err := store.GetMeta(ctx)
+	if err != nil {
+		_ = store.Close()
+		data := protocol.ErrorData{Hint: "Failed to read repo index metadata. Verify the index path and permissions."}
+		env := protocol.Error(command, protocol.ErrorCodeERuntime, "repo index metadata read failed", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		if writeErr := protocol.Write(out, env); writeErr != nil {
+			return repoIndexQueryContext{}, fmt.Errorf("write repo index metadata error envelope: %w", writeErr)
+		}
+		return repoIndexQueryContext{}, fmt.Errorf("get meta: %w", err)
+	}
+	current := repoindex.ResolveGitSnapshot(ctx, absWorkspace)
+	freshness := repoindex.CompareIndexFreshness(meta, current)
+	if !repoIndexNavigationFreshnessOK(freshness, allowStale) {
+		_ = store.Close()
+		data := protocol.ErrorData{
+			Hint: "Rebuild the repo index for this workspace or pass --allow-stale to query the stored graph explicitly.",
+			Context: map[string]any{
+				"freshness":        freshness,
+				"store_path":       store.Path(),
+				"allow_stale_flag": "--allow-stale",
+			},
+		}
+		env := protocol.Error(command, protocol.ErrorCodeERuntime, "repo index is stale for graph navigation", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		if writeErr := protocol.Write(out, env); writeErr != nil {
+			return repoIndexQueryContext{}, fmt.Errorf("write repo index freshness error envelope: %w", writeErr)
+		}
+		return repoIndexQueryContext{}, fmt.Errorf("repo index freshness is %s", freshness.Level)
+	}
+
+	return repoIndexQueryContext{
+		Workspace: absWorkspace,
+		Store:     store,
+		Freshness: freshness,
+	}, nil
+}
+
+func repoIndexNavigationFreshnessOK(freshness repoindex.IndexFreshnessStatus, allowStale bool) bool {
+	if allowStale {
+		return true
+	}
+	return freshness.Level == repoindex.FreshnessCurrent || freshness.Level == repoindex.FreshnessBehind
+}
+
+func runIndexRepoTracePath(cmd *cobra.Command, workspace, srcID, dstID string, edgeTypes []string, maxDepth, perNodeCap int, allowStale bool) error {
+	ctx := cmd.Context()
+	command := "index.repo.trace_path"
+	req, err := repoquery.NewTracePathRequest(srcID, dstID, edgeTypes, maxDepth, perNodeCap)
+	if err != nil {
+		hint := "Use --src-id and --dst-id with stored repoindex node IDs. Use --edge for known edge types when needed."
+		data := protocol.ValidationErrorData{Reason: err.Error(), Hint: hint}
+		env := protocol.Error(command, protocol.ErrorCodeEARG, err.Error(), data, protocol.WithSource("cli"))
+		if writeErr := protocol.Write(cmd.OutOrStdout(), env); writeErr != nil {
+			return fmt.Errorf("write repo trace-path argument error envelope: %w", writeErr)
+		}
+		return fmt.Errorf("build trace path request: %w", err)
+	}
+
+	queryCtx, err := openFreshRepoIndexQueryContext(ctx, workspace, command, allowStale, cmd.OutOrStdout())
+	if err != nil {
+		return err
+	}
+	defer queryCtx.Store.Close()
+
+	service := repoquery.NewQueryService(repoindex.NewQueryEngine(queryCtx.Store))
+	result, err := service.TracePathWithProjection(ctx, req)
+	if err != nil {
+		return fmt.Errorf("repo query trace path failed: %w", err)
+	}
+
+	data := map[string]any{
+		"workspace":  queryCtx.Workspace,
+		"store_path": queryCtx.Store.Path(),
+		"freshness":  queryCtx.Freshness,
+		"src_id":     req.SrcID,
+		"dst_id":     req.DstID,
+		"edges":      repoquery.EdgeTypeValues(repoIndexTracePathEdgeTypes(req.EdgeTypes)),
+		"result":     result.Result,
+		"anchors":    result.Anchors,
+	}
+
+	env := protocol.OK(command, data, protocol.WithSource("cli"), protocol.WithWorkspace(queryCtx.Workspace))
+	return protocol.Write(cmd.OutOrStdout(), env)
+}
+
+func runIndexRepoSmartContext(cmd *cobra.Command, workspace, nodeID string, limit int, allowStale bool) error {
+	ctx := cmd.Context()
+	command := "index.repo.smart_context"
+	req, err := repoquery.NewSmartContextRequest(nodeID, limit)
+	if err != nil {
+		hint := "Use --node-id with a stored repoindex node ID."
+		data := protocol.ValidationErrorData{Reason: err.Error(), Hint: hint}
+		env := protocol.Error(command, protocol.ErrorCodeEARG, err.Error(), data, protocol.WithSource("cli"))
+		if writeErr := protocol.Write(cmd.OutOrStdout(), env); writeErr != nil {
+			return fmt.Errorf("write repo smart-context argument error envelope: %w", writeErr)
+		}
+		return fmt.Errorf("build smart context request: %w", err)
+	}
+
+	queryCtx, err := openFreshRepoIndexQueryContext(ctx, workspace, command, allowStale, cmd.OutOrStdout())
+	if err != nil {
+		return err
+	}
+	defer queryCtx.Store.Close()
+
+	service := repoquery.NewQueryService(repoindex.NewQueryEngine(queryCtx.Store))
+	result, err := service.SmartContextWithProjection(ctx, req)
+	if err != nil {
+		return fmt.Errorf("repo query smart context failed: %w", err)
+	}
+
+	data := map[string]any{
+		"workspace":  queryCtx.Workspace,
+		"store_path": queryCtx.Store.Path(),
+		"freshness":  queryCtx.Freshness,
+		"node_id":    req.NodeID,
+		"result":     result.Result,
+		"anchors":    result.Anchors,
+	}
+
+	env := protocol.OK(command, data, protocol.WithSource("cli"), protocol.WithWorkspace(queryCtx.Workspace))
+	return protocol.Write(cmd.OutOrStdout(), env)
+}
+
+func runIndexRepoBlastRadius(cmd *cobra.Command, workspace, nodeID string, edgeTypes []string, maxDepth, limit, perNodeCap int, allowStale bool) error {
+	ctx := cmd.Context()
+	command := "index.repo.blast_radius"
+	req, err := repoquery.NewBlastRadiusRequest(nodeID, edgeTypes, maxDepth, limit, perNodeCap)
+	if err != nil {
+		hint := "Use --node-id with a stored repoindex node ID. Use --edge for known edge types when needed."
+		data := protocol.ValidationErrorData{Reason: err.Error(), Hint: hint}
+		env := protocol.Error(command, protocol.ErrorCodeEARG, err.Error(), data, protocol.WithSource("cli"))
+		if writeErr := protocol.Write(cmd.OutOrStdout(), env); writeErr != nil {
+			return fmt.Errorf("write repo blast-radius argument error envelope: %w", writeErr)
+		}
+		return fmt.Errorf("build blast radius request: %w", err)
+	}
+
+	queryCtx, err := openFreshRepoIndexQueryContext(ctx, workspace, command, allowStale, cmd.OutOrStdout())
+	if err != nil {
+		return err
+	}
+	defer queryCtx.Store.Close()
+
+	service := repoquery.NewQueryService(repoindex.NewQueryEngine(queryCtx.Store))
+	result, err := service.BlastRadiusWithProjection(ctx, req)
+	if err != nil {
+		return fmt.Errorf("repo query blast radius failed: %w", err)
+	}
+
+	data := map[string]any{
+		"workspace":  queryCtx.Workspace,
+		"store_path": queryCtx.Store.Path(),
+		"freshness":  queryCtx.Freshness,
+		"node_id":    req.NodeID,
+		"edges":      repoquery.EdgeTypeValues(repoIndexBlastRadiusEdgeTypes(req.EdgeTypes)),
+		"result":     result.Result,
+		"anchors":    result.Anchors,
+	}
+
+	env := protocol.OK(command, data, protocol.WithSource("cli"), protocol.WithWorkspace(queryCtx.Workspace))
+	return protocol.Write(cmd.OutOrStdout(), env)
+}
+
+func repoIndexTracePathEdgeTypes(edgeTypes []repoindex.EdgeType) []repoindex.EdgeType {
+	if len(edgeTypes) == 0 {
+		return repoindex.DefaultTracePathEdgeTypes()
+	}
+	return edgeTypes
+}
+
+func repoIndexBlastRadiusEdgeTypes(edgeTypes []repoindex.EdgeType) []repoindex.EdgeType {
+	if len(edgeTypes) == 0 {
+		return repoindex.DefaultBlastRadiusEdgeTypes()
+	}
+	return edgeTypes
 }
 
 func resolveRepoOpenFallbackID(ctx context.Context, workspace string, service *repoquery.QueryService, id string) (string, error) {
