@@ -1,6 +1,6 @@
 # LadybugDB Graph Projection Spike Plan
 
-Status: proposed spike
+Status: evaluated spike
 Owner: foxctl
 Last updated: 2026-05-11
 
@@ -25,13 +25,14 @@ or FTS. It asks a narrower question:
 
 ## Decision
 
-Proceed with Phase 0 and Phase 1 only.
+Phase 0 through Phase 3 passed as a CLI-only spike. Phase 4 keeps the
+projection artifacts and proof scripts, but stops before runtime integration.
 
 Do not add LadybugDB as a Go dependency. Do not create a runtime
-`GraphQueryEngine` interface yet. Do not use Ladybug vector or FTS features in
-the spike. Do not dual-write.
+`GraphQueryEngine` interface yet. Do not add a foxctl command or skill yet. Do
+not use Ladybug vector or FTS features in the spike. Do not dual-write.
 
-Use the Ladybug CLI and import path first:
+The accepted posture is still CLI/import first:
 
 ```text
 Phase 0/1:
@@ -44,11 +45,14 @@ Much later:
   consider Go binding only behind explicit build tags
 ```
 
-The hard gate is:
+The hard gate passed:
 
 ```text
-Proceed only if Ladybug CLI/import works without any Go cgo dependency.
+Ladybug CLI/import works without any Go cgo dependency.
 ```
+
+The remaining gate before user-facing adoption is real-repo measurement of
+rebuild cost, query time, and output quality.
 
 ## Non-Goals
 
@@ -514,6 +518,12 @@ Decision:
 - otherwise keep the export artifacts if useful and stop before runtime
   integration
 
+Result:
+
+- Evaluated on 2026-05-11; keep the export/proof artifacts and stop before
+  runtime integration. See
+  [LadybugDB Phase 4 Evaluation](../../research/ladybugdb-phase4-evaluation.md).
+
 ## Later Integration Options
 
 Do these only after the CLI proof is accepted.
@@ -576,11 +586,12 @@ Regression tests:
 
 ## Final Recommendation
 
-Run Phase 0 and Phase 1.
+Stop before runtime integration.
 
-Stop unless the Ladybug CLI can create a strict schema, import typed CSV node and
+The Ladybug CLI can create a strict schema, import typed CSV node and
 relationship tables, and run the three graph traversal proofs without adding any
-Go dependency or cgo build requirement.
+Go dependency or cgo build requirement. Keep those artifacts because they are
+useful for future real-repo measurement.
 
 The best outcome is not a new canonical database. The best outcome is:
 
@@ -590,3 +601,6 @@ Ladybug becomes a disposable graph lens
 agents get trace_path, smart_context, and blast_radius
 default builds stay clean
 ```
+
+Before any user-facing command or runtime interface, run a separate real-repo
+measurement slice and preserve the same default-build constraints.
