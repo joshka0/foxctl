@@ -104,19 +104,23 @@ RETURN length(e) AS path_len, properties(nodes(p), 'id') AS node_ids;
 }
 
 func ladybugRebuildScriptPath(t *testing.T) string {
+	return ladybugScriptPath(t, "ladybug_rebuild_projection.sh")
+}
+
+func ladybugScriptPath(t *testing.T, name string) string {
 	t.Helper()
 	dir, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
 	for {
-		candidate := filepath.Join(dir, "scripts", "ladybug_rebuild_projection.sh")
+		candidate := filepath.Join(dir, "scripts", name)
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			t.Fatalf("scripts/ladybug_rebuild_projection.sh not found from %s", dir)
+			t.Fatalf("scripts/%s not found from %s", name, dir)
 		}
 		dir = parent
 	}
