@@ -59,7 +59,7 @@ type Bus struct {
 	mu          sync.RWMutex
 	subscribers map[uint64]chan coreevents.Event
 	closed      bool
-	nextID      uint64
+	nextID      atomic.Uint64
 
 	cfg Config
 
@@ -95,7 +95,7 @@ func (b *Bus) Subscribe(buffer int) (<-chan coreevents.Event, func()) {
 	}
 
 	ch := make(chan coreevents.Event, buffer)
-	id := atomic.AddUint64(&b.nextID, 1)
+	id := b.nextID.Add(1)
 
 	b.mu.Lock()
 	if b.closed {

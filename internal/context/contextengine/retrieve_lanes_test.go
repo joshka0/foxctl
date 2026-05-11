@@ -14,11 +14,11 @@ import (
 
 var (
 	testNow       = time.Date(2025, 3, 15, 10, 0, 0, 0, time.UTC)
-	testIDCounter int64
+	testIDCounter atomic.Int64
 )
 
 func testIDGen() string {
-	n := atomic.AddInt64(&testIDCounter, 1)
+	n := testIDCounter.Add(1)
 	return fmt.Sprintf("test-id-%d", n)
 }
 
@@ -34,7 +34,7 @@ func testLaneConfig() LaneConfig {
 }
 
 func resetTestIDCounter() {
-	atomic.StoreInt64(&testIDCounter, 0)
+	testIDCounter.Store(0)
 }
 
 // --- VAL-RETR-010: All lanes reject empty query ---

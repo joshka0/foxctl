@@ -69,12 +69,12 @@ func TestWFQSchedulerExecution(t *testing.T) {
 	scheduler.Start(ctx)
 	defer scheduler.Stop()
 
-	var executed int32
+	var executed atomic.Int32
 	job := &Job{
 		ID:        "job-1",
 		Namespace: "ns1",
 		Execute: func(_ context.Context) error {
-			atomic.AddInt32(&executed, 1)
+			executed.Add(1)
 			return nil
 		},
 	}
@@ -87,8 +87,8 @@ func TestWFQSchedulerExecution(t *testing.T) {
 	// Wait for execution
 	time.Sleep(100 * time.Millisecond)
 
-	if atomic.LoadInt32(&executed) != 1 {
-		t.Errorf("expected job to be executed once, got %d", executed)
+	if executed.Load() != 1 {
+		t.Errorf("expected job to be executed once, got %d", executed.Load())
 	}
 }
 
@@ -109,7 +109,7 @@ func TestWFQSchedulerFairness(t *testing.T) {
 	scheduler.Start(ctx)
 	defer scheduler.Stop()
 
-	var ns1Count, ns2Count int32
+	var ns1Count, ns2Count atomic.Int32
 	var mu sync.Mutex
 
 	// Enqueue 20 jobs for each namespace
@@ -118,7 +118,7 @@ func TestWFQSchedulerFairness(t *testing.T) {
 			ID:        "ns1-job-" + string(rune(i)),
 			Namespace: "ns1",
 			Execute: func(_ context.Context) error {
-				atomic.AddInt32(&ns1Count, 1)
+				ns1Count.Add(1)
 				time.Sleep(10 * time.Millisecond)
 				return nil
 			},
@@ -128,7 +128,7 @@ func TestWFQSchedulerFairness(t *testing.T) {
 			ID:        "ns2-job-" + string(rune(i)),
 			Namespace: "ns2",
 			Execute: func(_ context.Context) error {
-				atomic.AddInt32(&ns2Count, 1)
+				ns2Count.Add(1)
 				time.Sleep(10 * time.Millisecond)
 				return nil
 			},
@@ -147,8 +147,8 @@ func TestWFQSchedulerFairness(t *testing.T) {
 	// Wait for execution
 	time.Sleep(1 * time.Second)
 
-	n1 := atomic.LoadInt32(&ns1Count)
-	n2 := atomic.LoadInt32(&ns2Count)
+	n1 := ns1Count.Load()
+	n2 := ns2Count.Load()
 
 	// ns1 should execute approximately 2x more jobs than ns2
 	// Allow for some variance due to timing
@@ -211,11 +211,10 @@ func TestWFQSchedulerMultipleNamespaces(t *testing.T) {
 	defer scheduler.Stop()
 
 	namespaces := []string{"ns1", "ns2", "ns3"}
-	counts := make(map[string]*int32)
+	counts := make(map[string]*atomic.Int32)
 
 	for _, ns := range namespaces {
-		count := int32(0)
-		counts[ns] = &count
+		counts[ns] = &atomic.Int32{}
 
 		for i := 0; i < 10; i++ {
 			ns := ns // capture
@@ -224,7 +223,7 @@ func TestWFQSchedulerMultipleNamespaces(t *testing.T) {
 				ID:        ns + "-job-" + string(rune(i)),
 				Namespace: ns,
 				Execute: func(_ context.Context) error {
-					atomic.AddInt32(c, 1)
+					c.Add(1)
 					time.Sleep(5 * time.Millisecond)
 					return nil
 				},
@@ -240,7 +239,7 @@ func TestWFQSchedulerMultipleNamespaces(t *testing.T) {
 
 	// All namespaces should execute some jobs
 	for ns, count := range counts {
-		c := atomic.LoadInt32(count)
+		c := count.Load()
 		if c == 0 {
 			t.Errorf("namespace %s executed 0 jobs (starvation)", ns)
 		}
@@ -318,12 +317,12 @@ func TestWFQSchedulerStopAndStart(t *testing.T) {
 	// Start scheduler
 	scheduler.Start(ctx)
 
-	var executed int32
+	var executed atomic.Int32
 	job := &Job{
 		ID:        "job1",
 		Namespace: "ns1",
 		Execute: func(_ context.Context) error {
-			atomic.AddInt32(&executed, 1)
+			executed.Add(1)
 			return nil
 		},
 	}
@@ -333,8 +332,8 @@ func TestWFQSchedulerStopAndStart(t *testing.T) {
 	}
 	time.Sleep(100 * time.Millisecond)
 
-	if atomic.LoadInt32(&executed) != 1 {
-		t.Errorf("expected 1 execution, got %d", executed)
+	if executed.Load() != 1 {
+		t.Errorf("expected 1 execution, got %d", executed.Load())
 	}
 
 	// Stop scheduler
@@ -345,7 +344,7 @@ func TestWFQSchedulerStopAndStart(t *testing.T) {
 		ID:        "job2",
 		Namespace: "ns1",
 		Execute: func(_ context.Context) error {
-			atomic.AddInt32(&executed, 1)
+			executed.Add(1)
 			return nil
 		},
 	}
@@ -356,8 +355,8 @@ func TestWFQSchedulerStopAndStart(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Should still be 1 (job2 not executed)
-	if atomic.LoadInt32(&executed) != 1 {
-		t.Errorf("expected 1 execution after stop, got %d", executed)
+	if executed.Load() != 1 {
+		t.Errorf("expected 1 execution after stop, got %d", executed.Load())
 	}
 }
 

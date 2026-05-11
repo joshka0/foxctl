@@ -13,19 +13,19 @@ import (
 // ---------------------------------------------------------------------------
 
 var (
-	integrationNow       = time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC)
-	integrationIDCounter int64
+	integrationNow           = time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC)
+	integrationIDCounter     atomic.Int64
 )
 
 func integrationIDGen() string {
-	n := atomic.AddInt64(&integrationIDCounter, 1)
+	n := integrationIDCounter.Add(1)
 	return fmt.Sprintf("int-id-%d", n)
 }
 
 func integrationClock() time.Time { return integrationNow }
 
 func resetIntegrationIDCounter() {
-	atomic.StoreInt64(&integrationIDCounter, 0)
+	integrationIDCounter.Store(0)
 }
 
 // newIntegrationStore creates a fresh MemoryStore for integration tests.
