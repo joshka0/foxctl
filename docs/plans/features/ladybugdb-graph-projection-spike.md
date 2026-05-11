@@ -379,7 +379,7 @@ Result:
 Deliverables:
 
 - deterministic export files under ignored projection output
-- per-label node CSVs, omitting empty node-kind files
+- one strict `nodes_graph.csv` file for projected graph nodes
 - per-edge relationship CSVs, omitting empty edge-type files
 - `meta.json` with repo key, repoindex schema version, git snapshot, and export
   time
@@ -452,6 +452,11 @@ Do not add placeholder Ladybug schema, import, rebuild, or query scripts in
 Phase 1. Those are Ladybug integration artifacts and should wait until the
 Phase 0 `lbug` CLI gate passes with real syntax and transcripts.
 
+Result:
+
+- Implemented as a dependency-free repoindex export artifact and writer; see
+  [LadybugDB Repoindex Export Projection Phase 1](../../goals/ladybugdb-repoindex-export-projection_goal.md).
+
 ### Phase 2: Ladybug Import Script
 
 Deliverables:
@@ -483,6 +488,11 @@ Deliverables:
 
 Still do not add a Go runtime interface in this phase unless the proof queries
 already pass and the next decision explicitly asks for integration.
+
+Result:
+
+- Passed on 2026-05-11 with `Lbug 0.16.1`; see
+  [LadybugDB Phase 3 Query Proofs](../../research/ladybugdb-phase3-query-proofs.md).
 
 ### Phase 4: Evaluation and Decision
 
