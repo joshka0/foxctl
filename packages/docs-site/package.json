@@ -9,7 +9,20 @@
     "check": "astro sync && astro build"
   },
   "dependencies": {
+    "@astrojs/react": "5.0.4",
     "@astrojs/starlight": "0.38.4",
-    "astro": "6.2.2"
+    "@heroui/react": "3.0.3",
+    "@heroui/styles": "3.0.3",
+    "@tailwindcss/vite": "4.1.18",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "astro": "6.2.2",
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
+    "tailwindcss": "4.1.18"
+  },
+  "overrides": {
+    "@heroui/styles": "3.0.3",
+    "vite": "7.3.2"
   }
 }
