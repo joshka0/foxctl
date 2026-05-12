@@ -122,11 +122,10 @@ foxctl openapi describe memory:github --tag=issues
 ### Spec Caching
 
 Specs are cached in memory for 24 hours (configurable). Cache is invalidated on
-re-import, TTL expiry, or manual clear:
+re-import or TTL expiry. To force a refresh, re-import the spec:
 
 ```bash
-foxctl cache clear --type=openapi_spec
-foxctl cache clear --type=openapi_spec --name=github
+foxctl openapi import ./github-api.yaml --as=github
 ```
 
 ## Auth Strategies
