@@ -1,179 +1,77 @@
----
-vault_refs:
-  - notes/repo/foxctl/platform-and-web.md
-  - notes/repo/foxctl/semantic-and-memory.md
-  - notes/repo/foxctl/skills-runtime-wiring.md
-  - notes/repo/foxctl/index.md
-  - 00-home/index.md
----
+<div align="center">
 
 # foxctl
 
-> AI agent toolkit for local skills, retrieval, memory, provider integrations, and multi-agent workflows.
+**AI agent toolkit for local skills, retrieval, memory, and multi-agent workflows.**
 
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
-[![Go Version](https://img.shields.io/badge/go-1.26.1+-blue.svg)](https://golang.org/dl/)
+[![Go Version](https://img.shields.io/badge/Go-1.26.1+-00ADD8.svg)](https://golang.org/dl/)
+[![Bun](https://img.shields.io/badge/Bun-optional-000000.svg)](https://bun.sh/)
 
-`foxctl` is the repo-local control plane behind a lot of this project’s AI workflow:
+[Getting Started](#quick-start) · [Install](#install) · [Docs](#documentation) · [Development](#development)
 
-- skill execution and installation
-- semantic/code retrieval and repo indexing
-- session continuity and memory storage
-- MCP and web/API serving
-- provider bootstrap for Claude Code, Codex, OpenCode, and Gemini
-- durable room / agent / mailbox orchestration
+</div>
 
-The repository is primarily Go, with Bun-based packages for the web GUI.
+---
 
-## What’s Here
+foxctl is the repo-local control plane for AI-powered development workflows — skill execution, semantic code retrieval, session continuity, provider integrations, and durable multi-agent coordination.
 
-- `cmd/foxctl/` - Cobra CLI entrypoints
-- `skills/` - installable skill implementations
-- `configs/hooks/` - provider hook/runtime glue
-- `configs/skills-pack/` - provider-facing skill packs
-- `internal/` - runtime, storage, indexing, context, and web internals
-- `cmd/foxctl_tui/` - canonical Go terminal agent shell
-- `packages/gui-agent/` - web operator surface
-- `archive/packages/tui-agent/` - archived TypeScript TUI workbench
-- `archive/cmd/foxctl_viewer/` - archived legacy Go viewer TUI
-- `docs/` - canonical architecture, guides, specs, and plans
+## Features
 
-### Internal Layout
+| Capability | Description |
+|---|---|
+| **Skill Execution** | Installable, composable skills with JSON envelope I/O and WASI isolation |
+| **Code Retrieval** | Semantic search, smart search, context grep, and repo graph indexing |
+| **Session Continuity** | Persistent memory, transcript capture, and task-history summaries across sessions |
+| **Multi-Agent Orchestration** | Durable rooms, mailbox coordination, overseer hierarchies, and agent lifecycle management |
+| **Context Engine** | Unified pipeline from raw events → typed evidence → claims → impact → retrieval packs |
+| **Provider Integrations** | Bootstrap for Claude Code, Codex, OpenCode, and Gemini via MCP serving |
+| **MCP & Web Serving** | Built-in MCP server and web GUI for operator control |
+| **Kubernetes Deployment** | Production-grade manifests and overlays for container orchestration |
 
-This is the short version of the `internal/*` grouping. The canonical placement
-rules live in [docs/architecture/package-topology.md](docs/architecture/package-topology.md).
+## Quick Start
 
-```text
-internal/
-  domain/        core contracts and value types
-  platform/      config, workspace, logging, cross-cutting helpers
-  protocol/      wire/envelope/protocol helpers
-  storage/       SQLite/libsql/postgres stores, CAS, durable state
-  auth/          authn/authz and identity-facing helpers
-  providers/     provider-specific integrations and compatibility layers
-  runtime/       execution, daemon, orchestration, terminal, hooks, observability
-  v2/            newer agent/runtime/orchestration lane only
-  context/       memory, session continuity, transcript/context plane
-  intelligence/  retrieval, indexing, codemaps, refactor/code intelligence
-  interfaces/    web, gateway, chat adapter, OpenAPI transport layers
-  tooling/       evals, standalone tools, runtime-neutral tooling
+```bash
+# Clone and install
+git clone <repo-url> foxctl && cd foxctl
+./install.sh
+
+# Verify
+foxctl version
+foxctl skills list
+foxctl mcp status
+
+# Search your codebase
+foxctl run code/semantic_search --input '{"format":"tree"}'
+
+# Build the repo graph index for call/reference navigation
+foxctl index repo build --workspace . --go --typescript --elixir
 ```
 
-Two important rules:
+For non-Go repos, disable Go indexing explicitly:
 
-- new top-level `internal/*` roots should be rare
-- `internal/v2/*` is not the default destination for new code; it is scoped to
-  the newer agent/runtime/orchestration stack
-
-## Context Engine
-
-The **Unified Context Engine** transforms raw events (file writes, commits,
-corrections, task changes, tool calls) into structured, typed, and validated
-context primitives. It replaces scattered string-based references and keyword
-heuristics with a single canonical type system.
-
-**Pipeline:**
-
-```
-events → evidence → claims → impact/staleness → projections → retrieval packs → feedback
-```
-
-### Where the Code Lives
-
-```text
-internal/context/contextengine/           # Canonical domain types + pure validation
-  refs.go              EvidenceRef, RefType — typed references replacing raw strings
-  events.go            ContextEvent, ContextEventKind — append-only event log entries
-  evidence.go          EvidenceNode, EvidencePack — structured evidence with grounding
-  claims.go            MemoryClaim, ClaimStatus, ClaimScope — lifecycle-managed claims
-  impact.go            ImpactEdge, ImpactEdgeKind — directional dependency graph
-  impact_engine.go     ComputeImpact, ApplyInvalidation, ResolveStaleness
-  staleness.go         StalenessMarker — reactive invalidation from dirty edits
-  projections.go       ProjectionMeta, WorkingSet, TaskContext, ContextPacket
-  retrieval.go         RetrievalEpisode, RetrievalFeedback — retrieval telemetry
-  retrieve_lanes.go    5 lane services (code, memory, context, task, mixed)
-  filters.go           Typed filter predicates for evidence queries
-  validate.go          Validation functions for all canonical types
-
-internal/context/contextengine/adapters/  # Bidirectional type conversions
-  contextplane.go      TopOfMind, Handoff, Observation, TaskPacket → canonical
-  companion.go         ConversationEvent, EvidenceSnippet, Assumption → canonical
-  retrievalv2.go       SearchResponse, FusedHit → canonical
-  taskhistory.go       Pack, SessionSummary → canonical
-  taskstore.go         Task, Epic → canonical
-  trajectory.go        Event, Trajectory → canonical
-  observability.go     Event → canonical
-  rlm.go               NodeResult → canonical
-
-internal/storage/contextengine/           # Durable store
-  schema.go            9 entity tables, 18 indexes, CAS integration
-  store.go             Store interface + SQLite implementation
-
-internal/context/contextplane/types.go   # Updated: []EvidenceRef, ProjectionMeta
-internal/context/companion/              # ExtractionPolicy interface, TypedSignalExtractor
-internal/rlm/                            # Composite DefaultTools (6), typed QueryPlan
-```
-
-### Key Concepts
-
-- **EvidenceRef** — typed reference (`file://`, `symbol://`, `note://`, etc.)
-  replacing raw `[]string` throughout the codebase
-- **EvidencePack** — a compact, serializable bundle of evidence items returned
-  by retrieval lanes; large packs go to CAS
-- **MemoryClaim** — a durable assertion with typed lifecycle transitions
-  (Candidate → Current → NeedsRevalidation → Stale → Superseded/Rejected)
-- **Impact Engine** — computes downstream effects of changes, marks stale
-  evidence, and resolves invalidation chains
-- **Retrieval Lanes** — five composable lane services (code, memory, context,
-  task, mixed) that return `EvidencePack` and record telemetry episodes
-- **ExtractionPolicy** — replaces keyword heuristics with typed interfaces
-  for companion signal extraction; 3 concrete implementations
-
-### Design Invariants
-
-| Invariant | Rule |
-|-----------|------|
-| Pure core | `contextengine/` has zero IO imports — only stdlib |
-| No keyword heuristics | Classification uses typed fields, scored features, or structured policies |
-| Append-only events | `ContextEvent`, `RetrievalEpisode`, `RetrievalFeedback` never mutate |
-| Typed transitions | Claim and staleness status changes go through explicit transition functions |
-| CAS for large payloads | Evidence packs exceeding 64KB persist to CAS with summary inline |
-| Bidirectional adapters | Adapters import contextengine + source package; no cycles |
-
-### Dependency Direction
-
-```
-internal/context/contextengine/        ← pure, no IO imports
-         ↑
-internal/context/contextengine/adapters/ ← imports both sides
-         ↑
-internal/storage/contextengine/        ← imports contextengine only
-         ↑
-internal/context/contextplane/         ← uses adapters + contextengine
-internal/context/companion/            ← uses adapters + contextengine
-internal/rlm/                          ← uses adapters + contextengine
+```bash
+foxctl index repo build --workspace . --go=false --typescript --elixir
 ```
 
 ## Install
 
-### Recommended
-
-Run the interactive installer from the repo root:
+### Recommended — Interactive Installer
 
 ```bash
 ./install.sh
 ```
 
-That flow is intended to:
+The installer:
 
-- verify or install core local dependencies
-- optionally install Bun for GUI and OpenCode plugin workflows
-- build the CLI and skills
-- wire up provider integrations via `scripts/init.sh`
+- Verifies or installs core local dependencies
+- Optionally installs Bun for GUI and OpenCode plugin workflows
+- Builds the CLI and skills
+- Wires up provider integrations via `scripts/init.sh`
 
 If you run the installer outside an existing checkout, it clones the repo from GitLab.
 
-### Non-interactive
+### Non-Interactive
 
 ```bash
 ./install.sh --yes
@@ -195,11 +93,7 @@ If you already have the toolchain installed and want the repo-native flow:
 make init
 ```
 
-`make init` runs:
-
-- `build`
-- `skills-install-all`
-- `./scripts/init.sh`
+`make init` runs `build`, `skills-install-all`, and `./scripts/init.sh`.
 
 If you only want the CLI path:
 
@@ -213,29 +107,24 @@ make skills-install
 
 ### Required
 
-- `bash`
-- `git`
-- `make`
-- `jq`
+- `bash`, `git`, `make`, `jq`
 - Go `1.26.1+`
 
-### Recommended For Full Setup
+### Recommended (Full Setup)
 
-- Bun
-  - needed for `packages/gui-agent` and OpenCode plugin install flows
+- Bun — needed for `packages/gui-agent` and OpenCode plugin install flows
 
-On macOS, the full path usually means Homebrew `go`, `jq`, and `bun`.
+On macOS: Homebrew `go`, `jq`, and `bun`.
 
-On Debian/Ubuntu, the full path usually means `git`, `make`, `jq`, `curl`, and
-a current Go toolchain.
+On Debian/Ubuntu: `git`, `make`, `jq`, `curl`, and a current Go toolchain.
 
 ## Environment
 
 `foxctl` loads env files in this order:
 
 1. `~/.foxctl/.env`
-2. the git-root `.env`
-3. the current working directory `.env`
+2. The git-root `.env`
+3. The current working directory `.env`
 
 Common variables:
 
@@ -256,36 +145,7 @@ TURSO_AUTH_TOKEN=...
 FOXCTL_POSTGRES_DSN=...
 ```
 
-`scripts/init.sh` will copy repo `.env` to `~/.foxctl/.env` if present and no
-global env file exists yet.
-
-## First Run
-
-Verify the install:
-
-```bash
-foxctl version
-foxctl skills list
-foxctl mcp status
-```
-
-Get oriented in a repo:
-
-```bash
-foxctl run code/semantic_search --input '{"format":"tree"}'
-```
-
-Build the repo graph index when you need call/reference navigation:
-
-```bash
-foxctl index repo build --workspace . --go --typescript --elixir
-```
-
-For non-Go repos, disable Go explicitly:
-
-```bash
-foxctl index repo build --workspace . --go=false --typescript --elixir
-```
+`scripts/init.sh` copies the repo `.env` to `~/.foxctl/.env` if present and no global env file exists yet.
 
 ## Common Commands
 
@@ -317,26 +177,106 @@ foxctl web serve --dev-cors
 foxctl mcp serve --skills
 ```
 
+## Context Engine
+
+The **Unified Context Engine** transforms raw events (file writes, commits, corrections, task changes, tool calls) into structured, typed, and validated context primitives — replacing scattered string-based references and keyword heuristics with a single canonical type system.
+
+**Pipeline:**
+
+```
+events → evidence → claims → impact/staleness → projections → retrieval packs → feedback
+```
+
+### Key Concepts
+
+| Concept | Description |
+|---|---|
+| **EvidenceRef** | Typed reference (`file://`, `symbol://`, `note://`, etc.) replacing raw `[]string` |
+| **EvidencePack** | Compact, serializable bundle of evidence items returned by retrieval lanes; large packs go to CAS |
+| **MemoryClaim** | Durable assertion with typed lifecycle transitions (Candidate → Current → NeedsRevalidation → Stale → Superseded/Rejected) |
+| **Impact Engine** | Computes downstream effects of changes, marks stale evidence, and resolves invalidation chains |
+| **Retrieval Lanes** | Five composable lane services (code, memory, context, task, mixed) returning `EvidencePack` with telemetry |
+| **ExtractionPolicy** | Replaces keyword heuristics with typed interfaces for companion signal extraction |
+
+### Design Invariants
+
+| Invariant | Rule |
+|---|---|
+| Pure core | `contextengine/` has zero IO imports — only stdlib |
+| No keyword heuristics | Classification uses typed fields, scored features, or structured policies |
+| Append-only events | `ContextEvent`, `RetrievalEpisode`, `RetrievalFeedback` never mutate |
+| Typed transitions | Claim and staleness status changes go through explicit transition functions |
+| CAS for large payloads | Evidence packs exceeding 64KB persist to CAS with summary inline |
+| Bidirectional adapters | Adapters import contextengine + source package; no cycles |
+
+### Dependency Direction
+
+```
+internal/context/contextengine/        ← pure, no IO imports
+         ↑
+internal/context/contextengine/adapters/ ← imports both sides
+         ↑
+internal/storage/contextengine/        ← imports contextengine only
+         ↑
+internal/context/contextplane/         ← uses adapters + contextengine
+internal/context/companion/            ← uses adapters + contextengine
+internal/rlm/                          ← uses adapters + contextengine
+```
+
+## Repository Layout
+
+```
+cmd/foxctl/                  Cobra CLI entrypoints
+cmd/foxctl_tui/              Canonical Go terminal agent shell
+skills/                      Installable skill implementations
+configs/hooks/               Provider hook/runtime glue
+configs/skills-pack/         Provider-facing skill packs
+internal/                    Runtime, storage, indexing, context, and web internals
+packages/gui-agent/          Web operator surface
+packages/docs-site/          Starlight documentation site
+archive/                     Archived packages and legacy tooling
+docs/                        Canonical architecture, guides, specs, and plans
+foxprox/                     Foxprox agent terminal coordination (independent module)
+```
+
+### Internal Packages
+
+> For contributors working inside `internal/`. The canonical placement rules live in [docs/architecture/package-topology.md](docs/architecture/package-topology.md).
+
+| Package | Responsibility |
+|---|---|
+| `domain/` | Core contracts and value types |
+| `platform/` | Config, workspace, logging, cross-cutting helpers |
+| `protocol/` | Wire/envelope/protocol helpers |
+| `storage/` | SQLite/libsql/postgres stores, CAS, durable state |
+| `auth/` | Authn/authz and identity-facing helpers |
+| `providers/` | Provider-specific integrations and compatibility layers |
+| `runtime/` | Execution, daemon, orchestration, terminal, hooks, observability |
+| `v2/` | Newer agent/runtime/orchestration lane only |
+| `context/` | Memory, session continuity, transcript/context plane |
+| `intelligence/` | Retrieval, indexing, codemaps, refactor/code intelligence |
+| `interfaces/` | Web, gateway, chat adapter, OpenAPI transport layers |
+| `tooling/` | Evals, standalone tools, runtime-neutral tooling |
+
+**Rules:**
+
+- New top-level `internal/*` roots should be rare
+- `internal/v2/*` is not the default destination for new code; it is scoped to the newer agent/runtime/orchestration stack
+
 ## Provider Bootstrap
 
-`scripts/init.sh` is the current source of truth for local provider wiring. It
-handles:
+`scripts/init.sh` is the current source of truth for local provider wiring. It handles:
 
-- symlinking `foxctl` into `~/.local/bin`
-- creating `~/.foxctl/{storage,cache,cas,skills,jobs,observability,backups}`
-- installing provider skill packs from `configs/skills-pack`
-- configuring Claude Code hooks/settings
-- wiring OpenCode plugin + skills + agents
-- creating Codex MCP config and skill links
-- linking Gemini skill packs
-- starting the shared MCP daemon with `foxctl mcp serve --daemon --skills`
+- Symlinking `foxctl` into `~/.local/bin`
+- Creating `~/.foxctl/{storage,cache,cas,skills,jobs,observability,backups}`
+- Installing provider skill packs from `configs/skills-pack`
+- Configuring Claude Code hooks/settings
+- Wiring OpenCode plugin + skills + agents
+- Creating Codex MCP config and skill links
+- Linking Gemini skill packs
+- Starting the shared MCP daemon with `foxctl mcp serve --daemon --skills`
 
-Today that bootstrap targets:
-
-- Claude Code
-- Codex
-- OpenCode
-- Gemini
+Currently supported providers: Claude Code, Codex, OpenCode, Gemini
 
 ## Web GUI And TUI
 
@@ -364,11 +304,24 @@ Build the TUI binary without launching it:
 make go-tui-build
 ```
 
-The API server entrypoint is:
+The API server entrypoint:
 
 ```bash
 foxctl web serve --dev-cors
 ```
+
+## foxprox
+
+`foxprox/` is a self-contained Go module (`github.com/joshka/foxprox`) implementing the Foxprox agent terminal coordination protocol — a local-first daemon for PTY-backed sessions, multi-agent rooms, typed intents, and structured message delivery.
+
+It lives in this repo via a `go.mod` replace directive and is wired into the foxctl web server through a thin bridge layer (`internal/interfaces/foxproxbridge/`). The module is fully independent: it has its own `go.mod`, its own tests, and can be split into a separate repository at any point via `git subtree split`.
+
+Key commands built from the module:
+
+- `foxproxd` — the daemon
+- `foxproxctl` — CLI client (sessions, rooms, messages)
+
+Protocol spec: [foxprox/docs/ATCP-v0.1.md](foxprox/docs/ATCP-v0.1.md)
 
 ## Development
 
@@ -388,8 +341,7 @@ make build
 make skills-install-all
 ```
 
-The CLI build is non-CGO by default. Turso is the canonical SQLite-family
-storage path; do not reintroduce the old libsqlite3/sqlite-vector build lane.
+The CLI build is non-CGO by default. Turso is the canonical SQLite-family storage path; do not reintroduce the old libsqlite3/sqlite-vector build lane.
 
 For markdown/doc changes:
 
@@ -401,36 +353,31 @@ make check-doc-links
 
 Start with:
 
-- [AGENTS.md](AGENTS.md)
-- [docs/README.md](docs/README.md)
-- [docs/start/README.md](docs/start/README.md)
-- [docs/architecture/package-topology.md](docs/architecture/package-topology.md)
+- [AGENTS.md](AGENTS.md) — AI assistant guide and command reference
+- [docs/README.md](docs/README.md) — Canonical documentation map
+- [docs/start/README.md](docs/start/README.md) — Fast orientation guides
+- [docs/architecture/package-topology.md](docs/architecture/package-topology.md) — `internal/*` placement rules
 
 Current high-signal docs:
 
-- [docs/architecture/context-architecture.md](docs/architecture/context-architecture.md)
-- [docs/architecture/jido-hybrid-runtime.md](docs/architecture/jido-hybrid-runtime.md)
-- [docs/general/agent-daemon.md](docs/general/agent-daemon.md)
-- [docs/guides/kubernetes.md](docs/guides/kubernetes.md)
-- [docs/spec/agent_hierarchy.md](docs/spec/agent_hierarchy.md)
+- [docs/architecture/context-architecture.md](docs/architecture/context-architecture.md) — Dual-plane context + Obsidian knowledge layer
+- [docs/architecture/jido-hybrid-runtime.md](docs/architecture/jido-hybrid-runtime.md) — Go-native vs Jido runtime
+- [docs/general/agent-daemon.md](docs/general/agent-daemon.md) — Agent daemon operations
+- [docs/guides/kubernetes.md](docs/guides/kubernetes.md) — Kubernetes deployment
+- [docs/spec/agent_hierarchy.md](docs/spec/agent_hierarchy.md) — Multi-agent hierarchy spec
 
-## foxprox
+## What's Here
 
-`foxprox/` is a self-contained Go module (`github.com/joshka/foxprox`) implementing
-the Foxprox agent terminal coordination protocol — a local-first daemon for PTY-backed
-sessions, multi-agent rooms, typed intents, and structured message delivery.
-
-It lives in this repo via a `go.mod` replace directive and is wired into the foxctl
-web server through a thin bridge layer (`internal/interfaces/foxproxbridge/`). The
-module is fully independent: it has its own `go.mod`, its own tests, and can be
-split into a separate repository at any point via `git subtree split`.
-
-Key commands built from the module:
-
-- `foxproxd` — the daemon
-- `foxproxctl` — CLI client (sessions, rooms, messages)
-
-Protocol spec: [foxprox/docs/ATCP-v0.1.md](foxprox/docs/ATCP-v0.1.md)
+- `cmd/foxctl/` - Cobra CLI entrypoints
+- `skills/` - Installable skill implementations
+- `configs/hooks/` - Provider hook/runtime glue
+- `configs/skills-pack/` - Provider-facing skill packs
+- `internal/` - Runtime, storage, indexing, context, and web internals
+- `cmd/foxctl_tui/` - Canonical Go terminal agent shell
+- `packages/gui-agent/` - Web operator surface
+- `archive/packages/tui-agent/` - Archived TypeScript TUI workbench
+- `archive/cmd/foxctl_viewer/` - Archived legacy Go viewer TUI
+- `docs/` - Canonical architecture, guides, specs, and plans
 
 ## License
 
