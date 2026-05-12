@@ -63,6 +63,11 @@ func isSQLiteBusy(err error) bool {
 	return strings.Contains(msg, "database is locked") || strings.Contains(msg, "sqlite_busy")
 }
 
+// IsSQLiteBusy reports whether err indicates that SQLite is busy.
+func IsSQLiteBusy(err error) bool {
+	return isSQLiteBusy(err)
+}
+
 func sleepWithContext(ctx context.Context, d time.Duration) bool {
 	if d <= 0 {
 		return ctx.Err() == nil

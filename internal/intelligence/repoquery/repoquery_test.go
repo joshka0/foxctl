@@ -147,6 +147,44 @@ func TestNewDAGGrepRequestSanitizesNaturalQuery(t *testing.T) {
 	}
 }
 
+func TestNewTracePathRequestParsesEdgeTypes(t *testing.T) {
+	t.Parallel()
+
+	req, err := NewTracePathRequest("src", "dst", []string{"calls,references"}, 4, 12)
+	if err != nil {
+		t.Fatalf("NewTracePathRequest error = %v", err)
+	}
+	if req.SrcID != "src" || req.DstID != "dst" || req.MaxDepth != 4 || req.PerNodeCap != 12 {
+		t.Fatalf("unexpected trace request: %#v", req)
+	}
+	if len(req.EdgeTypes) != 2 || req.EdgeTypes[0] != repoindex.EdgeCalls || req.EdgeTypes[1] != repoindex.EdgeRefersTo {
+		t.Fatalf("edge types = %#v", req.EdgeTypes)
+	}
+}
+
+func TestNewSmartContextRequestRequiresNodeID(t *testing.T) {
+	t.Parallel()
+
+	if _, err := NewSmartContextRequest(" ", 0); err == nil {
+		t.Fatal("NewSmartContextRequest accepted empty node_id")
+	}
+}
+
+func TestNewBlastRadiusRequestParsesEdgeTypes(t *testing.T) {
+	t.Parallel()
+
+	req, err := NewBlastRadiusRequest("seed", []string{"contains", "calls"}, 3, 20, 5)
+	if err != nil {
+		t.Fatalf("NewBlastRadiusRequest error = %v", err)
+	}
+	if req.NodeID != "seed" || req.MaxDepth != 3 || req.Limit != 20 || req.PerNodeCap != 5 {
+		t.Fatalf("unexpected blast request: %#v", req)
+	}
+	if len(req.EdgeTypes) != 2 || req.EdgeTypes[0] != repoindex.EdgeContains || req.EdgeTypes[1] != repoindex.EdgeCalls {
+		t.Fatalf("edge types = %#v", req.EdgeTypes)
+	}
+}
+
 func TestParseEdgeTypesAcceptsNaturalAliases(t *testing.T) {
 	t.Parallel()
 

@@ -41,6 +41,21 @@ type DAGOutput struct {
 	Rendered map[string]string       `json:"rendered,omitempty"`
 }
 
+type TracePathOutput struct {
+	Result  repoindex.TracePathResult `json:"result"`
+	Anchors []Anchor                  `json:"anchors,omitempty"`
+}
+
+type SmartContextOutput struct {
+	Result  repoindex.SmartContextResult `json:"result"`
+	Anchors []Anchor                     `json:"anchors,omitempty"`
+}
+
+type BlastRadiusOutput struct {
+	Result  repoindex.BlastRadiusResult `json:"result"`
+	Anchors []Anchor                    `json:"anchors,omitempty"`
+}
+
 // Projector converts repo graph nodes into code-oriented anchors.
 type Projector struct{}
 

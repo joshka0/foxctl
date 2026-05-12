@@ -20,6 +20,7 @@ import (
 	"github.com/joshka0/foxctl/internal/protocol"
 	"github.com/joshka0/foxctl/internal/runtime/observability"
 	"github.com/joshka0/foxctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/storage/sqliteutil"
 	"github.com/spf13/cobra"
 )
 
@@ -35,6 +36,9 @@ func newIndexRepoCommand() *cobra.Command {
 		newIndexRepoSearchCommand(),
 		newIndexRepoExpandCommand(),
 		newIndexRepoOpenCommand(),
+		newIndexRepoTracePathCommand(),
+		newIndexRepoSmartContextCommand(),
+		newIndexRepoBlastRadiusCommand(),
 		newIndexRepoAskCommand(),
 	)
 	return cmd
@@ -198,6 +202,95 @@ func newIndexRepoOpenCommand() *cobra.Command {
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root directory")
 	cmd.Flags().StringVar(&id, "id", "", "Node ID")
 	_ = cmd.MarkFlagRequired("id")
+
+	return cmd
+}
+
+func newIndexRepoTracePathCommand() *cobra.Command {
+	var workspace string
+	var srcID string
+	var srcQuery string
+	var dstID string
+	var dstQuery string
+	var edgeTypes []string
+	var maxDepth int
+	var perNodeCap int
+	var allowStale bool
+
+	cmd := &cobra.Command{
+		Use:     "trace-path",
+		Aliases: []string{"trace"},
+		Short:   "Find a shortest stored repo graph path between two nodes",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runIndexRepoTracePath(cmd, workspace, srcID, srcQuery, dstID, dstQuery, edgeTypes, maxDepth, perNodeCap, allowStale)
+		},
+	}
+
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root directory")
+	cmd.Flags().StringVar(&srcID, "src-id", "", "Source node ID")
+	cmd.Flags().StringVar(&srcQuery, "src-query", "", "Query used to resolve the source node")
+	cmd.Flags().StringVar(&dstID, "dst-id", "", "Destination node ID")
+	cmd.Flags().StringVar(&dstQuery, "dst-query", "", "Query used to resolve the destination node")
+	cmd.Flags().StringSliceVar(&edgeTypes, "edge", nil, "Edge types to traverse (repeatable)")
+	cmd.Flags().IntVar(&maxDepth, "max-depth", 5, "Maximum path depth")
+	cmd.Flags().IntVar(&perNodeCap, "per-node", 50, "Max outgoing edges per node")
+	cmd.Flags().BoolVar(&allowStale, "allow-stale", false, "Allow querying a stale or dirty repo index")
+
+	return cmd
+}
+
+func newIndexRepoSmartContextCommand() *cobra.Command {
+	var workspace string
+	var nodeID string
+	var query string
+	var limit int
+	var allowStale bool
+
+	cmd := &cobra.Command{
+		Use:     "smart-context",
+		Aliases: []string{"context"},
+		Short:   "Return stable one-hop repo graph context sections for a node",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runIndexRepoSmartContext(cmd, workspace, nodeID, query, limit, allowStale)
+		},
+	}
+
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root directory")
+	cmd.Flags().StringVar(&nodeID, "node-id", "", "Node ID")
+	cmd.Flags().StringVar(&query, "query", "", "Query used to resolve the node")
+	cmd.Flags().IntVar(&limit, "limit", 50, "Maximum edges per context section")
+	cmd.Flags().BoolVar(&allowStale, "allow-stale", false, "Allow querying a stale or dirty repo index")
+
+	return cmd
+}
+
+func newIndexRepoBlastRadiusCommand() *cobra.Command {
+	var workspace string
+	var nodeID string
+	var query string
+	var edgeTypes []string
+	var maxDepth int
+	var limit int
+	var perNodeCap int
+	var allowStale bool
+
+	cmd := &cobra.Command{
+		Use:     "blast-radius",
+		Aliases: []string{"blast"},
+		Short:   "Expand bounded downstream repo graph impact for a node",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runIndexRepoBlastRadius(cmd, workspace, nodeID, query, edgeTypes, maxDepth, limit, perNodeCap, allowStale)
+		},
+	}
+
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root directory")
+	cmd.Flags().StringVar(&nodeID, "node-id", "", "Node ID")
+	cmd.Flags().StringVar(&query, "query", "", "Query used to resolve the node")
+	cmd.Flags().StringSliceVar(&edgeTypes, "edge", nil, "Edge types to traverse (repeatable)")
+	cmd.Flags().IntVar(&maxDepth, "max-depth", 3, "Maximum expansion depth")
+	cmd.Flags().IntVar(&limit, "limit", 50, "Maximum nodes to return")
+	cmd.Flags().IntVar(&perNodeCap, "per-node", 50, "Max outgoing edges per node")
+	cmd.Flags().BoolVar(&allowStale, "allow-stale", false, "Allow querying a stale or dirty repo index")
 
 	return cmd
 }
@@ -1100,6 +1193,372 @@ func runIndexRepoOpen(cmd *cobra.Command, workspace, id string) error {
 
 	env := protocol.OK("index.repo.open", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	return protocol.Write(cmd.OutOrStdout(), env)
+}
+
+type repoIndexQueryContext struct {
+	Workspace string
+	Store     *repoindex.Store
+	Freshness repoindex.IndexFreshnessStatus
+}
+
+type repoIndexStoreOpenFunc func(context.Context, string, string) (*repoindex.Store, error)
+
+const (
+	repoIndexNavigationOpenRetryBudget = 2 * time.Second
+	repoIndexNavigationOpenRetryStep   = 50 * time.Millisecond
+)
+
+func openFreshRepoIndexQueryContext(ctx context.Context, workspace, command string, allowStale bool, out io.Writer) (repoIndexQueryContext, error) {
+	absWorkspace, err := filepath.Abs(workspace)
+	if err != nil {
+		return repoIndexQueryContext{}, fmt.Errorf("resolve workspace: %w", err)
+	}
+
+	cfg, err := loadConfig(ctx)
+	if err != nil {
+		return repoIndexQueryContext{}, fmt.Errorf("load config: %w", err)
+	}
+
+	store, err := openRepoIndexStoreWithRetry(ctx, cfg.Storage.Root, absWorkspace)
+	if err != nil {
+		return repoIndexQueryContext{}, fmt.Errorf("open repoindex store: %w", err)
+	}
+
+	meta, err := store.GetMeta(ctx)
+	if err != nil {
+		_ = store.Close()
+		data := protocol.ErrorData{Hint: "Failed to read repo index metadata. Verify the index path and permissions."}
+		env := protocol.Error(command, protocol.ErrorCodeERuntime, "repo index metadata read failed", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		if writeErr := protocol.Write(out, env); writeErr != nil {
+			return repoIndexQueryContext{}, fmt.Errorf("write repo index metadata error envelope: %w", writeErr)
+		}
+		return repoIndexQueryContext{}, fmt.Errorf("get meta: %w", err)
+	}
+	current := repoindex.ResolveGitSnapshot(ctx, absWorkspace)
+	freshness := repoindex.CompareIndexFreshness(meta, current)
+	if !repoIndexNavigationFreshnessOK(freshness, allowStale) {
+		_ = store.Close()
+		data := protocol.ErrorData{
+			Hint: "Rebuild the repo index for this workspace or pass --allow-stale to query the stored graph explicitly.",
+			Context: map[string]any{
+				"freshness":        freshness,
+				"store_path":       store.Path(),
+				"allow_stale_flag": "--allow-stale",
+			},
+		}
+		env := protocol.Error(command, protocol.ErrorCodeERuntime, "repo index is stale for graph navigation", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		if writeErr := protocol.Write(out, env); writeErr != nil {
+			return repoIndexQueryContext{}, fmt.Errorf("write repo index freshness error envelope: %w", writeErr)
+		}
+		return repoIndexQueryContext{}, fmt.Errorf("repo index freshness is %s", freshness.Level)
+	}
+
+	return repoIndexQueryContext{
+		Workspace: absWorkspace,
+		Store:     store,
+		Freshness: freshness,
+	}, nil
+}
+
+func openRepoIndexStoreWithRetry(ctx context.Context, storageRoot, workspace string) (*repoindex.Store, error) {
+	return openRepoIndexStoreWithRetryFunc(ctx, storageRoot, workspace, repoindex.Open, repoIndexNavigationOpenRetryBudget, repoIndexNavigationOpenRetryStep)
+}
+
+func openRepoIndexStoreWithRetryFunc(ctx context.Context, storageRoot, workspace string, open repoIndexStoreOpenFunc, maxWait, stepDelay time.Duration) (*repoindex.Store, error) {
+	if open == nil {
+		open = repoindex.Open
+	}
+	if maxWait <= 0 {
+		return open(ctx, storageRoot, workspace)
+	}
+	if stepDelay <= 0 {
+		stepDelay = 25 * time.Millisecond
+	}
+
+	deadline := time.Now().Add(maxWait)
+	var lastErr error
+	for {
+		store, err := open(ctx, storageRoot, workspace)
+		if err == nil || !sqliteutil.IsSQLiteBusy(err) {
+			return store, err
+		}
+		lastErr = err
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return nil, lastErr
+		}
+		delay := stepDelay
+		if remaining < delay {
+			delay = remaining
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func repoIndexNavigationFreshnessOK(freshness repoindex.IndexFreshnessStatus, allowStale bool) bool {
+	if allowStale {
+		return true
+	}
+	return freshness.Level == repoindex.FreshnessCurrent || freshness.Level == repoindex.FreshnessBehind
+}
+
+func runIndexRepoTracePath(cmd *cobra.Command, workspace, srcID, srcQuery, dstID, dstQuery string, edgeTypes []string, maxDepth, perNodeCap int, allowStale bool) error {
+	ctx := cmd.Context()
+	command := "index.repo.trace_path"
+	hint := "Use --src-id/--dst-id with stored repoindex node IDs, or --src-query/--dst-query to resolve nodes by search. Use --edge for known edge types when needed."
+	if err := validateRepoIndexNavigationSelector(srcID, srcQuery, "--src-id", "--src-query"); err != nil {
+		return writeRepoIndexNavigationArgError(cmd, command, "", err, hint)
+	}
+	if err := validateRepoIndexNavigationSelector(dstID, dstQuery, "--dst-id", "--dst-query"); err != nil {
+		return writeRepoIndexNavigationArgError(cmd, command, "", err, hint)
+	}
+
+	queryCtx, err := openFreshRepoIndexQueryContext(ctx, workspace, command, allowStale, cmd.OutOrStdout())
+	if err != nil {
+		return err
+	}
+	defer queryCtx.Store.Close()
+
+	service := repoquery.NewQueryService(repoindex.NewQueryEngine(queryCtx.Store))
+	resolvedSrcID, err := resolveRepoIndexNavigationNode(ctx, queryCtx.Workspace, service, repoIndexNavigationNodeSelector{
+		ID:        srcID,
+		Query:     srcQuery,
+		IDFlag:    "--src-id",
+		QueryFlag: "--src-query",
+	})
+	if err != nil {
+		return writeRepoIndexNavigationArgError(cmd, command, queryCtx.Workspace, err, hint)
+	}
+	resolvedDstID, err := resolveRepoIndexNavigationNode(ctx, queryCtx.Workspace, service, repoIndexNavigationNodeSelector{
+		ID:        dstID,
+		Query:     dstQuery,
+		IDFlag:    "--dst-id",
+		QueryFlag: "--dst-query",
+	})
+	if err != nil {
+		return writeRepoIndexNavigationArgError(cmd, command, queryCtx.Workspace, err, hint)
+	}
+	req, err := repoquery.NewTracePathRequest(resolvedSrcID, resolvedDstID, edgeTypes, maxDepth, perNodeCap)
+	if err != nil {
+		return writeRepoIndexNavigationArgError(cmd, command, queryCtx.Workspace, err, hint)
+	}
+	result, err := service.TracePathWithProjection(ctx, req)
+	if err != nil {
+		return fmt.Errorf("repo query trace path failed: %w", err)
+	}
+
+	data := map[string]any{
+		"workspace":  queryCtx.Workspace,
+		"store_path": queryCtx.Store.Path(),
+		"freshness":  queryCtx.Freshness,
+		"src_id":     req.SrcID,
+		"dst_id":     req.DstID,
+		"edges":      repoquery.EdgeTypeValues(repoIndexTracePathEdgeTypes(req.EdgeTypes)),
+		"result":     result.Result,
+		"anchors":    result.Anchors,
+	}
+	if strings.TrimSpace(srcQuery) != "" {
+		data["src_query"] = strings.TrimSpace(srcQuery)
+	}
+	if strings.TrimSpace(dstQuery) != "" {
+		data["dst_query"] = strings.TrimSpace(dstQuery)
+	}
+
+	env := protocol.OK(command, data, protocol.WithSource("cli"), protocol.WithWorkspace(queryCtx.Workspace))
+	return protocol.Write(cmd.OutOrStdout(), env)
+}
+
+func runIndexRepoSmartContext(cmd *cobra.Command, workspace, nodeID, query string, limit int, allowStale bool) error {
+	ctx := cmd.Context()
+	command := "index.repo.smart_context"
+	hint := "Use --node-id with a stored repoindex node ID, or --query to resolve the node by search."
+	if err := validateRepoIndexNavigationSelector(nodeID, query, "--node-id", "--query"); err != nil {
+		return writeRepoIndexNavigationArgError(cmd, command, "", err, hint)
+	}
+
+	queryCtx, err := openFreshRepoIndexQueryContext(ctx, workspace, command, allowStale, cmd.OutOrStdout())
+	if err != nil {
+		return err
+	}
+	defer queryCtx.Store.Close()
+
+	service := repoquery.NewQueryService(repoindex.NewQueryEngine(queryCtx.Store))
+	resolvedNodeID, err := resolveRepoIndexNavigationNode(ctx, queryCtx.Workspace, service, repoIndexNavigationNodeSelector{
+		ID:        nodeID,
+		Query:     query,
+		IDFlag:    "--node-id",
+		QueryFlag: "--query",
+	})
+	if err != nil {
+		return writeRepoIndexNavigationArgError(cmd, command, queryCtx.Workspace, err, hint)
+	}
+	req, err := repoquery.NewSmartContextRequest(resolvedNodeID, limit)
+	if err != nil {
+		return writeRepoIndexNavigationArgError(cmd, command, queryCtx.Workspace, err, hint)
+	}
+	result, err := service.SmartContextWithProjection(ctx, req)
+	if err != nil {
+		return fmt.Errorf("repo query smart context failed: %w", err)
+	}
+
+	data := map[string]any{
+		"workspace":  queryCtx.Workspace,
+		"store_path": queryCtx.Store.Path(),
+		"freshness":  queryCtx.Freshness,
+		"node_id":    req.NodeID,
+		"result":     result.Result,
+		"anchors":    result.Anchors,
+	}
+	if strings.TrimSpace(query) != "" {
+		data["query"] = strings.TrimSpace(query)
+	}
+
+	env := protocol.OK(command, data, protocol.WithSource("cli"), protocol.WithWorkspace(queryCtx.Workspace))
+	return protocol.Write(cmd.OutOrStdout(), env)
+}
+
+func runIndexRepoBlastRadius(cmd *cobra.Command, workspace, nodeID, query string, edgeTypes []string, maxDepth, limit, perNodeCap int, allowStale bool) error {
+	ctx := cmd.Context()
+	command := "index.repo.blast_radius"
+	hint := "Use --node-id with a stored repoindex node ID, or --query to resolve the node by search. Use --edge for known edge types when needed."
+	if err := validateRepoIndexNavigationSelector(nodeID, query, "--node-id", "--query"); err != nil {
+		return writeRepoIndexNavigationArgError(cmd, command, "", err, hint)
+	}
+
+	queryCtx, err := openFreshRepoIndexQueryContext(ctx, workspace, command, allowStale, cmd.OutOrStdout())
+	if err != nil {
+		return err
+	}
+	defer queryCtx.Store.Close()
+
+	service := repoquery.NewQueryService(repoindex.NewQueryEngine(queryCtx.Store))
+	resolvedNodeID, err := resolveRepoIndexNavigationNode(ctx, queryCtx.Workspace, service, repoIndexNavigationNodeSelector{
+		ID:        nodeID,
+		Query:     query,
+		IDFlag:    "--node-id",
+		QueryFlag: "--query",
+	})
+	if err != nil {
+		return writeRepoIndexNavigationArgError(cmd, command, queryCtx.Workspace, err, hint)
+	}
+	req, err := repoquery.NewBlastRadiusRequest(resolvedNodeID, edgeTypes, maxDepth, limit, perNodeCap)
+	if err != nil {
+		return writeRepoIndexNavigationArgError(cmd, command, queryCtx.Workspace, err, hint)
+	}
+	result, err := service.BlastRadiusWithProjection(ctx, req)
+	if err != nil {
+		return fmt.Errorf("repo query blast radius failed: %w", err)
+	}
+
+	data := map[string]any{
+		"workspace":  queryCtx.Workspace,
+		"store_path": queryCtx.Store.Path(),
+		"freshness":  queryCtx.Freshness,
+		"node_id":    req.NodeID,
+		"edges":      repoquery.EdgeTypeValues(repoIndexBlastRadiusEdgeTypes(req.EdgeTypes)),
+		"result":     result.Result,
+		"anchors":    result.Anchors,
+	}
+	if strings.TrimSpace(query) != "" {
+		data["query"] = strings.TrimSpace(query)
+	}
+
+	env := protocol.OK(command, data, protocol.WithSource("cli"), protocol.WithWorkspace(queryCtx.Workspace))
+	return protocol.Write(cmd.OutOrStdout(), env)
+}
+
+func repoIndexTracePathEdgeTypes(edgeTypes []repoindex.EdgeType) []repoindex.EdgeType {
+	if len(edgeTypes) == 0 {
+		return repoindex.DefaultTracePathEdgeTypes()
+	}
+	return edgeTypes
+}
+
+func repoIndexBlastRadiusEdgeTypes(edgeTypes []repoindex.EdgeType) []repoindex.EdgeType {
+	if len(edgeTypes) == 0 {
+		return repoindex.DefaultBlastRadiusEdgeTypes()
+	}
+	return edgeTypes
+}
+
+type repoIndexNavigationNodeSelector struct {
+	ID        string
+	Query     string
+	IDFlag    string
+	QueryFlag string
+}
+
+func writeRepoIndexNavigationArgError(cmd *cobra.Command, command, workspace string, err error, hint string) error {
+	data := protocol.ValidationErrorData{Reason: err.Error(), Hint: hint}
+	meta := []protocol.Option{protocol.WithSource("cli")}
+	if strings.TrimSpace(workspace) != "" {
+		meta = append(meta, protocol.WithWorkspace(workspace))
+	}
+	env := protocol.Error(command, protocol.ErrorCodeEARG, err.Error(), data, meta...)
+	if writeErr := protocol.Write(cmd.OutOrStdout(), env); writeErr != nil {
+		return fmt.Errorf("write repo navigation argument error envelope: %w", writeErr)
+	}
+	return err
+}
+
+func validateRepoIndexNavigationSelector(id, query, idFlag, queryFlag string) error {
+	id = strings.TrimSpace(id)
+	query = strings.TrimSpace(query)
+	switch {
+	case id == "" && query == "":
+		return fmt.Errorf("one of %s or %s is required", idFlag, queryFlag)
+	case id != "" && query != "":
+		return fmt.Errorf("%s and %s are mutually exclusive", idFlag, queryFlag)
+	default:
+		return nil
+	}
+}
+
+func resolveRepoIndexNavigationNode(ctx context.Context, workspace string, service *repoquery.QueryService, selector repoIndexNavigationNodeSelector) (string, error) {
+	id := strings.TrimSpace(selector.ID)
+	query := strings.TrimSpace(selector.Query)
+	if err := validateRepoIndexNavigationSelector(id, query, selector.IDFlag, selector.QueryFlag); err != nil {
+		return "", err
+	}
+	if id != "" {
+		req, err := repoquery.NewOpenRequest(id)
+		if err == nil {
+			if result, openErr := service.OpenWithProjection(ctx, req); openErr == nil {
+				return result.Node.ID, nil
+			}
+		}
+		resolvedID, err := resolveRepoOpenFallbackID(ctx, workspace, service, id)
+		if err != nil {
+			return "", fmt.Errorf("%s %q was not found", selector.IDFlag, id)
+		}
+		return resolvedID, nil
+	}
+
+	req, err := repoquery.NewSearchRequest(query, 10)
+	if err != nil {
+		return "", err
+	}
+	result, err := service.SearchWithProjection(ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s %q: %w", selector.QueryFlag, query, err)
+	}
+	if len(result.Nodes) == 0 {
+		return "", fmt.Errorf("%s %q matched no repoindex nodes", selector.QueryFlag, query)
+	}
+	node, ok := pickBestRepoOpenFallbackNode(result.Nodes, query)
+	if !ok {
+		return "", fmt.Errorf("%s %q matched no repoindex nodes", selector.QueryFlag, query)
+	}
+	return node.ID, nil
 }
 
 func resolveRepoOpenFallbackID(ctx context.Context, workspace string, service *repoquery.QueryService, id string) (string, error) {
