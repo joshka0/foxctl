@@ -1,0 +1,102 @@
+import { defineConfig } from 'astro/config';
+import starlight from '@astrojs/starlight';
+
+export default defineConfig({
+  integrations: [
+    starlight({
+      title: 'foxctl Docs',
+      description:
+        'Production documentation for foxctl workflows, architecture, operations, and release checks.',
+      tableOfContents: {
+        minHeadingLevel: 2,
+        maxHeadingLevel: 3,
+      },
+      sidebar: [
+        {
+          label: 'Start Here',
+          items: [
+            { slug: 'start/overview' },
+            { slug: 'start/install-first-run' },
+            { slug: 'start/docs-map' },
+          ],
+        },
+        {
+          label: 'Guides',
+          items: [
+            { slug: 'guides/designing-foxctl-features' },
+            { slug: 'guides/add-a-skill' },
+            { slug: 'workflows/repo-navigation' },
+            { slug: 'workflows/agents-and-rooms' },
+          ],
+        },
+        {
+          label: 'Core Workflows',
+          items: [
+            { slug: 'skills/runtime-and-install' },
+            { slug: 'retrieval/search-and-index' },
+            { slug: 'retrieval/repoindex-and-dag-grep' },
+            { slug: 'retrieval/repoindex-model' },
+            { slug: 'context/aca' },
+            { slug: 'context/context-engine' },
+            { slug: 'memory/continuity' },
+          ],
+        },
+        {
+          label: 'Agents and Rooms',
+          items: [
+            { slug: 'agents/lifecycle' },
+            { slug: 'agents/orchestration' },
+            { slug: 'collaboration/rooms' },
+          ],
+        },
+        {
+          label: 'Integrations',
+          items: [
+            { slug: 'integrations/providers-and-mcp' },
+            { slug: 'integrations/openapi-and-plugins' },
+            { slug: 'integrations/chat-platforms' },
+            { slug: 'integrations/hooks' },
+            { slug: 'context/obsidian-bridge' },
+          ],
+        },
+        {
+          label: 'Reference',
+          items: [
+            { slug: 'reference/cli' },
+            { slug: 'reference/command-map' },
+            { slug: 'reference/protocol-v1' },
+            { slug: 'storage/cas-and-persistence' },
+          ],
+        },
+        {
+          label: 'Architecture',
+          items: [
+            { slug: 'architecture/system' },
+            { slug: 'architecture/design-principles' },
+            { slug: 'architecture/runtime' },
+            { slug: 'architecture/api-server' },
+            { slug: 'architecture/auth-and-identity' },
+          ],
+        },
+        {
+          label: 'Operations',
+          items: [
+            { slug: 'operations/troubleshooting' },
+            { slug: 'operations/gotchas' },
+            { slug: 'operations/observability' },
+            { slug: 'quality/ci-and-evals' },
+            { slug: 'deployment/kubernetes' },
+          ],
+        },
+        {
+          label: 'Production',
+          items: [{ slug: 'production/verification' }],
+        },
+        {
+          label: 'Roadmap and Archive',
+          items: [{ slug: 'roadmap/planned-and-archive' }],
+        },
+      ],
+    }),
+  ],
+});
