@@ -75,7 +75,6 @@ Archived documentation lives in `docs/archive/`:
 | `impl_plan/` | Completed implementation plans (phases 1–4, vector alignment) | Phases completed; vector alignment done |
 | `designs/` | Implemented design documents (jsonv2, session lineage) | Designs implemented |
 | `migrations/` | Completed migration docs (v2 migration, architecture specs) | Migrations completed; specs superseded |
-| `legacy/` | Superseded root-level docs (search-guide, vector-search, embeddings) | Replaced by current docs in `docs/general/` |
 | `specs/` | Implemented specs (phase 7 trajectory, coderabbit followups) | Specs implemented or superseded |
 
 ### Archive maintenance policy
