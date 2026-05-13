@@ -8,9 +8,12 @@
     "dev:foxterm": "bun run --cwd packages/foxterm dev",
     "dev:gui": "bun run --cwd packages/gui-agent dev",
     "dev:gui-auth-gateway": "bun run --cwd packages/gui-auth-gateway dev",
+    "dev:docs": "bun run --cwd packages/docs-site dev",
     "dev:server": "go run ./cmd/foxctl web serve --dev-cors --atcp",
     "dev:atcpd": "go run ./cmd/atcpd --data-dir $HOME/.foxctl/atcp",
     "dev:all": "make gui-agent",
+    "build:docs": "bun run --cwd packages/docs-site build",
+    "check:docs": "bun run --cwd packages/docs-site check",
     "build": "bun run --filter '*' build",
     "typecheck": "bun run --filter '*' typecheck",
     "typecheck:fast": "tsgo --noEmit",
@@ -22,5 +25,12 @@
     "@redwoodjs/agent-ci": "0.7.1",
     "@typescript/native-preview": "7.0.0-dev.20260103.1",
     "oxlint": "1.36.0"
+  },
+  "overrides": {
+    "defu": "6.1.7",
+    "diff": "8.0.4",
+    "postcss": "8.5.14",
+    "rollup": "4.60.3",
+    "vite": "7.3.2"
   }
 }
