@@ -4,6 +4,7 @@ import starlight from '@astrojs/starlight';
 import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
+  site: 'https://foxctl.com',
   vite: {
     plugins: [tailwindcss()],
   },
