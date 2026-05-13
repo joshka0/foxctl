@@ -72,16 +72,6 @@ func personalizedCoChangeRank(seedPaths []string, commits []gitcochange.Commit, 
 	}
 }
 
-func coChangeCommitWeight(commitTime time.Time, fileCount int, now time.Time, halfLifeDays int) float64 {
-	return gitcochange.CommitWeight(commitTime, fileCount, gitcochange.Config{
-		MaxFilesPerCommit:    fileCount,
-		HalfLifeDays:         halfLifeDays,
-		Now:                  now,
-		GiantCommitSoftLimit: fileCount,
-		GiantCommitHardLimit: fileCount,
-	})
-}
-
 func coChangeBoostForHit(repoPaths []string, prior coChangePrior, weights RetrievalWeights) int {
 	if len(prior.pathScores) == 0 || prior.maxScore <= 0 || weights.CoChange <= 0 {
 		return 0

@@ -42,22 +42,6 @@ func RedactEvent(event *Event) {
 	*event = *redacted
 }
 
-// redactMap recursively walks a map and redacts string values.
-func redactMap(m map[string]any) {
-	for k, v := range m {
-		switch val := v.(type) {
-		case string:
-			if isSensitiveKey(k) {
-				m[k] = redactReplacement
-			} else {
-				m[k] = RedactString(val)
-			}
-		case map[string]any:
-			redactMap(val)
-		}
-	}
-}
-
 // isSensitiveKey returns true if the map key suggests a sensitive value.
 func isSensitiveKey(key string) bool {
 	k := strings.ToLower(key)

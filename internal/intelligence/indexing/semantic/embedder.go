@@ -32,7 +32,6 @@ type Embedder struct {
 	provider      EmbeddingProvider
 	providerName  string
 	rateLimitWait bool
-	allowFallback bool
 	guard         GuardFunc
 }
 
