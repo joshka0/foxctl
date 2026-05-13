@@ -2330,6 +2330,7 @@ func verifierPreludeForTool(toolName string) string {
 	}
 	return strings.TrimSpace(`import json as _rlm_json
 import builtins as _rlm_builtins
+import re as _rlm_re
 
 _rlm_print = _rlm_builtins.print
 _rlm_verifier_done = False
@@ -2365,6 +2366,56 @@ fail = reject
 
 def check(name, pass_value, **evidence):
     return {"name": str(name), "pass": bool(pass_value), "evidence": dict(evidence)}
+
+def exact_labeled_section(label, stop_markers=None, text=None, occurrence="last"):
+    source = text
+    if source is None:
+        source = globals().get("official_prompt", globals().get("prompt", ""))
+    source = str(source)
+    label = str(label).strip()
+    if not label:
+        return ""
+    label_variants = []
+    for candidate in (label, label.rstrip(":") + ":"):
+        if candidate and candidate not in label_variants:
+            label_variants.append(candidate)
+    matches = {}
+    for candidate in label_variants:
+        search_from = 0
+        while True:
+            idx = source.find(candidate, search_from)
+            if idx < 0:
+                break
+            if idx not in matches or len(candidate) > matches[idx]:
+                matches[idx] = len(candidate)
+            search_from = idx + len(candidate)
+    if not matches:
+        return ""
+    occ = str(occurrence or "last").lower()
+    ordered_matches = sorted(matches.items())
+    start, matched_len = ordered_matches[0] if occ == "first" else ordered_matches[-1]
+    tail = source[start + matched_len:].lstrip(" \t:")
+    if stop_markers is None:
+        stop_markers = ["\n\n"]
+    if isinstance(stop_markers, str):
+        stop_markers = [stop_markers]
+    cut_points = []
+    for marker in stop_markers:
+        marker = str(marker)
+        if not marker:
+            continue
+        idx = tail.find(marker)
+        if idx >= 0:
+            cut_points.append(idx)
+    if cut_points:
+        tail = tail[:min(cut_points)]
+    return tail.strip()
+
+def regex_tokens_from_labeled_section(label, pattern, stop_markers=None, text=None, occurrence="last"):
+    section = exact_labeled_section(label, stop_markers=stop_markers, text=text, occurrence=occurrence)
+    if not section:
+        return []
+    return _rlm_re.findall(str(pattern), section)
 
 def candidate_answer(candidate_id):
     candidate_id = str(candidate_id).strip()
@@ -4237,6 +4288,7 @@ func buildREPLCodeRepairPrompt(originalPrompt string, phase REPLRunnerPhase, pri
 			b.WriteString("Every execution path must end by calling accept(...) with the final solution or reject(...) with a compact blocker.\n")
 			b.WriteString("Do not manually print RLM_CHECK_JSON or RLM_ANSWER_JSON; use accept/reject.\n")
 		}
+		b.WriteString("For long labeled task inputs, use exact_labeled_section(label, stop_markers=[...]) or regex_tokens_from_labeled_section(label, pattern, stop_markers=[...]) instead of hard-coded token counts, guessed end tokens, or regexing the entire prompt.\n")
 	} else {
 		b.WriteString("The code must print a non-empty compact result in its first five executable lines.\n")
 	}
@@ -4272,6 +4324,7 @@ func buildREPLCodeFilterPrompt(originalPrompt string, phase REPLRunnerPhase, pri
 		} else {
 			b.WriteString("This verifier phase injects accept(answer, checks=[...], reason=...) and reject(reason) helpers. The filtered code must call accept(...) with a complete final solution or reject(...) with a compact blocker on every execution path.\n")
 		}
+		b.WriteString("Preserve exact_labeled_section(...) or regex_tokens_from_labeled_section(...) when parsing long labeled task data; do not preserve hard-coded token counts or guessed end tokens.\n")
 		b.WriteString("Do not preserve ordinary diagnostic print(...) calls as the only output; ordinary print output is suppressed in this phase.\n")
 	}
 	if phase.MaxREPLCodeLines > 0 {

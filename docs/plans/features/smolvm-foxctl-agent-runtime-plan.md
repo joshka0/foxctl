@@ -53,6 +53,15 @@ not behave as a reliable host bind-mount target in local tests. Host-provided
 repo/output mounts should use `/mnt/repo` and `/mnt/out`; `/workspace` can
 remain smolvm's own persistent workspace when needed.
 
+Operational note from the LongCoT/RLM Python runner: preloaded dependencies
+must live in the image rootfs overlay, not only under `/workspace`, before
+packing the `.smolmachine`. The default local runner expects the stopped named
+machine `foxctl-rlm-longcot-glibc-offline`, created from the durable sidecar
+`~/Library/Caches/foxctl/smolvm/foxctl-python312-longcot-glibc.smolmachine`.
+That machine should report `network:false`; package imports such as
+`python-chess`, `sympy`, `networkx`, `numpy`, and `rdkit` should work without
+outbound network.
+
 Each top-level run gets one readable run namespace and each agent gets one
 readable agent namespace under that run:
 

@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	defaultSmolVMMachineName = "foxctl-rlm-longcot-clean-offline"
-	defaultSmolVMImage       = "python:3.12-alpine"
+	defaultSmolVMMachineName = "foxctl-rlm-longcot-glibc-offline"
+	defaultSmolVMImage       = "python:3.12-slim"
 	defaultSmolVMGuestWork   = "/workspace/foxctl-rlm-python"
 )
 
@@ -295,10 +295,30 @@ func (s *SmolVMPythonSession) ensureMachineLocked(ctx context.Context) error {
 	}
 	if s.startOnInit {
 		if _, err := s.runSmolVMLocked(ctx, 5*time.Minute, "machine", "start", "--name", s.machineName); err != nil && !strings.Contains(err.Error(), "already running") {
+			if path, ok := missingSmolMachineSidecarPath(err.Error()); ok {
+				return fmt.Errorf("start smolvm machine %q: stale machine references missing .smolmachine sidecar %q; recreate the machine from a durable sidecar or select a valid machine: %w", s.machineName, path, err)
+			}
 			return fmt.Errorf("start smolvm machine %q: %w", s.machineName, err)
 		}
 	}
 	return nil
+}
+
+func missingSmolMachineSidecarPath(text string) (string, bool) {
+	if !strings.Contains(text, "source .smolmachine not found") {
+		return "", false
+	}
+	const marker = "source .smolmachine not found:"
+	idx := strings.Index(text, marker)
+	if idx < 0 {
+		return "", true
+	}
+	rest := strings.TrimSpace(text[idx+len(marker):])
+	if rest == "" {
+		return "", true
+	}
+	path := strings.Fields(rest)[0]
+	return strings.TrimSpace(path), true
 }
 
 func (s *SmolVMPythonSession) installPackagesLocked(ctx context.Context, packages []string) (rlm.ExecResult, error) {

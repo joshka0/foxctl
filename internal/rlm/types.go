@@ -19,6 +19,9 @@ type Task struct {
 	MaxDepth        int            `json:"max_depth,omitempty"`
 	MaxIterations   int            `json:"max_iterations,omitempty"`
 	MaxSubcalls     int            `json:"max_subcalls,omitempty"`
+	MaxChildren     int            `json:"max_children,omitempty"`
+	MaxConcurrent   int            `json:"max_concurrent,omitempty"`
+	MaxTotalNodes   int            `json:"max_total_nodes,omitempty"`
 	Metadata        map[string]any `json:"metadata,omitempty"`
 }
 

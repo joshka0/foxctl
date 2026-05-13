@@ -2329,7 +2329,7 @@ func longCoTFanoutQueryCalls(prompts []string) []rlmruntime.REPLRunnerPhaseAutoT
 			Tool: rlmruntime.RLMQueryToolName,
 			Args: mustLongCoTAutoToolArgs(map[string]any{
 				"prompt":         prompt,
-				"max_iterations": 2,
+				"max_iterations": 3,
 			}),
 		})
 	}
@@ -2571,9 +2571,11 @@ func longCoTLambdaAdaptiveLongInputSolvePhases(sandbox rlmruntime.SandboxKind) [
 				"The runtime predefines accept(answer, checks=[...], reason=\"...\") and reject(reason). Use accept to emit the required RLM_CHECK_JSON and RLM_ANSWER_JSON sentinels; use reject for blockers.",
 				"Do not paste move lists, programs, SMILES strings, tables, formulas, or other long task data as literals.",
 				"When the prompt packet lists exact_data_sections, extract from that labeled section only. Do not regex the entire prompt if examples or format instructions contain similar tokens. Preserve full tokens, including suffixes such as promotion characters.",
+				"The verifier prelude provides exact_labeled_section(label, stop_markers=[...]) and regex_tokens_from_labeled_section(label, pattern, stop_markers=[...]) for long labeled task data. Use these helpers instead of guessed end markers, hard-coded terminal tokens, or token-count slices.",
 				"Use prior child summaries as candidate sources, but verify or repair candidates with deterministic parsing, recomputation, simulation, type checking, or constraint checks.",
 				longCoTCapabilityPromptLine(sandbox),
 				"Prefer compact library-backed verification over hand-written domain engines. If a library can parse/simulate/typecheck/recompute the task exactly, use that library instead of implementing those semantics yourself.",
+				"When a library returns a complete serialized answer, return that serialization exactly once; do not append fields already included in the serialized value.",
 				"Keep verifier code compact: imports, small helper functions, computation, then accept/reject. Do not write a derivation in comments.",
 				"Keep comments brief. If the solution needs a long derivation, put the derivation into executable checks instead of comments.",
 				"Do not output tool-call XML, markdown, or prose; return only executable code.",
@@ -2974,22 +2976,83 @@ func longCoTREPLRunnerConfig(
 	if requireEphemeralSkills {
 		cfg.Phases = longCoTEphemeralSkillPhases(question, sandbox, generalHelper)
 	}
+	longCoTEnsurePhaseREPLBudget(&cfg)
 	if blocksworldHelper && longCoTQuestionIsBlocksWorld(question) {
 		cfg.ExtraToolExecutor = longCoTBlocksWorldToolExecutor{Prompt: question.PromptText}
 	}
 	return cfg
 }
 
+func longCoTEnsurePhaseREPLBudget(cfg *rlmruntime.REPLRunnerConfig) {
+	if cfg == nil || len(cfg.Phases) == 0 {
+		return
+	}
+	requiredREPLCalls := 0
+	requiredIterations := 0
+	for _, phase := range cfg.Phases {
+		if phase.AutoExecuteRequiredTool {
+			if len(phase.AutoExecuteToolCalls) > 0 {
+				for _, call := range phase.AutoExecuteToolCalls {
+					if longCoTIsREPLTool(call.Tool) {
+						requiredREPLCalls++
+					}
+				}
+			} else {
+				for _, tool := range phase.RequiredTools {
+					if longCoTIsREPLTool(tool) {
+						requiredREPLCalls++
+					}
+				}
+			}
+			continue
+		}
+		if !phase.RuntimeOnlyFinal {
+			requiredIterations += firstPositiveInt(phase.MaxIterations, 1)
+		}
+		if phase.OutputKind == rlmruntime.REPLPhaseOutputKindREPLCode {
+			requiredREPLCalls++
+			if phase.FilterOverlongREPLCode {
+				requiredIterations++
+			}
+			if !phase.DisableREPLCodeRepair && cfg.ToolErrorRepairMaxAttempts > 0 {
+				requiredREPLCalls += cfg.ToolErrorRepairMaxAttempts
+				requiredIterations += cfg.ToolErrorRepairMaxAttempts
+			}
+		}
+	}
+	if requiredREPLCalls > cfg.Budget.MaxREPLCalls {
+		cfg.Budget.MaxREPLCalls = requiredREPLCalls
+	}
+	if requiredIterations > cfg.Budget.MaxIterations {
+		cfg.Budget.MaxIterations = requiredIterations
+	}
+}
+
+func longCoTIsREPLTool(tool string) bool {
+	switch strings.TrimSpace(tool) {
+	case rlmruntime.PythonREPLToolName, rlmruntime.GoREPLToolName:
+		return true
+	default:
+		return false
+	}
+}
+
 func longCoTSmolVMMachineName() string {
-	return firstNonEmpty(os.Getenv("FOXCTL_LONGCOT_SMOLVM_MACHINE"), "foxctl-rlm-longcot-clean-offline")
+	return firstNonEmpty(os.Getenv("FOXCTL_LONGCOT_SMOLVM_MACHINE"), "foxctl-rlm-longcot-glibc-offline")
 }
 
 func longCoTSmolVMImage() string {
-	return firstNonEmpty(os.Getenv("FOXCTL_LONGCOT_SMOLVM_IMAGE"), "python:3.12-alpine")
+	return firstNonEmpty(os.Getenv("FOXCTL_LONGCOT_SMOLVM_IMAGE"), "python:3.12-slim")
 }
 
 func longCoTSmolVMImageID() string {
-	return firstNonEmpty(os.Getenv("FOXCTL_LONGCOT_SMOLVM_IMAGE_ID"), longCoTSmolVMImage())
+	if imageID := strings.TrimSpace(os.Getenv("FOXCTL_LONGCOT_SMOLVM_IMAGE_ID")); imageID != "" {
+		return imageID
+	}
+	if image := strings.TrimSpace(os.Getenv("FOXCTL_LONGCOT_SMOLVM_IMAGE")); image != "" {
+		return image
+	}
+	return "foxctl-python312-longcot-glibc"
 }
 
 func longCoTSmolVMMachineMode() string {
@@ -3255,6 +3318,8 @@ func longCoTREPLQueryFactory(cfg *rlmruntime.REPLRunnerConfig) func(parentTask r
 				childCfg.Budget.MaxConcurrent = 0
 				childCfg.Budget.MaxTotalNodes = 0
 			}
+			longCoTEnsurePhaseREPLBudget(&childCfg)
+			childTask.MaxIterations = maxInt(childTask.MaxIterations, childCfg.Budget.MaxIterations)
 			childCfg.Sandbox = longCoTChildSandboxConfig(childCfg.Sandbox, childTask)
 			childTask.MaxDepth = childDepth
 			childTask.MaxSubcalls = childSubcalls
@@ -3371,6 +3436,7 @@ func longCoTRetryableRLMError(err error) bool {
 		"status 502",
 		"status 503",
 		"status 504",
+		"empty assistant response",
 	} {
 		if strings.Contains(msg, marker) {
 			return true

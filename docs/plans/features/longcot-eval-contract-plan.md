@@ -1,6 +1,7 @@
 # LongCoT × RLM Evaluation Plan
 
-**Status:** Active plan  
+**Status:** Active plan; initial eval shell and multiple scaffolded RLM
+conditions have landed
 **Created:** 2026-04-19  
 **Related:** [LongCoT eval investigation](../../research/longcot-eval-investigation.md), [RLM next steps](foxctl-rlm-next-steps.md), [RLM retrieval findings](rlm-retrieval-findings.md), [RLM integration outline](foxctl-rlm-integration-outline.md), [RLM query runtime spec](../../spec/rlm_query_runtime.md)
 
@@ -8,7 +9,11 @@
 
 Build a LongCoT-backed internal eval that measures foxctl's RLM agent setup against an official-style no-tool baseline. The primary goal is not leaderboard comparison; it is a paired A/B harness that answers whether RLM scaffolding, staged planning, and later safe deterministic tools improve verifiable long-horizon reasoning accuracy per token.
 
-The first implementation slice is intentionally low-risk: add explicit LongCoT-safe RLM profiles, pure eval schemas/summaries, and docs. Real LongCoT dataset loading, verifier process execution, and live LLM runs come later behind typed interfaces and leakage controls.
+The first implementation slice was intentionally low-risk: add explicit
+LongCoT-safe RLM profiles, pure eval schemas/summaries, and docs. The current
+code has moved beyond that first slice into scaffolded REPL, recursive,
+lambda-adaptive, BRAID, and helper-assisted conditions. Those conditions remain
+internal comparisons, not official leaderboard-equivalent runs.
 
 ## Non-Goals
 
@@ -297,10 +302,12 @@ config.json
 - [x] Pure `longcoteval` schema/summary/leakage/markdown scaffolding exists.
 - [x] Unit tests cover profiles, paired summaries, leakage, markdown, and official-response conversion.
 - [x] Dry-run CLI shell.
+- [x] Offline official-compatible fixture shell.
 - [ ] Official bridge fixtures.
 - [x] Baseline no-tool runner.
 - [x] RLM no-tool runner.
-- [ ] Staged LongCoT RLM route.
+- [x] Staged/scaffolded LongCoT RLM routes.
+- [ ] Helper-pipeline trace/reporting cleanup.
 
 ## Validation Commands
 

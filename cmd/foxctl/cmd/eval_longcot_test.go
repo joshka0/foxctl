@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -857,8 +858,8 @@ func TestLongCoTREPLRunnerConfigLambdaAdaptiveUsesSimpleOptionalPhases(t *testin
 	if cfg.Sandbox.SmolVMPython.CreateOnInit {
 		t.Fatal("adaptive lambda smolvm sandbox should require the prepared offline machine")
 	}
-	if cfg.Sandbox.SmolVMPython.MachineName != "foxctl-rlm-longcot-clean-offline" {
-		t.Fatalf("smolvm machine=%q want foxctl-rlm-longcot-clean-offline", cfg.Sandbox.SmolVMPython.MachineName)
+	if cfg.Sandbox.SmolVMPython.MachineName != "foxctl-rlm-longcot-glibc-offline" {
+		t.Fatalf("smolvm machine=%q want foxctl-rlm-longcot-glibc-offline", cfg.Sandbox.SmolVMPython.MachineName)
 	}
 	if !strings.Contains(cfg.Sandbox.SmolVMPython.GuestWorkDir, "/runs/") {
 		t.Fatalf("smolvm guest workdir should be run-scoped, got %q", cfg.Sandbox.SmolVMPython.GuestWorkDir)
@@ -878,8 +879,8 @@ func TestLongCoTREPLRunnerConfigLambdaAdaptiveUsesSimpleOptionalPhases(t *testin
 	if cfg.Sandbox.MachineMode != "serialized_shared" {
 		t.Fatalf("sandbox machine mode=%q want serialized_shared", cfg.Sandbox.MachineMode)
 	}
-	if cfg.Sandbox.EvalImageID != "python:3.12-alpine" {
-		t.Fatalf("sandbox eval image id=%q want python:3.12-alpine", cfg.Sandbox.EvalImageID)
+	if cfg.Sandbox.EvalImageID != "foxctl-python312-longcot-glibc" {
+		t.Fatalf("sandbox eval image id=%q want foxctl-python312-longcot-glibc", cfg.Sandbox.EvalImageID)
 	}
 	if len(cfg.Sandbox.SmolVMPython.ForwardEnv) != 0 {
 		t.Fatalf("smolvm python sandbox should not forward API key env by default, got %v", cfg.Sandbox.SmolVMPython.ForwardEnv)
@@ -970,6 +971,15 @@ func TestLongCoTREPLRunnerConfigSmolVMMachineEnvOverride(t *testing.T) {
 	}
 	if cfg.Sandbox.MachineMode != "per_attempt" {
 		t.Fatalf("sandbox machine mode=%q", cfg.Sandbox.MachineMode)
+	}
+}
+
+func TestLongCoTSmolVMImageIDFollowsImageOverride(t *testing.T) {
+	t.Setenv("FOXCTL_LONGCOT_SMOLVM_IMAGE", "python:3.12-bookworm")
+	t.Setenv("FOXCTL_LONGCOT_SMOLVM_IMAGE_ID", "")
+
+	if got := longCoTSmolVMImageID(); got != "python:3.12-bookworm" {
+		t.Fatalf("image id=%q want python:3.12-bookworm", got)
 	}
 }
 
@@ -1077,8 +1087,97 @@ func TestLongCoTREPLRunnerConfigLambdaAdaptiveLongInputForcesFanoutAndOfficialPr
 	if !strings.Contains(verify.Prompt, "accept(answer") || !strings.Contains(verify.Prompt, "reject(reason)") {
 		t.Fatalf("long_tool_verify prompt should expose accept/reject helpers:\n%s", verify.Prompt)
 	}
+	if !strings.Contains(verify.Prompt, "exact_labeled_section") || !strings.Contains(verify.Prompt, "regex_tokens_from_labeled_section") {
+		t.Fatalf("long_tool_verify prompt should expose generic exact-data helpers:\n%s", verify.Prompt)
+	}
 	if !cfg.Phases[4].ForwardExecutedStructuredToolAnswer || !cfg.Phases[4].RequireStructuredToolAnswer {
 		t.Fatalf("final should forward executed structured tool answer: forward=%v require=%v", cfg.Phases[4].ForwardExecutedStructuredToolAnswer, cfg.Phases[4].RequireStructuredToolAnswer)
+	}
+}
+
+func TestLongCoTREPLRunnerConfigLambdaAdaptiveLongInputBudgetsVerifierRepair(t *testing.T) {
+	t.Parallel()
+
+	condition := longcoteval.Condition{
+		ID:            longcoteval.ConditionRLMLambdaAdaptiveSingle,
+		Kind:          longcoteval.ConditionKindRLM,
+		RLMPlanMode:   "repl_lambda_adaptive",
+		MaxDepth:      2,
+		MaxIterations: 3,
+		MaxSubcalls:   3,
+	}
+	longPrompt := "Return solution = <value>.\n" + strings.Repeat("node_1 depends on node_2.\n", 90)
+	cfg := longCoTREPLRunnerConfig(
+		longcoteval.Question{PromptText: longPrompt},
+		condition,
+		longCoTLiveTarget{Provider: "openai", Model: "gpt-5"},
+		longCoTHelperRuntime{Target: longCoTLiveTarget{Provider: "openai", Model: "gpt-5"}},
+		30*time.Second,
+		3,
+		t.TempDir(),
+		rlmruntime.SandboxKindPython,
+		false,
+		false,
+		false,
+		false,
+		false,
+	)
+	if got, want := cfg.Budget.MaxREPLCalls, 5; got < want {
+		t.Fatalf("MaxREPLCalls=%d want at least %d for prompt packet + verifier repair attempts", got, want)
+	}
+	if got, want := cfg.Budget.MaxIterations, 5; got < want {
+		t.Fatalf("MaxIterations=%d want at least %d for verifier filtering/repair attempts", got, want)
+	}
+}
+
+func TestLongCoTEnsurePhaseREPLBudgetCoversChildSolvePhases(t *testing.T) {
+	t.Parallel()
+
+	cfg := rlmruntime.REPLRunnerConfig{
+		Budget: rlmruntime.BudgetConfig{
+			MaxIterations: 2,
+			MaxREPLCalls:  2,
+		},
+		ToolErrorRepairMaxAttempts: 2,
+		Phases:                     longCoTChildSolvePhases(rlmruntime.SandboxKindPython, false),
+	}
+
+	longCoTEnsurePhaseREPLBudget(&cfg)
+
+	if got, want := cfg.Budget.MaxIterations, 4; got < want {
+		t.Fatalf("MaxIterations=%d want at least %d for child scratch + repair + final", got, want)
+	}
+	if got, want := cfg.Budget.MaxREPLCalls, 4; got < want {
+		t.Fatalf("MaxREPLCalls=%d want at least %d for child context + scratch repair", got, want)
+	}
+}
+
+func TestLongCoTFanoutQueryCallsGiveChildrenEnoughModelTurns(t *testing.T) {
+	t.Parallel()
+
+	calls := longCoTFanoutQueryCalls([]string{"child"})
+	if got, want := len(calls), 1; got != want {
+		t.Fatalf("calls=%d want %d", got, want)
+	}
+	var payload struct {
+		MaxIterations int `json:"max_iterations"`
+	}
+	if err := json.Unmarshal(calls[0].Args, &payload); err != nil {
+		t.Fatalf("decode args: %v", err)
+	}
+	if got, want := payload.MaxIterations, 3; got != want {
+		t.Fatalf("max_iterations=%d want %d", got, want)
+	}
+}
+
+func TestLongCoTRetryableRLMErrorIncludesEmptyChildResponse(t *testing.T) {
+	t.Parallel()
+
+	if !longCoTRetryableRLMError(errors.New("rlm repl runner: empty assistant response")) {
+		t.Fatal("empty assistant response should be retryable for child runs")
+	}
+	if longCoTRetryableRLMError(errors.New("rlm runtime: iterations budget exceeded")) {
+		t.Fatal("budget errors should not be retried blindly")
 	}
 }
 
@@ -2387,6 +2486,15 @@ func TestLongCoTBlocksWorldSolveTool(t *testing.T) {
 	}
 	if got["answer_format"] != "solution = move A to B" {
 		t.Fatalf("answer_format=%v", got["answer_format"])
+	}
+	output, ok := got["output"].(string)
+	if !ok {
+		t.Fatalf("output missing or not string: %#v", got["output"])
+	}
+	for _, want := range []string{"RLM_CHECK_JSON=", "RLM_ANSWER_JSON=", "solution = move A to B"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("structured output missing %q:\n%s", want, output)
+		}
 	}
 }
 

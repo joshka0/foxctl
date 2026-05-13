@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft implementation plan. This supersedes treating `eval longcot` as the
+Implementation in progress. This supersedes treating `eval longcot` as the
 primary workstream. LongCoT remains the benchmark consumer, but the immediate
 priority is a real Recursive Language Model runtime for `foxctl`.
 
@@ -23,8 +23,10 @@ Recursive Language Models:
 The first benchmark target is official LongCoT, but the runtime must be generic
 enough for other foxctl tasks.
 
-Async fan-out/fan-in recursion is tracked as the next implementation phase in
+Async fan-out/fan-in recursion is tracked in
 [rlm-recursive-fanout-runtime-plan.md](rlm-recursive-fanout-runtime-plan.md).
+That phase has since landed in core runtime form; remaining work is mostly CLI
+ergonomics, reporting, and LongCoT/helper-pipeline hardening.
 
 ## Direction Update: Simplify The Harness
 
@@ -52,20 +54,25 @@ not a prerequisite for the adaptive experiment.
 
 ## Current State
 
-`internal/rlm` is currently a bounded tool-orchestration layer, not a paper
-RLM.
+`internal/rlm` now has both the original bounded tool-orchestration layer and a
+paper-style runtime lane.
 
-- `internal/rlm/llm_runner.go` wraps `engine.LLMChatEngine` and supports a
+- `internal/rlm/llm_runner.go` still wraps `engine.LLMChatEngine` and supports a
   single pass or staged retrieval-oriented phases.
-- `internal/rlm/env/adapter.go` has a `subcall` tool callback, but subcalls are
-  optional tool invocations, not a first-class recursive runtime.
-- `internal/rlm/interfaces.go` defines `Sandbox`, but no active RLM runner uses
-  a REPL/code sandbox.
-- LongCoT conditions currently force an empty tool environment and set
-  `MaxSubcalls` to zero.
+- `internal/rlm/runtime/repl_runner.go` provides the REPL-backed runner with
+  structured `RLM_ANSWER_JSON` / `RLM_CHECK_JSON` answer handoff.
+- `internal/rlm/runtime/scheduler.go`, `node_store.go`, `budget.go`, and
+  `rlm_tools.go` provide async `rlm_query`, `rlm_wait`, and `rlm_result` with
+  depth, child, concurrency, and total-node budgets.
+- `cmd/foxctl/cmd/eval_longcot.go` includes scaffolded LongCoT RLM conditions
+  such as REPL, recursive, lambda-adaptive, and BRAID variants.
+- `ephemeral_helper_solve` exists as a parent-facing helper shortcut, but its
+  pipeline trace and preset decomposition are still being hardened in
+  [rlm-helper-pipeline-repair-plan.md](rlm-helper-pipeline-repair-plan.md).
 
-This means current LongCoT `rlm_*` conditions are not meaningful RLM
-comparisons.
+The main caution is evaluation language: helper-assisted or recursive LongCoT
+conditions are internal scaffolded comparisons, not official leaderboard
+conditions.
 
 ## Target Architecture
 
@@ -224,8 +231,10 @@ Definition of done:
 
 ## Immediate Next Slice
 
-1. Build `internal/rlm/runtime` budget and trajectory primitives.
-2. Build `internal/rlm/repl` persistent Python session.
-3. Add an experimental runner that exposes REPL only, no subcalls.
-4. Run a synthetic BlocksWorld-like local task before reconnecting official
-   LongCoT.
+1. Keep `rlm run` CLI budget/reporting aligned with the async runtime fields.
+2. Harden `ephemeral_helper_solve` trace output so parent prompts receive only
+   compact pipeline summaries, source hashes, and digestible metadata.
+3. Extract reusable helper-pipeline types under
+   `internal/rlm/runtime/helperpipeline`.
+4. Split the BlocksWorld helper preset into explicit parse/solve/verify/format
+   steps before adding durable repair/cache behavior.

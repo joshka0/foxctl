@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/rlm"
+	"github.com/joshka0/foxctl/internal/runtime/engine"
 )
 
 func TestHelperFactoryToolsDraftsRunsAndReturnsAnswer(t *testing.T) {
@@ -1686,9 +1687,18 @@ func TestHelperFactoryToolsUsesPresetSourceBeforeDrafting(t *testing.T) {
 		t.Fatalf("Execute returned error: %v", err)
 	}
 	var got struct {
-		OK       bool             `json:"ok"`
-		Answer   string           `json:"answer"`
-		Preset   string           `json:"preset"`
+		OK                    bool   `json:"ok"`
+		Answer                string `json:"answer"`
+		Preset                string `json:"preset"`
+		HelperScaffolded      bool   `json:"helper_scaffolded"`
+		LeaderboardComparable bool   `json:"leaderboard_comparable"`
+		Pipeline              struct {
+			PipelineID            string           `json:"pipeline_id"`
+			Scaffolded            bool             `json:"scaffolded"`
+			LeaderboardComparable bool             `json:"leaderboard_comparable"`
+			Status                string           `json:"status"`
+			Steps                 []map[string]any `json:"steps"`
+		} `json:"pipeline"`
 		Attempts []map[string]any `json:"attempts"`
 	}
 	if err := json.Unmarshal([]byte(raw), &got); err != nil {
@@ -1696,6 +1706,15 @@ func TestHelperFactoryToolsUsesPresetSourceBeforeDrafting(t *testing.T) {
 	}
 	if !got.OK || got.Answer != "solution = preset" || got.Preset != "test_preset" {
 		t.Fatalf("output ok=%v answer=%q preset=%q raw=%s", got.OK, got.Answer, got.Preset, raw)
+	}
+	if !got.HelperScaffolded || got.LeaderboardComparable {
+		t.Fatalf("helper scaffold flags scaffolded=%v leaderboard=%v raw=%s", got.HelperScaffolded, got.LeaderboardComparable, raw)
+	}
+	if got.Pipeline.PipelineID == "" || !got.Pipeline.Scaffolded || got.Pipeline.LeaderboardComparable || got.Pipeline.Status != "completed" {
+		t.Fatalf("unexpected compact pipeline trace: %+v raw=%s", got.Pipeline, raw)
+	}
+	if len(got.Pipeline.Steps) != 1 || got.Pipeline.Steps[0]["source_hash"] == "" {
+		t.Fatalf("pipeline steps missing source hash: %+v raw=%s", got.Pipeline.Steps, raw)
 	}
 	if strings.Contains(raw, "func Solve") {
 		t.Fatalf("compact helper output leaked full source: %s", raw)
@@ -1708,6 +1727,37 @@ func TestHelperFactoryToolsUsesPresetSourceBeforeDrafting(t *testing.T) {
 	}
 	if !strings.Contains(raw, `"capability_policy"`) || !strings.Contains(raw, `"network":"none"`) {
 		t.Fatalf("helper output missing capability policy: %s", raw)
+	}
+}
+
+func TestHelperFactoryToolsPipelineTraceSummarizesLargeOutputs(t *testing.T) {
+	t.Parallel()
+
+	tools := &HelperFactoryTools{Config: HelperFactoryConfig{
+		TaskPrompt:          "Return solution = many moves.",
+		Attempts:            1,
+		ExtractSolutionLine: true,
+		PresetName:          "large_output_preset",
+		PresetSource: `func Solve(input map[string]any) map[string]any {
+	moves := make([][]int, 0, 64)
+	for i := 0; i < 64; i++ {
+		moves = append(moves, []int{i, (i + 1) % 3, (i + 2) % 3})
+	}
+	return map[string]any{"ok": true, "answer": "solution = many moves", "moves": moves}
+}`,
+	}}
+	raw, err := tools.Execute(context.Background(), EphemeralHelperSolveToolName, nil)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if strings.Contains(raw, `"moves":[`) {
+		t.Fatalf("helper output leaked full move array: %s", raw)
+	}
+	if !strings.Contains(raw, `"moves_count":64`) {
+		t.Fatalf("helper output missing compact move count: %s", raw)
+	}
+	if !strings.Contains(raw, `"pipeline"`) || !strings.Contains(raw, `"output_summary"`) {
+		t.Fatalf("helper output missing compact pipeline trace: %s", raw)
 	}
 }
 
@@ -1878,6 +1928,25 @@ solution = <integer>
 		if strings.Contains(prompt, forbidden) {
 			t.Fatalf("compacted prompt still contains %q:\n%s", forbidden, prompt)
 		}
+	}
+}
+
+func TestHelperFactoryTraceFromToolResultsIgnoresNonHelperOutput(t *testing.T) {
+	t.Parallel()
+
+	if trace, ok := helperFactoryTraceFromToolResults([]engine.ToolResult{{
+		Content: `{"ok":true,"output":"RLM_CHECK_JSON={\"pass\":true}\nRLM_ANSWER_JSON={\"answer\":\"solution = 4\",\"pass\":true}"}`,
+	}}); ok {
+		t.Fatalf("non-helper output was misclassified as helper trace: %#v", trace)
+	}
+	trace, ok := helperFactoryTraceFromToolResults([]engine.ToolResult{{
+		Content: `{"ok":true,"pipeline_id":"pipe-test","output":"solution = 4"}`,
+	}})
+	if !ok {
+		t.Fatal("expected helper pipeline payload to be recognized")
+	}
+	if trace["pipeline_id"] != "pipe-test" {
+		t.Fatalf("pipeline_id=%v", trace["pipeline_id"])
 	}
 }
 
