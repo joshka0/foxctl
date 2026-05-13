@@ -130,7 +130,82 @@ func TestLoadRejectsConflictingSelectors(t *testing.T) {
 	}
 }
 
+func TestLoadSnapshotIDRejectsMismatchedArtifact(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	storageRoot := t.TempDir()
+	casRoot := t.TempDir()
+
+	payload := refsnapshot.Payload{
+		SnapshotID: "refsnap-actual",
+		Mode:       refstatus.ModeParserOnly,
+		Scope: refscope.Scope{
+			Workspace: "/repo",
+			RepoRoot:  "/repo",
+			Path:      "internal",
+			Language:  "go",
+		},
+		Summary: refsnapshot.Summary{FileCount: 1},
+		Files:   []refsnapshot.FileSnapshot{{Path: "internal/a.go", Language: "go"}},
+		Symbols: []refsnapshot.SymbolSnapshot{},
+	}
+	artifact := putJSONArtifact(t, ctx, casRoot, payload)
+	putSnapshotRecord(t, ctx, storageRoot, refsnapshotstore.Record{
+		SnapshotID:     "refsnap-requested",
+		ArtifactDigest: artifact,
+		Workspace:      "/repo",
+		RepoRoot:       "/repo",
+		Path:           "internal",
+		Language:       "go",
+		Mode:           string(refstatus.ModeParserOnly),
+		CreatedAt:      time.Date(2026, 4, 2, 12, 0, 0, 0, time.UTC),
+	})
+
+	_, err := Load(ctx, storageRoot, casRoot, Options{SnapshotID: "refsnap-requested"})
+	if err == nil {
+		t.Fatal("expected mismatched snapshot artifact error")
+	}
+	loadErr, ok := err.(*LoadError)
+	if !ok {
+		t.Fatalf("err=%T want *LoadError", err)
+	}
+	if loadErr.Kind != ErrorKindInvalidArtifact {
+		t.Fatalf("kind=%q want %q", loadErr.Kind, ErrorKindInvalidArtifact)
+	}
+}
+
+func TestLoadRejectsInvalidJSONArtifact(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	casRoot := t.TempDir()
+	artifact := putRawArtifact(t, ctx, casRoot, []byte("{not-json"))
+
+	_, err := Load(ctx, t.TempDir(), casRoot, Options{Artifact: artifact})
+	if err == nil {
+		t.Fatal("expected invalid artifact error")
+	}
+	loadErr, ok := err.(*LoadError)
+	if !ok {
+		t.Fatalf("err=%T want *LoadError", err)
+	}
+	if loadErr.Kind != ErrorKindInvalidArtifact {
+		t.Fatalf("kind=%q want %q", loadErr.Kind, ErrorKindInvalidArtifact)
+	}
+}
+
 func putJSONArtifact(t *testing.T, ctx context.Context, casRoot string, payload any) string {
+	t.Helper()
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return putRawArtifact(t, ctx, casRoot, body)
+}
+
+func putRawArtifact(t *testing.T, ctx context.Context, casRoot string, body []byte) string {
 	t.Helper()
 
 	store, err := cas.NewStore(casRoot)
@@ -139,10 +214,6 @@ func putJSONArtifact(t *testing.T, ctx context.Context, casRoot string, payload 
 	}
 	defer store.Close()
 
-	body, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
 	obj, err := store.Put(ctx, bytes.NewReader(body), "application/json", []string{"test"})
 	if err != nil {
 		t.Fatalf("put cas: %v", err)

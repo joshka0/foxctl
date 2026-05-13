@@ -80,6 +80,11 @@ type Options struct {
 	SnapshotID string
 }
 
+type loadSelector struct {
+	Artifact   string
+	SnapshotID string
+}
+
 // Result is the decoded refactor artifact payload.
 type Result struct {
 	Kind           ArtifactKind             `json:"kind"`
@@ -92,75 +97,73 @@ type Result struct {
 
 // Load resolves and decodes a persisted refactor snapshot or scout evidence artifact.
 func Load(ctx context.Context, storageRoot, casRoot string, opts Options) (Result, error) {
-	artifact := strings.TrimSpace(opts.Artifact)
-	snapshotID := strings.TrimSpace(opts.SnapshotID)
-	switch {
-	case artifact != "" && snapshotID != "":
-		return Result{}, &LoadError{
-			Kind:    ErrorKindInvalidInput,
-			Message: "use either --artifact or --snapshot-id, not both",
-			Hint:    "Pass the digest from `refactor scout` or `refactor snapshot`, or pass a snapshot id from `refactor snapshot`.",
-		}
-	case artifact == "" && snapshotID == "":
-		return Result{}, &LoadError{
-			Kind:    ErrorKindInvalidInput,
-			Message: "either --artifact or --snapshot-id is required",
-			Hint:    "Use --snapshot-id refsnap-... for a stored snapshot, or --artifact sha256:... for a snapshot/evidence artifact digest.",
-		}
+	selector, err := normalizeLoadSelector(opts)
+	if err != nil {
+		return Result{}, err
 	}
-
-	result := Result{}
-	if snapshotID != "" {
-		record, err := loadSnapshotRecord(ctx, storageRoot, snapshotID)
-		if err != nil {
-			return Result{}, err
-		}
-		artifact = record.ArtifactDigest
-		result.SnapshotRecord = &record
+	artifact, record, err := resolveLoadArtifact(ctx, storageRoot, selector)
+	if err != nil {
+		return Result{}, err
 	}
 	body, err := readArtifact(ctx, casRoot, artifact)
 	if err != nil {
 		return Result{}, err
 	}
+	return decodeLoadResult(ctx, storageRoot, selector, artifact, record, body)
+}
 
+func normalizeLoadSelector(opts Options) (loadSelector, error) {
+	selector := loadSelector{
+		Artifact:   strings.TrimSpace(opts.Artifact),
+		SnapshotID: strings.TrimSpace(opts.SnapshotID),
+	}
+	switch {
+	case selector.Artifact != "" && selector.SnapshotID != "":
+		return loadSelector{}, &LoadError{
+			Kind:    ErrorKindInvalidInput,
+			Message: "use either --artifact or --snapshot-id, not both",
+			Hint:    "Pass the digest from `refactor scout` or `refactor snapshot`, or pass a snapshot id from `refactor snapshot`.",
+		}
+	case selector.Artifact == "" && selector.SnapshotID == "":
+		return loadSelector{}, &LoadError{
+			Kind:    ErrorKindInvalidInput,
+			Message: "either --artifact or --snapshot-id is required",
+			Hint:    "Use --snapshot-id refsnap-... for a stored snapshot, or --artifact sha256:... for a snapshot/evidence artifact digest.",
+		}
+	default:
+		return selector, nil
+	}
+}
+
+func resolveLoadArtifact(ctx context.Context, storageRoot string, selector loadSelector) (string, *refsnapshotstore.Record, error) {
+	if selector.SnapshotID == "" {
+		return selector.Artifact, nil, nil
+	}
+	record, err := loadSnapshotRecord(ctx, storageRoot, selector.SnapshotID)
+	if err != nil {
+		return "", nil, err
+	}
+	return record.ArtifactDigest, &record, nil
+}
+
+func decodeLoadResult(ctx context.Context, storageRoot string, selector loadSelector, artifact string, record *refsnapshotstore.Record, body []byte) (Result, error) {
 	kind, err := detectArtifactKind(body)
 	if err != nil {
 		return Result{}, err
 	}
-	result.Kind = kind
-	result.Artifact = artifact
-
+	result := Result{
+		Kind:           kind,
+		Artifact:       artifact,
+		SnapshotRecord: record,
+	}
 	switch kind {
 	case ArtifactKindSnapshot:
-		var payload refsnapshot.Payload
-		if err := json.Unmarshal(body, &payload); err != nil {
-			return Result{}, fmt.Errorf("decode refactor snapshot artifact: %w", err)
-		}
-		result.Snapshot = &payload
-		result.SnapshotID = strings.TrimSpace(payload.SnapshotID)
-		if snapshotID != "" && result.SnapshotID != snapshotID {
-			return Result{}, &LoadError{
-				Kind:    ErrorKindInvalidArtifact,
-				Message: fmt.Sprintf("snapshot artifact %q does not match snapshot id %q", artifact, snapshotID),
-				Hint:    "Re-run `foxctl refactor snapshot ...` and use the returned snapshot id or artifact digest together.",
-			}
-		}
-		if result.SnapshotRecord == nil && result.SnapshotID != "" {
-			if record, err := maybeLoadSnapshotRecord(ctx, storageRoot, result.SnapshotID); err == nil && record != nil {
-				result.SnapshotRecord = record
-			}
+		if err := decodeSnapshotResult(body, selector, artifact, &result); err != nil {
+			return Result{}, err
 		}
 	case ArtifactKindHotspotPack:
-		var pack HotspotPack
-		if err := json.Unmarshal(body, &pack); err != nil {
-			return Result{}, fmt.Errorf("decode refactor hotspot evidence artifact: %w", err)
-		}
-		result.HotspotPack = &pack
-		result.SnapshotID = strings.TrimSpace(pack.SnapshotID)
-		if result.SnapshotRecord == nil && result.SnapshotID != "" {
-			if record, err := maybeLoadSnapshotRecord(ctx, storageRoot, result.SnapshotID); err == nil && record != nil {
-				result.SnapshotRecord = record
-			}
+		if err := decodeHotspotPackResult(body, &result); err != nil {
+			return Result{}, err
 		}
 	default:
 		return Result{}, &LoadError{
@@ -169,8 +172,39 @@ func Load(ctx context.Context, storageRoot, casRoot string, opts Options) (Resul
 			Hint:    "Pass a digest from `refactor snapshot` (`data.artifact`) or `refactor scout` (`data.snapshot_artifact` or `data.evidence_artifact`).",
 		}
 	}
-
+	if result.SnapshotRecord == nil && result.SnapshotID != "" {
+		if record, err := maybeLoadSnapshotRecord(ctx, storageRoot, result.SnapshotID); err == nil && record != nil {
+			result.SnapshotRecord = record
+		}
+	}
 	return result, nil
+}
+
+func decodeSnapshotResult(body []byte, selector loadSelector, artifact string, result *Result) error {
+	var payload refsnapshot.Payload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return fmt.Errorf("decode refactor snapshot artifact: %w", err)
+	}
+	result.Snapshot = &payload
+	result.SnapshotID = strings.TrimSpace(payload.SnapshotID)
+	if selector.SnapshotID != "" && result.SnapshotID != selector.SnapshotID {
+		return &LoadError{
+			Kind:    ErrorKindInvalidArtifact,
+			Message: fmt.Sprintf("snapshot artifact %q does not match snapshot id %q", artifact, selector.SnapshotID),
+			Hint:    "Re-run `foxctl refactor snapshot ...` and use the returned snapshot id or artifact digest together.",
+		}
+	}
+	return nil
+}
+
+func decodeHotspotPackResult(body []byte, result *Result) error {
+	var pack HotspotPack
+	if err := json.Unmarshal(body, &pack); err != nil {
+		return fmt.Errorf("decode refactor hotspot evidence artifact: %w", err)
+	}
+	result.HotspotPack = &pack
+	result.SnapshotID = strings.TrimSpace(pack.SnapshotID)
+	return nil
 }
 
 func loadSnapshotRecord(ctx context.Context, storageRoot, snapshotID string) (refsnapshotstore.Record, error) {
