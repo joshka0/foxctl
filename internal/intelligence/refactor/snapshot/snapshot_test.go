@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+	symindex "github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
 	refscope "github.com/joshka0/foxctl/internal/intelligence/refactor/scope"
 	refstatus "github.com/joshka0/foxctl/internal/intelligence/refactor/status"
 )
@@ -104,6 +105,84 @@ func TestBuildSnapshotReturnsHelpfulErrorWhenScopeHasNoMatchingFiles(t *testing.
 	}
 	if buildErr.Hint == "" {
 		t.Fatal("expected non-empty hint")
+	}
+}
+
+func TestBuildFileSnapshotUsesStableMetadata(t *testing.T) {
+	t.Parallel()
+
+	content := []byte("package sample\n\nfunc Alpha() {}\n")
+	symbols := []symindex.Symbol{
+		{ID: "a.go:Alpha", Name: "Alpha", Kind: symindex.KindFunction},
+		{ID: "a.go:Beta", Name: "Beta", Kind: symindex.KindFunction},
+	}
+
+	file := buildFileSnapshot("pkg/a.go", "go", content, symbols)
+	if file.Path != "pkg/a.go" {
+		t.Fatalf("path=%q want pkg/a.go", file.Path)
+	}
+	if file.Language != "go" {
+		t.Fatalf("language=%q want go", file.Language)
+	}
+	if file.LineCount != 4 {
+		t.Fatalf("line_count=%d want 4", file.LineCount)
+	}
+	if file.SymbolCount != 2 {
+		t.Fatalf("symbol_count=%d want 2", file.SymbolCount)
+	}
+	if file.Package == "" {
+		t.Fatal("expected derived package")
+	}
+	if file.Hash == "" {
+		t.Fatal("expected content hash")
+	}
+}
+
+func TestBuildSymbolSnapshotsTrimsBoundaryFields(t *testing.T) {
+	t.Parallel()
+
+	snapshots := buildSymbolSnapshots("pkg/a.go", []symindex.Symbol{{
+		ID:         "pkg/a.go:Alpha",
+		Name:       " Alpha ",
+		Kind:       symindex.KindFunction,
+		BodyDigest: " sha256:body ",
+		StartLine:  3,
+		EndLine:    5,
+		Signature:  " func Alpha() ",
+	}})
+
+	if len(snapshots) != 1 {
+		t.Fatalf("snapshots len=%d want 1", len(snapshots))
+	}
+	got := snapshots[0]
+	if got.Path != "pkg/a.go" || got.SymbolID != "pkg/a.go:Alpha" || got.Name != "Alpha" {
+		t.Fatalf("snapshot identity=%+v", got)
+	}
+	if got.Hash != "sha256:body" || got.Signature != "func Alpha()" {
+		t.Fatalf("snapshot trimmed fields=%+v", got)
+	}
+	if got.LineStart != 3 || got.LineEnd != 5 {
+		t.Fatalf("lines=%d-%d want 3-5", got.LineStart, got.LineEnd)
+	}
+}
+
+func TestAddFileToPayloadUpdatesSummaryFromFileAndSymbols(t *testing.T) {
+	t.Parallel()
+
+	payload := Payload{}
+	addFileToPayload(&payload, FileSnapshot{Path: "pkg/a.go", LineCount: 7}, []SymbolSnapshot{
+		{SymbolID: "a"},
+		{SymbolID: "b"},
+	})
+
+	if payload.Summary.FileCount != 1 {
+		t.Fatalf("file_count=%d want 1", payload.Summary.FileCount)
+	}
+	if payload.Summary.SymbolCount != 2 {
+		t.Fatalf("symbol_count=%d want 2", payload.Summary.SymbolCount)
+	}
+	if payload.Summary.LineCount != 7 {
+		t.Fatalf("line_count=%d want 7", payload.Summary.LineCount)
 	}
 }
 

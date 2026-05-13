@@ -4,8 +4,11 @@ package main
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"testing"
+
+	sitter "github.com/tree-sitter/go-tree-sitter"
 
 	symindex "github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
 )
@@ -179,4 +182,115 @@ end
 	if !ok || groupKind != "tuple_clause" {
 		t.Fatalf("group_kind=%#v", got[0].Evidence["group_kind"])
 	}
+}
+
+func TestElixirNodeFingerprintNormalizesIdentifiersInsideSameGuardShape(t *testing.T) {
+	root, content := parseElixirRootForTest(t, `defmodule Demo do
+  def run(response, payload) do
+    if response.status == 401 do
+      :ok
+    end
+
+    if payload.status == 401 do
+      :ok
+    end
+  end
+end
+`)
+
+	ifCalls := collectElixirCallsByTarget(root, content, "if")
+	if len(ifCalls) != 2 {
+		t.Fatalf("len(ifCalls)=%d want 2", len(ifCalls))
+	}
+	firstArgs := elixirCallArgumentsLocal(&ifCalls[0])
+	secondArgs := elixirCallArgumentsLocal(&ifCalls[1])
+	firstFP := elixirNodeFingerprint(firstArgs, content)
+	secondFP := elixirNodeFingerprint(secondArgs, content)
+	if firstFP != secondFP {
+		t.Fatalf("fingerprints differ: %q != %q", firstFP, secondFP)
+	}
+	if strings.Contains(firstFP, "response") || strings.Contains(firstFP, "payload") {
+		t.Fatalf("fingerprint leaked identifier names: %q", firstFP)
+	}
+}
+
+func TestElixirGuardAtomsSplitBooleanGuardsAndRejectBareIdentifier(t *testing.T) {
+	root, content := parseElixirRootForTest(t, `defmodule Demo do
+  def run(response, ready) do
+    if response.status == 401 and fallback?() do
+      :ok
+    end
+
+    if ready do
+      :ok
+    end
+  end
+end
+`)
+
+	ifCalls := collectElixirCallsByTarget(root, content, "if")
+	if len(ifCalls) != 2 {
+		t.Fatalf("len(ifCalls)=%d want 2", len(ifCalls))
+	}
+
+	splitAtoms := elixirGuardAtoms(elixirCallArgumentsLocal(&ifCalls[0]), content)
+	if len(splitAtoms) != 2 {
+		t.Fatalf("len(splitAtoms)=%d want 2 (%#v)", len(splitAtoms), splitAtoms)
+	}
+	fingerprints := make([]string, 0, len(splitAtoms))
+	previews := make([]string, 0, len(splitAtoms))
+	for _, atom := range splitAtoms {
+		fingerprints = append(fingerprints, atom.Fingerprint)
+		previews = append(previews, atom.Preview)
+	}
+	sort.Strings(fingerprints)
+	sort.Strings(previews)
+	if !strings.Contains(strings.Join(fingerprints, " "), "dot(var,status)") {
+		t.Fatalf("guard fingerprints missing status predicate: %v", fingerprints)
+	}
+	if !strings.Contains(strings.Join(fingerprints, " "), "call(fallback?)") {
+		t.Fatalf("guard fingerprints missing fallback call: %v", fingerprints)
+	}
+	if !strings.Contains(strings.Join(previews, " | "), "fallback?()") {
+		t.Fatalf("guard previews missing fallback call: %v", previews)
+	}
+
+	rejected := elixirGuardAtoms(elixirCallArgumentsLocal(&ifCalls[1]), content)
+	if len(rejected) != 0 {
+		t.Fatalf("expected no atoms for bare identifier guard, got %#v", rejected)
+	}
+}
+
+func parseElixirRootForTest(t *testing.T, src string) (*sitter.Node, []byte) {
+	t.Helper()
+	content := []byte(src)
+	tree, ok := parseElixirSlopTree(content)
+	if !ok || tree == nil {
+		t.Fatal("parseElixirSlopTree failed")
+	}
+	t.Cleanup(func() { tree.Close() })
+	return tree.RootNode(), content
+}
+
+func collectElixirCallsByTarget(root *sitter.Node, content []byte, target string) []sitter.Node {
+	if root == nil {
+		return nil
+	}
+	calls := make([]sitter.Node, 0, 4)
+	var walk func(*sitter.Node)
+	walk = func(node *sitter.Node) {
+		if node == nil {
+			return
+		}
+		if node.Kind() == "call" && strings.TrimSpace(elixirCallTargetName(node, content)) == target {
+			calls = append(calls, *node)
+		}
+		cursor := node.Walk()
+		for _, child := range node.NamedChildren(cursor) {
+			c := child
+			walk(&c)
+		}
+	}
+	walk(root)
+	return calls
 }

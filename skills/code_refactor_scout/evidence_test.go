@@ -167,6 +167,61 @@ func TestAttachEvidenceToHotspotsAddsSnapshotAndHotFieldsWithoutRepoGraph(t *tes
 	}
 }
 
+func TestAttachEvidenceToHotspotsMaintainsStablePackWithPartialIndexes(t *testing.T) {
+	findings := []finding{
+		{
+			RuleID: "function_hotspot",
+			File:   "internal/runtime/actor/agent_actor.go",
+			Symbol: "*AgentActor.handleAsk",
+			Evidence: map[string]any{
+				"rules": []string{"fan_out_dependency_spread"},
+			},
+		},
+	}
+	pack := refevidence.HotspotPack{}
+
+	got := attachEvidenceToHotspots(context.Background(), findings, nil, nil, nil, nil, "refsnap-partial", "sha256:partial", &pack)
+	if len(got) != 1 {
+		t.Fatalf("len=%d want 1", len(got))
+	}
+	evidence := got[0].Evidence
+	if evidence["scope_snapshot_id"] != "refsnap-partial" {
+		t.Fatalf("scope_snapshot_id=%v want refsnap-partial", evidence["scope_snapshot_id"])
+	}
+	if evidence["scope_snapshot_artifact"] != "sha256:partial" {
+		t.Fatalf("scope_snapshot_artifact=%v want sha256:partial", evidence["scope_snapshot_artifact"])
+	}
+	if _, ok := evidence["recent_change_count"]; ok {
+		t.Fatalf("recent_change_count should be absent with partial indexes: %#v", evidence)
+	}
+	if _, ok := evidence["seed_node_id"]; ok {
+		t.Fatalf("seed_node_id should be absent without repo graph: %#v", evidence)
+	}
+
+	if len(pack.Hotspots) != 1 {
+		t.Fatalf("hotspots=%d want 1", len(pack.Hotspots))
+	}
+	row := pack.Hotspots[0]
+	if row.File != "internal/runtime/actor/agent_actor.go" {
+		t.Fatalf("row file=%q want internal/runtime/actor/agent_actor.go", row.File)
+	}
+	if row.Symbol != "*AgentActor.handleAsk" {
+		t.Fatalf("row symbol=%q want *AgentActor.handleAsk", row.Symbol)
+	}
+	if row.RecentChangeCount != 0 || row.HotScore != 0 {
+		t.Fatalf("row hot evidence=(%d, %v) want zero values", row.RecentChangeCount, row.HotScore)
+	}
+	if row.SymbolTouchCount != 0 || row.SymbolHotScore != 0 || row.SymbolChangedLine != 0 {
+		t.Fatalf("row symbol evidence=(%d, %v, %d) want zero values", row.SymbolTouchCount, row.SymbolHotScore, row.SymbolChangedLine)
+	}
+	if row.CochangeCount != 0 || row.CochangeStrength != 0 || len(row.CochangePaths) != 0 {
+		t.Fatalf("row cochange evidence=(%d, %v, %v) want zero values", row.CochangeCount, row.CochangeStrength, row.CochangePaths)
+	}
+	if row.SeedNodeID != "" || row.SeedQuery != "" || row.ReverseDepCount != 0 || row.ForwardDepCount != 0 || len(row.SuggestedReads) != 0 {
+		t.Fatalf("row graph evidence should remain empty: %#v", row)
+	}
+}
+
 func TestLookupFindingSymbolHotspotNormalizesReceiverNames(t *testing.T) {
 	index := buildFindingSymbolHotIndex([]refhot.SymbolHotspot{
 		{

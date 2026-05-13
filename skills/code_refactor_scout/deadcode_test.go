@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -32,6 +33,292 @@ func TestApplyFocusDeadFiltersToDeadFindings(t *testing.T) {
 		if !isDeadFinding(item) {
 			t.Fatalf("non-dead finding survived focus filter: %#v", item)
 		}
+	}
+}
+
+func TestDeadSymbolFindingForClassification(t *testing.T) {
+	t.Parallel()
+
+	makeInfo := func(exported bool, summary deadInboundSummary) deadSymbolInfo {
+		return deadSymbolInfo{
+			Node: repoindex.Node{
+				File:      "sample/helpers.go",
+				Name:      "helper",
+				Exported:  exported,
+				SpanStart: 10,
+			},
+			Summary: summary,
+		}
+	}
+
+	tests := []struct {
+		name      string
+		info      deadSymbolInfo
+		reach     deadReachability
+		wantRule  string
+		wantScore int
+		wantOK    bool
+	}{
+		{
+			name:      "private-unreachable",
+			info:      makeInfo(false, deadInboundSummary{}),
+			reach:     deadReachabilityNone,
+			wantRule:  "unreachable_private_symbol",
+			wantScore: 84,
+			wantOK:    true,
+		},
+		{
+			name:      "private-test-only",
+			info:      makeInfo(false, deadInboundSummary{TestCount: 1}),
+			reach:     deadReachabilityTestOnly,
+			wantRule:  "test_only_helper",
+			wantScore: 74,
+			wantOK:    true,
+		},
+		{
+			name:      "exported-stale",
+			info:      makeInfo(true, deadInboundSummary{}),
+			reach:     deadReachabilityNone,
+			wantRule:  "stale_export_candidate",
+			wantScore: 66,
+			wantOK:    true,
+		},
+		{
+			name:   "exported-test-ref-is-not-stale",
+			info:   makeInfo(true, deadInboundSummary{TestCount: 1}),
+			reach:  deadReachabilityNone,
+			wantOK: false,
+		},
+		{
+			name:   "private-live-not-flagged",
+			info:   makeInfo(false, deadInboundSummary{}),
+			reach:  deadReachabilityLive,
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, gotRule, gotOK := deadSymbolFindingFor(&tt.info, tt.reach)
+			if gotOK != tt.wantOK {
+				t.Fatalf("got ok=%v want %v", gotOK, tt.wantOK)
+			}
+			if !tt.wantOK {
+				return
+			}
+			if gotRule != tt.wantRule {
+				t.Fatalf("rule=%q want %q", gotRule, tt.wantRule)
+			}
+			if got.RuleID != tt.wantRule {
+				t.Fatalf("finding rule=%q want %q", got.RuleID, tt.wantRule)
+			}
+			if got.Score != tt.wantScore {
+				t.Fatalf("score=%d want %d", got.Score, tt.wantScore)
+			}
+		})
+	}
+}
+
+func TestDeadFileContainmentClassification(t *testing.T) {
+	t.Parallel()
+
+	contains := []repoindex.Edge{
+		{Dst: "private"},
+		{Dst: "exported"},
+	}
+	containment := summarizeDeadFileContainment(contains, map[string]string{
+		"private":  "unreachable_private_symbol",
+		"exported": "stale_export_candidate",
+	})
+
+	item, ruleID, ok := deadFileFindingFor(repoindex.Node{File: "sample/dead.go"}, containment, deadFileInboundSummary{})
+	if !ok {
+		t.Fatal("expected orphan file finding")
+	}
+	if ruleID != "orphan_file" || item.RuleID != "orphan_file" {
+		t.Fatalf("rule=%q finding=%q want orphan_file", ruleID, item.RuleID)
+	}
+	if item.Score != 76 {
+		t.Fatalf("score=%d want 76", item.Score)
+	}
+}
+
+func TestDeadPackageContainmentClassification(t *testing.T) {
+	t.Parallel()
+
+	scope := refscope.Scope{Path: "sample", IsDir: true}
+	files := map[string]repoindex.Node{
+		"file-a": {ID: "file-a", File: "sample/a.go"},
+		"file-b": {ID: "file-b", File: "sample/b.go"},
+	}
+	containment := summarizeDeadPackageContainment([]repoindex.Edge{
+		{Dst: "file-a"},
+		{Dst: "file-b"},
+	}, files, scope, map[string]string{
+		"sample/a.go": "test_only_file",
+		"sample/b.go": "test_only_file",
+	})
+
+	item, ruleID, ok := deadPackageFindingFor(repoindex.Node{Name: "sample"}, containment, deadPackageInboundSummary{})
+	if !ok {
+		t.Fatal("expected test-only package finding")
+	}
+	if ruleID != "test_only_package" || item.RuleID != "test_only_package" {
+		t.Fatalf("rule=%q finding=%q want test_only_package", ruleID, item.RuleID)
+	}
+	if item.Score != 64 {
+		t.Fatalf("score=%d want 64", item.Score)
+	}
+}
+
+func TestDeadFileFindingForSkipsNonConservativeInboundCases(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		containment deadFileContainment
+		summary     deadFileInboundSummary
+	}{
+		{
+			name: "test-only-with-external-non-test-reference",
+			containment: deadFileContainment{
+				SymbolCount: 2,
+				AllDeadish:  true,
+				AllTestOnly: true,
+				HasTestOnly: true,
+			},
+			summary: deadFileInboundSummary{ExternalNonTest: 1},
+		},
+		{
+			name: "orphan-shape-but-test-inbound-present",
+			containment: deadFileContainment{
+				SymbolCount:    2,
+				AllDeadish:     true,
+				AllTestOnly:    false,
+				HasPrivateDead: true,
+			},
+			summary: deadFileInboundSummary{TestCount: 1},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, _, ok := deadFileFindingFor(repoindex.Node{File: "sample/dead.go"}, tt.containment, tt.summary)
+			if ok {
+				t.Fatalf("expected no finding for case %q", tt.name)
+			}
+		})
+	}
+}
+
+func TestDeadPackageFindingForSkipsNonConservativeInboundCases(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		containment deadPackageContainment
+		summary     deadPackageInboundSummary
+	}{
+		{
+			name: "test-only-package-with-external-non-test-reference",
+			containment: deadPackageContainment{
+				Paths:       []string{"sample/a.go", "sample/b.go"},
+				AllTestOnly: true,
+				HasTestOnly: true,
+			},
+			summary: deadPackageInboundSummary{ExternalNonTest: 1},
+		},
+		{
+			name: "orphan-package-shape-with-test-inbound-present",
+			containment: deadPackageContainment{
+				Paths:     []string{"sample/a.go"},
+				AllOrphan: true,
+			},
+			summary: deadPackageInboundSummary{TestCount: 1},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, _, ok := deadPackageFindingFor(repoindex.Node{Name: "sample"}, tt.containment, tt.summary)
+			if ok {
+				t.Fatalf("expected no finding for case %q", tt.name)
+			}
+		})
+	}
+}
+
+func TestSummarizeDeadCodeInboundsCountsSourceBucketsAndSamples(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	storageRoot := t.TempDir()
+	workspace := t.TempDir()
+
+	store, err := repoindex.Open(ctx, storageRoot, workspace)
+	if err != nil {
+		t.Fatalf("open repoindex store: %v", err)
+	}
+	defer store.Close()
+
+	pkg := "go:sample"
+	now := time.Now().UTC()
+	targetID := repoindex.SymbolID(store.RepoKey(), pkg, "target")
+	sameFileID := repoindex.SymbolID(store.RepoKey(), pkg, "sameFileCaller")
+	externalID := repoindex.SymbolID(store.RepoKey(), pkg, "externalCaller")
+	testID := repoindex.SymbolID(store.RepoKey(), pkg, "TestTarget")
+
+	nodes := []repoindex.Node{
+		{ID: targetID, Kind: repoindex.NodeSymbol, Pkg: pkg, File: "sample/target.go", Name: "target", Signature: "func target()", SpanStart: 20, SpanEnd: 24, UpdatedAt: now},
+		{ID: sameFileID, Kind: repoindex.NodeSymbol, Pkg: pkg, File: "sample/target.go", Name: "sameFileCaller", Signature: "func sameFileCaller()", SpanStart: 8, SpanEnd: 12, UpdatedAt: now},
+		{ID: externalID, Kind: repoindex.NodeSymbol, Pkg: pkg, File: "sample/other.go", Name: "externalCaller", Signature: "func externalCaller()", SpanStart: 10, SpanEnd: 14, UpdatedAt: now},
+		{ID: testID, Kind: repoindex.NodeSymbol, Pkg: pkg, File: "sample/target_test.go", Name: "TestTarget", Signature: "func TestTarget(t *testing.T)", SpanStart: 10, SpanEnd: 16, UpdatedAt: now},
+	}
+	if err := store.ReplaceAll(ctx, nodes, nil); err != nil {
+		t.Fatalf("replace repoindex graph: %v", err)
+	}
+
+	incoming := []repoindex.Edge{
+		{Src: sameFileID, Dst: targetID, Type: repoindex.EdgeCalls, Weight: 1},
+		{Src: sameFileID, Dst: targetID, Type: repoindex.EdgeUsesSymbol, Weight: 1},
+		{Src: externalID, Dst: targetID, Type: repoindex.EdgeCalls, Weight: 1},
+		{Src: testID, Dst: targetID, Type: repoindex.EdgeCalls, Weight: 1},
+		{Src: targetID, Dst: targetID, Type: repoindex.EdgeCalls, Weight: 1},
+	}
+	summary, err := summarizeDeadCodeInbounds(ctx, store, nodes[0], incoming)
+	if err != nil {
+		t.Fatalf("summarizeDeadCodeInbounds: %v", err)
+	}
+
+	if summary.TotalCount != 4 {
+		t.Fatalf("total=%d want 4", summary.TotalCount)
+	}
+	if summary.SameFileNonTest != 2 {
+		t.Fatalf("same-file=%d want 2", summary.SameFileNonTest)
+	}
+	if summary.ExternalNonTest != 1 {
+		t.Fatalf("external=%d want 1", summary.ExternalNonTest)
+	}
+	if summary.TestCount != 1 {
+		t.Fatalf("test=%d want 1", summary.TestCount)
+	}
+
+	wantSamples := []string{
+		"sample/target.go:sameFileCaller",
+		"sample/other.go:externalCaller",
+		"sample/target_test.go:TestTarget",
+	}
+	if !reflect.DeepEqual(summary.SourceSample, wantSamples) {
+		t.Fatalf("source sample=%#v want %#v", summary.SourceSample, wantSamples)
 	}
 }
 

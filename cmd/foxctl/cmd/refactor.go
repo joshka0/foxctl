@@ -33,6 +33,7 @@ import (
 var (
 	refactorLanguages = []string{"auto", "go", "python", "javascript", "typescript", "elixir", "rust"}
 	refactorFocuses   = []string{"all", "slop", "dead"}
+	refactorTargets   = []string{"all", "small-composable-code", "semantic-commenting", "improve-codebase-architecture"}
 	refactorViews     = []string{"raw", "grouped", "entrypoints", "summary"}
 	refactorRuleSets  = []string{"conservative", "default", "aggressive"}
 	refactorDirs      = []string{"out", "in"}
@@ -318,6 +319,7 @@ func newRefactorScoutCommand() *cobra.Command {
 		workspace    string
 		language     string
 		focus        string
+		target       string
 		view         string
 		ruleSet      string
 		minScore     int
@@ -336,6 +338,7 @@ Required flag combinations:
 
 Most important knobs:
   --focus        all|slop|dead
+  --target       all|small-composable-code|semantic-commenting|improve-codebase-architecture
   --view         raw|grouped|entrypoints|summary
   --rule-set     conservative|default|aggressive
   --min-score    Filter low-confidence or low-severity findings
@@ -348,9 +351,17 @@ For DB/persistence review:
   use --focus slop --view grouped
   then inspect data.presentation.lanes.db_access_patterns for Ecto/Repo
   anti-pattern candidates such as loader chains, transaction scripts, and
-  post-transaction preloads.`,
+  post-transaction preloads.
+
+For skill-targeted review:
+  use --target small-composable-code for sprawl and focused cleanup
+  use --target semantic-commenting for high-signal owner comments and anchors
+  use --target improve-codebase-architecture for deepening opportunities.`,
 		Example: `  # General grouped scout output
   foxctl refactor scout --path ./internal --language go --view grouped
+
+  # Route findings toward one follow-up skill
+  foxctl refactor scout --path ./internal --language go --target improve-codebase-architecture
 
   # Narrow to anti-pattern candidates
   foxctl refactor scout --path apps/praze-api/lib --language elixir --focus slop --view entrypoints
@@ -366,6 +377,7 @@ For DB/persistence review:
 				"path":          path,
 				"language":      language,
 				"focus":         focus,
+				"target":        target,
 				"view":          view,
 				"rule_set":      ruleSet,
 				"min_score":     minScore,
@@ -379,6 +391,7 @@ For DB/persistence review:
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().StringVar(&language, "language", "", "Single language scope to analyze (required)")
 	cmd.Flags().StringVar(&focus, "focus", "all", "Finding family focus")
+	cmd.Flags().StringVar(&target, "target", "all", "Skill review target")
 	cmd.Flags().StringVar(&view, "view", "grouped", "Grouped presentation mode")
 	cmd.Flags().StringVar(&ruleSet, "rule-set", "default", "Threshold sensitivity profile")
 	cmd.Flags().IntVar(&minScore, "min-score", 70, "Minimum finding score to keep inline")
@@ -387,6 +400,7 @@ For DB/persistence review:
 	_ = cmd.MarkFlagRequired("language")
 	registerFlagCompletions(cmd, "language", refactorLanguages)
 	registerFlagCompletions(cmd, "focus", refactorFocuses)
+	registerFlagCompletions(cmd, "target", refactorTargets)
 	registerFlagCompletions(cmd, "view", refactorViews)
 	registerFlagCompletions(cmd, "rule-set", refactorRuleSets)
 	return cmd
@@ -489,16 +503,15 @@ func runRefactorSkill(cmd *cobra.Command, workspace, skillName string, input map
 	}
 
 	cfg := config.MustFromContext(cmd.Context())
-	resolver := createSkillResolver(cfg)
-	handle, err := resolver.Resolve(skillName)
-	if err != nil {
-		return err
-	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("get working directory: %w", err)
 	}
-	manifest, artifactPath, err := loadRefactorManifestAndArtifact(handle.ManifestPath, cwd)
+	manifestPath, err := resolveRefactorSkillManifestPath(cfg, skillName, cwd)
+	if err != nil {
+		return err
+	}
+	manifest, artifactPath, err := loadRefactorManifestAndArtifact(manifestPath, cwd)
 	if err != nil {
 		return err
 	}
@@ -514,6 +527,31 @@ func runRefactorSkill(cmd *cobra.Command, workspace, skillName string, input map
 		return err
 	}
 	return memorycmd.WriteEnvelope(cmd.OutOrStdout(), stdout)
+}
+
+func resolveRefactorSkillManifestPath(cfg config.Config, skillName, cwd string) (string, error) {
+	if manifestPath, ok := localFoxctlRefactorSkillManifest(skillName, cwd); ok {
+		return manifestPath, nil
+	}
+	resolver := createSkillResolver(cfg)
+	handle, err := resolver.Resolve(skillName)
+	if err != nil {
+		return "", err
+	}
+	return handle.ManifestPath, nil
+}
+
+func localFoxctlRefactorSkillManifest(skillName, cwd string) (string, bool) {
+	root, ok := foxctlSourceRoot(cwd)
+	if !ok {
+		return "", false
+	}
+	name := skill.NormalizeSkillName(skillName)
+	manifestPath := filepath.Join(root, "skills", filepath.FromSlash(name), "skill.yaml")
+	if _, err := os.Stat(manifestPath); err == nil {
+		return manifestPath, true
+	}
+	return "", false
 }
 
 func runRefactorStatus(cmd *cobra.Command, workspace, path, language string, includeTests bool) error {

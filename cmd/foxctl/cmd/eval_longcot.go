@@ -256,61 +256,26 @@ func newEvalLongCoTCommand() *cobra.Command {
 			ctx := cmd.Context()
 			out := cmd.OutOrStdout()
 
-			if limit < 0 {
-				return writeOptimizeError(out, evalLongCoTCommand, "--limit must be >= 0")
+			if err := validateLongCoTRunNumericFlags(limit, maxTokens, timeout, maxIterations, helperAttempts, helperTimeout, helperMaxTokens); err != nil {
+				return writeOptimizeError(out, evalLongCoTCommand, err.Error())
 			}
-			if maxTokens < 0 {
-				return writeOptimizeError(out, evalLongCoTCommand, "--max-tokens must be >= 0")
+			normalizedHelperLanguage, err := normalizeLongCoTHelperLanguage(helperLanguage)
+			if err != nil {
+				return writeOptimizeError(out, evalLongCoTCommand, err.Error())
 			}
-			if timeout < 0 {
-				return writeOptimizeError(out, evalLongCoTCommand, "--timeout must be >= 0")
+			helperLanguage = normalizedHelperLanguage
+			sandbox, err := normalizeLongCoTSandboxKind(sandboxKind)
+			if err != nil {
+				return writeOptimizeError(out, evalLongCoTCommand, err.Error())
 			}
-			if maxIterations < 0 {
-				return writeOptimizeError(out, evalLongCoTCommand, "--max-iterations must be >= 0")
-			}
-			if helperAttempts < 0 {
-				return writeOptimizeError(out, evalLongCoTCommand, "--helper-attempts must be >= 0")
-			}
-			if helperTimeout < 0 {
-				return writeOptimizeError(out, evalLongCoTCommand, "--helper-timeout must be >= 0")
-			}
-			if helperMaxTokens < 0 {
-				return writeOptimizeError(out, evalLongCoTCommand, "--helper-max-tokens must be >= 0")
-			}
-			helperLanguage = strings.ToLower(strings.TrimSpace(helperLanguage))
-			switch helperLanguage {
-			case "", rlmruntime.HelperLanguageGo, rlmruntime.HelperLanguagePython:
-			default:
-				return writeOptimizeError(out, evalLongCoTCommand, fmt.Sprintf("unsupported --helper-language %q (allowed: go, python)", helperLanguage))
-			}
-			sandbox := rlmruntime.NormalizeSandboxKind(rlmruntime.SandboxKind(sandboxKind))
-			if !rlmruntime.IsSupportedSandboxKind(sandbox) {
-				return writeOptimizeError(out, evalLongCoTCommand, fmt.Sprintf("unsupported --sandbox %q (allowed: python, smolvm, yaegi)", sandboxKind))
-			}
-			if requireEphemeralSkills {
-				ephemeralSkills = true
-				generalHelper = true
-			}
-			if generalHelper {
-				ephemeralSkills = true
-			}
+			ephemeralSkills, generalHelper = normalizeLongCoTHelperFlags(ephemeralSkills, generalHelper, requireEphemeralSkills)
 
 			datasetPath = strings.TrimSpace(datasetPath)
 			datasetLabel := ""
 			datasetSource := "dataset"
 
-			format, err := normalizeLongCoTFormat(format)
-			if err != nil {
-				return writeOptimizeError(out, evalLongCoTCommand, err.Error())
-			}
-			reviewMode, err := normalizeLongCoTReviewMode(reviewMode)
-			if err != nil {
-				return writeOptimizeError(out, evalLongCoTCommand, err.Error())
-			}
-			if reviewIter < 1 {
-				return writeOptimizeError(out, evalLongCoTCommand, "--rlm-review-iterations must be >= 1")
-			}
-			reviewCfg, err := newLongCoTReviewConfig(
+			normalizedFormat, normalizedReviewMode, reviewCfg, err := normalizeLongCoTReviewInputs(
+				format,
 				reviewMode,
 				reviewIter,
 				reviewRecursive,
@@ -324,15 +289,11 @@ func newEvalLongCoTCommand() *cobra.Command {
 			if err != nil {
 				return writeOptimizeError(out, evalLongCoTCommand, err.Error())
 			}
+			format = normalizedFormat
+			reviewMode = normalizedReviewMode
 
-			filter := longCoTQuestionFilter{
-				Split:      strings.TrimSpace(split),
-				Domains:    normalizeDistinctLower(domains),
-				Difficulty: strings.TrimSpace(difficulty),
-				Limit:      limit,
-				Seed:       seed,
-			}
-			if _, err := resolveLongCoTDifficultySet(filter.Difficulty); err != nil {
+			filter, err := normalizeLongCoTQuestionFilter(split, domains, difficulty, limit, seed)
+			if err != nil {
 				return writeOptimizeError(out, evalLongCoTCommand, err.Error())
 			}
 
@@ -651,6 +612,136 @@ func newEvalLongCoTCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&noFallback, "verify-no-fallback", false, "Disable LongCoT verifier fallback judges (--no-fallback)")
 
 	return cmd
+}
+
+func validateLongCoTRunNumericFlags(
+	limit int,
+	maxTokens int,
+	timeout time.Duration,
+	maxIterations int,
+	helperAttempts int,
+	helperTimeout time.Duration,
+	helperMaxTokens int,
+) error {
+	if err := validateLongCoTNonNegativeIntFlag("--limit", limit); err != nil {
+		return err
+	}
+	if err := validateLongCoTNonNegativeIntFlag("--max-tokens", maxTokens); err != nil {
+		return err
+	}
+	if err := validateLongCoTNonNegativeDurationFlag("--timeout", timeout); err != nil {
+		return err
+	}
+	if err := validateLongCoTNonNegativeIntFlag("--max-iterations", maxIterations); err != nil {
+		return err
+	}
+	if err := validateLongCoTNonNegativeIntFlag("--helper-attempts", helperAttempts); err != nil {
+		return err
+	}
+	if err := validateLongCoTNonNegativeDurationFlag("--helper-timeout", helperTimeout); err != nil {
+		return err
+	}
+	if err := validateLongCoTNonNegativeIntFlag("--helper-max-tokens", helperMaxTokens); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateLongCoTNonNegativeIntFlag(flag string, value int) error {
+	if value < 0 {
+		return fmt.Errorf("%s must be >= 0", flag)
+	}
+	return nil
+}
+
+func validateLongCoTNonNegativeDurationFlag(flag string, value time.Duration) error {
+	if value < 0 {
+		return fmt.Errorf("%s must be >= 0", flag)
+	}
+	return nil
+}
+
+func normalizeLongCoTHelperLanguage(raw string) (string, error) {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	switch value {
+	case "", rlmruntime.HelperLanguageGo, rlmruntime.HelperLanguagePython:
+		return value, nil
+	default:
+		return "", fmt.Errorf("unsupported --helper-language %q (allowed: go, python)", value)
+	}
+}
+
+func normalizeLongCoTSandboxKind(raw string) (rlmruntime.SandboxKind, error) {
+	sandbox := rlmruntime.NormalizeSandboxKind(rlmruntime.SandboxKind(raw))
+	if !rlmruntime.IsSupportedSandboxKind(sandbox) {
+		return "", fmt.Errorf("unsupported --sandbox %q (allowed: python, smolvm, yaegi)", raw)
+	}
+	return sandbox, nil
+}
+
+func normalizeLongCoTHelperFlags(ephemeralSkills, generalHelper, requireEphemeralSkills bool) (bool, bool) {
+	if requireEphemeralSkills {
+		ephemeralSkills = true
+		generalHelper = true
+	}
+	if generalHelper {
+		ephemeralSkills = true
+	}
+	return ephemeralSkills, generalHelper
+}
+
+func normalizeLongCoTReviewInputs(
+	rawFormat string,
+	rawReviewMode string,
+	reviewIter int,
+	reviewRecursive bool,
+	reviewMaxDepth int,
+	reviewMaxSubcalls int,
+	reviewCandidateMaxChars int,
+	reviewChildSummaryMaxChars int,
+	reviewChildSummaryRewrite bool,
+	reviewChildSummaryRewriteIter int,
+) (string, string, longCoTReviewConfig, error) {
+	format, err := normalizeLongCoTFormat(rawFormat)
+	if err != nil {
+		return "", "", longCoTReviewConfig{}, err
+	}
+	reviewMode, err := normalizeLongCoTReviewMode(rawReviewMode)
+	if err != nil {
+		return "", "", longCoTReviewConfig{}, err
+	}
+	if reviewIter < 1 {
+		return "", "", longCoTReviewConfig{}, fmt.Errorf("--rlm-review-iterations must be >= 1")
+	}
+	reviewCfg, err := newLongCoTReviewConfig(
+		reviewMode,
+		reviewIter,
+		reviewRecursive,
+		reviewMaxDepth,
+		reviewMaxSubcalls,
+		reviewCandidateMaxChars,
+		reviewChildSummaryMaxChars,
+		reviewChildSummaryRewrite,
+		reviewChildSummaryRewriteIter,
+	)
+	if err != nil {
+		return "", "", longCoTReviewConfig{}, err
+	}
+	return format, reviewMode, reviewCfg, nil
+}
+
+func normalizeLongCoTQuestionFilter(split string, domains []string, difficulty string, limit int, seed int64) (longCoTQuestionFilter, error) {
+	filter := longCoTQuestionFilter{
+		Split:      strings.TrimSpace(split),
+		Domains:    normalizeDistinctLower(domains),
+		Difficulty: strings.TrimSpace(difficulty),
+		Limit:      limit,
+		Seed:       seed,
+	}
+	if _, err := resolveLongCoTDifficultySet(filter.Difficulty); err != nil {
+		return longCoTQuestionFilter{}, err
+	}
+	return filter, nil
 }
 
 func normalizeLongCoTFormat(raw string) (string, error) {

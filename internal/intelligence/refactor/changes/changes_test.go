@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -70,6 +71,137 @@ func TestDiffSnapshotsDetectsAddedModifiedDeletedFilesAndSymbols(t *testing.T) {
 	}
 }
 
+func TestDiffSnapshotsUnchangedProducesNoChanges(t *testing.T) {
+	t.Parallel()
+
+	snapshot := refsnapshot.Payload{
+		Files: []refsnapshot.FileSnapshot{
+			{Path: "a.go", Language: "go", Hash: "sha256:a1"},
+		},
+		Symbols: []refsnapshot.SymbolSnapshot{
+			{Path: "a.go", SymbolID: "a:Alpha", Name: "Alpha", Kind: "function", Hash: "sha256:s1"},
+		},
+	}
+
+	files, symbols, summary := diffSnapshots(snapshot, snapshot, 10, 10)
+	if len(files) != 0 {
+		t.Fatalf("files len=%d want 0", len(files))
+	}
+	if len(symbols) != 0 {
+		t.Fatalf("symbols len=%d want 0", len(symbols))
+	}
+	if summary.FileCount != 0 {
+		t.Fatalf("file_count=%d want 0", summary.FileCount)
+	}
+	if summary.SymbolCount != 0 {
+		t.Fatalf("symbol_count=%d want 0", summary.SymbolCount)
+	}
+	if summary.LimitedByFiles {
+		t.Fatal("limited_by_files=true want false")
+	}
+	if summary.LimitedBySymbol {
+		t.Fatal("limited_by_symbols=true want false")
+	}
+	if len(summary.ChangeKinds) != 0 {
+		t.Fatalf("change_kinds len=%d want 0", len(summary.ChangeKinds))
+	}
+}
+
+func TestDiffSnapshotsStableOrdering(t *testing.T) {
+	t.Parallel()
+
+	prev := refsnapshot.Payload{
+		Files: []refsnapshot.FileSnapshot{
+			{Path: "z.go", Language: "go", Hash: "sha256:z1"},
+			{Path: "b.go", Language: "go", Hash: "sha256:b1"},
+			{Path: "d.go", Language: "go", Hash: "sha256:d1"},
+		},
+		Symbols: []refsnapshot.SymbolSnapshot{
+			{Path: "z.go", SymbolID: "z:Zulu", Name: "Zulu", Kind: "function", Hash: "sha256:sz1"},
+			{Path: "b.go", SymbolID: "b:Beta", Name: "Beta", Kind: "function", Hash: "sha256:sb1"},
+			{Path: "d.go", SymbolID: "d:Delta", Name: "Delta", Kind: "function", Hash: "sha256:sd1"},
+		},
+	}
+	curr := refsnapshot.Payload{
+		Files: []refsnapshot.FileSnapshot{
+			{Path: "a.go", Language: "go", Hash: "sha256:a1"},
+			{Path: "d.go", Language: "go", Hash: "sha256:d2"},
+			{Path: "b.go", Language: "go", Hash: "sha256:b1"},
+		},
+		Symbols: []refsnapshot.SymbolSnapshot{
+			{Path: "a.go", SymbolID: "a:Alpha", Name: "Alpha", Kind: "function", Hash: "sha256:sa1"},
+			{Path: "d.go", SymbolID: "d:Delta", Name: "Delta", Kind: "function", Hash: "sha256:sd2"},
+			{Path: "b.go", SymbolID: "b:Beta", Name: "Beta", Kind: "function", Hash: "sha256:sb1"},
+		},
+	}
+
+	files, symbols, _ := diffSnapshots(prev, curr, 20, 20)
+	gotFiles := make([]string, 0, len(files))
+	for _, file := range files {
+		gotFiles = append(gotFiles, file.Path)
+	}
+	wantFiles := []string{"a.go", "d.go", "z.go"}
+	if !reflect.DeepEqual(gotFiles, wantFiles) {
+		t.Fatalf("file order=%v want %v", gotFiles, wantFiles)
+	}
+
+	gotSymbols := make([]string, 0, len(symbols))
+	for _, symbol := range symbols {
+		gotSymbols = append(gotSymbols, symbol.SymbolID)
+	}
+	wantSymbols := []string{"a:Alpha", "d:Delta", "z:Zulu"}
+	if !reflect.DeepEqual(gotSymbols, wantSymbols) {
+		t.Fatalf("symbol order=%v want %v", gotSymbols, wantSymbols)
+	}
+}
+
+func TestDiffSnapshotsLimitBehavior(t *testing.T) {
+	t.Parallel()
+
+	prev := refsnapshot.Payload{
+		Files: []refsnapshot.FileSnapshot{
+			{Path: "a.go", Language: "go", Hash: "sha256:a1"},
+			{Path: "b.go", Language: "go", Hash: "sha256:b1"},
+		},
+		Symbols: []refsnapshot.SymbolSnapshot{
+			{Path: "a.go", SymbolID: "a:Alpha", Name: "Alpha", Kind: "function", Hash: "sha256:sa1"},
+			{Path: "b.go", SymbolID: "b:Beta", Name: "Beta", Kind: "function", Hash: "sha256:sb1"},
+		},
+	}
+	curr := refsnapshot.Payload{
+		Files: []refsnapshot.FileSnapshot{
+			{Path: "a.go", Language: "go", Hash: "sha256:a2"},
+			{Path: "b.go", Language: "go", Hash: "sha256:b2"},
+			{Path: "c.go", Language: "go", Hash: "sha256:c1"},
+		},
+		Symbols: []refsnapshot.SymbolSnapshot{
+			{Path: "a.go", SymbolID: "a:Alpha", Name: "Alpha", Kind: "function", Hash: "sha256:sa2"},
+			{Path: "b.go", SymbolID: "b:Beta", Name: "Beta", Kind: "function", Hash: "sha256:sb2"},
+			{Path: "c.go", SymbolID: "c:Gamma", Name: "Gamma", Kind: "function", Hash: "sha256:sc1"},
+		},
+	}
+
+	files, symbols, summary := diffSnapshots(prev, curr, 2, 2)
+	if got, want := len(files), 2; got != want {
+		t.Fatalf("files len=%d want %d", got, want)
+	}
+	if got, want := len(symbols), 2; got != want {
+		t.Fatalf("symbols len=%d want %d", got, want)
+	}
+	if got, want := summary.FileCount, 3; got != want {
+		t.Fatalf("file_count=%d want %d", got, want)
+	}
+	if got, want := summary.SymbolCount, 3; got != want {
+		t.Fatalf("symbol_count=%d want %d", got, want)
+	}
+	if !summary.LimitedByFiles {
+		t.Fatal("limited_by_files=false want true")
+	}
+	if !summary.LimitedBySymbol {
+		t.Fatal("limited_by_symbols=false want true")
+	}
+}
+
 func TestCollectGitFileChangesFiltersScopeAndLanguage(t *testing.T) {
 	t.Parallel()
 
@@ -109,6 +241,118 @@ func TestCollectGitFileChangesFiltersScopeAndLanguage(t *testing.T) {
 		if want[change.Path] != change.ChangeKind {
 			t.Fatalf("path=%q kind=%q want %q", change.Path, change.ChangeKind, want[change.Path])
 		}
+	}
+}
+
+func TestParseGitNameStatusChangesRenameAndCopyAsDeleteAdd(t *testing.T) {
+	t.Parallel()
+
+	scope := refscope.Scope{
+		Path:     ".",
+		Language: "go",
+		IsDir:    true,
+	}
+	changes := parseGitNameStatusChanges(
+		"R100\told.go\tnew.go\nC075\tsource.go\tcopy.go\n",
+		scope,
+		true,
+	)
+
+	got := make([]indexing.FileChange, 0, len(changes))
+	for _, change := range changes {
+		got = append(got, indexing.FileChange{
+			Path:       change.Path,
+			Language:   change.Language,
+			ChangeKind: change.ChangeKind,
+		})
+	}
+	want := []indexing.FileChange{
+		{Path: "old.go", Language: "go", ChangeKind: indexing.ChangeKindDeleted},
+		{Path: "new.go", Language: "go", ChangeKind: indexing.ChangeKindAdded},
+		{Path: "source.go", Language: "go", ChangeKind: indexing.ChangeKindDeleted},
+		{Path: "copy.go", Language: "go", ChangeKind: indexing.ChangeKindAdded},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("changes=%#v want %#v", got, want)
+	}
+}
+
+func TestParseGitNameStatusChangesIgnoresMalformedRows(t *testing.T) {
+	t.Parallel()
+
+	scope := refscope.Scope{
+		Path:     ".",
+		Language: "go",
+		IsDir:    true,
+	}
+	changes := parseGitNameStatusChanges(
+		"R100\tonly-old.go\nA\nM\tvalid.go\nD\t\n",
+		scope,
+		true,
+	)
+	if got, want := len(changes), 1; got != want {
+		t.Fatalf("change count=%d want %d (%#v)", got, want, changes)
+	}
+	if changes[0].Path != "valid.go" || changes[0].ChangeKind != indexing.ChangeKindModified {
+		t.Fatalf("change=%#v want path=valid.go kind=modified", changes[0])
+	}
+}
+
+func TestParseGitNameStatusChangesFiltersByScopeLanguageAndTests(t *testing.T) {
+	t.Parallel()
+
+	scope := refscope.Scope{
+		Path:     "internal",
+		Language: "go",
+		IsDir:    true,
+	}
+	changes := parseGitNameStatusChanges(
+		"M\tinternal/keep.go\nM\tinternal/keep_test.go\nM\tinternal/skip.ts\nM\tweb/out.go\nD\tinternal/remove.go\n",
+		scope,
+		false,
+	)
+
+	got := make([]indexing.FileChange, 0, len(changes))
+	for _, change := range changes {
+		got = append(got, indexing.FileChange{
+			Path:       change.Path,
+			Language:   change.Language,
+			ChangeKind: change.ChangeKind,
+		})
+	}
+	want := []indexing.FileChange{
+		{Path: "internal/keep.go", Language: "go", ChangeKind: indexing.ChangeKindModified},
+		{Path: "internal/remove.go", Language: "go", ChangeKind: indexing.ChangeKindDeleted},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("changes=%#v want %#v", got, want)
+	}
+}
+
+func TestMergeGitFileChangesSuppressesDuplicateUntrackedPaths(t *testing.T) {
+	t.Parallel()
+
+	diff := []indexing.FileChange{
+		{Path: "a.go", Language: "go", ChangeKind: indexing.ChangeKindModified},
+		{Path: "b.go", Language: "go", ChangeKind: indexing.ChangeKindAdded},
+	}
+	untracked := []indexing.FileChange{
+		{Path: "b.go", Language: "go", ChangeKind: indexing.ChangeKindAdded},
+		{Path: "c.go", Language: "go", ChangeKind: indexing.ChangeKindAdded},
+	}
+
+	merged := mergeGitFileChanges(diff, untracked)
+	got := make([]string, 0, len(merged))
+	for _, change := range merged {
+		got = append(got, string(change.ChangeKind)+":"+change.Path)
+	}
+	want := []string{
+		string(indexing.ChangeKindModified) + ":a.go",
+		string(indexing.ChangeKindAdded) + ":b.go",
+		string(indexing.ChangeKindAdded) + ":c.go",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("merged=%v want %v", got, want)
 	}
 }
 

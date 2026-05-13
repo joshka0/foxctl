@@ -67,6 +67,38 @@ const (
 	deadReachabilityLive
 )
 
+type deadDiscoveryResult struct {
+	FileNodes       []repoindex.Node
+	SymbolInfos     map[string]*deadSymbolInfo
+	NodeCache       map[string]repoindex.Node
+	StructuralRoots deadStructuralRoots
+}
+
+type deadFileContainment struct {
+	SymbolCount    int
+	AllDeadish     bool
+	AllTestOnly    bool
+	HasTestOnly    bool
+	HasPrivateDead bool
+}
+
+type deadPackageContainment struct {
+	Paths       []string
+	AllOrphan   bool
+	AllTestOnly bool
+	HasTestOnly bool
+}
+
+type deadInboundSource struct {
+	Edge repoindex.Edge
+	Node repoindex.Node
+}
+
+type deadSourceSampler struct {
+	seen  map[string]struct{}
+	items []string
+}
+
 func buildDeadCodeFindings(ctx context.Context, storageRoot string, scope refscope.Scope, status refstatus.Status, focus string) ([]finding, error) {
 	if !focusWantsDeadCode(focus) || status.Mode != refstatus.ModeIndexBacked {
 		return nil, nil
@@ -78,98 +110,20 @@ func buildDeadCodeFindings(ctx context.Context, storageRoot string, scope refsco
 	}
 	defer store.Close()
 
-	limit := status.RepoIndex.Stats.NodesByKind[repoindex.NodeSymbol]
-	if limit <= 0 {
-		limit = 50000
-	}
-	fileLimit := status.RepoIndex.Stats.NodesByKind[repoindex.NodeFile]
-	if fileLimit <= 0 {
-		fileLimit = 10000
-	}
-	fileNodes, err := store.ListNodesByKind(ctx, repoindex.NodeFile, fileLimit)
-	if err != nil {
-		return nil, err
-	}
-	structuralRoots, err := buildDeadStructuralRoots(ctx, store, scope, fileNodes)
-	if err != nil {
-		return nil, err
-	}
-	nodes, err := store.ListNodesByKind(ctx, repoindex.NodeSymbol, limit)
+	discovery, err := runDeadDiscoveryPhase(ctx, store, scope, status)
 	if err != nil {
 		return nil, err
 	}
 
-	locatorCache := make(map[string][]repoindex.LocatorEntry)
-	nodeCache := make(map[string]repoindex.Node)
-	infos := make(map[string]*deadSymbolInfo)
-	for _, node := range nodes {
-		if !deadCodeScopeIncludes(scope, node.File) {
-			continue
-		}
-		if !scope.IncludeTests && fsutil.IsTestFile(filepath.Base(node.File)) {
-			continue
-		}
-
-		locator := deadCodeLocatorForNode(ctx, store, locatorCache, node)
-		if !deadCodeSupportsSymbol(node, locator) || deadCodeExempt(node, locator) {
-			continue
-		}
-
-		incoming, err := store.GetIncomingEdges(ctx, node.ID, deadCodeEdgeTypes, maxDeadCodeEdgeScan)
-		if err != nil {
-			return nil, err
-		}
-		summary, err := summarizeDeadCodeInbounds(ctx, store, node, incoming)
-		if err != nil {
-			return nil, err
-		}
-
-		nodeCache[node.ID] = node
-		infos[node.ID] = &deadSymbolInfo{
-			Node:     node,
-			Locator:  locator,
-			Incoming: incoming,
-			Summary:  summary,
-		}
-	}
-
-	out := make([]finding, 0, 32)
-	symbolRuleByID := make(map[string]string, len(infos))
-	memo := make(map[string]deadReachability, len(infos))
-	for _, info := range infos {
-		reachability := classifyDeadReachability(ctx, store, info.Node.ID, infos, nodeCache, memo, structuralRoots, nil)
-		switch {
-		case !info.Node.Exported && reachability == deadReachabilityNone:
-			out = append(out, makeUnreachablePrivateFinding(info.Node, info.Locator, info.Summary))
-			symbolRuleByID[info.Node.ID] = "unreachable_private_symbol"
-		case !info.Node.Exported && reachability == deadReachabilityTestOnly:
-			out = append(out, makeTestOnlyHelperFinding(info.Node, info.Locator, info.Summary))
-			symbolRuleByID[info.Node.ID] = "test_only_helper"
-		case info.Node.Exported && reachability == deadReachabilityNone && info.Summary.ExternalNonTest == 0 && info.Summary.TestCount == 0:
-			out = append(out, makeStaleExportFinding(info.Node, info.Locator, info.Summary))
-			symbolRuleByID[info.Node.ID] = "stale_export_candidate"
-		}
-	}
-
-	fileFindings, fileRuleByPath, err := buildDeadFileFindings(ctx, store, scope, fileNodes, symbolRuleByID)
+	symbolFindings, symbolRuleByID := runDeadSymbolClassificationPhase(ctx, store, discovery)
+	familyFindings, fileRuleByPath, packageRuleByFile, err := runDeadFamilyFindingPhase(ctx, store, scope, status, discovery.FileNodes, symbolRuleByID)
 	if err != nil {
 		return nil, err
 	}
-	out = append(out, fileFindings...)
 
-	pkgLimit := status.RepoIndex.Stats.NodesByKind[repoindex.NodePackage]
-	if pkgLimit <= 0 {
-		pkgLimit = 10000
-	}
-	packageNodes, err := store.ListNodesByKind(ctx, repoindex.NodePackage, pkgLimit)
-	if err != nil {
-		return nil, err
-	}
-	packageFindings, packageRuleByFile, err := buildDeadPackageFindings(ctx, store, scope, packageNodes, fileNodes, fileRuleByPath)
-	if err != nil {
-		return nil, err
-	}
-	out = append(out, packageFindings...)
+	out := make([]finding, 0, len(symbolFindings)+len(familyFindings))
+	out = append(out, symbolFindings...)
+	out = append(out, familyFindings...)
 	if shouldSuppressDeadFamilyFindings(focus) {
 		out = suppressDeadFamilyFindings(out, fileRuleByPath, packageRuleByFile)
 	}
@@ -178,145 +132,349 @@ func buildDeadCodeFindings(ctx context.Context, storageRoot string, scope refsco
 	return out, nil
 }
 
+func runDeadDiscoveryPhase(ctx context.Context, store *repoindex.Store, scope refscope.Scope, status refstatus.Status) (deadDiscoveryResult, error) {
+	fileNodes, err := deadListNodesByKind(ctx, store, status, repoindex.NodeFile, 10000)
+	if err != nil {
+		return deadDiscoveryResult{}, err
+	}
+	structuralRoots, err := buildDeadStructuralRoots(ctx, store, scope, fileNodes)
+	if err != nil {
+		return deadDiscoveryResult{}, err
+	}
+
+	symbolNodes, err := deadListNodesByKind(ctx, store, status, repoindex.NodeSymbol, 50000)
+	if err != nil {
+		return deadDiscoveryResult{}, err
+	}
+	symbolInfos, nodeCache, err := collectDeadSymbolInfos(ctx, store, scope, symbolNodes)
+	if err != nil {
+		return deadDiscoveryResult{}, err
+	}
+
+	return deadDiscoveryResult{
+		FileNodes:       fileNodes,
+		SymbolInfos:     symbolInfos,
+		NodeCache:       nodeCache,
+		StructuralRoots: structuralRoots,
+	}, nil
+}
+
+func deadListNodesByKind(ctx context.Context, store *repoindex.Store, status refstatus.Status, kind repoindex.NodeKind, fallback int) ([]repoindex.Node, error) {
+	limit := status.RepoIndex.Stats.NodesByKind[kind]
+	if limit <= 0 {
+		limit = fallback
+	}
+	return store.ListNodesByKind(ctx, kind, limit)
+}
+
+func collectDeadSymbolInfos(ctx context.Context, store *repoindex.Store, scope refscope.Scope, nodes []repoindex.Node) (map[string]*deadSymbolInfo, map[string]repoindex.Node, error) {
+	locatorCache := make(map[string][]repoindex.LocatorEntry)
+	nodeCache := make(map[string]repoindex.Node)
+	infos := make(map[string]*deadSymbolInfo)
+	for _, node := range nodes {
+		info, include, err := deadSymbolInfoForNode(ctx, store, scope, locatorCache, node)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !include {
+			continue
+		}
+		nodeCache[node.ID] = node
+		infos[node.ID] = info
+	}
+	return infos, nodeCache, nil
+}
+
+func deadSymbolInfoForNode(ctx context.Context, store *repoindex.Store, scope refscope.Scope, locatorCache map[string][]repoindex.LocatorEntry, node repoindex.Node) (*deadSymbolInfo, bool, error) {
+	if !deadCodeScopeIncludes(scope, node.File) {
+		return nil, false, nil
+	}
+	if !scope.IncludeTests && fsutil.IsTestFile(filepath.Base(node.File)) {
+		return nil, false, nil
+	}
+
+	locator := deadCodeLocatorForNode(ctx, store, locatorCache, node)
+	if !deadCodeSupportsSymbol(node, locator) || deadCodeExempt(node, locator) {
+		return nil, false, nil
+	}
+
+	incoming, err := store.GetIncomingEdges(ctx, node.ID, deadCodeEdgeTypes, maxDeadCodeEdgeScan)
+	if err != nil {
+		return nil, false, err
+	}
+	summary, err := summarizeDeadCodeInbounds(ctx, store, node, incoming)
+	if err != nil {
+		return nil, false, err
+	}
+	return &deadSymbolInfo{
+		Node:     node,
+		Locator:  locator,
+		Incoming: incoming,
+		Summary:  summary,
+	}, true, nil
+}
+
+func runDeadSymbolClassificationPhase(ctx context.Context, store *repoindex.Store, discovery deadDiscoveryResult) ([]finding, map[string]string) {
+	out := make([]finding, 0, len(discovery.SymbolInfos))
+	symbolRuleByID := make(map[string]string, len(discovery.SymbolInfos))
+	memo := make(map[string]deadReachability, len(discovery.SymbolInfos))
+
+	for _, info := range discovery.SymbolInfos {
+		reachability := classifyDeadReachability(ctx, store, info.Node.ID, discovery.SymbolInfos, discovery.NodeCache, memo, discovery.StructuralRoots, nil)
+		item, ruleID, ok := deadSymbolFindingFor(info, reachability)
+		if !ok {
+			continue
+		}
+		out = append(out, item)
+		symbolRuleByID[info.Node.ID] = ruleID
+	}
+	return out, symbolRuleByID
+}
+
+func deadSymbolFindingFor(info *deadSymbolInfo, reachability deadReachability) (finding, string, bool) {
+	switch {
+	case !info.Node.Exported && reachability == deadReachabilityNone:
+		return makeUnreachablePrivateFinding(info.Node, info.Locator, info.Summary), "unreachable_private_symbol", true
+	case !info.Node.Exported && reachability == deadReachabilityTestOnly:
+		return makeTestOnlyHelperFinding(info.Node, info.Locator, info.Summary), "test_only_helper", true
+	case info.Node.Exported && reachability == deadReachabilityNone && info.Summary.ExternalNonTest == 0 && info.Summary.TestCount == 0:
+		return makeStaleExportFinding(info.Node, info.Locator, info.Summary), "stale_export_candidate", true
+	default:
+		return finding{}, "", false
+	}
+}
+
+func runDeadFamilyFindingPhase(ctx context.Context, store *repoindex.Store, scope refscope.Scope, status refstatus.Status, fileNodes []repoindex.Node, symbolRuleByID map[string]string) ([]finding, map[string]string, map[string]string, error) {
+	fileFindings, fileRuleByPath, err := buildDeadFileFindings(ctx, store, scope, fileNodes, symbolRuleByID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	packageNodes, err := deadListNodesByKind(ctx, store, status, repoindex.NodePackage, 10000)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	packageFindings, packageRuleByFile, err := buildDeadPackageFindings(ctx, store, scope, packageNodes, fileNodes, fileRuleByPath)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	out := make([]finding, 0, len(fileFindings)+len(packageFindings))
+	out = append(out, fileFindings...)
+	out = append(out, packageFindings...)
+	return out, fileRuleByPath, packageRuleByFile, nil
+}
+
 func buildDeadFileFindings(ctx context.Context, store *repoindex.Store, scope refscope.Scope, files []repoindex.Node, symbolRules map[string]string) ([]finding, map[string]string, error) {
 	out := make([]finding, 0, 16)
 	fileRules := make(map[string]string)
 	for _, fileNode := range files {
-		if !deadCodeScopeIncludes(scope, fileNode.File) {
+		if !deadFileCandidate(scope, fileNode) {
 			continue
 		}
-		if deadCodeExemptFile(fileNode.File) {
-			continue
-		}
-
-		contains, err := store.GetOutgoingEdges(ctx, fileNode.ID, []repoindex.EdgeType{repoindex.EdgeContains}, 512)
+		item, ruleID, ok, err := deadFileFindingCandidate(ctx, store, fileNode, symbolRules)
 		if err != nil {
 			return nil, nil, err
 		}
-		if len(contains) == 0 {
+		if !ok {
 			continue
 		}
-
-		contained := make([]string, 0, len(contains))
-		allDeadish := true
-		allTestOnly := true
-		hasTestOnly := false
-		hasPrivateDead := false
-		for _, edge := range contains {
-			ruleID, ok := symbolRules[edge.Dst]
-			if !ok {
-				allDeadish = false
-				allTestOnly = false
-				continue
-			}
-			contained = append(contained, edge.Dst)
-			switch ruleID {
-			case "unreachable_private_symbol":
-				hasPrivateDead = true
-				allTestOnly = false
-			case "test_only_helper":
-				hasTestOnly = true
-			case "stale_export_candidate":
-				// allowed in both conservative file families
-			default:
-				allDeadish = false
-				allTestOnly = false
-			}
-		}
-		if len(contained) == 0 {
-			continue
-		}
-
-		incoming, err := store.GetIncomingEdges(ctx, fileNode.ID, []repoindex.EdgeType{repoindex.EdgeImports, repoindex.EdgeTests, repoindex.EdgeRefersTo}, maxDeadCodeEdgeScan)
-		if err != nil {
-			return nil, nil, err
-		}
-		summary, err := summarizeDeadFileInbounds(ctx, store, fileNode, incoming)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		switch {
-		case allTestOnly && hasTestOnly && summary.ExternalNonTest == 0:
-			out = append(out, makeTestOnlyFileFinding(fileNode, len(contained), summary))
-			fileRules[fileNode.File] = "test_only_file"
-		case allDeadish && hasPrivateDead && summary.ExternalNonTest == 0 && summary.TestCount == 0:
-			out = append(out, makeOrphanFileFinding(fileNode, len(contained), summary))
-			fileRules[fileNode.File] = "orphan_file"
-		}
+		out = append(out, item)
+		fileRules[fileNode.File] = ruleID
 	}
 	return out, fileRules, nil
 }
 
-func buildDeadPackageFindings(ctx context.Context, store *repoindex.Store, scope refscope.Scope, packages []repoindex.Node, files []repoindex.Node, fileRules map[string]string) ([]finding, map[string]string, error) {
-	fileNodeByID := make(map[string]repoindex.Node, len(files))
-	for _, node := range files {
-		fileNodeByID[node.ID] = node
+func deadFileFindingCandidate(ctx context.Context, store *repoindex.Store, fileNode repoindex.Node, symbolRules map[string]string) (finding, string, bool, error) {
+	containment, ok, err := deadFileContainmentForNode(ctx, store, fileNode, symbolRules)
+	if err != nil {
+		return finding{}, "", false, err
+	}
+	if !ok {
+		return finding{}, "", false, nil
 	}
 
+	inboundSummary, err := deadFileInboundSummaryForNode(ctx, store, fileNode)
+	if err != nil {
+		return finding{}, "", false, err
+	}
+	item, ruleID, ok := deadFileFindingFor(fileNode, containment, inboundSummary)
+	return item, ruleID, ok, nil
+}
+
+func deadFileContainmentForNode(ctx context.Context, store *repoindex.Store, fileNode repoindex.Node, symbolRules map[string]string) (deadFileContainment, bool, error) {
+	contains, err := store.GetOutgoingEdges(ctx, fileNode.ID, []repoindex.EdgeType{repoindex.EdgeContains}, 512)
+	if err != nil {
+		return deadFileContainment{}, false, err
+	}
+	if len(contains) == 0 {
+		return deadFileContainment{}, false, nil
+	}
+	containment := summarizeDeadFileContainment(contains, symbolRules)
+	if containment.SymbolCount == 0 {
+		return deadFileContainment{}, false, nil
+	}
+	return containment, true, nil
+}
+
+func deadFileInboundSummaryForNode(ctx context.Context, store *repoindex.Store, fileNode repoindex.Node) (deadFileInboundSummary, error) {
+	incoming, err := store.GetIncomingEdges(ctx, fileNode.ID, []repoindex.EdgeType{repoindex.EdgeImports, repoindex.EdgeTests, repoindex.EdgeRefersTo}, maxDeadCodeEdgeScan)
+	if err != nil {
+		return deadFileInboundSummary{}, err
+	}
+	return summarizeDeadFileInbounds(ctx, store, fileNode, incoming)
+}
+
+func deadFileCandidate(scope refscope.Scope, node repoindex.Node) bool {
+	return deadCodeScopeIncludes(scope, node.File) && !deadCodeExemptFile(node.File)
+}
+
+func summarizeDeadFileContainment(contains []repoindex.Edge, symbolRules map[string]string) deadFileContainment {
+	result := deadFileContainment{
+		AllDeadish:  true,
+		AllTestOnly: true,
+	}
+	for _, edge := range contains {
+		ruleID, ok := symbolRules[edge.Dst]
+		if !ok {
+			result.AllDeadish = false
+			result.AllTestOnly = false
+			continue
+		}
+		result.SymbolCount++
+		switch ruleID {
+		case "unreachable_private_symbol":
+			result.HasPrivateDead = true
+			result.AllTestOnly = false
+		case "test_only_helper":
+			result.HasTestOnly = true
+		case "stale_export_candidate":
+			// Stale exports can belong to either conservative file family.
+		default:
+			result.AllDeadish = false
+			result.AllTestOnly = false
+		}
+	}
+	return result
+}
+
+func deadFileFindingFor(node repoindex.Node, containment deadFileContainment, summary deadFileInboundSummary) (finding, string, bool) {
+	switch {
+	case containment.AllTestOnly && containment.HasTestOnly && summary.ExternalNonTest == 0:
+		return makeTestOnlyFileFinding(node, containment.SymbolCount, summary), "test_only_file", true
+	case containment.AllDeadish && containment.HasPrivateDead && summary.ExternalNonTest == 0 && summary.TestCount == 0:
+		return makeOrphanFileFinding(node, containment.SymbolCount, summary), "orphan_file", true
+	default:
+		return finding{}, "", false
+	}
+}
+
+func buildDeadPackageFindings(ctx context.Context, store *repoindex.Store, scope refscope.Scope, packages []repoindex.Node, files []repoindex.Node, fileRules map[string]string) ([]finding, map[string]string, error) {
+	fileNodeByID := deadFileNodesByID(files)
 	out := make([]finding, 0, 8)
 	packageRuleByFile := make(map[string]string)
 	for _, pkgNode := range packages {
-		contains, err := store.GetOutgoingEdges(ctx, pkgNode.ID, []repoindex.EdgeType{repoindex.EdgeContains}, 512)
+		containment, item, ruleID, ok, err := deadPackageFindingCandidate(ctx, store, pkgNode, fileNodeByID, scope, fileRules)
 		if err != nil {
 			return nil, nil, err
 		}
-
-		containedPaths := make([]string, 0, len(contains))
-		allOrphan := true
-		allTestOnly := true
-		hasTestOnly := false
-		for _, edge := range contains {
-			fileNode, ok := fileNodeByID[edge.Dst]
-			if !ok || !deadCodeScopeIncludes(scope, fileNode.File) || deadCodeExemptFile(fileNode.File) {
-				continue
-			}
-			ruleID, ok := fileRules[fileNode.File]
-			if !ok {
-				allOrphan = false
-				allTestOnly = false
-				containedPaths = append(containedPaths, fileNode.File)
-				continue
-			}
-			containedPaths = append(containedPaths, fileNode.File)
-			switch ruleID {
-			case "orphan_file":
-				allTestOnly = false
-			case "test_only_file":
-				hasTestOnly = true
-				allOrphan = false
-			default:
-				allOrphan = false
-				allTestOnly = false
-			}
-		}
-		if len(containedPaths) == 0 {
+		if !ok {
 			continue
 		}
-
-		incoming, err := store.GetIncomingEdges(ctx, pkgNode.ID, []repoindex.EdgeType{repoindex.EdgeImports, repoindex.EdgeTests}, maxDeadCodeEdgeScan)
-		if err != nil {
-			return nil, nil, err
-		}
-		summary, err := summarizeDeadPackageInbounds(ctx, store, pkgNode, incoming)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		switch {
-		case allTestOnly && hasTestOnly && summary.ExternalNonTest == 0:
-			out = append(out, makeTestOnlyPackageFinding(pkgNode, len(containedPaths), summary))
-			for _, path := range containedPaths {
-				packageRuleByFile[path] = "test_only_package"
-			}
-		case allOrphan && summary.ExternalNonTest == 0 && summary.TestCount == 0:
-			out = append(out, makeStalePackageFinding(pkgNode, len(containedPaths), summary))
-			for _, path := range containedPaths {
-				packageRuleByFile[path] = "stale_package_candidate"
-			}
+		out = append(out, item)
+		for _, path := range containment.Paths {
+			packageRuleByFile[path] = ruleID
 		}
 	}
 	return out, packageRuleByFile, nil
+}
+
+func deadPackageFindingCandidate(ctx context.Context, store *repoindex.Store, pkgNode repoindex.Node, fileNodeByID map[string]repoindex.Node, scope refscope.Scope, fileRules map[string]string) (deadPackageContainment, finding, string, bool, error) {
+	containment, ok, err := deadPackageContainmentForNode(ctx, store, pkgNode, fileNodeByID, scope, fileRules)
+	if err != nil {
+		return deadPackageContainment{}, finding{}, "", false, err
+	}
+	if !ok {
+		return deadPackageContainment{}, finding{}, "", false, nil
+	}
+
+	inboundSummary, err := deadPackageInboundSummaryForNode(ctx, store, pkgNode)
+	if err != nil {
+		return deadPackageContainment{}, finding{}, "", false, err
+	}
+	item, ruleID, ok := deadPackageFindingFor(pkgNode, containment, inboundSummary)
+	return containment, item, ruleID, ok, nil
+}
+
+func deadPackageContainmentForNode(ctx context.Context, store *repoindex.Store, pkgNode repoindex.Node, fileNodeByID map[string]repoindex.Node, scope refscope.Scope, fileRules map[string]string) (deadPackageContainment, bool, error) {
+	contains, err := store.GetOutgoingEdges(ctx, pkgNode.ID, []repoindex.EdgeType{repoindex.EdgeContains}, 512)
+	if err != nil {
+		return deadPackageContainment{}, false, err
+	}
+	containment := summarizeDeadPackageContainment(contains, fileNodeByID, scope, fileRules)
+	if len(containment.Paths) == 0 {
+		return deadPackageContainment{}, false, nil
+	}
+	return containment, true, nil
+}
+
+func deadPackageInboundSummaryForNode(ctx context.Context, store *repoindex.Store, pkgNode repoindex.Node) (deadPackageInboundSummary, error) {
+	incoming, err := store.GetIncomingEdges(ctx, pkgNode.ID, []repoindex.EdgeType{repoindex.EdgeImports, repoindex.EdgeTests}, maxDeadCodeEdgeScan)
+	if err != nil {
+		return deadPackageInboundSummary{}, err
+	}
+	return summarizeDeadPackageInbounds(ctx, store, pkgNode, incoming)
+}
+
+func deadFileNodesByID(files []repoindex.Node) map[string]repoindex.Node {
+	out := make(map[string]repoindex.Node, len(files))
+	for _, node := range files {
+		out[node.ID] = node
+	}
+	return out
+}
+
+func summarizeDeadPackageContainment(contains []repoindex.Edge, fileNodeByID map[string]repoindex.Node, scope refscope.Scope, fileRules map[string]string) deadPackageContainment {
+	result := deadPackageContainment{
+		Paths:       make([]string, 0, len(contains)),
+		AllOrphan:   true,
+		AllTestOnly: true,
+	}
+	for _, edge := range contains {
+		fileNode, ok := fileNodeByID[edge.Dst]
+		if !ok || !deadFileCandidate(scope, fileNode) {
+			continue
+		}
+		ruleID, ok := fileRules[fileNode.File]
+		result.Paths = append(result.Paths, fileNode.File)
+		if !ok {
+			result.AllOrphan = false
+			result.AllTestOnly = false
+			continue
+		}
+		switch ruleID {
+		case "orphan_file":
+			result.AllTestOnly = false
+		case "test_only_file":
+			result.HasTestOnly = true
+			result.AllOrphan = false
+		default:
+			result.AllOrphan = false
+			result.AllTestOnly = false
+		}
+	}
+	return result
+}
+
+func deadPackageFindingFor(node repoindex.Node, containment deadPackageContainment, summary deadPackageInboundSummary) (finding, string, bool) {
+	switch {
+	case containment.AllTestOnly && containment.HasTestOnly && summary.ExternalNonTest == 0:
+		return makeTestOnlyPackageFinding(node, len(containment.Paths), summary), "test_only_package", true
+	case containment.AllOrphan && summary.ExternalNonTest == 0 && summary.TestCount == 0:
+		return makeStalePackageFinding(node, len(containment.Paths), summary), "stale_package_candidate", true
+	default:
+		return finding{}, "", false
+	}
 }
 
 func suppressDeadFamilyFindings(items []finding, fileRuleByPath map[string]string, packageRuleByFile map[string]string) []finding {
@@ -593,131 +751,155 @@ func deadCodeExemptFile(path string) bool {
 }
 
 func summarizeDeadCodeInbounds(ctx context.Context, store *repoindex.Store, target repoindex.Node, incoming []repoindex.Edge) (deadInboundSummary, error) {
-	if len(incoming) == 0 {
-		return deadInboundSummary{}, nil
-	}
-	sourceIDs := make([]string, 0, len(incoming))
-	seenIDs := make(map[string]struct{}, len(incoming))
-	for _, edge := range incoming {
-		if strings.TrimSpace(edge.Src) == "" || edge.Src == target.ID {
-			continue
-		}
-		if _, ok := seenIDs[edge.Src]; ok {
-			continue
-		}
-		seenIDs[edge.Src] = struct{}{}
-		sourceIDs = append(sourceIDs, edge.Src)
-	}
-	nodes, err := store.GetNodes(ctx, sourceIDs)
+	sources, err := loadDeadInboundSources(ctx, store, target, incoming)
 	if err != nil {
 		return deadInboundSummary{}, err
-	}
-	nodeByID := make(map[string]repoindex.Node, len(nodes))
-	for _, node := range nodes {
-		nodeByID[node.ID] = node
 	}
 
 	targetFile := filepath.ToSlash(strings.TrimSpace(target.File))
 	summary := deadInboundSummary{}
-	sampleSeen := make(map[string]struct{})
-	for _, edge := range incoming {
-		if edge.Src == target.ID {
-			continue
-		}
-		source, ok := nodeByID[edge.Src]
-		if !ok {
-			continue
-		}
-		sourceFile := filepath.ToSlash(strings.TrimSpace(source.File))
-		if sourceFile == "" {
+	sampler := deadSourceSampler{}
+	for _, source := range sources {
+		sourceFile, skip := deadInboundSourceFile(source)
+		if skip {
 			continue
 		}
 		summary.TotalCount++
-		if fsutil.IsTestFile(filepath.Base(sourceFile)) {
-			summary.TestCount++
-		} else if sourceFile == targetFile {
-			summary.SameFileNonTest++
-		} else {
-			summary.ExternalNonTest++
-		}
-		label := sourceFile
-		if strings.TrimSpace(source.Name) != "" {
-			label = fmt.Sprintf("%s:%s", sourceFile, source.Name)
-		}
-		if len(summary.SourceSample) < maxDeadCodeSourceSamples {
-			if _, ok := sampleSeen[label]; !ok {
-				sampleSeen[label] = struct{}{}
-				summary.SourceSample = append(summary.SourceSample, label)
-			}
-		}
+		deadIncrementSymbolInboundSummary(&summary, targetFile, sourceFile)
+		sampler.Add(deadSymbolInboundLabel(sourceFile, source.Node.Name))
 	}
+	summary.SourceSample = sampler.Items()
 	return summary, nil
 }
 
 func summarizeDeadFileInbounds(ctx context.Context, store *repoindex.Store, target repoindex.Node, incoming []repoindex.Edge) (deadFileInboundSummary, error) {
-	if len(incoming) == 0 {
-		return deadFileInboundSummary{}, nil
-	}
-	sourceIDs := make([]string, 0, len(incoming))
-	seenIDs := make(map[string]struct{}, len(incoming))
-	for _, edge := range incoming {
-		if strings.TrimSpace(edge.Src) == "" || edge.Src == target.ID {
-			continue
-		}
-		if _, ok := seenIDs[edge.Src]; ok {
-			continue
-		}
-		seenIDs[edge.Src] = struct{}{}
-		sourceIDs = append(sourceIDs, edge.Src)
-	}
-	nodes, err := store.GetNodes(ctx, sourceIDs)
+	sources, err := loadDeadInboundSources(ctx, store, target, incoming)
 	if err != nil {
 		return deadFileInboundSummary{}, err
 	}
-	nodeByID := make(map[string]repoindex.Node, len(nodes))
-	for _, node := range nodes {
-		nodeByID[node.ID] = node
-	}
 
 	summary := deadFileInboundSummary{}
-	sampleSeen := make(map[string]struct{})
-	for _, edge := range incoming {
-		source, ok := nodeByID[edge.Src]
-		if !ok {
-			continue
-		}
+	sampler := deadSourceSampler{}
+	for _, source := range sources {
+		sourceFile, _ := deadInboundSourceFile(source)
 		summary.TotalCount++
-		sourceFile := filepath.ToSlash(strings.TrimSpace(source.File))
-		if edge.Type == repoindex.EdgeTests || fsutil.IsTestFile(filepath.Base(sourceFile)) {
+		if deadInboundSourceIsTest(source.Edge, sourceFile) {
 			summary.TestCount++
 		} else {
 			summary.ExternalNonTest++
 		}
-		label := sourceFile
-		if label == "" {
-			label = source.Name
-		}
-		if label == "" {
-			label = source.ID
-		}
-		if len(summary.SourceSample) < maxDeadCodeSourceSamples {
-			if _, ok := sampleSeen[label]; !ok {
-				sampleSeen[label] = struct{}{}
-				summary.SourceSample = append(summary.SourceSample, label)
-			}
-		}
+		sampler.Add(deadFileInboundLabel(source, sourceFile))
 	}
+	summary.SourceSample = sampler.Items()
 	return summary, nil
 }
 
 func summarizeDeadPackageInbounds(ctx context.Context, store *repoindex.Store, target repoindex.Node, incoming []repoindex.Edge) (deadPackageInboundSummary, error) {
-	if len(incoming) == 0 {
-		return deadPackageInboundSummary{}, nil
+	sources, err := loadDeadInboundSources(ctx, store, target, incoming)
+	if err != nil {
+		return deadPackageInboundSummary{}, err
 	}
+
+	summary := deadPackageInboundSummary{}
+	sampler := deadSourceSampler{}
+	for _, source := range sources {
+		sourceFile, _ := deadInboundSourceFile(source)
+		summary.TotalCount++
+		if deadInboundSourceIsTest(source.Edge, sourceFile) {
+			summary.TestCount++
+		} else {
+			summary.ExternalNonTest++
+		}
+		sampler.Add(deadPackageInboundLabel(source, sourceFile))
+	}
+	summary.SourceSample = sampler.Items()
+	return summary, nil
+}
+
+func deadInboundSourceFile(source deadInboundSource) (string, bool) {
+	sourceFile := filepath.ToSlash(strings.TrimSpace(source.Node.File))
+	return sourceFile, sourceFile == ""
+}
+
+func deadInboundSourceIsTest(edge repoindex.Edge, sourceFile string) bool {
+	return edge.Type == repoindex.EdgeTests || fsutil.IsTestFile(filepath.Base(sourceFile))
+}
+
+func deadIncrementSymbolInboundSummary(summary *deadInboundSummary, targetFile, sourceFile string) {
+	if deadInboundSourceIsTest(repoindex.Edge{}, sourceFile) {
+		summary.TestCount++
+		return
+	}
+	if sourceFile == targetFile {
+		summary.SameFileNonTest++
+		return
+	}
+	summary.ExternalNonTest++
+}
+
+func deadSymbolInboundLabel(sourceFile, sourceName string) string {
+	if name := strings.TrimSpace(sourceName); name != "" {
+		return fmt.Sprintf("%s:%s", sourceFile, name)
+	}
+	return sourceFile
+}
+
+func deadFileInboundLabel(source deadInboundSource, sourceFile string) string {
+	if sourceFile != "" {
+		return sourceFile
+	}
+	if name := strings.TrimSpace(source.Node.Name); name != "" {
+		return name
+	}
+	return source.Node.ID
+}
+
+func deadPackageInboundLabel(source deadInboundSource, sourceFile string) string {
+	if name := strings.TrimSpace(source.Node.Name); name != "" {
+		return name
+	}
+	if sourceFile != "" {
+		return sourceFile
+	}
+	return source.Node.ID
+}
+
+func loadDeadInboundSources(ctx context.Context, store *repoindex.Store, target repoindex.Node, incoming []repoindex.Edge) ([]deadInboundSource, error) {
+	if len(incoming) == 0 {
+		return nil, nil
+	}
+	sourceIDs := uniqueDeadInboundSourceIDs(target.ID, incoming)
+	if len(sourceIDs) == 0 {
+		return nil, nil
+	}
+	nodes, err := store.GetNodes(ctx, sourceIDs)
+	if err != nil {
+		return nil, err
+	}
+	nodeByID := make(map[string]repoindex.Node, len(nodes))
+	for _, node := range nodes {
+		nodeByID[node.ID] = node
+	}
+
+	sources := make([]deadInboundSource, 0, len(incoming))
+	for _, edge := range incoming {
+		source, ok := nodeByID[edge.Src]
+		if !ok {
+			continue
+		}
+		sources = append(sources, deadInboundSource{
+			Edge: edge,
+			Node: source,
+		})
+	}
+	return sources, nil
+}
+
+func uniqueDeadInboundSourceIDs(targetID string, incoming []repoindex.Edge) []string {
 	sourceIDs := make([]string, 0, len(incoming))
 	seenIDs := make(map[string]struct{}, len(incoming))
 	for _, edge := range incoming {
-		if strings.TrimSpace(edge.Src) == "" || edge.Src == target.ID {
+		if strings.TrimSpace(edge.Src) == "" || edge.Src == targetID {
 			continue
 		}
 		if _, ok := seenIDs[edge.Src]; ok {
@@ -726,43 +908,25 @@ func summarizeDeadPackageInbounds(ctx context.Context, store *repoindex.Store, t
 		seenIDs[edge.Src] = struct{}{}
 		sourceIDs = append(sourceIDs, edge.Src)
 	}
-	nodes, err := store.GetNodes(ctx, sourceIDs)
-	if err != nil {
-		return deadPackageInboundSummary{}, err
-	}
-	nodeByID := make(map[string]repoindex.Node, len(nodes))
-	for _, node := range nodes {
-		nodeByID[node.ID] = node
-	}
+	return sourceIDs
+}
 
-	summary := deadPackageInboundSummary{}
-	sampleSeen := make(map[string]struct{})
-	for _, edge := range incoming {
-		source, ok := nodeByID[edge.Src]
-		if !ok {
-			continue
-		}
-		summary.TotalCount++
-		if edge.Type == repoindex.EdgeTests || fsutil.IsTestFile(filepath.Base(strings.TrimSpace(source.File))) {
-			summary.TestCount++
-		} else {
-			summary.ExternalNonTest++
-		}
-		label := strings.TrimSpace(source.Name)
-		if label == "" {
-			label = strings.TrimSpace(source.File)
-		}
-		if label == "" {
-			label = source.ID
-		}
-		if len(summary.SourceSample) < maxDeadCodeSourceSamples {
-			if _, ok := sampleSeen[label]; !ok {
-				sampleSeen[label] = struct{}{}
-				summary.SourceSample = append(summary.SourceSample, label)
-			}
-		}
+func (s *deadSourceSampler) Add(label string) {
+	if len(s.items) >= maxDeadCodeSourceSamples {
+		return
 	}
-	return summary, nil
+	if s.seen == nil {
+		s.seen = make(map[string]struct{}, maxDeadCodeSourceSamples)
+	}
+	if _, ok := s.seen[label]; ok {
+		return
+	}
+	s.seen[label] = struct{}{}
+	s.items = append(s.items, label)
+}
+
+func (s *deadSourceSampler) Items() []string {
+	return s.items
 }
 
 func classifyDeadReachability(ctx context.Context, store *repoindex.Store, nodeID string, infos map[string]*deadSymbolInfo, nodeCache map[string]repoindex.Node, memo map[string]deadReachability, roots deadStructuralRoots, visiting map[string]struct{}) deadReachability {

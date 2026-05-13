@@ -37,26 +37,34 @@ type elixirTransactionScript struct {
 	MultiStepCount int
 }
 
+func collectElixirSymbolCandidates[T any](sym symindex.Symbol, lang string, content []byte, collect func(root *sitter.Node, content []byte) []T) ([]T, bool) {
+	if !supportsObservedFunctionSignals(sym, lang, content) {
+		return nil, false
+	}
+	body, ok := extractObservedSymbolBytes(sym, content)
+	if !ok {
+		return nil, false
+	}
+	tree, ok := parseElixirSlopTree(body)
+	if !ok {
+		return nil, false
+	}
+	defer tree.Close()
+	candidates := collect(tree.RootNode(), body)
+	if len(candidates) == 0 {
+		return nil, false
+	}
+	return candidates, true
+}
+
 func analyzeElixirPreloadAfterGetChains(_ string, relPath, lang string, content []byte, symbols []symindex.Symbol) []finding {
 	if len(symbols) == 0 {
 		return nil
 	}
 	findings := make([]finding, 0, 4)
 	for _, sym := range symbols {
-		if !supportsObservedFunctionSignals(sym, lang, content) {
-			continue
-		}
-		body, ok := extractObservedSymbolBytes(sym, content)
+		chains, ok := collectElixirSymbolCandidates(sym, lang, content, collectElixirPreloadAfterGetChains)
 		if !ok {
-			continue
-		}
-		tree, ok := parseElixirSlopTree(body)
-		if !ok {
-			continue
-		}
-		chains := collectElixirPreloadAfterGetChains(tree.RootNode(), body)
-		tree.Close()
-		if len(chains) == 0 {
 			continue
 		}
 		line := sym.StartLine + chains[0].Line - 1
@@ -107,20 +115,8 @@ func analyzeElixirTransactionScriptHotspots(_ string, relPath, lang string, cont
 	}
 	findings := make([]finding, 0, 4)
 	for _, sym := range symbols {
-		if !supportsObservedFunctionSignals(sym, lang, content) {
-			continue
-		}
-		body, ok := extractObservedSymbolBytes(sym, content)
+		scripts, ok := collectElixirSymbolCandidates(sym, lang, content, collectElixirTransactionScripts)
 		if !ok {
-			continue
-		}
-		tree, ok := parseElixirSlopTree(body)
-		if !ok {
-			continue
-		}
-		scripts := collectElixirTransactionScripts(tree.RootNode(), body)
-		tree.Close()
-		if len(scripts) == 0 {
 			continue
 		}
 		for _, script := range scripts {
@@ -163,20 +159,8 @@ func analyzeElixirPostTransactionPreloads(_ string, relPath, lang string, conten
 	}
 	findings := make([]finding, 0, 4)
 	for _, sym := range symbols {
-		if !supportsObservedFunctionSignals(sym, lang, content) {
-			continue
-		}
-		body, ok := extractObservedSymbolBytes(sym, content)
+		candidates, ok := collectElixirSymbolCandidates(sym, lang, content, collectElixirPostTransactionPreloads)
 		if !ok {
-			continue
-		}
-		tree, ok := parseElixirSlopTree(body)
-		if !ok {
-			continue
-		}
-		candidates := collectElixirPostTransactionPreloads(tree.RootNode(), body)
-		tree.Close()
-		if len(candidates) == 0 {
 			continue
 		}
 		for _, candidate := range candidates {
@@ -230,37 +214,22 @@ func collectElixirPreloadAfterGetChains(root *sitter.Node, content []byte) []eli
 }
 
 func elixirPreloadAfterGetChainCandidate(node *sitter.Node, content []byte) (elixirPreloadAfterGetChain, bool) {
-	if node == nil || node.Kind() != "binary_operator" {
-		return elixirPreloadAfterGetChain{}, false
-	}
-	children := elixirNamedChildren(node)
-	if len(children) < 2 {
-		return elixirPreloadAfterGetChain{}, false
-	}
-	left := &children[0]
-	right := &children[len(children)-1]
-	if strings.TrimSpace(elixirBinaryOperator(node, left, right, content)) != "|>" {
+	left, right, ok := elixirPipeOperands(node, content)
+	if !ok {
 		return elixirPreloadAfterGetChain{}, false
 	}
 	if left.Kind() != "call" || right.Kind() != "call" {
 		return elixirPreloadAfterGetChain{}, false
 	}
 	repoCall := strings.TrimSpace(elixirCallTargetName(left, content))
-	if repoCall != "Repo.get" && repoCall != "Repo.get!" && repoCall != "Repo.get_by" && repoCall != "Repo.get_by!" {
+	if !isElixirRepoGetCall(repoCall) {
 		return elixirPreloadAfterGetChain{}, false
 	}
 	preloadCall := strings.TrimSpace(elixirCallTargetName(right, content))
 	if preloadCall != "Repo.preload" {
 		return elixirPreloadAfterGetChain{}, false
 	}
-	preloadTarget := ""
-	if args := elixirCallArgumentsLocal(right); args != nil {
-		children := elixirNamedChildren(args)
-		if len(children) > 0 {
-			last := &children[len(children)-1]
-			preloadTarget = previewElixirText(elixirNodeText(last, content))
-		}
-	}
+	preloadTarget := elixirPreloadTargetFromCall(right, content)
 	return elixirPreloadAfterGetChain{
 		Line:          int(node.StartPosition().Row) + 1,
 		RepoCall:      repoCall,
@@ -268,6 +237,47 @@ func elixirPreloadAfterGetChainCandidate(node *sitter.Node, content []byte) (eli
 		PreloadTarget: preloadTarget,
 		Preview:       previewElixirText(elixirNodeText(node, content)),
 	}, true
+}
+
+func elixirPipeOperands(node *sitter.Node, content []byte) (*sitter.Node, *sitter.Node, bool) {
+	if node == nil || node.Kind() != "binary_operator" {
+		return nil, nil, false
+	}
+	children := elixirNamedChildren(node)
+	if len(children) < 2 {
+		return nil, nil, false
+	}
+	left := &children[0]
+	right := &children[len(children)-1]
+	if strings.TrimSpace(elixirBinaryOperator(node, left, right, content)) != "|>" {
+		return nil, nil, false
+	}
+	return left, right, true
+}
+
+func isElixirRepoGetCall(name string) bool {
+	switch name {
+	case "Repo.get", "Repo.get!", "Repo.get_by", "Repo.get_by!":
+		return true
+	default:
+		return false
+	}
+}
+
+func elixirPreloadTargetFromCall(call *sitter.Node, content []byte) string {
+	if call == nil {
+		return ""
+	}
+	args := elixirCallArgumentsLocal(call)
+	if args == nil {
+		return ""
+	}
+	children := elixirNamedChildren(args)
+	if len(children) == 0 {
+		return ""
+	}
+	last := &children[len(children)-1]
+	return previewElixirText(elixirNodeText(last, content))
 }
 
 func collectElixirTransactionScripts(root *sitter.Node, content []byte) []elixirTransactionScript {
@@ -335,35 +345,55 @@ func collectElixirPostTransactionPreloads(root *sitter.Node, content []byte) []e
 }
 
 func elixirPostTransactionPreloadCandidate(node *sitter.Node, content []byte) (elixirPostTransactionPreload, bool) {
-	if node == nil || node.Kind() != "binary_operator" {
+	left, doBlock, ok := elixirCasePipelineParts(node, content)
+	if !ok {
 		return elixirPostTransactionPreload{}, false
 	}
-	children := elixirNamedChildren(node)
-	if len(children) < 2 {
+	if !elixirPipeHasCallTarget(left, content, "Repo.transaction") {
 		return elixirPostTransactionPreload{}, false
 	}
-	left := &children[0]
-	right := &children[len(children)-1]
-	if strings.TrimSpace(elixirBinaryOperator(node, left, right, content)) != "|>" {
+	targets := elixirCasePreloadTargets(doBlock, content)
+	if len(targets) == 0 {
 		return elixirPostTransactionPreload{}, false
 	}
-	if right.Kind() != "call" || strings.TrimSpace(elixirCallTargetName(right, content)) != "case" {
-		return elixirPostTransactionPreload{}, false
+	return elixirPostTransactionPreload{
+		Line:           int(node.StartPosition().Row) + 1,
+		PreloadTargets: targets,
+		Preview:        previewElixirText(elixirNodeText(node, content)),
+	}, true
+}
+
+func elixirCasePipelineParts(node *sitter.Node, content []byte) (*sitter.Node, *sitter.Node, bool) {
+	left, right, ok := elixirPipeOperands(node, content)
+	if !ok {
+		return nil, nil, false
+	}
+	if right.Kind() != "call" {
+		return nil, nil, false
+	}
+	if strings.TrimSpace(elixirCallTargetName(right, content)) != "case" {
+		return nil, nil, false
 	}
 	doBlock := elixirCallDoBlock(right)
 	if doBlock == nil {
-		return elixirPostTransactionPreload{}, false
+		return nil, nil, false
 	}
-	stages := elixirPipeStages(left, content)
-	hasTransaction := false
+	return left, doBlock, true
+}
+
+func elixirPipeHasCallTarget(node *sitter.Node, content []byte, target string) bool {
+	stages := elixirPipeStages(node, content)
 	for _, stage := range stages {
-		if stage.target == "Repo.transaction" {
-			hasTransaction = true
-			break
+		if stage.target == target {
+			return true
 		}
 	}
-	if !hasTransaction {
-		return elixirPostTransactionPreload{}, false
+	return false
+}
+
+func elixirCasePreloadTargets(doBlock *sitter.Node, content []byte) []string {
+	if doBlock == nil {
+		return nil
 	}
 	targets := make([]string, 0, 2)
 	doChildren := elixirNamedChildren(doBlock)
@@ -382,15 +412,7 @@ func elixirPostTransactionPreloadCandidate(node *sitter.Node, content []byte) (e
 			}
 		}
 	}
-	targets = appendUniquePatternStrings(nil, targets...)
-	if len(targets) == 0 {
-		return elixirPostTransactionPreload{}, false
-	}
-	return elixirPostTransactionPreload{
-		Line:           int(node.StartPosition().Row) + 1,
-		PreloadTargets: targets,
-		Preview:        previewElixirText(elixirNodeText(node, content)),
-	}, true
+	return appendUniquePatternStrings(nil, targets...)
 }
 
 func elixirRepoPreloadTargets(node *sitter.Node, content []byte) []string {
@@ -437,26 +459,8 @@ func elixirTransactionScriptCandidate(node *sitter.Node, content []byte) (elixir
 }
 
 func elixirAnonymousTransactionScriptCandidate(node *sitter.Node, content []byte) (elixirTransactionScript, bool) {
-	if node == nil || node.Kind() != "call" {
-		return elixirTransactionScript{}, false
-	}
-	if strings.TrimSpace(elixirCallTargetName(node, content)) != "Repo.transaction" {
-		return elixirTransactionScript{}, false
-	}
-	args := elixirCallArgumentsLocal(node)
-	if args == nil {
-		return elixirTransactionScript{}, false
-	}
-	argChildren := elixirNamedChildren(args)
-	if len(argChildren) == 0 {
-		return elixirTransactionScript{}, false
-	}
-	fnNode := &argChildren[0]
-	if fnNode.Kind() != "anonymous_function" {
-		return elixirTransactionScript{}, false
-	}
-	body := elixirAnonymousFunctionBody(fnNode)
-	if body == nil {
+	line, body, ok := elixirAnonymousTransactionBody(node, content)
+	if !ok {
 		return elixirTransactionScript{}, false
 	}
 	statements := elixirNamedChildren(body)
@@ -466,13 +470,39 @@ func elixirAnonymousTransactionScriptCandidate(node *sitter.Node, content []byte
 	}
 	repoCalls, branchCount := elixirTransactionBodyStats(body, content)
 	return elixirTransactionScript{
-		Line:           int(node.StartPosition().Row) + 1,
+		Line:           line,
 		StatementCount: statementCount,
 		RepoCallCount:  len(repoCalls),
 		BranchCount:    branchCount,
 		RepoCalls:      sampleStrings(repoCalls, 6),
 		Preview:        previewElixirText(elixirNodeText(node, content)),
 	}, true
+}
+
+func elixirAnonymousTransactionBody(node *sitter.Node, content []byte) (int, *sitter.Node, bool) {
+	if node == nil || node.Kind() != "call" {
+		return 0, nil, false
+	}
+	if strings.TrimSpace(elixirCallTargetName(node, content)) != "Repo.transaction" {
+		return 0, nil, false
+	}
+	args := elixirCallArgumentsLocal(node)
+	if args == nil {
+		return 0, nil, false
+	}
+	argChildren := elixirNamedChildren(args)
+	if len(argChildren) == 0 {
+		return 0, nil, false
+	}
+	fnNode := &argChildren[0]
+	if fnNode.Kind() != "anonymous_function" {
+		return 0, nil, false
+	}
+	body := elixirAnonymousFunctionBody(fnNode)
+	if body == nil {
+		return 0, nil, false
+	}
+	return int(node.StartPosition().Row) + 1, body, true
 }
 
 func elixirMultiTransactionScriptCandidate(node *sitter.Node, content []byte) (elixirTransactionScript, bool) {
@@ -483,19 +513,40 @@ func elixirMultiTransactionScriptCandidate(node *sitter.Node, content []byte) (e
 	if len(stages) < 3 {
 		return elixirTransactionScript{}, false
 	}
-	transactionIdx := -1
-	for i, stage := range stages {
-		if stage.target == "Repo.transaction" {
-			transactionIdx = i
-			break
-		}
-	}
+	transactionIdx := elixirTransactionStageIndex(stages)
 	if transactionIdx <= 0 {
 		return elixirTransactionScript{}, false
 	}
+	multiStageCount, repoCalls, pipelineNames, runSteps := summarizeElixirMultiStages(stages, transactionIdx)
+	if multiStageCount < 2 {
+		return elixirTransactionScript{}, false
+	}
+	return elixirTransactionScript{
+		Line:           stages[transactionIdx].line,
+		StatementCount: transactionIdx + 1,
+		RepoCallCount:  len(repoCalls),
+		BranchCount:    runSteps,
+		RepoCalls:      sampleStrings(repoCalls, 6),
+		Preview:        previewElixirText(elixirNodeText(node, content)),
+		PipelineStages: sampleStrings(pipelineNames, 8),
+		MultiStepCount: multiStageCount,
+	}, true
+}
+
+func elixirTransactionStageIndex(stages []elixirPipeStage) int {
+	for i, stage := range stages {
+		if stage.target == "Repo.transaction" {
+			return i
+		}
+	}
+	return -1
+}
+
+func summarizeElixirMultiStages(stages []elixirPipeStage, transactionIdx int) (int, []string, []string, int) {
 	multiStageCount := 0
 	repoCalls := make([]string, 0, 6)
 	pipelineNames := make([]string, 0, len(stages))
+	runSteps := 0
 	for i, stage := range stages[:transactionIdx] {
 		if strings.HasPrefix(stage.target, "Ecto.Multi.") || strings.HasPrefix(stage.target, "Multi.") {
 			if i > 0 || !strings.HasSuffix(stage.target, ".new") {
@@ -508,27 +559,12 @@ func elixirMultiTransactionScriptCandidate(node *sitter.Node, content []byte) (e
 		if stage.target != "" {
 			pipelineNames = append(pipelineNames, stage.target)
 		}
-	}
-	repoCalls = appendUniquePatternStrings(repoCalls, "Repo.transaction")
-	if multiStageCount < 2 {
-		return elixirTransactionScript{}, false
-	}
-	runSteps := 0
-	for _, stage := range stages[:transactionIdx] {
 		if strings.HasSuffix(stage.target, ".run") {
 			runSteps++
 		}
 	}
-	return elixirTransactionScript{
-		Line:           stages[transactionIdx].line,
-		StatementCount: transactionIdx + 1,
-		RepoCallCount:  len(repoCalls),
-		BranchCount:    runSteps,
-		RepoCalls:      sampleStrings(repoCalls, 6),
-		Preview:        previewElixirText(elixirNodeText(node, content)),
-		PipelineStages: sampleStrings(pipelineNames, 8),
-		MultiStepCount: multiStageCount,
-	}, true
+	repoCalls = appendUniquePatternStrings(repoCalls, "Repo.transaction")
+	return multiStageCount, repoCalls, pipelineNames, runSteps
 }
 
 type elixirPipeStage struct {

@@ -136,68 +136,96 @@ func attachEvidenceToHotspots(ctx context.Context, findings []finding, service *
 		if out[i].RuleID != "function_hotspot" {
 			continue
 		}
-		if out[i].Evidence == nil {
-			out[i].Evidence = map[string]any{}
-		}
-		out[i].Evidence["scope_snapshot_id"] = snapshotID
-		out[i].Evidence["scope_snapshot_artifact"] = snapshotArtifact
-		if hot, ok := hotIndex[out[i].File]; ok {
-			out[i].Evidence["recent_change_count"] = hot.TouchCount
-			out[i].Evidence["hot_score"] = hot.Score
-		}
-		if symbolHot, ok := lookupFindingSymbolHotspot(symbolHotIndex, out[i]); ok {
-			out[i].Evidence["symbol_recent_change_count"] = symbolHot.TouchCount
-			out[i].Evidence["symbol_hot_score"] = symbolHot.Score
-			out[i].Evidence["symbol_changed_line_count"] = symbolHot.ChangedLineCount
-		}
-		if cochange := lookupFindingCochange(cochangeIndex, out[i]); len(cochange) > 0 {
-			out[i].Evidence["cochange_count"] = len(cochange)
-			out[i].Evidence["cochange_strength"] = cochange[0].Score
-			out[i].Evidence["cochange_paths"] = cochangeNeighborPaths(cochange)
-		}
-		if boundary := classifySuggestedBoundary(out[i]); boundary != "" {
-			out[i].Evidence["suggested_boundary_kind"] = boundary
-		}
-		row := refevidence.HotspotRow{
-			File:              out[i].File,
-			Symbol:            out[i].Symbol,
-			RuleID:            out[i].RuleID,
-			RecentChangeCount: evidenceInt(out[i].Evidence["recent_change_count"]),
-			HotScore:          evidenceFloat(out[i].Evidence["hot_score"]),
-			SymbolTouchCount:  evidenceInt(out[i].Evidence["symbol_recent_change_count"]),
-			SymbolHotScore:    evidenceFloat(out[i].Evidence["symbol_hot_score"]),
-			SymbolChangedLine: evidenceInt(out[i].Evidence["symbol_changed_line_count"]),
-			CochangeStrength:  evidenceFloat(out[i].Evidence["cochange_strength"]),
-			CochangeCount:     evidenceInt(out[i].Evidence["cochange_count"]),
-			CochangePaths:     evidenceStrings(out[i].Evidence["cochange_paths"]),
-			SuggestedBoundary: evidenceString(out[i].Evidence["suggested_boundary_kind"]),
-		}
+		projection := hotspotEvidenceForFinding(out[i], hotIndex, symbolHotIndex, cochangeIndex, snapshotID, snapshotArtifact)
+		out[i].Evidence = projection.Evidence
+		row := projection.Row
 		shouldAttachGraph := service != nil && graphEnriched < maxIndexedHotspotEvidence
 		if shouldAttachGraph {
-			if seed, seedQuery := resolveFindingSeedNode(ctx, service, out[i]); seed != nil {
-				reverse, reverseAnchors := expandFindingNeighbors(ctx, service, seed.ID, repoindex.DirIn)
-				forward, forwardAnchors := expandFindingNeighbors(ctx, service, seed.ID, repoindex.DirOut)
-				suggestedReads := suggestedReadPaths(out[i].File, reverseAnchors, forwardAnchors)
-
-				out[i].Evidence["seed_node_id"] = seed.ID
-				out[i].Evidence["seed_query"] = seedQuery
-				out[i].Evidence["reverse_dep_count"] = reverse
-				out[i].Evidence["forward_dep_count"] = forward
-				out[i].Evidence["suggested_reads"] = suggestedReads
-				row.SeedNodeID = seed.ID
-				row.SeedQuery = seedQuery
-				row.ReverseDepCount = reverse
-				row.ForwardDepCount = forward
-				row.SuggestedReads = suggestedReads
+			if attachHotspotGraphEvidence(ctx, service, out[i], out[i].Evidence, &row) {
 				graphEnriched++
 			}
 		}
-		row.OpportunityScore = evidenceInt(out[i].Evidence["opportunity_score"])
 		if pack != nil && len(pack.Hotspots) < maxEvidenceHotspots {
 			pack.Hotspots = append(pack.Hotspots, row)
 		}
 	}
 	return out
+}
+
+type hotspotEvidenceProjection struct {
+	Evidence map[string]any
+	Row      refevidence.HotspotRow
+}
+
+func hotspotEvidenceForFinding(item finding, hotIndex map[string]refhot.FileHotspot, symbolHotIndex map[string]refhot.SymbolHotspot, cochangeIndex map[string][]refhot.CochangeNeighbor, snapshotID, snapshotArtifact string) hotspotEvidenceProjection {
+	evidence := item.Evidence
+	if evidence == nil {
+		evidence = map[string]any{}
+	}
+	evidence["scope_snapshot_id"] = snapshotID
+	evidence["scope_snapshot_artifact"] = snapshotArtifact
+	if hot, ok := hotIndex[item.File]; ok {
+		evidence["recent_change_count"] = hot.TouchCount
+		evidence["hot_score"] = hot.Score
+	}
+	if symbolHot, ok := lookupFindingSymbolHotspot(symbolHotIndex, item); ok {
+		evidence["symbol_recent_change_count"] = symbolHot.TouchCount
+		evidence["symbol_hot_score"] = symbolHot.Score
+		evidence["symbol_changed_line_count"] = symbolHot.ChangedLineCount
+	}
+	if cochange := lookupFindingCochange(cochangeIndex, item); len(cochange) > 0 {
+		evidence["cochange_count"] = len(cochange)
+		evidence["cochange_strength"] = cochange[0].Score
+		evidence["cochange_paths"] = cochangeNeighborPaths(cochange)
+	}
+	if boundary := classifySuggestedBoundary(item); boundary != "" {
+		evidence["suggested_boundary_kind"] = boundary
+	}
+
+	row := refevidence.HotspotRow{
+		File:              item.File,
+		Symbol:            item.Symbol,
+		RuleID:            item.RuleID,
+		RecentChangeCount: evidenceInt(evidence["recent_change_count"]),
+		HotScore:          evidenceFloat(evidence["hot_score"]),
+		SymbolTouchCount:  evidenceInt(evidence["symbol_recent_change_count"]),
+		SymbolHotScore:    evidenceFloat(evidence["symbol_hot_score"]),
+		SymbolChangedLine: evidenceInt(evidence["symbol_changed_line_count"]),
+		CochangeStrength:  evidenceFloat(evidence["cochange_strength"]),
+		CochangeCount:     evidenceInt(evidence["cochange_count"]),
+		CochangePaths:     evidenceStrings(evidence["cochange_paths"]),
+		SuggestedBoundary: evidenceString(evidence["suggested_boundary_kind"]),
+		OpportunityScore:  evidenceInt(evidence["opportunity_score"]),
+	}
+	return hotspotEvidenceProjection{
+		Evidence: evidence,
+		Row:      row,
+	}
+}
+
+func attachHotspotGraphEvidence(ctx context.Context, service *repoquery.QueryService, item finding, evidence map[string]any, row *refevidence.HotspotRow) bool {
+	if service == nil || row == nil {
+		return false
+	}
+	seed, seedQuery := resolveFindingSeedNode(ctx, service, item)
+	if seed == nil {
+		return false
+	}
+	reverse, reverseAnchors := expandFindingNeighbors(ctx, service, seed.ID, repoindex.DirIn)
+	forward, forwardAnchors := expandFindingNeighbors(ctx, service, seed.ID, repoindex.DirOut)
+	suggestedReads := suggestedReadPaths(item.File, reverseAnchors, forwardAnchors)
+
+	evidence["seed_node_id"] = seed.ID
+	evidence["seed_query"] = seedQuery
+	evidence["reverse_dep_count"] = reverse
+	evidence["forward_dep_count"] = forward
+	evidence["suggested_reads"] = suggestedReads
+	row.SeedNodeID = seed.ID
+	row.SeedQuery = seedQuery
+	row.ReverseDepCount = reverse
+	row.ForwardDepCount = forward
+	row.SuggestedReads = suggestedReads
+	return true
 }
 
 func rerankScoutFindings(findings []finding, mode refstatus.Mode) []finding {

@@ -16,66 +16,18 @@ import (
 )
 
 func analyzeTypeScriptDuplicateRecoveryBlocks(path, relPath, lang string, content []byte, symbols []symindex.Symbol) []finding {
-	if len(symbols) == 0 {
-		return nil
-	}
-	grammar := tsGrammarForPath(path)
-	if grammar == nil {
-		return nil
-	}
-
-	findings := make([]finding, 0, 4)
-	for _, sym := range symbols {
-		if !supportsObservedFunctionSignals(sym, lang, content) {
-			continue
-		}
-		body, ok := extractObservedSymbolBytes(sym, content)
-		if !ok {
-			continue
-		}
-		tree, ok := parseTSRecoveryTree(grammar, body)
-		if !ok {
-			continue
-		}
-		groups := collectTSDuplicateRecoveryGroups(tree.RootNode(), body)
-		tree.Close()
-		if len(groups) == 0 {
-			continue
-		}
-		for _, group := range groups {
-			absLines := make([]int, 0, len(group.Lines))
-			for _, line := range group.Lines {
-				absLines = append(absLines, sym.StartLine+line-1)
-			}
-			score := scoreDuplicateRecoveryBlock(len(absLines), group.StatementCount)
-			findings = append(findings, finding{
-				RuleID:            "duplicate_recovery_block",
-				Category:          "function",
-				Severity:          severityFor(score),
-				Score:             score,
-				Title:             "Function repeats the same guarded recovery block",
-				Detail:            sym.Name + " repeats a normalized guarded block " + itoa(len(absLines)) + " times, which is a strong signal that the recovery or fallback path wants one helper instead of copy-pasted branches.",
-				SuggestedRefactor: "Extract the repeated guarded recovery/remap path into a local helper or small policy function, then keep each branch focused on the condition that differs.",
-				File:              relPath,
-				Line:              absLines[0],
-				Symbol:            sym.Name,
-				Language:          lang,
-				Confidence:        "high",
-				Signals:           []string{"tree_sitter", "normalized_recovery_block"},
-				Evidence: map[string]any{
-					"normalized_block_hash": hashShort(group.Fingerprint),
-					"duplicate_count":       len(absLines),
-					"duplicate_span_lines":  absLines,
-					"statement_count":       group.StatementCount,
-					"control_transfers":     group.ControlTransfers,
-				},
-			})
-		}
-	}
-	return findings
+	return analyzeTSSymbolGroups(path, relPath, lang, content, symbols, collectTSDuplicateRecoveryGroups, buildTypeScriptDuplicateRecoveryFindings)
 }
 
 func analyzeTypeScriptDuplicatedErrorRemaps(path, relPath, lang string, content []byte, symbols []symindex.Symbol) []finding {
+	return analyzeTSSymbolGroups(path, relPath, lang, content, symbols, collectTSDuplicatedErrorRemapGroups, buildTypeScriptDuplicatedErrorRemapFindings)
+}
+
+func analyzeTypeScriptRepeatedGuardLadders(path, relPath, lang string, content []byte, symbols []symindex.Symbol) []finding {
+	return analyzeTSSymbolGroups(path, relPath, lang, content, symbols, collectTSRepeatedGuardGroups, buildTypeScriptRepeatedGuardFindings)
+}
+
+func analyzeTSSymbolGroups[T any](path, relPath, lang string, content []byte, symbols []symindex.Symbol, collect func(*sitter.Node, []byte) []T, build func(symindex.Symbol, string, string, []T) []finding) []finding {
 	if len(symbols) == 0 {
 		return nil
 	}
@@ -86,111 +38,132 @@ func analyzeTypeScriptDuplicatedErrorRemaps(path, relPath, lang string, content 
 
 	findings := make([]finding, 0, 4)
 	for _, sym := range symbols {
-		if !supportsObservedFunctionSignals(sym, lang, content) {
-			continue
-		}
-		body, ok := extractObservedSymbolBytes(sym, content)
+		groups, ok := collectTSSymbolCandidates(grammar, sym, lang, content, collect)
 		if !ok {
 			continue
 		}
-		tree, ok := parseTSRecoveryTree(grammar, body)
-		if !ok {
-			continue
-		}
-		groups := collectTSDuplicatedErrorRemapGroups(tree.RootNode(), body)
-		tree.Close()
-		if len(groups) == 0 {
-			continue
-		}
-		for _, group := range groups {
-			absLines := make([]int, 0, len(group.Lines))
-			for _, line := range group.Lines {
-				absLines = append(absLines, sym.StartLine+line-1)
-			}
-			score := scoreDuplicatedErrorRemap(len(absLines))
-			findings = append(findings, finding{
-				RuleID:            "duplicated_error_remap",
-				Category:          "function",
-				Severity:          severityFor(score),
-				Score:             score,
-				Title:             "Function repeats the same guarded error remap",
-				Detail:            sym.Name + " repeats the same guarded error remap " + itoa(len(absLines)) + " times inside catch handling, which suggests one shared error translation helper should own the mapping.",
-				SuggestedRefactor: "Extract the repeated error remap into one helper that translates the external error shape to the domain error once, then call it from each catch path.",
-				File:              relPath,
-				Line:              absLines[0],
-				Symbol:            sym.Name,
-				Language:          lang,
-				Confidence:        "high",
-				Signals:           []string{"tree_sitter", "normalized_error_remap"},
-				Evidence: map[string]any{
-					"normalized_condition_hash": hashShort(group.ConditionFingerprint),
-					"normalized_remap_hash":     hashShort(group.RemapFingerprint),
-					"duplicate_count":           len(absLines),
-					"duplicate_span_lines":      absLines,
-				},
-			})
-		}
+		findings = append(findings, build(sym, relPath, lang, groups)...)
 	}
 	return findings
 }
 
-func analyzeTypeScriptRepeatedGuardLadders(path, relPath, lang string, content []byte, symbols []symindex.Symbol) []finding {
-	if len(symbols) == 0 {
-		return nil
+func collectTSSymbolCandidates[T any](grammar *sitter.Language, sym symindex.Symbol, lang string, content []byte, collect func(*sitter.Node, []byte) []T) ([]T, bool) {
+	if !supportsObservedFunctionSignals(sym, lang, content) {
+		return nil, false
 	}
-	grammar := tsGrammarForPath(path)
-	if grammar == nil {
-		return nil
+	body, ok := extractObservedSymbolBytes(sym, content)
+	if !ok {
+		return nil, false
 	}
+	tree, ok := parseTSRecoveryTree(grammar, body)
+	if !ok {
+		return nil, false
+	}
+	groups := collect(tree.RootNode(), body)
+	tree.Close()
+	if len(groups) == 0 {
+		return nil, false
+	}
+	return groups, true
+}
 
-	findings := make([]finding, 0, 4)
-	for _, sym := range symbols {
-		if !supportsObservedFunctionSignals(sym, lang, content) {
-			continue
-		}
-		body, ok := extractObservedSymbolBytes(sym, content)
-		if !ok {
-			continue
-		}
-		tree, ok := parseTSRecoveryTree(grammar, body)
-		if !ok {
-			continue
-		}
-		groups := collectTSRepeatedGuardGroups(tree.RootNode(), body)
-		tree.Close()
-		if len(groups) == 0 {
-			continue
-		}
-		for _, group := range groups {
-			absLines := make([]int, 0, len(group.Lines))
-			for _, line := range group.Lines {
-				absLines = append(absLines, sym.StartLine+line-1)
-			}
-			score := scoreRepeatedGuardLadder(len(absLines))
-			findings = append(findings, finding{
-				RuleID:            "repeated_guard_ladder",
-				Category:          "function",
-				Severity:          severityFor(score),
-				Score:             score,
-				Title:             "Function repeats the same guard predicate",
-				Detail:            sym.Name + " repeats the same guard predicate " + itoa(len(absLines)) + " times, which suggests one policy helper or state transition should own the repeated gate instead of branching on it in multiple places.",
-				SuggestedRefactor: "Extract the repeated guard or the guarded action into one helper so the policy check is expressed once and reused consistently.",
-				File:              relPath,
-				Line:              absLines[0],
-				Symbol:            sym.Name,
-				Language:          lang,
-				Confidence:        "high",
-				Signals:           []string{"tree_sitter", "normalized_guard_predicate"},
-				Evidence: map[string]any{
-					"normalized_guard_hash": hashShort(group.Fingerprint),
-					"duplicate_count":       len(absLines),
-					"duplicate_span_lines":  absLines,
-					"guard_preview":         group.Preview,
-				},
-			})
-		}
+func buildTypeScriptDuplicateRecoveryFindings(sym symindex.Symbol, relPath, lang string, groups []tsDuplicateRecoveryGroup) []finding {
+	findings := make([]finding, 0, len(groups))
+	for _, group := range groups {
+		absLines := absoluteTSLines(sym, group.Lines)
+		score := scoreDuplicateRecoveryBlock(len(absLines), group.StatementCount)
+		findings = append(findings, finding{
+			RuleID:            "duplicate_recovery_block",
+			Category:          "function",
+			Severity:          severityFor(score),
+			Score:             score,
+			Title:             "Function repeats the same guarded recovery block",
+			Detail:            sym.Name + " repeats a normalized guarded block " + itoa(len(absLines)) + " times, which is a strong signal that the recovery or fallback path wants one helper instead of copy-pasted branches.",
+			SuggestedRefactor: "Extract the repeated guarded recovery/remap path into a local helper or small policy function, then keep each branch focused on the condition that differs.",
+			File:              relPath,
+			Line:              absLines[0],
+			Symbol:            sym.Name,
+			Language:          lang,
+			Confidence:        "high",
+			Signals:           []string{"tree_sitter", "normalized_recovery_block"},
+			Evidence: map[string]any{
+				"normalized_block_hash": hashShort(group.Fingerprint),
+				"duplicate_count":       len(absLines),
+				"duplicate_span_lines":  absLines,
+				"statement_count":       group.StatementCount,
+				"control_transfers":     group.ControlTransfers,
+			},
+		})
 	}
 	return findings
+}
+
+func buildTypeScriptDuplicatedErrorRemapFindings(sym symindex.Symbol, relPath, lang string, groups []tsDuplicatedErrorRemapGroup) []finding {
+	findings := make([]finding, 0, len(groups))
+	for _, group := range groups {
+		absLines := absoluteTSLines(sym, group.Lines)
+		score := scoreDuplicatedErrorRemap(len(absLines))
+		findings = append(findings, finding{
+			RuleID:            "duplicated_error_remap",
+			Category:          "function",
+			Severity:          severityFor(score),
+			Score:             score,
+			Title:             "Function repeats the same guarded error remap",
+			Detail:            sym.Name + " repeats the same guarded error remap " + itoa(len(absLines)) + " times inside catch handling, which suggests one shared error translation helper should own the mapping.",
+			SuggestedRefactor: "Extract the repeated error remap into one helper that translates the external error shape to the domain error once, then call it from each catch path.",
+			File:              relPath,
+			Line:              absLines[0],
+			Symbol:            sym.Name,
+			Language:          lang,
+			Confidence:        "high",
+			Signals:           []string{"tree_sitter", "normalized_error_remap"},
+			Evidence: map[string]any{
+				"normalized_condition_hash": hashShort(group.ConditionFingerprint),
+				"normalized_remap_hash":     hashShort(group.RemapFingerprint),
+				"duplicate_count":           len(absLines),
+				"duplicate_span_lines":      absLines,
+			},
+		})
+	}
+	return findings
+}
+
+func buildTypeScriptRepeatedGuardFindings(sym symindex.Symbol, relPath, lang string, groups []tsRepeatedGuardGroup) []finding {
+	findings := make([]finding, 0, len(groups))
+	for _, group := range groups {
+		absLines := absoluteTSLines(sym, group.Lines)
+		score := scoreRepeatedGuardLadder(len(absLines))
+		findings = append(findings, finding{
+			RuleID:            "repeated_guard_ladder",
+			Category:          "function",
+			Severity:          severityFor(score),
+			Score:             score,
+			Title:             "Function repeats the same guard predicate",
+			Detail:            sym.Name + " repeats the same guard predicate " + itoa(len(absLines)) + " times, which suggests one policy helper or state transition should own the repeated gate instead of branching on it in multiple places.",
+			SuggestedRefactor: "Extract the repeated guard or the guarded action into one helper so the policy check is expressed once and reused consistently.",
+			File:              relPath,
+			Line:              absLines[0],
+			Symbol:            sym.Name,
+			Language:          lang,
+			Confidence:        "high",
+			Signals:           []string{"tree_sitter", "normalized_guard_predicate"},
+			Evidence: map[string]any{
+				"normalized_guard_hash": hashShort(group.Fingerprint),
+				"duplicate_count":       len(absLines),
+				"duplicate_span_lines":  absLines,
+				"guard_preview":         group.Preview,
+			},
+		})
+	}
+	return findings
+}
+
+func absoluteTSLines(sym symindex.Symbol, relativeLines []int) []int {
+	absLines := make([]int, 0, len(relativeLines))
+	for _, line := range relativeLines {
+		absLines = append(absLines, sym.StartLine+line-1)
+	}
+	return absLines
 }
 
 func tsGrammarForPath(path string) *sitter.Language {
@@ -240,88 +213,112 @@ type tsRepeatedGuardGroup struct {
 	Lines       []int
 }
 
-func collectTSDuplicateRecoveryGroups(root *sitter.Node, content []byte) []tsDuplicateRecoveryGroup {
-	if root == nil {
-		return nil
-	}
-	groups := make(map[string]*tsDuplicateRecoveryGroup)
-	walkTSDuplicateCandidates(root, content, func(block *sitter.Node) {
-		candidate := tsRecoveryCandidate(block, content)
-		if candidate == nil {
-			return
-		}
-		if existing, ok := groups[candidate.Fingerprint]; ok {
-			existing.Lines = append(existing.Lines, candidate.Lines[0])
-			sort.Ints(existing.Lines)
-			if candidate.StatementCount > existing.StatementCount {
-				existing.StatementCount = candidate.StatementCount
-			}
-			if candidate.ControlTransfers > existing.ControlTransfers {
-				existing.ControlTransfers = candidate.ControlTransfers
-			}
-			return
-		}
-		copyCandidate := *candidate
-		groups[candidate.Fingerprint] = &copyCandidate
-	})
+type tsLineGroup[T any] struct {
+	Fingerprint string
+	Lines       []int
+	Value       T
+}
 
-	out := make([]tsDuplicateRecoveryGroup, 0, len(groups))
+func newTSLineGroup[T any](fingerprint string, lines []int, value T) *tsLineGroup[T] {
+	groupLines := append([]int(nil), lines...)
+	sort.Ints(groupLines)
+	return &tsLineGroup[T]{
+		Fingerprint: fingerprint,
+		Lines:       groupLines,
+		Value:       value,
+	}
+}
+
+func appendTSGroupLine[T any](group *tsLineGroup[T], line int) {
+	if group == nil {
+		return
+	}
+	group.Lines = append(group.Lines, line)
+	sort.Ints(group.Lines)
+}
+
+func sortedTSLineGroups[T any](groups map[string]*tsLineGroup[T], applyLines func(*T, []int), lines func(*T) []int, fingerprint func(*T) string) []T {
+	out := make([]T, 0, len(groups))
 	for _, group := range groups {
 		if group == nil || len(group.Lines) < 2 {
 			continue
 		}
 		sort.Ints(group.Lines)
-		out = append(out, *group)
+		value := group.Value
+		applyLines(&value, append([]int(nil), group.Lines...))
+		out = append(out, value)
 	}
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].Lines[0] != out[j].Lines[0] {
-			return out[i].Lines[0] < out[j].Lines[0]
+		leftLines := lines(&out[i])
+		rightLines := lines(&out[j])
+		if leftLines[0] != rightLines[0] {
+			return leftLines[0] < rightLines[0]
 		}
-		return out[i].Fingerprint < out[j].Fingerprint
+		return fingerprint(&out[i]) < fingerprint(&out[j])
 	})
 	return out
+}
+
+func mergeTSDuplicateRecoveryStats(existing *tsDuplicateRecoveryGroup, candidate tsDuplicateRecoveryGroup) {
+	if candidate.StatementCount > existing.StatementCount {
+		existing.StatementCount = candidate.StatementCount
+	}
+	if candidate.ControlTransfers > existing.ControlTransfers {
+		existing.ControlTransfers = candidate.ControlTransfers
+	}
+}
+
+func collectTSDuplicateRecoveryGroups(root *sitter.Node, content []byte) []tsDuplicateRecoveryGroup {
+	if root == nil {
+		return nil
+	}
+	groups := make(map[string]*tsLineGroup[tsDuplicateRecoveryGroup])
+	walkTSDuplicateCandidates(root, content, func(block *sitter.Node) {
+		candidate := tsRecoveryCandidate(block, content)
+		if candidate == nil {
+			return
+		}
+		if group, ok := groups[candidate.Fingerprint]; ok {
+			appendTSGroupLine(group, candidate.Lines[0])
+			mergeTSDuplicateRecoveryStats(&group.Value, *candidate)
+			return
+		}
+		groups[candidate.Fingerprint] = newTSLineGroup(candidate.Fingerprint, candidate.Lines, *candidate)
+	})
+	return sortedTSLineGroups(groups,
+		func(group *tsDuplicateRecoveryGroup, lines []int) { group.Lines = lines },
+		func(group *tsDuplicateRecoveryGroup) []int { return group.Lines },
+		func(group *tsDuplicateRecoveryGroup) string { return group.Fingerprint },
+	)
 }
 
 func collectTSDuplicatedErrorRemapGroups(root *sitter.Node, content []byte) []tsDuplicatedErrorRemapGroup {
 	if root == nil {
 		return nil
 	}
-	groups := make(map[string]*tsDuplicatedErrorRemapGroup)
+	groups := make(map[string]*tsLineGroup[tsDuplicatedErrorRemapGroup])
 	walkTSCatchClauses(root, func(catchClause *sitter.Node) {
 		candidates := tsErrorRemapCandidates(catchClause, content)
 		for _, candidate := range candidates {
-			if existing, ok := groups[candidate.Fingerprint]; ok {
-				existing.Lines = append(existing.Lines, candidate.Lines[0])
-				sort.Ints(existing.Lines)
+			if group, ok := groups[candidate.Fingerprint]; ok {
+				appendTSGroupLine(group, candidate.Lines[0])
 				continue
 			}
-			copyCandidate := candidate
-			groups[candidate.Fingerprint] = &copyCandidate
+			groups[candidate.Fingerprint] = newTSLineGroup(candidate.Fingerprint, candidate.Lines, candidate)
 		}
 	})
-
-	out := make([]tsDuplicatedErrorRemapGroup, 0, len(groups))
-	for _, group := range groups {
-		if group == nil || len(group.Lines) < 2 {
-			continue
-		}
-		sort.Ints(group.Lines)
-		out = append(out, *group)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Lines[0] != out[j].Lines[0] {
-			return out[i].Lines[0] < out[j].Lines[0]
-		}
-		return out[i].Fingerprint < out[j].Fingerprint
-	})
-	return out
+	return sortedTSLineGroups(groups,
+		func(group *tsDuplicatedErrorRemapGroup, lines []int) { group.Lines = lines },
+		func(group *tsDuplicatedErrorRemapGroup) []int { return group.Lines },
+		func(group *tsDuplicatedErrorRemapGroup) string { return group.Fingerprint },
+	)
 }
 
 func collectTSRepeatedGuardGroups(root *sitter.Node, content []byte) []tsRepeatedGuardGroup {
 	if root == nil {
 		return nil
 	}
-	groups := make(map[string]*tsRepeatedGuardGroup)
+	groups := make(map[string]*tsLineGroup[tsRepeatedGuardGroup])
 	walkTSIfStatements(root, func(ifNode *sitter.Node) {
 		if ifNode == nil || ifNode.Kind() != "if_statement" {
 			return
@@ -331,35 +328,23 @@ func collectTSRepeatedGuardGroups(root *sitter.Node, content []byte) []tsRepeate
 			return
 		}
 		for _, atom := range tsGuardAtoms(condition, content) {
-			if existing, ok := groups[atom.Fingerprint]; ok {
-				existing.Lines = append(existing.Lines, atom.Line)
-				sort.Ints(existing.Lines)
+			if group, ok := groups[atom.Fingerprint]; ok {
+				appendTSGroupLine(group, atom.Line)
 				continue
 			}
 			copyAtom := atom
-			groups[atom.Fingerprint] = &tsRepeatedGuardGroup{
+			groups[atom.Fingerprint] = newTSLineGroup(atom.Fingerprint, []int{atom.Line}, tsRepeatedGuardGroup{
 				Fingerprint: copyAtom.Fingerprint,
 				Preview:     copyAtom.Preview,
 				Lines:       []int{copyAtom.Line},
-			}
+			})
 		}
 	})
-
-	out := make([]tsRepeatedGuardGroup, 0, len(groups))
-	for _, group := range groups {
-		if group == nil || len(group.Lines) < 2 {
-			continue
-		}
-		sort.Ints(group.Lines)
-		out = append(out, *group)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Lines[0] != out[j].Lines[0] {
-			return out[i].Lines[0] < out[j].Lines[0]
-		}
-		return out[i].Fingerprint < out[j].Fingerprint
-	})
-	return out
+	return sortedTSLineGroups(groups,
+		func(group *tsRepeatedGuardGroup, lines []int) { group.Lines = lines },
+		func(group *tsRepeatedGuardGroup) []int { return group.Lines },
+		func(group *tsRepeatedGuardGroup) string { return group.Fingerprint },
+	)
 }
 
 func walkTSDuplicateCandidates(node *sitter.Node, content []byte, visit func(*sitter.Node)) {

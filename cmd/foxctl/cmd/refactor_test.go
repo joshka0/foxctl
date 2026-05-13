@@ -2,10 +2,12 @@ package cmd
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/spf13/cobra"
 )
 
@@ -172,6 +174,17 @@ func TestRefactorScoutCommandExposesViewFlag(t *testing.T) {
 	}
 }
 
+func TestRefactorScoutCommandExposesTargetFlag(t *testing.T) {
+	cmd := newRefactorScoutCommand()
+	flag := cmd.Flags().Lookup("target")
+	if flag == nil {
+		t.Fatal("scout command missing target flag")
+	}
+	if flag.DefValue != "all" {
+		t.Fatalf("target default=%q want all", flag.DefValue)
+	}
+}
+
 func TestRefactorScoutAndAdvisorWorkspaceDefaultToDot(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -202,9 +215,11 @@ func TestRefactorScoutHelpDocumentsKeyFlags(t *testing.T) {
 	for _, want := range []string{
 		"--language",
 		"--focus",
+		"--target",
 		"--view",
 		"--rule-set",
 		"all|slop|dead",
+		"small-composable-code|semantic-commenting|improve-codebase-architecture",
 		"raw|grouped|entrypoints|summary",
 	} {
 		if !strings.Contains(got, want) {
@@ -247,5 +262,45 @@ func TestRefactorEntryRootsIncludesRepoRootForBundledSkill(t *testing.T) {
 	}
 	if roots[1] != filepath.Clean("/repo") {
 		t.Fatalf("expected repo root second, got %#v", roots)
+	}
+}
+
+func TestResolveRefactorSkillManifestPrefersFoxctlSourceSkill(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), "module github.com/joshka0/foxctl\n")
+	localManifest := filepath.Join(root, "skills", "code_refactor_scout", "skill.yaml")
+	writeFile(t, localManifest, "apiVersion: foxctl/v1\n")
+	installedRoot := filepath.Join(root, "installed")
+	installedManifest := filepath.Join(installedRoot, "code_refactor_scout", "skill.yaml")
+	writeFile(t, installedManifest, "apiVersion: foxctl/v1\n")
+
+	got, err := resolveRefactorSkillManifestPath(config.Config{
+		Paths: config.Paths{Skills: installedRoot},
+	}, "code/refactor_scout", filepath.Join(root, "cmd", "foxctl"))
+	if err != nil {
+		t.Fatalf("resolve manifest: %v", err)
+	}
+	if got != localManifest {
+		t.Fatalf("manifest=%q want local %q", got, localManifest)
+	}
+}
+
+func TestLocalFoxctlRefactorSkillManifestRequiresFoxctlModule(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/other\n")
+	writeFile(t, filepath.Join(root, "skills", "code_refactor_scout", "skill.yaml"), "apiVersion: foxctl/v1\n")
+
+	if got, ok := localFoxctlRefactorSkillManifest("code/refactor_scout", root); ok {
+		t.Fatalf("unexpected local manifest %q for non-foxctl module", got)
+	}
+}
+
+func writeFile(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
 	}
 }

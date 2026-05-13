@@ -44,6 +44,18 @@ func TestAnalyzeTypeScriptDuplicateRecoveryBlocks(t *testing.T) {
 	if len(lines) != 2 || lines[0] != 2 || lines[1] != 6 {
 		t.Fatalf("duplicate_span_lines=%v want [2 6]", lines)
 	}
+	if duplicateCount, ok := got[0].Evidence["duplicate_count"].(int); !ok || duplicateCount != 2 {
+		t.Fatalf("duplicate_count=%#v want 2", got[0].Evidence["duplicate_count"])
+	}
+	if statementCount, ok := got[0].Evidence["statement_count"].(int); !ok || statementCount != 2 {
+		t.Fatalf("statement_count=%#v want 2", got[0].Evidence["statement_count"])
+	}
+	if controlTransfers, ok := got[0].Evidence["control_transfers"].(int); !ok || controlTransfers != 1 {
+		t.Fatalf("control_transfers=%#v want 1", got[0].Evidence["control_transfers"])
+	}
+	if blockHash, ok := got[0].Evidence["normalized_block_hash"].(string); !ok || strings.TrimSpace(blockHash) == "" {
+		t.Fatalf("normalized_block_hash=%#v", got[0].Evidence["normalized_block_hash"])
+	}
 }
 
 func TestAnalyzeTypeScriptDuplicatedErrorRemaps(t *testing.T) {
@@ -88,6 +100,15 @@ func TestAnalyzeTypeScriptDuplicatedErrorRemaps(t *testing.T) {
 	if len(lines) != 2 || lines[0] != 5 || lines[1] != 14 {
 		t.Fatalf("duplicate_span_lines=%v want [5 14]", lines)
 	}
+	if duplicateCount, ok := got[0].Evidence["duplicate_count"].(int); !ok || duplicateCount != 2 {
+		t.Fatalf("duplicate_count=%#v want 2", got[0].Evidence["duplicate_count"])
+	}
+	if conditionHash, ok := got[0].Evidence["normalized_condition_hash"].(string); !ok || strings.TrimSpace(conditionHash) == "" {
+		t.Fatalf("normalized_condition_hash=%#v", got[0].Evidence["normalized_condition_hash"])
+	}
+	if remapHash, ok := got[0].Evidence["normalized_remap_hash"].(string); !ok || strings.TrimSpace(remapHash) == "" {
+		t.Fatalf("normalized_remap_hash=%#v", got[0].Evidence["normalized_remap_hash"])
+	}
 }
 
 func TestAnalyzeTypeScriptRepeatedGuardLadders(t *testing.T) {
@@ -122,8 +143,54 @@ func TestAnalyzeTypeScriptRepeatedGuardLadders(t *testing.T) {
 	if len(lines) != 2 || lines[0] != 2 || lines[1] != 5 {
 		t.Fatalf("duplicate_span_lines=%v want [2 5]", lines)
 	}
+	if duplicateCount, ok := got[0].Evidence["duplicate_count"].(int); !ok || duplicateCount != 2 {
+		t.Fatalf("duplicate_count=%#v want 2", got[0].Evidence["duplicate_count"])
+	}
 	preview, ok := got[0].Evidence["guard_preview"].(string)
 	if !ok || !strings.Contains(preview, "response.status") {
 		t.Fatalf("guard_preview=%#v", got[0].Evidence["guard_preview"])
+	}
+	if guardHash, ok := got[0].Evidence["normalized_guard_hash"].(string); !ok || strings.TrimSpace(guardHash) == "" {
+		t.Fatalf("normalized_guard_hash=%#v", got[0].Evidence["normalized_guard_hash"])
+	}
+}
+
+func TestCollectTSRepeatedGuardGroupsFiltersSingletonsAndSortsLines(t *testing.T) {
+	src := []byte(`export function evaluate(response: { status: number }, ok: boolean) {
+  if (response.status === 401) {
+    return retryOne();
+  }
+  if (response.status === 404) {
+    return notFound();
+  }
+  if (response.status === 401 && ok) {
+    return retryTwo();
+  }
+  if (response.status === 401) {
+    return retryThree();
+  }
+  return done();
+}
+`)
+
+	grammar := tsGrammarForPath("evaluate.ts")
+	if grammar == nil {
+		t.Fatal("expected TypeScript grammar")
+	}
+	tree, ok := parseTSRecoveryTree(grammar, src)
+	if !ok {
+		t.Fatal("expected parse success")
+	}
+	defer tree.Close()
+
+	groups := collectTSRepeatedGuardGroups(tree.RootNode(), src)
+	if len(groups) != 1 {
+		t.Fatalf("groups=%d want 1", len(groups))
+	}
+	if len(groups[0].Lines) != 3 || groups[0].Lines[0] != 2 || groups[0].Lines[1] != 8 || groups[0].Lines[2] != 11 {
+		t.Fatalf("lines=%v want [2 8 11]", groups[0].Lines)
+	}
+	if !strings.Contains(groups[0].Preview, "response.status") {
+		t.Fatalf("preview=%q", groups[0].Preview)
 	}
 }

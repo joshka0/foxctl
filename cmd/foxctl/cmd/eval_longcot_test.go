@@ -1940,6 +1940,88 @@ func TestNormalizeLongCoTReviewMode(t *testing.T) {
 	}
 }
 
+func TestEvalLongCoTRejectsUnsupportedHelperLanguage(t *testing.T) {
+	t.Parallel()
+
+	env, err := runEvalLongCoTForTest(t, "--dry-run", "--helper-language", "ruby")
+	if err == nil {
+		t.Fatal("expected unsupported helper language error")
+	}
+	if env.Status != envelope.StatusError {
+		t.Fatalf("status=%q want error", env.Status)
+	}
+	if !strings.Contains(err.Error(), `unsupported --helper-language "ruby" (allowed: go, python)`) {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestEvalLongCoTRejectsUnsupportedSandbox(t *testing.T) {
+	t.Parallel()
+
+	env, err := runEvalLongCoTForTest(t, "--dry-run", "--sandbox", "lua")
+	if err == nil {
+		t.Fatal("expected unsupported sandbox error")
+	}
+	if env.Status != envelope.StatusError {
+		t.Fatalf("status=%q want error", env.Status)
+	}
+	if !strings.Contains(err.Error(), `unsupported --sandbox "lua" (allowed: python, smolvm, yaegi)`) {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestNormalizeLongCoTHelperFlags(t *testing.T) {
+	t.Parallel()
+
+	ephemeral, helper := normalizeLongCoTHelperFlags(false, false, true)
+	if !ephemeral || !helper {
+		t.Fatalf("require-ephemeral expected true/true, got ephemeral=%v helper=%v", ephemeral, helper)
+	}
+
+	ephemeral, helper = normalizeLongCoTHelperFlags(false, true, false)
+	if !ephemeral || !helper {
+		t.Fatalf("general-helper expected true/true, got ephemeral=%v helper=%v", ephemeral, helper)
+	}
+}
+
+func TestNormalizeLongCoTReviewInputsRejectsInvalidIterations(t *testing.T) {
+	t.Parallel()
+
+	_, _, _, err := normalizeLongCoTReviewInputs("markdown", "auto", 0, false, 2, 2, 2000, 900, true, 2)
+	if err == nil {
+		t.Fatal("expected invalid review iterations to fail")
+	}
+	if !strings.Contains(err.Error(), "--rlm-review-iterations must be >= 1") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestValidateLongCoTRunNumericFlags(t *testing.T) {
+	t.Parallel()
+
+	if err := validateLongCoTRunNumericFlags(0, 0, 0, 0, 0, 0, 0); err != nil {
+		t.Fatalf("expected zero values to pass, got %v", err)
+	}
+	if err := validateLongCoTRunNumericFlags(-1, 0, 0, 0, 0, 0, 0); err == nil || !strings.Contains(err.Error(), "--limit must be >= 0") {
+		t.Fatalf("expected --limit validation error, got %v", err)
+	}
+	if err := validateLongCoTRunNumericFlags(0, 0, -1*time.Second, 0, 0, 0, 0); err == nil || !strings.Contains(err.Error(), "--timeout must be >= 0") {
+		t.Fatalf("expected --timeout validation error, got %v", err)
+	}
+}
+
+func TestNormalizeLongCoTQuestionFilterRejectsUnsupportedDifficulty(t *testing.T) {
+	t.Parallel()
+
+	_, err := normalizeLongCoTQuestionFilter("eval", []string{"math"}, "expert", 5, 7)
+	if err == nil {
+		t.Fatal("expected unsupported difficulty to fail")
+	}
+	if !strings.Contains(err.Error(), `unsupported --difficulty "expert"`) {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func TestLongCoTReviewConfigForQuestion(t *testing.T) {
 	t.Parallel()
 

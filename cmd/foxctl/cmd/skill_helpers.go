@@ -173,12 +173,19 @@ func findSkillManifest(cfg config.Config, requested string) (skill.Manifest, err
 // createSkillResolver creates a resolver with paths from config.
 func createSkillResolver(cfg config.Config) *skill.Resolver {
 	searchPaths := append([]string{}, skill.EnvSearchPaths()...)
+	devSearchPaths := skill.DevSearchPaths()
+	inSourceCheckout := inFoxctlSourceCheckout()
+	if inSourceCheckout {
+		searchPaths = append(searchPaths, devSearchPaths...)
+	}
 	if cfg.Paths.Skills != "" {
 		searchPaths = append(searchPaths, cfg.Paths.Skills)
 	}
 	searchPaths = append(searchPaths, skill.UserSearchPaths()...)
 	searchPaths = append(searchPaths, skill.BuiltinSearchPaths()...)
-	searchPaths = append(searchPaths, skill.DevSearchPaths()...)
+	if !inSourceCheckout {
+		searchPaths = append(searchPaths, devSearchPaths...)
+	}
 	return skill.NewResolver(skill.WithSearchPaths(skill.NormalizeSearchPaths(searchPaths)...))
 }
 
@@ -196,6 +203,7 @@ func loadSkillDir(dir string) (SkillHandle, error) {
 	}
 	artifact, err := skill.ResolveArtifactPath(dir, manifest, skill.ArtifactOptions{
 		PreferCGO: buildinfo.IsCGO(),
+		EntryRoot: sourceEntryRoot(dir),
 	})
 	if err != nil {
 		if errors.Is(err, skill.ErrArtifactsMissing) {
@@ -208,6 +216,13 @@ func loadSkillDir(dir string) (SkillHandle, error) {
 		ManifestPath: manifestPath,
 		ArtifactPath: artifact,
 	}, nil
+}
+
+func sourceEntryRoot(dir string) string {
+	if root, ok := foxctlSourceRoot(dir); ok {
+		return root
+	}
+	return ""
 }
 
 func executeSkill(ctx context.Context, manifest skill.Manifest, artifactPath string, input []byte) ([]byte, []byte, error) {

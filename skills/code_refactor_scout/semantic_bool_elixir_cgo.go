@@ -58,17 +58,7 @@ func detectElixirSemanticSimplification(body []byte) *semanticSimplificationCand
 	}
 	original := originalExpr
 	simplifiedText := renderSemanticBoolExpr(simplified, elixirSemanticBoolSyntax)
-	if original == simplifiedText {
-		return nil
-	}
-	return &semanticSimplificationCandidate{
-		Kind:               "boolean_expr_identity",
-		PatternIDs:         appendUniquePatternStrings(nil, patterns...),
-		OriginalForm:       original,
-		SimplifiedForm:     simplifiedText,
-		OriginalTokenCount: semanticSourceTokenCount(original),
-		SimplifiedTokens:   semanticSourceTokenCount(simplifiedText),
-	}
+	return buildSemanticSimplificationCandidate("boolean_expr_identity", patterns, original, simplifiedText)
 }
 
 func detectElixirBoolReturnWrapper(root *sitter.Node, content []byte) *semanticSimplificationCandidate {
@@ -97,31 +87,17 @@ func detectElixirBoolReturnWrapper(root *sitter.Node, content []byte) *semanticS
 	if expr == nil {
 		return nil
 	}
-	patterns := []string{"boolean_return_wrapper"}
+	patternID := "boolean_return_wrapper"
 	if !thenExpr && elseExpr {
-		patterns[0] = "inverted_boolean_return_wrapper"
-		expr = semanticBoolNot(expr)
+		patternID = "inverted_boolean_return_wrapper"
 	}
-	patterns = appendUniquePatternStrings(patterns, lowerPatterns...)
-	if simplified, extra, changed := simplifySemanticBoolExpr(expr); changed {
-		expr = simplified
-		patterns = append(patterns, extra...)
-	} else if !lowerChanged && patterns[0] == "boolean_return_wrapper" {
+	expr, patterns, ok := finalizeSemanticBoolWrapperExpr(expr, patternID, lowerPatterns, lowerChanged, patternID == "inverted_boolean_return_wrapper")
+	if !ok {
 		return nil
 	}
 	original := strings.Join(strings.Fields(strings.TrimSpace(elixirNodeText(ifCall, content))), " ")
 	simplifiedText := renderSemanticBoolExpr(expr, elixirSemanticBoolSyntax)
-	if original == "" || original == simplifiedText {
-		return nil
-	}
-	return &semanticSimplificationCandidate{
-		Kind:               "boolean_return_wrapper",
-		PatternIDs:         appendUniquePatternStrings(nil, patterns...),
-		OriginalForm:       original,
-		SimplifiedForm:     simplifiedText,
-		OriginalTokenCount: semanticSourceTokenCount(original),
-		SimplifiedTokens:   semanticSourceTokenCount(simplifiedText),
-	}
+	return buildSemanticSimplificationCandidate("boolean_return_wrapper", patterns, original, simplifiedText)
 }
 
 func elixirSingleBooleanResultExpr(root *sitter.Node, content []byte) (*semanticBoolExpr, string, []string, bool) {
@@ -174,15 +150,11 @@ func lowerElixirSemanticBoolExprDetailed(node *sitter.Node, content []byte) (*se
 		case "and", "&&":
 			leftExpr, leftPatterns, leftChanged := lowerElixirSemanticBoolExprDetailed(left, content)
 			rightExpr, rightPatterns, rightChanged := lowerElixirSemanticBoolExprDetailed(right, content)
-			patterns := appendUniquePatternStrings(nil, leftPatterns...)
-			patterns = appendUniquePatternStrings(patterns, rightPatterns...)
-			return semanticBoolAnd(leftExpr, rightExpr), patterns, leftChanged || rightChanged
+			return semanticBoolBinaryFromChildren("and", leftExpr, leftPatterns, leftChanged, rightExpr, rightPatterns, rightChanged)
 		case "or", "||":
 			leftExpr, leftPatterns, leftChanged := lowerElixirSemanticBoolExprDetailed(left, content)
 			rightExpr, rightPatterns, rightChanged := lowerElixirSemanticBoolExprDetailed(right, content)
-			patterns := appendUniquePatternStrings(nil, leftPatterns...)
-			patterns = appendUniquePatternStrings(patterns, rightPatterns...)
-			return semanticBoolOr(leftExpr, rightExpr), patterns, leftChanged || rightChanged
+			return semanticBoolBinaryFromChildren("or", leftExpr, leftPatterns, leftChanged, rightExpr, rightPatterns, rightChanged)
 		case "==", "===", "!=", "!==":
 			if lit, ok := elixirBoolLiteralValue(right, content); ok {
 				base, patterns, changed := lowerElixirSemanticBoolExprDetailed(left, content)
@@ -206,20 +178,11 @@ func lowerElixirSemanticBoolExprDetailed(node *sitter.Node, content []byte) (*se
 }
 
 func lowerElixirBoolLiteralComparisonFromBase(base *semanticBoolExpr, op string, lit bool) *semanticBoolExpr {
-	switch op {
-	case "==", "===":
-		if lit {
-			return base
-		}
-		return semanticBoolNot(base)
-	case "!=", "!==":
-		if lit {
-			return semanticBoolNot(base)
-		}
-		return base
-	default:
+	equality, ok := semanticBoolStringComparisonIsEquality(op)
+	if !ok {
 		return nil
 	}
+	return lowerSemanticBoolLiteralComparisonFromEquality(base, lit, equality)
 }
 
 func elixirSemanticBoolAtom(node *sitter.Node, content []byte) *semanticBoolExpr {

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -8,14 +10,363 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skilltest"
 	symindex "github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
 )
+
+func TestRunSummaryPresentationSignalsAndTargetFiltering(t *testing.T) {
+	work := t.TempDir()
+	source := `package sample
+
+func hasValue(value *int) bool {
+	if value == nil {
+		return false
+	}
+	return true
+}
+
+func isPresent(value *int) bool {
+	if value == nil {
+		return false
+	}
+	return true
+}
+`
+	if err := os.WriteFile(filepath.Join(work, "sample.go"), []byte(source), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	rc, cleanup := skilltest.NewTestRunContext(t, stdout, &skilltest.TestContextOptions{Workspace: work})
+	defer cleanup()
+
+	if err := run(context.Background(), rc, input{
+		Path:       "sample.go",
+		Language:   "go",
+		Target:     targetSmallComposableCode,
+		View:       "summary",
+		MaxResults: 1,
+	}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	env := skilltest.AssertEnvelopeOK(t, stdout.Bytes(), command)
+	data := extractMapData(t, env.Data)
+
+	if data["focus"] != "all" {
+		t.Fatalf("focus=%v want all", data["focus"])
+	}
+	if data["target"] != targetSmallComposableCode {
+		t.Fatalf("target=%v want %s", data["target"], targetSmallComposableCode)
+	}
+	if data["view"] != "summary" {
+		t.Fatalf("view=%v want summary", data["view"])
+	}
+
+	languageScope := extractMapData(t, data["language_scope"])
+	if languageScope["language"] != "go" {
+		t.Fatalf("language_scope.language=%v want go", languageScope["language"])
+	}
+
+	presentation := extractMapData(t, data["presentation"])
+	if presentation["active_lane"] != "overview" {
+		t.Fatalf("presentation.active_lane=%v want overview", presentation["active_lane"])
+	}
+
+	summary := extractMapData(t, data["summary"])
+	if got := intFromAny(t, summary["finding_count"]); got < 2 {
+		t.Fatalf("summary.finding_count=%d want at least 2", got)
+	}
+	if got := intFromAny(t, summary["returned_findings"]); got != 1 {
+		t.Fatalf("summary.returned_findings=%d want 1", got)
+	}
+	if !boolFromAny(t, summary["limited_by_results"]) {
+		t.Fatalf("summary.limited_by_results=%v want true", summary["limited_by_results"])
+	}
+
+	signals := extractMapData(t, data["signals"])
+	if !boolFromAny(t, signals["targeted_review"]) {
+		t.Fatalf("signals.targeted_review=%v want true", signals["targeted_review"])
+	}
+	if boolFromAny(t, signals["slop_focus"]) {
+		t.Fatalf("signals.slop_focus=%v want false", signals["slop_focus"])
+	}
+	if boolFromAny(t, signals["dead_focus"]) {
+		t.Fatalf("signals.dead_focus=%v want false", signals["dead_focus"])
+	}
+
+	findings, ok := data["findings"].([]any)
+	if !ok {
+		t.Fatalf("findings type=%T want []any", data["findings"])
+	}
+	if len(findings) != 1 {
+		t.Fatalf("len(findings)=%d want 1", len(findings))
+	}
+	first := extractMapData(t, findings[0])
+	targets, ok := first["targets"].([]any)
+	if !ok || len(targets) == 0 {
+		t.Fatalf("findings[0].targets=%#v want non-empty target annotations", first["targets"])
+	}
+	foundTarget := false
+	for _, target := range targets {
+		if target == targetSmallComposableCode {
+			foundTarget = true
+			break
+		}
+	}
+	if !foundTarget {
+		t.Fatalf("findings[0].targets=%#v missing %s", targets, targetSmallComposableCode)
+	}
+}
+
+func TestRunSlopFocusFiltersNonSlopFindings(t *testing.T) {
+	work := t.TempDir()
+	source := `package sample
+
+func isPresent(value *int) bool {
+	if value == nil {
+		return false
+	}
+	return true
+}
+`
+	if err := os.WriteFile(filepath.Join(work, "sample.go"), []byte(source), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	rc, cleanup := skilltest.NewTestRunContext(t, stdout, &skilltest.TestContextOptions{Workspace: work})
+	defer cleanup()
+
+	if err := run(context.Background(), rc, input{
+		Path:     "sample.go",
+		Language: "go",
+		Focus:    "slop",
+	}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	env := skilltest.AssertEnvelopeOK(t, stdout.Bytes(), command)
+	data := extractMapData(t, env.Data)
+	if data["focus"] != "slop" {
+		t.Fatalf("focus=%v want slop", data["focus"])
+	}
+
+	signals := extractMapData(t, data["signals"])
+	if !boolFromAny(t, signals["slop_focus"]) {
+		t.Fatalf("signals.slop_focus=%v want true", signals["slop_focus"])
+	}
+	if boolFromAny(t, signals["targeted_review"]) {
+		t.Fatalf("signals.targeted_review=%v want false", signals["targeted_review"])
+	}
+
+	summary := extractMapData(t, data["summary"])
+	if got := intFromAny(t, summary["finding_count"]); got == 0 {
+		t.Fatalf("summary.finding_count=%d want at least 1 slop finding", got)
+	}
+	if got := intFromAny(t, summary["returned_findings"]); got == 0 {
+		t.Fatalf("summary.returned_findings=%d want at least 1 slop finding", got)
+	}
+
+	findings, ok := data["findings"].([]any)
+	if !ok {
+		t.Fatalf("findings type=%T want []any", data["findings"])
+	}
+	for _, raw := range findings {
+		item := extractMapData(t, raw)
+		if !focusAllowsFinding(finding{
+			RuleID:   item["rule_id"].(string),
+			Evidence: extractOptionalMap(item["evidence"]),
+		}, "slop") {
+			t.Fatalf("non-slop finding survived slop focus: %#v", item)
+		}
+	}
+}
+
+func extractMapData(t *testing.T, v any) map[string]any {
+	t.Helper()
+	data, ok := v.(map[string]any)
+	if !ok {
+		t.Fatalf("value type=%T want map[string]any", v)
+	}
+	return data
+}
+
+func intFromAny(t *testing.T, v any) int {
+	t.Helper()
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	default:
+		t.Fatalf("value type=%T want number", v)
+		return 0
+	}
+}
+
+func boolFromAny(t *testing.T, v any) bool {
+	t.Helper()
+	b, ok := v.(bool)
+	if !ok {
+		t.Fatalf("value type=%T want bool", v)
+	}
+	return b
+}
+
+func extractOptionalMap(v any) map[string]any {
+	data, _ := v.(map[string]any)
+	return data
+}
 
 func TestSplitTopLevel(t *testing.T) {
 	got := splitTopLevel("a int, b map[string]int, c tuple[int, string], d func(x int, y string)")
 	if len(got) != 4 {
 		t.Fatalf("expected 4 parts, got %d: %#v", len(got), got)
 	}
+}
+
+func TestGoSplitTopLevelNestedStructures(t *testing.T) {
+	input := "a map[string][]int, b func(x func(y int, z []string), y map[string]int), c tuple[map[string]int, func(a, b int)], d"
+	got := splitTopLevel(input)
+	want := []string{
+		"a map[string][]int",
+		"b func(x func(y int, z []string), y map[string]int)",
+		"c tuple[map[string]int, func(a, b int)]",
+		"d",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("len(splitTopLevel)=%d want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("splitTopLevel[%d]=%q want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestGoFuncSignatureReceiverAndNamedReturns(t *testing.T) {
+	fn := mustParseGoFuncDeclByName(t, `package sample
+
+import "context"
+
+type Worker struct{}
+
+func (w *Worker) Build(ctx context.Context, labels []string) (ok bool, err error) {
+	return true, nil
+}
+`, "Build")
+
+	got := goFuncSignature(fn)
+	want := "func (w *Worker) Build(ctx context.Context, labels []string) (ok bool, err error)"
+	if got != want {
+		t.Fatalf("goFuncSignature=%q want %q", got, want)
+	}
+}
+
+func TestGoStmtFingerprintStabilityWithBranchesAndCalls(t *testing.T) {
+	fn := mustParseGoFuncDeclByName(t, `package sample
+
+type Item struct{}
+
+func evaluate(value *Item) bool {
+	present := lookup(value)
+	if present != nil {
+		record(present)
+		return check(present)
+	}
+	return fallback()
+}
+`, "evaluate")
+
+	got := extractGoOrchestrationMetrics(fn)
+	wantFingerprint := "assign(call_ident_1);if(bin(!=,ident,ident)){call_ident_1;return(call_ident_1)};return(call_ident_0)"
+	if got.Fingerprint != wantFingerprint {
+		t.Fatalf("fingerprint=%q want %q", got.Fingerprint, wantFingerprint)
+	}
+	if got.BranchCount != 1 {
+		t.Fatalf("branch_count=%d want 1", got.BranchCount)
+	}
+	if got.CallSiteCount != 4 {
+		t.Fatalf("call_site_count=%d want 4", got.CallSiteCount)
+	}
+}
+
+func TestDetectGoBoolReturnWrapperIfElseForm(t *testing.T) {
+	fn := mustParseGoFuncDeclByName(t, `package sample
+
+type Item struct{}
+
+func isPresent(value *Item) bool {
+	if value == nil {
+		return false
+	} else {
+		return true
+	}
+}
+`, "isPresent")
+
+	candidate := detectGoBoolReturnWrapper(fn.Body.List)
+	if candidate == nil {
+		t.Fatal("expected bool return wrapper candidate")
+	}
+	if candidate.Kind != "boolean_return_wrapper" {
+		t.Fatalf("kind=%q want boolean_return_wrapper", candidate.Kind)
+	}
+	if candidate.SimplifiedForm != "return value != nil" {
+		t.Fatalf("simplified_form=%q want return value != nil", candidate.SimplifiedForm)
+	}
+	if len(candidate.PatternIDs) == 0 || candidate.PatternIDs[0] != "inverted_boolean_return_wrapper" {
+		t.Fatalf("pattern_ids=%#v want inverted wrapper first", candidate.PatternIDs)
+	}
+}
+
+func TestDetectGoBoolReturnWrapperIfTailForm(t *testing.T) {
+	fn := mustParseGoFuncDeclByName(t, `package sample
+
+type Item struct{}
+
+func isPresent(value *Item) bool {
+	if value == nil {
+		return false
+	}
+	return true
+}
+`, "isPresent")
+
+	candidate := detectGoBoolReturnWrapper(fn.Body.List)
+	if candidate == nil {
+		t.Fatal("expected bool return wrapper candidate")
+	}
+	if candidate.Kind != "boolean_return_wrapper" {
+		t.Fatalf("kind=%q want boolean_return_wrapper", candidate.Kind)
+	}
+	if candidate.SimplifiedForm != "return value != nil" {
+		t.Fatalf("simplified_form=%q want return value != nil", candidate.SimplifiedForm)
+	}
+	if len(candidate.PatternIDs) == 0 || candidate.PatternIDs[0] != "inverted_boolean_return_wrapper" {
+		t.Fatalf("pattern_ids=%#v want inverted wrapper first", candidate.PatternIDs)
+	}
+}
+
+func mustParseGoFuncDeclByName(t *testing.T, src, name string) *ast.FuncDecl {
+	t.Helper()
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "sample.go", src, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse go file: %v", err)
+	}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name == nil {
+			continue
+		}
+		if fn.Name.Name == name {
+			return fn
+		}
+	}
+	t.Fatalf("function %q not found", name)
+	return nil
 }
 
 func TestParseSignatureMetricsTypeScript(t *testing.T) {
@@ -443,6 +794,46 @@ func TestApplyFocusSlopFiltersToSlopFindings(t *testing.T) {
 	}
 }
 
+func TestApplyReviewTargetsAnnotatesSkillTargets(t *testing.T) {
+	items := []finding{
+		{RuleID: "function_hotspot", Category: "function", File: "a.go", Symbol: "DoThing", Score: 91},
+		{RuleID: "semantic_simplification_candidate", Category: "function", File: "b.go", Symbol: "CleanBool", Score: 75},
+		{RuleID: "unreachable_private_symbol", Category: "dead_code", File: "c.go", Symbol: "unused", Score: 88},
+	}
+
+	got := applyReviewTargets(items)
+	hotspot := got[0]
+	for _, want := range []string{targetSmallComposableCode, targetSemanticCommenting, targetImproveCodebaseArchitecture} {
+		if !findingTargetsReview(hotspot, want) {
+			t.Fatalf("function_hotspot missing target %q: %#v", want, hotspot.Targets)
+		}
+	}
+	if !findingTargetsReview(got[1], targetSmallComposableCode) {
+		t.Fatalf("semantic simplification should target small composable code: %#v", got[1].Targets)
+	}
+	if findingTargetsReview(got[1], targetImproveCodebaseArchitecture) {
+		t.Fatalf("isolated semantic simplification should not target architecture: %#v", got[1].Targets)
+	}
+	if !findingTargetsReview(got[2], targetSmallComposableCode) {
+		t.Fatalf("dead code should target small composable cleanup: %#v", got[2].Targets)
+	}
+}
+
+func TestApplyTargetFiltersBySkillTarget(t *testing.T) {
+	items := applyReviewTargets([]finding{
+		{RuleID: "function_hotspot", Category: "function", File: "a.go", Symbol: "DoThing", Score: 91},
+		{RuleID: "unreachable_private_symbol", Category: "dead_code", File: "b.go", Symbol: "unused", Score: 88},
+	})
+
+	got := applyTarget(items, targetImproveCodebaseArchitecture)
+	if len(got) != 1 {
+		t.Fatalf("len(got)=%d want 1: %#v", len(got), got)
+	}
+	if got[0].RuleID != "function_hotspot" {
+		t.Fatalf("filtered rule=%q want function_hotspot", got[0].RuleID)
+	}
+}
+
 func TestShouldSuppressConstituentFindings(t *testing.T) {
 	if shouldSuppressConstituentFindings("slop") {
 		t.Fatal("slop focus should keep constituent findings visible")
@@ -720,6 +1111,40 @@ func TestBuildScoutPresentationSummaryViewUsesOverviewLane(t *testing.T) {
 	}
 }
 
+func TestBuildScoutPresentationIncludesSkillTargetLanes(t *testing.T) {
+	items := applyReviewTargets([]finding{
+		{
+			RuleID:   "function_hotspot",
+			Category: "function",
+			File:     "reader/index.ts",
+			Line:     10,
+			Symbol:   "readerApi",
+			Score:    94,
+			Detail:   "readerApi triggers multiple refactoring signals.",
+		},
+		{
+			RuleID:   "unreachable_private_symbol",
+			Category: "dead_code",
+			File:     "reader/dead.ts",
+			Line:     4,
+			Symbol:   "unusedHelper",
+			Score:    88,
+			Detail:   "unusedHelper has no incoming references.",
+		},
+	})
+
+	presentation := buildScoutPresentation(items, "grouped")
+	if len(presentation.Lanes.SkillTargets[targetSmallComposableCode]) != 2 {
+		t.Fatalf("small composable lane=%#v want 2 items", presentation.Lanes.SkillTargets[targetSmallComposableCode])
+	}
+	if len(presentation.Lanes.SkillTargets[targetSemanticCommenting]) != 1 {
+		t.Fatalf("semantic commenting lane=%#v want 1 item", presentation.Lanes.SkillTargets[targetSemanticCommenting])
+	}
+	if presentation.Lanes.SkillTargets[targetImproveCodebaseArchitecture][0].RepresentativeRule != "function_hotspot" {
+		t.Fatalf("architecture target lane=%#v want function_hotspot first", presentation.Lanes.SkillTargets[targetImproveCodebaseArchitecture])
+	}
+}
+
 func TestBuildScoutPresentationIncludesDBAccessLane(t *testing.T) {
 	items := []finding{
 		{
@@ -758,6 +1183,137 @@ func TestBuildScoutPresentationIncludesDBAccessLane(t *testing.T) {
 	}
 	if len(presentation.Lanes.DBAccessPatterns[0].Samples) == 0 {
 		t.Fatalf("expected db lane samples, got %#v", presentation.Lanes.DBAccessPatterns[0])
+	}
+}
+
+func TestSummarizeFilesDeterministicOrderingAndLimit(t *testing.T) {
+	items := []finding{
+		{RuleID: "receiver_hotspot", File: "b.go", Symbol: "B", Score: 90},
+		{RuleID: "god_file", File: "a.go", Symbol: "A", Score: 90},
+		{RuleID: "fan_out_dependency_spread", File: "a.go", Score: 90},
+		{RuleID: "deep_nesting", File: "c.go", Symbol: "C", Score: 70},
+	}
+
+	got := summarizeFiles(items, 2)
+	if len(got) != 2 {
+		t.Fatalf("len(got)=%d want 2 (%#v)", len(got), got)
+	}
+	if got[0].File != "a.go" || got[1].File != "b.go" {
+		t.Fatalf("unexpected summary order: %#v", got)
+	}
+	if got[0].TopSymbol != "A" {
+		t.Fatalf("top symbol=%q want A", got[0].TopSymbol)
+	}
+	if len(got[0].DominantRules) != 2 || got[0].DominantRules[0] != "fan_out_dependency_spread" || got[0].DominantRules[1] != "god_file" {
+		t.Fatalf("dominant rules=%#v want [fan_out_dependency_spread god_file]", got[0].DominantRules)
+	}
+}
+
+func TestSummarizeSymbolsDeterministicOrderingAndLimit(t *testing.T) {
+	items := []finding{
+		{RuleID: "z_rule", File: "b.go", Symbol: "Zed", Line: 0, Score: 90},
+		{RuleID: "a_rule", File: "b.go", Symbol: "Zed", Line: 22, Score: 85},
+		{RuleID: "m_rule", File: "a.go", Symbol: "Alpha", Line: 5, Score: 90},
+		{RuleID: "q_rule", File: "a.go", Symbol: "Alpha", Line: 5, Score: 70},
+		{RuleID: "n_rule", File: "c.go", Symbol: "Other", Line: 1, Score: 60},
+	}
+
+	got := summarizeSymbols(items, 2)
+	if len(got) != 2 {
+		t.Fatalf("len(got)=%d want 2 (%#v)", len(got), got)
+	}
+	if got[0].File != "a.go" || got[0].Symbol != "Alpha" {
+		t.Fatalf("first symbol summary=%#v want a.go/Alpha", got[0])
+	}
+	if got[1].File != "b.go" || got[1].Symbol != "Zed" {
+		t.Fatalf("second symbol summary=%#v want b.go/Zed", got[1])
+	}
+	if got[1].Line != 22 {
+		t.Fatalf("line=%d want 22", got[1].Line)
+	}
+	if len(got[1].RuleIDs) != 2 || got[1].RuleIDs[0] != "a_rule" || got[1].RuleIDs[1] != "z_rule" {
+		t.Fatalf("rule ids=%#v want [a_rule z_rule]", got[1].RuleIDs)
+	}
+}
+
+func TestBuildEntrypointLaneRepresentativePrefersHotspotAtEqualScore(t *testing.T) {
+	items := []finding{
+		{
+			RuleID:   "high_cyclomatic_complexity",
+			Category: "function",
+			File:     "pkg/worker.go",
+			Line:     10,
+			Symbol:   "Run",
+			Score:    90,
+		},
+		{
+			RuleID:   "function_hotspot",
+			Category: "function",
+			File:     "pkg/worker.go",
+			Line:     10,
+			Symbol:   "Run",
+			Score:    90,
+		},
+	}
+
+	lane := buildEntrypointLane(items, 10)
+	if len(lane) != 1 {
+		t.Fatalf("lane=%#v want 1 item", lane)
+	}
+	if lane[0].RepresentativeRule != "function_hotspot" {
+		t.Fatalf("representative rule=%q want function_hotspot", lane[0].RepresentativeRule)
+	}
+	if lane[0].FindingCount != 2 {
+		t.Fatalf("finding_count=%d want 2", lane[0].FindingCount)
+	}
+}
+
+func TestBuildSkillTargetLaneDeduplicatesAndAppliesLimit(t *testing.T) {
+	items := []finding{
+		{
+			RuleID:        "function_hotspot",
+			Category:      "function",
+			File:          "pkg/a.go",
+			Line:          10,
+			Symbol:        "DoThing",
+			Score:         95,
+			Targets:       []string{targetSmallComposableCode},
+			TargetReasons: []string{"alpha", "beta", "gamma", "delta"},
+		},
+		{
+			RuleID:   "function_hotspot",
+			Category: "function",
+			File:     "pkg/a.go",
+			Line:     12,
+			Symbol:   "DoThing",
+			Score:    80,
+			Targets:  []string{targetSmallComposableCode},
+		},
+		{
+			RuleID:   "unreachable_private_symbol",
+			Category: "dead_code",
+			File:     "pkg/b.go",
+			Line:     4,
+			Symbol:   "unused",
+			Score:    88,
+			Targets:  []string{targetSmallComposableCode},
+		},
+	}
+
+	full := buildSkillTargetLane(items, targetSmallComposableCode, 10)
+	if len(full) != 2 {
+		t.Fatalf("lane=%#v want 2 deduplicated items", full)
+	}
+	if len(full[0].Samples) != 3 || full[0].Samples[0] != "alpha" || full[0].Samples[1] != "beta" || full[0].Samples[2] != "gamma" {
+		t.Fatalf("samples=%#v want [alpha beta gamma]", full[0].Samples)
+	}
+
+	limited := buildSkillTargetLane(items, targetSmallComposableCode, 1)
+	if len(limited) != 1 {
+		t.Fatalf("limited lane=%#v want 1 item", limited)
+	}
+	if limited[0].RepresentativeRule != "function_hotspot" {
+		t.Fatalf("limited top rule=%q want function_hotspot", limited[0].RepresentativeRule)
 	}
 }
 

@@ -40,6 +40,7 @@ type input struct {
 	Path         string `json:"path"`
 	Language     string `json:"language" validate:"omitempty,oneof=auto go python javascript typescript elixir rust"`
 	Focus        string `json:"focus" validate:"omitempty,oneof=all slop dead"`
+	Target       string `json:"target" validate:"omitempty,oneof=all small-composable-code semantic-commenting improve-codebase-architecture"`
 	View         string `json:"view" validate:"omitempty,oneof=raw grouped entrypoints summary"`
 	IncludeTests bool   `json:"include_tests"`
 	MaxResults   int    `json:"max_results" validate:"gte=0"`
@@ -61,6 +62,8 @@ type finding struct {
 	Language          string         `json:"language"`
 	Confidence        string         `json:"confidence,omitempty"`
 	Signals           []string       `json:"signals,omitempty"`
+	Targets           []string       `json:"targets,omitempty"`
+	TargetReasons     []string       `json:"target_reasons,omitempty"`
 	Evidence          map[string]any `json:"evidence,omitempty"`
 }
 
@@ -183,11 +186,12 @@ type scoutNoiseIndicator struct {
 }
 
 type scoutPresentationLanes struct {
-	BestEntrypoints       []scoutLaneItem `json:"best_entrypoints,omitempty"`
-	DBAccessPatterns      []scoutLaneItem `json:"db_access_patterns,omitempty"`
-	RepeatedPatternFamily []scoutLaneItem `json:"repeated_pattern_families,omitempty"`
-	ModuleSeams           []scoutLaneItem `json:"module_seams,omitempty"`
-	Backlog               []scoutLaneItem `json:"backlog,omitempty"`
+	BestEntrypoints       []scoutLaneItem            `json:"best_entrypoints,omitempty"`
+	DBAccessPatterns      []scoutLaneItem            `json:"db_access_patterns,omitempty"`
+	RepeatedPatternFamily []scoutLaneItem            `json:"repeated_pattern_families,omitempty"`
+	ModuleSeams           []scoutLaneItem            `json:"module_seams,omitempty"`
+	Backlog               []scoutLaneItem            `json:"backlog,omitempty"`
+	SkillTargets          map[string][]scoutLaneItem `json:"skill_targets,omitempty"`
 }
 
 type scoutLaneItem struct {
@@ -210,11 +214,67 @@ func main() {
 }
 
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	in = normalizeScoutInput(in)
+
+	scopeState, err := resolveScoutRunScope(ctx, rc, in)
+	if err != nil {
+		return err
+	}
+	in.Language = scopeState.LanguageScope.Language
+	state, err := analyzeScoutState(ctx, scopeState, in)
+	if err != nil {
+		return err
+	}
+
+	findingsStage := finalizeAndFilterScoutFindings(ctx, rc, in, scopeState, state)
+	enrichmentStage := enrichScoutFindings(ctx, rc, in, scopeState, findingsStage.Findings)
+	artifactStage, err := persistScoutFindingsArtifact(ctx, rc, enrichmentStage.Findings, in.MaxResults, in.View)
+	if err != nil {
+		return err
+	}
+	data := assembleScoutOutputData(in, scopeState, state, findingsStage, enrichmentStage, artifactStage)
+	return skillout.Emit(rc, command, data)
+}
+
+type scoutRunScope struct {
+	Workspace      string
+	SearchPath     string
+	PathInfo       fs.FileInfo
+	LanguageScope  languageScope
+	StatusScope    refscope.Scope
+	IndexStatus    refstatus.Status
+	EffectiveScope refscope.Scope
+}
+
+type scoutFindingsStage struct {
+	Findings    []finding
+	DeadCodeErr error
+}
+
+type scoutEnrichmentStage struct {
+	Findings    []finding
+	Evidence    scoutEvidenceResult
+	EvidenceErr error
+}
+
+type scoutArtifactStage struct {
+	Findings            []finding
+	TotalFindings       int
+	SeverityCounts      map[string]int
+	Presentation        scoutPresentation
+	LimitedByMaxResults bool
+	Preview             skillout.PreviewArtifact[finding]
+}
+
+func normalizeScoutInput(in input) input {
 	if in.Language == "" {
 		in.Language = "auto"
 	}
 	if in.Focus == "" {
 		in.Focus = "all"
+	}
+	if in.Target == "" {
+		in.Target = "all"
 	}
 	if in.View == "" {
 		in.View = "grouped"
@@ -228,25 +288,41 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	if in.RuleSet == "" {
 		in.RuleSet = "default"
 	}
+	return in
+}
 
+func resolveScoutRunScope(ctx context.Context, rc *skillmain.RunContext, in input) (scoutRunScope, error) {
 	workspace, searchPath, err := skillmain.ResolvePath(rc, in.Path)
 	if err != nil {
-		return err
+		return scoutRunScope{}, err
 	}
 
 	info, err := os.Stat(searchPath)
 	if err != nil {
-		return skillerr.WrapIO("stat path", err)
+		return scoutRunScope{}, skillerr.WrapIO("stat path", err)
 	}
 
 	scope, err := resolveLanguageScope(workspace, searchPath, info, in)
 	if err != nil {
-		return err
+		return scoutRunScope{}, err
 	}
-	in.Language = scope.Language
 
+	statusScope := buildScoutStatusScope(workspace, searchPath, info, scope, in.IncludeTests)
+	indexStatus := refstatus.Evaluate(ctx, rc.Config.Storage.Root, statusScope)
+	return scoutRunScope{
+		Workspace:      workspace,
+		SearchPath:     searchPath,
+		PathInfo:       info,
+		LanguageScope:  scope,
+		StatusScope:    statusScope,
+		IndexStatus:    indexStatus,
+		EffectiveScope: indexStatus.Scope,
+	}, nil
+}
+
+func analyzeScoutState(ctx context.Context, scope scoutRunScope, in input) (*scoutState, error) {
 	state := &scoutState{
-		Workspace:        workspace,
+		Workspace:        scope.Workspace,
 		Thresholds:       thresholdsFor(in.RuleSet),
 		Registry:         symindex.DefaultRegistry(),
 		ScannedLanguages: make(map[string]int),
@@ -256,16 +332,21 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		CallFrequency:    make(map[string]map[string]int),
 	}
 
-	if info.IsDir() {
-		if err := analyzeDirectory(ctx, searchPath, in, state); err != nil {
-			return err
+	analysisInput := in
+	analysisInput.Language = scope.LanguageScope.Language
+	if scope.PathInfo.IsDir() {
+		if err := analyzeDirectory(ctx, scope.SearchPath, analysisInput, state); err != nil {
+			return nil, err
 		}
 	} else {
-		if err := analyzeFile(ctx, searchPath, workspace, in, state); err != nil {
-			return err
+		if err := analyzeFile(ctx, scope.SearchPath, scope.Workspace, analysisInput, state); err != nil {
+			return nil, err
 		}
 	}
+	return state, nil
+}
 
+func finalizeAndFilterScoutFindings(ctx context.Context, rc *skillmain.RunContext, in input, scope scoutRunScope, state *scoutState) scoutFindingsStage {
 	finalizeObservationFindings(state)
 	finalizeReceiverHotspots(state)
 	hotspotSymbols := synthesizeCompositeFindings(state)
@@ -273,12 +354,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		suppressConstituentFindings(state, hotspotSymbols)
 	}
 
-	statusScope := buildScoutStatusScope(workspace, searchPath, info, scope, in.IncludeTests)
-	indexStatus := refstatus.Evaluate(ctx, rc.Config.Storage.Root, statusScope)
-	effectiveScope := indexStatus.Scope
-
 	allFindings := append([]finding(nil), state.Findings...)
-	deadCodeFindings, deadCodeErr := buildDeadCodeFindings(ctx, rc.Config.Storage.Root, effectiveScope, indexStatus, in.Focus)
+	deadCodeFindings, deadCodeErr := buildDeadCodeFindings(ctx, rc.Config.Storage.Root, scope.EffectiveScope, scope.IndexStatus, in.Focus)
 	if deadCodeErr == nil {
 		allFindings = append(allFindings, deadCodeFindings...)
 	}
@@ -292,69 +369,108 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 	sortFindings(filtered)
 	filtered = diversifyFindings(filtered, maxInt(headDiversifyMinItems, in.MaxResults*3), headMaxPerRule, headMaxPerFile, headMaxPerSymbol)
-
-	evidence, evidenceErr := buildScoutEvidence(ctx, rc, in, effectiveScope, indexStatus, filtered)
-	if evidenceErr == nil {
-		filtered = evidence.Findings
+	return scoutFindingsStage{
+		Findings:    filtered,
+		DeadCodeErr: deadCodeErr,
 	}
-	filtered = applyConfidenceScores(filtered, indexStatus.Mode)
-	sortFindings(filtered)
+}
 
-	totalFindings := len(filtered)
-	summary := buildSummary(filtered)
-	presentation := buildScoutPresentation(filtered, in.View)
+func enrichScoutFindings(ctx context.Context, rc *skillmain.RunContext, in input, scope scoutRunScope, findings []finding) scoutEnrichmentStage {
+	evidence, evidenceErr := buildScoutEvidence(ctx, rc, in, scope.EffectiveScope, scope.IndexStatus, findings)
+	if evidenceErr == nil {
+		findings = evidence.Findings
+	}
+	findings = applyConfidenceScores(findings, scope.IndexStatus.Mode)
+	findings = applyReviewTargets(findings)
+	findings = applyTarget(findings, in.Target)
+	sortFindings(findings)
+	return scoutEnrichmentStage{
+		Findings:    findings,
+		Evidence:    evidence,
+		EvidenceErr: evidenceErr,
+	}
+}
+
+func persistScoutFindingsArtifact(
+	ctx context.Context,
+	rc *skillmain.RunContext,
+	findings []finding,
+	maxResults int,
+	view string,
+) (scoutArtifactStage, error) {
+	totalFindings := len(findings)
+	severityCounts := buildSummary(findings)
+	presentation := buildScoutPresentation(findings, view)
 	limitedByMaxResults := false
-	if len(filtered) > in.MaxResults {
-		filtered = filtered[:in.MaxResults]
+	if len(findings) > maxResults {
+		findings = findings[:maxResults]
 		limitedByMaxResults = true
 	}
-	previewResult, err := skillout.PreviewAndPersistNDJSON(ctx, rc, filtered, rc.MaxPreview, "code_refactor_scout", true)
+	preview, err := skillout.PreviewAndPersistNDJSON(ctx, rc, findings, rc.MaxPreview, "code_refactor_scout", true)
 	if err != nil {
-		return err
+		return scoutArtifactStage{}, err
 	}
+	return scoutArtifactStage{
+		Findings:            findings,
+		TotalFindings:       totalFindings,
+		SeverityCounts:      severityCounts,
+		Presentation:        presentation,
+		LimitedByMaxResults: limitedByMaxResults,
+		Preview:             preview,
+	}, nil
+}
 
+func assembleScoutOutputData(
+	in input,
+	scope scoutRunScope,
+	state *scoutState,
+	findingsStage scoutFindingsStage,
+	enrichmentStage scoutEnrichmentStage,
+	artifactStage scoutArtifactStage,
+) map[string]any {
 	data := map[string]any{
-		"findings":       previewResult.Preview,
-		"language_scope": scope,
-		"index_mode":     string(indexStatus.Mode),
+		"findings":       artifactStage.Preview.Preview,
+		"language_scope": scope.LanguageScope,
+		"index_mode":     string(scope.IndexStatus.Mode),
 		"view":           in.View,
-		"presentation":   presentation,
+		"presentation":   artifactStage.Presentation,
 		"summary": map[string]any{
 			"scanned_files":      state.ScannedFiles,
 			"scanned_symbols":    state.ScannedSymbols,
 			"languages":          state.ScannedLanguages,
-			"finding_count":      totalFindings,
-			"returned_findings":  len(filtered),
-			"severity_counts":    summary,
-			"limited_by_results": limitedByMaxResults,
+			"finding_count":      artifactStage.TotalFindings,
+			"returned_findings":  len(artifactStage.Findings),
+			"severity_counts":    artifactStage.SeverityCounts,
+			"limited_by_results": artifactStage.LimitedByMaxResults,
 		},
 		"rule_set": in.RuleSet,
 		"focus":    in.Focus,
+		"target":   in.Target,
 		"signals": map[string]any{
 			"symbol_signatures": true,
 			"go_ast":            true,
 			"call_extraction":   true,
 			"slop_focus":        in.Focus == "slop",
 			"dead_focus":        in.Focus == "dead",
-			"repo_graph":        indexStatus.Mode == refstatus.ModeIndexBacked,
-			"evidence_backed":   evidenceErr == nil,
+			"targeted_review":   in.Target != "all",
+			"repo_graph":        scope.IndexStatus.Mode == refstatus.ModeIndexBacked,
+			"evidence_backed":   enrichmentStage.EvidenceErr == nil,
 		},
 	}
-	if deadCodeErr != nil {
-		data["dead_code_error"] = deadCodeErr.Error()
+	if findingsStage.DeadCodeErr != nil {
+		data["dead_code_error"] = findingsStage.DeadCodeErr.Error()
 	}
-	if evidenceErr == nil {
-		data["snapshot_id"] = evidence.SnapshotID
-		data["snapshot_artifact"] = evidence.SnapshotArtifact
-		if strings.TrimSpace(evidence.EvidenceArtifact) != "" {
-			data["evidence_artifact"] = evidence.EvidenceArtifact
+	if enrichmentStage.EvidenceErr == nil {
+		data["snapshot_id"] = enrichmentStage.Evidence.SnapshotID
+		data["snapshot_artifact"] = enrichmentStage.Evidence.SnapshotArtifact
+		if strings.TrimSpace(enrichmentStage.Evidence.EvidenceArtifact) != "" {
+			data["evidence_artifact"] = enrichmentStage.Evidence.EvidenceArtifact
 		}
 	} else {
-		data["evidence_error"] = evidenceErr.Error()
+		data["evidence_error"] = enrichmentStage.EvidenceErr.Error()
 	}
-	skillout.AddArtifact(data, previewResult.Artifact)
-
-	return skillout.Emit(rc, command, data)
+	skillout.AddArtifact(data, artifactStage.Preview.Artifact)
+	return data
 }
 
 func resolveLanguageScope(workspace, searchPath string, info fs.FileInfo, in input) (languageScope, error) {
@@ -691,187 +807,265 @@ func analyzeGoFuncDecl(fn *ast.FuncDecl, fset *token.FileSet, relPath string, st
 		return nil
 	}
 
-	name := fn.Name.Name
-	receiver := receiverTypeName(fn)
-	if receiver != "" {
-		name = receiver + "." + name
-		hotspot := state.ReceiverMethods[receiver]
-		hotspot.Count++
-		hotspot.File = relPath
-		hotspot.Line = fset.Position(fn.Pos()).Line
-		hotspot.Language = "go"
-		state.ReceiverMethods[receiver] = hotspot
-	}
+	facts := buildGoFuncDeclFacts(fn, fset, relPath)
+	recordGoReceiverHotspot(state, facts)
+	recordGoSymbolObservation(state, facts)
 
+	findings := goFuncDeclThresholdFindings(facts, state.Thresholds)
+	findings = append(findings, analyzeGoSemanticSimplification(fn, fset, relPath, facts.Name)...)
+	findings = append(findings, analyzeDuplicateRecoveryBlocks(fn, fset, relPath, facts.Name)...)
+
+	return findings
+}
+
+type goFuncDeclFacts struct {
+	Name           string
+	Receiver       string
+	RelPath        string
+	Line           int
+	Length         int
+	ParamCount     int
+	BoolParamCount int
+	ReturnCount    int
+	Cyclomatic     int
+	Nesting        int
+	Signature      string
+	Orchestration  goOrchestrationMetrics
+}
+
+func buildGoFuncDeclFacts(fn *ast.FuncDecl, fset *token.FileSet, relPath string) goFuncDeclFacts {
+	baseName := fn.Name.Name
+	receiver := receiverTypeName(fn)
+	name := baseName
+	if receiver != "" {
+		name = receiver + "." + baseName
+	}
 	line := fset.Position(fn.Pos()).Line
 	length := fset.Position(fn.End()).Line - line + 1
 	paramCount, boolParamCount := goParamMetrics(fn)
-	returnCount := goReturnCount(fn)
-	cyclomatic := calculateGoCyclomaticComplexity(fn)
-	nesting := calculateGoNestingDepth(fn)
-	signature := goFuncSignature(fn)
-	orchestration := extractGoOrchestrationMetrics(fn)
+	return goFuncDeclFacts{
+		Name:           name,
+		Receiver:       receiver,
+		RelPath:        relPath,
+		Line:           line,
+		Length:         length,
+		ParamCount:     paramCount,
+		BoolParamCount: boolParamCount,
+		ReturnCount:    goReturnCount(fn),
+		Cyclomatic:     calculateGoCyclomaticComplexity(fn),
+		Nesting:        calculateGoNestingDepth(fn),
+		Signature:      goFuncSignature(fn),
+		Orchestration:  extractGoOrchestrationMetrics(fn),
+	}
+}
 
+func recordGoReceiverHotspot(state *scoutState, facts goFuncDeclFacts) {
+	if facts.Receiver == "" {
+		return
+	}
+	hotspot := state.ReceiverMethods[facts.Receiver]
+	hotspot.Count++
+	hotspot.File = facts.RelPath
+	hotspot.Line = facts.Line
+	hotspot.Language = "go"
+	state.ReceiverMethods[facts.Receiver] = hotspot
+}
+
+func recordGoSymbolObservation(state *scoutState, facts goFuncDeclFacts) {
 	kind := symindex.KindFunction
-	if receiver != "" {
+	if facts.Receiver != "" {
 		kind = symindex.KindMethod
 	}
-	obs := ensureSymbolObservation(state, relPath, name, "go", kind, line)
-	obs.Symbol = chooseDisplaySymbol(obs.Symbol, name)
-	obs.Signature = signature
-	obs.ParamCount = paramCount
-	obs.BoolParamCount = boolParamCount
-	obs.ReturnCount = returnCount
-	obs.SymbolLines = length
-	obs.FunctionLines = length
-	obs.Cyclomatic = cyclomatic
-	obs.Nesting = nesting
-	obs.BranchCount = orchestration.BranchCount
-	obs.CallSiteCount = orchestration.CallSiteCount
-	obs.OrchestrationFingerprint = orchestration.Fingerprint
-	obs.OrchestrationTokens = orchestration.Tokens
+	obs := ensureSymbolObservation(state, facts.RelPath, facts.Name, "go", kind, facts.Line)
+	obs.Symbol = chooseDisplaySymbol(obs.Symbol, facts.Name)
+	obs.Signature = facts.Signature
+	obs.ParamCount = facts.ParamCount
+	obs.BoolParamCount = facts.BoolParamCount
+	obs.ReturnCount = facts.ReturnCount
+	obs.SymbolLines = facts.Length
+	obs.FunctionLines = facts.Length
+	obs.Cyclomatic = facts.Cyclomatic
+	obs.Nesting = facts.Nesting
+	obs.BranchCount = facts.Orchestration.BranchCount
+	obs.CallSiteCount = facts.Orchestration.CallSiteCount
+	obs.OrchestrationFingerprint = facts.Orchestration.Fingerprint
+	obs.OrchestrationTokens = facts.Orchestration.Tokens
+}
 
-	findings := make([]finding, 0, 5)
-
-	if paramCount >= state.Thresholds.ParamCount {
-		score := scoreLongParameterList(paramCount, state.Thresholds)
-		findings = append(findings, finding{
-			RuleID:            "long_parameter_list",
-			Category:          "signature",
-			Severity:          severityFor(score),
-			Score:             score,
-			Title:             "Function signature carries too many parameters",
-			Detail:            fmt.Sprintf("%s accepts %d parameters, which usually indicates hidden coupling between callsite setup and business logic.", name, paramCount),
-			SuggestedRefactor: "Group related inputs into a dedicated struct or extract a narrower helper that owns part of the setup.",
-			File:              relPath,
-			Line:              line,
-			Symbol:            name,
-			Language:          "go",
-			Confidence:        "high",
-			Signals:           []string{"go_ast", "parameter_count"},
-			Evidence: map[string]any{
-				"signature":       signature,
-				"parameter_count": paramCount,
-			},
-		})
+func goFuncDeclThresholdFindings(facts goFuncDeclFacts, threshold thresholds) []finding {
+	findings := make([]finding, 0, 6)
+	if item, ok := goLongParameterListFinding(facts, threshold); ok {
+		findings = append(findings, item)
 	}
-
-	if boolParamCount > 0 {
-		score := scoreBooleanParams(boolParamCount)
-		findings = append(findings, finding{
-			RuleID:            "boolean_parameter",
-			Category:          "signature",
-			Severity:          severityFor(score),
-			Score:             score,
-			Title:             "Boolean parameters hide multiple code paths",
-			Detail:            fmt.Sprintf("%s takes %d boolean parameter(s), which often means the function is selecting between modes instead of exposing clear operations.", name, boolParamCount),
-			SuggestedRefactor: "Split mode-specific behavior into separate functions or replace booleans with a typed option object.",
-			File:              relPath,
-			Line:              line,
-			Symbol:            name,
-			Language:          "go",
-			Confidence:        "high",
-			Signals:           []string{"go_ast", "typed_boolean_parameter"},
-			Evidence: map[string]any{
-				"signature":      signature,
-				"boolean_params": boolParamCount,
-			},
-		})
+	if item, ok := goBooleanParameterFinding(facts); ok {
+		findings = append(findings, item)
 	}
-
-	if returnCount >= state.Thresholds.ReturnCount {
-		score := scoreWideReturnTuple(returnCount, state.Thresholds)
-		findings = append(findings, finding{
-			RuleID:            "wide_return_tuple",
-			Category:          "signature",
-			Severity:          severityFor(score),
-			Score:             score,
-			Title:             "Function returns a wide tuple",
-			Detail:            fmt.Sprintf("%s returns %d values, which makes the caller coordinate too many parallel outputs.", name, returnCount),
-			SuggestedRefactor: "Return a small result struct when outputs belong together, or split status reporting from value production.",
-			File:              relPath,
-			Line:              line,
-			Symbol:            name,
-			Language:          "go",
-			Confidence:        "high",
-			Signals:           []string{"go_ast", "return_count"},
-			Evidence: map[string]any{
-				"signature":    signature,
-				"return_count": returnCount,
-			},
-		})
+	if item, ok := goWideReturnTupleFinding(facts, threshold); ok {
+		findings = append(findings, item)
 	}
-
-	if length >= state.Thresholds.FunctionLines {
-		score := scoreOversizedFunction(length, state.Thresholds)
-		findings = append(findings, finding{
-			RuleID:            "oversized_function",
-			Category:          "function",
-			Severity:          severityFor(score),
-			Score:             score,
-			Title:             "Function body is long enough to obscure responsibility boundaries",
-			Detail:            fmt.Sprintf("%s is %d lines long, which raises the odds that orchestration and detail logic are mixed together.", name, length),
-			SuggestedRefactor: "Extract named helpers around decision points, side effects, or repeated setup and keep the top-level function as orchestration only.",
-			File:              relPath,
-			Line:              line,
-			Symbol:            name,
-			Language:          "go",
-			Confidence:        "high",
-			Signals:           []string{"go_ast", "function_lines"},
-			Evidence: map[string]any{
-				"function_lines": length,
-			},
-		})
+	if item, ok := goOversizedFunctionFinding(facts, threshold); ok {
+		findings = append(findings, item)
 	}
-
-	if cyclomatic >= state.Thresholds.Cyclomatic {
-		score := scoreCyclomaticComplexity(cyclomatic, state.Thresholds)
-		findings = append(findings, finding{
-			RuleID:            "high_cyclomatic_complexity",
-			Category:          "function",
-			Severity:          severityFor(score),
-			Score:             score,
-			Title:             "Cyclomatic complexity is high enough to merit decomposition",
-			Detail:            fmt.Sprintf("%s has cyclomatic complexity %d, which suggests too many decision paths for a single unit.", name, cyclomatic),
-			SuggestedRefactor: "Flatten conditionals with early returns and move independent decision branches behind dedicated helpers or strategy objects.",
-			File:              relPath,
-			Line:              line,
-			Symbol:            name,
-			Language:          "go",
-			Confidence:        "high",
-			Signals:           []string{"go_ast", "cyclomatic_complexity"},
-			Evidence: map[string]any{
-				"cyclomatic_complexity": cyclomatic,
-			},
-		})
+	if item, ok := goCyclomaticComplexityFinding(facts, threshold); ok {
+		findings = append(findings, item)
 	}
-
-	if nesting >= state.Thresholds.Nesting {
-		score := scoreDeepNesting(nesting, state.Thresholds)
-		findings = append(findings, finding{
-			RuleID:            "deep_nesting",
-			Category:          "function",
-			Severity:          severityFor(score),
-			Score:             score,
-			Title:             "Nested control flow is making the function harder to reshape",
-			Detail:            fmt.Sprintf("%s reaches nesting depth %d, which makes extraction and local reasoning more expensive.", name, nesting),
-			SuggestedRefactor: "Invert guards, return early on edge cases, and isolate nested branches into helpers that express intent directly.",
-			File:              relPath,
-			Line:              line,
-			Symbol:            name,
-			Language:          "go",
-			Confidence:        "high",
-			Signals:           []string{"go_ast", "nesting_depth"},
-			Evidence: map[string]any{
-				"nesting_depth": nesting,
-			},
-		})
+	if item, ok := goDeepNestingFinding(facts, threshold); ok {
+		findings = append(findings, item)
 	}
-
-	findings = append(findings, analyzeGoSemanticSimplification(fn, fset, relPath, name)...)
-	findings = append(findings, analyzeDuplicateRecoveryBlocks(fn, fset, relPath, name)...)
-
 	return findings
+}
+
+func goLongParameterListFinding(facts goFuncDeclFacts, threshold thresholds) (finding, bool) {
+	if facts.ParamCount < threshold.ParamCount {
+		return finding{}, false
+	}
+	score := scoreLongParameterList(facts.ParamCount, threshold)
+	return finding{
+		RuleID:            "long_parameter_list",
+		Category:          "signature",
+		Severity:          severityFor(score),
+		Score:             score,
+		Title:             "Function signature carries too many parameters",
+		Detail:            fmt.Sprintf("%s accepts %d parameters, which usually indicates hidden coupling between callsite setup and business logic.", facts.Name, facts.ParamCount),
+		SuggestedRefactor: "Group related inputs into a dedicated struct or extract a narrower helper that owns part of the setup.",
+		File:              facts.RelPath,
+		Line:              facts.Line,
+		Symbol:            facts.Name,
+		Language:          "go",
+		Confidence:        "high",
+		Signals:           []string{"go_ast", "parameter_count"},
+		Evidence: map[string]any{
+			"signature":       facts.Signature,
+			"parameter_count": facts.ParamCount,
+		},
+	}, true
+}
+
+func goBooleanParameterFinding(facts goFuncDeclFacts) (finding, bool) {
+	if facts.BoolParamCount <= 0 {
+		return finding{}, false
+	}
+	score := scoreBooleanParams(facts.BoolParamCount)
+	return finding{
+		RuleID:            "boolean_parameter",
+		Category:          "signature",
+		Severity:          severityFor(score),
+		Score:             score,
+		Title:             "Boolean parameters hide multiple code paths",
+		Detail:            fmt.Sprintf("%s takes %d boolean parameter(s), which often means the function is selecting between modes instead of exposing clear operations.", facts.Name, facts.BoolParamCount),
+		SuggestedRefactor: "Split mode-specific behavior into separate functions or replace booleans with a typed option object.",
+		File:              facts.RelPath,
+		Line:              facts.Line,
+		Symbol:            facts.Name,
+		Language:          "go",
+		Confidence:        "high",
+		Signals:           []string{"go_ast", "typed_boolean_parameter"},
+		Evidence: map[string]any{
+			"signature":      facts.Signature,
+			"boolean_params": facts.BoolParamCount,
+		},
+	}, true
+}
+
+func goWideReturnTupleFinding(facts goFuncDeclFacts, threshold thresholds) (finding, bool) {
+	if facts.ReturnCount < threshold.ReturnCount {
+		return finding{}, false
+	}
+	score := scoreWideReturnTuple(facts.ReturnCount, threshold)
+	return finding{
+		RuleID:            "wide_return_tuple",
+		Category:          "signature",
+		Severity:          severityFor(score),
+		Score:             score,
+		Title:             "Function returns a wide tuple",
+		Detail:            fmt.Sprintf("%s returns %d values, which makes the caller coordinate too many parallel outputs.", facts.Name, facts.ReturnCount),
+		SuggestedRefactor: "Return a small result struct when outputs belong together, or split status reporting from value production.",
+		File:              facts.RelPath,
+		Line:              facts.Line,
+		Symbol:            facts.Name,
+		Language:          "go",
+		Confidence:        "high",
+		Signals:           []string{"go_ast", "return_count"},
+		Evidence: map[string]any{
+			"signature":    facts.Signature,
+			"return_count": facts.ReturnCount,
+		},
+	}, true
+}
+
+func goOversizedFunctionFinding(facts goFuncDeclFacts, threshold thresholds) (finding, bool) {
+	if facts.Length < threshold.FunctionLines {
+		return finding{}, false
+	}
+	score := scoreOversizedFunction(facts.Length, threshold)
+	return finding{
+		RuleID:            "oversized_function",
+		Category:          "function",
+		Severity:          severityFor(score),
+		Score:             score,
+		Title:             "Function body is long enough to obscure responsibility boundaries",
+		Detail:            fmt.Sprintf("%s is %d lines long, which raises the odds that orchestration and detail logic are mixed together.", facts.Name, facts.Length),
+		SuggestedRefactor: "Extract named helpers around decision points, side effects, or repeated setup and keep the top-level function as orchestration only.",
+		File:              facts.RelPath,
+		Line:              facts.Line,
+		Symbol:            facts.Name,
+		Language:          "go",
+		Confidence:        "high",
+		Signals:           []string{"go_ast", "function_lines"},
+		Evidence: map[string]any{
+			"function_lines": facts.Length,
+		},
+	}, true
+}
+
+func goCyclomaticComplexityFinding(facts goFuncDeclFacts, threshold thresholds) (finding, bool) {
+	if facts.Cyclomatic < threshold.Cyclomatic {
+		return finding{}, false
+	}
+	score := scoreCyclomaticComplexity(facts.Cyclomatic, threshold)
+	return finding{
+		RuleID:            "high_cyclomatic_complexity",
+		Category:          "function",
+		Severity:          severityFor(score),
+		Score:             score,
+		Title:             "Cyclomatic complexity is high enough to merit decomposition",
+		Detail:            fmt.Sprintf("%s has cyclomatic complexity %d, which suggests too many decision paths for a single unit.", facts.Name, facts.Cyclomatic),
+		SuggestedRefactor: "Flatten conditionals with early returns and move independent decision branches behind dedicated helpers or strategy objects.",
+		File:              facts.RelPath,
+		Line:              facts.Line,
+		Symbol:            facts.Name,
+		Language:          "go",
+		Confidence:        "high",
+		Signals:           []string{"go_ast", "cyclomatic_complexity"},
+		Evidence: map[string]any{
+			"cyclomatic_complexity": facts.Cyclomatic,
+		},
+	}, true
+}
+
+func goDeepNestingFinding(facts goFuncDeclFacts, threshold thresholds) (finding, bool) {
+	if facts.Nesting < threshold.Nesting {
+		return finding{}, false
+	}
+	score := scoreDeepNesting(facts.Nesting, threshold)
+	return finding{
+		RuleID:            "deep_nesting",
+		Category:          "function",
+		Severity:          severityFor(score),
+		Score:             score,
+		Title:             "Nested control flow is making the function harder to reshape",
+		Detail:            fmt.Sprintf("%s reaches nesting depth %d, which makes extraction and local reasoning more expensive.", facts.Name, facts.Nesting),
+		SuggestedRefactor: "Invert guards, return early on edge cases, and isolate nested branches into helpers that express intent directly.",
+		File:              facts.RelPath,
+		Line:              facts.Line,
+		Symbol:            facts.Name,
+		Language:          "go",
+		Confidence:        "high",
+		Signals:           []string{"go_ast", "nesting_depth"},
+		Evidence: map[string]any{
+			"nesting_depth": facts.Nesting,
+		},
+	}, true
 }
 
 func analyzeGoGenDecl(decl *ast.GenDecl, fset *token.FileSet, relPath string, state *scoutState) []finding {
@@ -1531,118 +1725,13 @@ func finalizeStructuralSimilarityClusterFindings(state *scoutState, peerMap map[
 		if len(cluster.Members) < 2 {
 			continue
 		}
-		memberNames := make([]string, 0, len(cluster.Members))
-		for _, member := range cluster.Members {
-			memberNames = append(memberNames, member.Symbol)
-		}
-		profile := classifyStructuralCluster(cluster)
-		score := scoreStructuralSimilarityCluster(len(cluster.Members), cluster.EdgeCount, cluster.MaxSimilarity, cluster.AverageSimilarity, cluster.UniqueFileCount, cluster.AverageBranches, cluster.AverageCallSites, cluster.AverageFanOut)
-		state.Findings = append(state.Findings, finding{
-			RuleID:            "structural_similarity_cluster",
-			Category:          "cluster",
-			Severity:          severityFor(score),
-			Score:             score,
-			Title:             profile.Title,
-			Detail:            fmt.Sprintf(profile.DetailTemplate, cluster.File, len(cluster.Members)),
-			SuggestedRefactor: profile.SuggestedRefactor,
-			File:              cluster.File,
-			Line:              cluster.EntryLine,
-			Language:          "go",
-			Confidence:        "high",
-			Signals:           []string{"go_ast", "orchestration_similarity", "cluster"},
-			Evidence: map[string]any{
-				"seam_kind":                profile.Kind,
-				"adapter_surface_score":    cluster.AdapterSurfaceScore,
-				"scope_path":               cluster.ScopePath,
-				"cluster_size":             len(cluster.Members),
-				"edge_count":               cluster.EdgeCount,
-				"average_similarity":       cluster.AverageSimilarity,
-				"max_similarity":           cluster.MaxSimilarity,
-				"average_branches":         cluster.AverageBranches,
-				"average_call_sites":       cluster.AverageCallSites,
-				"average_fan_out":          cluster.AverageFanOut,
-				"average_symbol_lines":     cluster.AverageSymbolLines,
-				"branch_range":             cluster.BranchRange,
-				"call_site_range":          cluster.CallSiteRange,
-				"fan_out_range":            cluster.FanOutRange,
-				"symbol_line_range":        cluster.SymbolLineRange,
-				"param_range":              cluster.ParamRange,
-				"return_range":             cluster.ReturnRange,
-				"dominant_container":       cluster.DominantContainer,
-				"dominant_container_ratio": cluster.DominantContainerRatio,
-				"member_symbols":           memberNames,
-				"member_files":             cluster.MemberFiles,
-				"strongest_pair":           []string{cluster.StrongestPair[0], cluster.StrongestPair[1]},
-				"why_similar":              cluster.StrongestDetail.WhySimilar,
-				"shared_subsequence":       sampleStrings(cluster.StrongestDetail.SharedSubsequence, 8),
-				"shared_tokens":            cluster.StrongestDetail.SharedTokens,
-				"similarity_breakdown": map[string]int{
-					"sequence":   cluster.StrongestDetail.SequenceScore,
-					"overlap":    cluster.StrongestDetail.OverlapScore,
-					"call_sites": cluster.StrongestDetail.CallSiteScore,
-					"branches":   cluster.StrongestDetail.BranchScore,
-				},
-			},
-		})
+		state.Findings = append(state.Findings, makeStructuralClusterFinding(cluster, false))
 	}
 	for _, cluster := range topStructuralSimilarityClustersByDirectory(state, peerMap) {
 		if len(cluster.Members) < 2 || cluster.UniqueFileCount < 2 {
 			continue
 		}
-		memberNames := make([]string, 0, len(cluster.Members))
-		for _, member := range cluster.Members {
-			memberNames = append(memberNames, member.Symbol)
-		}
-		profile := classifyStructuralCluster(cluster)
-		score := scoreStructuralSimilarityCluster(len(cluster.Members), cluster.EdgeCount, cluster.MaxSimilarity, cluster.AverageSimilarity, cluster.UniqueFileCount, cluster.AverageBranches, cluster.AverageCallSites, cluster.AverageFanOut)
-		state.Findings = append(state.Findings, finding{
-			RuleID:            "structural_similarity_module_cluster",
-			Category:          "cluster",
-			Severity:          severityFor(score),
-			Score:             score,
-			Title:             moduleClusterTitle(profile),
-			Detail:            moduleClusterDetail(cluster, profile),
-			SuggestedRefactor: profile.SuggestedRefactor,
-			File:              cluster.File,
-			Line:              cluster.EntryLine,
-			Language:          "go",
-			Confidence:        "high",
-			Signals:           []string{"go_ast", "orchestration_similarity", "cluster", "module_scope"},
-			Evidence: map[string]any{
-				"seam_kind":                profile.Kind,
-				"adapter_surface_score":    cluster.AdapterSurfaceScore,
-				"scope_path":               cluster.ScopePath,
-				"cluster_size":             len(cluster.Members),
-				"unique_file_count":        cluster.UniqueFileCount,
-				"edge_count":               cluster.EdgeCount,
-				"average_similarity":       cluster.AverageSimilarity,
-				"max_similarity":           cluster.MaxSimilarity,
-				"average_branches":         cluster.AverageBranches,
-				"average_call_sites":       cluster.AverageCallSites,
-				"average_fan_out":          cluster.AverageFanOut,
-				"average_symbol_lines":     cluster.AverageSymbolLines,
-				"branch_range":             cluster.BranchRange,
-				"call_site_range":          cluster.CallSiteRange,
-				"fan_out_range":            cluster.FanOutRange,
-				"symbol_line_range":        cluster.SymbolLineRange,
-				"param_range":              cluster.ParamRange,
-				"return_range":             cluster.ReturnRange,
-				"dominant_container":       cluster.DominantContainer,
-				"dominant_container_ratio": cluster.DominantContainerRatio,
-				"member_symbols":           memberNames,
-				"member_files":             cluster.MemberFiles,
-				"strongest_pair":           []string{cluster.StrongestPair[0], cluster.StrongestPair[1]},
-				"why_similar":              cluster.StrongestDetail.WhySimilar,
-				"shared_subsequence":       sampleStrings(cluster.StrongestDetail.SharedSubsequence, 8),
-				"shared_tokens":            cluster.StrongestDetail.SharedTokens,
-				"similarity_breakdown": map[string]int{
-					"sequence":   cluster.StrongestDetail.SequenceScore,
-					"overlap":    cluster.StrongestDetail.OverlapScore,
-					"call_sites": cluster.StrongestDetail.CallSiteScore,
-					"branches":   cluster.StrongestDetail.BranchScore,
-				},
-			},
-		})
+		state.Findings = append(state.Findings, makeStructuralClusterFinding(cluster, true))
 	}
 }
 
@@ -1654,55 +1743,7 @@ func finalizeCallFamilyClusterFindings(state *scoutState, peerMap map[string][]c
 		if len(cluster.Members) < 2 {
 			continue
 		}
-		memberNames := make([]string, 0, len(cluster.Members))
-		for _, member := range cluster.Members {
-			memberNames = append(memberNames, member.Symbol)
-		}
-		profile := classifyCallFamilyCluster(cluster)
-		score := scoreCallFamilyCluster(len(cluster.Members), cluster.EdgeCount, cluster.MaxSimilarity, cluster.AverageSimilarity, cluster.UniqueFileCount, cluster.AverageFanOut, cluster.AverageSymbolLines, cluster.AdapterSurfaceScore)
-		state.Findings = append(state.Findings, finding{
-			RuleID:            "call_family_cluster",
-			Category:          "cluster",
-			Severity:          severityFor(score),
-			Score:             score,
-			Title:             profile.Title,
-			Detail:            fmt.Sprintf(profile.DetailTemplate, cluster.File, len(cluster.Members)),
-			SuggestedRefactor: profile.SuggestedRefactor,
-			File:              cluster.File,
-			Line:              cluster.EntryLine,
-			Language:          cluster.Members[0].Language,
-			Confidence:        "medium",
-			Signals:           []string{"call_extraction", "call_family_similarity", "cluster"},
-			Evidence: map[string]any{
-				"seam_kind":                profile.Kind,
-				"similarity_mode":          "call_family",
-				"adapter_surface_score":    cluster.AdapterSurfaceScore,
-				"scope_path":               cluster.ScopePath,
-				"cluster_size":             len(cluster.Members),
-				"edge_count":               cluster.EdgeCount,
-				"average_similarity":       cluster.AverageSimilarity,
-				"max_similarity":           cluster.MaxSimilarity,
-				"average_fan_out":          cluster.AverageFanOut,
-				"average_symbol_lines":     cluster.AverageSymbolLines,
-				"average_param_count":      cluster.AverageParamCount,
-				"average_return_count":     cluster.AverageReturnCount,
-				"dominant_container":       cluster.DominantContainer,
-				"dominant_container_ratio": cluster.DominantContainerRatio,
-				"member_symbols":           memberNames,
-				"member_files":             cluster.MemberFiles,
-				"strongest_pair":           []string{cluster.StrongestPair[0], cluster.StrongestPair[1]},
-				"why_similar":              cluster.StrongestDetail.WhySimilar,
-				"shared_calls":             cluster.StrongestDetail.SharedCalls,
-				"similarity_breakdown": map[string]int{
-					"call_overlap":    cluster.StrongestDetail.CallOverlapScore,
-					"distinctiveness": cluster.StrongestDetail.DistinctivenessScore,
-					"namespace":       cluster.StrongestDetail.NamespaceScore,
-					"signature_shape": cluster.StrongestDetail.SignatureShapeScore,
-					"fan_out":         cluster.StrongestDetail.FanOutScore,
-					"span":            cluster.StrongestDetail.SpanScore,
-				},
-			},
-		})
+		state.Findings = append(state.Findings, makeCallFamilyClusterFinding(cluster, false))
 	}
 	for _, cluster := range topCallFamilyClustersByDirectory(state, peerMap) {
 		if len(cluster.Members) < 2 || cluster.UniqueFileCount < 2 {
@@ -1711,57 +1752,152 @@ func finalizeCallFamilyClusterFindings(state *scoutState, peerMap map[string][]c
 		if !allowCallFamilyModuleCluster(cluster) {
 			continue
 		}
-		memberNames := make([]string, 0, len(cluster.Members))
-		for _, member := range cluster.Members {
-			memberNames = append(memberNames, member.Symbol)
-		}
-		profile := classifyCallFamilyCluster(cluster)
-		score := scoreCallFamilyCluster(len(cluster.Members), cluster.EdgeCount, cluster.MaxSimilarity, cluster.AverageSimilarity, cluster.UniqueFileCount, cluster.AverageFanOut, cluster.AverageSymbolLines, cluster.AdapterSurfaceScore)
-		state.Findings = append(state.Findings, finding{
-			RuleID:            "call_family_module_cluster",
-			Category:          "cluster",
-			Severity:          severityFor(score),
-			Score:             score,
-			Title:             moduleClusterTitle(profile),
-			Detail:            moduleCallFamilyClusterDetail(cluster, profile),
-			SuggestedRefactor: profile.SuggestedRefactor,
-			File:              cluster.File,
-			Line:              cluster.EntryLine,
-			Language:          cluster.Members[0].Language,
-			Confidence:        "medium",
-			Signals:           []string{"call_extraction", "call_family_similarity", "cluster", "module_scope"},
-			Evidence: map[string]any{
-				"seam_kind":                profile.Kind,
-				"similarity_mode":          "call_family",
-				"adapter_surface_score":    cluster.AdapterSurfaceScore,
-				"scope_path":               cluster.ScopePath,
-				"cluster_size":             len(cluster.Members),
-				"unique_file_count":        cluster.UniqueFileCount,
-				"edge_count":               cluster.EdgeCount,
-				"average_similarity":       cluster.AverageSimilarity,
-				"max_similarity":           cluster.MaxSimilarity,
-				"average_fan_out":          cluster.AverageFanOut,
-				"average_symbol_lines":     cluster.AverageSymbolLines,
-				"average_param_count":      cluster.AverageParamCount,
-				"average_return_count":     cluster.AverageReturnCount,
-				"dominant_container":       cluster.DominantContainer,
-				"dominant_container_ratio": cluster.DominantContainerRatio,
-				"member_symbols":           memberNames,
-				"member_files":             cluster.MemberFiles,
-				"strongest_pair":           []string{cluster.StrongestPair[0], cluster.StrongestPair[1]},
-				"why_similar":              cluster.StrongestDetail.WhySimilar,
-				"shared_calls":             cluster.StrongestDetail.SharedCalls,
-				"similarity_breakdown": map[string]int{
-					"call_overlap":    cluster.StrongestDetail.CallOverlapScore,
-					"distinctiveness": cluster.StrongestDetail.DistinctivenessScore,
-					"namespace":       cluster.StrongestDetail.NamespaceScore,
-					"signature_shape": cluster.StrongestDetail.SignatureShapeScore,
-					"fan_out":         cluster.StrongestDetail.FanOutScore,
-					"span":            cluster.StrongestDetail.SpanScore,
-				},
-			},
-		})
+		state.Findings = append(state.Findings, makeCallFamilyClusterFinding(cluster, true))
 	}
+}
+
+func makeStructuralClusterFinding(cluster structuralSimilarityCluster, moduleScope bool) finding {
+	profile := classifyStructuralCluster(cluster)
+	score := scoreStructuralSimilarityCluster(len(cluster.Members), cluster.EdgeCount, cluster.MaxSimilarity, cluster.AverageSimilarity, cluster.UniqueFileCount, cluster.AverageBranches, cluster.AverageCallSites, cluster.AverageFanOut)
+	ruleID := "structural_similarity_cluster"
+	title := profile.Title
+	detail := fmt.Sprintf(profile.DetailTemplate, cluster.File, len(cluster.Members))
+	signals := []string{"go_ast", "orchestration_similarity", "cluster"}
+	if moduleScope {
+		ruleID = "structural_similarity_module_cluster"
+		title = moduleClusterTitle(profile)
+		detail = moduleClusterDetail(cluster, profile)
+		signals = append(signals, "module_scope")
+	}
+	return finding{
+		RuleID:            ruleID,
+		Category:          "cluster",
+		Severity:          severityFor(score),
+		Score:             score,
+		Title:             title,
+		Detail:            detail,
+		SuggestedRefactor: profile.SuggestedRefactor,
+		File:              cluster.File,
+		Line:              cluster.EntryLine,
+		Language:          "go",
+		Confidence:        "high",
+		Signals:           signals,
+		Evidence:          structuralClusterEvidence(cluster, profile, moduleScope),
+	}
+}
+
+func structuralClusterEvidence(cluster structuralSimilarityCluster, profile structuralSeamProfile, moduleScope bool) map[string]any {
+	evidence := map[string]any{
+		"seam_kind":                profile.Kind,
+		"adapter_surface_score":    cluster.AdapterSurfaceScore,
+		"scope_path":               cluster.ScopePath,
+		"cluster_size":             len(cluster.Members),
+		"edge_count":               cluster.EdgeCount,
+		"average_similarity":       cluster.AverageSimilarity,
+		"max_similarity":           cluster.MaxSimilarity,
+		"average_branches":         cluster.AverageBranches,
+		"average_call_sites":       cluster.AverageCallSites,
+		"average_fan_out":          cluster.AverageFanOut,
+		"average_symbol_lines":     cluster.AverageSymbolLines,
+		"branch_range":             cluster.BranchRange,
+		"call_site_range":          cluster.CallSiteRange,
+		"fan_out_range":            cluster.FanOutRange,
+		"symbol_line_range":        cluster.SymbolLineRange,
+		"param_range":              cluster.ParamRange,
+		"return_range":             cluster.ReturnRange,
+		"dominant_container":       cluster.DominantContainer,
+		"dominant_container_ratio": cluster.DominantContainerRatio,
+		"member_symbols":           observationSymbols(cluster.Members),
+		"member_files":             cluster.MemberFiles,
+		"strongest_pair":           []string{cluster.StrongestPair[0], cluster.StrongestPair[1]},
+		"why_similar":              cluster.StrongestDetail.WhySimilar,
+		"shared_subsequence":       sampleStrings(cluster.StrongestDetail.SharedSubsequence, 8),
+		"shared_tokens":            cluster.StrongestDetail.SharedTokens,
+		"similarity_breakdown": map[string]int{
+			"sequence":   cluster.StrongestDetail.SequenceScore,
+			"overlap":    cluster.StrongestDetail.OverlapScore,
+			"call_sites": cluster.StrongestDetail.CallSiteScore,
+			"branches":   cluster.StrongestDetail.BranchScore,
+		},
+	}
+	if moduleScope {
+		evidence["unique_file_count"] = cluster.UniqueFileCount
+	}
+	return evidence
+}
+
+func makeCallFamilyClusterFinding(cluster callFamilyCluster, moduleScope bool) finding {
+	profile := classifyCallFamilyCluster(cluster)
+	score := scoreCallFamilyCluster(len(cluster.Members), cluster.EdgeCount, cluster.MaxSimilarity, cluster.AverageSimilarity, cluster.UniqueFileCount, cluster.AverageFanOut, cluster.AverageSymbolLines, cluster.AdapterSurfaceScore)
+	ruleID := "call_family_cluster"
+	title := profile.Title
+	detail := fmt.Sprintf(profile.DetailTemplate, cluster.File, len(cluster.Members))
+	signals := []string{"call_extraction", "call_family_similarity", "cluster"}
+	if moduleScope {
+		ruleID = "call_family_module_cluster"
+		title = moduleClusterTitle(profile)
+		detail = moduleCallFamilyClusterDetail(cluster, profile)
+		signals = append(signals, "module_scope")
+	}
+	return finding{
+		RuleID:            ruleID,
+		Category:          "cluster",
+		Severity:          severityFor(score),
+		Score:             score,
+		Title:             title,
+		Detail:            detail,
+		SuggestedRefactor: profile.SuggestedRefactor,
+		File:              cluster.File,
+		Line:              cluster.EntryLine,
+		Language:          cluster.Members[0].Language,
+		Confidence:        "medium",
+		Signals:           signals,
+		Evidence:          callFamilyClusterEvidence(cluster, profile, moduleScope),
+	}
+}
+
+func callFamilyClusterEvidence(cluster callFamilyCluster, profile structuralSeamProfile, moduleScope bool) map[string]any {
+	evidence := map[string]any{
+		"seam_kind":                profile.Kind,
+		"similarity_mode":          "call_family",
+		"adapter_surface_score":    cluster.AdapterSurfaceScore,
+		"scope_path":               cluster.ScopePath,
+		"cluster_size":             len(cluster.Members),
+		"edge_count":               cluster.EdgeCount,
+		"average_similarity":       cluster.AverageSimilarity,
+		"max_similarity":           cluster.MaxSimilarity,
+		"average_fan_out":          cluster.AverageFanOut,
+		"average_symbol_lines":     cluster.AverageSymbolLines,
+		"average_param_count":      cluster.AverageParamCount,
+		"average_return_count":     cluster.AverageReturnCount,
+		"dominant_container":       cluster.DominantContainer,
+		"dominant_container_ratio": cluster.DominantContainerRatio,
+		"member_symbols":           observationSymbols(cluster.Members),
+		"member_files":             cluster.MemberFiles,
+		"strongest_pair":           []string{cluster.StrongestPair[0], cluster.StrongestPair[1]},
+		"why_similar":              cluster.StrongestDetail.WhySimilar,
+		"shared_calls":             cluster.StrongestDetail.SharedCalls,
+		"similarity_breakdown": map[string]int{
+			"call_overlap":    cluster.StrongestDetail.CallOverlapScore,
+			"distinctiveness": cluster.StrongestDetail.DistinctivenessScore,
+			"namespace":       cluster.StrongestDetail.NamespaceScore,
+			"signature_shape": cluster.StrongestDetail.SignatureShapeScore,
+			"fan_out":         cluster.StrongestDetail.FanOutScore,
+			"span":            cluster.StrongestDetail.SpanScore,
+		},
+	}
+	if moduleScope {
+		evidence["unique_file_count"] = cluster.UniqueFileCount
+	}
+	return evidence
+}
+
+func observationSymbols(members []*symbolObservation) []string {
+	out := make([]string, 0, len(members))
+	for _, member := range members {
+		out = append(out, member.Symbol)
+	}
+	return out
 }
 
 func allowCallFamilyModuleCluster(cluster callFamilyCluster) bool {
@@ -1906,501 +2042,6 @@ func stringSliceSubset(left, right []string) bool {
 		}
 	}
 	return true
-}
-
-func topStructuralSimilarityClustersByFile(state *scoutState, peerMap map[string][]similarObservation) []structuralSimilarityCluster {
-	bestByFile := make(map[string]structuralSimilarityCluster)
-	visited := make(map[string]struct{})
-	for file, keys := range state.FileSymbols {
-		for _, key := range keys {
-			if _, ok := visited[key]; ok {
-				continue
-			}
-			localPeers := localSimilarPeers(peerMap[key], file)
-			if len(localPeers) == 0 {
-				visited[key] = struct{}{}
-				continue
-			}
-			cluster := buildStructuralSimilarityCluster(state, peerMap, file, key, visited)
-			if len(cluster.Members) < 2 {
-				continue
-			}
-			current, ok := bestByFile[file]
-			if !ok || compareStructuralClusters(cluster, current) > 0 {
-				bestByFile[file] = cluster
-			}
-		}
-	}
-	out := make([]structuralSimilarityCluster, 0, len(bestByFile))
-	for _, cluster := range bestByFile {
-		out = append(out, cluster)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		leftScore := scoreStructuralSimilarityCluster(len(out[i].Members), out[i].EdgeCount, out[i].MaxSimilarity, out[i].AverageSimilarity, out[i].UniqueFileCount, out[i].AverageBranches, out[i].AverageCallSites, out[i].AverageFanOut)
-		rightScore := scoreStructuralSimilarityCluster(len(out[j].Members), out[j].EdgeCount, out[j].MaxSimilarity, out[j].AverageSimilarity, out[j].UniqueFileCount, out[j].AverageBranches, out[j].AverageCallSites, out[j].AverageFanOut)
-		if leftScore != rightScore {
-			return leftScore > rightScore
-		}
-		if out[i].File != out[j].File {
-			return out[i].File < out[j].File
-		}
-		return out[i].EntryLine < out[j].EntryLine
-	})
-	return out
-}
-
-func topCallFamilyClustersByFile(state *scoutState, peerMap map[string][]callFamilyPeer) []callFamilyCluster {
-	bestByFile := make(map[string]callFamilyCluster)
-	visited := make(map[string]struct{})
-	for file, keys := range state.FileSymbols {
-		for _, key := range keys {
-			if _, ok := visited[key]; ok {
-				continue
-			}
-			localPeers := localCallFamilyPeers(peerMap[key], file)
-			if len(localPeers) == 0 {
-				visited[key] = struct{}{}
-				continue
-			}
-			cluster := buildCallFamilyClusterInScope(state, peerMap, file, key, visited, func(obs *symbolObservation) bool {
-				return obs != nil && obs.File == file
-			}, func(peers []callFamilyPeer) []callFamilyPeer {
-				return localCallFamilyPeers(peers, file)
-			})
-			if len(cluster.Members) < 2 {
-				continue
-			}
-			current, ok := bestByFile[file]
-			if !ok || compareCallFamilyClusters(cluster, current) > 0 {
-				bestByFile[file] = cluster
-			}
-		}
-	}
-	out := make([]callFamilyCluster, 0, len(bestByFile))
-	for _, cluster := range bestByFile {
-		out = append(out, cluster)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		leftScore := scoreCallFamilyCluster(len(out[i].Members), out[i].EdgeCount, out[i].MaxSimilarity, out[i].AverageSimilarity, out[i].UniqueFileCount, out[i].AverageFanOut, out[i].AverageSymbolLines, out[i].AdapterSurfaceScore)
-		rightScore := scoreCallFamilyCluster(len(out[j].Members), out[j].EdgeCount, out[j].MaxSimilarity, out[j].AverageSimilarity, out[j].UniqueFileCount, out[j].AverageFanOut, out[j].AverageSymbolLines, out[j].AdapterSurfaceScore)
-		if leftScore != rightScore {
-			return leftScore > rightScore
-		}
-		if out[i].File != out[j].File {
-			return out[i].File < out[j].File
-		}
-		return out[i].EntryLine < out[j].EntryLine
-	})
-	return out
-}
-
-func topCallFamilyClustersByDirectory(state *scoutState, peerMap map[string][]callFamilyPeer) []callFamilyCluster {
-	bestByDir := make(map[string]callFamilyCluster)
-	visited := make(map[string]struct{})
-	for _, keys := range state.FileSymbols {
-		for _, key := range keys {
-			if _, ok := visited[key]; ok {
-				continue
-			}
-			obs := state.Symbols[key]
-			if obs == nil {
-				continue
-			}
-			dir := callFamilyModuleScopeForObservation(obs)
-			if strings.TrimSpace(dir) == "" {
-				visited[key] = struct{}{}
-				continue
-			}
-			localPeers := directoryCallFamilyPeers(peerMap[key], dir)
-			if len(localPeers) == 0 {
-				visited[key] = struct{}{}
-				continue
-			}
-			cluster := buildCallFamilyClusterInScope(state, peerMap, dir, key, visited, func(obs *symbolObservation) bool {
-				return obs != nil && callFamilyModuleScopeForObservation(obs) == dir
-			}, func(peers []callFamilyPeer) []callFamilyPeer {
-				return directoryCallFamilyPeers(peers, dir)
-			})
-			if len(cluster.Members) < 2 || cluster.UniqueFileCount < 2 {
-				continue
-			}
-			current, ok := bestByDir[dir]
-			if !ok || compareCallFamilyClusters(cluster, current) > 0 {
-				bestByDir[dir] = cluster
-			}
-		}
-	}
-	out := make([]callFamilyCluster, 0, len(bestByDir))
-	for _, cluster := range bestByDir {
-		out = append(out, cluster)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		leftScore := scoreCallFamilyCluster(len(out[i].Members), out[i].EdgeCount, out[i].MaxSimilarity, out[i].AverageSimilarity, out[i].UniqueFileCount, out[i].AverageFanOut, out[i].AverageSymbolLines, out[i].AdapterSurfaceScore)
-		rightScore := scoreCallFamilyCluster(len(out[j].Members), out[j].EdgeCount, out[j].MaxSimilarity, out[j].AverageSimilarity, out[j].UniqueFileCount, out[j].AverageFanOut, out[j].AverageSymbolLines, out[j].AdapterSurfaceScore)
-		if leftScore != rightScore {
-			return leftScore > rightScore
-		}
-		if out[i].ScopePath != out[j].ScopePath {
-			return out[i].ScopePath < out[j].ScopePath
-		}
-		return out[i].EntryLine < out[j].EntryLine
-	})
-	return out
-}
-
-func topStructuralSimilarityClustersByDirectory(state *scoutState, peerMap map[string][]similarObservation) []structuralSimilarityCluster {
-	bestByDir := make(map[string]structuralSimilarityCluster)
-	visited := make(map[string]struct{})
-	for _, keys := range state.FileSymbols {
-		for _, key := range keys {
-			if _, ok := visited[key]; ok {
-				continue
-			}
-			obs := state.Symbols[key]
-			if obs == nil {
-				continue
-			}
-			dir := moduleScopeFor(obs.File)
-			localPeers := directorySimilarPeers(peerMap[key], dir)
-			if len(localPeers) == 0 {
-				visited[key] = struct{}{}
-				continue
-			}
-			cluster := buildStructuralSimilarityDirectoryCluster(state, peerMap, dir, key, visited)
-			if len(cluster.Members) < 2 || cluster.UniqueFileCount < 2 {
-				continue
-			}
-			current, ok := bestByDir[dir]
-			if !ok || compareStructuralClusters(cluster, current) > 0 {
-				bestByDir[dir] = cluster
-			}
-		}
-	}
-	out := make([]structuralSimilarityCluster, 0, len(bestByDir))
-	for _, cluster := range bestByDir {
-		out = append(out, cluster)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		leftScore := scoreStructuralSimilarityCluster(len(out[i].Members), out[i].EdgeCount, out[i].MaxSimilarity, out[i].AverageSimilarity, out[i].UniqueFileCount, out[i].AverageBranches, out[i].AverageCallSites, out[i].AverageFanOut)
-		rightScore := scoreStructuralSimilarityCluster(len(out[j].Members), out[j].EdgeCount, out[j].MaxSimilarity, out[j].AverageSimilarity, out[j].UniqueFileCount, out[j].AverageBranches, out[j].AverageCallSites, out[j].AverageFanOut)
-		if leftScore != rightScore {
-			return leftScore > rightScore
-		}
-		if out[i].ScopePath != out[j].ScopePath {
-			return out[i].ScopePath < out[j].ScopePath
-		}
-		return out[i].EntryLine < out[j].EntryLine
-	})
-	return out
-}
-
-func buildStructuralSimilarityCluster(state *scoutState, peerMap map[string][]similarObservation, file, startKey string, visited map[string]struct{}) structuralSimilarityCluster {
-	return buildStructuralSimilarityClusterInScope(state, peerMap, file, startKey, visited, func(obs *symbolObservation) bool {
-		return obs != nil && obs.File == file
-	}, func(peers []similarObservation) []similarObservation {
-		return localSimilarPeers(peers, file)
-	})
-}
-
-func buildStructuralSimilarityDirectoryCluster(state *scoutState, peerMap map[string][]similarObservation, dir, startKey string, visited map[string]struct{}) structuralSimilarityCluster {
-	return buildStructuralSimilarityClusterInScope(state, peerMap, dir, startKey, visited, func(obs *symbolObservation) bool {
-		return obs != nil && moduleScopeFor(obs.File) == dir
-	}, func(peers []similarObservation) []similarObservation {
-		return directorySimilarPeers(peers, dir)
-	})
-}
-
-func buildCallFamilyClusterInScope(
-	state *scoutState,
-	peerMap map[string][]callFamilyPeer,
-	scopePath, startKey string,
-	visited map[string]struct{},
-	inScope func(*symbolObservation) bool,
-	filterPeers func([]callFamilyPeer) []callFamilyPeer,
-) callFamilyCluster {
-	queue := []string{startKey}
-	componentKeys := make([]string, 0, 4)
-	componentSet := make(map[string]struct{}, 4)
-	for len(queue) > 0 {
-		key := queue[0]
-		queue = queue[1:]
-		if _, ok := visited[key]; ok {
-			continue
-		}
-		visited[key] = struct{}{}
-		obs := state.Symbols[key]
-		if obs == nil || !inScope(obs) {
-			continue
-		}
-		componentKeys = append(componentKeys, key)
-		componentSet[key] = struct{}{}
-		for _, peer := range filterPeers(peerMap[key]) {
-			peerKey := observationKey(peer.Observation.File, peer.Observation.Symbol)
-			if _, ok := visited[peerKey]; ok {
-				continue
-			}
-			queue = append(queue, peerKey)
-		}
-	}
-	if len(componentKeys) == 0 {
-		return callFamilyCluster{}
-	}
-	sort.Strings(componentKeys)
-	members := make([]*symbolObservation, 0, len(componentKeys))
-	memberFilesSet := make(map[string]struct{}, len(componentKeys))
-	entryLine := 0
-	representativeFile := ""
-	edgeCount := 0
-	totalSimilarity := 0
-	totalFanOut := 0
-	totalSymbolLines := 0
-	totalParamCount := 0
-	totalReturnCount := 0
-	minFanOut := 0
-	maxFanOut := 0
-	minSymbolLines := 0
-	maxSymbolLines := 0
-	minParams := 0
-	maxParams := 0
-	minReturns := 0
-	maxReturns := 0
-	containerCounts := make(map[string]int)
-	maxSimilarity := 0
-	strongestPair := [2]string{}
-	strongestDetail := callFamilySimilarityDetails{}
-	seenEdges := make(map[string]struct{})
-	for _, key := range componentKeys {
-		obs := state.Symbols[key]
-		if obs == nil {
-			continue
-		}
-		members = append(members, obs)
-		memberFilesSet[obs.File] = struct{}{}
-		totalFanOut += obs.FanOut
-		totalSymbolLines += obs.SymbolLines
-		totalParamCount += obs.ParamCount
-		totalReturnCount += obs.ReturnCount
-		minFanOut, maxFanOut = updateRange(minFanOut, maxFanOut, obs.FanOut, len(members) == 1)
-		minSymbolLines, maxSymbolLines = updateRange(minSymbolLines, maxSymbolLines, obs.SymbolLines, len(members) == 1)
-		minParams, maxParams = updateRange(minParams, maxParams, obs.ParamCount, len(members) == 1)
-		minReturns, maxReturns = updateRange(minReturns, maxReturns, obs.ReturnCount, len(members) == 1)
-		containerCounts[symbolContainer(obs.Symbol)]++
-		if representativeFile == "" || obs.File < representativeFile || (obs.File == representativeFile && (entryLine == 0 || obs.Line < entryLine)) {
-			representativeFile = obs.File
-			entryLine = obs.Line
-		}
-		for _, peer := range filterPeers(peerMap[key]) {
-			peerKey := observationKey(peer.Observation.File, peer.Observation.Symbol)
-			if _, ok := componentSet[peerKey]; !ok {
-				continue
-			}
-			edgeID := orderedPairKey(key, peerKey)
-			if _, ok := seenEdges[edgeID]; ok {
-				continue
-			}
-			seenEdges[edgeID] = struct{}{}
-			edgeCount++
-			totalSimilarity += peer.Similarity
-			if peer.Similarity > maxSimilarity {
-				maxSimilarity = peer.Similarity
-				strongestPair = [2]string{obs.Symbol, peer.Observation.Symbol}
-				strongestDetail = peer.Details
-			}
-		}
-	}
-	memberFiles := sortedKeys(memberFilesSet)
-	avgSimilarity := 0
-	if edgeCount > 0 {
-		avgSimilarity = totalSimilarity / edgeCount
-	}
-	avgFanOut := 0
-	avgSymbolLines := 0
-	avgParamCount := 0
-	avgReturnCount := 0
-	if len(members) > 0 {
-		avgFanOut = totalFanOut / len(members)
-		avgSymbolLines = totalSymbolLines / len(members)
-		avgParamCount = totalParamCount / len(members)
-		avgReturnCount = totalReturnCount / len(members)
-	}
-	dominantContainer, dominantContainerRatio := dominantContainerStats(containerCounts, len(members))
-	adapterSurfaceScore := scoreAdapterSurfaceCluster(len(members), len(memberFiles), dominantContainerRatio, 0, 0, maxFanOut-minFanOut, maxSymbolLines-minSymbolLines, maxParams-minParams, maxReturns-minReturns)
-	return callFamilyCluster{
-		ScopePath:              scopePath,
-		File:                   representativeFile,
-		Members:                members,
-		MemberFiles:            memberFiles,
-		UniqueFileCount:        len(memberFiles),
-		EntryLine:              entryLine,
-		EdgeCount:              edgeCount,
-		AverageSimilarity:      avgSimilarity,
-		MaxSimilarity:          maxSimilarity,
-		AverageFanOut:          avgFanOut,
-		AverageSymbolLines:     avgSymbolLines,
-		AverageParamCount:      avgParamCount,
-		AverageReturnCount:     avgReturnCount,
-		DominantContainer:      dominantContainer,
-		DominantContainerRatio: dominantContainerRatio,
-		AdapterSurfaceScore:    adapterSurfaceScore,
-		StrongestPair:          strongestPair,
-		StrongestDetail:        strongestDetail,
-	}
-}
-
-func buildStructuralSimilarityClusterInScope(
-	state *scoutState,
-	peerMap map[string][]similarObservation,
-	scopePath, startKey string,
-	visited map[string]struct{},
-	inScope func(*symbolObservation) bool,
-	filterPeers func([]similarObservation) []similarObservation,
-) structuralSimilarityCluster {
-	queue := []string{startKey}
-	componentKeys := make([]string, 0, 4)
-	componentSet := make(map[string]struct{}, 4)
-	for len(queue) > 0 {
-		key := queue[0]
-		queue = queue[1:]
-		if _, ok := visited[key]; ok {
-			continue
-		}
-		visited[key] = struct{}{}
-		obs := state.Symbols[key]
-		if obs == nil || !inScope(obs) {
-			continue
-		}
-		componentKeys = append(componentKeys, key)
-		componentSet[key] = struct{}{}
-		for _, peer := range filterPeers(peerMap[key]) {
-			peerKey := observationKey(peer.Observation.File, peer.Observation.Symbol)
-			if _, ok := visited[peerKey]; ok {
-				continue
-			}
-			queue = append(queue, peerKey)
-		}
-	}
-	if len(componentKeys) == 0 {
-		return structuralSimilarityCluster{}
-	}
-	sort.Strings(componentKeys)
-	members := make([]*symbolObservation, 0, len(componentKeys))
-	memberFilesSet := make(map[string]struct{}, len(componentKeys))
-	entryLine := 0
-	representativeFile := ""
-	edgeCount := 0
-	totalSimilarity := 0
-	totalBranches := 0
-	totalCallSites := 0
-	totalFanOut := 0
-	totalSymbolLines := 0
-	maxSimilarity := 0
-	minBranches := 0
-	maxBranches := 0
-	minCallSites := 0
-	maxCallSites := 0
-	minFanOut := 0
-	maxFanOut := 0
-	minSymbolLines := 0
-	maxSymbolLines := 0
-	minParams := 0
-	maxParams := 0
-	minReturns := 0
-	maxReturns := 0
-	containerCounts := make(map[string]int)
-	strongestPair := [2]string{}
-	strongestDetail := orchestrationSimilarityDetails{}
-	seenEdges := make(map[string]struct{})
-	for _, key := range componentKeys {
-		obs := state.Symbols[key]
-		if obs == nil {
-			continue
-		}
-		members = append(members, obs)
-		memberFilesSet[obs.File] = struct{}{}
-		totalBranches += obs.BranchCount
-		totalCallSites += obs.CallSiteCount
-		totalFanOut += obs.FanOut
-		totalSymbolLines += obs.SymbolLines
-		minBranches, maxBranches = updateRange(minBranches, maxBranches, obs.BranchCount, len(members) == 1)
-		minCallSites, maxCallSites = updateRange(minCallSites, maxCallSites, obs.CallSiteCount, len(members) == 1)
-		minFanOut, maxFanOut = updateRange(minFanOut, maxFanOut, obs.FanOut, len(members) == 1)
-		minSymbolLines, maxSymbolLines = updateRange(minSymbolLines, maxSymbolLines, obs.SymbolLines, len(members) == 1)
-		minParams, maxParams = updateRange(minParams, maxParams, obs.ParamCount, len(members) == 1)
-		minReturns, maxReturns = updateRange(minReturns, maxReturns, obs.ReturnCount, len(members) == 1)
-		containerCounts[symbolContainer(obs.Symbol)]++
-		if representativeFile == "" || obs.File < representativeFile || (obs.File == representativeFile && (entryLine == 0 || obs.Line < entryLine)) {
-			representativeFile = obs.File
-			entryLine = obs.Line
-		}
-		for _, peer := range filterPeers(peerMap[key]) {
-			peerKey := observationKey(peer.Observation.File, peer.Observation.Symbol)
-			if _, ok := componentSet[peerKey]; !ok {
-				continue
-			}
-			edgeID := orderedPairKey(key, peerKey)
-			if _, ok := seenEdges[edgeID]; ok {
-				continue
-			}
-			seenEdges[edgeID] = struct{}{}
-			edgeCount++
-			totalSimilarity += peer.Similarity
-			if peer.Similarity > maxSimilarity {
-				maxSimilarity = peer.Similarity
-				strongestPair = [2]string{obs.Symbol, peer.Observation.Symbol}
-				strongestDetail = peer.Details
-			}
-		}
-	}
-	memberFiles := sortedKeys(memberFilesSet)
-	avgSimilarity := 0
-	if edgeCount > 0 {
-		avgSimilarity = totalSimilarity / edgeCount
-	}
-	avgBranches := 0
-	avgCallSites := 0
-	avgFanOut := 0
-	avgSymbolLines := 0
-	if len(members) > 0 {
-		avgBranches = totalBranches / len(members)
-		avgCallSites = totalCallSites / len(members)
-		avgFanOut = totalFanOut / len(members)
-		avgSymbolLines = totalSymbolLines / len(members)
-	}
-	dominantContainer, dominantContainerRatio := dominantContainerStats(containerCounts, len(members))
-	branchRange := maxBranches - minBranches
-	callSiteRange := maxCallSites - minCallSites
-	fanOutRange := maxFanOut - minFanOut
-	symbolLineRange := maxSymbolLines - minSymbolLines
-	paramRange := maxParams - minParams
-	returnRange := maxReturns - minReturns
-	adapterSurfaceScore := scoreAdapterSurfaceCluster(len(members), len(memberFiles), dominantContainerRatio, branchRange, callSiteRange, fanOutRange, symbolLineRange, paramRange, returnRange)
-	return structuralSimilarityCluster{
-		ScopePath:              scopePath,
-		File:                   representativeFile,
-		MemberKeys:             componentKeys,
-		Members:                members,
-		MemberFiles:            memberFiles,
-		UniqueFileCount:        len(memberFiles),
-		EntryLine:              entryLine,
-		EdgeCount:              edgeCount,
-		AverageSimilarity:      avgSimilarity,
-		MaxSimilarity:          maxSimilarity,
-		AverageBranches:        avgBranches,
-		AverageCallSites:       avgCallSites,
-		AverageFanOut:          avgFanOut,
-		AverageSymbolLines:     avgSymbolLines,
-		BranchRange:            branchRange,
-		CallSiteRange:          callSiteRange,
-		FanOutRange:            fanOutRange,
-		SymbolLineRange:        symbolLineRange,
-		ParamRange:             paramRange,
-		ReturnRange:            returnRange,
-		DominantContainer:      dominantContainer,
-		DominantContainerRatio: dominantContainerRatio,
-		AdapterSurfaceScore:    adapterSurfaceScore,
-		StrongestPair:          strongestPair,
-		StrongestDetail:        strongestDetail,
-	}
 }
 
 func updateRange(minValue, maxValue, value int, initialize bool) (int, int) {
@@ -2775,18 +2416,39 @@ func finalizeDuplicateOrchestrationFindings(state *scoutState, peerMap map[strin
 	}
 }
 
-func finalizeSameFileExtractionFindings(state *scoutState) {
-	type peerEvidence struct {
-		peer               string
-		sharedCalls        []string
-		sameOrchestration  bool
-		orchestrationWhy   string
-		sharedSubsequence  []string
-		sharedTokens       []string
-		signatureAlignment bool
-	}
-	perSymbol := make(map[string][]peerEvidence)
+type sameFilePeerEvidence struct {
+	peer               string
+	sharedCalls        []string
+	sameOrchestration  bool
+	orchestrationWhy   string
+	sharedSubsequence  []string
+	sharedTokens       []string
+	signatureAlignment bool
+}
 
+type sameFilePeerSummary struct {
+	maxSharedCalls        int
+	sameOrchestrationPeer int
+	peerNames             []string
+	sharedCallUnion       map[string]struct{}
+	bestWhySimilar        string
+	bestSharedSubsequence []string
+	bestSharedTokens      []string
+}
+
+func finalizeSameFileExtractionFindings(state *scoutState) {
+	perSymbol := collectSameFilePeerEvidence(state)
+	for key, peers := range perSymbol {
+		obs := state.Symbols[key]
+		if obs == nil || len(peers) == 0 {
+			continue
+		}
+		state.Findings = append(state.Findings, buildSameFileExtractionFinding(obs, peers))
+	}
+}
+
+func collectSameFilePeerEvidence(state *scoutState) map[string][]sameFilePeerEvidence {
+	perSymbol := make(map[string][]sameFilePeerEvidence)
 	for _, keys := range state.FileSymbols {
 		if len(keys) < 2 {
 			continue
@@ -2801,131 +2463,142 @@ func finalizeSameFileExtractionFindings(state *scoutState) {
 				if right == nil || left.Language != right.Language {
 					continue
 				}
-				sharedCalls := intersectStrings(left.Calls, right.Calls)
-				orchestrationSimilarity := 0
-				if left.Language == "go" {
-					details := orchestrationSimilarityDetailsFor(left, right)
-					orchestrationSimilarity = details.Score
-					if orchestrationSimilarity >= orchestrationSimilarityThreshold(state.Thresholds) {
-						perSymbol[keys[i]] = append(perSymbol[keys[i]], peerEvidence{
-							peer:               right.Symbol,
-							sharedCalls:        sharedCalls,
-							sameOrchestration:  true,
-							orchestrationWhy:   details.WhySimilar,
-							sharedSubsequence:  details.SharedSubsequence,
-							sharedTokens:       details.SharedTokens,
-							signatureAlignment: left.ParamCount == right.ParamCount && left.ReturnCount == right.ReturnCount,
-						})
-						perSymbol[keys[j]] = append(perSymbol[keys[j]], peerEvidence{
-							peer:               left.Symbol,
-							sharedCalls:        sharedCalls,
-							sameOrchestration:  true,
-							orchestrationWhy:   details.WhySimilar,
-							sharedSubsequence:  details.SharedSubsequence,
-							sharedTokens:       details.SharedTokens,
-							signatureAlignment: left.ParamCount == right.ParamCount && left.ReturnCount == right.ReturnCount,
-						})
-						continue
-					}
-				}
-				signatureAlignment := left.ParamCount == right.ParamCount && left.ReturnCount == right.ReturnCount
-				minFanOut := minInt(left.FanOut, right.FanOut)
-				substantialPair := maxInt(left.SymbolLines, right.SymbolLines) >= maxInt(18, state.Thresholds.FunctionLines/3)
-				overlapOK := minFanOut > 0 && len(sharedCalls)*2 >= minFanOut
-				qualifies := substantialPair && len(sharedCalls) >= state.Thresholds.SameFileSharedCalls && overlapOK && signatureAlignment
-				if !qualifies {
+				peer, ok := evaluateSameFilePeer(state, left, right)
+				if !ok {
 					continue
 				}
-				perSymbol[keys[i]] = append(perSymbol[keys[i]], peerEvidence{
-					peer:               right.Symbol,
-					sharedCalls:        sharedCalls,
-					sameOrchestration:  false,
-					signatureAlignment: signatureAlignment,
-				})
-				perSymbol[keys[j]] = append(perSymbol[keys[j]], peerEvidence{
-					peer:               left.Symbol,
-					sharedCalls:        sharedCalls,
-					sameOrchestration:  false,
-					signatureAlignment: signatureAlignment,
-				})
+				perSymbol[keys[i]] = append(perSymbol[keys[i]], withSameFilePeerName(peer, right.Symbol))
+				perSymbol[keys[j]] = append(perSymbol[keys[j]], withSameFilePeerName(peer, left.Symbol))
 			}
 		}
 	}
+	return perSymbol
+}
 
-	for key, peers := range perSymbol {
-		obs := state.Symbols[key]
-		if obs == nil || len(peers) == 0 {
-			continue
-		}
-		sort.Slice(peers, func(i, j int) bool {
-			if len(peers[i].sharedCalls) != len(peers[j].sharedCalls) {
-				return len(peers[i].sharedCalls) > len(peers[j].sharedCalls)
-			}
-			return peers[i].peer < peers[j].peer
-		})
-		maxSharedCalls := 0
-		sameOrchestrationPeers := 0
-		peerNames := make([]string, 0, len(peers))
-		sharedCallUnion := make(map[string]struct{})
-		bestWhySimilar := ""
-		bestSharedSubsequence := []string(nil)
-		bestSharedTokens := []string(nil)
-		for _, peer := range peers {
-			peerNames = append(peerNames, peer.peer)
-			if len(peer.sharedCalls) > maxSharedCalls {
-				maxSharedCalls = len(peer.sharedCalls)
-			}
-			if peer.sameOrchestration {
-				sameOrchestrationPeers++
-				if bestWhySimilar == "" {
-					bestWhySimilar = peer.orchestrationWhy
-					bestSharedSubsequence = peer.sharedSubsequence
-					bestSharedTokens = peer.sharedTokens
-				}
-			}
-			for _, call := range peer.sharedCalls {
-				sharedCallUnion[call] = struct{}{}
-			}
-		}
-		score := scoreSameFileExtraction(len(peers), maxSharedCalls, sameOrchestrationPeers > 0)
-		confidence := "medium"
-		if sameOrchestrationPeers > 0 || obs.Language == "go" {
-			confidence = "high"
-		}
-		state.Findings = append(state.Findings, finding{
-			RuleID:            "same_file_extraction_candidate",
-			Category:          "function",
-			Severity:          severityFor(score),
-			Score:             score,
-			Title:             "Sibling functions in the same file want a shared extraction",
-			Detail:            fmt.Sprintf("%s overlaps with %d same-file sibling function(s), which suggests repeated setup or branch handling that should live behind a shared helper.", obs.Symbol, len(peers)),
-			SuggestedRefactor: "Extract the shared setup or decision sequence into a helper, then keep each public entrypoint focused on what actually differs.",
-			File:              obs.File,
-			Line:              obs.Line,
-			Symbol:            obs.Symbol,
-			Language:          obs.Language,
-			Confidence:        confidence,
-			Signals:           []string{"call_extraction", "same_file_overlap"},
-			Evidence: map[string]any{
-				"peer_symbols":             sampleStrings(peerNames, 6),
-				"shared_calls":             sampleStrings(sortedKeys(sharedCallUnion), 8),
-				"peer_count":               len(peers),
-				"max_shared_calls":         maxSharedCalls,
-				"same_orchestration_peers": sameOrchestrationPeers,
-				"why_similar":              bestWhySimilar,
-				"shared_subsequence":       sampleStrings(bestSharedSubsequence, 8),
-				"shared_tokens":            bestSharedTokens,
-			},
-		})
+func evaluateSameFilePeer(state *scoutState, left, right *symbolObservation) (sameFilePeerEvidence, bool) {
+	sharedCalls := intersectStrings(left.Calls, right.Calls)
+	peer := sameFilePeerEvidence{
+		sharedCalls:        sharedCalls,
+		signatureAlignment: sameFileSignatureAligned(left, right),
 	}
+	if left.Language == "go" {
+		details := orchestrationSimilarityDetailsFor(left, right)
+		if details.Score >= orchestrationSimilarityThreshold(state.Thresholds) {
+			peer.sameOrchestration = true
+			peer.orchestrationWhy = details.WhySimilar
+			peer.sharedSubsequence = details.SharedSubsequence
+			peer.sharedTokens = details.SharedTokens
+			return peer, true
+		}
+	}
+	if !qualifiesSameFileSharedExtraction(state, left, right, sharedCalls, peer.signatureAlignment) {
+		return sameFilePeerEvidence{}, false
+	}
+	return peer, true
+}
+
+func withSameFilePeerName(peer sameFilePeerEvidence, name string) sameFilePeerEvidence {
+	peer.peer = name
+	return peer
+}
+
+func sameFileSignatureAligned(left, right *symbolObservation) bool {
+	return left.ParamCount == right.ParamCount && left.ReturnCount == right.ReturnCount
+}
+
+func qualifiesSameFileSharedExtraction(state *scoutState, left, right *symbolObservation, sharedCalls []string, signatureAlignment bool) bool {
+	minFanOut := minInt(left.FanOut, right.FanOut)
+	substantialPair := maxInt(left.SymbolLines, right.SymbolLines) >= maxInt(18, state.Thresholds.FunctionLines/3)
+	overlapOK := minFanOut > 0 && len(sharedCalls)*2 >= minFanOut
+	return substantialPair && len(sharedCalls) >= state.Thresholds.SameFileSharedCalls && overlapOK && signatureAlignment
+}
+
+func buildSameFileExtractionFinding(obs *symbolObservation, peers []sameFilePeerEvidence) finding {
+	summary := summarizeSameFilePeers(peers)
+	score := scoreSameFileExtraction(len(peers), summary.maxSharedCalls, summary.sameOrchestrationPeer > 0)
+	confidence := "medium"
+	if summary.sameOrchestrationPeer > 0 || obs.Language == "go" {
+		confidence = "high"
+	}
+	return finding{
+		RuleID:            "same_file_extraction_candidate",
+		Category:          "function",
+		Severity:          severityFor(score),
+		Score:             score,
+		Title:             "Sibling functions in the same file want a shared extraction",
+		Detail:            fmt.Sprintf("%s overlaps with %d same-file sibling function(s), which suggests repeated setup or branch handling that should live behind a shared helper.", obs.Symbol, len(peers)),
+		SuggestedRefactor: "Extract the shared setup or decision sequence into a helper, then keep each public entrypoint focused on what actually differs.",
+		File:              obs.File,
+		Line:              obs.Line,
+		Symbol:            obs.Symbol,
+		Language:          obs.Language,
+		Confidence:        confidence,
+		Signals:           []string{"call_extraction", "same_file_overlap"},
+		Evidence: map[string]any{
+			"peer_symbols":             sampleStrings(summary.peerNames, 6),
+			"shared_calls":             sampleStrings(sortedKeys(summary.sharedCallUnion), 8),
+			"peer_count":               len(peers),
+			"max_shared_calls":         summary.maxSharedCalls,
+			"same_orchestration_peers": summary.sameOrchestrationPeer,
+			"why_similar":              summary.bestWhySimilar,
+			"shared_subsequence":       sampleStrings(summary.bestSharedSubsequence, 8),
+			"shared_tokens":            summary.bestSharedTokens,
+		},
+	}
+}
+
+func summarizeSameFilePeers(peers []sameFilePeerEvidence) sameFilePeerSummary {
+	sort.Slice(peers, func(i, j int) bool {
+		if len(peers[i].sharedCalls) != len(peers[j].sharedCalls) {
+			return len(peers[i].sharedCalls) > len(peers[j].sharedCalls)
+		}
+		return peers[i].peer < peers[j].peer
+	})
+	summary := sameFilePeerSummary{
+		peerNames:       make([]string, 0, len(peers)),
+		sharedCallUnion: make(map[string]struct{}),
+	}
+	for _, peer := range peers {
+		summary.peerNames = append(summary.peerNames, peer.peer)
+		if len(peer.sharedCalls) > summary.maxSharedCalls {
+			summary.maxSharedCalls = len(peer.sharedCalls)
+		}
+		if peer.sameOrchestration {
+			summary.sameOrchestrationPeer++
+			if summary.bestWhySimilar == "" {
+				summary.bestWhySimilar = peer.orchestrationWhy
+				summary.bestSharedSubsequence = peer.sharedSubsequence
+				summary.bestSharedTokens = peer.sharedTokens
+			}
+		}
+		for _, call := range peer.sharedCalls {
+			summary.sharedCallUnion[call] = struct{}{}
+		}
+	}
+	return summary
 }
 
 func synthesizeCompositeFindings(state *scoutState) map[string]struct{} {
 	if state == nil || len(state.Findings) == 0 {
 		return nil
 	}
+	grouped := groupFunctionConstituents(state.Findings)
+
+	hotspots := make(map[string]struct{})
+	for _, group := range grouped {
+		hotspot, ok := buildCompositeHotspotFinding(group)
+		if !ok {
+			continue
+		}
+		hotspots[findingSymbolKey(hotspot)] = struct{}{}
+		state.Findings = append(state.Findings, hotspot)
+	}
+	return hotspots
+}
+
+func groupFunctionConstituents(items []finding) map[string][]finding {
 	grouped := make(map[string][]finding)
-	for _, item := range state.Findings {
+	for _, item := range items {
 		if !isFunctionConstituent(item) {
 			continue
 		}
@@ -2935,70 +2608,77 @@ func synthesizeCompositeFindings(state *scoutState) map[string]struct{} {
 		}
 		grouped[key] = append(grouped[key], item)
 	}
+	return grouped
+}
 
-	hotspots := make(map[string]struct{})
-	for _, group := range grouped {
-		if len(group) < 2 {
-			continue
-		}
-		rules := make(map[string]finding)
-		top := group[0]
-		for _, item := range group {
-			if item.Score > top.Score {
-				top = item
-			}
-			if _, ok := rules[item.RuleID]; !ok {
-				rules[item.RuleID] = item
-			}
-		}
-		structuralCount, signatureCount, supportiveCount := hotspotRuleMix(rules)
-		if !qualifiesFunctionHotspot(structuralCount, signatureCount, supportiveCount) {
-			continue
-		}
-
-		ruleIDs := make([]string, 0, len(rules))
-		signals := make(map[string]struct{})
-		ruleScores := make(map[string]int)
-		confidence := "medium"
-		for ruleID, item := range rules {
-			ruleIDs = append(ruleIDs, ruleID)
-			ruleScores[ruleID] = item.Score
-			for _, signal := range item.Signals {
-				signals[signal] = struct{}{}
-			}
-			if item.Confidence == "high" {
-				confidence = "high"
-			}
-		}
-		sort.Strings(ruleIDs)
-		score := clampScore(top.Score + 5*(len(ruleIDs)-1))
-		hotspots[findingSymbolKey(top)] = struct{}{}
-		state.Findings = append(state.Findings, finding{
-			RuleID:            "function_hotspot",
-			Category:          "function",
-			Severity:          severityFor(score),
-			Score:             score,
-			Title:             "Function combines multiple refactoring signals",
-			Detail:            fmt.Sprintf("%s triggers %d independent refactoring signals (%s), making it a stronger entrypoint than any single metric alone.", top.Symbol, len(ruleIDs), strings.Join(ruleIDs, ", ")),
-			SuggestedRefactor: "Refactor this function as a unit: split orchestration from branch-heavy detail, then narrow the signature or outputs if they still read as overloaded.",
-			File:              top.File,
-			Line:              top.Line,
-			Symbol:            top.Symbol,
-			Language:          top.Language,
-			Confidence:        confidence,
-			Signals:           sortedKeys(signals),
-			Evidence: map[string]any{
-				"rules":       ruleIDs,
-				"rule_scores": ruleScores,
-				"mix": map[string]int{
-					"structural": structuralCount,
-					"signature":  signatureCount,
-					"supportive": supportiveCount,
-				},
-			},
-		})
+func buildCompositeHotspotFinding(group []finding) (finding, bool) {
+	if len(group) < 2 {
+		return finding{}, false
 	}
-	return hotspots
+	top, rules := compositeHotspotGroupSummary(group)
+	structuralCount, signatureCount, supportiveCount := hotspotRuleMix(rules)
+	if !qualifiesFunctionHotspot(structuralCount, signatureCount, supportiveCount) {
+		return finding{}, false
+	}
+	ruleIDs, ruleScores, signals, confidence := compositeHotspotRuleDetails(rules)
+	score := clampScore(top.Score + 5*(len(ruleIDs)-1))
+	return finding{
+		RuleID:            "function_hotspot",
+		Category:          "function",
+		Severity:          severityFor(score),
+		Score:             score,
+		Title:             "Function combines multiple refactoring signals",
+		Detail:            fmt.Sprintf("%s triggers %d independent refactoring signals (%s), making it a stronger entrypoint than any single metric alone.", top.Symbol, len(ruleIDs), strings.Join(ruleIDs, ", ")),
+		SuggestedRefactor: "Refactor this function as a unit: split orchestration from branch-heavy detail, then narrow the signature or outputs if they still read as overloaded.",
+		File:              top.File,
+		Line:              top.Line,
+		Symbol:            top.Symbol,
+		Language:          top.Language,
+		Confidence:        confidence,
+		Signals:           signals,
+		Evidence: map[string]any{
+			"rules":       ruleIDs,
+			"rule_scores": ruleScores,
+			"mix": map[string]int{
+				"structural": structuralCount,
+				"signature":  signatureCount,
+				"supportive": supportiveCount,
+			},
+		},
+	}, true
+}
+
+func compositeHotspotGroupSummary(group []finding) (finding, map[string]finding) {
+	top := group[0]
+	rules := make(map[string]finding)
+	for _, item := range group {
+		if item.Score > top.Score {
+			top = item
+		}
+		if _, ok := rules[item.RuleID]; !ok {
+			rules[item.RuleID] = item
+		}
+	}
+	return top, rules
+}
+
+func compositeHotspotRuleDetails(rules map[string]finding) ([]string, map[string]int, []string, string) {
+	ruleIDs := make([]string, 0, len(rules))
+	signals := make(map[string]struct{})
+	ruleScores := make(map[string]int)
+	confidence := "medium"
+	for ruleID, item := range rules {
+		ruleIDs = append(ruleIDs, ruleID)
+		ruleScores[ruleID] = item.Score
+		for _, signal := range item.Signals {
+			signals[signal] = struct{}{}
+		}
+		if item.Confidence == "high" {
+			confidence = "high"
+		}
+	}
+	sort.Strings(ruleIDs)
+	return ruleIDs, ruleScores, sortedKeys(signals), confidence
 }
 
 func isFunctionConstituent(item finding) bool {
@@ -3262,45 +2942,58 @@ func splitTopLevel(value string) []string {
 	}
 	var parts []string
 	start := 0
-	parenDepth := 0
-	bracketDepth := 0
-	braceDepth := 0
-	angleDepth := 0
+	depth := splitTopLevelDepth{}
 	for i, r := range value {
-		switch r {
-		case '(':
-			parenDepth++
-		case ')':
-			if parenDepth > 0 {
-				parenDepth--
-			}
-		case '[':
-			bracketDepth++
-		case ']':
-			if bracketDepth > 0 {
-				bracketDepth--
-			}
-		case '{':
-			braceDepth++
-		case '}':
-			if braceDepth > 0 {
-				braceDepth--
-			}
-		case '<':
-			angleDepth++
-		case '>':
-			if angleDepth > 0 {
-				angleDepth--
-			}
-		case ',':
-			if parenDepth == 0 && bracketDepth == 0 && braceDepth == 0 && angleDepth == 0 {
-				parts = append(parts, strings.TrimSpace(value[start:i]))
-				start = i + 1
-			}
+		if r == ',' && depth.topLevel() {
+			parts = append(parts, strings.TrimSpace(value[start:i]))
+			start = i + 1
+			continue
 		}
+		depth = splitTopLevelAdvance(depth, r)
 	}
 	parts = append(parts, strings.TrimSpace(value[start:]))
 	return parts
+}
+
+type splitTopLevelDepth struct {
+	Paren   int
+	Bracket int
+	Brace   int
+	Angle   int
+}
+
+func (depth splitTopLevelDepth) topLevel() bool {
+	return depth.Paren == 0 && depth.Bracket == 0 && depth.Brace == 0 && depth.Angle == 0
+}
+
+func splitTopLevelAdvance(depth splitTopLevelDepth, r rune) splitTopLevelDepth {
+	switch r {
+	case '(':
+		depth.Paren++
+	case ')':
+		if depth.Paren > 0 {
+			depth.Paren--
+		}
+	case '[':
+		depth.Bracket++
+	case ']':
+		if depth.Bracket > 0 {
+			depth.Bracket--
+		}
+	case '{':
+		depth.Brace++
+	case '}':
+		if depth.Brace > 0 {
+			depth.Brace--
+		}
+	case '<':
+		depth.Angle++
+	case '>':
+		if depth.Angle > 0 {
+			depth.Angle--
+		}
+	}
+	return depth
 }
 
 func findMatching(value string, start int, open, close rune) int {
@@ -3380,6 +3073,7 @@ func buildScoutPresentation(items []finding, view string) scoutPresentation {
 			RepeatedPatternFamily: buildRepeatedPatternLane(items, 8),
 			ModuleSeams:           buildModuleSeamLane(items, 8),
 			Backlog:               buildBacklogLane(items, 8),
+			SkillTargets:          buildSkillTargetLanes(items, 5),
 		},
 	}
 	switch view {
@@ -3445,115 +3139,142 @@ func summarizeFiles(items []finding, limit int) []scoutFileSummary {
 	if len(items) == 0 {
 		return nil
 	}
-	type acc struct {
-		count     int
-		maxScore  int
-		topSymbol string
-		rules     map[string]int
-	}
-	index := make(map[string]*acc)
+	index := make(map[string]*fileSummaryGroup)
 	for _, item := range items {
-		if strings.TrimSpace(item.File) == "" {
-			continue
-		}
-		a := index[item.File]
-		if a == nil {
-			a = &acc{rules: make(map[string]int)}
-			index[item.File] = a
-		}
-		a.count++
-		a.rules[item.RuleID]++
-		if item.Score > a.maxScore || (item.Score == a.maxScore && strings.TrimSpace(item.Symbol) != "" && a.topSymbol == "") {
-			a.maxScore = item.Score
-			a.topSymbol = item.Symbol
-		}
+		accumulateFileSummary(index, item)
 	}
 	out := make([]scoutFileSummary, 0, len(index))
-	for file, a := range index {
+	for file, group := range index {
 		out = append(out, scoutFileSummary{
 			File:          file,
-			Count:         a.count,
-			MaxScore:      a.maxScore,
-			TopSymbol:     strings.TrimSpace(a.topSymbol),
-			DominantRules: topCountKeys(a.rules, 3),
+			Count:         group.count,
+			MaxScore:      group.maxScore,
+			TopSymbol:     strings.TrimSpace(group.topSymbol),
+			DominantRules: topCountKeys(group.rules, 3),
 		})
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].MaxScore != out[j].MaxScore {
-			return out[i].MaxScore > out[j].MaxScore
-		}
-		if out[i].Count != out[j].Count {
-			return out[i].Count > out[j].Count
-		}
-		return out[i].File < out[j].File
-	})
-	if limit > 0 && len(out) > limit {
-		out = out[:limit]
-	}
-	return out
+	sortFileSummaries(out)
+	return limitFileSummaries(out, limit)
 }
 
 func summarizeSymbols(items []finding, limit int) []scoutSymbolSummary {
-	type acc struct {
-		file     string
-		symbol   string
-		line     int
-		count    int
-		maxScore int
-		rules    map[string]struct{}
-	}
-	index := make(map[string]*acc)
+	index := make(map[string]*symbolSummaryGroup)
 	for _, item := range items {
-		if strings.TrimSpace(item.Symbol) == "" {
-			continue
-		}
-		key := findingSymbolKey(item)
-		a := index[key]
-		if a == nil {
-			a = &acc{
-				file:   item.File,
-				symbol: item.Symbol,
-				line:   item.Line,
-				rules:  make(map[string]struct{}),
-			}
-			index[key] = a
-		}
-		a.count++
-		if item.Score > a.maxScore {
-			a.maxScore = item.Score
-		}
-		if a.line == 0 && item.Line > 0 {
-			a.line = item.Line
-		}
-		a.rules[item.RuleID] = struct{}{}
+		accumulateSymbolSummary(index, item)
 	}
 	out := make([]scoutSymbolSummary, 0, len(index))
-	for _, a := range index {
+	for _, group := range index {
 		out = append(out, scoutSymbolSummary{
-			File:     a.file,
-			Symbol:   a.symbol,
-			Line:     a.line,
-			Count:    a.count,
-			MaxScore: a.maxScore,
-			RuleIDs:  sortedKeys(a.rules),
+			File:     group.file,
+			Symbol:   group.symbol,
+			Line:     group.line,
+			Count:    group.count,
+			MaxScore: group.maxScore,
+			RuleIDs:  sortedKeys(group.rules),
 		})
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].MaxScore != out[j].MaxScore {
-			return out[i].MaxScore > out[j].MaxScore
-		}
-		if out[i].Count != out[j].Count {
-			return out[i].Count > out[j].Count
-		}
-		if out[i].File != out[j].File {
-			return out[i].File < out[j].File
-		}
-		return out[i].Symbol < out[j].Symbol
-	})
-	if limit > 0 && len(out) > limit {
-		out = out[:limit]
+	sortSymbolSummaries(out)
+	return limitSymbolSummaries(out, limit)
+}
+
+type fileSummaryGroup struct {
+	count     int
+	maxScore  int
+	topSymbol string
+	rules     map[string]int
+}
+
+func accumulateFileSummary(index map[string]*fileSummaryGroup, item finding) {
+	file := strings.TrimSpace(item.File)
+	if file == "" {
+		return
 	}
-	return out
+	group := index[file]
+	if group == nil {
+		group = &fileSummaryGroup{rules: make(map[string]int)}
+		index[file] = group
+	}
+	group.count++
+	group.rules[item.RuleID]++
+	if item.Score > group.maxScore || (item.Score == group.maxScore && strings.TrimSpace(item.Symbol) != "" && group.topSymbol == "") {
+		group.maxScore = item.Score
+		group.topSymbol = item.Symbol
+	}
+}
+
+func sortFileSummaries(items []scoutFileSummary) {
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].MaxScore != items[j].MaxScore {
+			return items[i].MaxScore > items[j].MaxScore
+		}
+		if items[i].Count != items[j].Count {
+			return items[i].Count > items[j].Count
+		}
+		return items[i].File < items[j].File
+	})
+}
+
+func limitFileSummaries(items []scoutFileSummary, limit int) []scoutFileSummary {
+	if limit > 0 && len(items) > limit {
+		return items[:limit]
+	}
+	return items
+}
+
+type symbolSummaryGroup struct {
+	file     string
+	symbol   string
+	line     int
+	count    int
+	maxScore int
+	rules    map[string]struct{}
+}
+
+func accumulateSymbolSummary(index map[string]*symbolSummaryGroup, item finding) {
+	if strings.TrimSpace(item.Symbol) == "" {
+		return
+	}
+	key := findingSymbolKey(item)
+	group := index[key]
+	if group == nil {
+		group = &symbolSummaryGroup{
+			file:   item.File,
+			symbol: item.Symbol,
+			line:   item.Line,
+			rules:  make(map[string]struct{}),
+		}
+		index[key] = group
+	}
+	group.count++
+	if item.Score > group.maxScore {
+		group.maxScore = item.Score
+	}
+	if group.line == 0 && item.Line > 0 {
+		group.line = item.Line
+	}
+	group.rules[item.RuleID] = struct{}{}
+}
+
+func sortSymbolSummaries(items []scoutSymbolSummary) {
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].MaxScore != items[j].MaxScore {
+			return items[i].MaxScore > items[j].MaxScore
+		}
+		if items[i].Count != items[j].Count {
+			return items[i].Count > items[j].Count
+		}
+		if items[i].File != items[j].File {
+			return items[i].File < items[j].File
+		}
+		return items[i].Symbol < items[j].Symbol
+	})
+}
+
+func limitSymbolSummaries(items []scoutSymbolSummary, limit int) []scoutSymbolSummary {
+	if limit > 0 && len(items) > limit {
+		return items[:limit]
+	}
+	return items
 }
 
 func summarizeNoiseIndicators(items []finding) []scoutNoiseIndicator {
@@ -3616,12 +3337,59 @@ func summarizeNoiseIndicators(items []finding) []scoutNoiseIndicator {
 }
 
 func buildEntrypointLane(items []finding, limit int) []scoutLaneItem {
-	type group struct {
-		rep   finding
-		count int
-		rules map[string]struct{}
+	index := collectEntrypointLaneGroups(items)
+	out := make([]scoutLaneItem, 0, len(index))
+	for _, group := range index {
+		laneItem := laneItemFromRepresentative(group.rep)
+		laneItem.FindingCount = group.count
+		laneItem.RuleIDs = sortedKeys(group.rules)
+		laneItem.SeamKind = evidenceString(group.rep.Evidence["seam_kind"])
+		out = append(out, laneItem)
 	}
-	index := make(map[string]*group)
+	return sortAndLimitLaneItems(out, limit)
+}
+
+func buildRepeatedPatternLane(items []finding, limit int) []scoutLaneItem {
+	index := collectRepeatedPatternLaneGroups(items)
+	out := make([]scoutLaneItem, 0, len(index))
+	for _, group := range index {
+		if group.count <= 1 && group.rep.RuleID != "semantic_simplification_candidate" {
+			continue
+		}
+		laneItem := laneItemFromRepresentative(group.rep)
+		laneItem.FindingCount = group.count
+		laneItem.RuleIDs = []string{group.rep.RuleID}
+		laneItem.Summary = repeatedPatternLaneSummary(group.rep, group.count)
+		laneItem.Samples = sampleStrings(group.samples, 4)
+		out = append(out, laneItem)
+	}
+	return sortAndLimitLaneItems(out, limit)
+}
+
+func buildDBAccessLane(items []finding, limit int) []scoutLaneItem {
+	index := collectDBAccessLaneGroups(items)
+	out := make([]scoutLaneItem, 0, len(index))
+	for _, group := range index {
+		displayCount := displayDBAccessFindingCount(group)
+		laneItem := laneItemFromRepresentative(group.rep)
+		laneItem.FindingCount = displayCount
+		laneItem.RuleIDs = sortedKeys(group.rules)
+		laneItem.Summary = dbAccessLaneSummary(group.rep, displayCount)
+		laneItem.SeamKind = evidenceString(group.rep.Evidence["suggested_boundary_kind"])
+		laneItem.Samples = sampleStrings(group.samples, 4)
+		out = append(out, laneItem)
+	}
+	return sortAndLimitLaneItems(out, limit)
+}
+
+type entrypointLaneGroup struct {
+	rep   finding
+	count int
+	rules map[string]struct{}
+}
+
+func collectEntrypointLaneGroups(items []finding) map[string]*entrypointLaneGroup {
+	index := make(map[string]*entrypointLaneGroup)
 	for _, item := range items {
 		if strings.TrimSpace(item.Symbol) == "" {
 			continue
@@ -3630,155 +3398,116 @@ func buildEntrypointLane(items []finding, limit int) []scoutLaneItem {
 			continue
 		}
 		key := findingSymbolKey(item)
-		g := index[key]
-		if g == nil {
-			g = &group{rep: item, rules: make(map[string]struct{})}
-			index[key] = g
+		group := index[key]
+		if group == nil {
+			group = &entrypointLaneGroup{rep: item, rules: make(map[string]struct{})}
+			index[key] = group
 		}
-		g.count++
-		g.rules[item.RuleID] = struct{}{}
-		if shouldReplaceRepresentative(g.rep, item) {
-			g.rep = item
+		group.count++
+		group.rules[item.RuleID] = struct{}{}
+		if shouldReplaceRepresentative(group.rep, item) {
+			group.rep = item
 		}
 	}
-	out := make([]scoutLaneItem, 0, len(index))
-	for _, g := range index {
-		out = append(out, scoutLaneItem{
-			File:               g.rep.File,
-			Symbol:             g.rep.Symbol,
-			Line:               g.rep.Line,
-			MaxScore:           g.rep.Score,
-			FindingCount:       g.count,
-			RepresentativeRule: g.rep.RuleID,
-			RuleIDs:            sortedKeys(g.rules),
-			Summary:            scoutLaneSummary(g.rep),
-			Category:           g.rep.Category,
-			SeamKind:           evidenceString(g.rep.Evidence["seam_kind"]),
-		})
-	}
-	sortLaneItems(out)
-	if limit > 0 && len(out) > limit {
-		out = out[:limit]
-	}
-	return out
+	return index
 }
 
-func buildRepeatedPatternLane(items []finding, limit int) []scoutLaneItem {
-	type group struct {
-		rep     finding
-		count   int
-		samples []string
-	}
-	index := make(map[string]*group)
+type repeatedPatternLaneGroup struct {
+	rep     finding
+	count   int
+	samples []string
+}
+
+func collectRepeatedPatternLaneGroups(items []finding) map[string]*repeatedPatternLaneGroup {
+	index := make(map[string]*repeatedPatternLaneGroup)
 	for _, item := range items {
 		if !isPatternFamilyRule(item.RuleID) || strings.TrimSpace(item.Symbol) == "" {
 			continue
 		}
 		key := findingSymbolKey(item) + "::" + item.RuleID
-		g := index[key]
-		if g == nil {
-			g = &group{rep: item}
-			index[key] = g
+		group := index[key]
+		if group == nil {
+			group = &repeatedPatternLaneGroup{rep: item}
+			index[key] = group
 		}
-		g.count++
-		if shouldReplaceRepresentative(g.rep, item) {
-			g.rep = item
+		group.count++
+		if shouldReplaceRepresentative(group.rep, item) {
+			group.rep = item
 		}
-		g.samples = appendUniquePatternStrings(g.samples, patternEvidenceSamples(item)...)
+		group.samples = appendUniquePatternStrings(group.samples, patternEvidenceSamples(item)...)
 	}
-	out := make([]scoutLaneItem, 0, len(index))
-	for _, g := range index {
-		if g.count <= 1 && g.rep.RuleID != "semantic_simplification_candidate" {
-			continue
-		}
-		summary := scoutLaneSummary(g.rep)
-		if g.count > 1 {
-			summary = fmt.Sprintf("%s emitted %d %s finding(s). %s", g.rep.Symbol, g.count, g.rep.RuleID, scoutLaneSummary(g.rep))
-		}
-		out = append(out, scoutLaneItem{
-			File:               g.rep.File,
-			Symbol:             g.rep.Symbol,
-			Line:               g.rep.Line,
-			MaxScore:           g.rep.Score,
-			FindingCount:       g.count,
-			RepresentativeRule: g.rep.RuleID,
-			RuleIDs:            []string{g.rep.RuleID},
-			Summary:            summary,
-			Category:           g.rep.Category,
-			Samples:            sampleStrings(g.samples, 4),
-		})
-	}
-	sortLaneItems(out)
-	if limit > 0 && len(out) > limit {
-		out = out[:limit]
-	}
-	return out
+	return index
 }
 
-func buildDBAccessLane(items []finding, limit int) []scoutLaneItem {
-	type group struct {
-		rep        finding
-		count      int
-		rules      map[string]struct{}
-		seenShapes map[string]struct{}
-		samples    []string
+func repeatedPatternLaneSummary(rep finding, count int) string {
+	summary := scoutLaneSummary(rep)
+	if count > 1 {
+		return fmt.Sprintf("%s emitted %d %s finding(s). %s", rep.Symbol, count, rep.RuleID, scoutLaneSummary(rep))
 	}
-	index := make(map[string]*group)
+	return summary
+}
+
+type dbAccessLaneGroup struct {
+	rep        finding
+	count      int
+	rules      map[string]struct{}
+	seenShapes map[string]struct{}
+	samples    []string
+}
+
+func collectDBAccessLaneGroups(items []finding) map[string]*dbAccessLaneGroup {
+	index := make(map[string]*dbAccessLaneGroup)
 	for _, item := range items {
 		if !isDBAccessRule(item.RuleID) || strings.TrimSpace(item.Symbol) == "" {
 			continue
 		}
 		key := findingSymbolKey(item)
-		g := index[key]
-		if g == nil {
-			g = &group{rep: item, rules: make(map[string]struct{}), seenShapes: make(map[string]struct{})}
-			index[key] = g
-		}
-		shapeKey := item.RuleID + "::" + fmt.Sprintf("%d", item.Line) + "::" + dbAccessShapeKey(item)
-		if item.RuleID == "transaction_script_hotspot" {
-			shapeKey = item.RuleID
-		}
-		if _, ok := g.seenShapes[shapeKey]; !ok {
-			g.seenShapes[shapeKey] = struct{}{}
-			g.count++
-		}
-		g.rules[item.RuleID] = struct{}{}
-		g.samples = appendUniquePatternStrings(g.samples, patternEvidenceSamples(item)...)
-		if shouldReplaceRepresentative(g.rep, item) {
-			g.rep = item
-		}
-	}
-	out := make([]scoutLaneItem, 0, len(index))
-	for _, g := range index {
-		displayCount := g.count
-		if len(g.rules) == 1 {
-			if _, ok := g.rules["transaction_script_hotspot"]; ok {
-				displayCount = 1
+		group := index[key]
+		if group == nil {
+			group = &dbAccessLaneGroup{
+				rep:        item,
+				rules:      make(map[string]struct{}),
+				seenShapes: make(map[string]struct{}),
 			}
+			index[key] = group
 		}
-		summary := scoutLaneSummary(g.rep)
-		if displayCount > 1 {
-			summary = fmt.Sprintf("%s carries %d DB access pattern finding(s). %s", g.rep.Symbol, displayCount, scoutLaneSummary(g.rep))
+		shapeKey := dbAccessLaneShapeKey(item)
+		if _, ok := group.seenShapes[shapeKey]; !ok {
+			group.seenShapes[shapeKey] = struct{}{}
+			group.count++
 		}
-		out = append(out, scoutLaneItem{
-			File:               g.rep.File,
-			Symbol:             g.rep.Symbol,
-			Line:               g.rep.Line,
-			MaxScore:           g.rep.Score,
-			FindingCount:       displayCount,
-			RepresentativeRule: g.rep.RuleID,
-			RuleIDs:            sortedKeys(g.rules),
-			Summary:            summary,
-			Category:           g.rep.Category,
-			SeamKind:           evidenceString(g.rep.Evidence["suggested_boundary_kind"]),
-			Samples:            sampleStrings(g.samples, 4),
-		})
+		group.rules[item.RuleID] = struct{}{}
+		group.samples = appendUniquePatternStrings(group.samples, patternEvidenceSamples(item)...)
+		if shouldReplaceRepresentative(group.rep, item) {
+			group.rep = item
+		}
 	}
-	sortLaneItems(out)
-	if limit > 0 && len(out) > limit {
-		out = out[:limit]
+	return index
+}
+
+func dbAccessLaneShapeKey(item finding) string {
+	if item.RuleID == "transaction_script_hotspot" {
+		return item.RuleID
 	}
-	return out
+	return item.RuleID + "::" + fmt.Sprintf("%d", item.Line) + "::" + dbAccessShapeKey(item)
+}
+
+func displayDBAccessFindingCount(group *dbAccessLaneGroup) int {
+	displayCount := group.count
+	if len(group.rules) == 1 {
+		if _, ok := group.rules["transaction_script_hotspot"]; ok {
+			displayCount = 1
+		}
+	}
+	return displayCount
+}
+
+func dbAccessLaneSummary(rep finding, displayCount int) string {
+	summary := scoutLaneSummary(rep)
+	if displayCount > 1 {
+		return fmt.Sprintf("%s carries %d DB access pattern finding(s). %s", rep.Symbol, displayCount, scoutLaneSummary(rep))
+	}
+	return summary
 }
 
 func dbAccessShapeKey(item finding) string {
@@ -3866,6 +3595,68 @@ func buildBacklogLane(items []finding, limit int) []scoutLaneItem {
 		out = out[:limit]
 	}
 	return out
+}
+
+func buildSkillTargetLanes(items []finding, limit int) map[string][]scoutLaneItem {
+	targets := reviewTargetNames()
+	out := make(map[string][]scoutLaneItem, len(targets))
+	for _, target := range targets {
+		lane := buildSkillTargetLane(items, target, limit)
+		if len(lane) > 0 {
+			out[target] = lane
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func buildSkillTargetLane(items []finding, target string, limit int) []scoutLaneItem {
+	out := make([]scoutLaneItem, 0, len(items))
+	seen := make(map[string]struct{})
+	for _, item := range items {
+		if !findingTargetsReview(item, target) {
+			continue
+		}
+		key := laneFindingDedupKey(item)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		laneItem := laneItemFromRepresentative(item)
+		laneItem.FindingCount = 1
+		laneItem.RuleIDs = []string{item.RuleID}
+		laneItem.SeamKind = firstNonEmptyString(evidenceString(item.Evidence["suggested_boundary_kind"]), evidenceString(item.Evidence["seam_kind"]))
+		laneItem.ScopePath = evidenceString(item.Evidence["scope_path"])
+		laneItem.Samples = sampleStrings(item.TargetReasons, 3)
+		out = append(out, laneItem)
+	}
+	return sortAndLimitLaneItems(out, limit)
+}
+
+func laneItemFromRepresentative(item finding) scoutLaneItem {
+	return scoutLaneItem{
+		File:               item.File,
+		Symbol:             item.Symbol,
+		Line:               item.Line,
+		MaxScore:           item.Score,
+		RepresentativeRule: item.RuleID,
+		Summary:            scoutLaneSummary(item),
+		Category:           item.Category,
+	}
+}
+
+func laneFindingDedupKey(item finding) string {
+	return item.File + "::" + item.Symbol + "::" + item.RuleID + "::" + item.Category
+}
+
+func sortAndLimitLaneItems(items []scoutLaneItem, limit int) []scoutLaneItem {
+	sortLaneItems(items)
+	if limit > 0 && len(items) > limit {
+		return items[:limit]
+	}
+	return items
 }
 
 func shouldReplaceRepresentative(current, candidate finding) bool {
@@ -4410,6 +4201,16 @@ func sampleStrings(items []string, limit int) []string {
 	return out
 }
 
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func intersectStrings(left, right []string) []string {
 	if len(left) == 0 || len(right) == 0 {
 		return nil
@@ -4520,54 +4321,57 @@ func goFuncSignature(fn *ast.FuncDecl) string {
 	}
 	var b strings.Builder
 	b.WriteString("func ")
-	if fn.Recv != nil && len(fn.Recv.List) > 0 {
-		b.WriteString("(")
-		if len(fn.Recv.List[0].Names) > 0 {
-			b.WriteString(fn.Recv.List[0].Names[0].Name)
-			b.WriteString(" ")
-		}
-		b.WriteString(exprToString(fn.Recv.List[0].Type))
-		b.WriteString(") ")
-	}
+	b.WriteString(goReceiverSignature(fn))
 	b.WriteString(fn.Name.Name)
 	b.WriteString("(")
 	if fn.Type.Params != nil {
-		params := make([]string, 0, len(fn.Type.Params.List))
-		for _, field := range fn.Type.Params.List {
-			typeText := exprToString(field.Type)
-			if len(field.Names) == 0 {
-				params = append(params, typeText)
-				continue
-			}
-			for _, name := range field.Names {
-				params = append(params, name.Name+" "+typeText)
-			}
-		}
-		b.WriteString(strings.Join(params, ", "))
+		b.WriteString(strings.Join(goFieldSignatureParts(fn.Type.Params.List), ", "))
 	}
 	b.WriteString(")")
-	if fn.Type.Results != nil && len(fn.Type.Results.List) > 0 {
-		results := make([]string, 0, len(fn.Type.Results.List))
-		for _, field := range fn.Type.Results.List {
-			typeText := exprToString(field.Type)
-			if len(field.Names) == 0 {
-				results = append(results, typeText)
-				continue
-			}
-			for _, name := range field.Names {
-				results = append(results, name.Name+" "+typeText)
-			}
+	b.WriteString(goResultSignature(fn))
+	return b.String()
+}
+
+func goReceiverSignature(fn *ast.FuncDecl) string {
+	if fn == nil || fn.Recv == nil || len(fn.Recv.List) == 0 {
+		return ""
+	}
+	field := fn.Recv.List[0]
+	var b strings.Builder
+	b.WriteString("(")
+	if len(field.Names) > 0 {
+		b.WriteString(field.Names[0].Name)
+		b.WriteString(" ")
+	}
+	b.WriteString(exprToString(field.Type))
+	b.WriteString(") ")
+	return b.String()
+}
+
+func goFieldSignatureParts(fields []*ast.Field) []string {
+	parts := make([]string, 0, len(fields))
+	for _, field := range fields {
+		typeText := exprToString(field.Type)
+		if len(field.Names) == 0 {
+			parts = append(parts, typeText)
+			continue
 		}
-		if len(results) == 1 && len(fn.Type.Results.List[0].Names) == 0 {
-			b.WriteString(" ")
-			b.WriteString(results[0])
-		} else {
-			b.WriteString(" (")
-			b.WriteString(strings.Join(results, ", "))
-			b.WriteString(")")
+		for _, name := range field.Names {
+			parts = append(parts, name.Name+" "+typeText)
 		}
 	}
-	return b.String()
+	return parts
+}
+
+func goResultSignature(fn *ast.FuncDecl) string {
+	if fn == nil || fn.Type.Results == nil || len(fn.Type.Results.List) == 0 {
+		return ""
+	}
+	results := goFieldSignatureParts(fn.Type.Results.List)
+	if len(results) == 1 && len(fn.Type.Results.List[0].Names) == 0 {
+		return " " + results[0]
+	}
+	return " (" + strings.Join(results, ", ") + ")"
 }
 
 func exprToString(expr ast.Expr) string {
@@ -4647,58 +4451,32 @@ func tokenizeStructuralFingerprint(fingerprint string) []string {
 func goStmtFingerprint(stmt ast.Stmt, metrics *goOrchestrationMetrics) string {
 	switch node := stmt.(type) {
 	case *ast.AssignStmt:
-		parts := make([]string, 0, len(node.Rhs))
-		for _, expr := range node.Rhs {
-			parts = append(parts, goExprFingerprint(expr, metrics))
-		}
-		return "assign(" + strings.Join(parts, ",") + ")"
+		return goExprListFingerprint("assign", node.Rhs, metrics)
 	case *ast.ExprStmt:
 		return goExprFingerprint(node.X, metrics)
 	case *ast.ReturnStmt:
-		parts := make([]string, 0, len(node.Results))
-		for _, expr := range node.Results {
-			parts = append(parts, goExprFingerprint(expr, metrics))
-		}
-		return "return(" + strings.Join(parts, ",") + ")"
+		return goExprListFingerprint("return", node.Results, metrics)
 	case *ast.IfStmt:
-		if metrics != nil {
-			metrics.BranchCount++
-		}
-		body := goBlockFingerprint(node.Body, metrics)
-		elseShape := ""
-		if node.Else != nil {
-			elseShape = "|" + goStmtFingerprint(node.Else, metrics)
-		}
-		return "if(" + goExprFingerprint(node.Cond, metrics) + "){" + body + "}" + elseShape
+		return goIfStmtFingerprint(node, metrics)
 	case *ast.ForStmt:
-		if metrics != nil {
-			metrics.BranchCount++
-		}
+		incrementGoBranchCount(metrics)
 		return "for{" + goBlockFingerprint(node.Body, metrics) + "}"
 	case *ast.RangeStmt:
-		if metrics != nil {
-			metrics.BranchCount++
-		}
+		incrementGoBranchCount(metrics)
 		return "range(" + goExprFingerprint(node.X, metrics) + "){" + goBlockFingerprint(node.Body, metrics) + "}"
 	case *ast.SwitchStmt:
-		if metrics != nil {
-			metrics.BranchCount++
-		}
+		incrementGoBranchCount(metrics)
 		return "switch{" + goCaseBlockFingerprint(node.Body, metrics) + "}"
 	case *ast.TypeSwitchStmt:
-		if metrics != nil {
-			metrics.BranchCount++
-		}
+		incrementGoBranchCount(metrics)
 		return "typeswitch{" + goCaseBlockFingerprint(node.Body, metrics) + "}"
 	case *ast.SelectStmt:
-		if metrics != nil {
-			metrics.BranchCount++
-		}
+		incrementGoBranchCount(metrics)
 		return "select{" + goCaseBlockFingerprint(node.Body, metrics) + "}"
 	case *ast.DeferStmt:
-		return "defer(" + goExprFingerprint(node.Call, metrics) + ")"
+		return goExprWrapperFingerprint("defer", node.Call, metrics)
 	case *ast.GoStmt:
-		return "go(" + goExprFingerprint(node.Call, metrics) + ")"
+		return goExprWrapperFingerprint("go", node.Call, metrics)
 	case *ast.DeclStmt:
 		return "decl"
 	case *ast.IncDecStmt:
@@ -4710,7 +4488,7 @@ func goStmtFingerprint(stmt ast.Stmt, metrics *goOrchestrationMetrics) string {
 	case *ast.LabeledStmt:
 		return "label{" + goStmtFingerprint(node.Stmt, metrics) + "}"
 	case *ast.SendStmt:
-		return "send(" + goExprFingerprint(node.Value, metrics) + ")"
+		return goExprWrapperFingerprint("send", node.Value, metrics)
 	case *ast.EmptyStmt:
 		return ""
 	default:
@@ -4718,19 +4496,39 @@ func goStmtFingerprint(stmt ast.Stmt, metrics *goOrchestrationMetrics) string {
 	}
 }
 
+func goExprListFingerprint(prefix string, exprs []ast.Expr, metrics *goOrchestrationMetrics) string {
+	parts := make([]string, 0, len(exprs))
+	for _, expr := range exprs {
+		parts = append(parts, goExprFingerprint(expr, metrics))
+	}
+	return prefix + "(" + strings.Join(parts, ",") + ")"
+}
+
+func goExprWrapperFingerprint(prefix string, expr ast.Expr, metrics *goOrchestrationMetrics) string {
+	return prefix + "(" + goExprFingerprint(expr, metrics) + ")"
+}
+
+func incrementGoBranchCount(metrics *goOrchestrationMetrics) {
+	if metrics != nil {
+		metrics.BranchCount++
+	}
+}
+
+func goIfStmtFingerprint(node *ast.IfStmt, metrics *goOrchestrationMetrics) string {
+	incrementGoBranchCount(metrics)
+	body := goBlockFingerprint(node.Body, metrics)
+	elseShape := ""
+	if node.Else != nil {
+		elseShape = "|" + goStmtFingerprint(node.Else, metrics)
+	}
+	return "if(" + goExprFingerprint(node.Cond, metrics) + "){" + body + "}" + elseShape
+}
+
 func goBlockFingerprint(block *ast.BlockStmt, metrics *goOrchestrationMetrics) string {
 	if block == nil || len(block.List) == 0 {
 		return ""
 	}
-	parts := make([]string, 0, len(block.List))
-	for _, stmt := range block.List {
-		token := goStmtFingerprint(stmt, metrics)
-		if token == "" {
-			continue
-		}
-		parts = append(parts, token)
-	}
-	return strings.Join(parts, ";")
+	return strings.Join(goStmtListFingerprints(block.List, metrics), ";")
 }
 
 func goCaseBlockFingerprint(block *ast.BlockStmt, metrics *goOrchestrationMetrics) string {
@@ -4741,28 +4539,26 @@ func goCaseBlockFingerprint(block *ast.BlockStmt, metrics *goOrchestrationMetric
 	for _, stmt := range block.List {
 		switch clause := stmt.(type) {
 		case *ast.CaseClause:
-			body := make([]string, 0, len(clause.Body))
-			for _, bodyStmt := range clause.Body {
-				token := goStmtFingerprint(bodyStmt, metrics)
-				if token == "" {
-					continue
-				}
-				body = append(body, token)
-			}
+			body := goStmtListFingerprints(clause.Body, metrics)
 			parts = append(parts, "case{"+strings.Join(body, ";")+"}")
 		case *ast.CommClause:
-			body := make([]string, 0, len(clause.Body))
-			for _, bodyStmt := range clause.Body {
-				token := goStmtFingerprint(bodyStmt, metrics)
-				if token == "" {
-					continue
-				}
-				body = append(body, token)
-			}
+			body := goStmtListFingerprints(clause.Body, metrics)
 			parts = append(parts, "comm{"+strings.Join(body, ";")+"}")
 		}
 	}
 	return strings.Join(parts, "|")
+}
+
+func goStmtListFingerprints(stmts []ast.Stmt, metrics *goOrchestrationMetrics) []string {
+	parts := make([]string, 0, len(stmts))
+	for _, stmt := range stmts {
+		token := goStmtFingerprint(stmt, metrics)
+		if token == "" {
+			continue
+		}
+		parts = append(parts, token)
+	}
+	return parts
 }
 
 func goExprFingerprint(expr ast.Expr, metrics *goOrchestrationMetrics) string {
@@ -4902,65 +4698,25 @@ func detectGoBoolReturnWrapper(stmts []ast.Stmt) *semanticSimplificationCandidat
 	if len(stmts) == 0 {
 		return nil
 	}
-	var (
-		cond      ast.Expr
-		invert    bool
-		patternID string
-	)
-	switch len(stmts) {
-	case 1:
-		ifStmt, ok := stmts[0].(*ast.IfStmt)
-		if !ok || ifStmt.Else == nil {
-			return nil
-		}
-		bodyValue, bodyOK := goSingleBlockBooleanReturnValue(ifStmt.Body)
-		elseBlock, elseOK := ifStmt.Else.(*ast.BlockStmt)
-		elseValue, elseReturnOK := goSingleBlockBooleanReturnValue(elseBlock)
-		if !bodyOK || !elseOK || !elseReturnOK || bodyValue == elseValue {
-			return nil
-		}
-		cond = ifStmt.Cond
-		invert = !bodyValue && elseValue
-		if invert {
-			patternID = "inverted_boolean_return_wrapper"
-		} else {
-			patternID = "boolean_return_wrapper"
-		}
-	case 2:
-		ifStmt, ok := stmts[0].(*ast.IfStmt)
-		if !ok || ifStmt.Else != nil {
-			return nil
-		}
-		bodyValue, bodyOK := goSingleBlockBooleanReturnValue(ifStmt.Body)
-		tailValue, tailOK := goBooleanReturnValue(stmts[1])
-		if !bodyOK || !tailOK || bodyValue == tailValue {
-			return nil
-		}
-		cond = ifStmt.Cond
-		invert = !bodyValue && tailValue
-		if invert {
-			patternID = "inverted_boolean_return_wrapper"
-		} else {
-			patternID = "boolean_return_wrapper"
-		}
-	default:
+	match, ok := matchGoBoolReturnWrapper(stmts)
+	if !ok {
 		return nil
 	}
-	if cond == nil {
+	if match.Cond == nil {
 		return nil
 	}
-	simplifiedExpr, lowerPatterns, lowerChanged := lowerGoSemanticBoolExprDetailed(cond)
+	simplifiedExpr, lowerPatterns, lowerChanged := lowerGoSemanticBoolExprDetailed(match.Cond)
 	if simplifiedExpr == nil {
 		return nil
 	}
-	patterns := appendUniquePatternStrings([]string{patternID}, lowerPatterns...)
-	if invert {
+	patterns := appendUniquePatternStrings([]string{match.PatternID}, lowerPatterns...)
+	if match.Invert {
 		simplifiedExpr = semanticBoolNot(simplifiedExpr)
 	}
 	if expr, exprPatterns, changed := simplifySemanticBoolExpr(simplifiedExpr); changed {
 		simplifiedExpr = expr
 		patterns = append(patterns, exprPatterns...)
-	} else if !lowerChanged && !invert {
+	} else if !lowerChanged && !match.Invert {
 		return nil
 	}
 	original := renderGoStmtList(stmts)
@@ -4976,6 +4732,66 @@ func detectGoBoolReturnWrapper(stmts []ast.Stmt) *semanticSimplificationCandidat
 		OriginalTokenCount: semanticSourceTokenCount(original),
 		SimplifiedTokens:   semanticSourceTokenCount(simplifiedText),
 	}
+}
+
+type goBoolReturnWrapperMatch struct {
+	Cond      ast.Expr
+	Invert    bool
+	PatternID string
+}
+
+func matchGoBoolReturnWrapper(stmts []ast.Stmt) (goBoolReturnWrapperMatch, bool) {
+	switch len(stmts) {
+	case 1:
+		return matchGoBoolReturnWrapperIfElse(stmts[0])
+	case 2:
+		return matchGoBoolReturnWrapperIfTail(stmts[0], stmts[1])
+	default:
+		return goBoolReturnWrapperMatch{}, false
+	}
+}
+
+func matchGoBoolReturnWrapperIfElse(stmt ast.Stmt) (goBoolReturnWrapperMatch, bool) {
+	ifStmt, ok := stmt.(*ast.IfStmt)
+	if !ok || ifStmt.Else == nil {
+		return goBoolReturnWrapperMatch{}, false
+	}
+	bodyValue, bodyOK := goSingleBlockBooleanReturnValue(ifStmt.Body)
+	elseBlock, elseOK := ifStmt.Else.(*ast.BlockStmt)
+	elseValue, elseReturnOK := goSingleBlockBooleanReturnValue(elseBlock)
+	if !bodyOK || !elseOK || !elseReturnOK || bodyValue == elseValue {
+		return goBoolReturnWrapperMatch{}, false
+	}
+	return makeGoBoolReturnWrapperMatch(ifStmt.Cond, bodyValue, elseValue)
+}
+
+func matchGoBoolReturnWrapperIfTail(head, tail ast.Stmt) (goBoolReturnWrapperMatch, bool) {
+	ifStmt, ok := head.(*ast.IfStmt)
+	if !ok || ifStmt.Else != nil {
+		return goBoolReturnWrapperMatch{}, false
+	}
+	bodyValue, bodyOK := goSingleBlockBooleanReturnValue(ifStmt.Body)
+	tailValue, tailOK := goBooleanReturnValue(tail)
+	if !bodyOK || !tailOK || bodyValue == tailValue {
+		return goBoolReturnWrapperMatch{}, false
+	}
+	return makeGoBoolReturnWrapperMatch(ifStmt.Cond, bodyValue, tailValue)
+}
+
+func makeGoBoolReturnWrapperMatch(cond ast.Expr, whenTrue bool, whenFalse bool) (goBoolReturnWrapperMatch, bool) {
+	if cond == nil || whenTrue == whenFalse {
+		return goBoolReturnWrapperMatch{}, false
+	}
+	invert := !whenTrue && whenFalse
+	patternID := "boolean_return_wrapper"
+	if invert {
+		patternID = "inverted_boolean_return_wrapper"
+	}
+	return goBoolReturnWrapperMatch{
+		Cond:      cond,
+		Invert:    invert,
+		PatternID: patternID,
+	}, true
 }
 
 func renderGoStmtList(stmts []ast.Stmt) string {

@@ -133,20 +133,7 @@ func (b Builder) Build(ctx context.Context, in Input) (Payload, error) {
 		}
 	}
 
-	payload := Payload{
-		SnapshotID: in.SnapshotID,
-		CreatedAt:  in.CreatedAt.UTC(),
-		Mode:       in.Status.Mode,
-		Scope:      in.Scope,
-		Git: GitSnapshot{
-			HeadSHA: strings.TrimSpace(in.Status.Git.HeadSHA),
-		},
-		RepoIndex: RepoIndexSnapshot{
-			HeadSHA:       strings.TrimSpace(in.Status.RepoIndex.Meta.HeadSHA),
-			IndexedAt:     in.Status.RepoIndex.Meta.IndexedAt.UTC(),
-			SchemaVersion: in.Status.RepoIndex.Meta.SchemaVersion,
-		},
-	}
+	payload := newPayload(in)
 
 	for _, absPath := range files {
 		if err := ctx.Err(); err != nil {
@@ -168,32 +155,68 @@ func (b Builder) Build(ctx context.Context, in Input) (Payload, error) {
 		}
 
 		symbols := extractSymbols(ctx, registry, lang, relPath, content)
-		payload.Files = append(payload.Files, FileSnapshot{
-			Path:        relPath,
-			Language:    lang,
-			LineCount:   countLines(content),
-			Hash:        symindex.ComputeDigest(content),
-			SymbolCount: len(symbols),
-			Package:     platformsymbol.DeriveSymbolPackage(relPath, lang),
-		})
-		payload.Summary.FileCount++
-		payload.Summary.SymbolCount += len(symbols)
-		payload.Summary.LineCount += countLines(content)
-
-		for _, symbol := range symbols {
-			payload.Symbols = append(payload.Symbols, SymbolSnapshot{
-				Path:      relPath,
-				SymbolID:  symbol.EffectiveID(),
-				Name:      strings.TrimSpace(symbol.Name),
-				Kind:      symbol.Kind,
-				Hash:      strings.TrimSpace(symbol.BodyDigest),
-				LineStart: symbol.StartLine,
-				LineEnd:   symbol.EndLine,
-				Signature: strings.TrimSpace(symbol.Signature),
-			})
-		}
+		addFileToPayload(&payload, buildFileSnapshot(relPath, lang, content, symbols), buildSymbolSnapshots(relPath, symbols))
 	}
 
+	sortPayload(&payload)
+
+	return payload, nil
+}
+
+func newPayload(in Input) Payload {
+	return Payload{
+		SnapshotID: in.SnapshotID,
+		CreatedAt:  in.CreatedAt.UTC(),
+		Mode:       in.Status.Mode,
+		Scope:      in.Scope,
+		Git: GitSnapshot{
+			HeadSHA: strings.TrimSpace(in.Status.Git.HeadSHA),
+		},
+		RepoIndex: RepoIndexSnapshot{
+			HeadSHA:       strings.TrimSpace(in.Status.RepoIndex.Meta.HeadSHA),
+			IndexedAt:     in.Status.RepoIndex.Meta.IndexedAt.UTC(),
+			SchemaVersion: in.Status.RepoIndex.Meta.SchemaVersion,
+		},
+	}
+}
+
+func buildFileSnapshot(relPath, lang string, content []byte, symbols []symindex.Symbol) FileSnapshot {
+	return FileSnapshot{
+		Path:        relPath,
+		Language:    lang,
+		LineCount:   countLines(content),
+		Hash:        symindex.ComputeDigest(content),
+		SymbolCount: len(symbols),
+		Package:     platformsymbol.DeriveSymbolPackage(relPath, lang),
+	}
+}
+
+func buildSymbolSnapshots(relPath string, symbols []symindex.Symbol) []SymbolSnapshot {
+	out := make([]SymbolSnapshot, 0, len(symbols))
+	for _, symbol := range symbols {
+		out = append(out, SymbolSnapshot{
+			Path:      relPath,
+			SymbolID:  symbol.EffectiveID(),
+			Name:      strings.TrimSpace(symbol.Name),
+			Kind:      symbol.Kind,
+			Hash:      strings.TrimSpace(symbol.BodyDigest),
+			LineStart: symbol.StartLine,
+			LineEnd:   symbol.EndLine,
+			Signature: strings.TrimSpace(symbol.Signature),
+		})
+	}
+	return out
+}
+
+func addFileToPayload(payload *Payload, file FileSnapshot, symbols []SymbolSnapshot) {
+	payload.Files = append(payload.Files, file)
+	payload.Symbols = append(payload.Symbols, symbols...)
+	payload.Summary.FileCount++
+	payload.Summary.SymbolCount += len(symbols)
+	payload.Summary.LineCount += file.LineCount
+}
+
+func sortPayload(payload *Payload) {
 	sort.Slice(payload.Files, func(i, j int) bool {
 		return payload.Files[i].Path < payload.Files[j].Path
 	})
@@ -209,8 +232,6 @@ func (b Builder) Build(ctx context.Context, in Input) (Payload, error) {
 		}
 		return payload.Symbols[i].SymbolID < payload.Symbols[j].SymbolID
 	})
-
-	return payload, nil
 }
 
 func collectFiles(scope refscope.Scope, includeTests bool) ([]string, error) {
