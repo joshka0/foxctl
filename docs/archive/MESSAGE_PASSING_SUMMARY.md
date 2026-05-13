@@ -228,7 +228,7 @@ go test ./internal/domain/agent -v
 - `docs/general/message-passing.md`
 - `docs/general/message-passing-quickstart.md`
 - `docs/designs/message-passing-examples.md`
-- `docs/general/MESSAGE_PASSING_SUMMARY.md` (this file)
+- `docs/archive/MESSAGE_PASSING_SUMMARY.md` (this file)
 - `internal/domain/agent/builder.go`
 - `internal/domain/agent/builder_test.go`
 - `internal/domain/agent/helpers.go`
