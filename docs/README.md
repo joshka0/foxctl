@@ -85,6 +85,10 @@ This is the canonical map for docs in this repository.
 - [docs/changelogs/README.md](changelogs/README.md) - Historical change notes.
 - [docs/designs/README.md](designs/README.md) - Design proposals (mixed status).
 - [docs/codemaps/README.md](codemaps/README.md) - Generated codemap artifacts.
+- [docs/foxprox/](foxprox/) - ATCP protocol docs, live smoke findings, and room integration notes.
+- [docs/goals/](goals/) - Goal documents for active initiatives (coordinator, memory, refactor, etc.).
+- [docs/analysis/](analysis/) - Deep analysis documents (RLM retrieval lanes, validation contracts).
+- [docs/checklists/](checklists/) - Operational checklists (security pre-launch, etc.).
 
 ## Additional Topic Areas
 
@@ -96,6 +100,9 @@ This is the canonical map for docs in this repository.
 - [docs/general/runtime-orchestration.md](general/runtime-orchestration.md) - Workflow-specific docs.
 - [docs/godot/README.md](godot/README.md) - Godot integration docs.
 - [docs/notes/README.md](notes/README.md) - Working notes (non-canonical).
+- [docs/viewer.md](viewer.md) - Viewer applications (GUI, TUI) and runtime topology.
+- [docs/SECURITY.md](SECURITY.md) - Security policy, supported versions, and vulnerability reporting.
+- [docs/TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Diagnosis guide for common installation, build, skill, job, and performance issues.
 
 ## Automated Checks
 
