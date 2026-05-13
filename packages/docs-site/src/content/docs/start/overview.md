@@ -3,7 +3,10 @@ title: Overview
 description: First commands, safety posture, and main navigation patterns for foxctl.
 ---
 
-foxctl combines a Go CLI, skills, repo indexing, retrieval, context tooling, agent coordination, and room workflows. This page covers the first commands to run, the project's safety posture, and how to navigate the documentation.
+foxctl is a Go-based framework and CLI for skills, repo indexing, retrieval,
+context tooling, agent coordination, and room workflows. This page covers the
+first commands to run, the project's safety posture, and how to navigate the
+documentation.
 
 ## First commands
 

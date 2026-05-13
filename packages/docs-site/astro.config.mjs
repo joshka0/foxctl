@@ -11,9 +11,14 @@ export default defineConfig({
   integrations: [
     react(),
     starlight({
-      title: 'foxctl Docs',
+      title: 'foxctl',
       description:
         'Production documentation for foxctl workflows, architecture, operations, and release checks.',
+      logo: {
+        src: './src/assets/foxctl-logo.svg',
+        alt: 'foxctl',
+      },
+      customCss: ['./src/styles/starlight-overrides.css'],
       tableOfContents: {
         minHeadingLevel: 2,
         maxHeadingLevel: 3,
@@ -59,6 +64,7 @@ export default defineConfig({
         {
           label: 'Integrations',
           items: [
+            { slug: 'integrations/status' },
             { slug: 'integrations/providers-and-mcp' },
             { slug: 'integrations/openapi-and-plugins' },
             { slug: 'integrations/chat-platforms' },
@@ -92,6 +98,7 @@ export default defineConfig({
             { slug: 'operations/gotchas' },
             { slug: 'operations/observability' },
             { slug: 'quality/ci-and-evals' },
+            { slug: 'quality/benchmarks' },
             { slug: 'deployment/kubernetes' },
           ],
         },
@@ -101,7 +108,7 @@ export default defineConfig({
         },
         {
           label: 'Roadmap and Archive',
-          items: [{ slug: 'roadmap/planned-and-archive' }],
+          items: [{ slug: 'roadmap/progress' }, { slug: 'roadmap/planned-and-archive' }],
         },
       ],
     }),
