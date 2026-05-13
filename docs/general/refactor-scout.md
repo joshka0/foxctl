@@ -97,6 +97,8 @@ foxctl refactor scout --path ./crates/my-crate/src --language rust
 foxctl refactor scout --path apps/praze-api/lib --language elixir
 foxctl refactor scout --path ./internal --language go --focus slop
 foxctl refactor scout --path ./internal/runtime/actor --language go --focus dead
+foxctl refactor scout --path ./internal --language go --target improve-codebase-architecture
+foxctl refactor scout --path ./internal --language go --target semantic-commenting
 ```
 
 Run the two-stage advisor:
@@ -258,6 +260,10 @@ Focused usage:
   packages.
 - `refactor scout` now also emits `data.index_mode` so downstream review flows
   can tell whether a run was parser-only or index-backed.
+- `--target` narrows returned findings toward a follow-up skill workflow:
+  `small-composable-code`, `semantic-commenting`, or
+  `improve-codebase-architecture`. The default `all` keeps the normal result
+  set and still annotates findings with `targets` and `target_reasons`.
 - successful scout runs now emit `data.snapshot_id` and
   `data.snapshot_artifact`
 - `data.signals.evidence_backed` tells you whether the snapshot/evidence layer
@@ -309,6 +315,13 @@ The scout's top-level output now carries:
 - `finding.evidence.confidence_factors`:
   visible confidence contributions so downstream review flows can sort or filter
   without re-deriving trust locally
+- `finding.targets` and `finding.target_reasons`:
+  deterministic follow-up skill lanes derived from rule IDs, categories, and
+  evidence, not keyword matching
+- `data.presentation.lanes.skill_targets`:
+  grouped top findings for the three follow-up skills:
+  `small-composable-code`, `semantic-commenting`, and
+  `improve-codebase-architecture`
 - `data.dead_code_error`:
   optional advisory error if dead-code candidate generation could not complete
 

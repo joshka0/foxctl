@@ -539,6 +539,85 @@ func TestEvaluateRebasesToDeepestIndexedWorkspace(t *testing.T) {
 	}
 }
 
+func TestDecideRepoIndexReportsMissingMeta(t *testing.T) {
+	t.Parallel()
+
+	decision := decideRepoIndex(refscope.Scope{Language: "go"}, GitStatus{}, repoindex.IndexMeta{}, ScopeCoverage{}, true)
+	if decision.Available {
+		t.Fatal("available=true want false")
+	}
+	if decision.ScopeCovered {
+		t.Fatal("scope_covered=true want false")
+	}
+	if len(decision.Reasons) != 1 || decision.Reasons[0] != ReasonRepoIndexMissing {
+		t.Fatalf("reasons=%v want [%s]", decision.Reasons, ReasonRepoIndexMissing)
+	}
+}
+
+func TestDecideRepoIndexAggregatesParserOnlyReasons(t *testing.T) {
+	t.Parallel()
+
+	meta := repoindex.IndexMeta{
+		RepoRoot:      "/repo",
+		HeadSHA:       "old",
+		SchemaVersion: repoindex.SchemaVersion() - 1,
+		IndexedAt:     time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC),
+		Languages:     []string{"typescript"},
+	}
+	decision := decideRepoIndex(
+		refscope.Scope{Language: "go"},
+		GitStatus{Available: true, HeadSHA: "new"},
+		meta,
+		ScopeCoverage{DiscoveredFileCount: 2, MatchedFileCount: 1, MissingFileCount: 1},
+		true,
+	)
+	if !decision.Available {
+		t.Fatal("available=false want true")
+	}
+	if decision.ScopeCovered {
+		t.Fatal("scope_covered=true want false")
+	}
+	want := []string{
+		ReasonRepoIndexSchemaMismatch,
+		ReasonRepoIndexHeadMismatch,
+		ReasonScopeLanguageNotIndexed,
+		ReasonScopePathNotIndexed,
+	}
+	for _, reason := range want {
+		if !containsReason(decision.Reasons, reason) {
+			t.Fatalf("reasons=%v missing %s", decision.Reasons, reason)
+		}
+	}
+}
+
+func TestDecideRepoIndexReadyWhenMetadataAndCoverageMatch(t *testing.T) {
+	t.Parallel()
+
+	meta := repoindex.IndexMeta{
+		RepoRoot:      "/repo",
+		HeadSHA:       "head",
+		SchemaVersion: repoindex.SchemaVersion(),
+		IndexedAt:     time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC),
+		Languages:     []string{"javascript"},
+	}
+	decision := decideRepoIndex(
+		refscope.Scope{Language: "javascript"},
+		GitStatus{Available: true, HeadSHA: "head"},
+		meta,
+		ScopeCoverage{DiscoveredFileCount: 1, MatchedFileCount: 1},
+		true,
+	)
+	if !decision.Available {
+		t.Fatal("available=false want true")
+	}
+	if !decision.ScopeCovered {
+		t.Fatal("scope_covered=false want true")
+	}
+	if len(decision.Reasons) != 0 {
+		t.Fatalf("reasons=%v want none", decision.Reasons)
+	}
+}
+
 func setupGitWorkspace(t *testing.T, ctx context.Context) (string, string, string) {
 	t.Helper()
 

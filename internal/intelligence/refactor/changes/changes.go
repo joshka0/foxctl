@@ -264,46 +264,39 @@ func readSnapshotArtifact(ctx context.Context, casRoot, digest string) (refsnaps
 }
 
 func diffSnapshots(previous, current refsnapshot.Payload, maxFiles, maxSymbols int) ([]FileChange, []SymbolChange, Summary) {
-	prevFiles := map[string]refsnapshot.FileSnapshot{}
-	currFiles := map[string]refsnapshot.FileSnapshot{}
-	for _, file := range previous.Files {
-		prevFiles[file.Path] = file
+	fileDiff := diffSnapshotFiles(previous.Files, current.Files, maxFiles)
+	symbolDiff := diffSnapshotSymbols(previous.Symbols, current.Symbols, maxSymbols, fileDiff.changedPaths)
+	return fileDiff.files, symbolDiff.symbols, Summary{
+		FileCount:       fileDiff.total,
+		SymbolCount:     symbolDiff.total,
+		ChangeKinds:     fileDiff.changeKinds,
+		LimitedByFiles:  fileDiff.total > maxFiles,
+		LimitedBySymbol: symbolDiff.total > maxSymbols,
 	}
-	for _, file := range current.Files {
-		currFiles[file.Path] = file
-	}
+}
 
-	allPaths := make([]string, 0, len(prevFiles)+len(currFiles))
-	seenPaths := map[string]struct{}{}
-	for path := range prevFiles {
-		seenPaths[path] = struct{}{}
-		allPaths = append(allPaths, path)
-	}
-	for path := range currFiles {
-		if _, ok := seenPaths[path]; ok {
-			continue
-		}
-		seenPaths[path] = struct{}{}
-		allPaths = append(allPaths, path)
-	}
-	sort.Strings(allPaths)
+type snapshotFileDiff struct {
+	files        []FileChange
+	total        int
+	changeKinds  map[string]int
+	changedPaths map[string]indexing.ChangeKind
+}
+
+func diffSnapshotFiles(previous, current []refsnapshot.FileSnapshot, maxFiles int) snapshotFileDiff {
+	prevByPath := fileSnapshotsByPath(previous)
+	currByPath := fileSnapshotsByPath(current)
+	allPaths := sortedSnapshotKeys(prevByPath, currByPath)
 
 	files := make([]FileChange, 0, min(len(allPaths), maxFiles))
-	changedPaths := map[string]indexing.ChangeKind{}
 	changeKinds := map[string]int{}
+	changedPaths := map[string]indexing.ChangeKind{}
 	totalFiles := 0
+
 	for _, path := range allPaths {
-		prev, hasPrev := prevFiles[path]
-		curr, hasCurr := currFiles[path]
-		var kind indexing.ChangeKind
-		switch {
-		case hasPrev && !hasCurr:
-			kind = indexing.ChangeKindDeleted
-		case !hasPrev && hasCurr:
-			kind = indexing.ChangeKindAdded
-		case hasPrev && hasCurr && prev.Hash != curr.Hash:
-			kind = indexing.ChangeKindModified
-		default:
+		prev, hasPrev := prevByPath[path]
+		curr, hasCurr := currByPath[path]
+		kind, ok := snapshotFileChangeKind(prev, hasPrev, curr, hasCurr)
+		if !ok {
 			continue
 		}
 		totalFiles++
@@ -320,62 +313,56 @@ func diffSnapshots(previous, current refsnapshot.Payload, maxFiles, maxSymbols i
 		}
 	}
 
-	prevSymbols := map[string]refsnapshot.SymbolSnapshot{}
-	currSymbols := map[string]refsnapshot.SymbolSnapshot{}
-	for _, symbol := range previous.Symbols {
-		prevSymbols[symbol.SymbolID] = symbol
+	return snapshotFileDiff{
+		files:        files,
+		total:        totalFiles,
+		changeKinds:  changeKinds,
+		changedPaths: changedPaths,
 	}
-	for _, symbol := range current.Symbols {
-		currSymbols[symbol.SymbolID] = symbol
-	}
+}
 
-	allSymbolIDs := make([]string, 0, len(prevSymbols)+len(currSymbols))
-	seenSymbolIDs := map[string]struct{}{}
-	for id := range prevSymbols {
-		seenSymbolIDs[id] = struct{}{}
-		allSymbolIDs = append(allSymbolIDs, id)
+func fileSnapshotsByPath(files []refsnapshot.FileSnapshot) map[string]refsnapshot.FileSnapshot {
+	out := make(map[string]refsnapshot.FileSnapshot, len(files))
+	for _, file := range files {
+		out[file.Path] = file
 	}
-	for id := range currSymbols {
-		if _, ok := seenSymbolIDs[id]; ok {
-			continue
-		}
-		seenSymbolIDs[id] = struct{}{}
-		allSymbolIDs = append(allSymbolIDs, id)
+	return out
+}
+
+func snapshotFileChangeKind(previous refsnapshot.FileSnapshot, hasPrevious bool, current refsnapshot.FileSnapshot, hasCurrent bool) (indexing.ChangeKind, bool) {
+	switch {
+	case hasPrevious && !hasCurrent:
+		return indexing.ChangeKindDeleted, true
+	case !hasPrevious && hasCurrent:
+		return indexing.ChangeKindAdded, true
+	case hasPrevious && hasCurrent && previous.Hash != current.Hash:
+		return indexing.ChangeKindModified, true
+	default:
+		return "", false
 	}
-	sort.Strings(allSymbolIDs)
+}
+
+type snapshotSymbolDiff struct {
+	symbols []SymbolChange
+	total   int
+}
+
+func diffSnapshotSymbols(previous, current []refsnapshot.SymbolSnapshot, maxSymbols int, changedPaths map[string]indexing.ChangeKind) snapshotSymbolDiff {
+	prevByID := symbolSnapshotsByID(previous)
+	currByID := symbolSnapshotsByID(current)
+	allSymbolIDs := sortedSnapshotKeys(prevByID, currByID)
 
 	symbols := make([]SymbolChange, 0, min(len(allSymbolIDs), maxSymbols))
 	totalSymbols := 0
 	for _, id := range allSymbolIDs {
-		prev, hasPrev := prevSymbols[id]
-		curr, hasCurr := currSymbols[id]
-		var (
-			kind indexing.ChangeKind
-			path string
-			name string
-			hash string
-		)
-		switch {
-		case hasPrev && !hasCurr:
-			kind = indexing.ChangeKindDeleted
-			path = prev.Path
-			name = prev.Name
-			hash = prev.Hash
-		case !hasPrev && hasCurr:
-			kind = indexing.ChangeKindAdded
-			path = curr.Path
-			name = curr.Name
-			hash = curr.Hash
-		case hasPrev && hasCurr && prev.Hash != curr.Hash:
-			kind = indexing.ChangeKindModified
-			path = curr.Path
-			name = curr.Name
-			hash = curr.Hash
-		default:
+		prev, hasPrev := prevByID[id]
+		curr, hasCurr := currByID[id]
+		path, name, hash, kind, ok := snapshotSymbolChange(prev, hasPrev, curr, hasCurr)
+		if !ok {
 			continue
 		}
 		if kind == indexing.ChangeKindModified {
-			if _, ok := changedPaths[path]; !ok {
+			if _, exists := changedPaths[path]; !exists {
 				changedPaths[path] = indexing.ChangeKindModified
 			}
 		}
@@ -391,14 +378,49 @@ func diffSnapshots(previous, current refsnapshot.Payload, maxFiles, maxSymbols i
 			})
 		}
 	}
-
-	return files, symbols, Summary{
-		FileCount:       totalFiles,
-		SymbolCount:     totalSymbols,
-		ChangeKinds:     changeKinds,
-		LimitedByFiles:  totalFiles > maxFiles,
-		LimitedBySymbol: totalSymbols > maxSymbols,
+	return snapshotSymbolDiff{
+		symbols: symbols,
+		total:   totalSymbols,
 	}
+}
+
+func symbolSnapshotsByID(symbols []refsnapshot.SymbolSnapshot) map[string]refsnapshot.SymbolSnapshot {
+	out := make(map[string]refsnapshot.SymbolSnapshot, len(symbols))
+	for _, symbol := range symbols {
+		out[symbol.SymbolID] = symbol
+	}
+	return out
+}
+
+func snapshotSymbolChange(previous refsnapshot.SymbolSnapshot, hasPrevious bool, current refsnapshot.SymbolSnapshot, hasCurrent bool) (path, name, hash string, kind indexing.ChangeKind, ok bool) {
+	switch {
+	case hasPrevious && !hasCurrent:
+		return previous.Path, previous.Name, previous.Hash, indexing.ChangeKindDeleted, true
+	case !hasPrevious && hasCurrent:
+		return current.Path, current.Name, current.Hash, indexing.ChangeKindAdded, true
+	case hasPrevious && hasCurrent && previous.Hash != current.Hash:
+		return current.Path, current.Name, current.Hash, indexing.ChangeKindModified, true
+	default:
+		return "", "", "", "", false
+	}
+}
+
+func sortedSnapshotKeys[V any](left, right map[string]V) []string {
+	keys := make([]string, 0, len(left)+len(right))
+	seen := make(map[string]struct{}, len(left)+len(right))
+	for key := range left {
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	for key := range right {
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func collectGitFileChanges(ctx context.Context, scope refscope.Scope, includeTests bool, sinceRef string) ([]indexing.FileChange, error) {
@@ -410,58 +432,12 @@ func collectGitFileChanges(ctx context.Context, scope refscope.Scope, includeTes
 		return nil, fmt.Errorf("git diff %q failed: %w (stderr: %s)", sinceRef, err, strings.TrimSpace(stderr.String()))
 	}
 
-	scopePath := normalizedScopePath(scope)
-	out := make([]indexing.FileChange, 0, 64)
-	for _, line := range strings.Split(stdout.String(), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		parts := strings.Split(line, "\t")
-		if len(parts) < 2 {
-			continue
-		}
-		status := strings.TrimSpace(parts[0])
-		switch {
-		case strings.HasPrefix(status, "R") || strings.HasPrefix(status, "C"):
-			if len(parts) < 3 {
-				continue
-			}
-			if change, ok := buildScopedChange(parts[1], indexing.ChangeKindDeleted, scope, scopePath, includeTests); ok {
-				out = append(out, change)
-			}
-			if change, ok := buildScopedChange(parts[2], indexing.ChangeKindAdded, scope, scopePath, includeTests); ok {
-				out = append(out, change)
-			}
-		case status == "A":
-			if change, ok := buildScopedChange(parts[1], indexing.ChangeKindAdded, scope, scopePath, includeTests); ok {
-				out = append(out, change)
-			}
-		case status == "D":
-			if change, ok := buildScopedChange(parts[1], indexing.ChangeKindDeleted, scope, scopePath, includeTests); ok {
-				out = append(out, change)
-			}
-		default:
-			if change, ok := buildScopedChange(parts[1], indexing.ChangeKindModified, scope, scopePath, includeTests); ok {
-				out = append(out, change)
-			}
-		}
-	}
+	out := parseGitNameStatusChanges(stdout.String(), scope, includeTests)
 	untracked, err := collectUntrackedFiles(ctx, scope, includeTests)
 	if err != nil {
 		return nil, err
 	}
-	seen := make(map[string]struct{}, len(out))
-	for _, change := range out {
-		seen[change.Path] = struct{}{}
-	}
-	for _, change := range untracked {
-		if _, ok := seen[change.Path]; ok {
-			continue
-		}
-		out = append(out, change)
-	}
-	return out, nil
+	return mergeGitFileChanges(out, untracked), nil
 }
 
 func collectUntrackedFiles(ctx context.Context, scope refscope.Scope, includeTests bool) ([]indexing.FileChange, error) {
@@ -472,18 +448,91 @@ func collectUntrackedFiles(ctx context.Context, scope refscope.Scope, includeTes
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("git ls-files failed: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
 	}
+	return parseUntrackedFileChanges(stdout.String(), scope, includeTests), nil
+}
+
+func parseGitNameStatusChanges(output string, scope refscope.Scope, includeTests bool) []indexing.FileChange {
 	scopePath := normalizedScopePath(scope)
-	out := make([]indexing.FileChange, 0, 16)
-	for _, line := range strings.Split(stdout.String(), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
+	out := make([]indexing.FileChange, 0, 64)
+	for _, line := range strings.Split(output, "\n") {
+		rawChanges, ok := parseGitNameStatusLine(line)
+		if !ok {
 			continue
 		}
+		for _, rawChange := range rawChanges {
+			change, ok := buildScopedChange(rawChange.path, rawChange.kind, scope, scopePath, includeTests)
+			if !ok {
+				continue
+			}
+			out = append(out, change)
+		}
+	}
+	return out
+}
+
+func parseUntrackedFileChanges(output string, scope refscope.Scope, includeTests bool) []indexing.FileChange {
+	scopePath := normalizedScopePath(scope)
+	out := make([]indexing.FileChange, 0, 16)
+	for _, line := range strings.Split(output, "\n") {
 		if change, ok := buildScopedChange(line, indexing.ChangeKindAdded, scope, scopePath, includeTests); ok {
 			out = append(out, change)
 		}
 	}
-	return out, nil
+	return out
+}
+
+type rawNameStatusChange struct {
+	path string
+	kind indexing.ChangeKind
+}
+
+func parseGitNameStatusLine(line string) ([]rawNameStatusChange, bool) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return nil, false
+	}
+	parts := strings.Split(line, "\t")
+	if len(parts) < 2 {
+		return nil, false
+	}
+	status := strings.TrimSpace(parts[0])
+	switch {
+	case strings.HasPrefix(status, "R"), strings.HasPrefix(status, "C"):
+		if len(parts) < 3 {
+			return nil, false
+		}
+		return []rawNameStatusChange{
+			{path: parts[1], kind: indexing.ChangeKindDeleted},
+			{path: parts[2], kind: indexing.ChangeKindAdded},
+		}, true
+	case status == "A":
+		return []rawNameStatusChange{{path: parts[1], kind: indexing.ChangeKindAdded}}, true
+	case status == "D":
+		return []rawNameStatusChange{{path: parts[1], kind: indexing.ChangeKindDeleted}}, true
+	default:
+		return []rawNameStatusChange{{path: parts[1], kind: indexing.ChangeKindModified}}, true
+	}
+}
+
+func mergeGitFileChanges(diffChanges, untrackedChanges []indexing.FileChange) []indexing.FileChange {
+	out := make([]indexing.FileChange, 0, len(diffChanges)+len(untrackedChanges))
+	out = append(out, diffChanges...)
+	return appendUniqueChanges(out, untrackedChanges)
+}
+
+func appendUniqueChanges(existing, candidate []indexing.FileChange) []indexing.FileChange {
+	seen := make(map[string]struct{}, len(existing))
+	for _, change := range existing {
+		seen[change.Path] = struct{}{}
+	}
+	for _, change := range candidate {
+		if _, ok := seen[change.Path]; ok {
+			continue
+		}
+		seen[change.Path] = struct{}{}
+		existing = append(existing, change)
+	}
+	return existing
 }
 
 func buildScopedChange(path string, kind indexing.ChangeKind, scope refscope.Scope, scopePath string, includeTests bool) (indexing.FileChange, bool) {

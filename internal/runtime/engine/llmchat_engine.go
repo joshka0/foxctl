@@ -209,14 +209,16 @@ func applyLLMChatDefaults(cfg *LLMChatConfig) {
 	if cfg.Model == "" {
 		cfg.Model = llmproviders.DefaultModelForProvider(cfg.Provider)
 	}
-	if cfg.AuthMode == "" {
+	if cfg.AuthMode == "" || strings.EqualFold(strings.TrimSpace(cfg.AuthMode), "auto") {
 		cfg.AuthMode = defaultAuthModeForProvider(cfg.Provider, cfg.APIKey)
 	}
 	if cfg.AuthHeader == "" {
 		cfg.AuthHeader = defaultAuthHeader(cfg.AuthMode)
 	}
-	if cfg.AuthPrefix == "" && cfg.AuthMode == "bearer" {
-		cfg.AuthPrefix = "Bearer "
+	if strings.EqualFold(strings.TrimSpace(cfg.AuthMode), "bearer") {
+		if cfg.AuthPrefix == "" || strings.EqualFold(strings.TrimSpace(cfg.AuthPrefix), "Bearer") {
+			cfg.AuthPrefix = "Bearer "
+		}
 	}
 	if cfg.MaxIterations <= 0 {
 		cfg.MaxIterations = 50

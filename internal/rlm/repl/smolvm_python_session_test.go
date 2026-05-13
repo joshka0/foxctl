@@ -17,13 +17,13 @@ func TestSmolVMPythonSessionSmoke(t *testing.T) {
 	defer cancel()
 
 	sandbox := NewSmolVMPythonSession(SmolVMPythonOptions{
-		MachineName:           "foxctl-rlm-longcot-clean-offline",
-		Image:                 "python:3.12-alpine",
+		MachineName:           "foxctl-rlm-longcot-glibc-offline",
+		Image:                 "python:3.12-slim",
 		GuestWorkDir:          "/workspace/foxctl-rlm-python",
 		Network:               false,
 		CreateOnInit:          false,
 		StartOnInit:           true,
-		StopOnClose:           false,
+		StopOnClose:           true,
 		AllowPackageInstall:   true,
 		AllowedPackages:       []string{"python-chess"},
 		PackageAliases:        map[string]string{"chess": "python-chess"},
@@ -54,5 +54,19 @@ func TestSmolVMPythonSessionSmoke(t *testing.T) {
 	}
 	if !strings.Contains(result.Output, `RLM_ANSWER_JSON={"answer":"solution = 1","pass":true,"checks":["computed"]}`) {
 		t.Fatalf("missing smolvm auto-emitted answer sentinel: %s", result.Output)
+	}
+}
+
+func TestMissingSmolMachineSidecarPath(t *testing.T) {
+	path, ok := missingSmolMachineSidecarPath("Error: agent operation failed: start machine: source .smolmachine not found: /private/tmp/foxctl-python312-clean-pack.smolmachine\nThe file may have been moved or deleted.")
+	if !ok {
+		t.Fatal("expected stale sidecar error to be detected")
+	}
+	if path != "/private/tmp/foxctl-python312-clean-pack.smolmachine" {
+		t.Fatalf("path=%q", path)
+	}
+
+	if path, ok := missingSmolMachineSidecarPath("Error: network is unreachable"); ok || path != "" {
+		t.Fatalf("unexpected stale sidecar detection path=%q ok=%v", path, ok)
 	}
 }

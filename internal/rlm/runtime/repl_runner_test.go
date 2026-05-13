@@ -3409,11 +3409,33 @@ func TestBuildREPLCodeFilterPromptPreservesVerifierPreludeContract(t *testing.T)
 	for _, want := range []string{
 		"injects accept(answer, checks=[...], reason=...) and reject(reason) helpers",
 		"must call accept(...) with a complete final solution or reject(...)",
+		"exact_labeled_section(...)",
 		"ordinary print output is suppressed",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("filter prompt missing %q:\n%s", want, prompt)
 		}
+	}
+}
+
+func TestVerifierPreludeProvidesGenericExactDataHelpers(t *testing.T) {
+	t.Parallel()
+
+	prelude := verifierPreludeForTool(PythonREPLToolName)
+	for _, want := range []string{
+		"def exact_labeled_section(",
+		"def regex_tokens_from_labeled_section(",
+		"label_variants",
+		".lstrip(\" \\t:\")",
+		"official_prompt",
+		"occurrence=\"last\"",
+	} {
+		if !strings.Contains(prelude, want) {
+			t.Fatalf("prelude missing %q:\n%s", want, prelude)
+		}
+	}
+	if got := verifierPreludeForTool(GoREPLToolName); got != "" {
+		t.Fatalf("Go prelude=%q want empty", got)
 	}
 }
 

@@ -31,6 +31,12 @@ signature:
       enum: ["all", "slop", "dead"]
       default: "all"
       description: "Optional focus filter for one finding family"
+    - name: target
+      type: string
+      required: false
+      enum: ["all", "small-composable-code", "semantic-commenting", "improve-codebase-architecture"]
+      default: "all"
+      description: "Optional follow-up skill target used to filter and group deterministic findings"
     - name: view
       type: string
       required: false
@@ -68,6 +74,9 @@ signature:
     - name: presentation
       type: object
       description: "Grouped overview and lane summaries for broader scopes"
+    - name: target
+      type: string
+      description: "Requested follow-up skill target"
     - name: index_mode
       type: string
       description: "Whether the run was parser_only or index_backed for the requested scope"
@@ -112,6 +121,12 @@ signature:
       - data.view reports the requested presentation mode
       - data.presentation adds grouped overview lanes while preserving the raw
         data.findings list for compatibility
+      - data.presentation.lanes.skill_targets groups findings by follow-up
+        skill lane: small-composable-code, semantic-commenting, and
+        improve-codebase-architecture
+      - data.target reports the requested skill target; when not all, returned
+        findings and presentation are filtered to that target while snapshot
+        and evidence artifacts still describe the full scout scope
       - data.snapshot_id and data.snapshot_artifact identify the captured scope
       - data.evidence_artifact points at persisted hotspot evidence when emitted
       - data.signals.evidence_backed tells downstream tooling whether the
@@ -161,6 +176,16 @@ signature:
         first version uses tree-sitter-backed Rust symbols when available plus
         same-file call edges, so crate-wide module/use reachability still lags
         Go.
+
+      Target modes:
+      - all: annotate findings with follow-up skill targets but keep the full
+        focused surface
+      - small-composable-code: return cleanup, deletion, signature, function,
+        and slop findings suitable for small behavior-preserving refactors
+      - semantic-commenting: return high-signal owners where a bounded Index
+        block or evidence-only semantic anchors may improve future retrieval
+      - improve-codebase-architecture: return module, interface, seam, and
+        fan-out findings suitable for deepening-opportunity review
 
       Current rule families:
       - dead-code candidates:
@@ -227,6 +252,7 @@ signature:
         foxctl run code/refactor_scout --input '{"path":"./internal","language":"go","focus":"slop"}'
         foxctl run code/refactor_scout --input '{"path":"./internal/runtime/actor","language":"go","focus":"dead"}'
         foxctl run code/refactor_scout --input '{"path":"./internal/runtime/actor","language":"go","focus":"slop","min_score":80,"max_results":8}'
+        foxctl run code/refactor_scout --input '{"path":"./internal","language":"go","target":"improve-codebase-architecture"}'
         foxctl skills run code/refactor_scout --path ./internal --rule-set aggressive
     workflows:
       - id: go-hotspots

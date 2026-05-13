@@ -74,11 +74,11 @@ This Starlight site organizes content into browsable sections:
 | **Guides** | Feature design, skill authoring, workflow walkthroughs | [Design a feature](/guides/designing-foxctl-features/), [Add a skill](/guides/add-a-skill/) |
 | **Core Workflows** | Skills, retrieval, repoindex, ACA, context engine, memory | [Skills runtime](/skills/runtime-and-install/), [Search and index](/retrieval/search-and-index/) |
 | **Agents and Rooms** | Agent daemon, overseer, rooms, collaboration | [Agent lifecycle](/agents/lifecycle/), [Orchestration](/agents/orchestration/), [Rooms](/collaboration/rooms/) |
-| **Integrations** | MCP, OpenAPI, hooks, chat platforms, Obsidian | [Providers and MCP](/integrations/providers-and-mcp/), [Hooks](/integrations/hooks/) |
+| **Integrations** | MCP, OpenAPI, hooks, chat platforms, Obsidian, and integration maturity | [Integration status](/integrations/status/), [Providers and MCP](/integrations/providers-and-mcp/), [Hooks](/integrations/hooks/) |
 | **Reference** | Command map, CLI, Protocol v1, storage | [CLI](/reference/cli/), [Command map](/reference/command-map/), [Protocol v1](/reference/protocol-v1/) |
 | **Architecture** | System, design principles, runtime, API, auth | [System](/architecture/system/), [Design principles](/architecture/design-principles/), [Runtime](/architecture/runtime/) |
-| **Operations** | Gotchas, observability, CI/evals, Kubernetes | [Gotchas](/operations/gotchas/), [Troubleshooting](/operations/troubleshooting/), [Observability](/operations/observability/) |
-| **Roadmap and Archive** | Planned, experimental, generated, and historical material | [Planned and archive](/roadmap/planned-and-archive/) |
+| **Operations** | Gotchas, observability, CI/evals, benchmarks, Kubernetes | [Gotchas](/operations/gotchas/), [Troubleshooting](/operations/troubleshooting/), [Benchmarks](/quality/benchmarks/) |
+| **Roadmap and Archive** | Progress, in-progress work, planned, experimental, generated, and historical material | [Progress](/roadmap/progress/), [Planned and archive](/roadmap/planned-and-archive/) |
 
 ## Reading order for new contributors
 

@@ -2,9 +2,11 @@ package hot
 
 import (
 	"context"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -119,6 +121,186 @@ func TestBuildResolvesSnapshotBaselineToGitHead(t *testing.T) {
 	}
 	if result.Since.GitHeadSHA != head {
 		t.Fatalf("git head=%q want %q", result.Since.GitHeadSHA, head)
+	}
+}
+
+func TestParseHotCommitTimestamp(t *testing.T) {
+	t.Parallel()
+
+	got, ok := parseHotCommitTimestamp("abc123\x1f1700000000")
+	if !ok {
+		t.Fatalf("expected commit line")
+	}
+	want := time.Unix(1700000000, 0).UTC()
+	if !got.Equal(want) {
+		t.Fatalf("timestamp=%s want %s", got, want)
+	}
+
+	got, ok = parseHotCommitTimestamp("abc123\x1fnot-a-timestamp")
+	if !ok {
+		t.Fatalf("invalid timestamp line should still be treated as commit line")
+	}
+	if !got.IsZero() {
+		t.Fatalf("invalid timestamp should reset to zero, got %s", got)
+	}
+
+	if _, ok := parseHotCommitTimestamp("internal/a.go"); ok {
+		t.Fatalf("path line must not be treated as commit line")
+	}
+}
+
+func TestFilterHotPath(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		rawPath      string
+		scopePath    string
+		isDir        bool
+		includeTests bool
+		languageHint string
+		wantPath     string
+		wantLanguage string
+		wantOK       bool
+	}{
+		{
+			name:         "accepts matching file",
+			rawPath:      "internal/a.go",
+			scopePath:    "internal",
+			isDir:        true,
+			includeTests: false,
+			languageHint: "go",
+			wantPath:     "internal/a.go",
+			wantLanguage: "go",
+			wantOK:       true,
+		},
+		{
+			name:         "rejects out of scope",
+			rawPath:      "pkg/a.go",
+			scopePath:    "internal",
+			isDir:        true,
+			includeTests: false,
+			languageHint: "go",
+			wantOK:       false,
+		},
+		{
+			name:         "rejects tests when disabled",
+			rawPath:      "internal/a_test.go",
+			scopePath:    "internal",
+			isDir:        true,
+			includeTests: false,
+			languageHint: "go",
+			wantOK:       false,
+		},
+		{
+			name:         "allows tests when enabled",
+			rawPath:      "internal/a_test.go",
+			scopePath:    "internal",
+			isDir:        true,
+			includeTests: true,
+			languageHint: "go",
+			wantPath:     "internal/a_test.go",
+			wantLanguage: "go",
+			wantOK:       true,
+		},
+		{
+			name:         "rejects language mismatch",
+			rawPath:      "internal/a.ts",
+			scopePath:    "internal",
+			isDir:        true,
+			includeTests: true,
+			languageHint: "go",
+			wantOK:       false,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			gotPath, gotLanguage, gotOK := filterHotPath(tc.rawPath, tc.scopePath, tc.isDir, tc.includeTests, tc.languageHint)
+			if gotOK != tc.wantOK {
+				t.Fatalf("ok=%v want %v", gotOK, tc.wantOK)
+			}
+			if gotPath != tc.wantPath {
+				t.Fatalf("path=%q want %q", gotPath, tc.wantPath)
+			}
+			if gotLanguage != tc.wantLanguage {
+				t.Fatalf("language=%q want %q", gotLanguage, tc.wantLanguage)
+			}
+		})
+	}
+}
+
+func TestRankHotFileScoresDeterministicTies(t *testing.T) {
+	t.Parallel()
+
+	scores := map[string]*fileScore{
+		"internal/z.go": {Path: "internal/z.go", Score: 3.0, TouchCount: 1},
+		"internal/c.go": {Path: "internal/c.go", Score: 2.0, TouchCount: 2},
+		"internal/a.go": {Path: "internal/a.go", Score: 2.0, TouchCount: 2},
+		"internal/b.go": {Path: "internal/b.go", Score: 2.0, TouchCount: 1},
+	}
+
+	ranked := rankHotFileScores(scores)
+	got := []string{ranked[0].Path, ranked[1].Path, ranked[2].Path, ranked[3].Path}
+	want := []string{"internal/z.go", "internal/a.go", "internal/c.go", "internal/b.go"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("rank[%d]=%q want %q (full=%v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestParseHotLogScoresAppliesFilters(t *testing.T) {
+	t.Parallel()
+
+	now := time.Unix(1_800_000_000, 0).UTC()
+	logOutput := "commit1\x1f1800000000\n" +
+		"internal/a.go\n" +
+		"internal/a_test.go\n" +
+		"pkg/a.go\n" +
+		"internal/readme.md\n" +
+		"internal/b.go\n"
+	scope := refscope.Scope{Path: "internal", IsDir: true, Language: "go"}
+
+	files := parseHotLogScores(logOutput, scope, false, 90, now)
+	if got, want := len(files), 2; got != want {
+		t.Fatalf("len=%d want %d", got, want)
+	}
+	if files[0].Path != "internal/a.go" || files[1].Path != "internal/b.go" {
+		t.Fatalf("unexpected files: %#v", files)
+	}
+}
+
+func TestParseHotLogScoresRecencyScoring(t *testing.T) {
+	t.Parallel()
+
+	now := time.Unix(1_800_000_000, 0).UTC()
+	newTS := now.Unix()
+	oldTS := now.Add(-20 * 24 * time.Hour).Unix()
+
+	logOutput := "commit-new\x1f" + strconv.FormatInt(newTS, 10) + "\n" +
+		"internal/new.go\n" +
+		"commit-old\x1f" + strconv.FormatInt(oldTS, 10) + "\n" +
+		"internal/old.go\n"
+
+	scope := refscope.Scope{Path: "internal", IsDir: true, Language: "go"}
+	files := parseHotLogScores(logOutput, scope, true, 10, now)
+	if got, want := len(files), 2; got != want {
+		t.Fatalf("len=%d want %d", got, want)
+	}
+	if files[0].Path != "internal/new.go" {
+		t.Fatalf("top path=%q want internal/new.go", files[0].Path)
+	}
+
+	oldScore := files[1].Score
+	wantOldScore := 0.25
+	if math.Abs(oldScore-wantOldScore) > 1e-9 {
+		t.Fatalf("old score=%f want %f", oldScore, wantOldScore)
+	}
+	if files[0].Score <= files[1].Score {
+		t.Fatalf("expected recent file to score higher: %#v", files)
 	}
 }
 

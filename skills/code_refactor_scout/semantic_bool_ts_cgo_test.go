@@ -53,3 +53,33 @@ func TestAnalyzeTypeScriptSemanticSimplificationsSkipsUnsafeOrTrue(t *testing.T)
 		t.Fatalf("expected no simplification finding, got %#v", got)
 	}
 }
+
+func TestAnalyzeTypeScriptSemanticSimplificationsFindsBooleanReturnWrapper(t *testing.T) {
+	src := []byte(`function shouldRun(flag: boolean): boolean {
+  if (flag === true) {
+    return true;
+  }
+  return false;
+}
+`)
+	symbols := []symindex.Symbol{{
+		Name:      "shouldRun",
+		Language:  "typescript",
+		Kind:      symindex.KindFunction,
+		StartLine: 1,
+		StartByte: 0,
+		EndByte:   len(src),
+	}}
+
+	got := analyzeTypeScriptSemanticSimplifications("shouldRun.ts", "shouldRun.ts", "typescript", src, symbols)
+	if len(got) != 1 {
+		t.Fatalf("len(got)=%d want 1 (%#v)", len(got), got)
+	}
+	if got[0].Evidence["simplified_form"] != "return flag" {
+		t.Fatalf("simplified_form=%#v", got[0].Evidence["simplified_form"])
+	}
+	patterns, ok := got[0].Evidence["pattern_ids"].([]string)
+	if !ok || len(patterns) == 0 || patterns[0] != "boolean_return_wrapper" {
+		t.Fatalf("pattern_ids=%#v", got[0].Evidence["pattern_ids"])
+	}
+}

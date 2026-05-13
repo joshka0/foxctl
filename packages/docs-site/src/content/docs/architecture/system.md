@@ -3,7 +3,9 @@ title: System architecture
 description: Current foxctl architecture map, subsystem topology, and package placement rules.
 ---
 
-foxctl is a multi-agent CLI and control plane with a hybrid runtime. This page describes the major subsystems, how they interact, and where code lives in the repo.
+foxctl is a Go-based multi-agent framework, CLI, and control plane with a hybrid
+runtime. This page describes the major subsystems, how they interact, and where
+code lives in the repo.
 
 ## Subsystem overview
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -264,19 +265,15 @@ func runActorSysSupervisorStart(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Write startup envelope
-	env := envelope.OK("actorsys/supervisor/start", map[string]any{
+	if err := writeActorSysOK("actorsys/supervisor/start", map[string]any{
 		"status":       "running",
 		"poll_ms":      supervisorPollInterval,
 		"trajectory":   supervisorEnableTrajectory,
 		"message":      "Supervisor started. Press Ctrl+C to stop.",
 		"actor_count":  0, // Will be updated
 		"storage_root": cfg.Storage.Root,
-	}, envelope.WithMetaMutator(func(m *envelope.Meta) {
-		m.Source = "actorsys"
-		m.Profiles = []string{"core/v1", "actor/v1"}
-	}))
-	if err := envelope.Write(os.Stdout, env); err != nil {
-		return fmt.Errorf("write envelope: %w", err)
+	}); err != nil {
+		return err
 	}
 
 	// Wait for shutdown
@@ -291,15 +288,11 @@ func runActorSysSupervisorStart(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Write shutdown envelope
-	shutdownEnv := envelope.OK("actorsys/supervisor/start", map[string]any{
+	if err := writeActorSysOK("actorsys/supervisor/start", map[string]any{
 		"status":  "stopped",
 		"message": "Supervisor stopped gracefully",
-	}, envelope.WithMetaMutator(func(m *envelope.Meta) {
-		m.Source = "actorsys"
-		m.Profiles = []string{"core/v1", "actor/v1"}
-	}))
-	if err := envelope.Write(os.Stdout, shutdownEnv); err != nil {
-		return fmt.Errorf("write envelope: %w", err)
+	}); err != nil {
+		return err
 	}
 
 	return nil
@@ -313,21 +306,17 @@ func runActorSysSupervisorStatus(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
 
-	// Open registry store to check registered actors
-	db, closeFn, err := openActorRegistryDB(ctx, cfg.Storage.Root)
+	var actors []actor.ActorRecord
+	err := withActorRegistryStore(ctx, cfg.Storage.Root, func(regStore *actor.SQLiteRegistryStore) error {
+		var err error
+		actors, err = regStore.ListActors(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to list actors: %s", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return writeActorSysError(cmd, "actorsys/supervisor/status", "failed to open registry: "+err.Error())
-	}
-	defer func() { errs.Ignore(closeFn(), "close registry db") }()
-
-	regStore, err := actor.NewRegistryStore(ctx, db)
-	if err != nil {
-		return writeActorSysError(cmd, "actorsys/supervisor/status", "failed to create registry store: "+err.Error())
-	}
-
-	actors, err := regStore.ListActors(ctx)
-	if err != nil {
-		return writeActorSysError(cmd, "actorsys/supervisor/status", "failed to list actors: "+err.Error())
+		return writeActorSysRegistryError(cmd, "actorsys/supervisor/status", err)
 	}
 
 	// Count by status
@@ -336,17 +325,12 @@ func runActorSysSupervisorStatus(cmd *cobra.Command, _ []string) error {
 		statusCounts[string(a.Status)]++
 	}
 
-	env := envelope.OK("actorsys/supervisor/status", map[string]any{
+	if err := writeActorSysOK("actorsys/supervisor/status", map[string]any{
 		"registered_actors": len(actors),
 		"status_counts":     statusCounts,
 		"storage_root":      cfg.Storage.Root,
-	}, envelope.WithMetaMutator(func(m *envelope.Meta) {
-		m.Source = "actorsys"
-		m.Profiles = []string{"core/v1", "actor/v1"}
-	}))
-
-	if err := envelope.Write(os.Stdout, env); err != nil {
-		return fmt.Errorf("write envelope: %w", err)
+	}); err != nil {
+		return err
 	}
 
 	return nil
@@ -373,77 +357,59 @@ func runActorSysSpawn(cmd *cobra.Command, _ []string) error {
 		return writeActorSysError(cmd, "actorsys/spawn", fmt.Sprintf("invalid role: %s (must be coder|planner|reviewer|fixer|verifier)", spawnActorRole))
 	}
 
-	// Open registry store
-	db, closeFn, err := openActorRegistryDB(ctx, cfg.Storage.Root)
-	if err != nil {
-		return writeActorSysError(cmd, "actorsys/spawn", "failed to open registry: "+err.Error())
-	}
-	defer func() { errs.Ignore(closeFn(), "close registry db") }()
+	var payload map[string]any
+	err := withActorRegistryStore(ctx, cfg.Storage.Root, func(regStore *actor.SQLiteRegistryStore) error {
+		actorCfg := actor.Config{
+			ID:        spawnActorNamespace,
+			Namespace: spawnActorNamespace,
+			Role:      spawnActorRole,
+		}
 
-	regStore, err := actor.NewRegistryStore(ctx, db)
-	if err != nil {
-		return writeActorSysError(cmd, "actorsys/spawn", "failed to create registry store: "+err.Error())
-	}
+		configJSON, err := actor.MarshalConfig(actorCfg)
+		if err != nil {
+			return fmt.Errorf("failed to marshal config: %s", err)
+		}
 
-	// Build actor config
-	actorCfg := actor.Config{
-		ID:        spawnActorNamespace,
-		Namespace: spawnActorNamespace,
-		Role:      spawnActorRole,
-	}
+		record := actor.ActorRecord{
+			Namespace:  spawnActorNamespace,
+			Role:       spawnActorRole,
+			ConfigJSON: configJSON,
+			Status:     actor.ActorStatusRegistered,
+		}
 
-	// Serialize config
-	configJSON, err := actor.MarshalConfig(actorCfg)
-	if err != nil {
-		return writeActorSysError(cmd, "actorsys/spawn", "failed to marshal config: "+err.Error())
-	}
+		if actorSysDryRun {
+			payload = map[string]any{
+				"dry_run":      true,
+				"namespace":    spawnActorNamespace,
+				"role":         spawnActorRole,
+				"llm_provider": spawnActorLLMProvider,
+				"llm_model":    spawnActorLLMModel,
+				"status":       "would_register",
+				"message":      "Dry run: actor would be registered",
+			}
+			return nil
+		}
 
-	// Register actor
-	record := actor.ActorRecord{
-		Namespace:  spawnActorNamespace,
-		Role:       spawnActorRole,
-		ConfigJSON: configJSON,
-		Status:     actor.ActorStatusRegistered,
-	}
+		if err := regStore.RegisterActor(ctx, record); err != nil {
+			return fmt.Errorf("failed to register actor: %s", err)
+		}
 
-	// Dry-run: show what would be done
-	if actorSysDryRun {
-		env := envelope.OK("actorsys/spawn", map[string]any{
-			"dry_run":      true,
+		payload = map[string]any{
 			"namespace":    spawnActorNamespace,
 			"role":         spawnActorRole,
 			"llm_provider": spawnActorLLMProvider,
 			"llm_model":    spawnActorLLMModel,
-			"status":       "would_register",
-			"message":      "Dry run: actor would be registered",
-		}, envelope.WithMetaMutator(func(m *envelope.Meta) {
-			m.Source = "actorsys"
-			m.Profiles = []string{"core/v1", "actor/v1"}
-		}))
-		if err := envelope.Write(os.Stdout, env); err != nil {
-			return fmt.Errorf("write envelope: %w", err)
+			"status":       "registered",
+			"message":      "Actor registered. Start supervisor to activate.",
 		}
 		return nil
+	})
+	if err != nil {
+		return writeActorSysRegistryError(cmd, "actorsys/spawn", err)
 	}
 
-	if err := regStore.RegisterActor(ctx, record); err != nil {
-		return writeActorSysError(cmd, "actorsys/spawn", "failed to register actor: "+err.Error())
-	}
-
-	env := envelope.OK("actorsys/spawn", map[string]any{
-		"namespace":    spawnActorNamespace,
-		"role":         spawnActorRole,
-		"llm_provider": spawnActorLLMProvider,
-		"llm_model":    spawnActorLLMModel,
-		"status":       "registered",
-		"message":      "Actor registered. Start supervisor to activate.",
-	}, envelope.WithMetaMutator(func(m *envelope.Meta) {
-		m.Source = "actorsys"
-		m.Profiles = []string{"core/v1", "actor/v1"}
-	}))
-
-	if err := envelope.Write(os.Stdout, env); err != nil {
-		return fmt.Errorf("write envelope: %w", err)
+	if err := writeActorSysOK("actorsys/spawn", payload); err != nil {
+		return err
 	}
 
 	return nil
@@ -456,26 +422,21 @@ func runActorSysList(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
 
-	// Open registry store
-	db, closeFn, err := openActorRegistryDB(ctx, cfg.Storage.Root)
-	if err != nil {
-		return writeActorSysError(cmd, "actorsys/list", "failed to open registry: "+err.Error())
-	}
-	defer func() { errs.Ignore(closeFn(), "close registry db") }()
-
-	regStore, err := actor.NewRegistryStore(ctx, db)
-	if err != nil {
-		return writeActorSysError(cmd, "actorsys/list", "failed to create registry store: "+err.Error())
-	}
-
 	var actors []actor.ActorRecord
-	if listActorStatus != "" {
-		actors, err = regStore.ListActorsByStatus(ctx, actor.ActorStatus(listActorStatus))
-	} else {
-		actors, err = regStore.ListActors(ctx)
-	}
+	err := withActorRegistryStore(ctx, cfg.Storage.Root, func(regStore *actor.SQLiteRegistryStore) error {
+		var err error
+		if listActorStatus != "" {
+			actors, err = regStore.ListActorsByStatus(ctx, actor.ActorStatus(listActorStatus))
+		} else {
+			actors, err = regStore.ListActors(ctx)
+		}
+		if err != nil {
+			return fmt.Errorf("failed to list actors: %s", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return writeActorSysError(cmd, "actorsys/list", "failed to list actors: "+err.Error())
+		return writeActorSysRegistryError(cmd, "actorsys/list", err)
 	}
 
 	// Build response
@@ -490,16 +451,11 @@ func runActorSysList(cmd *cobra.Command, _ []string) error {
 		})
 	}
 
-	env := envelope.OK("actorsys/list", map[string]any{
+	if err := writeActorSysOK("actorsys/list", map[string]any{
 		"actors": actorList,
 		"count":  len(actorList),
-	}, envelope.WithMetaMutator(func(m *envelope.Meta) {
-		m.Source = "actorsys"
-		m.Profiles = []string{"core/v1", "actor/v1"}
-	}))
-
-	if err := envelope.Write(os.Stdout, env); err != nil {
-		return fmt.Errorf("write envelope: %w", err)
+	}); err != nil {
+		return err
 	}
 
 	return nil
@@ -513,27 +469,23 @@ func runActorSysStatus(cmd *cobra.Command, args []string) error {
 	cfg := config.MustFromContext(ctx)
 	namespace := args[0]
 
-	// Open registry store
-	db, closeFn, err := openActorRegistryDB(ctx, cfg.Storage.Root)
-	if err != nil {
-		return writeActorSysError(cmd, "actorsys/status", "failed to open registry: "+err.Error())
-	}
-	defer func() { errs.Ignore(closeFn(), "close registry db") }()
-
-	regStore, err := actor.NewRegistryStore(ctx, db)
-	if err != nil {
-		return writeActorSysError(cmd, "actorsys/status", "failed to create registry store: "+err.Error())
-	}
-
-	record, err := regStore.GetActor(ctx, namespace)
-	if err != nil {
-		if err == actor.ErrActorNotFound {
-			return writeActorSysError(cmd, "actorsys/status", fmt.Sprintf("actor not found: %s", namespace))
+	var record actor.ActorRecord
+	err := withActorRegistryStore(ctx, cfg.Storage.Root, func(regStore *actor.SQLiteRegistryStore) error {
+		var err error
+		record, err = regStore.GetActor(ctx, namespace)
+		if err != nil {
+			if err == actor.ErrActorNotFound {
+				return fmt.Errorf("actor not found: %s", namespace)
+			}
+			return fmt.Errorf("failed to get actor: %s", err)
 		}
-		return writeActorSysError(cmd, "actorsys/status", "failed to get actor: "+err.Error())
+		return nil
+	})
+	if err != nil {
+		return writeActorSysRegistryError(cmd, "actorsys/status", err)
 	}
 
-	env := envelope.OK("actorsys/status", map[string]any{
+	if err := writeActorSysOK("actorsys/status", map[string]any{
 		"namespace":   record.Namespace,
 		"role":        record.Role,
 		"status":      record.Status,
@@ -541,13 +493,8 @@ func runActorSysStatus(cmd *cobra.Command, args []string) error {
 		"config_json": record.ConfigJSON,
 		"created_at":  record.CreatedAt.Format(time.RFC3339),
 		"updated_at":  record.UpdatedAt.Format(time.RFC3339),
-	}, envelope.WithMetaMutator(func(m *envelope.Meta) {
-		m.Source = "actorsys"
-		m.Profiles = []string{"core/v1", "actor/v1"}
-	}))
-
-	if err := envelope.Write(os.Stdout, env); err != nil {
-		return fmt.Errorf("write envelope: %w", err)
+	}); err != nil {
+		return err
 	}
 
 	return nil
@@ -596,7 +543,7 @@ func runActorSysSend(cmd *cobra.Command, args []string) error {
 
 	// Dry-run: show what would be sent
 	if actorSysDryRun {
-		env := envelope.OK("actorsys/send", map[string]any{
+		if err := writeActorSysOK("actorsys/send", map[string]any{
 			"dry_run":    true,
 			"message_id": msg.ID,
 			"namespace":  namespace,
@@ -604,12 +551,8 @@ func runActorSysSend(cmd *cobra.Command, args []string) error {
 			"payload":    payload,
 			"sent":       false,
 			"message":    "Dry run: message would be sent",
-		}, envelope.WithMetaMutator(func(m *envelope.Meta) {
-			m.Source = "actorsys"
-			m.Profiles = []string{"core/v1", "actor/v1"}
-		}))
-		if err := envelope.Write(os.Stdout, env); err != nil {
-			return fmt.Errorf("write envelope: %w", err)
+		}); err != nil {
+			return err
 		}
 		return nil
 	}
@@ -619,18 +562,13 @@ func runActorSysSend(cmd *cobra.Command, args []string) error {
 		return writeActorSysError(cmd, "actorsys/send", "failed to send message: "+err.Error())
 	}
 
-	env := envelope.OK("actorsys/send", map[string]any{
+	if err := writeActorSysOK("actorsys/send", map[string]any{
 		"message_id": msg.ID,
 		"namespace":  namespace,
 		"type":       sendActorType,
 		"sent":       true,
-	}, envelope.WithMetaMutator(func(m *envelope.Meta) {
-		m.Source = "actorsys"
-		m.Profiles = []string{"core/v1", "actor/v1"}
-	}))
-
-	if err := envelope.Write(os.Stdout, env); err != nil {
-		return fmt.Errorf("write envelope: %w", err)
+	}); err != nil {
+		return err
 	}
 
 	return nil
@@ -677,17 +615,12 @@ func runActorSysLogs(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	env := envelope.OK("actorsys/logs", map[string]any{
+	if err := writeActorSysOK("actorsys/logs", map[string]any{
 		"namespace": namespace,
 		"events":    eventList,
 		"count":     len(eventList),
-	}, envelope.WithMetaMutator(func(m *envelope.Meta) {
-		m.Source = "actorsys"
-		m.Profiles = []string{"core/v1", "actor/v1"}
-	}))
-
-	if err := envelope.Write(os.Stdout, env); err != nil {
-		return fmt.Errorf("write envelope: %w", err)
+	}); err != nil {
+		return err
 	}
 
 	return nil
@@ -702,60 +635,44 @@ func runActorSysUnregister(cmd *cobra.Command, args []string) error {
 	cfg := config.MustFromContext(ctx)
 	namespace := args[0]
 
-	// Open registry store
-	db, closeFn, err := openActorRegistryDB(ctx, cfg.Storage.Root)
-	if err != nil {
-		return writeActorSysError(cmd, "actorsys/unregister", "failed to open registry: "+err.Error())
-	}
-	defer func() { errs.Ignore(closeFn(), "close registry db") }()
-
-	regStore, err := actor.NewRegistryStore(ctx, db)
-	if err != nil {
-		return writeActorSysError(cmd, "actorsys/unregister", "failed to create registry store: "+err.Error())
-	}
-
-	// Check if actor exists first (for both dry-run and actual unregister)
-	record, err := regStore.GetActor(ctx, namespace)
-	if err != nil {
-		if err == actor.ErrActorNotFound {
-			return writeActorSysError(cmd, "actorsys/unregister", fmt.Sprintf("actor not found: %s", namespace))
+	var payload map[string]any
+	err := withActorRegistryStore(ctx, cfg.Storage.Root, func(regStore *actor.SQLiteRegistryStore) error {
+		record, err := regStore.GetActor(ctx, namespace)
+		if err != nil {
+			if err == actor.ErrActorNotFound {
+				return fmt.Errorf("actor not found: %s", namespace)
+			}
+			return fmt.Errorf("failed to lookup actor: %s", err)
 		}
-		return writeActorSysError(cmd, "actorsys/unregister", "failed to lookup actor: "+err.Error())
-	}
 
-	// Dry-run: show what would be done
-	if actorSysDryRun {
-		env := envelope.OK("actorsys/unregister", map[string]any{
-			"dry_run":      true,
+		if actorSysDryRun {
+			payload = map[string]any{
+				"dry_run":      true,
+				"namespace":    namespace,
+				"role":         record.Role,
+				"status":       string(record.Status),
+				"unregistered": false,
+				"message":      "Dry run: actor would be unregistered",
+			}
+			return nil
+		}
+
+		if err := regStore.UnregisterActor(ctx, namespace); err != nil {
+			return fmt.Errorf("failed to unregister actor: %s", err)
+		}
+
+		payload = map[string]any{
 			"namespace":    namespace,
-			"role":         record.Role,
-			"status":       string(record.Status),
-			"unregistered": false,
-			"message":      "Dry run: actor would be unregistered",
-		}, envelope.WithMetaMutator(func(m *envelope.Meta) {
-			m.Source = "actorsys"
-			m.Profiles = []string{"core/v1", "actor/v1"}
-		}))
-		if err := envelope.Write(os.Stdout, env); err != nil {
-			return fmt.Errorf("write envelope: %w", err)
+			"unregistered": true,
 		}
 		return nil
+	})
+	if err != nil {
+		return writeActorSysRegistryError(cmd, "actorsys/unregister", err)
 	}
 
-	if err := regStore.UnregisterActor(ctx, namespace); err != nil {
-		return writeActorSysError(cmd, "actorsys/unregister", "failed to unregister actor: "+err.Error())
-	}
-
-	env := envelope.OK("actorsys/unregister", map[string]any{
-		"namespace":    namespace,
-		"unregistered": true,
-	}, envelope.WithMetaMutator(func(m *envelope.Meta) {
-		m.Source = "actorsys"
-		m.Profiles = []string{"core/v1", "actor/v1"}
-	}))
-
-	if err := envelope.Write(os.Stdout, env); err != nil {
-		return fmt.Errorf("write envelope: %w", err)
+	if err := writeActorSysOK("actorsys/unregister", payload); err != nil {
+		return err
 	}
 
 	return nil
@@ -773,6 +690,96 @@ func openActorRegistryDB(ctx context.Context, storageRoot string) (*sql.DB, func
 	return db, closeFn, nil
 }
 
+type actorRegistrySetupKind string
+
+const (
+	actorRegistrySetupOpen   actorRegistrySetupKind = "open"
+	actorRegistrySetupCreate actorRegistrySetupKind = "create"
+)
+
+type actorRegistrySetupError struct {
+	kind actorRegistrySetupKind
+	err  error
+}
+
+func (e *actorRegistrySetupError) Error() string {
+	if e == nil || e.err == nil {
+		return ""
+	}
+	return e.err.Error()
+}
+
+func (e *actorRegistrySetupError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
+func withActorRegistryStore(ctx context.Context, storageRoot string, fn func(*actor.SQLiteRegistryStore) error) error {
+	db, closeFn, err := openActorRegistryDB(ctx, storageRoot)
+	if err != nil {
+		return &actorRegistrySetupError{kind: actorRegistrySetupOpen, err: err}
+	}
+	defer func() { errs.Ignore(closeFn(), "close registry db") }()
+
+	regStore, err := actor.NewRegistryStore(ctx, db)
+	if err != nil {
+		return &actorRegistrySetupError{kind: actorRegistrySetupCreate, err: err}
+	}
+	return fn(regStore)
+}
+
+func writeActorSysRegistryError(cmd *cobra.Command, command string, err error) error {
+	if message, ok := actorRegistryCommandSetupMessage(err); ok {
+		return writeActorSysError(cmd, command, message)
+	}
+	return writeActorSysError(cmd, command, err.Error())
+}
+
+func actorRegistryCommandSetupMessage(err error) (string, bool) {
+	var setupErr *actorRegistrySetupError
+	if !errors.As(err, &setupErr) {
+		return "", false
+	}
+	switch setupErr.kind {
+	case actorRegistrySetupOpen:
+		return "failed to open registry: " + setupErr.Error(), true
+	case actorRegistrySetupCreate:
+		return "failed to create registry store: " + setupErr.Error(), true
+	default:
+		return setupErr.Error(), true
+	}
+}
+
+func actorRegistryRespawnSetupError(err error) error {
+	var setupErr *actorRegistrySetupError
+	if !errors.As(err, &setupErr) {
+		return err
+	}
+	switch setupErr.kind {
+	case actorRegistrySetupOpen:
+		return fmt.Errorf("open registry db: %w", setupErr.err)
+	case actorRegistrySetupCreate:
+		return fmt.Errorf("create registry store: %w", setupErr.err)
+	default:
+		return setupErr
+	}
+}
+
+func writeActorSysOK(command string, payload map[string]any) error {
+	env := envelope.OK(command, payload, envelope.WithMetaMutator(withActorSysMeta))
+	if err := envelope.Write(os.Stdout, env); err != nil {
+		return fmt.Errorf("write envelope: %w", err)
+	}
+	return nil
+}
+
+func withActorSysMeta(m *envelope.Meta) {
+	m.Source = "actorsys"
+	m.Profiles = []string{"core/v1", "actor/v1"}
+}
+
 // respawnRegisteredActors opens the actor registry, finds actors that were
 // previously running or registered, and attempts to recreate and register them
 // with the provided actor system so they resume execution.
@@ -788,73 +795,67 @@ func openActorRegistryDB(ctx context.Context, storageRoot string) (*sql.DB, func
 // the registry (for example, opening the DB, creating the registry store, or
 // listing actors).
 func respawnRegisteredActors(ctx context.Context, cfg config.Config, system *actor.System, hookDispatcher hooks.Dispatcher) error {
-	db, closeFn, err := openActorRegistryDB(ctx, cfg.Storage.Root)
-	if err != nil {
-		return fmt.Errorf("open registry db: %w", err)
-	}
-	defer func() { errs.Ignore(closeFn(), "close registry db") }()
-
-	regStore, err := actor.NewRegistryStore(ctx, db)
-	if err != nil {
-		return fmt.Errorf("create registry store: %w", err)
-	}
-
-	// Get actors that were running
-	actors, err := regStore.ListActorsByStatus(ctx, actor.ActorStatusRunning)
-	if err != nil {
-		return fmt.Errorf("list running actors: %w", err)
-	}
-
-	// Also include registered actors
-	registered, err := regStore.ListActorsByStatus(ctx, actor.ActorStatusRegistered)
-	if err != nil {
-		return fmt.Errorf("list registered actors: %w", err)
-	}
-	actors = append(actors, registered...)
-
-	for _, rec := range actors {
-		// Create AgentActor from record
-		// Note: ActorID flows through AgentConfig.ActorID → hook.Input.ActorID
-		// Session ID is generated per-actor in onStart; environment session bridging
-		// happens at hook level, not actor level (hooks can read CLAUDE_SESSION_ID etc.)
-		agentCfg := actor.AgentActorConfig{
-			ActorConfig: rec.Config,
-			AgentConfig: agenttypes.AgentConfig{
-				Role:    agenttypes.AgentRole(rec.Role),
-				ActorID: rec.Namespace,
-			},
-			LLMProvider:   "gemini", // Default, should be stored in config
-			WorkspaceRoot: cfg.Storage.Root,
-			Hooks:         hookDispatcher, // Wire hooks dispatcher
-		}
-
-		// Use no-op logger for actor internals - we emit via observability instead
-		noopLogger := zerolog.New(io.Discard) //nolint:forbidigo // no-op logger for actor internals
-
-		agentActor, err := actor.NewAgentActor(agentCfg, actor.WithAgentLogger(noopLogger))
+	err := withActorRegistryStore(ctx, cfg.Storage.Root, func(regStore *actor.SQLiteRegistryStore) error {
+		actors, err := regStore.ListActorsByStatus(ctx, actor.ActorStatusRunning)
 		if err != nil {
-			observability.Emit(ctx, observability.NewEvent("actorsys.actor_create_error").
-				WithComponent(observability.ComponentCLI).
-				WithData("actor", rec.Namespace).
-				Error(err, 0))
-			continue
+			return fmt.Errorf("list running actors: %w", err)
 		}
 
-		if err := system.Register(ctx, agentActor); err != nil {
-			observability.Emit(ctx, observability.NewEvent("actorsys.actor_register_error").
-				WithComponent(observability.ComponentCLI).
-				WithData("actor", rec.Namespace).
-				Error(err, 0))
-			continue
+		registered, err := regStore.ListActorsByStatus(ctx, actor.ActorStatusRegistered)
+		if err != nil {
+			return fmt.Errorf("list registered actors: %w", err)
+		}
+		actors = append(actors, registered...)
+
+		for _, rec := range actors {
+			// Create AgentActor from record
+			// Note: ActorID flows through AgentConfig.ActorID → hook.Input.ActorID
+			// Session ID is generated per-actor in onStart; environment session bridging
+			// happens at hook level, not actor level (hooks can read CLAUDE_SESSION_ID etc.)
+			agentCfg := actor.AgentActorConfig{
+				ActorConfig: rec.Config,
+				AgentConfig: agenttypes.AgentConfig{
+					Role:    agenttypes.AgentRole(rec.Role),
+					ActorID: rec.Namespace,
+				},
+				LLMProvider:   "gemini", // Default, should be stored in config
+				WorkspaceRoot: cfg.Storage.Root,
+				Hooks:         hookDispatcher, // Wire hooks dispatcher
+			}
+
+			// Use no-op logger for actor internals - we emit via observability instead
+			noopLogger := zerolog.New(io.Discard) //nolint:forbidigo // no-op logger for actor internals
+
+			agentActor, err := actor.NewAgentActor(agentCfg, actor.WithAgentLogger(noopLogger))
+			if err != nil {
+				observability.Emit(ctx, observability.NewEvent("actorsys.actor_create_error").
+					WithComponent(observability.ComponentCLI).
+					WithData("actor", rec.Namespace).
+					Error(err, 0))
+				continue
+			}
+
+			if err := system.Register(ctx, agentActor); err != nil {
+				observability.Emit(ctx, observability.NewEvent("actorsys.actor_register_error").
+					WithComponent(observability.ComponentCLI).
+					WithData("actor", rec.Namespace).
+					Error(err, 0))
+				continue
+			}
+
+			// Update status to running
+			if err := regStore.UpdateStatus(ctx, rec.Namespace, actor.ActorStatusRunning); err != nil {
+				observability.Emit(ctx, observability.NewEvent("actorsys.status_update_error").
+					WithComponent(observability.ComponentCLI).
+					WithData("actor", rec.Namespace).
+					Error(err, 0))
+			}
 		}
 
-		// Update status to running
-		if err := regStore.UpdateStatus(ctx, rec.Namespace, actor.ActorStatusRunning); err != nil {
-			observability.Emit(ctx, observability.NewEvent("actorsys.status_update_error").
-				WithComponent(observability.ComponentCLI).
-				WithData("actor", rec.Namespace).
-				Error(err, 0))
-		}
+		return nil
+	})
+	if err != nil {
+		return actorRegistryRespawnSetupError(err)
 	}
 
 	return nil

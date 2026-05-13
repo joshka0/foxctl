@@ -212,6 +212,95 @@ func TestLLMChatEngine_Run_NoAuthHeaderWhenAuthModeNone(t *testing.T) {
 	}
 }
 
+func TestLLMChatEngine_Run_AutoAuthModeDefaultsToBearer(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer demo-secret" {
+			t.Fatalf("Authorization = %q, want bearer token", got)
+		}
+		resp := oaiResponse{
+			ID: "test-auto-auth",
+			Choices: []struct {
+				Message      oaiMessage `json:"message"`
+				FinishReason string     `json:"finish_reason"`
+			}{
+				{
+					Message:      oaiMessage{Role: "assistant", Content: "ok"},
+					FinishReason: "stop",
+				},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	engine, err := NewLLMChatEngine(LLMChatConfig{
+		Provider:      "openrouter",
+		APIKey:        "demo-secret",
+		BaseURL:       "http://mock",
+		Model:         "demo-model",
+		AuthMode:      "auto",
+		MaxIterations: 1,
+	})
+	if err != nil {
+		t.Fatalf("NewLLMChatEngine() error = %v", err)
+	}
+	engine.client = &http.Client{Transport: &handlerTransport{handler: handler}}
+
+	output, err := engine.Run(context.Background(), EngineInput{
+		Messages: []Message{{Role: RoleUser, Content: "Hi"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if output.AssistantText != "ok" {
+		t.Fatalf("response = %q, want ok", output.AssistantText)
+	}
+}
+
+func TestLLMChatEngine_Run_NormalizesBearerPrefix(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer demo-secret" {
+			t.Fatalf("Authorization = %q, want bearer token", got)
+		}
+		resp := oaiResponse{
+			ID: "test-bearer-prefix",
+			Choices: []struct {
+				Message      oaiMessage `json:"message"`
+				FinishReason string     `json:"finish_reason"`
+			}{
+				{
+					Message:      oaiMessage{Role: "assistant", Content: "ok"},
+					FinishReason: "stop",
+				},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	engine, err := NewLLMChatEngine(LLMChatConfig{
+		Provider:      "openrouter",
+		APIKey:        "demo-secret",
+		BaseURL:       "http://mock",
+		Model:         "demo-model",
+		AuthMode:      "bearer",
+		AuthPrefix:    "Bearer",
+		MaxIterations: 1,
+	})
+	if err != nil {
+		t.Fatalf("NewLLMChatEngine() error = %v", err)
+	}
+	engine.client = &http.Client{Transport: &handlerTransport{handler: handler}}
+
+	output, err := engine.Run(context.Background(), EngineInput{
+		Messages: []Message{{Role: RoleUser, Content: "Hi"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if output.AssistantText != "ok" {
+		t.Fatalf("response = %q, want ok", output.AssistantText)
+	}
+}
+
 func TestLLMChatEngine_Run_CustomHeaderAuth(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("X-Demo-Key"); got != "Token demo-secret" {

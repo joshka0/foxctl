@@ -47,3 +47,27 @@ func TestAnalyzePythonSemanticSimplificationsSkipsUnsafeOrTrue(t *testing.T) {
 		t.Fatalf("expected no simplification finding, got %#v", got)
 	}
 }
+
+func TestAnalyzePythonSemanticSimplificationsFindsBooleanReturnWrapper(t *testing.T) {
+	src := []byte("def should_run(flag):\n    if flag == True:\n        return True\n    return False\n")
+	symbols := []symindex.Symbol{{
+		Name:      "should_run",
+		Language:  "python",
+		Kind:      symindex.KindFunction,
+		StartLine: 1,
+		StartByte: 0,
+		EndByte:   len(src),
+	}}
+
+	got := analyzePythonSemanticSimplifications("should_run.py", "should_run.py", "python", src, symbols)
+	if len(got) != 1 {
+		t.Fatalf("len(got)=%d want 1 (%#v)", len(got), got)
+	}
+	if got[0].Evidence["simplified_form"] != "return flag" {
+		t.Fatalf("simplified_form=%#v", got[0].Evidence["simplified_form"])
+	}
+	patterns, ok := got[0].Evidence["pattern_ids"].([]string)
+	if !ok || len(patterns) == 0 || patterns[0] != "boolean_return_wrapper" {
+		t.Fatalf("pattern_ids=%#v", got[0].Evidence["pattern_ids"])
+	}
+}

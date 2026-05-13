@@ -1,11 +1,20 @@
 # Implementation Plan: RLM Recursive Fan-Out Runtime
 
+## Status
+
+Core runtime slice landed. The scheduler, memory node store, budget lanes,
+`rlm_query`, `rlm_wait`, `rlm_result`, and REPL-runner async recursion paths are
+implemented with focused runtime tests. Remaining work is integration hardening:
+tree-artifact reporting, filesystem node-store durability, smolvm propagation,
+agent-tool exposure, and richer LongCoT report metadata.
+
 ## Problem Statement
 
-Foxctl's current RLM work can run REPL-backed reasoning and can expose a
-bounded `rlm_query` tool, but the runtime is still effectively synchronous:
-the parent calls one child and waits for that child before continuing. That is
-not the recursive language model shape we want.
+Foxctl's earlier RLM work could run REPL-backed reasoning and expose a bounded
+`rlm_query` tool, but the runtime was effectively synchronous: the parent called
+one child and waited for that child before continuing. The core async runtime
+has since landed, so this document now tracks the original design plus the
+remaining hardening work.
 
 The target behavior is:
 
@@ -36,6 +45,8 @@ foxctl rlm run \
 
 The run should produce a tree-shaped artifact showing parent and child nodes,
 child summaries, tool usage, token usage, output paths, and final synthesis.
+The in-memory runtime path now supports this execution shape; durable artifacts
+and CLI output polish are still follow-up work.
 
 ## Architecture Decision
 
@@ -501,6 +512,24 @@ License impact: none.
 
 ## Implementation Order
 
+Current implementation status:
+
+- [x] Define node/result types in `internal/rlm/runtime/node.go`.
+- [x] Add in-memory node store in `internal/rlm/runtime/node_store.go`.
+- [x] Add output layout planning in `internal/rlm/runtime/layout.go`.
+- [x] Extend budgets for child/concurrency/total-node accounting.
+- [x] Implement scheduler with fake backend tests.
+- [x] Implement `rlm_query`, `rlm_wait`, and `rlm_result` tool executor.
+- [x] Wire async tools into `REPLRunner` behind config while keeping sync mode.
+- [ ] Add filesystem node store for cross-process/debuggable runs.
+- [x] Wire async budget flags through `foxctl rlm run`.
+- [ ] Wire tree metadata and artifacts through user-facing CLI reporting.
+- [ ] Add optional agent tool registry wiring for RLM tools.
+- [ ] Update smolvm command planning to pass recursive budgets/output roots.
+- [ ] Expand LongCoT report metadata for node tree summaries.
+
+Original ordered slice:
+
 1. Define node/result types in `internal/rlm/runtime/node.go`.
 2. Add memory and filesystem node stores in `internal/rlm/runtime/node_store.go`.
 3. Add output layout planning in `internal/rlm/runtime/layout.go`.
@@ -539,4 +568,3 @@ and eval integration tests. Step 14 is a manual smoke gate.
 - How much child reasoning should be persisted?
   - Default: persist tool calls, summaries, evidence, artifacts, and model
     metadata. Do not expose hidden chain-of-thought in user-facing reports.
-

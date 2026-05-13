@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft implementation plan. The first proof-of-concept slice exists in the
+Implementation in progress. The first proof-of-concept slice exists in the
 LongCoT eval runner:
 
 - `ephemeral_helper_solve` is exposed as one parent-facing tool.
@@ -25,6 +25,14 @@ Critical review has been incorporated into the execution order:
 
 This plan generalizes that proof into a reusable helper-pipeline runtime with
 repair and rerun support.
+
+Current hardening slice:
+
+- add compact parent-visible pipeline traces;
+- keep full helper source and large outputs out of model prompt context;
+- introduce shared helper-pipeline types under
+  `internal/rlm/runtime/helperpipeline`;
+- keep `ephemeral_helper_solve` as the only parent-facing tool.
 
 ## Goal
 
@@ -290,6 +298,8 @@ split them into explicit steps so repair can rerun only affected steps.
 
 ### Slice 0: Harden Current LongCoT Helper Contract
 
+Status: partially complete.
+
 - Make `--general-helper` imply helper-only phase enforcement.
 - Report helper-only tool surface for general-helper conditions.
 - Remove prompt conflicts between REPL-first and helper-first contracts.
@@ -301,6 +311,8 @@ split them into explicit steps so repair can rerun only affected steps.
   results in helper conditions.
 
 ### Slice 1: Compact Trace Output
+
+Status: in progress.
 
 - Stop returning full helper source and full large move arrays in the parent
   phase tool result by default.
@@ -314,6 +326,8 @@ split them into explicit steps so repair can rerun only affected steps.
 - Keep full trace in artifacts/metadata, not in the next model prompt.
 
 ### Slice 2: Extract Helper Pipeline Types
+
+Status: in progress.
 
 - Add `internal/rlm/runtime/helperpipeline`.
 - Move generic pipeline types and result structs there.
@@ -402,6 +416,13 @@ foxctl eval longcot \
   --blocksworld-helper=false \
   --verify \
   --verify-no-fallback
+```
+
+When using OpenRouter instead of LM Studio for interactive probes, keep the
+same helper/runtime flags and set:
+
+```bash
+--provider openrouter --model poolside/laguna-xs.2:free
 ```
 
 Expected result for current BlocksWorld stack subset: verified correct while

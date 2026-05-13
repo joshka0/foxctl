@@ -13,171 +13,132 @@ import (
 )
 
 func analyzeElixirDuplicateRecoveryBlocks(_ string, relPath, lang string, content []byte, symbols []symindex.Symbol) []finding {
-	if len(symbols) == 0 {
-		return nil
-	}
-
-	findings := make([]finding, 0, 4)
-	for _, sym := range symbols {
-		if !supportsObservedFunctionSignals(sym, lang, content) {
-			continue
-		}
-		body, ok := extractObservedSymbolBytes(sym, content)
-		if !ok {
-			continue
-		}
-		tree, ok := parseElixirSlopTree(body)
-		if !ok {
-			continue
-		}
-		groups := collectElixirDuplicateRecoveryGroups(tree.RootNode(), body)
-		tree.Close()
-		if len(groups) == 0 {
-			continue
-		}
-		for _, group := range groups {
-			absLines := make([]int, 0, len(group.Lines))
-			for _, line := range group.Lines {
-				absLines = append(absLines, sym.StartLine+line-1)
-			}
-			score := scoreDuplicateRecoveryBlock(len(absLines), group.StatementCount)
-			findings = append(findings, finding{
-				RuleID:            "duplicate_recovery_block",
-				Category:          "function",
-				Severity:          severityFor(score),
-				Score:             score,
-				Title:             "Function repeats the same guarded recovery block",
-				Detail:            sym.Name + " repeats a normalized guarded block " + itoa(len(absLines)) + " times, which is a strong signal that the recovery or fallback path wants one helper instead of copy-pasted branches.",
-				SuggestedRefactor: "Extract the repeated guarded recovery/remap path into a local helper or small policy function, then keep each branch focused on the condition that differs.",
-				File:              relPath,
-				Line:              absLines[0],
-				Symbol:            sym.Name,
-				Language:          lang,
-				Confidence:        "high",
-				Signals:           []string{"tree_sitter", "normalized_recovery_block"},
-				Evidence: map[string]any{
-					"normalized_block_hash": hashShort(group.Fingerprint),
-					"duplicate_count":       len(absLines),
-					"duplicate_span_lines":  absLines,
-					"statement_count":       group.StatementCount,
-					"control_transfers":     group.ControlTransfers,
-				},
-			})
-		}
-	}
-	return findings
+	return analyzeElixirSymbolGroups(relPath, lang, content, symbols, collectElixirDuplicateRecoveryGroups, buildElixirDuplicateRecoveryFindings)
 }
 
 func analyzeElixirDuplicatedErrorRemaps(_ string, relPath, lang string, content []byte, symbols []symindex.Symbol) []finding {
+	return analyzeElixirSymbolGroups(relPath, lang, content, symbols, collectElixirDuplicatedErrorRemapGroups, buildElixirDuplicatedErrorRemapFindings)
+}
+
+func analyzeElixirRepeatedGuardLadders(_ string, relPath, lang string, content []byte, symbols []symindex.Symbol) []finding {
+	return analyzeElixirSymbolGroups(relPath, lang, content, symbols, collectElixirRepeatedGuardGroups, buildElixirRepeatedGuardFindings)
+}
+
+func analyzeElixirSymbolGroups[T any](relPath, lang string, content []byte, symbols []symindex.Symbol, collect func(root *sitter.Node, content []byte) []T, build func(symindex.Symbol, string, string, []T) []finding) []finding {
 	if len(symbols) == 0 {
 		return nil
 	}
 
 	findings := make([]finding, 0, 4)
 	for _, sym := range symbols {
-		if !supportsObservedFunctionSignals(sym, lang, content) {
-			continue
-		}
-		body, ok := extractObservedSymbolBytes(sym, content)
+		groups, ok := collectElixirSymbolCandidates(sym, lang, content, collect)
 		if !ok {
 			continue
 		}
-		tree, ok := parseElixirSlopTree(body)
-		if !ok {
-			continue
-		}
-		groups := collectElixirDuplicatedErrorRemapGroups(tree.RootNode(), body)
-		tree.Close()
-		if len(groups) == 0 {
-			continue
-		}
-		for _, group := range groups {
-			absLines := make([]int, 0, len(group.Lines))
-			for _, line := range group.Lines {
-				absLines = append(absLines, sym.StartLine+line-1)
-			}
-			score := scoreDuplicatedErrorRemap(len(absLines))
-			findings = append(findings, finding{
-				RuleID:            "duplicated_error_remap",
-				Category:          "function",
-				Severity:          severityFor(score),
-				Score:             score,
-				Title:             "Function repeats the same guarded error remap",
-				Detail:            elixirErrorRemapDetail(sym.Name, group.GroupKind, len(absLines)),
-				SuggestedRefactor: "Extract the repeated error remap into one helper that translates the upstream error shape to the domain error once, then call it from each matching branch.",
-				File:              relPath,
-				Line:              absLines[0],
-				Symbol:            sym.Name,
-				Language:          lang,
-				Confidence:        "high",
-				Signals:           []string{"tree_sitter", "normalized_error_remap"},
-				Evidence: map[string]any{
-					"normalized_condition_hash": hashShort(group.ConditionFingerprint),
-					"normalized_remap_hash":     hashShort(group.RemapFingerprint),
-					"duplicate_count":           len(absLines),
-					"duplicate_span_lines":      absLines,
-					"condition_count":           len(group.ConditionFingerprints),
-					"group_kind":                group.GroupKind,
-				},
-			})
-		}
+		findings = append(findings, build(sym, relPath, lang, groups)...)
 	}
 	return findings
 }
 
-func analyzeElixirRepeatedGuardLadders(_ string, relPath, lang string, content []byte, symbols []symindex.Symbol) []finding {
-	if len(symbols) == 0 {
-		return nil
-	}
-
-	findings := make([]finding, 0, 4)
-	for _, sym := range symbols {
-		if !supportsObservedFunctionSignals(sym, lang, content) {
-			continue
-		}
-		body, ok := extractObservedSymbolBytes(sym, content)
-		if !ok {
-			continue
-		}
-		tree, ok := parseElixirSlopTree(body)
-		if !ok {
-			continue
-		}
-		groups := collectElixirRepeatedGuardGroups(tree.RootNode(), body)
-		tree.Close()
-		if len(groups) == 0 {
-			continue
-		}
-		for _, group := range groups {
-			absLines := make([]int, 0, len(group.Lines))
-			for _, line := range group.Lines {
-				absLines = append(absLines, sym.StartLine+line-1)
-			}
-			score := scoreRepeatedGuardLadder(len(absLines))
-			findings = append(findings, finding{
-				RuleID:            "repeated_guard_ladder",
-				Category:          "function",
-				Severity:          severityFor(score),
-				Score:             score,
-				Title:             "Function repeats the same guard predicate",
-				Detail:            sym.Name + " repeats the same guard predicate " + itoa(len(absLines)) + " times, which suggests one policy helper or state transition should own the repeated gate instead of branching on it in multiple places.",
-				SuggestedRefactor: "Extract the repeated guard or the guarded action into one helper so the policy check is expressed once and reused consistently.",
-				File:              relPath,
-				Line:              absLines[0],
-				Symbol:            sym.Name,
-				Language:          lang,
-				Confidence:        "high",
-				Signals:           []string{"tree_sitter", "normalized_guard_predicate"},
-				Evidence: map[string]any{
-					"normalized_guard_hash": hashShort(group.Fingerprint),
-					"duplicate_count":       len(absLines),
-					"duplicate_span_lines":  absLines,
-					"guard_preview":         group.Preview,
-				},
-			})
-		}
+func buildElixirDuplicateRecoveryFindings(sym symindex.Symbol, relPath, lang string, groups []elixirDuplicateRecoveryGroup) []finding {
+	findings := make([]finding, 0, len(groups))
+	for _, group := range groups {
+		absLines := absoluteElixirLines(sym, group.Lines)
+		score := scoreDuplicateRecoveryBlock(len(absLines), group.StatementCount)
+		findings = append(findings, finding{
+			RuleID:            "duplicate_recovery_block",
+			Category:          "function",
+			Severity:          severityFor(score),
+			Score:             score,
+			Title:             "Function repeats the same guarded recovery block",
+			Detail:            sym.Name + " repeats a normalized guarded block " + itoa(len(absLines)) + " times, which is a strong signal that the recovery or fallback path wants one helper instead of copy-pasted branches.",
+			SuggestedRefactor: "Extract the repeated guarded recovery/remap path into a local helper or small policy function, then keep each branch focused on the condition that differs.",
+			File:              relPath,
+			Line:              absLines[0],
+			Symbol:            sym.Name,
+			Language:          lang,
+			Confidence:        "high",
+			Signals:           []string{"tree_sitter", "normalized_recovery_block"},
+			Evidence: map[string]any{
+				"normalized_block_hash": hashShort(group.Fingerprint),
+				"duplicate_count":       len(absLines),
+				"duplicate_span_lines":  absLines,
+				"statement_count":       group.StatementCount,
+				"control_transfers":     group.ControlTransfers,
+			},
+		})
 	}
 	return findings
+}
+
+func buildElixirDuplicatedErrorRemapFindings(sym symindex.Symbol, relPath, lang string, groups []elixirDuplicatedErrorRemapGroup) []finding {
+	findings := make([]finding, 0, len(groups))
+	for _, group := range groups {
+		absLines := absoluteElixirLines(sym, group.Lines)
+		score := scoreDuplicatedErrorRemap(len(absLines))
+		findings = append(findings, finding{
+			RuleID:            "duplicated_error_remap",
+			Category:          "function",
+			Severity:          severityFor(score),
+			Score:             score,
+			Title:             "Function repeats the same guarded error remap",
+			Detail:            elixirErrorRemapDetail(sym.Name, group.GroupKind, len(absLines)),
+			SuggestedRefactor: "Extract the repeated error remap into one helper that translates the upstream error shape to the domain error once, then call it from each matching branch.",
+			File:              relPath,
+			Line:              absLines[0],
+			Symbol:            sym.Name,
+			Language:          lang,
+			Confidence:        "high",
+			Signals:           []string{"tree_sitter", "normalized_error_remap"},
+			Evidence: map[string]any{
+				"normalized_condition_hash": hashShort(group.ConditionFingerprint),
+				"normalized_remap_hash":     hashShort(group.RemapFingerprint),
+				"duplicate_count":           len(absLines),
+				"duplicate_span_lines":      absLines,
+				"condition_count":           len(group.ConditionFingerprints),
+				"group_kind":                group.GroupKind,
+			},
+		})
+	}
+	return findings
+}
+
+func buildElixirRepeatedGuardFindings(sym symindex.Symbol, relPath, lang string, groups []elixirRepeatedGuardGroup) []finding {
+	findings := make([]finding, 0, len(groups))
+	for _, group := range groups {
+		absLines := absoluteElixirLines(sym, group.Lines)
+		score := scoreRepeatedGuardLadder(len(absLines))
+		findings = append(findings, finding{
+			RuleID:            "repeated_guard_ladder",
+			Category:          "function",
+			Severity:          severityFor(score),
+			Score:             score,
+			Title:             "Function repeats the same guard predicate",
+			Detail:            sym.Name + " repeats the same guard predicate " + itoa(len(absLines)) + " times, which suggests one policy helper or state transition should own the repeated gate instead of branching on it in multiple places.",
+			SuggestedRefactor: "Extract the repeated guard or the guarded action into one helper so the policy check is expressed once and reused consistently.",
+			File:              relPath,
+			Line:              absLines[0],
+			Symbol:            sym.Name,
+			Language:          lang,
+			Confidence:        "high",
+			Signals:           []string{"tree_sitter", "normalized_guard_predicate"},
+			Evidence: map[string]any{
+				"normalized_guard_hash": hashShort(group.Fingerprint),
+				"duplicate_count":       len(absLines),
+				"duplicate_span_lines":  absLines,
+				"guard_preview":         group.Preview,
+			},
+		})
+	}
+	return findings
+}
+
+func absoluteElixirLines(sym symindex.Symbol, relativeLines []int) []int {
+	absLines := make([]int, 0, len(relativeLines))
+	for _, line := range relativeLines {
+		absLines = append(absLines, sym.StartLine+line-1)
+	}
+	return absLines
 }
 
 type elixirDuplicateRecoveryGroup struct {
@@ -208,6 +169,12 @@ type elixirGuardAtom struct {
 	Line        int
 }
 
+type elixirLineGroup[T any] struct {
+	Fingerprint string
+	Lines       []int
+	Value       T
+}
+
 func parseElixirSlopTree(content []byte) (*sitter.Tree, bool) {
 	parser := sitter.NewParser()
 	defer parser.Close()
@@ -221,88 +188,108 @@ func parseElixirSlopTree(content []byte) (*sitter.Tree, bool) {
 	return tree, true
 }
 
-func collectElixirDuplicateRecoveryGroups(root *sitter.Node, content []byte) []elixirDuplicateRecoveryGroup {
-	if root == nil {
-		return nil
+func newElixirLineGroup[T any](fingerprint string, lines []int, value T) *elixirLineGroup[T] {
+	groupLines := append([]int(nil), lines...)
+	sort.Ints(groupLines)
+	return &elixirLineGroup[T]{
+		Fingerprint: fingerprint,
+		Lines:       groupLines,
+		Value:       value,
 	}
-	groups := make(map[string]*elixirDuplicateRecoveryGroup)
-	walkElixirIfCalls(root, content, func(call *sitter.Node) {
-		candidate := elixirRecoveryCandidate(call, content)
-		if candidate == nil {
-			return
-		}
-		if existing, ok := groups[candidate.Fingerprint]; ok {
-			existing.Lines = append(existing.Lines, candidate.Lines[0])
-			sort.Ints(existing.Lines)
-			if candidate.StatementCount > existing.StatementCount {
-				existing.StatementCount = candidate.StatementCount
-			}
-			if candidate.ControlTransfers > existing.ControlTransfers {
-				existing.ControlTransfers = candidate.ControlTransfers
-			}
-			return
-		}
-		copyCandidate := *candidate
-		groups[candidate.Fingerprint] = &copyCandidate
-	})
+}
 
-	out := make([]elixirDuplicateRecoveryGroup, 0, len(groups))
+func appendElixirGroupLine[T any](group *elixirLineGroup[T], line int) {
+	if group == nil {
+		return
+	}
+	group.Lines = append(group.Lines, line)
+	sort.Ints(group.Lines)
+}
+
+func sortedElixirLineGroups[T any](groups map[string]*elixirLineGroup[T], applyLines func(*T, []int), lines func(*T) []int, fingerprint func(*T) string) []T {
+	out := make([]T, 0, len(groups))
 	for _, group := range groups {
 		if group == nil || len(group.Lines) < 2 {
 			continue
 		}
 		sort.Ints(group.Lines)
-		out = append(out, *group)
+		value := group.Value
+		applyLines(&value, append([]int(nil), group.Lines...))
+		out = append(out, value)
 	}
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].Lines[0] != out[j].Lines[0] {
-			return out[i].Lines[0] < out[j].Lines[0]
+		leftLines := lines(&out[i])
+		rightLines := lines(&out[j])
+		if leftLines[0] != rightLines[0] {
+			return leftLines[0] < rightLines[0]
 		}
-		return out[i].Fingerprint < out[j].Fingerprint
+		return fingerprint(&out[i]) < fingerprint(&out[j])
 	})
 	return out
+}
+
+func mergeElixirRecoveryStats(existing *elixirDuplicateRecoveryGroup, candidate elixirDuplicateRecoveryGroup) {
+	if candidate.StatementCount > existing.StatementCount {
+		existing.StatementCount = candidate.StatementCount
+	}
+	if candidate.ControlTransfers > existing.ControlTransfers {
+		existing.ControlTransfers = candidate.ControlTransfers
+	}
+}
+
+func collectElixirDuplicateRecoveryGroups(root *sitter.Node, content []byte) []elixirDuplicateRecoveryGroup {
+	if root == nil {
+		return nil
+	}
+	groups := make(map[string]*elixirLineGroup[elixirDuplicateRecoveryGroup])
+	walkElixirIfCalls(root, content, func(call *sitter.Node) {
+		candidate := elixirRecoveryCandidate(call, content)
+		if candidate == nil {
+			return
+		}
+		if group, ok := groups[candidate.Fingerprint]; ok {
+			appendElixirGroupLine(group, candidate.Lines[0])
+			mergeElixirRecoveryStats(&group.Value, *candidate)
+			return
+		}
+		groups[candidate.Fingerprint] = newElixirLineGroup(candidate.Fingerprint, candidate.Lines, *candidate)
+	})
+
+	return sortedElixirLineGroups(groups,
+		func(group *elixirDuplicateRecoveryGroup, lines []int) { group.Lines = lines },
+		func(group *elixirDuplicateRecoveryGroup) []int { return group.Lines },
+		func(group *elixirDuplicateRecoveryGroup) string { return group.Fingerprint },
+	)
 }
 
 func collectElixirRepeatedGuardGroups(root *sitter.Node, content []byte) []elixirRepeatedGuardGroup {
 	if root == nil {
 		return nil
 	}
-	groups := make(map[string]*elixirRepeatedGuardGroup)
+	groups := make(map[string]*elixirLineGroup[elixirRepeatedGuardGroup])
 	walkElixirIfCalls(root, content, func(call *sitter.Node) {
 		args := elixirCallArgumentsLocal(call)
 		if args == nil {
 			return
 		}
 		for _, atom := range elixirGuardAtoms(args, content) {
-			if existing, ok := groups[atom.Fingerprint]; ok {
-				existing.Lines = append(existing.Lines, atom.Line)
-				sort.Ints(existing.Lines)
+			if group, ok := groups[atom.Fingerprint]; ok {
+				appendElixirGroupLine(group, atom.Line)
 				return
 			}
-			copyAtom := atom
-			groups[atom.Fingerprint] = &elixirRepeatedGuardGroup{
-				Fingerprint: copyAtom.Fingerprint,
-				Preview:     copyAtom.Preview,
-				Lines:       []int{copyAtom.Line},
-			}
+			groups[atom.Fingerprint] = newElixirLineGroup(atom.Fingerprint, []int{atom.Line}, elixirRepeatedGuardGroup{
+				Fingerprint: atom.Fingerprint,
+				Preview:     atom.Preview,
+				Lines:       []int{atom.Line},
+			})
 		}
 	})
 
-	out := make([]elixirRepeatedGuardGroup, 0, len(groups))
-	for _, group := range groups {
-		if group == nil || len(group.Lines) < 2 {
-			continue
-		}
-		sort.Ints(group.Lines)
-		out = append(out, *group)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Lines[0] != out[j].Lines[0] {
-			return out[i].Lines[0] < out[j].Lines[0]
-		}
-		return out[i].Fingerprint < out[j].Fingerprint
-	})
-	return out
+	return sortedElixirLineGroups(groups,
+		func(group *elixirRepeatedGuardGroup, lines []int) { group.Lines = lines },
+		func(group *elixirRepeatedGuardGroup) []int { return group.Lines },
+		func(group *elixirRepeatedGuardGroup) string { return group.Fingerprint },
+	)
 }
 
 func collectElixirDuplicatedErrorRemapGroups(root *sitter.Node, content []byte) []elixirDuplicatedErrorRemapGroup {
@@ -380,23 +367,12 @@ func elixirRecoveryCandidate(call *sitter.Node, content []byte) *elixirDuplicate
 	if block == nil {
 		return nil
 	}
-	statements := elixirNamedChildren(block)
-	if len(statements) == 0 {
-		return nil
-	}
-	parts := make([]string, 0, len(statements))
-	for _, stmt := range statements {
-		fp := elixirNodeFingerprint(&stmt, content)
-		if strings.TrimSpace(fp) == "" {
-			continue
-		}
-		parts = append(parts, fp)
-	}
+	parts := elixirRecoveryFingerprints(block, content)
 	if len(parts) == 0 {
 		return nil
 	}
 	fingerprint := strings.Join(parts, ";")
-	if len(strings.Fields(strings.NewReplacer("(", " ", ")", " ", "[", " ", "]", " ", "{", " ", "}", " ", ",", " ", ";", " ").Replace(fingerprint))) < 2 {
+	if !elixirRecoveryFingerprintHasSignal(fingerprint) {
 		return nil
 	}
 	controlTransfers := elixirControlTransfers(block, content)
@@ -409,6 +385,32 @@ func elixirRecoveryCandidate(call *sitter.Node, content []byte) *elixirDuplicate
 		StatementCount:   len(parts),
 		ControlTransfers: controlTransfers,
 	}
+}
+
+func elixirRecoveryFingerprints(block *sitter.Node, content []byte) []string {
+	statements := elixirNamedChildren(block)
+	if len(statements) == 0 {
+		return nil
+	}
+	parts := make([]string, 0, len(statements))
+	for _, stmt := range statements {
+		fp := elixirNodeFingerprint(&stmt, content)
+		if strings.TrimSpace(fp) == "" {
+			continue
+		}
+		parts = append(parts, fp)
+	}
+	return parts
+}
+
+func elixirRecoveryFingerprintHasSignal(fingerprint string) bool {
+	if strings.TrimSpace(fingerprint) == "" {
+		return false
+	}
+	tokens := strings.Fields(strings.NewReplacer(
+		"(", " ", ")", " ", "[", " ", "]", " ", "{", " ", "}", " ", ",", " ", ";", " ",
+	).Replace(fingerprint))
+	return len(tokens) >= 2
 }
 
 func elixirErrorRemapCandidates(clause *sitter.Node, content []byte) []elixirDuplicatedErrorRemapGroup {
@@ -512,26 +514,47 @@ func elixirGuardAtoms(node *sitter.Node, content []byte) []elixirGuardAtom {
 	if node == nil {
 		return nil
 	}
-	switch node.Kind() {
-	case "arguments", "body":
-		children := elixirNamedChildren(node)
-		atoms := make([]elixirGuardAtom, 0, len(children))
-		for _, child := range children {
-			c := child
-			atoms = append(atoms, elixirGuardAtoms(&c, content)...)
-		}
+	if atoms, handled := elixirGuardContainerAtoms(node, content); handled {
 		return atoms
 	}
-	if node.Kind() == "binary_operator" {
-		left := node.ChildByFieldName("left")
-		right := node.ChildByFieldName("right")
-		switch elixirBinaryOperator(node, left, right, content) {
-		case "and", "or", "&&", "||":
-			atoms := elixirGuardAtoms(left, content)
-			atoms = append(atoms, elixirGuardAtoms(right, content)...)
-			return atoms
-		}
+	if atoms, handled := elixirGuardBooleanAtoms(node, content); handled {
+		return atoms
 	}
+	return elixirGuardLeafAtom(node, content)
+}
+
+func elixirGuardContainerAtoms(node *sitter.Node, content []byte) ([]elixirGuardAtom, bool) {
+	switch node.Kind() {
+	case "arguments", "body":
+	default:
+		return nil, false
+	}
+	children := elixirNamedChildren(node)
+	atoms := make([]elixirGuardAtom, 0, len(children))
+	for _, child := range children {
+		c := child
+		atoms = append(atoms, elixirGuardAtoms(&c, content)...)
+	}
+	return atoms, true
+}
+
+func elixirGuardBooleanAtoms(node *sitter.Node, content []byte) ([]elixirGuardAtom, bool) {
+	if node == nil || node.Kind() != "binary_operator" {
+		return nil, false
+	}
+	left := node.ChildByFieldName("left")
+	right := node.ChildByFieldName("right")
+	switch elixirBinaryOperator(node, left, right, content) {
+	case "and", "or", "&&", "||":
+	default:
+		return nil, false
+	}
+	atoms := elixirGuardAtoms(left, content)
+	atoms = append(atoms, elixirGuardAtoms(right, content)...)
+	return atoms, true
+}
+
+func elixirGuardLeafAtom(node *sitter.Node, content []byte) []elixirGuardAtom {
 	fingerprint := elixirNodeFingerprint(node, content)
 	if strings.TrimSpace(fingerprint) == "" {
 		return nil
@@ -643,55 +666,84 @@ func elixirNodeFingerprint(node *sitter.Node, content []byte) string {
 	if node == nil {
 		return ""
 	}
+	if fp, ok := elixirScalarFingerprint(node, content); ok {
+		return fp
+	}
+	if fp, ok := elixirStructuredFingerprint(node, content); ok {
+		return fp
+	}
+	return elixirFallbackFingerprint(node, content)
+}
+
+func elixirScalarFingerprint(node *sitter.Node, content []byte) (string, bool) {
 	switch node.Kind() {
 	case "identifier":
-		return "var"
+		return "var", true
 	case "alias":
-		return "alias(" + strings.TrimSpace(elixirNodeText(node, content)) + ")"
+		return "alias(" + strings.TrimSpace(elixirNodeText(node, content)) + ")", true
 	case "atom", "integer", "float", "charlist", "true", "false", "nil":
-		return "lit(" + strings.TrimSpace(elixirNodeText(node, content)) + ")"
+		return "lit(" + strings.TrimSpace(elixirNodeText(node, content)) + ")", true
+	case "quoted_content":
+		return "quoted(" + strings.TrimSpace(elixirNodeText(node, content)) + ")", true
 	case "string":
 		children := elixirNamedChildren(node)
 		if len(children) == 0 {
-			return "string(" + strings.TrimSpace(elixirNodeText(node, content)) + ")"
+			return "string(" + strings.TrimSpace(elixirNodeText(node, content)) + ")", true
 		}
-		return "string(" + strings.Join(elixirFingerprints(children, content), ",") + ")"
-	case "quoted_content":
-		return "quoted(" + strings.TrimSpace(elixirNodeText(node, content)) + ")"
+		return "string(" + strings.Join(elixirFingerprints(children, content), ",") + ")", true
+	default:
+		return "", false
+	}
+}
+
+func elixirStructuredFingerprint(node *sitter.Node, content []byte) (string, bool) {
+	switch node.Kind() {
 	case "call":
-		target := node.ChildByFieldName("target")
-		targetFP := elixirCallTargetFingerprint(target, content)
-		argFPs := elixirFingerprints(elixirNamedChildren(elixirCallArgumentsLocal(node)), content)
-		if len(argFPs) == 0 {
-			return "call(" + targetFP + ")"
-		}
-		return "call(" + targetFP + "," + strings.Join(argFPs, ",") + ")"
+		return elixirCallFingerprint(node, content), true
 	case "dot":
-		return elixirDotFingerprint(node, content)
+		return elixirDotFingerprint(node, content), true
 	case "binary_operator":
 		left := node.ChildByFieldName("left")
 		right := node.ChildByFieldName("right")
-		return "bin(" + elixirBinaryOperator(node, left, right, content) + "," + elixirNodeFingerprint(left, content) + "," + elixirNodeFingerprint(right, content) + ")"
+		return "bin(" + elixirBinaryOperator(node, left, right, content) + "," + elixirNodeFingerprint(left, content) + "," + elixirNodeFingerprint(right, content) + ")", true
 	case "unary_operator":
 		operand := node.ChildByFieldName("operand")
-		return "unary(" + elixirUnaryOperator(node, operand, content) + "," + elixirNodeFingerprint(operand, content) + ")"
+		return "unary(" + elixirUnaryOperator(node, operand, content) + "," + elixirNodeFingerprint(operand, content) + ")", true
 	case "arguments", "do_block", "body", "tuple", "list", "map", "struct":
-		childFPs := elixirFingerprints(elixirNamedChildren(node), content)
-		if len(childFPs) == 0 {
-			return node.Kind()
-		}
-		return node.Kind() + "[" + strings.Join(childFPs, ",") + "]"
+		return elixirNodeWithChildrenFingerprint(node, content), true
 	default:
-		childFPs := elixirFingerprints(elixirNamedChildren(node), content)
-		if len(childFPs) > 0 {
-			return node.Kind() + "[" + strings.Join(childFPs, ",") + "]"
-		}
-		text := strings.TrimSpace(elixirNodeText(node, content))
-		if text == "" {
-			return node.Kind()
-		}
-		return node.Kind() + "(" + text + ")"
+		return "", false
 	}
+}
+
+func elixirCallFingerprint(node *sitter.Node, content []byte) string {
+	target := node.ChildByFieldName("target")
+	targetFP := elixirCallTargetFingerprint(target, content)
+	argFPs := elixirFingerprints(elixirNamedChildren(elixirCallArgumentsLocal(node)), content)
+	if len(argFPs) == 0 {
+		return "call(" + targetFP + ")"
+	}
+	return "call(" + targetFP + "," + strings.Join(argFPs, ",") + ")"
+}
+
+func elixirNodeWithChildrenFingerprint(node *sitter.Node, content []byte) string {
+	childFPs := elixirFingerprints(elixirNamedChildren(node), content)
+	if len(childFPs) == 0 {
+		return node.Kind()
+	}
+	return node.Kind() + "[" + strings.Join(childFPs, ",") + "]"
+}
+
+func elixirFallbackFingerprint(node *sitter.Node, content []byte) string {
+	childFPs := elixirFingerprints(elixirNamedChildren(node), content)
+	if len(childFPs) > 0 {
+		return node.Kind() + "[" + strings.Join(childFPs, ",") + "]"
+	}
+	text := strings.TrimSpace(elixirNodeText(node, content))
+	if text == "" {
+		return node.Kind()
+	}
+	return node.Kind() + "(" + text + ")"
 }
 
 func elixirCallTargetFingerprint(target *sitter.Node, content []byte) string {

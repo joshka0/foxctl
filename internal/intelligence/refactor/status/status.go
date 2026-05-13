@@ -67,6 +67,12 @@ type Status struct {
 	RepoIndex RepoIndexStatus `json:"repo_index"`
 }
 
+type repoIndexDecision struct {
+	Available    bool
+	ScopeCovered bool
+	Reasons      []string
+}
+
 func Evaluate(ctx context.Context, storageRoot string, scope refscope.Scope) Status {
 	scope = rebaseToIndexedWorkspace(ctx, storageRoot, scope)
 	out := Status{
@@ -106,36 +112,44 @@ func Evaluate(ctx context.Context, storageRoot string, scope refscope.Scope) Sta
 	out.RepoIndex.Stats = stats
 	out.RepoIndex.Languages = append([]string(nil), meta.Languages...)
 
-	if meta.IndexedAt.IsZero() || strings.TrimSpace(meta.RepoRoot) == "" {
-		out.RepoIndex.Available = false
-		out.Reasons = append(out.Reasons, ReasonRepoIndexMissing)
-		return out
-	}
-	out.RepoIndex.Available = true
-
-	if meta.SchemaVersion != repoindex.SchemaVersion() {
-		out.Reasons = append(out.Reasons, ReasonRepoIndexSchemaMismatch)
-	}
-	if out.Git.Available && strings.TrimSpace(meta.HeadSHA) != "" && meta.HeadSHA != out.Git.HeadSHA {
-		out.Reasons = append(out.Reasons, ReasonRepoIndexHeadMismatch)
-	}
-	if !languageIndexed(scope.Language, meta.Languages) {
-		out.Reasons = append(out.Reasons, ReasonScopeLanguageNotIndexed)
-	}
-	if coverage, err := scopeCoverage(ctx, store, scope); err == nil {
+	var coverage ScopeCoverage
+	coverageOK := false
+	if computedCoverage, err := scopeCoverage(ctx, store, scope); err == nil {
+		coverage = computedCoverage
 		out.RepoIndex.Coverage = coverage
-		out.RepoIndex.ScopeCovered = coverageComplete(coverage)
-		if !out.RepoIndex.ScopeCovered {
-			out.Reasons = append(out.Reasons, ReasonScopePathNotIndexed)
-		}
-	} else {
-		out.Reasons = append(out.Reasons, ReasonScopePathNotIndexed)
+		coverageOK = true
 	}
 
+	decision := decideRepoIndex(scope, out.Git, meta, coverage, coverageOK)
+	out.RepoIndex.Available = decision.Available
+	out.RepoIndex.ScopeCovered = decision.ScopeCovered
+	out.Reasons = append(out.Reasons, decision.Reasons...)
 	if len(out.Reasons) == 0 {
 		out.Mode = ModeIndexBacked
 	}
 	return out
+}
+
+func decideRepoIndex(scope refscope.Scope, git GitStatus, meta repoindex.IndexMeta, coverage ScopeCoverage, coverageOK bool) repoIndexDecision {
+	if meta.IndexedAt.IsZero() || strings.TrimSpace(meta.RepoRoot) == "" {
+		return repoIndexDecision{Reasons: []string{ReasonRepoIndexMissing}}
+	}
+
+	decision := repoIndexDecision{Available: true}
+	if meta.SchemaVersion != repoindex.SchemaVersion() {
+		decision.Reasons = append(decision.Reasons, ReasonRepoIndexSchemaMismatch)
+	}
+	if git.Available && strings.TrimSpace(meta.HeadSHA) != "" && meta.HeadSHA != git.HeadSHA {
+		decision.Reasons = append(decision.Reasons, ReasonRepoIndexHeadMismatch)
+	}
+	if !languageIndexed(scope.Language, meta.Languages) {
+		decision.Reasons = append(decision.Reasons, ReasonScopeLanguageNotIndexed)
+	}
+	decision.ScopeCovered = coverageOK && coverageComplete(coverage)
+	if !decision.ScopeCovered {
+		decision.Reasons = append(decision.Reasons, ReasonScopePathNotIndexed)
+	}
+	return decision
 }
 
 func rebaseToIndexedWorkspace(ctx context.Context, storageRoot string, scope refscope.Scope) refscope.Scope {

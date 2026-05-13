@@ -3,6 +3,7 @@ package hot
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -64,5 +65,85 @@ func TestBuildCochangeIndexRanksRepeatedPairs(t *testing.T) {
 	}
 	if _, ok := got["internal/c.go"]; ok && len(got["internal/c.go"]) != 0 {
 		t.Fatalf("expected c.go to have no cochange neighbors: %#v", got["internal/c.go"])
+	}
+}
+
+func TestBuildCochangeGraphFromLogHandlesMalformedChunksAndFilters(t *testing.T) {
+	t.Parallel()
+
+	graph := buildCochangeGraphFromLog(strings.Join([]string{
+		"commit-1\x1f1710000000",
+		"internal/a.go",
+		"internal/b.go",
+		"internal/a_test.go",
+		"README.md",
+		"commit-2\x1fbroken-ts",
+		"internal/a.go",
+		"internal/c.go",
+		"internal/notes.txt",
+	}, "\n"), cochangeParseOptions{
+		ScopePath:    "internal",
+		IsDir:        true,
+		IncludeTests: false,
+		Language:     "go",
+		HalfLifeDays: 0,
+		Now:          time.Unix(1_710_000_100, 0).UTC(),
+	})
+
+	got := extractCochangeNeighbors(graph, 10)["internal/a.go"]
+	if len(got) != 2 {
+		t.Fatalf("neighbor count=%d want 2 (%#v)", len(got), got)
+	}
+	if got[0].Path != "internal/b.go" || got[1].Path != "internal/c.go" {
+		t.Fatalf("neighbor order=%#v want [internal/b.go internal/c.go]", got)
+	}
+	if got[0].Count != 1 || got[1].Count != 1 {
+		t.Fatalf("neighbor counts=%#v want each 1", got)
+	}
+	if got[0].LastTouched.IsZero() {
+		t.Fatalf("internal/b.go last touched should keep valid commit timestamp")
+	}
+	if !got[1].LastTouched.IsZero() {
+		t.Fatalf("internal/c.go last touched should remain zero for malformed timestamp chunk")
+	}
+}
+
+func TestExtractCochangeNeighborsDeterministicOrderAndLimit(t *testing.T) {
+	t.Parallel()
+
+	graph := map[string]map[string]*cochangeStats{
+		"internal/a.go": {
+			"internal/d.go": {Count: 1, Score: 1},
+			"internal/c.go": {Count: 1, Score: 1},
+			"internal/b.go": {Count: 1, Score: 1},
+		},
+	}
+
+	got := extractCochangeNeighbors(graph, 2)["internal/a.go"]
+	if len(got) != 2 {
+		t.Fatalf("neighbor count=%d want 2", len(got))
+	}
+	if got[0].Path != "internal/b.go" || got[1].Path != "internal/c.go" {
+		t.Fatalf("neighbor order=%#v want [internal/b.go internal/c.go]", got)
+	}
+}
+
+func TestFilterCochangeCommitPathIncludeTestsToggle(t *testing.T) {
+	t.Parallel()
+
+	opts := cochangeParseOptions{
+		ScopePath: "internal",
+		IsDir:     true,
+		Language:  "go",
+	}
+
+	if _, ok := filterCochangeCommitPath("internal/a_test.go", opts); ok {
+		t.Fatalf("expected test file to be excluded when IncludeTests=false")
+	}
+
+	opts.IncludeTests = true
+	path, ok := filterCochangeCommitPath("internal/a_test.go", opts)
+	if !ok || path != "internal/a_test.go" {
+		t.Fatalf("expected test file when IncludeTests=true, got path=%q ok=%v", path, ok)
 	}
 }

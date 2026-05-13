@@ -1805,27 +1805,6 @@ func goPackageID(importPath string) string {
 	return goPkgPrefix + importPath
 }
 
-func languageFromPackageID(pkgID string) string {
-	switch {
-	case strings.HasPrefix(pkgID, goPkgPrefix):
-		return "go"
-	case strings.HasPrefix(pkgID, tsLocalPrefix):
-		return "typescript"
-	case strings.HasPrefix(pkgID, tsNpmPrefix):
-		return "typescript"
-	case strings.HasPrefix(pkgID, pythonPkgPrefix):
-		return "python"
-	case strings.HasPrefix(pkgID, rustPkgPrefix):
-		return "rust"
-	case strings.HasPrefix(pkgID, csharpPkgPrefix):
-		return "csharp"
-	case strings.HasPrefix(pkgID, elixirPkgPrefix):
-		return "elixir"
-	default:
-		return ""
-	}
-}
-
 func languageForPath(pathValue string) string {
 	switch strings.ToLower(filepath.Ext(filepath.ToSlash(pathValue))) {
 	case ".go":

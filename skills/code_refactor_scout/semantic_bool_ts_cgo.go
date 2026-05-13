@@ -60,17 +60,7 @@ func detectTypeScriptSemanticSimplification(grammar *sitter.Language, body []byt
 	}
 	original := "return " + originalExpr
 	simplifiedText := "return " + renderSemanticBoolExpr(simplified, tsSemanticBoolSyntax)
-	if original == simplifiedText {
-		return nil
-	}
-	return &semanticSimplificationCandidate{
-		Kind:               "boolean_expr_identity",
-		PatternIDs:         appendUniquePatternStrings(nil, patterns...),
-		OriginalForm:       original,
-		SimplifiedForm:     simplifiedText,
-		OriginalTokenCount: semanticSourceTokenCount(original),
-		SimplifiedTokens:   semanticSourceTokenCount(simplifiedText),
-	}
+	return buildSemanticSimplificationCandidate("boolean_expr_identity", patterns, original, simplifiedText)
 }
 
 func detectTypeScriptBoolReturnWrapper(root *sitter.Node, content []byte) *semanticSimplificationCandidate {
@@ -130,29 +120,15 @@ func detectTypeScriptBoolReturnWrapper(root *sitter.Node, content []byte) *seman
 	patternID = "boolean_return_wrapper"
 	if invert {
 		patternID = "inverted_boolean_return_wrapper"
-		expr = semanticBoolNot(expr)
 	}
-	patterns := appendUniquePatternStrings([]string{patternID}, lowerPatterns...)
-	if simplified, extra, changed := simplifySemanticBoolExpr(expr); changed {
-		expr = simplified
-		patterns = append(patterns, extra...)
-	} else if !lowerChanged && !invert {
+	expr, patterns, ok := finalizeSemanticBoolWrapperExpr(expr, patternID, lowerPatterns, lowerChanged, invert)
+	if !ok {
 		return nil
 	}
 	original := strings.TrimSpace(tsNodeText(block, content))
 	original = strings.Join(strings.Fields(original), " ")
 	simplifiedText := "return " + renderSemanticBoolExpr(expr, tsSemanticBoolSyntax)
-	if original == "" || original == simplifiedText {
-		return nil
-	}
-	return &semanticSimplificationCandidate{
-		Kind:               "boolean_return_wrapper",
-		PatternIDs:         appendUniquePatternStrings(nil, patterns...),
-		OriginalForm:       original,
-		SimplifiedForm:     simplifiedText,
-		OriginalTokenCount: semanticSourceTokenCount(original),
-		SimplifiedTokens:   semanticSourceTokenCount(simplifiedText),
-	}
+	return buildSemanticSimplificationCandidate("boolean_return_wrapper", patterns, original, simplifiedText)
 }
 
 func tsSingleReturnedBooleanExpr(root *sitter.Node, content []byte) (*semanticBoolExpr, string, []string, bool) {
@@ -204,15 +180,11 @@ func lowerTypeScriptSemanticBoolExprDetailed(node *sitter.Node, content []byte) 
 		case "&&":
 			leftExpr, leftPatterns, leftChanged := lowerTypeScriptSemanticBoolExprDetailed(left, content)
 			rightExpr, rightPatterns, rightChanged := lowerTypeScriptSemanticBoolExprDetailed(right, content)
-			patterns := appendUniquePatternStrings(nil, leftPatterns...)
-			patterns = appendUniquePatternStrings(patterns, rightPatterns...)
-			return semanticBoolAnd(leftExpr, rightExpr), patterns, leftChanged || rightChanged
+			return semanticBoolBinaryFromChildren("and", leftExpr, leftPatterns, leftChanged, rightExpr, rightPatterns, rightChanged)
 		case "||":
 			leftExpr, leftPatterns, leftChanged := lowerTypeScriptSemanticBoolExprDetailed(left, content)
 			rightExpr, rightPatterns, rightChanged := lowerTypeScriptSemanticBoolExprDetailed(right, content)
-			patterns := appendUniquePatternStrings(nil, leftPatterns...)
-			patterns = appendUniquePatternStrings(patterns, rightPatterns...)
-			return semanticBoolOr(leftExpr, rightExpr), patterns, leftChanged || rightChanged
+			return semanticBoolBinaryFromChildren("or", leftExpr, leftPatterns, leftChanged, rightExpr, rightPatterns, rightChanged)
 		case "==", "===", "!=", "!==":
 			if lit, ok := tsBoolLiteralValue(right); ok {
 				base, patterns, changed := lowerTypeScriptSemanticBoolExprDetailed(left, content)
@@ -236,20 +208,11 @@ func lowerTypeScriptSemanticBoolExprDetailed(node *sitter.Node, content []byte) 
 }
 
 func lowerTypeScriptBoolLiteralComparisonFromBase(base *semanticBoolExpr, operator string, lit bool) *semanticBoolExpr {
-	switch operator {
-	case "==", "===":
-		if lit {
-			return base
-		}
-		return semanticBoolNot(base)
-	case "!=", "!==":
-		if lit {
-			return semanticBoolNot(base)
-		}
-		return base
-	default:
+	equality, ok := semanticBoolStringComparisonIsEquality(operator)
+	if !ok {
 		return nil
 	}
+	return lowerSemanticBoolLiteralComparisonFromEquality(base, lit, equality)
 }
 
 func tsSemanticBoolAtom(node *sitter.Node, content []byte) *semanticBoolExpr {

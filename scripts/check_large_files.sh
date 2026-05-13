@@ -10,6 +10,10 @@ cd "$ROOT_DIR"
 MAX_BYTES="${1:-512000}"
 BASE_REF="${CHECK_LARGE_FILES_BASE_REF:-}"
 
+if [ -z "$BASE_REF" ] && git rev-parse --verify origin/main >/dev/null 2>&1; then
+	BASE_REF="$(git merge-base HEAD origin/main 2>/dev/null || true)"
+fi
+
 # Skip patterns for known large/generated files
 SKIP_EXT='\.db$|\.db-shm$|\.db-wal$|\.wasm$|\.so$|\.dylib$|\.png$|\.jpg$|\.jpeg$|\.gif$|\.ico$|\.woff2?$|\.ttf$|\.eot$|\.ndjson$|\.test$'
 
@@ -17,6 +21,21 @@ SKIP_EXT='\.db$|\.db-shm$|\.db-wal$|\.wasm$|\.so$|\.dylib$|\.png$|\.jpg$|\.jpeg$
 INCLUDE_EXT='\.(go|ts|tsx|js|jsx|py|yaml|yml|json|md|toml|mod|sum|sql|proto|graphql)$'
 
 large_files=()
+
+path_size() {
+	local path="$1"
+	local size
+	size="$(git cat-file -s "HEAD:$path" 2>/dev/null || true)"
+	if [ -n "$size" ]; then
+		echo "$size"
+		return 0
+	fi
+	if [ -f "$path" ]; then
+		wc -c <"$path" | tr -d '[:space:]'
+		return 0
+	fi
+	echo ""
+}
 
 check_path_size() {
 	local path="$1"
@@ -33,10 +52,13 @@ check_path_size() {
 if [ -n "$BASE_REF" ] && git rev-parse --verify "$BASE_REF" >/dev/null 2>&1; then
 	while IFS= read -r path; do
 		[ -n "$path" ] || continue
-		size="$(git cat-file -s "HEAD:$path" 2>/dev/null || true)"
+		size="$(path_size "$path")"
 		[ -n "$size" ] || continue
 		check_path_size "$path" "$size"
-	done < <(git diff --name-only --diff-filter=A "$BASE_REF...HEAD")
+	done < <({
+		git diff --name-only --diff-filter=A "$BASE_REF...HEAD"
+		git diff --cached --name-only --diff-filter=A
+	} | sort -u)
 else
 	# Use git ls-tree for speed (no working tree stat calls for untracked files)
 	while IFS=$'\t' read -r mode_type size path; do

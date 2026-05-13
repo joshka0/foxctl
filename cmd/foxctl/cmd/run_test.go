@@ -135,21 +135,6 @@ func installTextGrepManifestOnly(t *testing.T) config.Config {
 	return cfg
 }
 
-func installHTTPOpenAPISkill(t *testing.T, cfg config.Config) {
-	t.Helper()
-	// Use normalized path (http_openapi) to match how the Installer creates directories
-	dest := filepath.Join(cfg.Paths.Skills, "http_openapi")
-	if err := os.MkdirAll(dest, 0o755); err != nil {
-		t.Fatalf("skill dir: %v", err)
-	}
-	copySkillFile(t, filepath.Join(repoRoot(t), "skills", "http_openapi", "skill.yaml"), filepath.Join(dest, "skill.yaml"))
-	binaryPath := filepath.Join(dest, "bin")
-	if runtime.GOOS == "windows" {
-		binaryPath += ".exe"
-	}
-	installSkillBinary(t, binaryPath, "./skills/http_openapi")
-}
-
 func installFSReadSkill(t *testing.T, cfg config.Config) {
 	t.Helper()
 	dest := filepath.Join(cfg.Paths.Skills, filepath.FromSlash("fs/read"))

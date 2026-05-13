@@ -231,56 +231,90 @@ func collectHotFiles(ctx context.Context, scope refscope.Scope, includeTests boo
 		}
 	}
 
+	return parseHotLogScores(stdout.String(), scope, includeTests, halfLifeDays, now), nil
+}
+
+func parseHotLogScores(logOutput string, scope refscope.Scope, includeTests bool, halfLifeDays int, now time.Time) []fileScore {
 	scopePath := normalizedScopePath(scope)
 	scores := map[string]*fileScore{}
 	var currentTime time.Time
-	for _, raw := range strings.Split(stdout.String(), "\n") {
+	for _, raw := range strings.Split(logOutput, "\n") {
 		line := strings.TrimSpace(raw)
 		if line == "" {
 			continue
 		}
-		if strings.Contains(line, "\x1f") {
-			parts := strings.SplitN(line, "\x1f", 2)
-			if len(parts) != 2 {
-				continue
-			}
-			sec, err := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
-			if err != nil {
-				currentTime = time.Time{}
-				continue
-			}
-			currentTime = time.Unix(sec, 0).UTC()
+		if ts, isCommitLine := parseHotCommitTimestamp(line); isCommitLine {
+			currentTime = ts
 			continue
 		}
-		path := pathutil.ToSlash(strings.TrimSpace(line))
-		if path == "" || !pathInScope(path, scopePath, scope.IsDir) {
+		path, lang, ok := filterHotPath(line, scopePath, scope.IsDir, includeTests, scope.Language)
+		if !ok {
 			continue
 		}
-		if !includeTests && fsutil.IsTestFile(filepath.Base(path)) {
-			continue
-		}
-		lang := langutil.DetectAllowedWithHint(scope.Language, path, langutil.CommonCodeLanguages)
-		if lang == "" {
-			continue
-		}
-		weight := recencyWeight(currentTime, now, halfLifeDays)
-		item := scores[path]
-		if item == nil {
-			item = &fileScore{Path: path, Language: lang}
-			scores[path] = item
-		}
-		item.TouchCount++
-		item.Score += weight
-		if currentTime.After(item.LastTouched) {
-			item.LastTouched = currentTime
-		}
+		addHotScore(scores, path, lang, currentTime, now, halfLifeDays)
 	}
+	return rankHotFileScores(scores)
+}
 
+func parseHotCommitTimestamp(line string) (time.Time, bool) {
+	if !strings.Contains(line, "\x1f") {
+		return time.Time{}, false
+	}
+	parts := strings.SplitN(line, "\x1f", 2)
+	if len(parts) != 2 {
+		return time.Time{}, true
+	}
+	sec, err := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
+	if err != nil {
+		return time.Time{}, true
+	}
+	return time.Unix(sec, 0).UTC(), true
+}
+
+func filterHotPath(rawPath, scopePath string, isDir, includeTests bool, languageHint string) (string, string, bool) {
+	path := pathutil.ToSlash(strings.TrimSpace(rawPath))
+	if path == "" || !pathInScope(path, scopePath, isDir) {
+		return "", "", false
+	}
+	if !includeTests && fsutil.IsTestFile(filepath.Base(path)) {
+		return "", "", false
+	}
+	lang := langutil.DetectAllowedWithHint(languageHint, path, langutil.CommonCodeLanguages)
+	if lang == "" {
+		return "", "", false
+	}
+	return path, lang, true
+}
+
+func addHotScore(scores map[string]*fileScore, path, language string, touchedAt, now time.Time, halfLifeDays int) {
+	weight := recencyWeight(touchedAt, now, halfLifeDays)
+	item := scores[path]
+	if item == nil {
+		item = &fileScore{Path: path, Language: language}
+		scores[path] = item
+	}
+	item.TouchCount++
+	item.Score += weight
+	if touchedAt.After(item.LastTouched) {
+		item.LastTouched = touchedAt
+	}
+}
+
+func rankHotFileScores(scores map[string]*fileScore) []fileScore {
 	out := make([]fileScore, 0, len(scores))
 	for _, item := range scores {
 		out = append(out, *item)
 	}
-	return out, nil
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Score != out[j].Score {
+			return out[i].Score > out[j].Score
+		}
+		if out[i].TouchCount != out[j].TouchCount {
+			return out[i].TouchCount > out[j].TouchCount
+		}
+		return out[i].Path < out[j].Path
+	})
+	return out
 }
 
 func recencyWeight(ts, now time.Time, halfLifeDays int) float64 {

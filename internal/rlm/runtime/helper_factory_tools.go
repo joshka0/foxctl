@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/joshka0/foxctl/internal/rlm"
+	"github.com/joshka0/foxctl/internal/rlm/runtime/helperpipeline"
 	"github.com/joshka0/foxctl/internal/runtime/engine"
 	"github.com/joshka0/foxctl/internal/tooling/skillrun/ephemeral"
 )
@@ -384,18 +385,23 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 			"preset":   strings.TrimSpace(h.Config.PresetName),
 			"language": helperLanguage,
 		})
+		pipeline := h.helperFactoryPipelineRun(true, answer, "", attempts, helperInput, result.Output)
 		out := map[string]any{
-			"ok":                   true,
-			"answer":               answer,
-			"requested_max_tokens": h.Config.LLM.MaxTokens,
-			"output_summary":       compactHelperFactoryMap(result.Output),
-			"input_summary":        compactHelperFactoryMap(helperInput),
-			"runner":               result.Metadata,
-			"provider":             strings.TrimSpace(h.Config.LLM.Provider),
-			"model":                strings.TrimSpace(h.Config.LLM.Model),
-			"preset":               strings.TrimSpace(h.Config.PresetName),
-			"attempts":             compactHelperFactoryAttempts(attempts),
-			"capability_policy":    h.effectiveCapabilityPolicy(helperLanguage),
+			"ok":                     true,
+			"answer":                 answer,
+			"pipeline_id":            pipeline.PipelineID,
+			"helper_scaffolded":      pipeline.Scaffolded,
+			"leaderboard_comparable": pipeline.LeaderboardComparable,
+			"requested_max_tokens":   h.Config.LLM.MaxTokens,
+			"output_summary":         compactHelperFactoryMap(result.Output),
+			"input_summary":          compactHelperFactoryMap(helperInput),
+			"runner":                 result.Metadata,
+			"provider":               strings.TrimSpace(h.Config.LLM.Provider),
+			"model":                  strings.TrimSpace(h.Config.LLM.Model),
+			"preset":                 strings.TrimSpace(h.Config.PresetName),
+			"pipeline":               pipeline,
+			"attempts":               compactHelperFactoryAttempts(attempts),
+			"capability_policy":      h.effectiveCapabilityPolicy(helperLanguage),
 		}
 		if verified {
 			out["verified"] = true
@@ -415,15 +421,21 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 		}
 		return marshalHelperFactoryOutput(out)
 	}
+	errText := fmt.Sprintf("helper factory failed after %d attempts: %s", attemptLimit, helperFactoryFirstFeedbackLine(lastFeedback))
+	pipeline := h.helperFactoryPipelineRun(false, "", errText, attempts, nil, nil)
 	out := map[string]any{
-		"ok":                   false,
-		"error":                fmt.Sprintf("helper factory failed after %d attempts: %s", attemptLimit, helperFactoryFirstFeedbackLine(lastFeedback)),
-		"requested_max_tokens": h.Config.LLM.MaxTokens,
-		"provider":             strings.TrimSpace(h.Config.LLM.Provider),
-		"model":                strings.TrimSpace(h.Config.LLM.Model),
-		"preset":               strings.TrimSpace(h.Config.PresetName),
-		"attempts":             compactHelperFactoryAttempts(attempts),
-		"capability_policy":    h.effectiveCapabilityPolicy(h.helperLanguage(0)),
+		"ok":                     false,
+		"error":                  errText,
+		"pipeline_id":            pipeline.PipelineID,
+		"helper_scaffolded":      pipeline.Scaffolded,
+		"leaderboard_comparable": pipeline.LeaderboardComparable,
+		"requested_max_tokens":   h.Config.LLM.MaxTokens,
+		"provider":               strings.TrimSpace(h.Config.LLM.Provider),
+		"model":                  strings.TrimSpace(h.Config.LLM.Model),
+		"preset":                 strings.TrimSpace(h.Config.PresetName),
+		"pipeline":               pipeline,
+		"attempts":               compactHelperFactoryAttempts(attempts),
+		"capability_policy":      h.effectiveCapabilityPolicy(h.helperLanguage(0)),
 	}
 	if repairHarness.HasCandidates() {
 		out["candidate_beam"] = compactHelperFactoryCandidateBeam(repairHarness.CandidateBeam())
@@ -1882,13 +1894,131 @@ func helperFactoryTraceFromToolResults(results []engine.ToolResult) (map[string]
 			continue
 		}
 		if _, ok := payload["attempts"]; !ok {
-			if _, ok := payload["output"]; !ok {
-				continue
+			if _, ok := payload["pipeline_id"]; !ok {
+				if _, ok := payload["pipeline"]; !ok {
+					continue
+				}
 			}
 		}
 		return payload, true
 	}
 	return nil, false
+}
+
+func (h *HelperFactoryTools) helperFactoryPipelineRun(ok bool, answer, errText string, attempts []map[string]any, input, output map[string]any) helperpipeline.PipelineRun {
+	status := "failed"
+	if ok {
+		status = "completed"
+	}
+	preset := strings.TrimSpace(h.Config.PresetName)
+	signature := helperpipeline.TaskSignature{
+		VerifierID: preset,
+	}
+	if len(input) > 0 {
+		signature.InputDigest = hashHelperFactoryString(helperFactoryJSONSummary(input))
+		signature.InputKeys = sortedHelperFactoryMapKeys(input)
+	}
+	if signature.VerifierID == "" && h.Config.AnswerVerifier != nil {
+		signature.VerifierID = "runtime_scaffold"
+	}
+	pipeline := helperpipeline.NewRun(helperpipeline.RunInput{
+		ToolName:    EphemeralHelperSolveToolName,
+		PresetName:  preset,
+		TaskDigest:  hashHelperFactoryString(h.Config.TaskPrompt),
+		InputDigest: signature.InputDigest,
+		SourceHash:  helperFactoryPipelineSourceHash(attempts),
+		VerifierID:  signature.VerifierID,
+		InputKeys:   signature.InputKeys,
+		OK:          ok,
+		Answer:      answer,
+		Error:       errText,
+		Steps:       helperFactoryPipelineSteps(attempts),
+	})
+	if len(pipeline.Steps) == 0 {
+		step := helperpipeline.StepRun{
+			StepID:     "solve",
+			Capability: helperpipeline.CapabilitySolve,
+			Status:     status,
+			Error:      errText,
+			PresetName: preset,
+		}
+		if len(input) > 0 {
+			step.InputSummary = compactHelperFactoryMap(input)
+		}
+		if len(output) > 0 {
+			step.OutputSummary = compactHelperFactoryMap(output)
+		}
+		pipeline.Steps = []helperpipeline.StepRun{step}
+	}
+	return pipeline
+}
+
+func helperFactoryPipelineSteps(attempts []map[string]any) []helperpipeline.StepRun {
+	if len(attempts) == 0 {
+		return nil
+	}
+	steps := make([]helperpipeline.StepRun, 0, len(attempts))
+	for _, attempt := range attempts {
+		stage := helperFactoryAttemptStage(attempt)
+		step := helperpipeline.StepRun{
+			StepID:     stage,
+			Capability: helperFactoryStageCapability(stage),
+			Status:     helperFactoryAttemptStatus(attempt),
+		}
+		if raw, ok := attempt["error"].(string); ok {
+			step.Error = compactHelperFactoryString(raw)
+		}
+		if raw, ok := attempt["preset"].(string); ok {
+			step.PresetName = strings.TrimSpace(raw)
+		}
+		if source, ok := attempt["source"].(string); ok && strings.TrimSpace(source) != "" {
+			step.SourceHash = hashHelperFactoryString(source)
+		}
+		if input, ok := attempt["input"].(map[string]any); ok {
+			step.InputSummary = compactHelperFactoryMap(input)
+		}
+		if output, ok := attempt["output"].(map[string]any); ok {
+			step.OutputSummary = compactHelperFactoryMap(output)
+		}
+		steps = append(steps, step)
+	}
+	return steps
+}
+
+func helperFactoryPipelineSourceHash(attempts []map[string]any) string {
+	for i := len(attempts) - 1; i >= 0; i-- {
+		if source, ok := attempts[i]["source"].(string); ok && strings.TrimSpace(source) != "" {
+			return hashHelperFactoryString(source)
+		}
+	}
+	return ""
+}
+
+func helperFactoryAttemptStage(attempt map[string]any) string {
+	if stage, ok := attempt["stage"].(string); ok && strings.TrimSpace(stage) != "" {
+		return strings.TrimSpace(stage)
+	}
+	return "solve"
+}
+
+func helperFactoryAttemptStatus(attempt map[string]any) string {
+	if ok, isBool := attempt["ok"].(bool); isBool && ok {
+		return "completed"
+	}
+	return "failed"
+}
+
+func helperFactoryStageCapability(stage string) helperpipeline.Capability {
+	switch strings.TrimSpace(stage) {
+	case "draft", "validate":
+		return helperpipeline.CapabilityParseProblem
+	case "verify", "answer_repair":
+		return helperpipeline.CapabilityVerify
+	case "finalize":
+		return helperpipeline.CapabilityFormatAnswer
+	default:
+		return helperpipeline.CapabilitySolve
+	}
 }
 
 func compactHelperFactoryAttempts(attempts []map[string]any) []map[string]any {

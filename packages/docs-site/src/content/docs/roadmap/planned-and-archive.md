@@ -5,6 +5,9 @@ description: How foxctl manages active plans, experimental features, and archive
 
 foxctl organizes documentation by lifecycle class. Planned work is useful for agents and contributors, but must not read as current operator guidance. Archived material is preserved for provenance but is not canonical behavior documentation.
 
+For a status-oriented summary of current and in-progress work, see
+[Progress](/roadmap/progress/).
+
 ## Documentation lifecycle
 
 | Class | Location | Meaning | Maintenance |

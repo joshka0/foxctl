@@ -57,17 +57,7 @@ func detectPythonSemanticSimplification(body []byte) *semanticSimplificationCand
 	}
 	original := "return " + originalExpr
 	simplifiedText := "return " + renderSemanticBoolExpr(simplified, pySemanticBoolSyntax)
-	if original == simplifiedText {
-		return nil
-	}
-	return &semanticSimplificationCandidate{
-		Kind:               "boolean_expr_identity",
-		PatternIDs:         appendUniquePatternStrings(nil, patterns...),
-		OriginalForm:       original,
-		SimplifiedForm:     simplifiedText,
-		OriginalTokenCount: semanticSourceTokenCount(original),
-		SimplifiedTokens:   semanticSourceTokenCount(simplifiedText),
-	}
+	return buildSemanticSimplificationCandidate("boolean_expr_identity", patterns, original, simplifiedText)
 }
 
 func parsePythonSemanticTree(content []byte) (*sitter.Tree, bool) {
@@ -137,28 +127,14 @@ func detectPythonBoolReturnWrapper(root *sitter.Node, content []byte) *semanticS
 	patternID = "boolean_return_wrapper"
 	if invert {
 		patternID = "inverted_boolean_return_wrapper"
-		expr = semanticBoolNot(expr)
 	}
-	patterns := appendUniquePatternStrings([]string{patternID}, lowerPatterns...)
-	if simplified, extra, changed := simplifySemanticBoolExpr(expr); changed {
-		expr = simplified
-		patterns = append(patterns, extra...)
-	} else if !lowerChanged && !invert {
+	expr, patterns, ok := finalizeSemanticBoolWrapperExpr(expr, patternID, lowerPatterns, lowerChanged, invert)
+	if !ok {
 		return nil
 	}
 	original := strings.Join(strings.Fields(strings.TrimSpace(pythonNodeText(block, content))), " ")
 	simplifiedText := "return " + renderSemanticBoolExpr(expr, pySemanticBoolSyntax)
-	if original == "" || original == simplifiedText {
-		return nil
-	}
-	return &semanticSimplificationCandidate{
-		Kind:               "boolean_return_wrapper",
-		PatternIDs:         appendUniquePatternStrings(nil, patterns...),
-		OriginalForm:       original,
-		SimplifiedForm:     simplifiedText,
-		OriginalTokenCount: semanticSourceTokenCount(original),
-		SimplifiedTokens:   semanticSourceTokenCount(simplifiedText),
-	}
+	return buildSemanticSimplificationCandidate("boolean_return_wrapper", patterns, original, simplifiedText)
 }
 
 func pythonSingleReturnedBooleanExpr(root *sitter.Node, content []byte) (*semanticBoolExpr, string, []string, bool) {
@@ -203,13 +179,11 @@ func lowerPythonSemanticBoolExprDetailed(node *sitter.Node, content []byte) (*se
 		op := pythonBinaryOperator(node, left, right, content)
 		leftExpr, leftPatterns, leftChanged := lowerPythonSemanticBoolExprDetailed(left, content)
 		rightExpr, rightPatterns, rightChanged := lowerPythonSemanticBoolExprDetailed(right, content)
-		patterns := appendUniquePatternStrings(nil, leftPatterns...)
-		patterns = appendUniquePatternStrings(patterns, rightPatterns...)
 		switch op {
 		case "and":
-			return semanticBoolAnd(leftExpr, rightExpr), patterns, leftChanged || rightChanged
+			return semanticBoolBinaryFromChildren("and", leftExpr, leftPatterns, leftChanged, rightExpr, rightPatterns, rightChanged)
 		case "or":
-			return semanticBoolOr(leftExpr, rightExpr), patterns, leftChanged || rightChanged
+			return semanticBoolBinaryFromChildren("or", leftExpr, leftPatterns, leftChanged, rightExpr, rightPatterns, rightChanged)
 		default:
 			return pythonSemanticBoolAtom(node, content), nil, false
 		}
@@ -242,20 +216,11 @@ func lowerPythonSemanticBoolExprDetailed(node *sitter.Node, content []byte) (*se
 }
 
 func lowerPythonBoolLiteralComparisonFromBase(base *semanticBoolExpr, op string, lit bool) *semanticBoolExpr {
-	switch op {
-	case "==":
-		if lit {
-			return base
-		}
-		return semanticBoolNot(base)
-	case "!=":
-		if lit {
-			return semanticBoolNot(base)
-		}
-		return base
-	default:
+	equality, ok := semanticBoolStringComparisonIsEquality(op)
+	if !ok {
 		return nil
 	}
+	return lowerSemanticBoolLiteralComparisonFromEquality(base, lit, equality)
 }
 
 func pythonSemanticBoolAtom(node *sitter.Node, content []byte) *semanticBoolExpr {

@@ -91,7 +91,7 @@ func TestChooseRLMRunnerReplWithEphemeralSkills(t *testing.T) {
 	runner := chooseRLMRunner(
 		"repl",
 		rlmenv.NewReadOnlyAdapter(config.Config{}, "", "", nil, rlm.Environment{}),
-		rlm.Task{Prompt: "solve", MaxIterations: 1, MaxDepth: 1},
+		rlm.Task{Prompt: "solve", MaxIterations: 1, MaxDepth: 1, MaxChildren: 3, MaxConcurrent: 2, MaxTotalNodes: 4},
 		rlm.Environment{},
 		"lmstudio",
 		"model",
@@ -125,6 +125,9 @@ func TestChooseRLMRunnerReplWithEphemeralSkills(t *testing.T) {
 	if !replRunner.Config.AsyncRecursion {
 		t.Fatal("AsyncRecursion=false")
 	}
+	if replRunner.Config.Budget.MaxChildren != 3 || replRunner.Config.Budget.MaxConcurrent != 2 || replRunner.Config.Budget.MaxTotalNodes != 4 {
+		t.Fatalf("budget=%+v, want explicit async tree budget", replRunner.Config.Budget)
+	}
 	if !replRunner.Config.ExtractSolutionLine {
 		t.Fatal("ExtractSolutionLine=false")
 	}
@@ -133,6 +136,57 @@ func TestChooseRLMRunnerReplWithEphemeralSkills(t *testing.T) {
 	}
 	if strings.Contains(replRunner.Config.SystemPrompt, "ephemeral_skill_draft") {
 		t.Fatalf("system prompt still references ephemeral skill draft surface:\n%s", replRunner.Config.SystemPrompt)
+	}
+}
+
+func TestRLMRunCommandCarriesAsyncTreeBudgetFlags(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	var cfg config.Config
+	cfg.Storage.Root = t.TempDir()
+
+	cmd := newRLMRunCommand()
+	cmd.SetArgs([]string{
+		"--prompt", "inspect auth flow",
+		"--workspace", workspace,
+		"--max-depth", "3",
+		"--max-subcalls", "5",
+		"--max-children", "4",
+		"--max-concurrent", "2",
+		"--max-total-nodes", "6",
+	})
+	cmd.SetContext(config.WithContext(context.Background(), cfg))
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	env, err := protocol.DecodeEnvelope(stdout.Bytes())
+	if err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	raw, err := json.Marshal(env.Data)
+	if err != nil {
+		t.Fatalf("marshal data: %v", err)
+	}
+	var payload struct {
+		Task struct {
+			MaxDepth      int `json:"max_depth"`
+			MaxSubcalls   int `json:"max_subcalls"`
+			MaxChildren   int `json:"max_children"`
+			MaxConcurrent int `json:"max_concurrent"`
+			MaxTotalNodes int `json:"max_total_nodes"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload.Task.MaxDepth != 3 || payload.Task.MaxSubcalls != 5 || payload.Task.MaxChildren != 4 || payload.Task.MaxConcurrent != 2 || payload.Task.MaxTotalNodes != 6 {
+		t.Fatalf("task budget=%+v, want CLI-provided async tree budget", payload.Task)
 	}
 }
 

@@ -246,6 +246,86 @@ func semanticSourceTokenCount(value string) int {
 	return len(strings.Fields(replacer.Replace(value)))
 }
 
+func semanticBoolBinaryFromChildren(kind string, left *semanticBoolExpr, leftPatterns []string, leftChanged bool, right *semanticBoolExpr, rightPatterns []string, rightChanged bool) (*semanticBoolExpr, []string, bool) {
+	patterns := appendUniquePatternStrings(nil, leftPatterns...)
+	patterns = appendUniquePatternStrings(patterns, rightPatterns...)
+	changed := leftChanged || rightChanged
+	switch kind {
+	case "and":
+		return semanticBoolAnd(left, right), patterns, changed
+	case "or":
+		return semanticBoolOr(left, right), patterns, changed
+	default:
+		return nil, patterns, changed
+	}
+}
+
+func semanticBoolTokenComparisonIsEquality(op token.Token) (bool, bool) {
+	switch op {
+	case token.EQL:
+		return true, true
+	case token.NEQ:
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func semanticBoolStringComparisonIsEquality(op string) (bool, bool) {
+	switch op {
+	case "==", "===":
+		return true, true
+	case "!=", "!==":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func lowerSemanticBoolLiteralComparisonFromEquality(base *semanticBoolExpr, lit bool, equality bool) *semanticBoolExpr {
+	if equality {
+		if lit {
+			return base
+		}
+		return semanticBoolNot(base)
+	}
+	if lit {
+		return semanticBoolNot(base)
+	}
+	return base
+}
+
+func finalizeSemanticBoolWrapperExpr(expr *semanticBoolExpr, patternID string, lowerPatterns []string, lowerChanged, invert bool) (*semanticBoolExpr, []string, bool) {
+	if expr == nil {
+		return nil, nil, false
+	}
+	patterns := appendUniquePatternStrings([]string{patternID}, lowerPatterns...)
+	if invert {
+		expr = semanticBoolNot(expr)
+	}
+	if simplified, extra, changed := simplifySemanticBoolExpr(expr); changed {
+		expr = simplified
+		patterns = append(patterns, extra...)
+	} else if !lowerChanged && !invert {
+		return nil, nil, false
+	}
+	return expr, patterns, true
+}
+
+func buildSemanticSimplificationCandidate(kind string, patterns []string, original, simplified string) *semanticSimplificationCandidate {
+	if original == "" || simplified == "" || original == simplified {
+		return nil
+	}
+	return &semanticSimplificationCandidate{
+		Kind:               kind,
+		PatternIDs:         appendUniquePatternStrings(nil, patterns...),
+		OriginalForm:       original,
+		SimplifiedForm:     simplified,
+		OriginalTokenCount: semanticSourceTokenCount(original),
+		SimplifiedTokens:   semanticSourceTokenCount(simplified),
+	}
+}
+
 func lowerGoSemanticBoolExprDetailed(expr ast.Expr) (*semanticBoolExpr, []string, bool) {
 	expr = goUnwrapParenExpr(expr)
 	switch node := expr.(type) {
@@ -274,23 +354,23 @@ func lowerGoSemanticBoolExprDetailed(expr ast.Expr) (*semanticBoolExpr, []string
 		case token.LAND:
 			left, leftPatterns, leftChanged := lowerGoSemanticBoolExprDetailed(node.X)
 			right, rightPatterns, rightChanged := lowerGoSemanticBoolExprDetailed(node.Y)
-			patterns := appendUniquePatternStrings(nil, leftPatterns...)
-			patterns = appendUniquePatternStrings(patterns, rightPatterns...)
-			return semanticBoolAnd(left, right), patterns, leftChanged || rightChanged
+			return semanticBoolBinaryFromChildren("and", left, leftPatterns, leftChanged, right, rightPatterns, rightChanged)
 		case token.LOR:
 			left, leftPatterns, leftChanged := lowerGoSemanticBoolExprDetailed(node.X)
 			right, rightPatterns, rightChanged := lowerGoSemanticBoolExprDetailed(node.Y)
-			patterns := appendUniquePatternStrings(nil, leftPatterns...)
-			patterns = appendUniquePatternStrings(patterns, rightPatterns...)
-			return semanticBoolOr(left, right), patterns, leftChanged || rightChanged
-		case token.EQL, token.NEQ:
+			return semanticBoolBinaryFromChildren("or", left, leftPatterns, leftChanged, right, rightPatterns, rightChanged)
+		default:
+			equality, comparison := semanticBoolTokenComparisonIsEquality(node.Op)
+			if !comparison {
+				return goSemanticBoolAtom(node), nil, false
+			}
 			if lit, ok := goBoolLiteralValue(node.Y); ok {
 				base, patterns, changed := lowerGoSemanticBoolExprDetailed(node.X)
 				if base == nil {
 					return nil, patterns, changed
 				}
 				patterns = appendUniquePatternStrings(patterns, "boolean_literal_comparison")
-				return lowerGoBoolLiteralComparisonFromBase(base, node.Op, lit), patterns, true
+				return lowerSemanticBoolLiteralComparisonFromEquality(base, lit, equality), patterns, true
 			}
 			if lit, ok := goBoolLiteralValue(node.X); ok {
 				base, patterns, changed := lowerGoSemanticBoolExprDetailed(node.Y)
@@ -298,7 +378,7 @@ func lowerGoSemanticBoolExprDetailed(expr ast.Expr) (*semanticBoolExpr, []string
 					return nil, patterns, changed
 				}
 				patterns = appendUniquePatternStrings(patterns, "boolean_literal_comparison")
-				return lowerGoBoolLiteralComparisonFromBase(base, node.Op, lit), patterns, true
+				return lowerSemanticBoolLiteralComparisonFromEquality(base, lit, equality), patterns, true
 			}
 		}
 		return goSemanticBoolAtom(node), nil, false
@@ -308,20 +388,11 @@ func lowerGoSemanticBoolExprDetailed(expr ast.Expr) (*semanticBoolExpr, []string
 }
 
 func lowerGoBoolLiteralComparisonFromBase(base *semanticBoolExpr, op token.Token, lit bool) *semanticBoolExpr {
-	switch op {
-	case token.EQL:
-		if lit {
-			return base
-		}
-		return semanticBoolNot(base)
-	case token.NEQ:
-		if lit {
-			return semanticBoolNot(base)
-		}
-		return base
-	default:
+	equality, ok := semanticBoolTokenComparisonIsEquality(op)
+	if !ok {
 		return nil
 	}
+	return lowerSemanticBoolLiteralComparisonFromEquality(base, lit, equality)
 }
 
 func goSemanticBoolAtom(expr ast.Expr) *semanticBoolExpr {

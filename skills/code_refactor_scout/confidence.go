@@ -26,69 +26,94 @@ func scoreFindingConfidence(item finding, mode refstatus.Mode) (int, map[string]
 		"base": score,
 	}
 
-	if mode == refstatus.ModeIndexBacked {
-		score += 6
-		factors["index_mode"] = 6
-	}
-	if item.Evidence != nil {
-		if evidenceString(item.Evidence["scope_snapshot_id"]) != "" {
-			score += 3
-			factors["snapshot"] = 3
-		}
-	}
-
-	switch item.RuleID {
-	case "function_hotspot":
-		rules := evidenceStrings(item.Evidence["rules"])
-		if structural := minConfidenceInt(len(rules)*2, 10); structural > 0 {
-			score += structural
-			factors["rule_mix"] = structural
-		}
-		if seed := evidenceString(item.Evidence["seed_node_id"]); seed != "" {
-			score += 4
-			factors["graph_seed"] = 4
-		}
-		if boundary := evidenceString(item.Evidence["suggested_boundary_kind"]); boundary != "" {
-			score += 2
-			factors["boundary"] = 2
-		}
-		if cochange := evidenceInt(item.Evidence["cochange_count"]); cochange > 0 {
-			bonus := minConfidenceInt(cochange, 3)
-			score += bonus
-			factors["cochange"] = bonus
-		}
-		if opportunity := evidenceInt(item.Evidence["opportunity_bonus"]); opportunity > 0 {
-			bonus := minConfidenceInt(opportunity, 8)
-			score += bonus
-			factors["opportunity"] = bonus
-		}
-	case "unreachable_private_symbol":
-		score += 12
-		factors["reachability"] = 12
-	case "test_only_helper":
-		score += 8
-		factors["reachability"] = 8
-	case "stale_export_candidate":
-		score += 4
-		factors["reachability"] = 4
-	}
-
-	if item.Evidence != nil {
-		if incoming := evidenceInt(item.Evidence["incoming_ref_count"]); incoming == 0 && isDeadRuleID(item.RuleID) {
-			score += 4
-			factors["zero_inbound_refs"] = 4
-		}
-		if external := evidenceInt(item.Evidence["external_non_test_refs"]); external == 0 && isDeadRuleID(item.RuleID) {
-			score += 4
-			factors["zero_external_refs"] = 4
-		}
-		if sourceSample := evidenceStrings(item.Evidence["source_sample"]); len(sourceSample) > 0 && isDeadRuleID(item.RuleID) {
-			score -= 4
-			factors["source_sample_penalty"] = -4
-		}
-	}
+	score += scoreIndexModeConfidence(mode, factors)
+	score += scoreSnapshotConfidence(item.Evidence, factors)
+	score += scoreRuleSpecificConfidence(item, factors)
+	score += scoreDeadRuleEvidenceConfidence(item.RuleID, item.Evidence, factors)
 
 	return clampScore(score), factors
+}
+
+func scoreIndexModeConfidence(mode refstatus.Mode, factors map[string]int) int {
+	if mode != refstatus.ModeIndexBacked {
+		return 0
+	}
+	factors["index_mode"] = 6
+	return 6
+}
+
+func scoreSnapshotConfidence(evidence map[string]any, factors map[string]int) int {
+	if evidenceString(evidence["scope_snapshot_id"]) == "" {
+		return 0
+	}
+	factors["snapshot"] = 3
+	return 3
+}
+
+func scoreRuleSpecificConfidence(item finding, factors map[string]int) int {
+	switch item.RuleID {
+	case "function_hotspot":
+		return scoreHotspotRuleConfidence(item.Evidence, factors)
+	case "unreachable_private_symbol":
+		factors["reachability"] = 12
+		return 12
+	case "test_only_helper":
+		factors["reachability"] = 8
+		return 8
+	case "stale_export_candidate":
+		factors["reachability"] = 4
+		return 4
+	default:
+		return 0
+	}
+}
+
+func scoreHotspotRuleConfidence(evidence map[string]any, factors map[string]int) int {
+	score := 0
+	rules := evidenceStrings(evidence["rules"])
+	if structural := minConfidenceInt(len(rules)*2, 10); structural > 0 {
+		score += structural
+		factors["rule_mix"] = structural
+	}
+	if seed := evidenceString(evidence["seed_node_id"]); seed != "" {
+		score += 4
+		factors["graph_seed"] = 4
+	}
+	if boundary := evidenceString(evidence["suggested_boundary_kind"]); boundary != "" {
+		score += 2
+		factors["boundary"] = 2
+	}
+	if cochange := evidenceInt(evidence["cochange_count"]); cochange > 0 {
+		bonus := minConfidenceInt(cochange, 3)
+		score += bonus
+		factors["cochange"] = bonus
+	}
+	if opportunity := evidenceInt(evidence["opportunity_bonus"]); opportunity > 0 {
+		bonus := minConfidenceInt(opportunity, 8)
+		score += bonus
+		factors["opportunity"] = bonus
+	}
+	return score
+}
+
+func scoreDeadRuleEvidenceConfidence(ruleID string, evidence map[string]any, factors map[string]int) int {
+	if evidence == nil || !isDeadRuleID(ruleID) {
+		return 0
+	}
+	score := 0
+	if incoming := evidenceInt(evidence["incoming_ref_count"]); incoming == 0 {
+		score += 4
+		factors["zero_inbound_refs"] = 4
+	}
+	if external := evidenceInt(evidence["external_non_test_refs"]); external == 0 {
+		score += 4
+		factors["zero_external_refs"] = 4
+	}
+	if sourceSample := evidenceStrings(evidence["source_sample"]); len(sourceSample) > 0 {
+		score -= 4
+		factors["source_sample_penalty"] = -4
+	}
+	return score
 }
 
 func isDeadRuleID(ruleID string) bool {

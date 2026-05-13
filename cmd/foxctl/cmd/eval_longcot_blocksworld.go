@@ -52,6 +52,7 @@ func (e longCoTBlocksWorldToolExecutor) Execute(_ context.Context, name string, 
 		"ok":            result.OK,
 		"solution":      result.Solution,
 		"answer_format": "solution = " + result.Solution,
+		"output":        longCoTBlocksWorldStructuredOutput(result),
 		"confidence":    confidence,
 		"plan":          result.Plan,
 		"moves":         result.Moves,
@@ -65,6 +66,30 @@ func (e longCoTBlocksWorldToolExecutor) Execute(_ context.Context, name string, 
 		return "", err
 	}
 	return string(body), nil
+}
+
+func longCoTBlocksWorldStructuredOutput(result longCoTBlocksWorldSolveResult) string {
+	if !result.OK {
+		payload, _ := json.Marshal(map[string]any{
+			"pass":   false,
+			"reason": firstNonEmpty(result.Error, "BlocksWorld helper could not solve prompt"),
+		})
+		return "RLM_CHECK_JSON=" + string(payload)
+	}
+	answer := "solution = " + result.Solution
+	checkPayload, _ := json.Marshal(map[string]any{
+		"pass":   true,
+		"reason": "BlocksWorld helper produced a valid plan",
+	})
+	answerPayload, _ := json.Marshal(map[string]any{
+		"answer": answer,
+		"pass":   true,
+		"checks": []string{"blocksworld helper parsed prompt and planned moves"},
+	})
+	return strings.Join([]string{
+		"RLM_CHECK_JSON=" + string(checkPayload),
+		"RLM_ANSWER_JSON=" + string(answerPayload),
+	}, "\n")
 }
 
 var (

@@ -1,0 +1,83 @@
+.page > header.header {
+  --sl-color-bg-nav: #101412;
+  --sl-color-hairline-shade: rgba(86, 199, 185, 0.22);
+  background-color: #101412;
+  border-bottom-color: rgba(86, 199, 185, 0.22);
+}
+
+.page > header.header > .header {
+  color: #e8f5f1;
+}
+
+.site-title:has(img[alt="foxctl"]) {
+  color: #f8fafc;
+  font-weight: 820;
+  height: auto;
+}
+
+.site-title:has(img[alt="foxctl"]):hover {
+  color: #b9f5ec;
+}
+
+.site-title img[alt="foxctl"] {
+  height: 2.25rem;
+  object-fit: contain;
+  width: 2.25rem;
+}
+
+.site-title img[alt="foxctl"] + span {
+  color: inherit;
+}
+
+.page > header.header button[data-open-modal] {
+  background-color: #0b100f;
+  border-color: rgba(86, 199, 185, 0.34);
+  color: #d7e8e4;
+}
+
+.page > header.header button[data-open-modal]:hover {
+  border-color: #56c7b9;
+  color: #ffffff;
+}
+
+.page > header.header button[data-open-modal] kbd {
+  background-color: rgba(86, 199, 185, 0.16);
+  color: #c8fff6;
+}
+
+.page > header.header starlight-theme-select label {
+  --sl-select-width: 7.5em !important;
+  align-items: center;
+  background-color: #0b100f;
+  border: 1px solid rgba(86, 199, 185, 0.34);
+  border-radius: 8px;
+  color: #d7e8e4;
+  min-height: 2.5rem;
+  min-width: 9.75rem;
+}
+
+.page > header.header starlight-theme-select label:hover {
+  border-color: #56c7b9;
+  color: #ffffff;
+}
+
+.page > header.header starlight-theme-select select {
+  height: 2.5rem;
+  margin-inline: 0;
+  min-width: 8.5rem;
+  padding-inline: 0.9rem 2.4rem;
+  width: 100%;
+}
+
+.page > header.header starlight-theme-select .label-icon {
+  display: none;
+}
+
+.page > header.header starlight-theme-select .caret {
+  inset-inline-end: 0.72rem;
+}
+
+.page > header.header starlight-theme-select option {
+  background-color: #101412;
+  color: #f8fafc;
+}

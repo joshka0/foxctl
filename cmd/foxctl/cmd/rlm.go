@@ -37,6 +37,9 @@ func newRLMRunCommand() *cobra.Command {
 	var maxDepth int
 	var maxIterations int
 	var maxSubcalls int
+	var maxChildren int
+	var maxConcurrent int
+	var maxTotalNodes int
 	var executor string
 	var llmProvider string
 	var llmModel string
@@ -73,6 +76,9 @@ func newRLMRunCommand() *cobra.Command {
 				MaxDepth:      maxDepth,
 				MaxIterations: maxIterations,
 				MaxSubcalls:   maxSubcalls,
+				MaxChildren:   maxChildren,
+				MaxConcurrent: maxConcurrent,
+				MaxTotalNodes: maxTotalNodes,
 			}
 			companionDB, companionClose, err := openRLMCompanionDB(cmd.Context(), cfg)
 			if err != nil {
@@ -181,6 +187,9 @@ func newRLMRunCommand() *cobra.Command {
 	cmd.Flags().IntVar(&maxDepth, "max-depth", 1, "Maximum recursion depth")
 	cmd.Flags().IntVar(&maxIterations, "max-iterations", 8, "Maximum root iterations")
 	cmd.Flags().IntVar(&maxSubcalls, "max-subcalls", 8, "Maximum subcalls")
+	cmd.Flags().IntVar(&maxChildren, "max-children", 0, "Maximum child nodes for async recursive RLM runs (0 derives from --max-subcalls)")
+	cmd.Flags().IntVar(&maxConcurrent, "max-concurrent", 0, "Maximum concurrently running child nodes for async recursive RLM runs (0 uses runtime default)")
+	cmd.Flags().IntVar(&maxTotalNodes, "max-total-nodes", 0, "Maximum total async recursive RLM nodes (0 derives from --max-children)")
 	_ = cmd.MarkFlagRequired("prompt")
 	return cmd
 }
@@ -273,6 +282,9 @@ func chooseRLMRunner(
 					MaxDepth:       task.MaxDepth,
 					MaxIterations:  task.MaxIterations,
 					MaxSubcalls:    task.MaxSubcalls,
+					MaxChildren:    task.MaxChildren,
+					MaxConcurrent:  task.MaxConcurrent,
+					MaxTotalNodes:  task.MaxTotalNodes,
 					MaxREPLCalls:   task.MaxIterations,
 					MaxHelperCalls: task.MaxIterations,
 					MaxDuration:    timeout,
@@ -280,8 +292,8 @@ func chooseRLMRunner(
 				Sandbox: rlmruntime.SandboxConfig{
 					Kind: kind,
 					SmolVMPython: repl.SmolVMPythonOptions{
-						MachineName:         "foxctl-rlm-longcot-clean-offline",
-						Image:               "python:3.12-alpine",
+						MachineName:         "foxctl-rlm-longcot-glibc-offline",
+						Image:               "python:3.12-slim",
 						GuestWorkDir:        "/workspace/foxctl-rlm-python",
 						Network:             false,
 						CreateOnInit:        false,
