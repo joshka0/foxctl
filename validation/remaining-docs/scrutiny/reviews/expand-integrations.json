@@ -1,0 +1,73 @@
+{
+  "featureId": "expand-integrations",
+  "featureName": "Expand integrations pages for Starlight docs site",
+  "featurePath": "packages/docs-site/src/content/docs/integrations/",
+  "scrutinyValidator": "scrutiny-validator",
+  "validationTimestamp": "2026-05-12T15:54:00Z",
+  "blockingIssues": [
+    {
+      "severity": "blocking",
+      "type": "phantom-command",
+      "description": "Lines 106-107 document 'foxctl cache clear' which does not exist as a top-level command. Verification: `./bin/foxctl cache --help` returns 'unknown command \"cache\" for \"foxctl\"'.",
+      "affectedFile": "packages/docs-site/src/content/docs/integrations/openapi-and-plugins.md",
+      "affectedLines": [106, 107],
+      "suggestedFix": "Replace references to 'foxctl cache clear' with 'foxctl memory cache clear' or remove if the command does not exist at any level"
+    }
+  ],
+  "nonBlockingIssues": [
+    {
+      "severity": "non-blocking",
+      "type": "unverified-flag",
+      "description": "Lines 91 and 100 reference 'foxctl openapi validate memory:github --strict' and 'foxctl openapi import ./spec.yaml --as=myapi --strict'. The --strict flag was not verified to exist in ./bin/foxctl openapi validate --help or ./bin/foxctl openapi import --help.",
+      "affectedFile": "packages/docs-site/src/content/docs/integrations/openapi-and-plugins.md",
+      "affectedLines": [91, 100],
+      "suggestedFix": "Verify --strict flag exists via 'foxctl openapi import --help' and 'foxctl openapi validate --help' before considering blocking"
+    }
+  ],
+  "assertions": [
+    {
+      "assertionId": "INT-001",
+      "description": "Documented CLI commands exist and function as described",
+      "status": "fail",
+      "reason": "'foxctl cache clear' is phantom — no such top-level command"
+    },
+    {
+      "assertionId": "INT-002",
+      "description": "Feature coverage: OpenAPI skill path documented",
+      "status": "pass",
+      "reason": "Comprehensive coverage of http/openapi skill including input/output, auth, pagination, retry, dry-run"
+    },
+    {
+      "assertionId": "INT-003",
+      "description": "Feature coverage: Auth strategies documented",
+      "status": "pass",
+      "reason": "Bearer, API Key, Basic Auth, OAuth2 Client Credentials all covered"
+    },
+    {
+      "assertionId": "INT-004",
+      "description": "Feature coverage: Plugin architecture documented",
+      "status": "pass",
+      "reason": "Auth and pagination plugin types, discovery, transport protocol, execution constraints"
+    },
+    {
+      "assertionId": "INT-005",
+      "description": "Feature coverage: Error codes table complete",
+      "status": "pass",
+      "reason": "EOPENAPI, EARG, EAUTH, EPAGINATION, ERATELIMIT, ERUNTIME, ENOTFOUND, ETIMEOUT all present with fix hints"
+    },
+    {
+      "assertionId": "INT-006",
+      "description": "Non-phantom commands documented: foxctl openapi import/validate/describe",
+      "status": "pass",
+      "reason": "Verified via './bin/foxctl openapi --help'"
+    },
+    {
+      "assertionId": "INT-007",
+      "description": "Spec caching section mentions foxctl memory list --type=openapi_spec",
+      "status": "pass",
+      "reason": "Command verified to exist in './bin/foxctl memory --help'"
+    }
+  ],
+  "summary": "FAIL — Line 107 documents phantom 'foxctl cache clear --type=openapi_spec' command which does not exist. Verified via './bin/foxctl cache --help' returns 'unknown command'. Other aspects (OpenAPI skill, auth, pagination, plugins, error codes) are well-documented. Non-blocking: --strict flag not independently verified.",
+  "status": "fail"
+}

@@ -7,9 +7,15 @@ DEFAULT_PACKAGES=(
   ./internal/domain/agent
   ./internal/intelligence/indexing/repoindex
   ./internal/platform/timeutil
+  ./internal/protocol
+  ./internal/rlm
+  ./internal/runtime/actor
+  ./internal/runtime/engine
   ./internal/runtime/execution/exec
+  ./internal/runtime/execution/scheduler
   ./internal/storage/cas
   ./internal/storage/dbutil
+  ./internal/tooling/shellreduce
 )
 
 COUNT="${BENCH_COUNT:-3}"
@@ -32,6 +38,7 @@ mkdir -p "$(dirname "$OUT")"
 {
   echo "# foxctl Go benchmarks"
   echo "# root: $ROOT"
+  echo "# manifest: configs/benchmarks/foxctl.json"
   echo "# packages: ${PACKAGES[*]}"
   echo "# pattern: $PATTERN"
   echo "# benchtime: $BENCHTIME"

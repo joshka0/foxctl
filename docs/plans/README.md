@@ -35,6 +35,7 @@ This directory contains active planning documents and implementation roadmaps.
 - `features/agent-mux-room-hierarchy.md`
 - `features/opensandbox-sandbox-workspace-integration.md`
 - `features/foxctl-evolve-plan.md` — plan for a foxctl-native repo-evolution tool built on DB-backed experiment state, CAS artifacts, and existing worktree primitives.
+- `features/foxctl-benchmark-suite-epic.md` — baseline-implemented benchmark epic for Go runtime, DAG/repoindex, RLM, rooms, hooks, and retrieval evidence.
 - `features/longcot-eval-contract-plan.md` — LongCoT eval contract plan for measuring RLM scaffold, staged reasoning, and token efficiency under the canonical runtime surface.
 - `features/aca-self-evolving-memory-layer.md`
 - `jidoctl-v2-hybrid-interface.md`
