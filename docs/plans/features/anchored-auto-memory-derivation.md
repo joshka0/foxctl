@@ -350,6 +350,6 @@ Add a dream-style consolidation worker over candidates and existing state.
 ## Related
 
 - [docs/general/companion-memory.md](../../general/companion-memory.md)
-- [docs/plans/companion-memory-salience-policy.md](../companion-memory-salience-policy.md)
+- [docs/archive/plans/companion-memory-salience-policy.md](../../archive/plans/companion-memory-salience-policy.md)
 - [docs/plans/features/memory-ensemble-retrieve.md](memory-ensemble-retrieve.md)
 - [docs/plans/features/aca-self-evolving-memory-layer.md](aca-self-evolving-memory-layer.md)

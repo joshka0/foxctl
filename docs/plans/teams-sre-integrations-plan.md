@@ -1032,7 +1032,7 @@ Primary files:
 2. `internal/platform/config/config.go` (wire Bedrock enterprise config if missing)
 3. `internal/context/companion/service.go` and/or runtime model call path
 4. `internal/v2/runtime/runner/model_call.go`
-5. `docs/plans/aws-bedrock-provider.md` (cross-link / align where needed)
+5. `docs/archive/plans/aws-bedrock-provider.md` (cross-link / align where needed)
 
 Package scaffolding:
 

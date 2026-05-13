@@ -37,10 +37,10 @@ The repo's existing `packages/tui/` package is considered legacy and should be a
 
 `packages/gui-agent` already owns the modern product direction for the operator control plane:
 
-- [`packages/gui-agent/src/App.tsx`](../../packages/gui-agent/src/App.tsx)
-- [`packages/gui-agent/src/components/v2/OrchestrationBoardScreen.tsx`](../../packages/gui-agent/src/components/v2/OrchestrationBoardScreen.tsx)
-- [`docs/plans/gui-agent-v2-rearchitecture.md`](gui-agent-v2-rearchitecture.md)
-- [`docs/plans/gui-agent-improvement-roadmap.md`](gui-agent-improvement-roadmap.md)
+- [`packages/gui-agent/src/App.tsx`](../../../packages/gui-agent/src/App.tsx)
+- [`packages/gui-agent/src/components/v2/OrchestrationBoardScreen.tsx`](../../../packages/gui-agent/src/components/v2/OrchestrationBoardScreen.tsx)
+- `gui-agent-v2-rearchitecture.md` (original path: `docs/plans/gui-agent-v2-rearchitecture.md`)
+- `gui-agent-improvement-roadmap.md` (original path: `docs/plans/gui-agent-improvement-roadmap.md`)
 
 Those files show a clear runtime / companion / events / orchestration model. Replacing that with pi's own runtime/session model would duplicate authority and make the product harder to reason about.
 
@@ -96,7 +96,7 @@ Secondary overlays:
 4. logs/raw event detail
 5. keyboard help
 
-This mirrors the intent already captured in [`DESIGN.md`](../../DESIGN.md): summary-first, entity-first, raw detail on demand.
+This mirrors the intent already captured in [`DESIGN.md`](../../../DESIGN.md): summary-first, entity-first, raw detail on demand.
 
 ## Architecture
 
@@ -235,8 +235,8 @@ Deliverables:
 
 Key seams to reuse:
 
-1. frontend contract shapes from [`packages/gui-agent/src/api/types.ts`](../../packages/gui-agent/src/api/types.ts)
-2. request/envelope handling patterns from [`packages/gui-agent/src/api/client.ts`](../../packages/gui-agent/src/api/client.ts)
+1. frontend contract shapes from [`packages/gui-agent/src/api/types.ts`](../../../packages/gui-agent/src/api/types.ts)
+2. request/envelope handling patterns from [`packages/gui-agent/src/api/client.ts`](../../../packages/gui-agent/src/api/client.ts)
 
 Definition of done:
 
