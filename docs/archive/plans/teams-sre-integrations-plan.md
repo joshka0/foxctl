@@ -4,7 +4,7 @@
 > **Status:** Draft
 > **Author:** Codex + Josh
 > **Date:** 2026-03-20
-> **Related internal docs:** [chat-platform-adapter.md](../architecture/chat-platform-adapter.md), [kubernetes-runtime.md](../architecture/kubernetes-runtime.md), [simulator-agents.md](../architecture/simulator-agents.md), [jido-hybrid-runtime.md](../architecture/jido-hybrid-runtime.md), [context-architecture.md](../architecture/context-architecture.md), [review_gate.md](../spec/review_gate.md), [agent_hierarchy.md](../spec/agent_hierarchy.md)
+> **Related internal docs:** [chat-platform-adapter.md](../../architecture/chat-platform-adapter.md), [kubernetes-runtime.md](../../architecture/kubernetes-runtime.md), [simulator-agents.md](../../architecture/simulator-agents.md), [jido-hybrid-runtime.md](../../architecture/jido-hybrid-runtime.md), [context-architecture.md](../../architecture/context-architecture.md), [review_gate.md](../../spec/review_gate.md), [agent_hierarchy.md](../../spec/agent_hierarchy.md)
 > **Reference implementation shape:** IncidentFox Teams bot, K8s gateway, approval UI, and credential-proxy patterns in `~/repos/githubs/incidentfox/`
 
 ## Problem Statement
@@ -566,7 +566,7 @@ Recommended default profile set:
 - `observability-investigator`
 - `remediator`
 
-Subagent spawning should continue to honor [agent_hierarchy.md](../spec/agent_hierarchy.md), especially for controlled delegation during long investigations.
+Subagent spawning should continue to honor [agent_hierarchy.md](../../spec/agent_hierarchy.md), especially for controlled delegation during long investigations.
 
 ## Security Model
 
