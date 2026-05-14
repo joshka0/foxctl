@@ -498,7 +498,7 @@ func TestShouldSkipCodePath(t *testing.T) {
 	}{
 		{path: "internal/app/service.go", want: false},
 		{path: "internal/app/service_test.go", want: true},
-		{path: "test/integration/foo.go", want: true},
+		{path: "tests/integration/foo.go", want: true},
 		{path: "pkg/testdata/input.go", want: true},
 		{path: "pkg/fixtures/input.go", want: true},
 		{path: "pkg/golden/input.go", want: true},

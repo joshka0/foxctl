@@ -639,7 +639,7 @@ foxctl proto validate --input envelope.json --strict
 
 ### A.2 Golden Fixtures
 
-See `test/golden/` for canonical envelope examples:
+See `tests/golden/` for canonical envelope examples:
 
 - `ok-inline.json` - Successful inline response
 - `ok-cas.json` - Successful CAS-artifactized response

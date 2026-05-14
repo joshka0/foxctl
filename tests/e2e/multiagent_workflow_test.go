@@ -649,7 +649,7 @@ func TestMultiAgentWorkflow_PlanOperation(t *testing.T) {
 		Title:       "Epic: Multi-agent E2E Tests",
 		Description: "Complete E2E test coverage for multi-agent workflow",
 		Status:      tasks.StatusPending,
-		ScopePath:   "test/e2e",
+		ScopePath:   "tests/e2e",
 	})
 	if err != nil {
 		t.Fatalf("Failed to create epic task: %v", err)
@@ -663,7 +663,7 @@ func TestMultiAgentWorkflow_PlanOperation(t *testing.T) {
 		Description: "Test graph analysis, PageRank, critical path",
 		Status:      tasks.StatusPending,
 		ParentID:    epicTask.ID,
-		ScopePath:   "test/e2e",
+		ScopePath:   "tests/e2e",
 	})
 	if err != nil {
 		t.Fatalf("Failed to create subtask1: %v", err)
@@ -676,7 +676,7 @@ func TestMultiAgentWorkflow_PlanOperation(t *testing.T) {
 		Status:      tasks.StatusPending,
 		ParentID:    epicTask.ID,
 		DependsOn:   []string{subtask1.ID},
-		ScopePath:   "test/e2e",
+		ScopePath:   "tests/e2e",
 	})
 	if err != nil {
 		t.Fatalf("Failed to create subtask2: %v", err)
@@ -689,7 +689,7 @@ func TestMultiAgentWorkflow_PlanOperation(t *testing.T) {
 		Status:      tasks.StatusPending,
 		ParentID:    epicTask.ID,
 		DependsOn:   []string{subtask1.ID},
-		ScopePath:   "test/e2e",
+		ScopePath:   "tests/e2e",
 	})
 	if err != nil {
 		t.Fatalf("Failed to create subtask3: %v", err)

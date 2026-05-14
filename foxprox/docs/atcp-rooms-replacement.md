@@ -508,14 +508,14 @@ Parsing rejects unknown schemes. Broker rejects `message.send` with unknown targ
 ## 12. Test Strategy
 
 - Unit tests per package (≥ 80% for new code in `internal/atcp/*`)
-- Integration tests in `test/integration/atcp_*_test.go`:
+- Integration tests in `tests/integration/atcp_*_test.go`:
   - Session + submit + observed output
   - Lease contention
   - Reminder durability across daemon restart
   - Message delivery policy fallback
   - Transaction observed completion
 - Regression test for the migration: seed a `board.db`, run migration, verify `atcp_messages` parity
-- Golden envelope fixtures for each kind under `test/golden/atcp/<kind>.json`
+- Golden envelope fixtures for each kind under `tests/golden/atcp/<kind>.json`
 
 ## 13. Open Questions
 

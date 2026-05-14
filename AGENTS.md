@@ -24,7 +24,7 @@ contributors
 | [docs/DOC_LIFECYCLE.md](docs/DOC_LIFECYCLE.md)     | Documentation lifecycle policy                   |
 | [docs/start/README.md](docs/start/README.md)       | Fast orientation guides                          |
 | [docs/architecture/package-topology.md](docs/architecture/package-topology.md) | Canonical `internal/*` package placement map |
-| [.claude/CLAUDE.md](.claude/CLAUDE.md)             | Claude Code hooks, commands, environment         |
+| [CLAUDE.md](CLAUDE.md)                           | Compatibility symlink to this canonical agent guide |
 | [docs/general/](docs/general/)                     | Detailed documentation                           |
 | [docs/general/repoindex.md](docs/general/repoindex.md) | Repo graph index terminology and command reference |
 | [docs/architecture/](docs/architecture/)           | Current architecture overviews (runtime + storage + adapters) |
@@ -77,7 +77,7 @@ contributors
 9. **Structured shell first for command-shaped retrieval** — for supported read-only repo inspection commands *(for example: `find`, `rg`, `grep`, `sed -n`, `git status --short`, `git diff --stat`, `git log --stat`)*, prefer `foxctl shell` because it returns compact structured output; fall back to raw/native tools for already-compact or exact-value commands *(for example: `git diff --name-only`, `wc`, plain `head`/`tail`)*
 10. **Subagent-aware planning** — before requesting agent splits, verify current spawning rules in [docs/spec/agent_hierarchy.md](docs/spec/agent_hierarchy.md) (depth constraints, actor roles, rejection paths).
 11. **Terminology coaching** — when the user asks something technical but uses imprecise language, provide the correct terminology in parentheses as a mini-lesson (e.g., "Fixed. Added scrolling *(in CSS terms: `overflow-y: auto` to handle content overflow)*")
-12. **Docs link hygiene** — run `make check-doc-links` for markdown/doc updates; CI enforces this via `.github/workflows/docs.yml`
+12. **Docs link hygiene** — run `make check-doc-links` for markdown/doc updates; CI enforces this via `.gitlab-ci.yml`
 13. **Go-native runtime rules (v2)** — prefer `Run(ctx)` components, bounded channels, single-writer state ownership, and immutable snapshots for high-read paths
 14. **ContextWiki vault refresh** — after repo docs, repo graph, or bridge metadata changes, rebuild the Obsidian layer with `foxctl obsidian graph build`, `graph promote`, `bridge reconcile`, and `index build`
 15. **Task continuity split** — use `foxctl context task-history-summary` for Codex/agents/scripts *(structured summary + artifact pointer)* and `configs/hooks/task-continuity-summary.sh` for hook injection *(prompt-ready wrapper output)*

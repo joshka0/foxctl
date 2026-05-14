@@ -107,7 +107,7 @@ For understanding the full system architecture:
 ## Automated checks
 
 - Local: `make check-doc-links`
-- CI: `.github/workflows/docs.yml`
+- CI: `.gitlab-ci.yml`
 
 ## Canonical sources
 

@@ -100,4 +100,4 @@ This is the canonical map for docs in this repository.
 ## Automated Checks
 
 - Local: `make check-doc-links`
-- CI: `.github/workflows/docs.yml`
+- CI: `.gitlab-ci.yml`

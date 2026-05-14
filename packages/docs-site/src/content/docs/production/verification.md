@@ -110,7 +110,7 @@ Before finalizing any change, confirm:
 
 ## Golden test verification
 
-Golden fixtures in `testdata/*.json` and `test/golden/` must remain reproducible:
+Golden fixtures in `testdata/*.json` and `tests/golden/` must remain reproducible:
 
 - Sort keys and arrays in output before comparison
 - Inject timestamps via clock interface (no `time.Now()` in core)

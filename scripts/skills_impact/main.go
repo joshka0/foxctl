@@ -68,7 +68,7 @@ func main() {
 	if err != nil {
 		fatalf("go list all packages: %v", err)
 	}
-	integrationPkgs, err := goListWithTags("integration", "./test/integration/...")
+	integrationPkgs, err := goListWithTags("integration", "./tests/integration/...")
 	if err == nil {
 		allPkgs = mergePackages(allPkgs, integrationPkgs)
 	}

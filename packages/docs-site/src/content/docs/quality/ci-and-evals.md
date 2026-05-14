@@ -51,13 +51,15 @@ bun run --cwd packages/docs-site check
 
 ## CI pipeline
 
-GitHub Actions (`.github/workflows/ci.yml`) runs a containerized CI pipeline using a pre-warmed Go image built from `Dockerfile.ci`. Key jobs:
+GitLab CI (`.gitlab-ci.yml`) runs a containerized pipeline using the Go image built from `deploy/docker/Dockerfile.ci`. Key jobs:
 
 | Job | What it runs |
 |---|---|
-| **lint** | `make lint` in the CI image |
-| **test** | `CGO_ENABLED=0 go test -short ./...` with 40% coverage floor |
-| **race/tests/coverage** | Race detection and coverage reporting |
+| **static-analysis** | `make fmt`, `make lint`, large-file checks, and tech-debt checks |
+| **unit-tests** | Impacted `make test-short-impacted` on merge requests, or `go test -short ./...` on main/full runs |
+| **race-tests-\*** | Sharded `make test-race-shard` checks |
+| **integration-tests** | Impacted or full `make test-integration` |
+| **build** | `make build`, skill builds, and manifest checks |
 
 ### CI guidelines
 
@@ -69,7 +71,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs a containerized CI pipeline usi
 
 Integration tests live in two locations, both gated with `//go:build integration`:
 
-### `test/integration/`
+### `tests/integration/`
 
 Full integration tests that may require network access, LLM API keys (`FOXCTL_LLM_API_KEY`, `GEMINI_API_KEY`), or external binaries. Tests end-to-end workflows like agent spawning, symbol indexing, and the SWE Grep pipeline.
 
@@ -122,7 +124,7 @@ For new features or changes in these subsystems, expect tests of these kinds:
 
 ### Golden tests
 
-Golden fixtures in `testdata/*.json` and `test/golden/` must be reproducible:
+Golden fixtures in `testdata/*.json` and `tests/golden/` must be reproducible:
 
 - Sort keys and arrays in output
 - Inject timestamps via clock interface (no `time.Now()` in core logic)
@@ -183,4 +185,3 @@ Before merging, every PR must pass:
 3. Coverage floor: `make check-coverage`
 4. CI pipeline (lint, test, race)
 5. At least one human approval
-

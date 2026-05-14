@@ -82,7 +82,7 @@ with `garble -literals -tiny`.
 - **Scope**
   - Ensure `garble` is available in environments that build hardened+obf
     binaries:
-    - Add `go install mvdan.cc/garble@<pinned>` to `Dockerfile.ci` or an
+    - Add `go install mvdan.cc/garble@<pinned>` to `deploy/docker/Dockerfile.ci` or an
       equivalent build image.
     - Optionally add a blank import in `tools.go` to keep `garble` pinned via
       `go.mod`.

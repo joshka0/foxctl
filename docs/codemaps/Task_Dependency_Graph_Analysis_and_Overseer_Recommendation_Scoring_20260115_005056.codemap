@@ -340,11 +340,11 @@
     {
       "id": "7",
       "title": "End-to-End Integration Test: Full Workflow",
-      "description": "Test suite in test/e2e - validates complete flow from task creation through graph analysis to scored recommendations",
+      "description": "Test suite in tests/e2e - validates complete flow from task creation through graph analysis to scored recommendations",
       "locations": [
         {
           "id": "7a",
-          "path": "test/e2e/multiagent_workflow_test.go",
+          "path": "tests/e2e/multiagent_workflow_test.go",
           "lineNumber": 96,
           "lineContent": "analyzer := tasksgraph.NewAnalyzer()",
           "title": "Create analyzer in test",
@@ -352,7 +352,7 @@
         },
         {
           "id": "7b",
-          "path": "test/e2e/multiagent_workflow_test.go",
+          "path": "tests/e2e/multiagent_workflow_test.go",
           "lineNumber": 97,
           "lineContent": "insights, err := analyzer.Analyze(allTasks, testWorkspaceID)",
           "title": "Analyze task graph",
@@ -360,7 +360,7 @@
         },
         {
           "id": "7c",
-          "path": "test/e2e/multiagent_workflow_test.go",
+          "path": "tests/e2e/multiagent_workflow_test.go",
           "lineNumber": 148,
           "lineContent": "err = boardStore.SendMessage(ctx, \u0026agent.BoardMessage{ Sender: \"actor:system:overseer\",",
           "title": "Send overseer message",
@@ -368,7 +368,7 @@
         },
         {
           "id": "7d",
-          "path": "test/e2e/multiagent_workflow_test.go",
+          "path": "tests/e2e/multiagent_workflow_test.go",
           "lineNumber": 245,
           "lineContent": "scorer := overseer.NewScorer(taskStore, boardStore)",
           "title": "Create scorer in test",
@@ -376,7 +376,7 @@
         },
         {
           "id": "7e",
-          "path": "test/e2e/multiagent_workflow_test.go",
+          "path": "tests/e2e/multiagent_workflow_test.go",
           "lineNumber": 246,
           "lineContent": "rec, err := scorer.Recommend(ctx, testWorkspaceID, 10)",
           "title": "Generate recommendations",
@@ -384,14 +384,14 @@
         },
         {
           "id": "7f",
-          "path": "test/e2e/multiagent_workflow_test.go",
+          "path": "tests/e2e/multiagent_workflow_test.go",
           "lineNumber": 277,
           "lineContent": "if taskCScore.UnreadAdmin != 1 { t.Errorf(\"expected Task C to have 1 unread admin message, got %d\", taskCScore.UnreadAdmin) }",
           "title": "Validate message impact",
           "description": "Verifies admin message correctly boosts task score in recommendations"
         }
       ],
-      "traceTextDiagram": "E2E Test: Full Workflow Validation \u003c-- test/e2e/multiagent_workflow_test.go:27\n├── Test Setup Phase\n│   ├── Create test tasks with dependencies \u003c-- test/e2e/multiagent_workflow_test.go:55\n│   └── Initialize stores (task, board) \u003c-- test/e2e/multiagent_workflow_test.go:31\n├── Graph Analysis Phase\n│   ├── analyzer.NewAnalyzer() \u003c-- 7a\n│   └── analyzer.Analyze(allTasks) \u003c-- 7b\n│       ├── Build directed graph \u003c-- internal/analysis/tasksgraph/graph.go:74\n│       ├── Compute PageRank \u003c-- internal/analysis/tasksgraph/graph.go:98\n│       └── Calculate critical paths \u003c-- internal/analysis/tasksgraph/graph.go:117\n├── Mailbox Message Phase\n│   └── boardStore.SendMessage() \u003c-- 7c\n│       └── Insert overseer message to DB \u003c-- internal/storage/blackboard/board_store.go:79\n├── Recommendation Generation Phase\n│   ├── overseer.NewScorer() \u003c-- 7d\n│   └── scorer.Recommend() \u003c-- 7e\n│       ├── Get graph insights \u003c-- internal/analysis/overseer/scorer.go:91\n│       ├── Count mailbox messages \u003c-- internal/analysis/overseer/scorer.go:103\n│       ├── Normalize \u0026 weight scores \u003c-- internal/analysis/overseer/scorer.go:166\n│       └── Sort by final score \u003c-- internal/analysis/overseer/scorer.go:190\n└── Validation Phase\n    └── Assert message impact on score \u003c-- 7f",
+      "traceTextDiagram": "E2E Test: Full Workflow Validation \u003c-- tests/e2e/multiagent_workflow_test.go:27\n├── Test Setup Phase\n│   ├── Create test tasks with dependencies \u003c-- tests/e2e/multiagent_workflow_test.go:55\n│   └── Initialize stores (task, board) \u003c-- tests/e2e/multiagent_workflow_test.go:31\n├── Graph Analysis Phase\n│   ├── analyzer.NewAnalyzer() \u003c-- 7a\n│   └── analyzer.Analyze(allTasks) \u003c-- 7b\n│       ├── Build directed graph \u003c-- internal/analysis/tasksgraph/graph.go:74\n│       ├── Compute PageRank \u003c-- internal/analysis/tasksgraph/graph.go:98\n│       └── Calculate critical paths \u003c-- internal/analysis/tasksgraph/graph.go:117\n├── Mailbox Message Phase\n│   └── boardStore.SendMessage() \u003c-- 7c\n│       └── Insert overseer message to DB \u003c-- internal/storage/blackboard/board_store.go:79\n├── Recommendation Generation Phase\n│   ├── overseer.NewScorer() \u003c-- 7d\n│   └── scorer.Recommend() \u003c-- 7e\n│       ├── Get graph insights \u003c-- internal/analysis/overseer/scorer.go:91\n│       ├── Count mailbox messages \u003c-- internal/analysis/overseer/scorer.go:103\n│       ├── Normalize \u0026 weight scores \u003c-- internal/analysis/overseer/scorer.go:166\n│       └── Sort by final score \u003c-- internal/analysis/overseer/scorer.go:190\n└── Validation Phase\n    └── Assert message impact on score \u003c-- 7f",
       "traceGuide": "## Motivation\n\nIn a multi-agent task management system, agents need to know **which task to work on next**. With dozens of pending tasks that have complex dependency relationships, simply picking the oldest or newest task is insufficient. The system needs to consider:\n\n- **Task dependencies**: Some tasks block many others (critical path)\n- **Task importance**: Some tasks are more central to the workflow (PageRank)\n- **Human attention**: Admin and overseer messages signal urgency\n- **Staleness**: Recently updated tasks may need less attention\n\nThe **overseer recommendation scorer** [2e] solves this by combining graph analysis with mailbox state to produce a weighted priority score for each task.\n\n## Details\n\n### Graph Analysis Foundation\n\nThe system builds a **directed dependency graph** where an edge from task A to task B means \"A depends on B\" [1c]. The `tasksgraph.Analyzer` [7a] computes three key metrics:\n\n1. **PageRank** [1d]: Measures task centrality using the standard algorithm with damping factor 0.85\n2. **Critical Path Score** [1e]: Longest path from each task to any sink (tasks with no dependencies), computed via memoized DFS [6e]\n3. **Topological Order** [1f]: Valid execution sequence when no cycles exist\n\n### Mailbox Integration\n\nThe scorer queries the **blackboard message store** [3a] to count unread messages per task, categorized by sender type [3c]:\n- **Admin messages**: Direct human input (highest signal)\n- **Overseer messages**: System coordination signals\n- **Other messages**: General communication\n\n### Weighted Scoring Formula\n\nThe final score [2e] combines five normalized (0-1) components:\n- **30% Critical Path**: Tasks blocking more work score higher\n- **20% PageRank**: Central tasks in the dependency graph\n- **25% Admin Mail**: Human attention signals\n- **15% Overseer Mail**: System coordination signals  \n- **10% Recency**: Inverse of days since last update\n\nAll components are normalized to prevent unbounded score inflation, then sorted descending [2f] to produce the final recommendation list.\n\n### Persistence\n\nComputed PageRank scores are **persisted to the task database** [4c] via bulk transaction [4e], allowing the scores to be retrieved without recomputing the entire graph on every query.\n\n### End-to-End Flow\n\nThe CLI command `foxctl todo recommend` [5a] invokes the todo skill [5b], which instantiates the scorer [5c] with both task and board stores, generates recommendations [5d], and returns the sorted list [5e]. The E2E test [7a-7f] validates that overseer messages correctly boost task scores in the final recommendations."
     }
   ],

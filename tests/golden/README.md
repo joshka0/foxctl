@@ -17,7 +17,7 @@ skills/     # Built-in skill envelopes (fs/ls, fs/read, text/grep, todo/manage)
 Fixtures should only be updated intentionally. After editing any fixture, run:
 
 ```
-go test ./test/golden
+go test ./tests/golden
 ```
 
 The tests ensure every JSON envelope conforms to the Core Profile v1 invariants and that

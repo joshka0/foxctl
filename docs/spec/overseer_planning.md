@@ -93,7 +93,7 @@ Hooks do **not** own the plan. They:
 		"goal": "Ship multi-agent E2E tests",
 		"description": "E2E for task graph, mailbox, file_guard, overseer scoring",
 		"scope_paths": [
-			"foxctl/test/e2e",
+			"foxctl/tests/e2e",
 			"foxctl/internal/intelligence/analysis"
 		],
 		"attach_to_task_id": "optional-epic-id-or-empty",
@@ -138,13 +138,13 @@ Hooks do **not** own the plan. They:
 				"title": "Epic: Ship multi-agent E2E tests",
 				"status": "pending",
 				"depends_on": [],
-				"scope_paths": ["foxctl/test/e2e"]
+				"scope_paths": ["foxctl/tests/e2e"]
 			},
 			{
 				"id": "01KB3K5N...",
 				"title": "Write multiagent_workflow_test.go",
 				"depends_on": ["01KB3K4M..."],
-				"scope_paths": ["foxctl/test/e2e"],
+				"scope_paths": ["foxctl/tests/e2e"],
 				"status": "pending"
 			}
 		],
@@ -399,7 +399,7 @@ graph insights.
   - [[overseer.Scorer](cci:2://file://~/repos/personal/claude-harness/foxctl/internal/intelligence/analysis/overseer/scorer.go:51:0-54:1)](cci:2://file://~/repos/personal/claude-harness/foxctl/internal/intelligence/analysis/overseer/scorer.go:51:0-54:1)
     is built and reachable from `todo/manage.recommend` (or an equivalent
     operation).
-  - [[multiagent_workflow_test.go](cci:7://file://~/repos/personal/claude-harness/foxctl/test/e2e/multiagent_workflow_test.go:0:0-0:0)](cci:7://file://~/repos/personal/claude-harness/foxctl/test/e2e/multiagent_workflow_test.go:0:0-0:0)
+  - [[multiagent_workflow_test.go](cci:7://file://~/repos/personal/claude-harness/foxctl/tests/e2e/multiagent_workflow_test.go:0:0-0:0)](cci:7://file://~/repos/personal/claude-harness/foxctl/tests/e2e/multiagent_workflow_test.go:0:0-0:0)
     E2E tests are part of the default test suite for this workspace.
 
 ### 9.2 Planning operation
@@ -547,7 +547,7 @@ agents:
 
 tests:
     - name: multi-agent-e2e
-      command: "go test -v ./test/e2e/..."
+      command: "go test -v ./tests/e2e/..."
       required: true
 ```
 ````

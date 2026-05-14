@@ -38,7 +38,7 @@ fi
 GOGC=50 GOMEMLIMIT=1800MiB make lint \
     GOLANGCI_TIMEOUT="${GOLANGCI_TIMEOUT:-30m}" \
     GOLANGCI_FLAGS="${GOLANGCI_FLAGS:---concurrency=1}" \
-    LINT_TARGETS="${LINT_TARGETS:-./cmd/... ./internal/... ./plugins/... ./scripts/... ./test/...}"
+    LINT_TARGETS="${LINT_TARGETS:-./cmd/... ./internal/... ./plugins/... ./scripts/... ./tests/...}"
 
 make check-large-files
 make check-tech-debt

@@ -1,6 +1,6 @@
 # Integration & E2E Test Quality Review Report
 
-**Scope:** `test/integration/`, `test/e2e/`, `cmd/foxctl/cmd/*_test.go`, and all `//go:build integration` tests across the foxctl Go codebase.
+**Scope:** `tests/integration/`, `tests/e2e/`, `cmd/foxctl/cmd/*_test.go`, and all `//go:build integration` tests across the foxctl Go codebase.
 **Date:** 2026-05-05
 **Reviewer:** Worker Droid (subagent)
 
@@ -19,7 +19,7 @@
 
 ## 1. Integration Tests Worth Keeping (KEEP)
 
-### `test/e2e/multiagent_workflow_test.go` (7 tests)
+### `tests/e2e/multiagent_workflow_test.go` (7 tests)
 - **TestMultiAgentWorkflow_FullCycle** — Exercises the full stack: task store → graph analysis → mailbox → file reservations → overseer scoring. Uses real SQLite-backed stores (`t.TempDir()`). This is a genuine integration test that validates cross-component coordination.
 - **TestMultiAgentWorkflow_CyclicDependencies** — Tests graph analyzer behavior with cycles.
 - **TestMultiAgentWorkflow_MessagePrioritization** — Validates overseer scoring with admin messages.
@@ -30,18 +30,18 @@
 
 **Why KEEP:** These tests wire together real storage (tasks, blackboard) with real analyzers and scorers. They verify emergent behavior (e.g., Task C gets top recommendation due to admin message + critical path) that no unit test can catch.
 
-### `test/integration/agent_helpers_test.go` (6 tests)
+### `tests/integration/agent_helpers_test.go` (6 tests)
 - **TestSender_SendAsk**, **TestSender_SendReply**, **TestSender_SendCmd**, **TestSender_SendEvent**, **TestReceiver**, **TestMessageMethods**, **TestFilterFunctions**, **TestReplyToBuilder**
 
 **Why KEEP:** Tests the agent sender/receiver helpers against a real `mailbox.Open()` store. Validates message serialization, polling, ack/nack/retry semantics. These are core protocol behaviors that must work across process boundaries.
 
-### `test/integration/agent_message_integration_test.go` (2 tests)
+### `tests/integration/agent_message_integration_test.go` (2 tests)
 - **TestMessagePassingIntegration** — Full request-response, fire-and-forget command, event broadcasting, session lineage, retry with Nack, workspace filtering.
 - **TestMessageBuilderFluent** — Fluent builder API with context preservation.
 
 **Why KEEP:** End-to-end message passing workflows through real mailbox store. Tests message types (Ask, Reply, Cmd, Event, Console) that are the backbone of the multi-agent system.
 
-### `test/integration/cache_test.go` (5 tests)
+### `tests/integration/cache_test.go` (5 tests)
 - **TestCacheHitSameInput**, **TestCacheMissDifferentInput**, **TestCacheModeOff**, **TestCacheModeOnlyMiss**, **TestCacheKeyDeterminism**
 
 **Why KEEP:** Tests the cache subsystem with real `cache.Open()` stores. Verifies cache key determinism (JSON key reordering, digest reordering), mode behavior, and the fact that cache is currently disabled but still stores entries. Important for cache correctness when re-enabled.
@@ -96,14 +96,14 @@
 
 ## 2. Flaky Tests That Need Fixing or Removal (FLAKY)
 
-### `test/integration/hierarchy_spawn_test.go` (2 tests)
+### `tests/integration/hierarchy_spawn_test.go` (2 tests)
 - **TestHierarchySpawn**, **TestOverseerConcurrencyLimit**
 
 **Why FLAKY:** Requires `GEMINI_API_KEY` or `FOXCTL_LLM_API_KEY` and calls real LLM APIs (Gemini). Spawns actual overseer and child agents with 2-minute timeouts. LLM API latency, rate limits, and model availability make these inherently flaky. They also leave sessions that need cleanup (`rt.Kill`).
 
 **Recommendation:** Replace with tests that use a fake LLM client or mock the runtime's LLM calls. The spawn logic and depth limit enforcement can be tested without a real LLM.
 
-### `test/integration/embedding_gemini_test.go` (2 tests)
+### `tests/integration/embedding_gemini_test.go` (2 tests)
 - **TestGeminiProvider_Integration**, **TestGeminiProvider_Integration_GeminiEmbedding001**
 
 **Why FLAKY:** Hits live Gemini API. Requires `GEMINI_API_KEY`. Network latency, API changes, and rate limiting make these flaky. The similarity test (`sim12 <= sim13`) could fail with model updates.
@@ -124,7 +124,7 @@
 
 **Recommendation:** Keep but add embedded PostgreSQL support for CI. Mark as `FLAKY` if CI doesn't have Postgres.
 
-### `test/integration/symbol_index_test.go` (3 tests)
+### `tests/integration/symbol_index_test.go` (3 tests)
 - **TestSymbolIndex_PostReviewFlow**, **TestSymbolIndex_IncrementalUpdate**, **TestSymbolIndex_CallGraph**
 
 **Why MARGINAL:** These test the symbol indexer with real file I/O and memory store. They are not flaky per se, but they test a heuristic indexer (symbol extraction is best-effort). The expected symbol counts ("at least 4") are loose. They are slow due to file writes and indexing.
@@ -135,14 +135,14 @@
 
 ## 3. Integration Tests That Are Just Expensive Unit Tests (VANITY)
 
-### `test/integration/tool_integration_test.go` (3 tests)
+### `tests/integration/tool_integration_test.go` (3 tests)
 - **TestToolIntegration_RetrievalFunnelWorkflow**, **TestToolIntegration_StructuredDiffWorkflow**, **TestToolIntegration_DryRunMode**
 
 **Why VANITY:** These test individual tools in a registry against a temp workspace. They don't test integration between components — they test each tool in isolation. The "workflow" is just sequential tool calls in the same test. The `code.search` step even notes it may fail if `rg` is not available. The telemetry recorder is a mock. These are expensive unit tests (file I/O + registry setup) dressed as integration tests.
 
 **Recommendation:** Move to `internal/agent/tools/` as unit tests. They don't need the `integration` build tag.
 
-### `test/integration/swe_grep_test.go` (1 test + subtests)
+### `tests/integration/swe_grep_test.go` (1 test + subtests)
 - **TestSWEGrep_CandidatesToSnippets** with 5 subtests
 
 **Why VANITY:** This tests the `code/snippet_extract` skill by building it and running it as a subprocess. While it exercises a real skill binary, the test is essentially verifying skill behavior through CLI invocation. The assertions are on envelope structure and summary fields, not on cross-component interaction. It requires `make skills-build` first.
@@ -276,7 +276,7 @@
 
 ## Appendix: Test Inventory
 
-### `test/integration/` (9 files, 22 tests)
+### `tests/integration/` (9 files, 22 tests)
 | File | Tests | Tag | Rating |
 |------|-------|-----|--------|
 | tool_integration_test.go | 3 | integration | VANITY |
@@ -288,7 +288,7 @@
 | swe_grep_test.go | 1 | integration | MARGINAL |
 | cache_test.go | 5 | integration | KEEP |
 
-### `test/e2e/` (1 file, 7 tests)
+### `tests/e2e/` (1 file, 7 tests)
 | File | Tests | Tag | Rating |
 |------|-------|-----|--------|
 | multiagent_workflow_test.go | 7 | (none) | KEEP |

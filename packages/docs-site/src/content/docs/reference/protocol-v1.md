@@ -265,7 +265,7 @@ foxctl run fs/ls --path . | foxctl proto validate
 foxctl proto validate --input envelope.json --strict
 ```
 
-Golden fixtures live in `test/golden/`:
+Golden fixtures live in `tests/golden/`:
 - `ok-inline.json` — Successful inline response
 - `ok-cas.json` — Successful CAS-artifactized response
 - `error-*.json` — Various error scenarios
