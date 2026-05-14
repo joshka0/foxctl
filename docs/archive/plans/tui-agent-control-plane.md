@@ -5,7 +5,7 @@ Owner: Solo maintainer
 Last Updated: 2026-04-18
 
 Archive note: the TypeScript TUI package described here now lives under
-`archive/packages/tui-agent/`. Current terminal work targets the Go TUI in
+`docs/archive/source/packages/tui-agent/`. Current terminal work targets the Go TUI in
 `cmd/foxctl_tui/` and `internal/interfaces/tui/`.
 
 ## Goal
@@ -205,7 +205,7 @@ Archive steps:
 
 Recommended destination:
 
-1. `archive/packages/tui-legacy/` if code should remain restorable
+1. `docs/archive/source/packages/tui-legacy/` if code should remain restorable
 2. or a slimmer `docs/archive/` note if the code is not worth carrying forward
 
 ## Delivery Phases

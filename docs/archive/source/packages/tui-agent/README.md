@@ -22,4 +22,4 @@ Reason for archive:
 
 Historical implementation plan:
 
-- [`docs/plans/tui-agent-control-plane.md`](../../../docs/plans/tui-agent-control-plane.md)
+- [`docs/archive/plans/tui-agent-control-plane.md`](../../../plans/tui-agent-control-plane.md)

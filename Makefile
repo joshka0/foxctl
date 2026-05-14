@@ -356,7 +356,7 @@ init: build skills-install-all
 	@./scripts/init.sh
 
 viewer:
-	@echo "foxctl-viewer is archived under archive/cmd/foxctl_viewer."
+	@echo "foxctl-viewer is archived under docs/archive/source/cmd/foxctl_viewer."
 	@echo "Use the canonical Go TUI instead: make go-tui-agent"
 	@exit 2
 
@@ -488,12 +488,12 @@ ts-install:
 	@bun install
 
 ts-build-tui:
-	@echo "The TypeScript TUI is archived under archive/packages/tui-agent."
+	@echo "The TypeScript TUI is archived under docs/archive/source/packages/tui-agent."
 	@echo "Use the canonical Go TUI instead: make go-tui-build"
 	@exit 2
 
 ts-dev-tui:
-	@echo "The TypeScript TUI is archived under archive/packages/tui-agent."
+	@echo "The TypeScript TUI is archived under docs/archive/source/packages/tui-agent."
 	@echo "Use the canonical Go TUI instead: make go-tui-agent"
 	@exit 2
 
@@ -557,7 +557,7 @@ gui-smoke-seed:
 	@bash scripts/gui_smoke_seed.sh "$(CURDIR)"
 
 ts-tui:
-	@echo "The TypeScript TUI is archived under archive/packages/tui-agent."
+	@echo "The TypeScript TUI is archived under docs/archive/source/packages/tui-agent."
 	@echo "Use the canonical Go TUI instead: make go-tui-agent"
 	@exit 2
 

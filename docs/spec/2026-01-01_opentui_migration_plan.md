@@ -5,7 +5,7 @@
 **Author:** Claude Code
 
 Archive note: `cmd/foxctl_viewer/` now lives under
-`archive/cmd/foxctl_viewer/`. Current terminal companion-agent work targets
+`docs/archive/source/cmd/foxctl_viewer/`. Current terminal companion-agent work targets
 `cmd/foxctl_tui/` and `internal/interfaces/tui/`.
 
 ## Executive Summary

@@ -768,7 +768,7 @@ func TestSearchPathFallbackRequiresTokenMatchForCodePaths(t *testing.T) {
 			t.Fatalf("write %s: %v", path, err)
 		}
 	}
-	mustWrite("archive/cmd/foxctl_viewer/actions.go")
+	mustWrite("docs/archive/source/cmd/foxctl_viewer/actions.go")
 	mustWrite("cmd/foxctl/cmd/agent.go")
 	mustWrite("internal/platform/config/config.go")
 
@@ -786,8 +786,8 @@ func TestMergeSymbolResultsWithFallbackKeepsPrimaryFirst(t *testing.T) {
 		SourceRank: 1,
 	}}
 	fallback := []Result{{
-		ID:         "symbol:path_fallback:archive/cmd/foxctl_viewer/actions.go",
-		Path:       "archive/cmd/foxctl_viewer/actions.go",
+		ID:         "symbol:path_fallback:docs/archive/source/cmd/foxctl_viewer/actions.go",
+		Path:       "docs/archive/source/cmd/foxctl_viewer/actions.go",
 		Similarity: 0.6,
 		SourceRank: 1,
 	}}

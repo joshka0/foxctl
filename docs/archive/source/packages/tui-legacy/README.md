@@ -11,7 +11,7 @@ It is retained for historical reference only. New terminal control-plane work sh
 - `make go-tui-agent`
 
 The intermediate TypeScript control-plane TUI is also archived at
-`archive/packages/tui-agent/`.
+`docs/archive/source/packages/tui-agent/`.
 
 Reason for archive:
 
