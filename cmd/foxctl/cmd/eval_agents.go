@@ -35,7 +35,9 @@ type agentEvalResult struct {
 	ToolCallCount         int                   `json:"tool_call_count,omitempty"`
 	ToolNames             []string              `json:"tool_names,omitempty"`
 	InputTokens           int                   `json:"input_tokens,omitempty"`
+	CachedInputTokens     int                   `json:"cached_input_tokens,omitempty"`
 	OutputTokens          int                   `json:"output_tokens,omitempty"`
+	ReasoningOutputTokens int                   `json:"reasoning_output_tokens,omitempty"`
 	TotalTokens           int                   `json:"total_tokens,omitempty"`
 	TranscriptPath        string                `json:"transcript_path,omitempty"`
 	TotalCostUSD          float64               `json:"total_cost_usd,omitempty"`
@@ -86,6 +88,8 @@ type agentEvalSummary struct {
 	MeanWrongScope    float64 `json:"mean_wrong_scope_penalty"`
 	MeanDurationMS    float64 `json:"mean_duration_ms"`
 	MeanTokens        float64 `json:"mean_tokens"`
+	MeanCachedInput   float64 `json:"mean_cached_input_tokens,omitempty"`
+	MeanReasoningOut  float64 `json:"mean_reasoning_output_tokens,omitempty"`
 	MeanCostUSD       float64 `json:"mean_cost_usd"`
 	ErrorCount        int     `json:"error_count"`
 }
@@ -94,28 +98,30 @@ type agentEvalTarget struct {
 	Label                   string `json:"label"`
 	Provider                string `json:"provider"`
 	BaseURL                 string `json:"base_url,omitempty"`
-	APIKey                  string `json:"api_key,omitempty"`
+	APIKey                  string `json:"-"`
 	Model                   string `json:"model"`
 	Runner                  string `json:"runner"`
 	SupportsRequiredToolUse bool   `json:"supports_required_tool_use,omitempty"`
 }
 
 type externalAgentEvalRecord struct {
-	CaseID         string  `json:"case_id,omitempty"`
-	Category       string  `json:"category,omitempty"`
-	Role           string  `json:"role,omitempty"`
-	Label          string  `json:"label,omitempty"`
-	Provider       string  `json:"provider,omitempty"`
-	Model          string  `json:"model,omitempty"`
-	Runner         string  `json:"runner,omitempty"`
-	Output         string  `json:"output"`
-	DurationMS     int64   `json:"duration_ms,omitempty"`
-	InputTokens    int     `json:"input_tokens,omitempty"`
-	OutputTokens   int     `json:"output_tokens,omitempty"`
-	TotalTokens    int     `json:"total_tokens,omitempty"`
-	TotalCostUSD   float64 `json:"total_cost_usd,omitempty"`
-	Error          string  `json:"error,omitempty"`
-	TranscriptPath string  `json:"transcript_path,omitempty"`
+	CaseID                string  `json:"case_id,omitempty"`
+	Category              string  `json:"category,omitempty"`
+	Role                  string  `json:"role,omitempty"`
+	Label                 string  `json:"label,omitempty"`
+	Provider              string  `json:"provider,omitempty"`
+	Model                 string  `json:"model,omitempty"`
+	Runner                string  `json:"runner,omitempty"`
+	Output                string  `json:"output"`
+	DurationMS            int64   `json:"duration_ms,omitempty"`
+	InputTokens           int     `json:"input_tokens,omitempty"`
+	CachedInputTokens     int     `json:"cached_input_tokens,omitempty"`
+	OutputTokens          int     `json:"output_tokens,omitempty"`
+	ReasoningOutputTokens int     `json:"reasoning_output_tokens,omitempty"`
+	TotalTokens           int     `json:"total_tokens,omitempty"`
+	TotalCostUSD          float64 `json:"total_cost_usd,omitempty"`
+	Error                 string  `json:"error,omitempty"`
+	TranscriptPath        string  `json:"transcript_path,omitempty"`
 }
 
 type structuredAgentEvalOutput struct {
@@ -150,20 +156,23 @@ type structuredScoutJudgeOutput struct {
 
 func newEvalAgentsCommand() *cobra.Command {
 	var (
-		workspace       string
-		evalDatasetFile string
-		roles           []string
-		defaultProvider string
-		models          []string
-		targets         []string
-		externalResults []string
-		agentRef        string
-		conversationID  string
-		vaultPath       string
-		timeout         time.Duration
-		maxIterations   int
-		passThreshold   float64
-		reportFile      string
+		workspace        string
+		evalDatasetFile  string
+		roles            []string
+		defaultProvider  string
+		models           []string
+		targets          []string
+		externalResults  []string
+		agentRef         string
+		conversationID   string
+		vaultPath        string
+		timeout          time.Duration
+		maxIterations    int
+		passThreshold    float64
+		reportFile       string
+		caseLimit        int
+		inputTokenPrice  float64
+		outputTokenPrice float64
 	)
 
 	cmd := &cobra.Command{
@@ -189,6 +198,8 @@ func newEvalAgentsCommand() *cobra.Command {
 			if len(evalCases) == 0 {
 				return writeOptimizeError(out, "eval.agents", "eval-dataset-file must contain at least one case")
 			}
+			loadedEvalCaseCount := len(evalCases)
+			evalCases = limitPromptEvalCases(evalCases, caseLimit)
 
 			resolvedRoles := normalizeAgentEvalRoles(roles)
 			if len(resolvedRoles) == 0 {
@@ -227,25 +238,30 @@ func newEvalAgentsCommand() *cobra.Command {
 				return writeOptimizeError(out, "eval.agents", fmt.Sprintf("load external results: %v", err))
 			}
 			results = append(results, imported...)
+			applyAgentEvalTokenPrice(results, inputTokenPrice, outputTokenPrice)
 
 			summaries := summarizeAgentEvalResults(results)
 			report := map[string]any{
-				"operation":             "eval.agents",
-				"workspace_id":          absWorkspace,
-				"role_count":            len(resolvedRoles),
-				"roles":                 resolvedRoles,
-				"target_count":          len(resolvedTargets),
-				"targets":               resolvedTargets,
-				"eval_case_count":       len(evalCases),
-				"eval_cases":            evalCases,
-				"memory_agent_ref":      strings.TrimSpace(agentRef),
-				"conversation_id":       strings.TrimSpace(conversationID),
-				"vault_path":            strings.TrimSpace(vaultPath),
-				"pass_threshold":        passThreshold,
-				"results":               results,
-				"summaries":             summaries,
-				"external_result_files": append([]string(nil), externalResults...),
-				"cli_command":           cmd.CommandPath(),
+				"operation":                          "eval.agents",
+				"workspace_id":                       absWorkspace,
+				"role_count":                         len(resolvedRoles),
+				"roles":                              resolvedRoles,
+				"target_count":                       len(resolvedTargets),
+				"targets":                            resolvedTargets,
+				"eval_case_count":                    len(evalCases),
+				"eval_dataset_case_count":            loadedEvalCaseCount,
+				"eval_case_limit":                    caseLimit,
+				"eval_cases":                         evalCases,
+				"memory_agent_ref":                   strings.TrimSpace(agentRef),
+				"conversation_id":                    strings.TrimSpace(conversationID),
+				"vault_path":                         strings.TrimSpace(vaultPath),
+				"pass_threshold":                     passThreshold,
+				"input_token_price_per_million_usd":  inputTokenPrice,
+				"output_token_price_per_million_usd": outputTokenPrice,
+				"results":                            results,
+				"summaries":                          summaries,
+				"external_result_files":              append([]string(nil), externalResults...),
+				"cli_command":                        cmd.CommandPath(),
 			}
 
 			if strings.TrimSpace(reportFile) != "" {
@@ -279,8 +295,38 @@ func newEvalAgentsCommand() *cobra.Command {
 	cmd.Flags().IntVar(&maxIterations, "max-iterations", 6, "Per-run max iterations")
 	cmd.Flags().Float64Var(&passThreshold, "pass-threshold", 0.8, "Quality threshold for pass/fail")
 	cmd.Flags().StringVar(&reportFile, "report-file", "", "Optional path to write the JSON report")
+	cmd.Flags().IntVar(&caseLimit, "case-limit", 0, "Maximum eval dataset rows to execute (0 means all)")
+	cmd.Flags().Float64Var(&inputTokenPrice, "input-token-price-per-million-usd", 0, "Optional input token price used to estimate result cost when model pricing is unavailable")
+	cmd.Flags().Float64Var(&outputTokenPrice, "output-token-price-per-million-usd", 0, "Optional output token price used to estimate result cost when model pricing is unavailable")
 	_ = cmd.MarkFlagRequired("eval-dataset-file")
 	return cmd
+}
+
+func limitPromptEvalCases(cases []promptEvalCase, limit int) []promptEvalCase {
+	if limit <= 0 || limit >= len(cases) {
+		return cases
+	}
+	return cases[:limit]
+}
+
+func applyAgentEvalTokenPrice(results []agentEvalResult, inputPricePerMillion, outputPricePerMillion float64) {
+	if inputPricePerMillion <= 0 && outputPricePerMillion <= 0 {
+		return
+	}
+	for i := range results {
+		results[i].TotalCostUSD = estimateTokenCostUSD(results[i].InputTokens, results[i].OutputTokens, inputPricePerMillion, outputPricePerMillion)
+	}
+}
+
+func estimateTokenCostUSD(inputTokens, outputTokens int, inputPricePerMillion, outputPricePerMillion float64) float64 {
+	var total float64
+	if inputPricePerMillion > 0 && inputTokens > 0 {
+		total += float64(inputTokens) / 1_000_000 * inputPricePerMillion
+	}
+	if outputPricePerMillion > 0 && outputTokens > 0 {
+		total += float64(outputTokens) / 1_000_000 * outputPricePerMillion
+	}
+	return total
 }
 
 func normalizeAgentEvalRoles(in []string) []string {
@@ -340,7 +386,7 @@ func resolveAgentEvalTargets(cfg config.Config, defaultProvider string, models, 
 			BaseURL:                 resolved.BaseURL,
 			APIKey:                  resolved.APIKey,
 			Model:                   model,
-			Runner:                  "native",
+			Runner:                  "foxctl-agent-runtime",
 			SupportsRequiredToolUse: agentEvalSupportsRequiredToolUse(resolved.Provider, model),
 		})
 	}
@@ -662,22 +708,24 @@ func loadExternalAgentEvalResults(paths []string, evalCases []promptEvalCase, pa
 				return nil, fmt.Errorf("decode external result %s: %w", path, err)
 			}
 			result := agentEvalResult{
-				CaseID:         strings.TrimSpace(rec.CaseID),
-				Category:       strings.TrimSpace(rec.Category),
-				Role:           strings.TrimSpace(rec.Role),
-				Label:          firstNonEmpty(rec.Label, strings.TrimSpace(rec.Role)+"@"+strings.TrimSpace(rec.Provider)+":"+strings.TrimSpace(rec.Model)),
-				Provider:       strings.TrimSpace(rec.Provider),
-				Model:          strings.TrimSpace(rec.Model),
-				Runner:         firstNonEmpty(rec.Runner, "external"),
-				Status:         "ok",
-				Output:         strings.TrimSpace(rec.Output),
-				DurationMS:     rec.DurationMS,
-				InputTokens:    rec.InputTokens,
-				OutputTokens:   rec.OutputTokens,
-				TotalTokens:    rec.TotalTokens,
-				TranscriptPath: strings.TrimSpace(rec.TranscriptPath),
-				TotalCostUSD:   rec.TotalCostUSD,
-				Error:          strings.TrimSpace(rec.Error),
+				CaseID:                strings.TrimSpace(rec.CaseID),
+				Category:              strings.TrimSpace(rec.Category),
+				Role:                  strings.TrimSpace(rec.Role),
+				Label:                 firstNonEmpty(rec.Label, strings.TrimSpace(rec.Role)+"@"+strings.TrimSpace(rec.Provider)+":"+strings.TrimSpace(rec.Model)),
+				Provider:              strings.TrimSpace(rec.Provider),
+				Model:                 strings.TrimSpace(rec.Model),
+				Runner:                firstNonEmpty(rec.Runner, "external"),
+				Status:                "ok",
+				Output:                strings.TrimSpace(rec.Output),
+				DurationMS:            rec.DurationMS,
+				InputTokens:           rec.InputTokens,
+				CachedInputTokens:     rec.CachedInputTokens,
+				OutputTokens:          rec.OutputTokens,
+				ReasoningOutputTokens: rec.ReasoningOutputTokens,
+				TotalTokens:           rec.TotalTokens,
+				TranscriptPath:        strings.TrimSpace(rec.TranscriptPath),
+				TotalCostUSD:          rec.TotalCostUSD,
+				Error:                 strings.TrimSpace(rec.Error),
 			}
 			if result.Error != "" {
 				result.Status = "error"
@@ -789,11 +837,15 @@ func fillExternalAgentTranscriptTokenUsage(results []agentEvalResult) {
 			continue
 		}
 		input := distributeInt(item.usage.InputTokens, count)
+		cached := distributeInt(item.usage.CachedInputTokens, count)
 		output := distributeInt(item.usage.OutputTokens, count)
+		reasoning := distributeInt(item.usage.ReasoningOutputTokens, count)
 		total := distributeInt(item.usage.TotalTokens, count)
 		for i, idx := range item.indices {
 			results[idx].InputTokens = input[i]
+			results[idx].CachedInputTokens = cached[i]
 			results[idx].OutputTokens = output[i]
+			results[idx].ReasoningOutputTokens = reasoning[i]
 			results[idx].TotalTokens = total[i]
 			results[idx].TranscriptPath = path
 		}
@@ -912,6 +964,8 @@ func summarizeAgentEvalResults(results []agentEvalResult) []agentEvalSummary {
 		item.MeanWrongScope += result.WrongScopePenalty
 		item.MeanDurationMS += float64(result.DurationMS)
 		item.MeanTokens += float64(result.TotalTokens)
+		item.MeanCachedInput += float64(result.CachedInputTokens)
+		item.MeanReasoningOut += float64(result.ReasoningOutputTokens)
 		item.MeanCostUSD += result.TotalCostUSD
 		if strings.TrimSpace(result.Error) != "" {
 			item.ErrorCount++
@@ -934,6 +988,8 @@ func summarizeAgentEvalResults(results []agentEvalResult) []agentEvalSummary {
 			item.MeanWrongScope /= scale
 			item.MeanDurationMS /= scale
 			item.MeanTokens /= scale
+			item.MeanCachedInput /= scale
+			item.MeanReasoningOut /= scale
 			item.MeanCostUSD /= scale
 		}
 		out = append(out, item.agentEvalSummary)

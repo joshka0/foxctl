@@ -5,10 +5,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestEvaluateModeAndSummarize(t *testing.T) {
-	mode := EvaluateModeWithForbidden("lexical",
+	mode := EvaluateModeWithBudgetAndDuration("lexical",
 		[]string{
 			"notes/repo/foxctl/index.md",
 			"internal/runtime/terminal/tmuxbridge/client.go",
@@ -17,6 +18,8 @@ func TestEvaluateModeAndSummarize(t *testing.T) {
 		[]string{"notes/repo/foxctl/packages/cmd-foxctl-cmd.md"},
 		[]string{"internal/runtime/terminal/tmuxbridge/client.go"},
 		3,
+		10,
+		25*time.Millisecond,
 		nil,
 	)
 	if mode.FirstCorrectRank != 3 {
@@ -27,6 +30,21 @@ func TestEvaluateModeAndSummarize(t *testing.T) {
 	}
 	if !mode.ForbiddenHit || len(mode.ForbiddenPaths) != 1 {
 		t.Fatalf("expected forbidden hit to be recorded: %+v", mode)
+	}
+	if mode.Budget == nil {
+		t.Fatal("expected budget metrics")
+	}
+	if mode.Budget.Limit != 10 {
+		t.Fatalf("budget limit=%d want 10", mode.Budget.Limit)
+	}
+	if mode.Budget.ReturnedPaths != 3 || mode.Budget.ReturnedHits != 3 {
+		t.Fatalf("budget returned paths/hits=%d/%d want 3/3", mode.Budget.ReturnedPaths, mode.Budget.ReturnedHits)
+	}
+	if mode.Budget.ReturnedPathBytes == 0 || mode.Budget.ReturnedPathTokenEstimate == 0 {
+		t.Fatalf("expected non-zero path budget fields: %+v", mode.Budget)
+	}
+	if mode.DurationMS != 25 {
+		t.Fatalf("duration_ms=%d want 25", mode.DurationMS)
 	}
 
 	results := []QueryResult{
@@ -48,6 +66,25 @@ func TestEvaluateModeAndSummarize(t *testing.T) {
 	}
 	if summaries[0].ForbiddenHits != 1 {
 		t.Fatalf("forbidden_hits=%d want 1", summaries[0].ForbiddenHits)
+	}
+	if summaries[0].MeanReturnedHits != 3 {
+		t.Fatalf("mean returned hits=%.1f want 3.0", summaries[0].MeanReturnedHits)
+	}
+	if summaries[0].MeanDurationMS != 25 {
+		t.Fatalf("mean duration ms=%.1f want 25.0", summaries[0].MeanDurationMS)
+	}
+	if summaries[0].MeanPathBytes == 0 || summaries[0].MeanPathTokens == 0 {
+		t.Fatalf("expected non-zero summary budget fields: %+v", summaries[0])
+	}
+	markdown := RenderMarkdown(RunResult{
+		Suite:     "test",
+		Workspace: ".",
+		Limit:     10,
+		Queries:   results,
+		Summaries: summaries,
+	})
+	if !strings.Contains(markdown, "avg ms") || !strings.Contains(markdown, "avg path tokens") || !strings.Contains(markdown, "est_tokens=") {
+		t.Fatalf("markdown missing budget fields:\n%s", markdown)
 	}
 }
 

@@ -4,7 +4,7 @@
 |-------|--------|
 | Status | Proposal |
 | Scope | Deterministic greenfield import from `~/.factory/missions/<mission-dir>` into the room-agile epic/milestone/story ledger and work-pack mirror |
-| Related | [room-epic-factory-mission-parity.md](./room-epic-factory-mission-parity.md), [room-agile-workpacks-and-validation.md](./room-agile-workpacks-and-validation.md), [room-epic-resume-and-next.md](./room-epic-resume-and-next.md) |
+| Related | [room-epic-factory-mission-parity.md](../../archive/plans/features/room-epic-factory-mission-parity.md), [room-agile-workpacks-and-validation.md](../../archive/plans/features/room-agile-workpacks-and-validation.md), [room-epic-resume-and-next.md](../../archive/plans/features/room-epic-resume-and-next.md) |
 
 ## Conclusion
 

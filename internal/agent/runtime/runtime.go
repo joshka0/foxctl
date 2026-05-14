@@ -772,7 +772,7 @@ func (e *agentToolExecutor) executeCodeSearch(ctx context.Context, args map[stri
 
 func (e *agentToolExecutor) executeShell(ctx context.Context, args map[string]any) (string, error) {
 	var argv []string
-	command := stringArg(args, "", "command")
+	command := stringArg(args, "command")
 	if strings.TrimSpace(command) == "" {
 		argv = stringSliceArg(args, "argv")
 		if len(argv) == 0 {
@@ -793,7 +793,7 @@ func (e *agentToolExecutor) executeShell(ctx context.Context, args map[string]an
 	cmdArgs := []string{"shell", "--command", command}
 	if boolArg(args, "measure_raw") {
 		cmdArgs = append(cmdArgs, "--measure")
-		if tokenModel := stringArg(args, "", "token_model"); strings.TrimSpace(tokenModel) != "" {
+		if tokenModel := stringArg(args, "token_model"); strings.TrimSpace(tokenModel) != "" {
 			cmdArgs = append(cmdArgs, "--token-model", tokenModel)
 		}
 	}
@@ -1700,7 +1700,7 @@ func (e *agentToolExecutor) executeRefactorScout(ctx context.Context, args map[s
 }
 
 func (e *agentToolExecutor) executeRepoIndexBuild(ctx context.Context, args map[string]any) (string, error) {
-	workspace := stringArg(args, "", "workspace")
+	workspace := stringArg(args, "workspace")
 	if strings.TrimSpace(workspace) == "" {
 		workspace = strings.TrimSpace(e.workspaceRoot)
 	}
@@ -1743,7 +1743,7 @@ func (e *agentToolExecutor) executeRepoIndexBuild(ctx context.Context, args map[
 }
 
 func (e *agentToolExecutor) executeRepoIndexEnrichSummaries(ctx context.Context, args map[string]any) (string, error) {
-	workspace := stringArg(args, "", "workspace")
+	workspace := stringArg(args, "workspace")
 	if strings.TrimSpace(workspace) == "" {
 		workspace = strings.TrimSpace(e.workspaceRoot)
 	}
@@ -1765,29 +1765,9 @@ func (e *agentToolExecutor) executeRepoIndexEnrichSummaries(ctx context.Context,
 }
 
 func (e *agentToolExecutor) executeRepoIndexSearch(ctx context.Context, args map[string]any) (string, error) {
-	query, _ := args["query"].(string)
-	if query == "" {
-		if q, ok := args["question"].(string); ok {
-			query = q
-		}
-	}
-	query = strings.TrimSpace(query)
-	if query == "" {
-		return "", fmt.Errorf("query is required")
-	}
-
-	limit := intArg(args, 20, "limit")
-	workspace := strings.TrimSpace(e.workspaceRoot)
-	if workspace == "" {
-		workspace = "."
-	}
-	input := map[string]any{
-		"query":     query,
-		"workspace": workspace,
-		"limit":     limit,
-	}
-	if inlineMode := stringArg(args, "inline_mode", ""); strings.TrimSpace(inlineMode) != "" {
-		input["inline_mode"] = strings.TrimSpace(inlineMode)
+	input, err := buildRepoIndexSearchInput(args, e.workspaceRoot)
+	if err != nil {
+		return "", err
 	}
 	inputBytes, err := json.Marshal(input)
 	if err != nil {
@@ -1798,26 +1778,9 @@ func (e *agentToolExecutor) executeRepoIndexSearch(ctx context.Context, args map
 }
 
 func (e *agentToolExecutor) executeRepoIndexExpand(ctx context.Context, args map[string]any) (string, error) {
-	seeds := stringSliceArg(args, "seeds", "seed")
-	if len(seeds) == 0 {
-		return "", fmt.Errorf("seeds are required")
-	}
-
-	workspace := strings.TrimSpace(e.workspaceRoot)
-	if workspace == "" {
-		workspace = "."
-	}
-	input := map[string]any{
-		"seeds":        seeds,
-		"workspace":    workspace,
-		"edge_types":   stringSliceArg(args, "edge_types", "edges", "edge"),
-		"direction":    firstNonEmptyString(stringArg(args, "direction", ""), "out"),
-		"depth":        intArg(args, 1, "depth"),
-		"budget":       intArg(args, 50, "budget"),
-		"per_node_cap": intArg(args, 50, "per_node_cap", "per_node"),
-	}
-	if inlineMode := stringArg(args, "inline_mode", ""); strings.TrimSpace(inlineMode) != "" {
-		input["inline_mode"] = strings.TrimSpace(inlineMode)
+	input, err := buildRepoIndexExpandInput(args, e.workspaceRoot)
+	if err != nil {
+		return "", err
 	}
 	inputBytes, err := json.Marshal(input)
 	if err != nil {
@@ -1825,6 +1788,52 @@ func (e *agentToolExecutor) executeRepoIndexExpand(ctx context.Context, args map
 	}
 	cmd := e.newFoxctlCommand(ctx, "run", "repo/index_expand", "--input", string(inputBytes))
 	return commandOutput(cmd, "repo_index_expand")
+}
+
+func buildRepoIndexSearchInput(args map[string]any, workspaceRoot string) (map[string]any, error) {
+	query := firstNonEmptyString(stringArg(args, "query"), stringArg(args, "question"))
+	if query == "" {
+		return nil, fmt.Errorf("query is required")
+	}
+
+	input := map[string]any{
+		"query":     query,
+		"workspace": repoIndexToolWorkspace(workspaceRoot),
+		"limit":     intArg(args, 20, "limit"),
+	}
+	if inlineMode := stringArg(args, "inline_mode"); inlineMode != "" {
+		input["inline_mode"] = inlineMode
+	}
+	return input, nil
+}
+
+func buildRepoIndexExpandInput(args map[string]any, workspaceRoot string) (map[string]any, error) {
+	seeds := stringSliceArg(args, "seeds", "seed")
+	if len(seeds) == 0 {
+		return nil, fmt.Errorf("seeds are required")
+	}
+
+	input := map[string]any{
+		"seeds":        seeds,
+		"workspace":    repoIndexToolWorkspace(workspaceRoot),
+		"edge_types":   stringSliceArg(args, "edge_types", "edges", "edge"),
+		"direction":    firstNonEmptyString(stringArg(args, "direction"), "out"),
+		"depth":        intArg(args, 1, "depth"),
+		"budget":       intArg(args, 50, "budget"),
+		"per_node_cap": intArg(args, 50, "per_node_cap", "per_node"),
+	}
+	if inlineMode := stringArg(args, "inline_mode"); inlineMode != "" {
+		input["inline_mode"] = inlineMode
+	}
+	return input, nil
+}
+
+func repoIndexToolWorkspace(workspaceRoot string) string {
+	workspace := strings.TrimSpace(workspaceRoot)
+	if workspace == "" {
+		return "."
+	}
+	return workspace
 }
 
 func (e *agentToolExecutor) executeRepoIndexOpen(ctx context.Context, args map[string]any) (string, error) {
@@ -1873,7 +1882,7 @@ func (e *agentToolExecutor) executeContextRetrieve(ctx context.Context, args map
 	if strings.TrimSpace(query) == "" {
 		return "", fmt.Errorf("query is required")
 	}
-	vaultPath := stringArg(args, "vault_path", "")
+	vaultPath := stringArg(args, "vault_path")
 	if strings.TrimSpace(vaultPath) == "" {
 		vaultPath = strings.TrimSpace(os.Getenv("FOXCTL_ACA_VAULT_PATH"))
 	}
@@ -1897,7 +1906,7 @@ func (e *agentToolExecutor) executeObsidianIndexSearch(ctx context.Context, args
 	if strings.TrimSpace(query) == "" {
 		return "", fmt.Errorf("query is required")
 	}
-	vaultPath := stringArg(args, "vault_path", "")
+	vaultPath := stringArg(args, "vault_path")
 	if strings.TrimSpace(vaultPath) == "" {
 		vaultPath = strings.TrimSpace(os.Getenv("FOXCTL_ACA_VAULT_PATH"))
 	}
@@ -1917,11 +1926,11 @@ func (e *agentToolExecutor) executeObsidianIndexSearch(ctx context.Context, args
 }
 
 func (e *agentToolExecutor) executeObsidianRead(ctx context.Context, args map[string]any) (string, error) {
-	path := stringArg(args, "path", "")
+	path := stringArg(args, "path")
 	if strings.TrimSpace(path) == "" {
 		return "", fmt.Errorf("path is required")
 	}
-	vaultPath := stringArg(args, "vault_path", "")
+	vaultPath := stringArg(args, "vault_path")
 	if strings.TrimSpace(vaultPath) == "" {
 		vaultPath = strings.TrimSpace(os.Getenv("FOXCTL_ACA_VAULT_PATH"))
 	}
@@ -1936,11 +1945,11 @@ func (e *agentToolExecutor) executeObsidianRead(ctx context.Context, args map[st
 }
 
 func (e *agentToolExecutor) executeObsidianRelated(ctx context.Context, args map[string]any) (string, error) {
-	path := stringArg(args, "path", "")
+	path := stringArg(args, "path")
 	if strings.TrimSpace(path) == "" {
 		return "", fmt.Errorf("path is required")
 	}
-	vaultPath := stringArg(args, "vault_path", "")
+	vaultPath := stringArg(args, "vault_path")
 	if strings.TrimSpace(vaultPath) == "" {
 		vaultPath = strings.TrimSpace(os.Getenv("FOXCTL_ACA_VAULT_PATH"))
 	}
@@ -2025,13 +2034,13 @@ func (e *agentToolExecutor) executeMemoryQuery(ctx context.Context, args map[str
 }
 
 func (e *agentToolExecutor) executeAgentMemoryContext(ctx context.Context, args map[string]any) (string, error) {
-	agentRef := stringArg(args, "", "agent_ref")
+	agentRef := stringArg(args, "agent_ref")
 	if strings.TrimSpace(agentRef) == "" {
 		return "", fmt.Errorf("agent_ref is required")
 	}
 
 	argsList := []string{"agent", "memory", "context", agentRef}
-	if conversationID := stringArg(args, "", "conversation_id"); strings.TrimSpace(conversationID) != "" {
+	if conversationID := stringArg(args, "conversation_id"); strings.TrimSpace(conversationID) != "" {
 		argsList = append(argsList, "--conversation-id", conversationID)
 	}
 
@@ -2040,17 +2049,17 @@ func (e *agentToolExecutor) executeAgentMemoryContext(ctx context.Context, args 
 }
 
 func (e *agentToolExecutor) executeAgentMemorySearch(ctx context.Context, args map[string]any) (string, error) {
-	agentRef := stringArg(args, "", "agent_ref")
+	agentRef := stringArg(args, "agent_ref")
 	if strings.TrimSpace(agentRef) == "" {
 		return "", fmt.Errorf("agent_ref is required")
 	}
-	query := stringArg(args, "", "query")
+	query := stringArg(args, "query")
 	if strings.TrimSpace(query) == "" {
 		return "", fmt.Errorf("query is required")
 	}
 
 	argsList := []string{"agent", "memory", "search", agentRef, "--query", strings.TrimSpace(query)}
-	if conversationID := stringArg(args, "", "conversation_id"); strings.TrimSpace(conversationID) != "" {
+	if conversationID := stringArg(args, "conversation_id"); strings.TrimSpace(conversationID) != "" {
 		argsList = append(argsList, "--conversation-id", conversationID)
 	}
 	if limit := intArg(args, 0, "limit"); limit > 0 {
@@ -4132,7 +4141,7 @@ func intArg(args map[string]any, fallback int, keys ...string) int {
 	return fallback
 }
 
-func stringArg(args map[string]any, fallback string, keys ...string) string {
+func stringArg(args map[string]any, keys ...string) string {
 	for _, key := range keys {
 		if v, ok := args[key].(string); ok {
 			trimmed := strings.TrimSpace(v)
@@ -4141,7 +4150,7 @@ func stringArg(args map[string]any, fallback string, keys ...string) string {
 			}
 		}
 	}
-	return fallback
+	return ""
 }
 
 func boolArg(args map[string]any, keys ...string) bool {

@@ -1461,6 +1461,7 @@ func registerOptimizedRetrievalTools(s *server.MCPServer) {
 			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
 			mcp.WithBoolean("measure_raw", mcp.Description("Measure raw output bytes and token estimates against the reduced summary")),
 			mcp.WithString("token_model", mcp.Description("Tokenizer model or encoding for measurement (default: cl100k_base)")),
+			mcp.WithNumber("input_token_price_per_million_usd", mcp.Description("Optional input-token price in USD per 1M tokens for estimated cost savings")),
 		),
 		handleStructuredShell,
 	)
@@ -3279,6 +3280,7 @@ func executeMCPPipeSource(ctx context.Context, toolName string, args map[string]
 				getStringArg(args, "command", ""),
 				getBoolArg(args, "measure_raw", false),
 				getStringArg(args, "token_model", "cl100k_base"),
+				getFloatArg(args, "input_token_price_per_million_usd", 0),
 				getStringSliceArg(args, "argv"),
 			)
 		})
@@ -4588,8 +4590,9 @@ func handleStructuredShell(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	workspace := getStringArg(args, "workspace", ".")
 	measureRaw := getBoolArg(args, "measure_raw", false)
 	tokenModel := getStringArg(args, "token_model", "cl100k_base")
+	inputTokenPricePerMillionUSD := getFloatArg(args, "input_token_price_per_million_usd", 0)
 	return runEnvelopeCommand(ctx, "structured_shell", func(cmd *cobra.Command) error {
-		return runShellCommand(cmd, workspace, command, measureRaw, tokenModel, argv)
+		return runShellCommand(cmd, workspace, command, measureRaw, tokenModel, inputTokenPricePerMillionUSD, argv)
 	})
 }
 

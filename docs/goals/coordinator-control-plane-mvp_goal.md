@@ -66,7 +66,7 @@ coordinator policy and harness evidence.
   orientation, proposals, retrieval inspection, promotion helpers, and task
   history.
 - Related plan:
-  `docs/plans/features/aca-self-evolving-memory-layer.md`.
+  `docs/archive/plans/features/aca-self-evolving-memory-layer.md`.
 
 ## Architecture Contract
 

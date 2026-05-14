@@ -4,7 +4,7 @@
 |-------|-------|
 | Status | Design proposal |
 | Scope | Layer an implementer, verifier/tester, and judge/coordinator workflow on top of existing room agile primitives |
-| Related | [foxctl room skill](../../configs/skills-pack/foxctl-room/SKILL.md), [foxctl room agile skill](../../configs/skills-pack/foxctl-room-agile/SKILL.md), [room evidence lanes](../plans/features/room-evidence-lanes.md), [room milestone evidence policy](../plans/features/room-milestone-evidence-policy.md), [room runtime delivery contract](../plans/features/room-runtime-delivery-contract.md), [LLM-as-a-Verifier](https://llm-as-a-verifier.notion.site/) |
+| Related | [foxctl room skill](../../configs/skills-pack/foxctl-room/SKILL.md), [foxctl room agile skill](../../configs/skills-pack/foxctl-room-agile/SKILL.md), [room evidence lanes](../archive/plans/features/room-evidence-lanes.md), [room milestone evidence policy](../archive/plans/features/room-milestone-evidence-policy.md), [room runtime delivery contract](../archive/plans/features/room-runtime-delivery-contract.md), [LLM-as-a-Verifier](https://llm-as-a-verifier.notion.site/) |
 
 ## Summary
 

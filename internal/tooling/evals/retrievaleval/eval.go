@@ -28,12 +28,23 @@ type ModeResult struct {
 	Available        bool     `json:"available"`
 	Error            string   `json:"error,omitempty"`
 	TotalHits        int      `json:"total_hits"`
+	DurationMS       int64    `json:"duration_ms,omitempty"`
 	TopPaths         []string `json:"top_paths,omitempty"`
+	Budget           *Budget  `json:"budget,omitempty"`
 	FirstCorrectRank int      `json:"first_correct_rank,omitempty"`
 	ForbiddenHit     bool     `json:"forbidden_hit,omitempty"`
 	ForbiddenPaths   []string `json:"forbidden_paths,omitempty"`
 	HitAt5           bool     `json:"hit_at_5"`
 	HitAt10          bool     `json:"hit_at_10"`
+}
+
+type Budget struct {
+	Limit                     int  `json:"limit,omitempty"`
+	ReturnedHits              int  `json:"returned_hits"`
+	ReturnedPaths             int  `json:"returned_paths"`
+	ReturnedPathBytes         int  `json:"returned_path_bytes"`
+	ReturnedPathTokenEstimate int  `json:"returned_path_token_estimate"`
+	LimitReached              bool `json:"limit_reached,omitempty"`
 }
 
 type QueryResult struct {
@@ -51,6 +62,10 @@ type Summary struct {
 	HitRateAt5         float64 `json:"hit_rate_at_5"`
 	HitRateAt10        float64 `json:"hit_rate_at_10"`
 	MeanReciprocalRank float64 `json:"mean_reciprocal_rank"`
+	MeanDurationMS     float64 `json:"mean_duration_ms,omitempty"`
+	MeanReturnedHits   float64 `json:"mean_returned_hits,omitempty"`
+	MeanPathBytes      float64 `json:"mean_returned_path_bytes,omitempty"`
+	MeanPathTokens     float64 `json:"mean_returned_path_token_estimate,omitempty"`
 }
 
 type RunResult struct {
@@ -83,11 +98,21 @@ func EvaluateMode(mode string, hitPaths, expected []string, totalHits int, err e
 }
 
 func EvaluateModeWithForbidden(mode string, hitPaths, expected, forbidden []string, totalHits int, err error) ModeResult {
+	return EvaluateModeWithBudget(mode, hitPaths, expected, forbidden, totalHits, 0, err)
+}
+
+func EvaluateModeWithBudget(mode string, hitPaths, expected, forbidden []string, totalHits, limit int, err error) ModeResult {
+	return EvaluateModeWithBudgetAndDuration(mode, hitPaths, expected, forbidden, totalHits, limit, 0, err)
+}
+
+func EvaluateModeWithBudgetAndDuration(mode string, hitPaths, expected, forbidden []string, totalHits, limit int, duration time.Duration, err error) ModeResult {
 	result := ModeResult{
-		Mode:      mode,
-		Available: err == nil,
-		TotalHits: totalHits,
-		TopPaths:  append([]string(nil), hitPaths...),
+		Mode:       mode,
+		Available:  err == nil,
+		TotalHits:  totalHits,
+		DurationMS: duration.Milliseconds(),
+		TopPaths:   append([]string(nil), hitPaths...),
+		Budget:     NewBudget(hitPaths, totalHits, limit),
 	}
 	if err != nil {
 		result.Error = err.Error()
@@ -112,11 +137,29 @@ func EvaluateModeWithForbidden(mode string, hitPaths, expected, forbidden []stri
 	return result
 }
 
+func NewBudget(hitPaths []string, totalHits, limit int) *Budget {
+	budget := &Budget{
+		Limit:         limit,
+		ReturnedHits:  totalHits,
+		ReturnedPaths: len(hitPaths),
+		LimitReached:  limit > 0 && len(hitPaths) >= limit,
+	}
+	if totalHits < len(hitPaths) {
+		budget.ReturnedHits = len(hitPaths)
+	}
+	text := strings.Join(hitPaths, "\n")
+	budget.ReturnedPathBytes = len([]byte(text))
+	budget.ReturnedPathTokenEstimate = estimateTokens(text)
+	return budget
+}
+
 func Summarize(results []QueryResult, modes []string) []Summary {
 	out := make([]Summary, 0, len(modes))
 	for _, mode := range modes {
 		s := Summary{Mode: mode, Queries: len(results)}
 		var rrSum float64
+		var returnedHits, pathBytes, pathTokens int
+		var durationMS int64
 		for _, query := range results {
 			modeResult, ok := query.Modes[mode]
 			if !ok || !modeResult.Available {
@@ -135,11 +178,21 @@ func Summarize(results []QueryResult, modes []string) []Summary {
 			if modeResult.FirstCorrectRank > 0 {
 				rrSum += 1.0 / float64(modeResult.FirstCorrectRank)
 			}
+			durationMS += modeResult.DurationMS
+			if modeResult.Budget != nil {
+				returnedHits += modeResult.Budget.ReturnedHits
+				pathBytes += modeResult.Budget.ReturnedPathBytes
+				pathTokens += modeResult.Budget.ReturnedPathTokenEstimate
+			}
 		}
 		if s.Available > 0 {
 			s.HitRateAt5 /= float64(s.Available)
 			s.HitRateAt10 /= float64(s.Available)
 			s.MeanReciprocalRank = rrSum / float64(s.Available)
+			s.MeanDurationMS = float64(durationMS) / float64(s.Available)
+			s.MeanReturnedHits = float64(returnedHits) / float64(s.Available)
+			s.MeanPathBytes = float64(pathBytes) / float64(s.Available)
+			s.MeanPathTokens = float64(pathTokens) / float64(s.Available)
 		}
 		out = append(out, s)
 	}
@@ -154,10 +207,10 @@ func RenderMarkdown(result RunResult) string {
 	fmt.Fprintf(&b, "- Vault: `%s`\n", result.VaultPath)
 	fmt.Fprintf(&b, "- Limit: `%d`\n\n", result.Limit)
 	b.WriteString("## Summary\n\n")
-	b.WriteString("| Mode | Available | forbidden | hit@5 | hit@10 | MRR |\n")
-	b.WriteString("| --- | ---: | ---: | ---: | ---: | ---: |\n")
+	b.WriteString("| Mode | Available | forbidden | hit@5 | hit@10 | MRR | avg ms | avg hits | avg path bytes | avg path tokens |\n")
+	b.WriteString("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n")
 	for _, s := range result.Summaries {
-		b.WriteString(fmt.Sprintf("| %s | %d/%d | %d | %.2f | %.2f | %.2f |\n", s.Mode, s.Available, s.Queries, s.ForbiddenHits, s.HitRateAt5, s.HitRateAt10, s.MeanReciprocalRank))
+		b.WriteString(fmt.Sprintf("| %s | %d/%d | %d | %.2f | %.2f | %.2f | %.1f | %.1f | %.1f | %.1f |\n", s.Mode, s.Available, s.Queries, s.ForbiddenHits, s.HitRateAt5, s.HitRateAt10, s.MeanReciprocalRank, s.MeanDurationMS, s.MeanReturnedHits, s.MeanPathBytes, s.MeanPathTokens))
 	}
 	b.WriteString("\n## Queries\n\n")
 	for _, q := range result.Queries {
@@ -177,7 +230,14 @@ func RenderMarkdown(result RunResult) string {
 				b.WriteString("\n")
 				continue
 			}
-			b.WriteString(line + fmt.Sprintf("rank=%d hit@5=%t hit@10=%t forbidden=%t\n", m.FirstCorrectRank, m.HitAt5, m.HitAt10, m.ForbiddenHit))
+			b.WriteString(line + fmt.Sprintf("rank=%d hit@5=%t hit@10=%t forbidden=%t", m.FirstCorrectRank, m.HitAt5, m.HitAt10, m.ForbiddenHit))
+			if m.DurationMS > 0 {
+				b.WriteString(fmt.Sprintf(" ms=%d", m.DurationMS))
+			}
+			if m.Budget != nil {
+				b.WriteString(fmt.Sprintf(" budget=%d/%d paths bytes=%d est_tokens=%d", m.Budget.ReturnedPaths, m.Budget.Limit, m.Budget.ReturnedPathBytes, m.Budget.ReturnedPathTokenEstimate))
+			}
+			b.WriteString("\n")
 			for _, path := range m.TopPaths[:minInt(len(m.TopPaths), 3)] {
 				b.WriteString("  - `" + path + "`\n")
 			}
@@ -188,6 +248,19 @@ func RenderMarkdown(result RunResult) string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+func estimateTokens(text string) int {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return 0
+	}
+	runes := len([]rune(text))
+	tokens := (runes + 3) / 4
+	if tokens < 1 {
+		return 1
+	}
+	return tokens
 }
 
 func normalizeExpected(items []string) []string {

@@ -81,7 +81,7 @@ Canonical references:
 - [Tmux collaboration](../../general/tmux-collaboration.md)
 - [Agent mux + room hierarchy](agent-mux-room-hierarchy.md)
 - [OpenTUI agent terminal facades](opentui-agent-terminal-facades.md)
-- [TUI agent control plane](../tui-agent-control-plane.md)
+- [TUI agent control plane](../../archive/plans/tui-agent-control-plane.md)
 - [Principal and tenant isolation](../k8s/01-principal-and-tenant-isolation.md)
 
 ## Non-Goals

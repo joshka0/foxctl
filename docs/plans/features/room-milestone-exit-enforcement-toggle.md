@@ -4,7 +4,7 @@
 |-------|--------|
 | Status | Draft |
 | Scope | Make milestone exit enforcement explicitly reversible so coordinators can turn `enforce_exit_policy` on or off without rewriting the milestone contract out of band |
-| Related | [room-milestone-exit-enforcement.md](./room-milestone-exit-enforcement.md), [room-milestone-contract.md](./room-milestone-contract.md), [room-milestone-exit-policy.md](./room-milestone-exit-policy.md) |
+| Related | [room-milestone-exit-enforcement.md](../../archive/plans/features/room-milestone-exit-enforcement.md), [room-milestone-contract.md](../../archive/plans/features/room-milestone-contract.md), [room-milestone-exit-policy.md](./room-milestone-exit-policy.md) |
 
 ## Why this slice
 

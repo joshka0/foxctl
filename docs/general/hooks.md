@@ -135,7 +135,7 @@ Core fields include event identity, principal/workspace/session metadata, provid
   - `configs/hooks/plan-sync.sh` is now a thin wrapper over that command.
   - `configs/hooks/graph-maintenance.sh` is now a thin wrapper over that command.
 - Remaining shell hooks are now triaged by category in:
-  - `docs/plans/features/hook-shell-triage-plan.md`
+  - `docs/archive/plans/features/hook-shell-triage-plan.md`
 - Prefer structured action outputs over ad-hoc stdout text for reliable automation.
 
 ## Task Continuity Usage

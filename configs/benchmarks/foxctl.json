@@ -1,0 +1,756 @@
+{
+  "version": 1,
+  "suite": "foxctl-benchmark-suite",
+  "description": "Canonical benchmark and eval inventory for foxctl's Go runtime, repoindex/DAG retrieval, RLM, room runtime, hooks, and integrations.",
+  "categories": [
+    {
+      "id": "runtime",
+      "name": "Runtime",
+      "status": "implemented",
+      "owner": "bench-runtime",
+      "description": "Go microbenchmarks for execution, lifecycle, scheduler, tool-runner, platform, and local storage primitives."
+    },
+    {
+      "id": "repoindex",
+      "name": "Repoindex",
+      "status": "implemented",
+      "owner": "bench-repoindex",
+      "description": "FTS and graph-navigation benchmarks over deterministic repoindex fixtures."
+    },
+    {
+      "id": "dag",
+      "name": "DAG",
+      "status": "implemented",
+      "owner": "bench-dag",
+      "description": "Explanation-subgraph benchmarks for DAG grep and structural edge expansion."
+    },
+    {
+      "id": "retrieval",
+      "name": "Retrieval",
+      "status": "in_progress",
+      "owner": "bench-retrieval",
+      "description": "Fixture-backed retrieval eval suites and policy checks; current foxctl fixture exposes quality alerts and remains advisory."
+    },
+    {
+      "id": "rlm",
+      "name": "RLM",
+      "status": "implemented",
+      "owner": "bench-rlm",
+      "description": "Model-free RLM planner/tool-policy benchmarks plus extended gather-context and LongCoT evidence suites."
+    },
+    {
+      "id": "room",
+      "name": "Room Runtime",
+      "status": "implemented",
+      "owner": "bench-room",
+      "description": "Room-agile frontier, story validation, and dispatch behavior checks."
+    },
+    {
+      "id": "integrations",
+      "name": "Integrations and Hooks",
+      "status": "implemented",
+      "owner": "bench-integrations",
+      "description": "Hook latency and structured-shell integration overhead lanes."
+    }
+  ],
+  "benchmarks": [
+    {
+      "id": "runtime.exec-buffer-pool",
+      "category": "runtime",
+      "status": "implemented",
+      "runner": "go-test-bench",
+      "default_gate": true,
+      "extended_gate": false,
+      "requires_network": false,
+      "requires_llm": false,
+      "commands": [
+        "BENCH_PATTERN=BenchmarkBufferPooling ./scripts/run-go-benchmarks.sh ./internal/runtime/execution/exec"
+      ],
+      "packages": [
+        "./internal/runtime/execution/exec"
+      ],
+      "fixtures": [
+        "synthetic execution payload"
+      ],
+      "metrics": [
+        "ns/op",
+        "B/op",
+        "allocs/op"
+      ],
+      "artifacts": [
+        "BENCH_OUT text file"
+      ],
+      "notes": "Existing exec buffer-pool benchmark; retained as the lowest-level runtime allocation sentinel."
+    },
+    {
+      "id": "runtime.tool-runner-dispatch",
+      "category": "runtime",
+      "status": "implemented",
+      "runner": "go-test-bench",
+      "default_gate": true,
+      "extended_gate": false,
+      "requires_network": false,
+      "requires_llm": false,
+      "commands": [
+        "BENCH_PATTERN=BenchmarkToolRunner ./scripts/run-go-benchmarks.sh ./internal/runtime/engine"
+      ],
+      "packages": [
+        "./internal/runtime/engine"
+      ],
+      "fixtures": [
+        "fake in-memory ToolExecutor",
+        "nil hook dispatcher",
+        "cheap in-memory hook dispatcher"
+      ],
+      "metrics": [
+        "ns/op",
+        "B/op",
+        "allocs/op"
+      ],
+      "artifacts": [
+        "BENCH_OUT text file"
+      ]
+    },
+    {
+      "id": "runtime.protocol-envelope",
+      "category": "runtime",
+      "status": "implemented",
+      "runner": "go-test-bench",
+      "default_gate": true,
+      "extended_gate": false,
+      "requires_network": false,
+      "requires_llm": false,
+      "commands": [
+        "BENCH_PATTERN=BenchmarkEnvelope ./scripts/run-go-benchmarks.sh ./internal/protocol"
+      ],
+      "packages": [
+        "./internal/protocol"
+      ],
+      "fixtures": [
+        "small protocol envelope payload with artifact pointer shape"
+      ],
+      "metrics": [
+        "ns/op",
+        "B/op",
+        "allocs/op"
+      ],
+      "artifacts": [
+        "BENCH_OUT text file"
+      ]
+    },
+    {
+      "id": "runtime.actor-lifecycle",
+      "category": "runtime",
+      "status": "implemented",
+      "runner": "go-test-bench",
+      "default_gate": true,
+      "extended_gate": false,
+      "requires_network": false,
+      "requires_llm": false,
+      "commands": [
+        "BENCH_PATTERN=BenchmarkBaseActorLifecycle ./scripts/run-go-benchmarks.sh ./internal/runtime/actor"
+      ],
+      "packages": [
+        "./internal/runtime/actor"
+      ],
+      "fixtures": [
+        "in-memory BaseActor with lifecycle hooks"
+      ],
+      "metrics": [
+        "ns/op",
+        "B/op",
+        "allocs/op"
+      ],
+      "artifacts": [
+        "BENCH_OUT text file"
+      ]
+    },
+    {
+      "id": "runtime.wfq-enqueue",
+      "category": "runtime",
+      "status": "implemented",
+      "runner": "go-test-bench",
+      "default_gate": true,
+      "extended_gate": false,
+      "requires_network": false,
+      "requires_llm": false,
+      "commands": [
+        "BENCH_PATTERN=BenchmarkWFQ ./scripts/run-go-benchmarks.sh ./internal/runtime/execution/scheduler"
+      ],
+      "packages": [
+        "./internal/runtime/execution/scheduler"
+      ],
+      "fixtures": [
+        "weighted namespace queue fixture"
+      ],
+      "metrics": [
+        "ns/op",
+        "B/op",
+        "allocs/op"
+      ],
+      "artifacts": [
+        "BENCH_OUT text file"
+      ]
+    },
+    {
+      "id": "runtime.timeutil-formatting",
+      "category": "runtime",
+      "status": "implemented",
+      "runner": "go-test-bench",
+      "default_gate": true,
+      "extended_gate": false,
+      "requires_network": false,
+      "requires_llm": false,
+      "commands": [
+        "BENCH_PATTERN='BenchmarkTime|BenchmarkNowUTC' ./scripts/run-go-benchmarks.sh ./internal/platform/timeutil"
+      ],
+      "packages": [
+        "./internal/platform/timeutil"
+      ],
+      "fixtures": [
+        "fixed RFC3339Nano timestamp fixture"
+      ],
+      "metrics": [
+        "ns/op",
+        "B/op",
+        "allocs/op"
+      ],
+      "artifacts": [
+        "BENCH_OUT text file"
+      ],
+      "notes": "Existing time utility benchmark retained so envelope and storage timestamp hot paths stay visible."
+    },
+    {
+      "id": "runtime.cas-store",
+      "category": "runtime",
+      "status": "implemented",
+      "runner": "go-test-bench",
+      "default_gate": true,
+      "extended_gate": false,
+      "requires_network": false,
+      "requires_llm": false,
+      "commands": [
+        "BENCH_PATTERN=BenchmarkBufferPoolPut ./scripts/run-go-benchmarks.sh ./internal/storage/cas"
+      ],
+      "packages": [
+        "./internal/storage/cas"
+      ],
+      "fixtures": [
+        "temporary filesystem CAS store",
+        "1KB through 1MB synthetic blobs"
+      ],
+      "metrics": [
+        "ns/op",
+        "B/op",
+        "allocs/op",
+        "bytes/op"
+      ],
+      "artifacts": [
+        "BENCH_OUT text file"
+      ],
+      "notes": "Existing CAS benchmark retained because large-output offload is part of the runtime contract."
+    },
+    {
+      "id": "runtime.dbutil-scanners",
+      "category": "runtime",
+      "status": "implemented",
+      "runner": "go-test-bench",
+      "default_gate": true,
+      "extended_gate": false,
+      "requires_network": false,
+      "requires_llm": false,
+      "commands": [
+        "BENCH_PATTERN='BenchmarkScan|BenchmarkTimeScanner' ./scripts/run-go-benchmarks.sh ./internal/storage/dbutil"
+      ],
+      "packages": [
+        "./internal/storage/dbutil"
+      ],
+      "fixtures": [
+        "fixed timestamp strings",
+        "small JSON digest array"
+      ],
+      "metrics": [
+        "ns/op",
+        "B/op",
+        "allocs/op"
+      ],
+      "artifacts": [
+        "BENCH_OUT text file"
+      ],
+      "notes": "Existing DB scanner benchmark retained for storage metadata decode hot paths."
+    },
+    {
+      "id": "repoindex.fts-fallback",
+      "category": "repoindex",
+      "status": "implemented",
+      "runner": "go-test-bench",
+      "default_gate": true,
+      "extended_gate": false,
+      "requires_network": false,
+      "requires_llm": false,
+      "commands": [
+        "BENCH_PATTERN='BenchmarkSearch|BenchmarkSearchScored' ./scripts/run-go-benchmarks.sh ./internal/intelligence/indexing/repoindex"
+      ],
+      "packages": [
+        "./internal/intelligence/indexing/repoindex"
+      ],
+      "fixtures": [
+        "ephemeral repoindex store with deterministic nodes"
+      ],
+      "metrics": [
+        "ns/op",
+        "B/op",
+        "allocs/op"
+      ],
+      "artifacts": [
+        "BENCH_OUT text file"
+      ]
+    },
+    {
+      "id": "repoindex.graph-navigation",
+      "category": "repoindex",
+      "status": "implemented",
+      "runner": "go-test-bench",
+      "default_gate": true,
+      "extended_gate": false,
+      "requires_network": false,
+      "requires_llm": false,
+      "commands": [
+        "BENCH_PATTERN='BenchmarkTracePath|BenchmarkBlastRadius' ./scripts/run-go-benchmarks.sh ./internal/intelligence/indexing/repoindex"
+      ],
+      "packages": [
+        "./internal/intelligence/indexing/repoindex"
+      ],
+      "fixtures": [
+        "ephemeral repoindex store with structural call/doc edges"
+      ],
+      "metrics": [
+        "ns/op",
+        "B/op",
+        "allocs/op"
+      ],
+      "artifacts": [
+        "BENCH_OUT text file"
+      ]
+    },
+    {
+      "id": "dag.structural-dag-grep",
+      "category": "dag",
+      "status": "implemented",
+      "runner": "go-test-bench",
+      "default_gate": true,
+      "extended_gate": false,
+      "requires_network": false,
+      "requires_llm": false,
+      "commands": [
+        "BENCH_PATTERN=BenchmarkDAGGrep ./scripts/run-go-benchmarks.sh ./internal/intelligence/indexing/repoindex"
+      ],
+      "packages": [
+        "./internal/intelligence/indexing/repoindex"
+      ],
+      "fixtures": [
+        "ephemeral repoindex store with explanation-subgraph edge fanout"
+      ],
+      "metrics": [
+        "ns/op",
+        "B/op",
+        "allocs/op",
+        "node_count",
+        "edge_count"
+      ],
+      "artifacts": [
+        "BENCH_OUT text file"
+      ]
+    },
+    {
+      "id": "retrieval.foxctl-default",
+      "category": "retrieval",
+      "status": "in_progress",
+      "runner": "make-eval",
+      "default_gate": true,
+      "extended_gate": false,
+      "requires_network": false,
+      "requires_llm": false,
+      "commands": [
+        "make eval-retrieval-foxctl"
+      ],
+      "fixtures": [
+        "testdata/evals/retrieval/foxctl.yaml"
+      ],
+      "metrics": [
+        "hit@5",
+        "hit@10",
+        "MRR",
+        "forbidden_hits",
+        "duration_ms",
+        "returned_paths",
+        "returned_path_bytes",
+        "returned_path_token_estimate"
+      ],
+      "artifacts": [
+        "retrieval eval envelope",
+        "policy summary"
+      ],
+      "notes": "Keep this lane visible but advisory until fixtures, ACA vault paths, and embedder health are reconciled into a stable saved artifact."
+    },
+    {
+      "id": "retrieval.foxctl-mixed",
+      "category": "retrieval",
+      "status": "implemented",
+      "runner": "make-eval",
+      "default_gate": false,
+      "extended_gate": true,
+      "requires_network": false,
+      "requires_llm": false,
+      "commands": [
+        "make eval-retrieval-foxctl-mixed",
+        "make eval-retrieval-foxctl-cochange"
+      ],
+      "fixtures": [
+        "testdata/evals/retrieval/foxctl-mixed.yaml",
+        "testdata/evals/retrieval/foxctl-cochange.yaml"
+      ],
+      "metrics": [
+        "hit@5",
+        "hit@10",
+        "MRR",
+        "forbidden_hits",
+        "duration_ms",
+        "returned_paths",
+        "returned_path_bytes",
+        "returned_path_token_estimate"
+      ],
+      "artifacts": [
+        "retrieval eval envelope",
+        "policy summary"
+      ]
+    },
+    {
+      "id": "retrieval.code-search-ensemble-trace-symbol",
+      "category": "retrieval",
+      "status": "implemented",
+      "runner": "make-eval",
+      "default_gate": false,
+      "extended_gate": true,
+      "requires_network": false,
+      "requires_llm": false,
+      "commands": [
+        "make eval-code-search-foxctl-trace-symbol ARGS='--report-file /private/tmp/foxctl-benchmarks/code-search-foxctl-trace-symbol.json'"
+      ],
+      "fixtures": [
+        "testdata/evals/code-search-ensemble/foxctl-trace-symbol.jsonl",
+        "testdata/evals/code-search-ensemble/foxctl-trace-symbol-policy.yaml"
+      ],
+      "metrics": [
+        "pass_rate",
+        "mean_path_recall",
+        "mean_symbol_recall",
+        "mean_fact_recall",
+        "mean_duration_ms",
+        "mean_tool_calls",
+        "mean_loaded_token_estimate",
+        "mean_emitted_token_estimate",
+        "mean_parent_input_token_savings_estimate",
+        "mean_compaction_ratio"
+      ],
+      "artifacts": [
+        "code-search ensemble report JSON",
+        "code-search ensemble envelope"
+      ],
+      "notes": "Dataset-matched deterministic comparison point for the documented 2026-04-30 native mini explorer trace on foxctl-trace-symbol. The native trace has token usage but not parsed quality rows, so compare token class separately from recall."
+    },
+    {
+      "id": "rlm.run-spec-policy",
+      "category": "rlm",
+      "status": "implemented",
+      "runner": "go-test-bench",
+      "default_gate": true,
+      "extended_gate": false,
+      "requires_network": false,
+      "requires_llm": false,
+      "commands": [
+        "BENCH_PATTERN=BenchmarkResolveRunSpec ./scripts/run-go-benchmarks.sh ./internal/rlm"
+      ],
+      "packages": [
+        "./internal/rlm"
+      ],
+      "fixtures": [
+        "fixed RLM tool registry",
+        "typed route/profile requests"
+      ],
+      "metrics": [
+        "ns/op",
+        "B/op",
+        "allocs/op"
+      ],
+      "artifacts": [
+        "BENCH_OUT text file"
+      ]
+    },
+    {
+      "id": "rlm.gather-context-fixture",
+      "category": "rlm",
+      "status": "implemented",
+      "runner": "foxctl-eval",
+      "default_gate": false,
+      "extended_gate": true,
+      "requires_network": false,
+      "requires_llm": false,
+      "commands": [
+        "./bin/foxctl eval gather-context --eval-dataset-file testdata/evals/gather-context/foxctl-repo-grounded.jsonl --case-limit 2 --report-file /private/tmp/foxctl-benchmarks/gather-context.json"
+      ],
+      "fixtures": [
+        "testdata/evals/gather-context/foxctl-repo-grounded.jsonl"
+      ],
+      "metrics": [
+        "pass_rate",
+        "path_recall",
+        "fact_recall",
+        "token_budget",
+        "bundle_size",
+        "duration_ms",
+        "repoindex_freshness",
+        "eval_case_limit"
+      ],
+      "artifacts": [
+        "gather-context report JSON"
+      ],
+      "notes": "`--case-limit` bounds dataset rows for quick smoke runs; `--limit` still controls evidence gathered per case."
+    },
+    {
+      "id": "rlm.provider-agent-baseline",
+      "category": "rlm",
+      "status": "experimental",
+      "runner": "foxctl-eval",
+      "default_gate": false,
+      "extended_gate": true,
+      "requires_network": true,
+      "requires_llm": true,
+      "commands": [
+        "./bin/foxctl eval agents --eval-dataset-file testdata/evals/gather-context/foxctl-repo-grounded.jsonl --case-limit 2 --role researcher --target openrouter:openai/gpt-5.4-mini --input-token-price-per-million-usd 1 --output-token-price-per-million-usd 1 --report-file /private/tmp/foxctl-benchmarks/provider-agent.json",
+        "jq -c '.results[]' /private/tmp/foxctl-benchmarks/provider-agent.json > /private/tmp/foxctl-benchmarks/provider-agent-results.jsonl",
+        "./bin/foxctl eval gather-context --eval-dataset-file testdata/evals/gather-context/foxctl-repo-grounded.jsonl --case-limit 2 --agent-baseline-results /private/tmp/foxctl-benchmarks/provider-agent-results.jsonl --baseline-input-token-price-per-million-usd 1 --baseline-output-token-price-per-million-usd 1 --report-file /private/tmp/foxctl-benchmarks/gather-context-head-to-head.json"
+      ],
+      "fixtures": [
+        "testdata/evals/gather-context/foxctl-repo-grounded.jsonl",
+        "authenticated OpenRouter-backed foxctl eval-agent target"
+      ],
+      "metrics": [
+        "baseline_pass_rate",
+        "baseline_error_count",
+        "baseline_mean_path_recall",
+        "baseline_mean_fact_recall",
+        "baseline_mean_duration_ms",
+        "baseline_mean_tokens",
+        "baseline_mean_cost_usd",
+        "duration_speedup",
+        "path_recall_delta",
+        "fact_recall_delta"
+      ],
+      "artifacts": [
+        "provider-backed eval agents report JSON",
+        "provider-backed external-results JSONL",
+        "gather-context head-to-head report JSON"
+      ],
+      "notes": "This is the provider-backed foxctl eval-agent comparison lane, not a local Codex native subagent baseline. It is intentionally extended-only because it needs model credentials; unauthenticated failures should be recorded as baseline_error_count, not treated as performance numbers. The default command uses normalized $1/Mtok input and output prices so cost deltas are explicit even when provider/model pricing is unavailable."
+    },
+    {
+      "id": "rlm.longcot-dry-run",
+      "category": "rlm",
+      "status": "implemented",
+      "runner": "foxctl-eval",
+      "default_gate": false,
+      "extended_gate": true,
+      "requires_network": false,
+      "requires_llm": false,
+      "commands": [
+        "./bin/foxctl eval longcot --dataset testdata/evals/longcot/fixture.jsonl --dry-run --save --output-dir /private/tmp/foxctl-benchmarks/longcot"
+      ],
+      "fixtures": [
+        "testdata/evals/longcot/fixture.jsonl"
+      ],
+      "metrics": [
+        "condition_count",
+        "leakage_flags",
+        "dry_run_plan_count"
+      ],
+      "artifacts": [
+        "LongCoT dry-run report JSON"
+      ]
+    },
+    {
+      "id": "room.dispatch-frontier-contract",
+      "category": "room",
+      "status": "implemented",
+      "runner": "go-test",
+      "default_gate": true,
+      "extended_gate": false,
+      "requires_network": false,
+      "requires_llm": false,
+      "commands": [
+        "go test -run 'TestRunRoomEpicDispatchFrontier|TestRunRoomStoryState' ./cmd/foxctl/cmd"
+      ],
+      "fixtures": [
+        "room_test.go in-memory blackboard fixtures"
+      ],
+      "metrics": [
+        "ready_frontier_count",
+        "blocked_frontier_count",
+        "state_transition_result"
+      ],
+      "artifacts": [
+        "go test output"
+      ],
+      "notes": "Correctness gate for the durable room frontier path; timing benchmarks stay out of the quick gate until room fixtures are cheaper."
+    },
+    {
+      "id": "integrations.hook-latency",
+      "category": "integrations",
+      "status": "implemented",
+      "runner": "shell-script",
+      "default_gate": false,
+      "extended_gate": true,
+      "requires_network": false,
+      "requires_llm": false,
+      "commands": [
+        "./scripts/benchmark-hooks.sh 5 all"
+      ],
+      "fixtures": [
+        "configs/hooks sample hook payloads"
+      ],
+      "metrics": [
+        "wall_clock_ms",
+        "mean_ms",
+        "max_ms"
+      ],
+      "artifacts": [
+        "/tmp/hook-benchmark-*.txt"
+      ]
+    },
+    {
+      "id": "integrations.shell-reducer-routing",
+      "category": "integrations",
+      "status": "implemented",
+      "runner": "go-test-bench",
+      "default_gate": true,
+      "extended_gate": false,
+      "requires_network": false,
+      "requires_llm": false,
+      "commands": [
+        "BENCH_PATTERN=BenchmarkShellReduce ./scripts/run-go-benchmarks.sh ./internal/tooling/shellreduce"
+      ],
+      "packages": [
+        "./internal/tooling/shellreduce"
+      ],
+      "fixtures": [
+        "typical structured shell command argv set"
+      ],
+      "metrics": [
+        "ns/op",
+        "B/op",
+        "allocs/op"
+      ],
+      "artifacts": [
+        "BENCH_OUT text file"
+      ]
+    },
+    {
+      "id": "integrations.shell-reducer-savings",
+      "category": "integrations",
+      "status": "implemented",
+      "runner": "shell-script",
+      "default_gate": false,
+      "extended_gate": true,
+      "requires_network": false,
+      "requires_llm": false,
+      "commands": [
+        "go run ./cmd/foxctl shell report --preset typical-bash --save-file /private/tmp/foxctl-benchmarks/shell-typical.json --input-token-price-per-million-usd 1"
+      ],
+      "fixtures": [
+        "typical-bash structured shell preset",
+        "current workspace files and git history"
+      ],
+      "metrics": [
+        "raw_tokens",
+        "reduced_tokens",
+        "tokens_saved_percent",
+        "raw_duration_ms",
+        "reduced_duration_ms",
+        "estimated_input_cost_saved_usd"
+      ],
+      "artifacts": [
+        "shell report JSON payload"
+      ],
+      "notes": "Measures concrete raw shell output versus foxctl structured reducers for common orientation commands such as ls, grep, sed, and git."
+    },
+    {
+      "id": "integrations.orientation-harness",
+      "category": "integrations",
+      "status": "implemented",
+      "runner": "shell-script",
+      "default_gate": false,
+      "extended_gate": true,
+      "requires_network": false,
+      "requires_llm": false,
+      "commands": [
+        "RUN_GATHER_CONTEXT=0 ./scripts/benchmark-orientation-harness.sh",
+        "RUN_GATHER_CONTEXT=1 GATHER_CASE_LIMIT=2 ./scripts/benchmark-orientation-harness.sh"
+      ],
+      "fixtures": [
+        "explicit repo-orientation shell command set",
+        "fs/ls skill cold-run case",
+        "text/ripgrep skill cold-run case",
+        "code/context_grep skill cold-run case",
+        "BenchmarkShellReduce hot reducer fixture"
+      ],
+      "metrics": [
+        "raw_tokens",
+        "reduced_tokens",
+        "tokens_saved_percent",
+        "raw_duration_ms",
+        "reduced_duration_ms",
+        "estimated_input_cost_saved_usd",
+        "tool_duration_ms",
+        "tool_estimated_tokens",
+        "tool_budget",
+        "gather_context_pass_rate",
+        "gather_context_path_recall",
+        "gather_context_fact_recall",
+        "gather_context_duration_ms",
+        "eval_case_limit"
+      ],
+      "artifacts": [
+        "orientation summary markdown",
+        "shell report JSON payload",
+        "tool cold-run JSON payload",
+        "hot reducer go benchmark output",
+        "optional gather_context report JSON"
+      ],
+      "notes": "Homepage-oriented offline evidence pack. It measures native shell output, structured shell reductions, and cold foxctl tool invocations with explicit budget controls; gather_context and native subagent baselines remain opt-in so the default artifact stays deterministic."
+    },
+    {
+      "id": "integrations.docs-site-build",
+      "category": "integrations",
+      "status": "experimental",
+      "runner": "npm-script",
+      "default_gate": false,
+      "extended_gate": true,
+      "requires_network": false,
+      "requires_llm": false,
+      "commands": [
+        "bun run --cwd packages/docs-site build"
+      ],
+      "fixtures": [
+        "packages/docs-site Astro/Starlight app"
+      ],
+      "metrics": [
+        "wall_clock_ms",
+        "bundle_size"
+      ],
+      "artifacts": [
+        "packages/docs-site/dist"
+      ],
+      "notes": "Non-Go documentation lane; kept extended so Go benchmark history stays stable."
+    }
+  ]
+}

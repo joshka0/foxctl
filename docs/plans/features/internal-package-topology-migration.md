@@ -733,4 +733,4 @@ on a stable vocabulary before package moves begin.
 - [docs/architecture/system-architecture.md](../../architecture/system-architecture.md)
 - [docs/general/runtime-orchestration.md](../../general/runtime-orchestration.md)
 - [docs/plans/features/eino-go-native-runtime-plan.md](./eino-go-native-runtime-plan.md)
-- [docs/plans/retrieval-search-refactor.md](../../plans/retrieval-search-refactor.md)
+- [docs/archive/plans/retrieval-search-refactor.md](../../archive/plans/retrieval-search-refactor.md)

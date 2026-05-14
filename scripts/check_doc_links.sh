@@ -6,6 +6,7 @@ ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$ROOT_DIR"
 
 python3 - <<'PY'
+import os
 import re
 import sys
 from pathlib import Path
@@ -56,7 +57,7 @@ def should_skip(base: str) -> bool:
 def resolve_candidate(file_path: Path, base: str) -> Path:
     if base.startswith("/"):
         return ROOT / base.lstrip("/")
-    return ROOT / file_path.parent.relative_to(ROOT) / base
+    return Path(os.path.normpath(os.path.join(str(file_path.parent), base)))
 
 
 errors: set[str] = set()

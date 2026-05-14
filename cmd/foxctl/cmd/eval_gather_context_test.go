@@ -92,6 +92,33 @@ func TestSummarizeGatherContextEvalResults(t *testing.T) {
 	}
 }
 
+func TestLimitGatherContextEvalCases(t *testing.T) {
+	t.Parallel()
+
+	cases := []promptEvalCase{
+		{ID: "one"},
+		{ID: "two"},
+		{ID: "three"},
+	}
+
+	if got := limitGatherContextEvalCases(cases, 0); len(got) != 3 {
+		t.Fatalf("limit 0 len=%d want 3", len(got))
+	}
+	if got := limitGatherContextEvalCases(cases, -1); len(got) != 3 {
+		t.Fatalf("negative limit len=%d want 3", len(got))
+	}
+	if got := limitGatherContextEvalCases(cases, 9); len(got) != 3 {
+		t.Fatalf("oversized limit len=%d want 3", len(got))
+	}
+	got := limitGatherContextEvalCases(cases, 2)
+	if len(got) != 2 {
+		t.Fatalf("limit 2 len=%d want 2", len(got))
+	}
+	if got[0].ID != "one" || got[1].ID != "two" {
+		t.Fatalf("limited cases=%v", got)
+	}
+}
+
 func TestSummarizeGatherContextEvalRoleDiagnostics(t *testing.T) {
 	t.Parallel()
 
@@ -206,6 +233,49 @@ func TestRenderGatherContextEvalMarkdownIncludesRoleDiagnostics(t *testing.T) {
 		"Peripheral roles returned when not expected",
 		"| tooling | 3 | 2 |",
 		"| case-1 | no |",
+	} {
+		if !strings.Contains(markdown, want) {
+			t.Fatalf("markdown missing %q:\n%s", want, markdown)
+		}
+	}
+}
+
+func TestGatherContextBaselineComparisonKeepsBaselineErrors(t *testing.T) {
+	t.Parallel()
+
+	comparisons := compareGatherContextToAgentBaselines(gatherContextEvalSummary{
+		Count:                   1,
+		PassRate:                1,
+		MeanPathRecall:          1,
+		MeanFactRecall:          1,
+		MeanDurationMS:          100,
+		MeanEmittedContextChars: 500,
+	}, []agentEvalSummary{{
+		Label:          "researcher@openai:gpt-5.4-mini",
+		Runner:         "foxctl-agent-runtime",
+		Count:          1,
+		ErrorCount:     1,
+		PassRate:       0,
+		MeanPathRecall: 0,
+		MeanFactRecall: 0,
+	}})
+	if len(comparisons) != 1 {
+		t.Fatalf("comparisons=%d want 1", len(comparisons))
+	}
+	if comparisons[0].BaselineErrorCount != 1 {
+		t.Fatalf("baseline_error_count=%d want 1", comparisons[0].BaselineErrorCount)
+	}
+
+	markdown := renderGatherContextEvalMarkdown("/workspace", gatherContextEvalSummary{
+		Count:          1,
+		PassRate:       1,
+		MeanPathRecall: 1,
+		MeanFactRecall: 1,
+	}, nil, comparisons, nil)
+	for _, want := range []string{
+		"## Agent Baselines",
+		"| Baseline | Errors | Pass Delta | Path Delta | Fact Delta | Speedup | Baseline Tokens | Cached Input | Reasoning Out |",
+		"| researcher@openai:gpt-5.4-mini | 1 |",
 	} {
 		if !strings.Contains(markdown, want) {
 			t.Fatalf("markdown missing %q:\n%s", want, markdown)

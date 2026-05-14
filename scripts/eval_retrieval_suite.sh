@@ -2,7 +2,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VAULT_PATH="${FOXCTL_VAULT_PATH:-$HOME/.foxctl/templates/obsidian-vault}"
+DEFAULT_VAULT_PATH="$HOME/.foxctl/templates/obsidian-vault"
+if [[ ! -d "$DEFAULT_VAULT_PATH" && -d "$ROOT/.foxctl/templates/obsidian-vault" ]]; then
+  DEFAULT_VAULT_PATH="$ROOT/.foxctl/templates/obsidian-vault"
+fi
+VAULT_PATH="${FOXCTL_VAULT_PATH:-$DEFAULT_VAULT_PATH}"
 WORKSPACE="${RETRIEVAL_WORKSPACE:-$ROOT}"
 SUITE="${RETRIEVAL_SUITE:-}"
 LIMIT="${RETRIEVAL_LIMIT:-}"

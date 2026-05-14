@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/joshka0/foxctl/cmd/foxctl/cmd/memorycmd"
 	envpkg "github.com/joshka0/foxctl/internal/domain/envelope"
@@ -29,10 +30,11 @@ func init() {
 
 func newShellCommand() *cobra.Command {
 	var (
-		commandString string
-		measure       bool
-		tokenModel    string
-		workspace     string
+		commandString                string
+		measure                      bool
+		tokenModel                   string
+		inputTokenPricePerMillionUSD float64
+		workspace                    string
 	)
 
 	cmd := &cobra.Command{
@@ -69,19 +71,20 @@ to raw shell output.`,
   foxctl bash -- go test -race ./...`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runShellCommand(cmd, workspace, commandString, measure, tokenModel, args)
+			return runShellCommand(cmd, workspace, commandString, measure, tokenModel, inputTokenPricePerMillionUSD, args)
 		},
 	}
 
 	cmd.Flags().StringVar(&commandString, "command", "", "Shell command string to route (alternative to passing argv after --)")
 	cmd.Flags().BoolVar(&measure, "measure", false, "Measure raw command output size and token estimates against the reduced summary")
 	cmd.Flags().StringVar(&tokenModel, "token-model", "cl100k_base", "Tokenizer model or encoding for measurement (for example cl100k_base or gpt-4o-mini)")
+	cmd.Flags().Float64Var(&inputTokenPricePerMillionUSD, "input-token-price-per-million-usd", 0, "Optional input-token price in USD per 1M tokens for estimated cost savings")
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.AddCommand(newShellReportCommand(), newShellToolcallsCommand())
 	return cmd
 }
 
-func runShellCommand(cmd *cobra.Command, workspaceOverride, commandString string, measure bool, tokenModel string, args []string) error {
+func runShellCommand(cmd *cobra.Command, workspaceOverride, commandString string, measure bool, tokenModel string, inputTokenPricePerMillionUSD float64, args []string) error {
 	argv, err := resolveShellArgv(commandString, args)
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.shell", protocol.ErrorCodeEARG, err.Error(), map[string]any{
@@ -107,6 +110,7 @@ func runShellCommand(cmd *cobra.Command, workspaceOverride, commandString string
 		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.shell", code, err.Error(), data, protocol.WithSource("cli"), protocol.WithWorkspace(resolveShellWorkspace(workspaceOverride)))
 	}
 
+	reducedStarted := time.Now()
 	resultData, routeErr := executeStructuredShellRoute(cmd, workspaceOverride, route)
 	if errors.Is(routeErr, errShellEnvelopeWritten) {
 		return nil
@@ -128,6 +132,8 @@ func runShellCommand(cmd *cobra.Command, workspaceOverride, commandString string
 	if resultData == nil {
 		return routeErr
 	}
+	summary := shellreduce.Summarize(route, resultData)
+	reducedDuration := time.Since(reducedStarted)
 
 	payload := map[string]any{
 		"input": map[string]any{
@@ -141,12 +147,14 @@ func runShellCommand(cmd *cobra.Command, workspaceOverride, commandString string
 			"native": route.Native,
 			"notes":  route.Notes,
 		},
-		"summary": shellreduce.Summarize(route, resultData),
+		"summary": summary,
 		"result":  resultData,
 	}
 	if measure {
-		payload["measure"] = shellreduce.Measure(cmd.Context(), resolveShellWorkspace(workspaceOverride), argv, stringValueFromAny(payload["summary"]), shellreduce.MeasureOptions{
-			TokenModel: tokenModel,
+		payload["measure"] = shellreduce.Measure(cmd.Context(), resolveShellWorkspace(workspaceOverride), argv, summary, shellreduce.MeasureOptions{
+			TokenModel:                   tokenModel,
+			ReducedDuration:              reducedDuration,
+			InputTokenPricePerMillionUSD: inputTokenPricePerMillionUSD,
 		})
 	}
 
@@ -271,16 +279,17 @@ func stringValueFromAny(value any) string {
 
 func newShellReportCommand() *cobra.Command {
 	var (
-		commands         []string
-		commandsFile     string
-		preset           string
-		saveFile         string
-		transcriptSource string
-		transcriptLimit  int
-		claudeDir        string
-		codexHome        string
-		tokenModel       string
-		workspace        string
+		commands                     []string
+		commandsFile                 string
+		preset                       string
+		saveFile                     string
+		transcriptSource             string
+		transcriptLimit              int
+		claudeDir                    string
+		codexHome                    string
+		tokenModel                   string
+		inputTokenPricePerMillionUSD float64
+		workspace                    string
 	)
 
 	cmd := &cobra.Command{
@@ -304,7 +313,7 @@ containing one command per line. Blank lines and # comments are ignored.`,
   foxctl shell report --preset typical-bash --save-file .foxctl/reports/shell-typical.json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runShellReportCommand(cmd, workspace, commands, commandsFile, preset, saveFile, transcriptSource, transcriptLimit, claudeDir, codexHome, tokenModel)
+			return runShellReportCommand(cmd, workspace, commands, commandsFile, preset, saveFile, transcriptSource, transcriptLimit, claudeDir, codexHome, tokenModel, inputTokenPricePerMillionUSD)
 		},
 	}
 	cmd.Flags().StringArrayVar(&commands, "command", nil, "Supported shell-style command to measure (repeatable)")
@@ -316,6 +325,7 @@ containing one command per line. Blank lines and # comments are ignored.`,
 	cmd.Flags().StringVar(&claudeDir, "claude-dir", "~/.claude/transcripts", "Claude transcript directory for transcript-derived preset")
 	cmd.Flags().StringVar(&codexHome, "codex-home", "~/.codex", "Codex home directory for transcript-derived preset")
 	cmd.Flags().StringVar(&tokenModel, "token-model", "cl100k_base", "Tokenizer model or encoding for measurement")
+	cmd.Flags().Float64Var(&inputTokenPricePerMillionUSD, "input-token-price-per-million-usd", 0, "Optional input-token price in USD per 1M tokens for estimated cost savings")
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	return cmd
 }
@@ -329,7 +339,7 @@ type shellReportSpec struct {
 	SkipReason string
 }
 
-func runShellReportCommand(cmd *cobra.Command, workspaceOverride string, commands []string, commandsFile, preset, saveFile, transcriptSource string, transcriptLimit int, claudeDir, codexHome, tokenModel string) error {
+func runShellReportCommand(cmd *cobra.Command, workspaceOverride string, commands []string, commandsFile, preset, saveFile, transcriptSource string, transcriptLimit int, claudeDir, codexHome, tokenModel string, inputTokenPricePerMillionUSD float64) error {
 	items, err := loadShellReportCommands(resolveShellWorkspace(workspaceOverride), commands, commandsFile, preset, transcriptSource, transcriptLimit, claudeDir, codexHome)
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.shell.report", protocol.ErrorCodeEARG, err.Error(), map[string]any{
@@ -343,7 +353,7 @@ func runShellReportCommand(cmd *cobra.Command, workspaceOverride string, command
 			rows = append(rows, shellreduce.SkippedCase(item.Operation, item.Weight, item.SkipReason))
 			continue
 		}
-		data, invokeErr := invokeMeasuredShell(cmd.Context(), resolveShellWorkspace(workspaceOverride), tokenModel, item.Command)
+		data, invokeErr := invokeMeasuredShell(cmd.Context(), resolveShellWorkspace(workspaceOverride), tokenModel, inputTokenPricePerMillionUSD, item.Command)
 		if invokeErr != nil {
 			var row shellreduce.ReportCase
 			if item.Optional {
@@ -360,15 +370,16 @@ func runShellReportCommand(cmd *cobra.Command, workspaceOverride string, command
 	}
 
 	payload := map[string]any{
-		"workspace":         resolveShellWorkspace(workspaceOverride),
-		"token_model":       tokenModel,
-		"case_count":        len(rows),
-		"cases":             rows,
-		"summary":           shellreduce.SummarizeReport(rows),
-		"supported":         shellreduce.SupportedFamilies(),
-		"preset":            preset,
-		"transcript_source": transcriptSource,
-		"transcript_limit":  transcriptLimit,
+		"workspace":                         resolveShellWorkspace(workspaceOverride),
+		"token_model":                       tokenModel,
+		"input_token_price_per_million_usd": inputTokenPricePerMillionUSD,
+		"case_count":                        len(rows),
+		"cases":                             rows,
+		"summary":                           shellreduce.SummarizeReport(rows),
+		"supported":                         shellreduce.SupportedFamilies(),
+		"preset":                            preset,
+		"transcript_source":                 transcriptSource,
+		"transcript_limit":                  transcriptLimit,
 	}
 	if strings.TrimSpace(saveFile) != "" {
 		if err := saveShellReport(resolveShellWorkspace(workspaceOverride), saveFile, payload); err != nil {
@@ -872,12 +883,19 @@ func aggregateTranscriptFamilyWeights(counts map[string]*transcriptCount) map[st
 	return out
 }
 
-func invokeMeasuredShell(ctx context.Context, workspace, tokenModel, command string) (map[string]any, error) {
+func invokeMeasuredShell(ctx context.Context, workspace, tokenModel string, inputTokenPricePerMillionUSD float64, command string) (map[string]any, error) {
 	bin := "foxctl"
 	if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
 		bin = exe
 	}
-	args := []string{"shell", "--measure", "--token-model", tokenModel, "--workspace", workspace, "--command", command}
+	args := []string{
+		"shell",
+		"--measure",
+		"--token-model", tokenModel,
+		"--input-token-price-per-million-usd", fmt.Sprintf("%.12g", inputTokenPricePerMillionUSD),
+		"--workspace", workspace,
+		"--command", command,
+	}
 	execCmd := exec.CommandContext(ctx, bin, args...)
 	execCmd.Dir = workspace
 

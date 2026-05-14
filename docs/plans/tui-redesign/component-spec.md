@@ -10,9 +10,9 @@ behavior.
 This document satisfies **VAL-DOCS-005**.
 
 Cross-references:
-- [information-architecture.md](information-architecture.md) — layout, navigation, keybindings, focus model
-- [research-go-tui.md](research-go-tui.md) — go-tui API reference (Component, State, Element, KeyMap, MockTerminal)
-- [audit-current-tui.md](audit-current-tui.md) — audit findings driving widget design
+- [information-architecture.md](../../archive/plans/information-architecture.md) — layout, navigation, keybindings, focus model
+- [research-go-tui.md](../../archive/plans/research-go-tui.md) — go-tui API reference (Component, State, Element, KeyMap, MockTerminal)
+- [audit-current-tui.md](../../archive/plans/audit-current-tui.md) — audit findings driving widget design
 - [DESIGN.md](../../../DESIGN.md) — product shape and visual interaction rules
 
 ---
@@ -141,7 +141,7 @@ The empty-state copy must always include a next-action CTA per DESIGN.md
 - **Generic:** "Loading…" with a spinner.
 
 Loading copy must explain what is being prepared (not just "Loading…") per
-[information-architecture.md](information-architecture.md) §(h) state design
+[information-architecture.md](../../archive/plans/information-architecture.md) §(h) state design
 rules.
 
 ### (10) Error-State Behavior
@@ -260,7 +260,7 @@ When `HasEntity=false`:
 - **Room detail:** "Select a room to view details."
 - **Generic:** "Select an item to view details."
 
-Per [information-architecture.md](information-architecture.md) §(h), the
+Per [information-architecture.md](../../archive/plans/information-architecture.md) §(h), the
 empty-state copy includes keyboard guidance so the operator knows what to do
 next.
 
@@ -720,7 +720,7 @@ by the parent widget with error-specific rendering.
 ## LoadingState
 
 A small, centered informational widget that renders during async operations.
-Displays a spinner and explanatory message. Per [information-architecture.md](information-architecture.md) §(h): loading states must explain what is being prepared.
+Displays a spinner and explanatory message. Per [information-architecture.md](../../archive/plans/information-architecture.md) §(h): loading states must explain what is being prepared.
 
 ### (1) Props
 
@@ -800,7 +800,7 @@ This widget **is** the loading state. Copy guidelines for its `Message` prop:
   "Loading agents…", "Loading room details…").
 - Must NOT use vague text like just "Loading…" without context.
 - Should include the target URL or entity name when available.
-- Per [information-architecture.md](information-architecture.md) §(h): loading
+- Per [information-architecture.md](../../archive/plans/information-architecture.md) §(h): loading
   states explain what is being prepared, not just that loading is happening.
 
 ### (10) Error-State Behavior

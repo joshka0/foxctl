@@ -29,6 +29,9 @@ func TestNewShellCommandDefaults(t *testing.T) {
 	if flag := cmd.Flags().Lookup("token-model"); flag == nil {
 		t.Fatal("token-model flag missing")
 	}
+	if flag := cmd.Flags().Lookup("input-token-price-per-million-usd"); flag == nil {
+		t.Fatal("input-token-price-per-million-usd flag missing")
+	}
 	foundReport := false
 	for _, child := range cmd.Commands() {
 		if child.Name() == "report" {
@@ -39,8 +42,12 @@ func TestNewShellCommandDefaults(t *testing.T) {
 	if !foundReport {
 		t.Fatal("report subcommand missing")
 	}
-	if report := newShellReportCommand(); report.Flags().Lookup("preset") == nil {
+	report := newShellReportCommand()
+	if report.Flags().Lookup("preset") == nil {
 		t.Fatal("report preset flag missing")
+	}
+	if report.Flags().Lookup("input-token-price-per-million-usd") == nil {
+		t.Fatal("report input-token-price-per-million-usd flag missing")
 	}
 }
 

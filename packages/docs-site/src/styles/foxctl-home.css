@@ -420,9 +420,13 @@ h1#_top {
 }
 
 .fox-progress-grid,
-.fox-integration-grid,
-.fox-benchmark-grid {
+.fox-integration-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.fox-cleanup-grid,
+.fox-benchmark-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .fox-info-card {
@@ -453,6 +457,103 @@ h1#_top {
   margin: 0;
 }
 
+.fox-benchmark-metric {
+  color: var(--fox-title);
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1.2;
+  min-height: 2.64rem;
+}
+
+.fox-product-table-shell {
+  background: #0e1211;
+  border: 1px solid var(--fox-border-strong);
+  border-radius: 8px;
+  margin-top: 16px;
+  overflow-x: auto;
+}
+
+.fox-product-table {
+  border-collapse: collapse;
+  min-width: 980px;
+  width: 100%;
+}
+
+.fox-product-table th,
+.fox-product-table td {
+  border-bottom: 1px solid var(--fox-border);
+  color: var(--fox-body);
+  font-size: 0.86rem;
+  line-height: 1.45;
+  padding: 14px 16px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.fox-product-table thead th {
+  background: #17211f;
+  color: var(--fox-heading);
+  font-size: 0.74rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.fox-product-table tbody tr:last-child th,
+.fox-product-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.fox-product-table tbody th {
+  color: var(--fox-title);
+  font-weight: 800;
+  width: 168px;
+}
+
+.fox-product-table tbody th span,
+.fox-product-table tbody th em {
+  display: block;
+}
+
+.fox-product-table tbody th em {
+  color: var(--fox-amber);
+  font-size: 0.7rem;
+  font-style: normal;
+  font-weight: 850;
+  margin-top: 7px;
+  text-transform: uppercase;
+}
+
+.fox-product-table td:nth-child(3) {
+  color: #eaf7f4;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
+  font-size: 0.82rem;
+}
+
+.fox-product-table td:nth-child(4) {
+  color: #b9f5ec;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
+  font-size: 0.82rem;
+}
+
+.fox-product-table td span,
+.fox-product-table td code {
+  display: block;
+}
+
+.fox-product-table td code {
+  background: rgba(248, 250, 252, 0.07);
+  border-radius: 6px;
+  color: #d7fff8;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+  padding: 6px 8px;
+}
+
 .fox-status-pill {
   align-self: start;
   background: rgba(86, 199, 185, 0.13);
@@ -472,6 +573,25 @@ h1#_top {
   background: rgba(242, 179, 109, 0.14);
   border-color: rgba(242, 179, 109, 0.48);
   color: #ffe1b6;
+}
+
+.fox-status-pill-cool {
+  background: rgba(192, 167, 255, 0.14);
+  border-color: rgba(192, 167, 255, 0.46);
+  color: #e4dcff;
+}
+
+.fox-inline-command {
+  background: rgba(248, 250, 252, 0.07);
+  border: 1px solid var(--fox-border);
+  border-radius: 6px;
+  color: #eef6f3;
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
 }
 
 .fox-surface-card {
@@ -676,7 +796,11 @@ h1#_top {
   }
 
   .fox-progress-grid,
-  .fox-integration-grid,
+  .fox-integration-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .fox-cleanup-grid,
   .fox-benchmark-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -759,6 +883,7 @@ h1#_top {
 
   .fox-progress-grid,
   .fox-integration-grid,
+  .fox-cleanup-grid,
   .fox-benchmark-grid {
     grid-template-columns: 1fr;
   }

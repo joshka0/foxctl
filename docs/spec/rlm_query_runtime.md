@@ -239,5 +239,5 @@ foxctl rlm run
 
 ## Related
 
-- [foxctl-rlm-integration-outline.md](../plans/features/foxctl-rlm-integration-outline.md)
+- [foxctl-rlm-integration-outline.md](../archive/plans/features/foxctl-rlm-integration-outline.md)
 - [v2_greenfield_bootstrap.md](v2_greenfield_bootstrap.md)
