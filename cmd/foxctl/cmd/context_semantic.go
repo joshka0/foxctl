@@ -69,11 +69,6 @@ func lookupEnvBool(name string) (bool, bool) {
 	return false, false
 }
 
-func openOpenAICompatSemanticProvider(cfg config.Config) semantic.EmbeddingProvider {
-	provider, _ := openOpenAICompatSemanticProviderWithError(cfg)
-	return provider
-}
-
 func openOpenAICompatSemanticProviderWithError(cfg config.Config) (semantic.EmbeddingProvider, error) {
 	providerName := strings.ToLower(strings.TrimSpace(cfg.Embedding.Provider))
 	override := strings.ToLower(strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_SEMANTIC_PROVIDER")))

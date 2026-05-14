@@ -16,7 +16,8 @@ web-ui/.vite/
 # Go build output
 *.test
 *.out
-
+.infisical.json
+.mcp.json 
 .gomodcache/
 .gocache/
 

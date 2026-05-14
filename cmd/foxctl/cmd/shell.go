@@ -270,13 +270,6 @@ func extractNestedArtifact(data map[string]any) string {
 	return ""
 }
 
-func stringValueFromAny(value any) string {
-	if s, ok := value.(string); ok {
-		return s
-	}
-	return ""
-}
-
 func newShellReportCommand() *cobra.Command {
 	var (
 		commands                     []string

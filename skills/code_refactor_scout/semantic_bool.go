@@ -387,14 +387,6 @@ func lowerGoSemanticBoolExprDetailed(expr ast.Expr) (*semanticBoolExpr, []string
 	}
 }
 
-func lowerGoBoolLiteralComparisonFromBase(base *semanticBoolExpr, op token.Token, lit bool) *semanticBoolExpr {
-	equality, ok := semanticBoolTokenComparisonIsEquality(op)
-	if !ok {
-		return nil
-	}
-	return lowerSemanticBoolLiteralComparisonFromEquality(base, lit, equality)
-}
-
 func goSemanticBoolAtom(expr ast.Expr) *semanticBoolExpr {
 	render := strings.TrimSpace(renderGoNode(expr))
 	if render == "" {
