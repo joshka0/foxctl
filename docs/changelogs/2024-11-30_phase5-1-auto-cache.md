@@ -49,7 +49,7 @@ On cache hit, envelope includes:
 ### Tests
 
 - `internal/runtime/runservice/executor_test.go` — Cache mode tests
-- `test/integration/cache_test.go` — Full integration tests for hit/miss
+- `tests/integration/cache_test.go` — Full integration tests for hit/miss
   scenarios
 
 ### Documentation

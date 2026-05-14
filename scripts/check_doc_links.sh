@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path.cwd()
 LINK_RE = re.compile(r"\[([^][]+)\]\(([^)]+)\)")
 SKIP_PREFIXES = ("http://", "https://", "mailto:", "#", "file://", "vscode://", "cci:", "data:")
-ROOT_FILES = ("AGENTS.md", "README.md", "CONTRIBUTING.md", "CLAUDE_INTEGRATION_GUIDE.md")
+ROOT_FILES = ("AGENTS.md", "CLAUDE.md", "README.md", "CONTRIBUTING.md")
 
 
 def collect_files() -> list[Path]:

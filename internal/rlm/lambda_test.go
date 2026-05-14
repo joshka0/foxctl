@@ -1072,7 +1072,7 @@ func TestSelectLambdaRetrievedPathsPrefersAnswerCitations(t *testing.T) {
 
 	candidates := []string{
 		"cmd/foxctl/cmd/eval_longcot.go",
-		"archive/cmd/foxctl_viewer/util.go",
+		"docs/archive/source/cmd/foxctl_viewer/util.go",
 		"internal/tooling/evals/longcotbridge/verifier.go",
 	}
 	answer := "Implemented in `cmd/foxctl/cmd/eval_longcot.go` and `internal/tooling/evals/longcotbridge/verifier.go`."
@@ -1119,7 +1119,7 @@ func TestSelectLambdaRetrievedPathsFallsBackToCandidates(t *testing.T) {
 
 	candidates := []string{
 		"cmd/foxctl/cmd/eval_longcot.go",
-		"archive/cmd/foxctl_viewer/util.go",
+		"docs/archive/source/cmd/foxctl_viewer/util.go",
 	}
 	got, answerPaths, source := selectLambdaRetrievedPaths("No explicit file citation.", candidates, "")
 	if strings.Join(got, "\n") != strings.Join(candidates, "\n") {

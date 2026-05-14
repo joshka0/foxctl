@@ -190,7 +190,7 @@ ifndef SHARD
 endif
 	@set -euo pipefail; \
 		case "$(SHARD)" in \
-			core-cmd) include_re='^github.com/joshka0/foxctl/(cmd|plugins|scripts|test)(/|$$)' ;; \
+			core-cmd) include_re='^github.com/joshka0/foxctl/(cmd|plugins|scripts|tests)(/|$$)' ;; \
 			core-internal) include_re='^github.com/joshka0/foxctl/internal/(adapters|agent|auth|console|domain|protocol|providers|rlm)(/|$$)' ;; \
 			runtime) include_re='^github.com/joshka0/foxctl/internal/runtime(/|$$)' ;; \
 			context-tooling) include_re='^github.com/joshka0/foxctl/internal/(context|tooling)(/|$$)' ;; \
@@ -218,7 +218,7 @@ ifndef BASE_REF
 endif
 	@set -euo pipefail; \
 		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
-		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -vx 'github.com/joshka0/foxctl/test/integration' || true )"; \
+		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -vx 'github.com/joshka0/foxctl/tests/integration' || true )"; \
 		pkgs="$$( printf '%s\n' "$$pkgs" | sed '/^$$/d' | paste -sd' ' - )"; \
 		if [ -z "$$pkgs" ]; then \
 			echo "No impacted packages"; \
@@ -236,7 +236,7 @@ ifndef BASE_REF
 endif
 	@set -euo pipefail; \
 		case "$(SHARD)" in \
-			core-cmd) include_re='^github.com/joshka0/foxctl/(cmd|plugins|scripts|test)(/|$$)' ;; \
+			core-cmd) include_re='^github.com/joshka0/foxctl/(cmd|plugins|scripts|tests)(/|$$)' ;; \
 			core-internal) include_re='^github.com/joshka0/foxctl/internal/(adapters|agent|auth|console|domain|protocol|providers|rlm)(/|$$)' ;; \
 			runtime) include_re='^github.com/joshka0/foxctl/internal/runtime(/|$$)' ;; \
 			context-tooling) include_re='^github.com/joshka0/foxctl/internal/(context|tooling)(/|$$)' ;; \
@@ -250,7 +250,7 @@ endif
 			*) echo "Unknown race shard: $(SHARD)" >&2; exit 1 ;; \
 		esac; \
 		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
-		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -E "$$include_re" | grep -vx 'github.com/joshka0/foxctl/test/integration' || true )"; \
+		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -E "$$include_re" | grep -vx 'github.com/joshka0/foxctl/tests/integration' || true )"; \
 		pkgs="$$( printf '%s\n' "$$pkgs" | sed '/^$$/d' | paste -sd' ' - )"; \
 		if [ -z "$$pkgs" ]; then \
 			echo "No impacted packages for race shard $(SHARD)"; \
@@ -260,7 +260,7 @@ endif
 		$(GO_CMD_CGO) test -race -short -p $(RACE_P) $$pkgs
 
 test-integration:
-	@$(GO_CMD) test -tags=integration ./test/integration/... -timeout 15m -v
+	@$(GO_CMD) test -tags=integration ./tests/integration/... -timeout 15m -v
 
 test-integration-impacted:
 ifndef BASE_REF
@@ -268,12 +268,12 @@ ifndef BASE_REF
 endif
 	@set -euo pipefail; \
 		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
-		if ! echo "$$pkgs" | tr ' ' '\n' | grep -qx 'github.com/joshka0/foxctl/test/integration'; then \
+		if ! echo "$$pkgs" | tr ' ' '\n' | grep -qx 'github.com/joshka0/foxctl/tests/integration'; then \
 			echo "Integration package not impacted"; \
 			exit 0; \
 		fi; \
 		echo "Running impacted integration package"; \
-		$(GO_CMD) test -tags=integration ./test/integration/... -timeout 15m -v
+		$(GO_CMD) test -tags=integration ./tests/integration/... -timeout 15m -v
 
 test-integration-cmd:
 	@$(GO_CMD) test -tags=integration ./cmd/foxctl/cmd/... -timeout 15m -v
@@ -356,7 +356,7 @@ init: build skills-install-all
 	@./scripts/init.sh
 
 viewer:
-	@echo "foxctl-viewer is archived under archive/cmd/foxctl_viewer."
+	@echo "foxctl-viewer is archived under docs/archive/source/cmd/foxctl_viewer."
 	@echo "Use the canonical Go TUI instead: make go-tui-agent"
 	@exit 2
 
@@ -488,12 +488,12 @@ ts-install:
 	@bun install
 
 ts-build-tui:
-	@echo "The TypeScript TUI is archived under archive/packages/tui-agent."
+	@echo "The TypeScript TUI is archived under docs/archive/source/packages/tui-agent."
 	@echo "Use the canonical Go TUI instead: make go-tui-build"
 	@exit 2
 
 ts-dev-tui:
-	@echo "The TypeScript TUI is archived under archive/packages/tui-agent."
+	@echo "The TypeScript TUI is archived under docs/archive/source/packages/tui-agent."
 	@echo "Use the canonical Go TUI instead: make go-tui-agent"
 	@exit 2
 
@@ -557,7 +557,7 @@ gui-smoke-seed:
 	@bash scripts/gui_smoke_seed.sh "$(CURDIR)"
 
 ts-tui:
-	@echo "The TypeScript TUI is archived under archive/packages/tui-agent."
+	@echo "The TypeScript TUI is archived under docs/archive/source/packages/tui-agent."
 	@echo "Use the canonical Go TUI instead: make go-tui-agent"
 	@exit 2
 
@@ -721,7 +721,7 @@ ifndef BASE_REF
 endif
 	@set -euo pipefail; \
 		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
-		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -vx 'github.com/joshka0/foxctl/test/integration' | xargs )"; \
+		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -vx 'github.com/joshka0/foxctl/tests/integration' | xargs )"; \
 		if [ -z "$$pkgs" ]; then \
 			echo "No impacted packages"; \
 			exit 0; \

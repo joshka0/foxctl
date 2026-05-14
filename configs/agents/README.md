@@ -224,7 +224,7 @@ That's it! Agents work immediately.
 
 **When integrating agents for a user:**
 
-1. **Read [CLAUDE_INTEGRATION_GUIDE.md](../../CLAUDE_INTEGRATION_GUIDE.md)**
+1. **Read [AGENTS.md](../../AGENTS.md)**
 2. **Just copy the .md file** - agents are standalone
 3. **Check for hardcoded paths:**
    ```bash
@@ -297,4 +297,4 @@ sed -i 's|~/git/.*project|$CLAUDE_PROJECT_DIR|g' .claude/agents/[agent-name].md
 3. **Ask Claude to use them** - "Use [agent] to [task]"
 4. **Create your own** - Follow the pattern for your specific needs
 
-**Questions?** See [CLAUDE_INTEGRATION_GUIDE.md](../../CLAUDE_INTEGRATION_GUIDE.md)
+**Questions?** See [AGENTS.md](../../AGENTS.md)

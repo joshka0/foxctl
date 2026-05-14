@@ -1,5 +1,0 @@
-{
-  "timeout": "10s",
-  "retryOn429": true,
-  "aliveStatusCodes": [200, 204, 206, 301, 302, 303, 307, 308]
-}

@@ -229,8 +229,7 @@ Claude should:
 4. Verify integration
 ```
 
-See [CLAUDE_INTEGRATION_GUIDE.md](../../.claude/CLAUDE.md) for
-complete instructions.
+See [AGENTS.md](../../AGENTS.md) for complete repository agent instructions.
 
 ### Manual Integration
 
@@ -412,8 +411,7 @@ Update skill-rules.json:
 
 **When integrating a skill for a user:**
 
-1. **Read [CLAUDE_INTEGRATION_GUIDE.md](../../.claude/CLAUDE.md)**
-   first
+1. **Read [AGENTS.md](../../AGENTS.md)** first
 2. Ask about their project structure
 3. Customize `pathPatterns` in skill-rules.json
 4. Verify the skill file has no hardcoded paths
@@ -434,6 +432,5 @@ Update skill-rules.json:
 3. **Add more:** Once first skill works, add others
 4. **Customize:** Adjust triggers based on your workflow
 
-**Questions?** See
-[CLAUDE_INTEGRATION_GUIDE.md](../../.claude/CLAUDE.md) for
-comprehensive integration instructions.
+**Questions?** See [AGENTS.md](../../AGENTS.md) for comprehensive repository
+agent instructions.

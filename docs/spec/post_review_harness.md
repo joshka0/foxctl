@@ -338,7 +338,7 @@ Define explicit behavior:
 
 - **Golden fixtures:**
   - If events cross process boundaries:
-    - JSON examples in `test/golden/envelopes/post_review_event_*.json`.
+    - JSON examples in `tests/golden/envelopes/post_review_event_*.json`.
   - Keep aligned with `core_profile_v1.md` and codemap.
 
 ---

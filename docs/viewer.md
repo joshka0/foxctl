@@ -12,8 +12,8 @@ mailbox/blackboard state, and companion conversations.
 
 Archived surfaces:
 
-- `archive/packages/tui-agent` — archived TypeScript terminal control plane
-- `archive/cmd/foxctl_viewer` — archived legacy Go viewer TUI
+- `docs/archive/source/packages/tui-agent` — archived TypeScript terminal control plane
+- `docs/archive/source/cmd/foxctl_viewer` — archived legacy Go viewer TUI
 
 ## Runtime Topology
 

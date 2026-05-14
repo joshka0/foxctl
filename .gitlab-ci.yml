@@ -75,7 +75,7 @@ build-ci-image:
       }
     - retry_cmd 30 2 docker info
     - retry_cmd 5 5 sh -lc 'echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"'
-    - retry_cmd 3 10 docker build --pull -t ${CI_IMAGE} -f Dockerfile.ci .
+    - retry_cmd 3 10 docker build --pull -t ${CI_IMAGE} -f deploy/docker/Dockerfile.ci .
     - retry_cmd 3 10 docker push ${CI_IMAGE}
 
 # --- Stage: check (all jobs run in parallel via DAG) ---
@@ -89,7 +89,7 @@ static-analysis:
       fi
     - make fmt
     - git -c core.filemode=false diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
-    - GOGC=50 GOMEMLIMIT=1800MiB make lint GOLANGCI_TIMEOUT=30m GOLANGCI_FLAGS='--concurrency=1' LINT_TARGETS='./cmd/... ./internal/... ./plugins/... ./scripts/... ./test/...'
+    - GOGC=50 GOMEMLIMIT=1800MiB make lint GOLANGCI_TIMEOUT=30m GOLANGCI_FLAGS='--concurrency=1' LINT_TARGETS='./cmd/... ./internal/... ./plugins/... ./scripts/... ./tests/...'
     - make check-large-files
     - make check-tech-debt
 

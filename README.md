@@ -375,8 +375,8 @@ Current high-signal docs:
 - `internal/` - Runtime, storage, indexing, context, and web internals
 - `cmd/foxctl_tui/` - Canonical Go terminal agent shell
 - `packages/gui-agent/` - Web operator surface
-- `archive/packages/tui-agent/` - Archived TypeScript TUI workbench
-- `archive/cmd/foxctl_viewer/` - Archived legacy Go viewer TUI
+- `docs/archive/source/packages/tui-agent/` - Archived TypeScript TUI workbench
+- `docs/archive/source/cmd/foxctl_viewer/` - Archived legacy Go viewer TUI
 - `docs/` - Canonical architecture, guides, specs, and plans
 
 ## License

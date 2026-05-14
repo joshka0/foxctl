@@ -2,7 +2,7 @@
 
 Date: 2025-11-27
 
-- Updated `Dockerfile.ci` to:
+- Updated `deploy/docker/Dockerfile.ci` to:
   - Set `WORKDIR /workspace`.
   - Copy `go.mod` and `go.sum` into the image.
   - Run `go mod download` to pre-populate the Go module cache.

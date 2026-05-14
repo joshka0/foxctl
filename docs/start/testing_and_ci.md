@@ -13,7 +13,7 @@ tests, coverage, and CI fit together so agents and humans can reason about
 - **Deterministic:** No network in default `go test ./...` or `make test`.
 - **Race awareness:** Use `-race` through the Makefile so package sharding and
   timeouts stay consistent.
-- **Golden tests:** Prefer stable JSON/NDJSON fixtures in `test/golden/` and
+- **Golden tests:** Prefer stable JSON/NDJSON fixtures in `tests/golden/` and
   `testdata/` to lock in envelope shapes.
 
 ---
@@ -26,7 +26,7 @@ changes. See `Makefile` for the authoritative definitions.
 - `make test` – unit tests (no network), all packages.
 - `make test-short` – unit tests with `-short` flag (fastest feedback loop).
 - `make test-race` – unit tests with `-race`.
-- `make test-integration` – integration tests in `test/integration/...` (may
+- `make test-integration` – integration tests in `tests/integration/...` (may
   require network/LLM APIs; gated with `//go:build integration`).
 - `make test-integration-cmd` – cmd integration tests in `cmd/foxctl/cmd/...`
   (requires `make skills-build` first; gated with `//go:build integration`).
@@ -79,7 +79,7 @@ helpers. Native vector search belongs in the Turso/Postgres storage backends.
 
 Integration tests live in two places, both gated with `//go:build integration`:
 
-1. **`test/integration/`** – Full integration tests that may require network
+1. **`tests/integration/`** – Full integration tests that may require network
    access, LLM API keys (e.g., `FOXCTL_LLM_API_KEY`, `GEMINI_API_KEY`), or
    external binaries. These test end-to-end workflows like agent spawning,
    symbol indexing, and the SWE Grep pipeline.
@@ -90,7 +90,7 @@ Integration tests live in two places, both gated with `//go:build integration`:
 Run them via:
 
 ```bash
-make test-integration       # test/integration/... (may need API keys)
+make test-integration       # tests/integration/... (may need API keys)
 make test-integration-cmd   # cmd/foxctl/cmd/... (needs skills-build)
 ```
 
@@ -149,14 +149,17 @@ When making code changes that affect tests, prefer to:
 
 ## CI Overview
 
-GitHub Actions (`.github/workflows/ci.yml`) runs a containerized CI pipeline
-using a pre-warmed Go image built from `Dockerfile.ci`. Key jobs:
+GitLab CI (`.gitlab-ci.yml`) runs a containerized pipeline using the Go image
+built from `deploy/docker/Dockerfile.ci`. Key jobs:
 
-- **lint** – `make lint` in the CI image.
-- **test** – `CGO_ENABLED=0 go test -short ./...`; coverage enforcement is
-  modeled by the local `check-coverage` target and currently uses a 40% floor.
-- **race/tests/coverage** – additional jobs for race detection and coverage
-  reporting, aligned with local `make` targets.
+- **static-analysis** – `make fmt`, `make lint`, large-file checks, and tech
+  debt checks.
+- **unit-tests** – impacted `make test-short-impacted` on merge requests, or
+  `go test -short ./...` on main/full runs.
+- **race-tests-\*** – sharded race checks through `make test-race-shard`.
+- **integration-tests** – impacted `make test-integration-impacted` on merge
+  requests, or `make test-integration` on main/full runs.
+- **build** – `make build`, impacted or full skill builds, and manifest checks.
 
 Agents proposing CI changes should:
 
