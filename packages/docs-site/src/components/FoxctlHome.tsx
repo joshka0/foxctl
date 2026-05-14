@@ -222,24 +222,17 @@ const progress = [
 
 const benchmarkSolutions = [
   {
-    title: 'Codex subagent comparison',
+    title: 'Context gather speed',
     label: '1 case',
     metric: '31.4x faster',
-    body: 'gather_context passed the RLM map case in 6.50s after a fresh repoindex build; a local Codex native subagent took 204.3s, found the paths, and failed exact fact scoring.',
+    body: 'gather_context built the RLM map evidence in 6.50s with 1.00 fact recall and a compact 1,096-character context bundle.',
     href: '/quality/benchmarks/',
   },
   {
     title: 'Shell context reduction',
     label: 'orientation',
-    metric: '89% fewer tokens',
-    body: 'Structured shell reports reduced 8,695 raw tokens to 953 returned tokens across ls, grep, sed, git status, diff, and log cases.',
-    href: '/quality/benchmarks/',
-  },
-  {
-    title: 'Cold tool skill checks',
-    label: 'bounded',
-    metric: '4,005 vs 6,007 tokens',
-    body: 'Cold foxctl skill calls returned less total context than equivalent native shell output, with startup overhead called out separately.',
+    metric: '85.4% less output',
+    body: 'foxctl reduced output across command rows that actually shrank: ls, find, cat, head, tail, grep, sed, git, and go test tasks.',
     href: '/quality/benchmarks/',
   },
   {
@@ -258,6 +251,144 @@ const benchmarkSolutions = [
   },
 ];
 
+const commandComparisonRows = [
+  {
+    binary: 'ls',
+    task: 'List the internal package tree',
+    command: 'ls -la internal',
+    native: '483 tokens / 1,002 bytes',
+    foxctl: '30 tokens / 106 bytes',
+    gain: '93.8% less',
+  },
+  {
+    binary: 'find',
+    task: 'Find Go files under tooling',
+    command: "find internal/tooling -name '*.go'",
+    native: '825 tokens / 3,061 bytes',
+    foxctl: '66 tokens / 237 bytes',
+    gain: '92.0% less',
+  },
+  {
+    binary: 'cat',
+    task: 'Read module metadata',
+    command: 'cat go.mod',
+    native: '7,520 tokens / 19,723 bytes',
+    foxctl: '1,011 tokens / 2,216 bytes',
+    gain: '86.6% less',
+  },
+  {
+    binary: 'head',
+    task: 'Read the start of shell command source',
+    command: 'head -n 80 cmd/foxctl/cmd/shell.go',
+    native: '679 tokens / 2,680 bytes',
+    foxctl: '580 tokens / 2,245 bytes',
+    gain: '14.6% less',
+  },
+  {
+    binary: 'tail',
+    task: 'Read the end of shell command source',
+    command: 'tail -n 80 cmd/foxctl/cmd/shell.go',
+    native: '655 tokens / 2,376 bytes',
+    foxctl: '623 tokens / 2,245 bytes',
+    gain: '4.9% less',
+  },
+  {
+    binary: 'grep',
+    task: 'Find Go functions in shellreduce',
+    command: "grep -rn 'func ' internal/tooling/shellreduce",
+    native: '4,779 tokens / 18,632 bytes',
+    foxctl: '53 tokens / 209 bytes',
+    gain: '98.9% less',
+  },
+  {
+    binary: 'sed',
+    task: 'Read the shell command source slice',
+    command: "sed -n '1,120p' cmd/foxctl/cmd/shell.go",
+    native: '1,148 tokens / 4,617 bytes',
+    foxctl: '556 tokens / 2,216 bytes',
+    gain: '51.6% less',
+  },
+  {
+    binary: 'git status',
+    task: 'Inspect worktree status',
+    command: 'git status --short',
+    native: '1,422 tokens / 5,095 bytes',
+    foxctl: '72 tokens / 215 bytes',
+    gain: '94.9% less',
+  },
+  {
+    binary: 'git diff',
+    task: 'Inspect changed-file stats',
+    command: 'git diff --stat',
+    native: '1,760 tokens / 6,458 bytes',
+    foxctl: '182 tokens / 503 bytes',
+    gain: '89.7% less',
+  },
+  {
+    binary: 'git diff',
+    task: 'List changed file names',
+    command: 'git diff --name-only',
+    native: '1,313 tokens / 4,755 bytes',
+    foxctl: '225 tokens / 768 bytes',
+    gain: '82.9% less',
+  },
+  {
+    binary: 'git log',
+    task: 'Review recent commit stats',
+    command: 'git log --stat -5',
+    native: '3,303 tokens / 11,464 bytes',
+    foxctl: '89 tokens / 337 bytes',
+    gain: '97.3% less',
+  },
+  {
+    binary: 'go test',
+    task: 'Run the shellreduce package tests',
+    command: 'go test ./internal/tooling/shellreduce',
+    native: '22 tokens / 68 bytes',
+    foxctl: '14 tokens / 41 bytes',
+    gain: '36.4% less',
+  },
+  {
+    binary: 'total',
+    task: 'All command-output rows where foxctl reduced output',
+    command: 'twelve native commands, same tasks through foxctl shell reduction',
+    native: '23,910 tokens / 79,932 bytes',
+    foxctl: '3,501 tokens / 11,338 bytes',
+    gain: '85.4% less',
+  },
+];
+
+const cleanupWorkflows = [
+  {
+    label: 'Scout',
+    title: 'Find refactor targets before editing',
+    body: 'Use refactor status, snapshots, hot paths, dependency expansion, and scout evidence to choose narrow cleanup targets.',
+    command: 'foxctl refactor scout --path ./internal --language go --focus slop',
+    href: '/quality/refactor-scouts/',
+  },
+  {
+    label: 'Slop',
+    title: 'Reduce AI-generated sprawl',
+    body: 'Look for duplicated guards, repeated remapping, overgrown functions, noisy adapters, and unclear package boundaries.',
+    command: 'foxctl refactor advisor --path ./internal --language go --focus slop',
+    href: '/quality/refactor-scouts/',
+  },
+  {
+    label: 'Tighten',
+    title: 'Clean repo boundaries',
+    body: 'Tighten package placement, command surfaces, docs ownership, and runtime boundaries without broad unrelated rewrites.',
+    command: 'foxctl refactor deps --path ./internal --language go --query Run --direction in',
+    href: '/quality/refactor-scouts/',
+  },
+  {
+    label: 'Evidence',
+    title: 'Keep cleanup reviewable',
+    body: 'Attach snapshots, change ranges, dependency evidence, and benchmark/doc checks so cleanup work stays auditable.',
+    command: 'foxctl refactor evidence --artifact sha256:<digest>',
+    href: '/quality/refactor-scouts/',
+  },
+];
+
 const architecture = [
   ['CLI', 'commands, hooks, local shells'],
   ['Skills', 'WASI, native, job tracking'],
@@ -271,6 +402,7 @@ const deepLinks = [
   ['Integrations', '/integrations/status/'],
   ['Progress', '/roadmap/progress/'],
   ['Benchmarks', '/quality/benchmarks/'],
+  ['Refactor scouts', '/quality/refactor-scouts/'],
   ['Protocol v1', '/reference/protocol-v1/'],
   ['Repoindex', '/retrieval/repoindex-and-dag-grep/'],
 ];
@@ -442,6 +574,32 @@ export default function FoxctlHome() {
         </div>
       </section>
 
+      <section className="fox-section" aria-labelledby="cleanup-title">
+        <div className="fox-section-heading">
+          <span className="fox-eyebrow">Repo cleanup</span>
+          <h2 id="cleanup-title">Refactor scouts for tightening real codebases</h2>
+          <p>
+            foxctl treats cleanup as an evidence workflow: scout the shape,
+            identify slop, tighten boundaries, and keep each refactor reviewable.
+          </p>
+        </div>
+        <div className="fox-info-grid fox-cleanup-grid">
+          {cleanupWorkflows.map(item => (
+            <article className="fox-info-card" key={item.title}>
+              <div className="fox-info-card-head">
+                <span className="fox-status-pill fox-status-pill-cool">{item.label}</span>
+                <strong>{item.title}</strong>
+              </div>
+              <p>{item.body}</p>
+              <code className="fox-inline-command">{item.command}</code>
+              <Link className="fox-inline-link" href={item.href}>
+                Open workflow
+              </Link>
+            </article>
+          ))}
+        </div>
+      </section>
+
       <section className="fox-section" aria-labelledby="benchmark-title">
         <div className="fox-section-heading">
           <span className="fox-eyebrow">Benchmark solutions</span>
@@ -466,6 +624,34 @@ export default function FoxctlHome() {
               </Link>
             </article>
           ))}
+        </div>
+        <div className="fox-product-table-shell" aria-label="Command output comparison table">
+          <table className="fox-product-table">
+            <thead>
+              <tr>
+                <th scope="col">Binary</th>
+                <th scope="col">Same task</th>
+                <th scope="col">Native output</th>
+                <th scope="col">foxctl output</th>
+              </tr>
+            </thead>
+            <tbody>
+              {commandComparisonRows.map(row => (
+                <tr key={`${row.binary}-${row.command}`}>
+                  <th scope="row">
+                    <span>{row.binary}</span>
+                    <em>{row.gain}</em>
+                  </th>
+                  <td>
+                    <span>{row.task}</span>
+                    <code>{row.command}</code>
+                  </td>
+                  <td>{row.native}</td>
+                  <td>{row.foxctl}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </section>
 
