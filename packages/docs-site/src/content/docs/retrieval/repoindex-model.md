@@ -128,8 +128,8 @@ foxctl run code/dag_grep --input '{
 |---|---|
 | Meaning-based candidate discovery | `code/semantic_search` |
 | Full function extraction | `code/context_grep` or `code/snippet_extract` |
-| Agent task continuity | ACA and context engine |
-| Long-term memory claims | Memory store and ACA proposal flow |
+| Agent task continuity | ContextWiki and context engine |
+| Long-term memory claims | Memory store and ContextWiki proposal flow |
 | Ranking policy and LLM summarization | App code |
 
 ## Canonical sources

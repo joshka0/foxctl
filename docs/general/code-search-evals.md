@@ -68,7 +68,7 @@ You can also override thresholds directly:
 
 If a checked-in policy file already sets those values, passing the flag again overrides the file.
 
-For ACA retrieval evals, see [retrieval-evals.md](retrieval-evals.md).
+For ContextWiki retrieval evals, see [retrieval-evals.md](retrieval-evals.md).
 
 ## `gather_context` Polyglot Fixture
 

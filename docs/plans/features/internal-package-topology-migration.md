@@ -48,7 +48,7 @@ The current repo already wants to be organized around these families:
 | Family | Current anchors | Meaning |
 |--------|------------------|---------|
 | runtime | `runtime/*`, `agent/*`, `v2/*` | agent execution, orchestration, lifecycle, runtime state |
-| context | `context/*` | ACA/control-plane, context assembly, transcript history, durable knowledge |
+| context | `context/*` | ContextWiki/control-plane, context assembly, transcript history, durable knowledge |
 | intelligence | `intelligence/*` | ingestion, retrieval, evidence extraction, synthesis, refactor planning, verification |
 | interfaces | `interfaces/*` | server, UI, transport, platform-facing entrypoints |
 | console | `console/*` | console session contracts, persistence, and application/runtime behavior |
@@ -359,7 +359,7 @@ Non-goals for Story 2:
 
 - do not rename `taskhistory`, `transcriptpipeline`, or `transcriptcache`
   packages yet
-- do not change ACA promotion semantics or knowledge-plane behavior
+- do not change ContextWiki promotion semantics or knowledge-plane behavior
 - do not fold `sessionkit` or other runtime-helper packages into the history
   tranche during this batch
 - do not change transcript artifact formats or cache behavior as part of the

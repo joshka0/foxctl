@@ -7,6 +7,7 @@ This is the canonical map for docs in this repository.
 - [AGENTS.md](../AGENTS.md) - Contributor + AI assistant operating rules.
 - [README.md](../README.md) - Product overview and quick start.
 - [docs/start/README.md](start/README.md) - Fast orientation for common workflows.
+- [docs/glossary.md](glossary.md) - Foxctl-specific terminology for agents and contributors.
 - [docs/architecture/package-topology.md](architecture/package-topology.md) - Read this first before introducing a new `internal/*` root or placing new code under `internal/v2/*`.
 - [docs/DOC_LIFECYCLE.md](DOC_LIFECYCLE.md) - Documentation lifecycle and maintenance policy.
 
@@ -18,14 +19,14 @@ This is the canonical map for docs in this repository.
 - [docs/general/repoindex.md](general/repoindex.md) - Repo graph index terminology, build/query commands, language coverage, and storage notes.
 - [docs/general/repoindex-pageindex.md](general/repoindex-pageindex.md) - PageIndex-inspired retrieval model for repoindex, DAG grep, and semantic comments.
 - [docs/general/core-package-coverage.md](general/core-package-coverage.md) - Machine-friendly core package coverage matrix.
-- [docs/general/refactor-scout.md](general/refactor-scout.md) - Local refactor scout/advisor workflow, seam vocabulary, language coverage, and ACA fit.
+- [docs/general/refactor-scout.md](general/refactor-scout.md) - Local refactor scout/advisor workflow, seam vocabulary, language coverage, and ContextWiki fit.
 - [docs/general/code-search-evals.md](general/code-search-evals.md) - Stable code-search eval suites, checked-in policies, and wrapper commands.
-- [docs/general/retrieval-evals.md](general/retrieval-evals.md) - Stable ACA retrieval eval suites, wrapper commands, and current expected bands.
-- [docs/general/tmux-collaboration.md](general/tmux-collaboration.md) - tmux-based live collaboration setup, structured pane inspection, and ACA promotion flow.
+- [docs/general/retrieval-evals.md](general/retrieval-evals.md) - Stable ContextWiki retrieval eval suites, wrapper commands, and current expected bands.
+- [docs/general/tmux-collaboration.md](general/tmux-collaboration.md) - tmux-based live collaboration setup, structured pane inspection, and ContextWiki promotion flow.
 - [docs/general/room-runtime-adoption-pass.md](general/room-runtime-adoption-pass.md) - Current adoption matrix for hardened room-runtime semantics and the remaining queued-draft dispatch gap.
 - [configs/skills-pack/foxctl-room/SKILL.md](../configs/skills-pack/foxctl-room/SKILL.md) - Durable shared room coordination skill for room chat, relay, loop, and room tasks.
 - [docs/architecture/](architecture/) - Current runtime architecture docs.
-- [docs/architecture/context-architecture.md](architecture/context-architecture.md) - Workspace-local ACA control plane and top-of-mind slice.
+- [docs/architecture/context-architecture.md](architecture/context-architecture.md) - Workspace-local ContextWiki control plane and top-of-mind slice.
 - [docs/architecture/rlm-gather-context.md](architecture/rlm-gather-context.md) - RLM `gather_context` tool over contextengine retrieval, reduction, and certification.
 - [docs/architecture/package-topology.md](architecture/package-topology.md) - Canonical grouping map for `internal/*`, including what is legacy runtime and what `internal/v2/*` is replacing.
 - [docs/architecture/jido-hybrid-runtime.md](architecture/jido-hybrid-runtime.md) - Canonical hybrid-runtime split for Jido orchestration + `foxctl` semantics.
@@ -41,7 +42,7 @@ This is the canonical map for docs in this repository.
 - [docs/spec/agent_hierarchy.md](spec/agent_hierarchy.md) - Current hierarchy and spawn protocol.
 - [docs/spec/overseer_profile.md](spec/overseer_profile.md) - Overseer coordination profile.
 - [docs/spec/repo_graph_index_and_dag_grep.md](spec/repo_graph_index_and_dag_grep.md) - Canonical repo graph schema and `dag_grep` behavior contract.
-- [docs/spec/rlm_query_runtime.md](spec/rlm_query_runtime.md) - Experimental RLM query-time runtime contract over ACA, companion memory, and external state.
+- [docs/spec/rlm_query_runtime.md](spec/rlm_query_runtime.md) - Experimental RLM query-time runtime contract over ContextWiki, companion memory, and external state.
 - [docs/spec/v2_greenfield_bootstrap.md](spec/v2_greenfield_bootstrap.md) - Evolving target-state v2 design spec, not the canonical as-built runtime map.
 - [docs/spec/v2_repo_rules_and_skills.md](spec/v2_repo_rules_and_skills.md) - v2 repo rules and core skills governance.
 

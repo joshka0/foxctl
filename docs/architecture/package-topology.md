@@ -314,7 +314,7 @@ That yields these routing decisions for the current top-level roots:
 
 | Package/root | Subfamily | Keep / bridge / move-later | Why |
 |------|-----------|-----------------------------|-----|
-| `internal/context/contextplane` | controlplane | keep | Owns ACA-style orientation, proposals, retrieval inspection, promotion helpers, and `taskhistory`; it is already the control-plane home rather than a generic helper bucket |
+| `internal/context/contextplane` | controlplane | keep | Owns ContextWiki-style orientation, proposals, retrieval inspection, promotion helpers, and `taskhistory`; it is already the control-plane home rather than a generic helper bucket |
 | `internal/context/companion` | assembly | keep | Owns live prompt/context assembly, conversation memory coordination, and layered context building for active sessions |
 | `internal/context/transcriptpipeline` | history | keep | Owns transcript import, preprocessing, claim derivation, and history extraction; it is the main history-processing engine |
 | `internal/context/contextplane/taskhistory` | history | bridge inside controlplane today | Lives under `contextplane` today but belongs to the same history tranche as `transcriptpipeline`; treat it as coupled history work, not stray control-plane cleanup |
@@ -351,7 +351,7 @@ Within the context family, the first explicit migration tranche should be the
 | Package/root | History role | Current boundary decision |
 |------|--------------|---------------------------|
 | `internal/context/transcriptpipeline` | transcript import, preprocessing, claim derivation, objective extraction, grouped history runs, and `HistoryPack` production | treat as the history-processing owner |
-| `internal/context/contextplane/taskhistory` | control-plane consumer that assembles task-oriented history views, family overviews, repo anchors, and ACA-facing summaries from transcript/history inputs | keep under `contextplane` for now, but treat as a history consumer rather than a second history-processing engine |
+| `internal/context/contextplane/taskhistory` | control-plane consumer that assembles task-oriented history views, family overviews, repo anchors, and ContextWiki-facing summaries from transcript/history inputs | keep under `contextplane` for now, but treat as a history consumer rather than a second history-processing engine |
 | `internal/storage/transcriptcache` | durable cache for prederived transcript artifacts | keep in `internal/storage/*` and plan with the history tranche |
 
 That means the practical boundary for new work is:
@@ -359,7 +359,7 @@ That means the practical boundary for new work is:
 - transcript parsing, normalization, objective extraction, claim derivation,
   grouped history runs, and cache semantics belong to `internal/context/transcriptpipeline`
   plus `internal/storage/transcriptcache`
-- task-oriented history packaging, control-plane summaries, and ACA/task-facing
+- task-oriented history packaging, control-plane summaries, and ContextWiki/task-facing
   presentation belong to `internal/context/contextplane/taskhistory`
 - new history work should not drift into `internal/context/sessionkit` or generic
   `internal/context/contextplane` helpers unless it is clearly a helper or consumer of
@@ -387,7 +387,7 @@ Explicit non-goals for the first history batch:
 
 - do not rename `taskhistory`, `transcriptpipeline`, or `transcriptcache`
   packages yet
-- do not rework ACA promotion semantics or knowledge-plane behavior
+- do not rework ContextWiki promotion semantics or knowledge-plane behavior
 - do not fold session helper packages into the history tranche prematurely
 - do not change transcript artifact formats or cache semantics as part of the
   boundary clarification step

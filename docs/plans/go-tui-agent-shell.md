@@ -54,7 +54,7 @@ Primary object model:
 3. `Memory`
    - the current layered memory context and searchable persistent artifacts
 4. `Continuity`
-   - ACA/top-of-mind/task-history state for the current workspace/task
+   - ContextWiki/top-of-mind/task-history state for the current workspace/task
 5. `Workers`
    - spawned task-bounded helpers and their runtime state
 6. `Board`
@@ -208,7 +208,7 @@ Hide destructive or high-impact operations in a dedicated section:
 
 Continuity is not the same as chat memory.
 
-It should expose ACA/task continuity surfaces:
+It should expose ContextWiki/task continuity surfaces:
 
 1. top-of-mind summary
 2. task-history summary
@@ -306,7 +306,7 @@ Sources:
 
 1. [docs/general/memory.md](../general/memory.md)
 
-### 3. ACA / Continuity Layer
+### 3. ContextWiki / Continuity Layer
 
 This is active-work continuity, not conversational memory.
 
@@ -329,7 +329,7 @@ Do not merge these three planes into one generic `memory` list.
 The shell should expose:
 
 1. `Memory` for companion/agent memory
-2. `Continuity` for ACA/task continuity
+2. `Continuity` for ContextWiki/task continuity
 3. explicit search/pin flows into the transcript
 
 ## Memory Policy Defaults
@@ -440,7 +440,7 @@ Use:
 
 Use:
 
-1. ACA/task continuity commands and wrappers
+1. ContextWiki/task continuity commands and wrappers
 2. `GET /api/orchestration/board-get`
 3. `GET /api/orchestration/board-card-runtime-get`
 4. `POST /api/orchestration/refresh`

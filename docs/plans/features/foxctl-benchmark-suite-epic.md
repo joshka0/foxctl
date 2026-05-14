@@ -88,7 +88,7 @@ The suite has two output planes:
 | Shell reducer savings | `foxctl shell report --preset typical-bash` | Raw shell output versus structured foxctl reductions with bytes, tokens, latency, and optional input-cost estimates |
 | Orientation harness | [benchmark-orientation-harness.sh](../../../scripts/benchmark-orientation-harness.sh) | Homepage-ready shell, tool, and hot reducer evidence pack with explicit budget fields |
 | Eval command registry | [eval.go](../../../cmd/foxctl/cmd/eval.go) | Existing `foxctl eval ...` command family and envelope output pattern |
-| Retrieval eval modes | [rlm-retrieval-findings.md](../../archive/plans/features/rlm-retrieval-findings.md) | Current hit@k/MRR comparison lanes across ACA, repoindex, DAG, and RLM |
+| Retrieval eval modes | [rlm-retrieval-findings.md](../../archive/plans/features/rlm-retrieval-findings.md) | Current hit@k/MRR comparison lanes across ContextWiki, repoindex, DAG, and RLM |
 | LongCoT/RLM conditions | [eval_longcot.go](../../../cmd/foxctl/cmd/eval_longcot.go) | Stable condition IDs and explicit route/profile/plan mode selection |
 | LongCoT typed results | [types.go](../../../internal/tooling/evals/longcoteval/types.go) | Usage, tool event, leakage, and RLM attempt telemetry shapes |
 | LongCoT autoresearch loop | [longcot-autoresearch-loop.md](../../research/longcot-autoresearch-loop.md), [longcot_autoresearch.py](../../../scripts/longcot_autoresearch.py) | Fixed-budget experiment runner and TSV ledger pattern |
@@ -107,7 +107,7 @@ benchmark map:
 | Runtime | [tool_runner_bench_test.go](../../../internal/runtime/engine/tool_runner_bench_test.go), [protocol_bench_test.go](../../../internal/protocol/protocol_bench_test.go), [base_actor_bench_test.go](../../../internal/runtime/actor/base_actor_bench_test.go), [wfq_bench_test.go](../../../internal/runtime/execution/scheduler/wfq_bench_test.go) | yes |
 | Repoindex/DAG | [dag_bench_test.go](../../../internal/intelligence/indexing/repoindex/dag_bench_test.go), existing query benchmarks | yes |
 | RLM | [run_spec_bench_test.go](../../../internal/rlm/run_spec_bench_test.go) plus gather-context/LongCoT extended eval entries | yes for model-free planner/policy |
-| Retrieval | Existing ACA retrieval eval target is recorded in the manifest | advisory until vault paths, fixtures, and embedder health produce a stable saved artifact |
+| Retrieval | Existing ContextWiki retrieval eval target is recorded in the manifest | advisory until vault paths, fixtures, and embedder health produce a stable saved artifact |
 | Room runtime | Existing room frontier/story state tests are recorded as correctness evals | yes |
 | Integrations/hooks | Hook wall-clock script, [router_bench_test.go](../../../internal/tooling/shellreduce/router_bench_test.go), `foxctl shell report`, and [benchmark-orientation-harness.sh](../../../scripts/benchmark-orientation-harness.sh) | shell reducer yes, shell/tool evidence extended, hook script extended |
 
@@ -332,7 +332,7 @@ Quality metrics:
 
 ### 4. Retrieval Benchmarks
 
-Purpose: keep ACA, code retrieval, direct repoindex, DAG, and RLM retrieval lanes
+Purpose: keep ContextWiki, code retrieval, direct repoindex, DAG, and RLM retrieval lanes
 honest against the same fixtures.
 
 Current lanes to preserve:
@@ -489,7 +489,7 @@ Stories:
 1. Add DAG quality fixtures with expected nodes, edges, paths, and budgets.
 2. Add repoindex quality fixtures for symbol, import, call/ref, and missing-node
    behavior.
-3. Consolidate retrieval quality suites so ACA, direct repoindex, DAG, and RLM
+3. Consolidate retrieval quality suites so ContextWiki, direct repoindex, DAG, and RLM
    modes run against the same task fixtures.
 4. Add path validation and budget discipline checks to retrieval reports.
 
@@ -607,7 +607,7 @@ extended.
 
 Current retrieval note: `make eval-retrieval-foxctl` now resolves
 `~/.foxctl/templates/obsidian-vault` when present and falls back to the
-repo-local ACA vault fixture. That lane is intentionally kept visible but
+repo-local ContextWiki vault fixture. That lane is intentionally kept visible but
 advisory until vault paths, expected fixtures, and embedder health are
 reconciled into a stable saved artifact.
 

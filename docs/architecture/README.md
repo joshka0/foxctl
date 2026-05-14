@@ -4,7 +4,7 @@ This folder contains **architectural** documentation for current in-repo behavio
 
 - [`system-architecture.md`](./system-architecture.md): canonical architecture map for `cmd/foxctl` + `internal/*`
 - [`package-topology.md`](./package-topology.md): canonical grouping map for `internal/*`, including explicit legacy-runtime vs `v2` replacement boundaries
-- [`context-architecture.md`](./context-architecture.md): workspace-local ACA control plane and computed top-of-mind slice
+- [`context-architecture.md`](./context-architecture.md): workspace-local ContextWiki control plane and computed top-of-mind slice
 - [`memory-core.md`](./memory-core.md): typed agent memory records, retrieval lanes, lifecycle, curator trust gates, and promotion rules
 - [`rlm-gather-context.md`](./rlm-gather-context.md): RLM `gather_context` tool over contextengine retrieval, reduction, and certification
 - [`jido-hybrid-runtime.md`](./jido-hybrid-runtime.md): canonical hybrid-runtime split between Jido orchestration and `foxctl` semantic ownership

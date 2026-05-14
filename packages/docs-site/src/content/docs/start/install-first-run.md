@@ -161,7 +161,7 @@ foxctl index repo build --workspace . --go=false --typescript --elixir
 | Inspect graph neighborhoods | `foxctl index repo search` and `expand` |
 | Start an agent | `foxctl agent spawn` |
 | Coordinate a room | `foxctl room ...` |
-| Refresh ACA/Obsidian context | `foxctl obsidian ...` |
+| Refresh ContextWiki/Obsidian context | `foxctl obsidian ...` |
 
 ## Developer setup helpers
 

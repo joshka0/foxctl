@@ -91,7 +91,7 @@ See [Runtime architecture](/architecture/runtime/) for how v2 and Jido fit toget
 | `internal/v2/runtime/contextbuilder` | Layered context building for active sessions |
 | `internal/v2/runtime/enrichers` | Async derived artifacts and companion bridge integration |
 
-See [ACA context architecture](/context/aca/) for the broader context model.
+See [ContextWiki](/context/contextwiki/) for the broader context model.
 
 ### Memory core and curator
 
@@ -183,7 +183,7 @@ The context family mixes five distinct concerns that should be routed separately
 
 | Subfamily | Packages | Role |
 |---|---|---|
-| Control plane | `context/contextplane` | ACA-style orientation, proposals, promotion helpers, and task history |
+| Control plane | `context/contextplane` | ContextWiki-style orientation, proposals, promotion helpers, and task history |
 | Assembly | `context/companion` | Live prompt/context assembly and conversation memory coordination |
 | History | `context/transcriptpipeline`, `context/contextplane/taskhistory`, `storage/transcriptcache` | Transcript import, claim derivation, task-oriented history views, and transcript artifact caching |
 | Runtime helpers | `context/sessionkit`, `context/updater`, `storage/contextbuffer`, `storage/contextvar` | Session utilities, proactive context surfacing, injection buffering, and context-variable persistence |

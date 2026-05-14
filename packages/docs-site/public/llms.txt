@@ -20,7 +20,7 @@ commands, and finding canonical behavior.
 - [Repoindex and DAG grep](https://foxctl.com/retrieval/repoindex-and-dag-grep/): Build the repo graph, search it, expand neighborhoods, and render explanation subgraphs.
 - [Repoindex model](https://foxctl.com/retrieval/repoindex-model/): Node kinds, edge kinds, IDs, summaries, anchors, and rebuild strategy.
 - [Repoindex and PageIndex](https://foxctl.com/retrieval/repoindex-pageindex/): How PageIndex's table-of-contents retrieval idea maps to repoindex and semantic comments.
-- [ACA context architecture](https://foxctl.com/context/aca/): How foxctl organizes repo context, memory, Obsidian knowledge, and retrieval evidence.
+- [ContextWiki](https://foxctl.com/context/contextwiki/): Workspace knowledge layer for repo context, memory, Obsidian knowledge, and retrieval evidence.
 - [Context engine](https://foxctl.com/context/context-engine/): Typed evidence, retrieval episodes, impact edges, and staleness markers.
 - [Memory continuity](https://foxctl.com/memory/continuity/): Task continuity, reusable memory, and session recall.
 
@@ -32,12 +32,13 @@ commands, and finding canonical behavior.
 - [Integration status](https://foxctl.com/integrations/status/): Current, in-progress, and planned integration surfaces.
 - [Providers and MCP](https://foxctl.com/integrations/providers-and-mcp/): Provider configuration and MCP bridge setup.
 - [OpenAPI and plugins](https://foxctl.com/integrations/openapi-and-plugins/): OpenAPI-backed calls and plugin integration.
-- [Hooks](https://foxctl.com/integrations/hooks/): Hook wiring for shell, Claude, ACA, and task continuity.
+- [Hooks](https://foxctl.com/integrations/hooks/): Hook wiring for shell, Claude, ContextWiki, and task continuity.
 
 ## Reference
 
 - [CLI reference](https://foxctl.com/reference/cli/): foxctl command reference.
 - [Command map](https://foxctl.com/reference/command-map/): High-level command families and when to use them.
+- [Glossary](https://foxctl.com/reference/glossary/): Foxctl-specific terminology for agents and contributors.
 - [Protocol v1](https://foxctl.com/reference/protocol-v1/): JSON envelope contract and output rules.
 - [CAS and persistence](https://foxctl.com/storage/cas-and-persistence/): Content-addressed storage and persistent state.
 

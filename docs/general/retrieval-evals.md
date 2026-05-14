@@ -1,6 +1,6 @@
 # Retrieval Evals
 
-Stable ACA retrieval evals are packaged as:
+Stable ContextWiki retrieval evals are packaged as:
 
 - checked-in suites under `testdata/evals/retrieval/`
 - checked-in policy files in the same folder
@@ -19,6 +19,9 @@ By default they evaluate:
 
 - `aca_default`
 - `aca_query_typed`
+
+Those mode IDs keep the old `aca_` prefix for compatibility with existing
+fixtures and reports. In prose, call the lane ContextWiki retrieval.
 
 ## Stable Commands
 
@@ -85,9 +88,9 @@ These budget fields intentionally measure the returned path list first. They do
 not yet measure full materialized context payload size, prompt tokens, or model
 usage tokens.
 
-## Refreshing ACA Inputs
+## Refreshing ContextWiki Inputs
 
-If a suite looks pathologically bad, refresh the current foxctl ACA/Obsidian
+If a suite looks pathologically bad, refresh the current foxctl ContextWiki/Obsidian
 inputs before treating the numbers as a ranking regression. Use the active
 foxctl vault path:
 
@@ -104,7 +107,7 @@ repo-local `.foxctl/templates/obsidian-vault` fixture.
 
 ## Current Expected Bands
 
-These are the latest verified ACA retrieval outputs available locally.
+These are the latest verified ContextWiki retrieval outputs available locally.
 
 ### foxctl
 
@@ -121,7 +124,7 @@ Source: `/tmp/retrieval-policy-check/foxctl-20260329T131551Z.json`
 
 Interpretation:
 
-- currently clean on the checked-in `foxctl` ACA package suite
+- currently clean on the checked-in `foxctl` ContextWiki package suite
 - route-aware note ranking, corrected workspace identity, and bounded package fallback are now enough to clear the suite under policy gating
 
 ### jido

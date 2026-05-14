@@ -35,7 +35,7 @@ surfaces are current behavior and which remain plan-backed work.
 | RLM helper runtime and eval loop | In progress | [Progress](/roadmap/progress/) |
 | OpenSandbox workspace integration | In progress | [Progress](/roadmap/progress/) |
 | Refactor intelligence and slop detection | In progress | [Progress](/roadmap/progress/) |
-| ACA memory and retrieval ensemble | In progress | [Progress](/roadmap/progress/) |
+| ContextWiki memory and retrieval ensemble | In progress | [Progress](/roadmap/progress/) |
 
 ## Operator rule
 

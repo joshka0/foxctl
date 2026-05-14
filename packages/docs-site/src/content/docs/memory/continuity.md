@@ -84,7 +84,7 @@ foxctl run session/recall --input '{"query":"oauth callback failure","limit":10}
 ## Task continuity
 
 Task continuity reconstitutes a bounded, hierarchical view of active work from
-ACA task state, handoffs, sessions, touched files, recent git history, and
+ContextWiki task state, handoffs, sessions, touched files, recent git history, and
 repoindex anchors. The output is deterministic first and model-assisted second.
 
 ### Structured command
@@ -375,7 +375,7 @@ Memory embeddings use the shared embedding provider path:
 
 | System | Role |
 |---|---|
-| [ACA](/context/aca/) | Workspace control plane — top-of-mind, handoffs, observations |
+| [ContextWiki](/context/contextwiki/) | Workspace control plane — top-of-mind, handoffs, observations |
 | [Context engine](/context/context-engine/) | Typed evidence substrate — evidence packs, retrieval episodes |
 | [Obsidian bridge](/context/obsidian-bridge/) | Knowledge plane — durable vault notes and docs reconciliation |
 | Memory and continuity | Evidence layer — named memory, sessions, task history |

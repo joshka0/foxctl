@@ -491,7 +491,7 @@ with stated resolutions. It satisfies VAL-DOCS-014.
 | Evidence Drawer | **Events** | Raw payloads for transcript rows, tool calls, errors. Forensic inspection. | No duplication — this is the canonical Events surface in the TUI. Drawer opens on demand and does not compete with runtime or companion for layout space. |
 | Rooms List (secondary flow) | **Rooms** | Room directory, membership, latest messages. | No duplication in M3 — Rooms is a secondary flow not implemented in the walking skeleton. When implemented, it will be a separate screen reachable via keybinding, not a competing panel in the primary layout. |
 | Status Footer | **Runtime** | Connection health, active entity label, keybinding hints. | Summary-only — does not duplicate Runtime's agent inventory or Companion's transcript. Footer is informational, not interactive. |
-| Memory / Continuity Rail | **Companion** | Per-agent memory context, ACA/continuity state. | Preserved from the legacy shell for the Companion flow. In the new cockpit, this is accessible from the Detail lane when a companion session is active. Not a separate top-level surface. |
+| Memory / Continuity Rail | **Companion** | Per-agent memory context, ContextWiki/continuity state. | Preserved from the legacy shell for the Companion flow. In the new cockpit, this is accessible from the Detail lane when a companion session is active. Not a separate top-level surface. |
 | Orchestration Board | **Orchestration** | Issue flow, board state, execution grouping. | Deferred to follow-up mission. The TUI has no Orchestration surface in M3. When implemented, it will be a separate screen (like Rooms) with its own keybinding. |
 
 ---

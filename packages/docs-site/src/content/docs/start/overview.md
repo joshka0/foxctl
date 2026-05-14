@@ -86,7 +86,7 @@ Paths must go through `policy.PathValidator`. WASI skills are workspace-confined
 | Skill execution | [Skills runtime](/skills/runtime-and-install/) |
 | Search and snippets | [Search and index](/retrieval/search-and-index/) |
 | Graph navigation | [Repoindex and DAG grep](/retrieval/repoindex-and-dag-grep/) |
-| Context and memory | [ACA](/context/aca/) and [Memory](/memory/continuity/) |
+| Context and memory | [ContextWiki](/context/contextwiki/), [Memory](/memory/continuity/), and [Glossary](/reference/glossary/) |
 | Agents and rooms | [Agent lifecycle](/agents/lifecycle/) and [Rooms](/collaboration/rooms/) |
 | Integrations | [Providers and MCP](/integrations/providers-and-mcp/) |
 | Operations | [Gotchas](/operations/gotchas/) and [Verification](/production/verification/) |

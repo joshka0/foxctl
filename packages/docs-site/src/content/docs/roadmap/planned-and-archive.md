@@ -38,7 +38,7 @@ Active planning documents live in `docs/plans/`. These represent work in progres
 | `features/eino-go-native-runtime-plan.md` | Eino `AgentEngine` integration + Go-native `RuntimeSpawner`/reconciler |
 | `features/opentui-agent-terminal-facades.md` | Facade backlog for a greenfield OpenTUI agent terminal |
 | `features/remote-workbench-session-handoff.md` | Plan for moving TUI workbench to Tailscale remote |
-| `features/semantic-code-anchors.md` | Typed code comments as repo graph edges and ACA retrieval signals |
+| `features/semantic-code-anchors.md` | Typed code comments as repo graph edges and ContextWiki retrieval signals |
 | `features/official-docs-production-release.md` | Starlight docs-site plan and production release matrix |
 | `features/durable-execution-recovery.md` | v2 orchestration crash recovery using card projection as durable retry queue |
 | `features/durable-execution-layer1-side-effects.md` | Runner side-effect safety: Turn Request Registry, idempotent event append, effect journal |
@@ -48,7 +48,7 @@ Active planning documents live in `docs/plans/`. These represent work in progres
 | `features/agent-mux-room-hierarchy.md` | Room hierarchy for mux-based agent coordination |
 | `features/foxctl-evolve-plan.md` | Foxctl-native repo-evolution tool with DB-backed experiment state |
 | `features/longcot-eval-contract-plan.md` | LongCoT eval contract for measuring RLM scaffold and token efficiency |
-| `features/aca-self-evolving-memory-layer.md` | Self-evolving memory layer for ACA |
+| `features/aca-self-evolving-memory-layer.md` | Self-evolving memory layer for ContextWiki |
 
 ### Using plans
 

@@ -72,10 +72,10 @@ This Starlight site organizes content into browsable sections:
 |---|---|---|
 | **Start Here** | First-run path and docs taxonomy | [Overview](/start/overview/), [Install](/start/install-first-run/), [Docs map](/start/docs-map/) |
 | **Guides** | Feature design, skill authoring, workflow walkthroughs | [Design a feature](/guides/designing-foxctl-features/), [Add a skill](/guides/add-a-skill/) |
-| **Core Workflows** | Skills, retrieval, repoindex, ACA, context engine, memory | [Skills runtime](/skills/runtime-and-install/), [Search and index](/retrieval/search-and-index/), [Repoindex and PageIndex](/retrieval/repoindex-pageindex/) |
+| **Core Workflows** | Skills, retrieval, repoindex, ContextWiki, context engine, memory | [Skills runtime](/skills/runtime-and-install/), [Search and index](/retrieval/search-and-index/), [Repoindex and PageIndex](/retrieval/repoindex-pageindex/) |
 | **Agents and Rooms** | Agent daemon, overseer, rooms, collaboration | [Agent lifecycle](/agents/lifecycle/), [Orchestration](/agents/orchestration/), [Rooms](/collaboration/rooms/) |
 | **Integrations** | MCP, OpenAPI, hooks, chat platforms, Obsidian, and integration maturity | [Integration status](/integrations/status/), [Providers and MCP](/integrations/providers-and-mcp/), [Hooks](/integrations/hooks/) |
-| **Reference** | Command map, CLI, Protocol v1, storage | [CLI](/reference/cli/), [Command map](/reference/command-map/), [Protocol v1](/reference/protocol-v1/) |
+| **Reference** | Command map, CLI, glossary, Protocol v1, storage | [CLI](/reference/cli/), [Command map](/reference/command-map/), [Glossary](/reference/glossary/), [Protocol v1](/reference/protocol-v1/) |
 | **Architecture** | System, design principles, runtime, API, auth | [System](/architecture/system/), [Design principles](/architecture/design-principles/), [Runtime](/architecture/runtime/) |
 | **Operations** | Gotchas, observability, CI/evals, benchmarks, Kubernetes | [Gotchas](/operations/gotchas/), [Troubleshooting](/operations/troubleshooting/), [Benchmarks](/quality/benchmarks/) |
 | **Roadmap and Archive** | Progress, in-progress work, planned, experimental, generated, and historical material | [Progress](/roadmap/progress/), [Planned and archive](/roadmap/planned-and-archive/) |
@@ -86,7 +86,8 @@ This Starlight site organizes content into browsable sections:
 2. [`README.md`](https://github.com/joshka0/foxctl/blob/main/README.md) — Product overview and quick start
 3. [`docs/start/README.md`](https://github.com/joshka0/foxctl/blob/main/docs/start/README.md) — Fast orientation for common workflows
 4. [`docs/architecture/package-topology.md`](https://github.com/joshka0/foxctl/blob/main/docs/architecture/package-topology.md) — Read before introducing a new `internal/*` root
-5. [`docs/DOC_LIFECYCLE.md`](https://github.com/joshka0/foxctl/blob/main/docs/DOC_LIFECYCLE.md) — Documentation lifecycle and maintenance policy
+5. [`docs/glossary.md`](https://github.com/joshka0/foxctl/blob/main/docs/glossary.md) — Foxctl terminology and naming rules
+6. [`docs/DOC_LIFECYCLE.md`](https://github.com/joshka0/foxctl/blob/main/docs/DOC_LIFECYCLE.md) — Documentation lifecycle and maintenance policy
 
 ## Current runtime reading order
 

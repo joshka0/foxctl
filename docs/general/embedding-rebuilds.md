@@ -19,10 +19,10 @@ workspace or vault.
 | Workspace symbol/search embeddings | `foxctl index init --workspace /path/to/workspace --scope symbols` | Rebuilds symbol embeddings and the code-search/searchindex side of the workspace. |
 | Obsidian semantic note/chunk embeddings | `foxctl obsidian index build --vault-path /path/to/vault` | Rebuilds the local vault index and semantic note/chunk embeddings. |
 
-## Full ACA Refresh
+## Full ContextWiki Refresh
 
 When repo docs, bridge metadata, or vault structure changed alongside embedding
-model changes, rebuild the full ACA layer:
+model changes, rebuild the full ContextWiki layer:
 
 ```bash
 foxctl obsidian graph build --workspace /path/to/workspace --vault-path /path/to/vault

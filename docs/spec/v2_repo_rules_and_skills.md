@@ -169,14 +169,14 @@ Rules:
 - read-only from projection/snapshot surfaces
 - must not block turn execution path
 
-### `context/*` (ACA control plane, read-only)
+### `context/*` (ContextWiki control plane, read-only)
 
 1. `context/show`
 2. `context/retrieve`
 
 Rules:
 
-- read-only access to top-of-mind and blended ACA retrieval state
+- read-only access to top-of-mind and blended ContextWiki retrieval state
 - safe for overseer/companion-style orientation flows
 - must not become a second orchestration path for task mutation
 
@@ -207,7 +207,7 @@ The classic agent runtime currently exposes a broader practical tool surface tha
 
 Today this repo has real, production-facing read-only surfaces for:
 
-- ACA control-plane retrieval
+- ContextWiki control-plane retrieval
 - Obsidian knowledge-layer retrieval
 - repo-index-era search and DAG traversal
 - project-local Heartwood tooling
@@ -215,7 +215,7 @@ Today this repo has real, production-facing read-only surfaces for:
 So v2 work should track two separate parity concerns:
 
 1. **profile/docs parity**
-   The v2 profile allowlists and skill-governance docs should reflect the read-only ACA/Obsidian surfaces that already exist.
+   The v2 profile allowlists and skill-governance docs should reflect the read-only ContextWiki/Obsidian surfaces that already exist.
 2. **tool-definition/executor parity**
    The actual v2 tool catalog still needs a concrete non-test source of `ToolDef` values and delegate wiring for those newer tools.
 
@@ -250,9 +250,9 @@ Required policy flags:
 
 MVP profile mapping:
 
-1. `overseer`: `agent/*`, `mail/*`, `code/*`, repo-index search, ACA read-only `context/*`, read-only `obsidian/*`, read-only `fs/*`
+1. `overseer`: `agent/*`, `mail/*`, `code/*`, repo-index search, ContextWiki read-only `context/*`, read-only `obsidian/*`, read-only `fs/*`
 2. `worker`: `fs/*`, `code/*`, `edit/*`, `test/*`, `mail/*`
-3. `companion`: `mail/*`, limited `memory/*`, read-only ACA `context/*`, read-only `obsidian/*`, optional read-only `code/*`
+3. `companion`: `mail/*`, limited `memory/*`, read-only ContextWiki `context/*`, read-only `obsidian/*`, optional read-only `code/*`
 
 Rule: profiles own defaults; per-agent overrides can only narrow, never broaden.
 

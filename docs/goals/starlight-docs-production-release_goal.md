@@ -37,7 +37,7 @@ least these foxctl areas:
 - CLI command families and common workflows
 - skills and skill runtime behavior
 - repoindex, semantic search, smart search, DAG grep, and code navigation
-- ACA/context architecture, memory, sessions, and task continuity
+- ContextWiki architecture, memory, sessions, and task continuity
 - agent daemon, agent hierarchy, overseer/subagent model, and room workflows
 - room-agile workflows, milestones, tasks, and evidence policy
 - GUI/web/runtime surfaces where they are current enough to document

@@ -695,7 +695,7 @@ feedback loops.
 
 7. **Cross-lane unification**
 
-   Fold companion hard state, transcript claims, context proposals, and ACA
+   Fold companion hard state, transcript claims, context proposals, and ContextWiki
    memory into the same record envelope. Keep their source lanes distinct, but
    route retrieval, lifecycle, and curator logic through one contract.
 

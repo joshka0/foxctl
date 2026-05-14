@@ -27,7 +27,7 @@ Core subsystem guides, API references, and operational documentation for `foxctl
 - [repoindex.md](repoindex.md) - Repo graph index terminology, build/query commands, and language coverage.
 - [repoindex-pageindex.md](repoindex-pageindex.md) - How PageIndex-style table-of-contents retrieval maps to repoindex, DAG grep, and semantic comments.
 - [code-search-evals.md](code-search-evals.md) - Stable code-search evaluation suites and policies.
-- [retrieval-evals.md](retrieval-evals.md) - ACA retrieval evaluation suites and expected bands.
+- [retrieval-evals.md](retrieval-evals.md) - ContextWiki retrieval evaluation suites and expected bands.
 - [refactor-scout.md](refactor-scout.md) - Local refactor scout workflow, seam vocabulary, and advisor integration.
 - [rlm-context.md](rlm-context.md) - RLM query-time runtime, context gathering, and reduction.
 
@@ -35,7 +35,7 @@ Core subsystem guides, API references, and operational documentation for `foxctl
 
 - [message-passing.md](message-passing.md) - Message-passing architecture and envelope contracts.
 - [message-passing-quickstart.md](message-passing-quickstart.md) - Quick start for message-passing patterns.
-- [tmux-collaboration.md](tmux-collaboration.md) - tmux-based live collaboration, pane inspection, and ACA promotion.
+- [tmux-collaboration.md](tmux-collaboration.md) - tmux-based live collaboration, pane inspection, and ContextWiki promotion.
 - [room-runtime-adoption-pass.md](room-runtime-adoption-pass.md) - Room-runtime adoption matrix and remaining gaps.
 - [v1-specs.md](v1-specs.md) - Foundational v1 protocol specifications.
 

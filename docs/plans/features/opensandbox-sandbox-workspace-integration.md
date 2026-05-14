@@ -148,7 +148,7 @@ Recommended access model:
 
 Good candidates:
 
-- ACA top-of-mind bundle
+- ContextWiki top-of-mind bundle
 - handoff bundle
 - repo-index search hits
 - selected memory hits
@@ -169,7 +169,7 @@ Write-back path should be explicit:
 
 - repo diff / patch / branch artifact
 - optional promoted memory observations
-- optional promotion drafts into ACA / Obsidian
+- optional promotion drafts into ContextWiki / Obsidian
 
 This keeps the sandbox as a worker, not a storage authority.
 
@@ -192,7 +192,7 @@ Recommended defaults:
 - no direct write access to canonical memory DBs
 - explicit artifact/promotion write-back only
 
-## AgentCTL Changes Needed
+## Foxctl Changes Needed
 
 ### Spawn / Runtime
 
@@ -286,7 +286,7 @@ Scope:
 
 Success:
 
-- sandboxed agent can answer questions with ACA/memory-aware context
+- sandboxed agent can answer questions with ContextWiki/memory-aware context
 
 ### Phase 3: Promotion
 
@@ -298,7 +298,7 @@ Scope:
 
 - diff artifact
 - repo patch / branch output
-- optional ACA promotion draft
+- optional ContextWiki promotion draft
 
 Success:
 

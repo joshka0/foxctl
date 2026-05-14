@@ -234,7 +234,7 @@ Practical rule:
 
 That means Jido memory, thread, and lightweight retrieval features are useful
 for live workflows and restores, but long-lived organization-facing knowledge
-should continue to live in `foxctl` memory/session surfaces and ACA / Obsidian.
+should continue to live in `foxctl` memory/session surfaces and ContextWiki / Obsidian.
 
 ## Future Workflow Domains
 
@@ -250,7 +250,7 @@ The runtime pattern should stay the same:
 1. `foxctl` owns ingress normalization, policy, storage, and semantic tools
 2. Jido owns live workflow execution, signals, parent/child trees, and
    directives
-3. durable outcomes reconcile back into Go-side events, stores, and ACA notes
+3. durable outcomes reconcile back into Go-side events, stores, and ContextWiki notes
 
 ## Deployment Shape
 

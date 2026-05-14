@@ -89,7 +89,7 @@ For retrieval and context features, decide which plane owns each job:
 |---|---|
 | Semantic search | Meaning-based candidate discovery |
 | Repoindex | Graph-shaped source relationships and explanation subgraphs |
-| ACA | Workspace continuity, vault notes, proposal lanes, and retrieval policy |
+| ContextWiki | Workspace continuity, vault notes, proposal lanes, and retrieval policy |
 | Context engine | Typed evidence packs, lane fusion, retrieval episodes, and feedback |
 | App code | Ranking policy, query planning, permissions, and LLM summarization |
 

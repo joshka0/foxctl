@@ -49,7 +49,7 @@ export default defineConfig({
             { slug: 'retrieval/repoindex-and-dag-grep' },
             { slug: 'retrieval/repoindex-model' },
             { slug: 'retrieval/repoindex-pageindex' },
-            { slug: 'context/aca' },
+            { slug: 'context/contextwiki' },
             { slug: 'context/context-engine' },
             { slug: 'memory/continuity' },
           ],
@@ -78,6 +78,7 @@ export default defineConfig({
           items: [
             { slug: 'reference/cli' },
             { slug: 'reference/command-map' },
+            { slug: 'reference/glossary' },
             { slug: 'reference/protocol-v1' },
             { slug: 'storage/cas-and-persistence' },
           ],

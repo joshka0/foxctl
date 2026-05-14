@@ -31,7 +31,7 @@ parallel source-profile subsystem:
 | --- | --- |
 | `code` | repoindex, semantic code search, exact local probes |
 | `memory` | memory claims, with explicit trust-tier status filters |
-| `context` | ACA top-of-mind, latest handoff, ACA vault/contextplane retrieval hits, and session recall when available |
+| `context` | ContextWiki top-of-mind, latest handoff, ContextWiki vault/contextplane retrieval hits, and session recall when available |
 | `task` | task store results |
 | `mixed` | fused lane retrieval through existing `RetrieveMixed` behavior |
 
@@ -41,9 +41,9 @@ bundle. The `gather-context` tool profile exposes only `gather_context` and
 answer seed and inspect refs only for verification. `retrieve_code`,
 `retrieve_memory`, `retrieve_context`, and `retrieve_mixed` remain raw
 retrieval/debug tools in broader profiles. The `context` lane reads the RLM
-bootstrapper's ACA projection for top-of-mind state, adds the latest handoff as
+bootstrapper's ContextWiki projection for top-of-mind state, adds the latest handoff as
 first-class context evidence, and can append contextplane retrieval packs from
-the Obsidian/ACA index when a vault path is configured.
+the Obsidian/ContextWiki index when a vault path is configured.
 
 ## Regression Gate
 

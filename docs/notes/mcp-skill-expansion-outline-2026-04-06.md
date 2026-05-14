@@ -92,7 +92,7 @@ These are good additions, but should come after Tier 1.
 
 Why:
 - Strong retrieval tool, but more context-system-specific.
-- Valuable when an MCP client is expected to interact with ACA/Obsidian state.
+- Valuable when an MCP client is expected to interact with ContextWiki/Obsidian state.
 
 Risk:
 - More concept-heavy than the narrow retrieval tools.
