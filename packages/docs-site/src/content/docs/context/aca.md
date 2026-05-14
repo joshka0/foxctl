@@ -8,6 +8,13 @@ Status: Current architecture guide.
 ACA is foxctl's context architecture for combining repo evidence, memory,
 sessions, and knowledge artifacts without turning every note into an instruction.
 
+It is fair to liken ACA to a wiki if you mean "a curated, linked knowledge
+surface for a workspace." The caveat is that ACA is more than wiki pages:
+it also has a control plane for current work, typed retrieval evidence,
+promotion proposals, and provenance rules. A wiki can be one knowledge plane
+inside ACA; ACA is the machinery that decides what is current, reviewable,
+retrievable, and safe to hand to agents.
+
 The short version:
 
 ```text

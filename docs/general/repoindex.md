@@ -8,6 +8,11 @@ relationships. It powers `foxctl index repo ...` and the agent tools
 Behavior contract:
 - [docs/spec/repo_graph_index_and_dag_grep.md](../spec/repo_graph_index_and_dag_grep.md)
 
+Design lineage:
+- [docs/general/repoindex-pageindex.md](repoindex-pageindex.md) explains how
+  repoindex adapts PageIndex-style table-of-contents retrieval to code graphs,
+  DAG grep, and semantic comments.
+
 ---
 
 ## Foxctl index terminology
@@ -170,6 +175,25 @@ The semantic tree (`foxctl run code/semantic_search --input '{"format":"tree"}'`
 and repoindex share the same file summary store. `foxctl index repo enrich
 summaries` copies those stored summaries into repoindex nodes when you want graph
 search/open output to include summary text.
+
+## Semantic comments and anchors
+
+Repoindex can use source-local retrieval hints when semantic anchors are enabled
+during indexing.
+
+- `Index:` blocks are broad discoverability metadata. Use them for terms,
+  flows, related symbols, resources, events, and output fields that syntax alone
+  will not connect cleanly.
+- `[[...]]` semantic anchors are typed evidence markers. Use them for stable
+  invariants, risks, protocols, decisions, domains, doc links, and test
+  contracts near the strongest owner.
+
+Do not treat either form as instruction or policy authority. They improve
+retrieval and explanation, but agents still need to open the referenced code,
+docs, and tests before relying on the relationship.
+
+For the full mental model, see
+[repoindex and PageIndex](repoindex-pageindex.md#how-to-think-about-semantic-commenting).
 
 ---
 

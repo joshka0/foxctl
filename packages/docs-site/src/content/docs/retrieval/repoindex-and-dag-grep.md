@@ -10,6 +10,9 @@ symbols, concepts, and typed edges so agents can navigate code by relationships
 For the data model details (node kinds, edge kinds, IDs, weights), see
 [repoindex model](/retrieval/repoindex-model/).
 
+For the design lineage and the role of semantic comments, see
+[repoindex and PageIndex](/retrieval/repoindex-pageindex/).
+
 ## Build the index
 
 The repo graph is derived from source code and must be built before it can be
