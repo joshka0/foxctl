@@ -20,14 +20,26 @@ This directory contains active planning documents and implementation roadmaps.
 - `features/official-docs-production-release.md` — vetted Starlight docs-site plan, supply-chain gate, information architecture, and production documentation release matrix.
 - `features/durable-execution-recovery.md` — plan for v2 orchestration-first crash recovery using the orchestration card projection as the durable retry queue; runner checkpointing is deferred until side effects are replay-safe.
 - `features/durable-execution-layer1-side-effects.md` — Layer 1 runner side-effect safety sequence: Turn Request Registry, idempotent event append, then model/tool effect journal.
+- `features/foxctl-benchmark-suite-epic.md` — baseline-implemented benchmark epic for Go runtime, DAG/repoindex, RLM, rooms, hooks, and retrieval evidence.
+- `features/longcot-eval-contract-plan.md` — LongCoT eval contract plan for measuring RLM scaffold, staged reasoning, and token efficiency under the canonical runtime surface.
+- `features/room-epic-pipeline.md` — room-agile epic pipeline and factory mission parity.
+- `features/smolvm-foxctl-agent-runtime-plan.md` — SmolVM-backed agent runtime plan.
+- `features/rlm-recursive-fanout-runtime-plan.md` — RLM recursive fan-out runtime plan.
+- `features/rlm-helper-pipeline-repair-plan.md` — RLM helper pipeline repair plan.
+- `features/factory-mission-import.md` — factory mission import for room-agile epics.
 - `follow_up_durable_execution.md` — follow-up backlog after the completed LLM-chat Layer 1 durable execution baseline.
-- `tui-agent-control-plane.md` — archived TypeScript TUI plan (moved to `docs/archive/plans/`); current terminal work is `go-tui-agent-shell.md`.
 - `go-tui-agent-shell.md` — Go-native interactive coding shell plan with memory, continuity, and worker rails.
 - `v2-implementation-todo.md`
 - `v2-greenfield-bootstrap.md`
 - `v2-symphony-kanban-implementation.md`
 - `gui-agent-improvement-roadmap.md`
 - `gui-agent-room-control-center.md`
+- `gui-agent-v2-rearchitecture.md`
+- `context-buffer-design.md`
+- `atcp-rooms-replacement.md`
+- `index-improvements.md`
+- `interactive-agent-system-integration.md`
+- `symbolkey-followup-improvements.md`
 - `features/slop-function-detection.md`
 - `features/refactor-intelligence-substrate.md`
 - `features/refactor-phase1-status-and-snapshot.md`
@@ -35,12 +47,11 @@ This directory contains active planning documents and implementation roadmaps.
 - `features/agent-mux-room-hierarchy.md`
 - `features/opensandbox-sandbox-workspace-integration.md`
 - `features/foxctl-evolve-plan.md` — plan for a foxctl-native repo-evolution tool built on DB-backed experiment state, CAS artifacts, and existing worktree primitives.
-- `features/foxctl-benchmark-suite-epic.md` — baseline-implemented benchmark epic for Go runtime, DAG/repoindex, RLM, rooms, hooks, and retrieval evidence.
-- `features/longcot-eval-contract-plan.md` — LongCoT eval contract plan for measuring RLM scaffold, staged reasoning, and token efficiency under the canonical runtime surface.
+- `features/memory-core-curator-layer.md`
+- `features/semantic-commenting-cleanup-notes.md`
 - `jidoctl-v2-hybrid-interface.md`
-- `chat-platform-adapter.md`
-- `k8s-sql-storage.md`
 - `k8s/00-overview.md`
+- `gui-v2/` — GUI v2 Svelte SPA implementation plans
 - `tui-redesign/architecture.md`
 - `tui-redesign/component-spec.md`
 - `tui-redesign/adrs/`
