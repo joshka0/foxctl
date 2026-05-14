@@ -222,22 +222,39 @@ const progress = [
 
 const benchmarkSolutions = [
   {
-    title: 'Curated benchmark runner',
-    label: 'bench:go',
-    body: 'A repeatable package set with count, time, pattern, and output capture controls.',
+    title: 'Codex subagent comparison',
+    label: '1 case',
+    metric: '31.4x faster',
+    body: 'gather_context passed the RLM map case in 6.50s after a fresh repoindex build; a local Codex native subagent took 204.3s, found the paths, and failed exact fact scoring.',
     href: '/quality/benchmarks/',
   },
   {
-    title: 'Repoindex query paths',
-    label: 'search',
-    body: 'Measures zero-result fallback, scored search, syntax fallback, and allocation cost.',
+    title: 'Shell context reduction',
+    label: 'orientation',
+    metric: '89% fewer tokens',
+    body: 'Structured shell reports reduced 8,695 raw tokens to 953 returned tokens across ls, grep, sed, git status, diff, and log cases.',
+    href: '/quality/benchmarks/',
+  },
+  {
+    title: 'Cold tool skill checks',
+    label: 'bounded',
+    metric: '4,005 vs 6,007 tokens',
+    body: 'Cold foxctl skill calls returned less total context than equivalent native shell output, with startup overhead called out separately.',
+    href: '/quality/benchmarks/',
+  },
+  {
+    title: 'Repoindex and DAG paths',
+    label: 'local',
+    metric: '< 1ms fixtures',
+    body: 'Search fallback and DAG explanation fixtures keep graph retrieval latency and allocation cost visible in the Go benchmark lane.',
     href: '/retrieval/repoindex-and-dag-grep/',
   },
   {
-    title: 'Storage hot paths',
-    label: 'CAS + DB',
-    body: 'Covers CAS buffering, slice preallocation, cancellation checks, and row scan helpers.',
-    href: '/storage/cas-and-persistence/',
+    title: 'Hot runtime overhead',
+    label: 'Go',
+    metric: '96.5ns runner',
+    body: 'The no-hook tool runner, envelope codecs, actor lifecycle, and shell reducer hot paths are measured with allocation-aware Go benchmarks.',
+    href: '/quality/benchmarks/',
   },
 ];
 
@@ -428,11 +445,11 @@ export default function FoxctlHome() {
       <section className="fox-section" aria-labelledby="benchmark-title">
         <div className="fox-section-heading">
           <span className="fox-eyebrow">Benchmark solutions</span>
-          <h2 id="benchmark-title">Performance checks that protect real hot paths</h2>
+          <h2 id="benchmark-title">Measured evidence for why the harness matters</h2>
           <p>
-            Benchmarks are wired as a runnable solution, not a static report: the
-            curated runner keeps repo search, storage, execution, and scan helper
-            costs visible during local work.
+            The current evidence separates hot runtime cost, cold CLI startup,
+            context size, and agent-baseline comparison so the site can make claims
+            without hiding the tradeoffs.
           </p>
         </div>
         <div className="fox-info-grid fox-benchmark-grid">
@@ -442,6 +459,7 @@ export default function FoxctlHome() {
                 <span className="fox-status-pill fox-status-pill-warm">{item.label}</span>
                 <strong>{item.title}</strong>
               </div>
+              <span className="fox-benchmark-metric">{item.metric}</span>
               <p>{item.body}</p>
               <Link className="fox-inline-link" href={item.href}>
                 Review

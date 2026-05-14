@@ -420,9 +420,12 @@ h1#_top {
 }
 
 .fox-progress-grid,
-.fox-integration-grid,
-.fox-benchmark-grid {
+.fox-integration-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.fox-benchmark-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .fox-info-card {
@@ -451,6 +454,16 @@ h1#_top {
   font-size: 0.92rem;
   line-height: 1.58;
   margin: 0;
+}
+
+.fox-benchmark-metric {
+  color: var(--fox-title);
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1.2;
+  min-height: 2.64rem;
 }
 
 .fox-status-pill {
@@ -676,7 +689,10 @@ h1#_top {
   }
 
   .fox-progress-grid,
-  .fox-integration-grid,
+  .fox-integration-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .fox-benchmark-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
