@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "foxctl": {
+      "command": "/Users/joshka/.local/bin/foxctl",
+      "args": ["mcp", "serve", "--groups", "code-intel,project"]
+    }
+  }
+}
