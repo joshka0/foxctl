@@ -63,20 +63,11 @@ This is the canonical map for docs in this repository.
 - [docs/plans/features/eino-go-native-runtime-plan.md](plans/features/eino-go-native-runtime-plan.md) - Eino `AgentEngine` integration + Go-native orchestration runtime; Jido optional.
 - [docs/plans/features/opentui-agent-terminal-facades.md](plans/features/opentui-agent-terminal-facades.md) - Backend facade backlog for a greenfield OpenTUI agent terminal over v2 runtime, room, orchestration, skills, jobs, MCP, and CAS APIs.
 - [docs/plans/gui-agent-improvement-roadmap.md](plans/gui-agent-improvement-roadmap.md) - Converged roadmap for turning `gui-agent` into a coherent operator control plane.
-- [docs/plans/features/v2-skills-parity-plan.md](plans/features/v2-skills-parity-plan.md) - Bring v2 profiles/tooling up to parity with ACA, Obsidian, and newer retrieval surfaces.
-- [docs/plans/features/foxctl-rlm-integration-outline.md](plans/features/foxctl-rlm-integration-outline.md) - Concrete outline for adding an RLM query-time runtime over ACA, companion memory, and repo/vault state.
-- [docs/plans/features/foxctl-rlm-next-steps.md](plans/features/foxctl-rlm-next-steps.md) - Routed and staged next-step plan for turning the experimental RLM runtime into a practical retrieval/controller layer.
 - [docs/plans/features/slop-function-detection.md](plans/features/slop-function-detection.md) - Plan for treating "slop" as deterministic structural findings on top of refactor scout, with optional advisor reranking.
 - [docs/plans/features/refactor-intelligence-substrate.md](plans/features/refactor-intelligence-substrate.md) - Plan for making refactor scout index-aware through status, snapshots, dependency queries, change cursors, and evidence packs.
 - [docs/plans/features/refactor-phase1-status-and-snapshot.md](plans/features/refactor-phase1-status-and-snapshot.md) - Concrete Phase 1 spec for `foxctl refactor status` and `foxctl refactor snapshot`, including CLI contract, envelopes, and snapshot persistence.
 - [docs/plans/features/refactor-deterministic-detection-backlog.md](plans/features/refactor-deterministic-detection-backlog.md) - Prioritized backlog for improving refactor scout through symbol hotness, opportunity scoring, co-change signals, stronger dead-code roots, and other deterministic detection upgrades.
 - [docs/plans/features/agent-mux-room-hierarchy.md](plans/features/agent-mux-room-hierarchy.md) - Proposed policy for mux-backed agent panes, parent-private subagents, and room membership boundaries.
-- [docs/plans/features/rlm-retrieval-findings.md](plans/features/rlm-retrieval-findings.md) - Current benchmark snapshot comparing ACA, direct repoindex lanes, and RLM retrieval modes.
-- [docs/plans/features/aca-retrieval-hypotheses.md](plans/features/aca-retrieval-hypotheses.md) - Deterministic ACA retrieval hypotheses and eval modes for testing control-plane, vault, trust, and repo-hint improvements.
-- [docs/plans/features/aca-self-corrective-loop.md](plans/features/aca-self-corrective-loop.md) - First slice for observing ACA retrieval misses, classifying them, and proposing deterministic corrections.
-- [docs/plans/features/aca-self-evolving-memory-layer.md](plans/features/aca-self-evolving-memory-layer.md) - Plan for turning ACA into a proposal-driven, eval-gated memory control loop with `L5` external evidence intake.
-- [docs/plans/features/generic-agent-experiment-loop.md](plans/features/generic-agent-experiment-loop.md) - Design for turning long-running agents into hypothesis-driven, evaluator-bounded experiment loops.
-- [docs/plans/features/workspace-embedding-overrides-research.md](plans/features/workspace-embedding-overrides-research.md) - Checklist for enabling workspace-local embedding overrides safely without dimension drift.
 - [docs/plans/features/opensandbox-sandbox-workspace-integration.md](plans/features/opensandbox-sandbox-workspace-integration.md) - Plan for running public-GUI agents in isolated OpenSandbox workspaces with shallow clones and controlled retrieval access.
 
 ## Historical and Generated Material

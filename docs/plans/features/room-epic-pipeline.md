@@ -4,7 +4,7 @@
 |-------|--------|
 | Status | Proposal |
 | Scope | One canonical pipeline for imported, authored, and hybrid room-agile epics from intake through dispatchable implementation plan |
-| Related | [factory-mission-import.md](./factory-mission-import.md), [room-epic-resume-and-next.md](./room-epic-resume-and-next.md), [room-agile-workpacks-and-validation.md](./room-agile-workpacks-and-validation.md), [../general/refactor-scout.md](../../general/refactor-scout.md) |
+| Related | [factory-mission-import.md](./factory-mission-import.md), [room-epic-resume-and-next.md](../../archive/plans/features/room-epic-resume-and-next.md), [room-agile-workpacks-and-validation.md](../../archive/plans/features/room-agile-workpacks-and-validation.md), [../general/refactor-scout.md](../../general/refactor-scout.md) |
 
 ## Conclusion
 

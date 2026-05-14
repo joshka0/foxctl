@@ -5,7 +5,7 @@
 | Status | Baseline implemented |
 | Created | 2026-05-13 |
 | Scope | Canonical benchmark and eval suite for foxctl runtime, DAG/repoindex, RLM, rooms, hooks, and retrieval behavior |
-| Related | [LongCoT eval contract plan](longcot-eval-contract-plan.md), [RLM retrieval findings](rlm-retrieval-findings.md), [RLM next steps](foxctl-rlm-next-steps.md), [retrieval evals](../../general/retrieval-evals.md), [RLM gather context](../../architecture/rlm-gather-context.md), [RLM query runtime spec](../../spec/rlm_query_runtime.md) |
+| Related | [LongCoT eval contract plan](longcot-eval-contract-plan.md), [RLM retrieval findings](../../archive/plans/features/rlm-retrieval-findings.md), [RLM next steps](../../archive/plans/features/foxctl-rlm-next-steps.md), [retrieval evals](../../general/retrieval-evals.md), [RLM gather context](../../architecture/rlm-gather-context.md), [RLM query runtime spec](../../spec/rlm_query_runtime.md) |
 
 ## Outcome
 
@@ -85,8 +85,10 @@ The suite has two output planes:
 | Root Go runner | [run-go-benchmarks.sh](../../../scripts/run-go-benchmarks.sh) | Offline default runner for the Go microbenchmark lane |
 | Exec runtime microbenchmarks | [exec_bench_test.go](../../../internal/runtime/execution/exec/exec_bench_test.go) | Existing `go test -bench` pattern for allocations and synthetic execution path |
 | Hook overhead | [benchmark-hooks.sh](../../../scripts/benchmark-hooks.sh) | Existing wall-clock benchmark script for Claude hook categories |
+| Shell reducer savings | `foxctl shell report --preset typical-bash` | Raw shell output versus structured foxctl reductions with bytes, tokens, latency, and optional input-cost estimates |
+| Orientation harness | [benchmark-orientation-harness.sh](../../../scripts/benchmark-orientation-harness.sh) | Homepage-ready shell, tool, and hot reducer evidence pack with explicit budget fields |
 | Eval command registry | [eval.go](../../../cmd/foxctl/cmd/eval.go) | Existing `foxctl eval ...` command family and envelope output pattern |
-| Retrieval eval modes | [rlm-retrieval-findings.md](rlm-retrieval-findings.md) | Current hit@k/MRR comparison lanes across ACA, repoindex, DAG, and RLM |
+| Retrieval eval modes | [rlm-retrieval-findings.md](../../archive/plans/features/rlm-retrieval-findings.md) | Current hit@k/MRR comparison lanes across ACA, repoindex, DAG, and RLM |
 | LongCoT/RLM conditions | [eval_longcot.go](../../../cmd/foxctl/cmd/eval_longcot.go) | Stable condition IDs and explicit route/profile/plan mode selection |
 | LongCoT typed results | [types.go](../../../internal/tooling/evals/longcoteval/types.go) | Usage, tool event, leakage, and RLM attempt telemetry shapes |
 | LongCoT autoresearch loop | [longcot-autoresearch-loop.md](../../research/longcot-autoresearch-loop.md), [longcot_autoresearch.py](../../../scripts/longcot_autoresearch.py) | Fixed-budget experiment runner and TSV ledger pattern |
@@ -105,12 +107,122 @@ benchmark map:
 | Runtime | [tool_runner_bench_test.go](../../../internal/runtime/engine/tool_runner_bench_test.go), [protocol_bench_test.go](../../../internal/protocol/protocol_bench_test.go), [base_actor_bench_test.go](../../../internal/runtime/actor/base_actor_bench_test.go), [wfq_bench_test.go](../../../internal/runtime/execution/scheduler/wfq_bench_test.go) | yes |
 | Repoindex/DAG | [dag_bench_test.go](../../../internal/intelligence/indexing/repoindex/dag_bench_test.go), existing query benchmarks | yes |
 | RLM | [run_spec_bench_test.go](../../../internal/rlm/run_spec_bench_test.go) plus gather-context/LongCoT extended eval entries | yes for model-free planner/policy |
+| Retrieval | Existing ACA retrieval eval target is recorded in the manifest | advisory until vault paths, fixtures, and embedder health produce a stable saved artifact |
 | Room runtime | Existing room frontier/story state tests are recorded as correctness evals | yes |
-| Integrations/hooks | Hook wall-clock script plus [router_bench_test.go](../../../internal/tooling/shellreduce/router_bench_test.go) | shell reducer yes, hook script extended |
+| Integrations/hooks | Hook wall-clock script, [router_bench_test.go](../../../internal/tooling/shellreduce/router_bench_test.go), `foxctl shell report`, and [benchmark-orientation-harness.sh](../../../scripts/benchmark-orientation-harness.sh) | shell reducer yes, shell/tool evidence extended, hook script extended |
 
 Default gate means local/offline and no network or live LLM dependency. Extended
 gate means useful evidence but intentionally opt-in because it is slower, more
 environment-sensitive, or outside the Go microbenchmark lane.
+
+## Current Evidence Snapshot
+
+Local snapshot from 2026-05-13, saved under `/private/tmp/foxctl-benchmarks`.
+These are baseline measurements, not regression thresholds.
+
+Go hot-path benchmark highlights:
+
+| Lane | Result | Interpretation |
+|------|--------|----------------|
+| tool runner, no hooks | `96.5 ns/op`, `0 B/op`, `0 allocs/op` | Tool execution wrapper is effectively free without dispatch hooks |
+| tool runner, dispatcher | `1.16 us/op`, `672 B/op`, `11 allocs/op` | Hook dispatch is visible but still microsecond-scale in the fake dispatcher |
+| envelope write/decode | `2.22 us/op` write, `2.83 us/op` decode | Protocol envelopes are cheap enough for CLI/tool boundaries |
+| actor lifecycle/dispatch | `23.5 ns/op` lifecycle, `12.9 ns/op` dispatch | In-memory actor primitives are not the bottleneck |
+| repoindex search fallback | `80.1 us/op` syntax fallback, `161.8 us/op` zero-result fallback | Query fallback cost is sub-millisecond in the deterministic fixture |
+| DAG grep structural | `691 us/op` | Explanation subgraph expansion is sub-millisecond for the small fixture |
+| trace path hit | `1.32 ms/op` | Path explanation is measurable but still local-interactive |
+| RLM run-spec resolve | `1.27 us/op` | Model-free RLM policy/planner setup is not the expensive part |
+| shell reducer route/summary | `3.79-3.94 us/op` route, `405-415 ns/op` summary | Hot reducer logic is cheap once inside the Go process |
+
+Tool skill cold-run report from
+`/private/tmp/foxctl-benchmarks/orientation-summary-20260513T233000Z.md`:
+
+| Tool case | Native | Foxctl | Budget |
+|-----------|--------|--------|--------|
+| `fs/ls` over `internal` | `28 ms`, `251` tokens | `894 ms`, `309` tokens | `max_entries=200` |
+| `text/ripgrep` for `func ` | `35 ms`, `2,878` tokens | `198 ms`, `331` tokens | `max_matches=20` |
+| `code/context_grep` for `func ` | `20 ms`, `2,878` tokens | `198 ms`, `3,365` tokens | `max_matches=20`, `max_blocks=20` |
+
+Interpretation: the current cold skill report shows real `foxctl run` tool
+startup overhead. `text/ripgrep` has a strong output-size win against native
+`rg`; `code/context_grep` deliberately returns function context, so its value is
+quality and structure rather than raw byte reduction for this fixture.
+
+Shell savings report:
+
+| Report | Raw | Reduced | Savings |
+|--------|-----|---------|---------|
+| orientation commands | `8,695` tokens, `31,940` bytes | `953` tokens, `3,550` bytes | `89.0%` token savings, `88.9%` byte savings |
+| estimated input cost at `$1/Mtok` | `$0.008695` | `$0.000953` | `$0.007742` saved |
+| cold command wall time | `0.60s` raw | `0.67s` reduced | mixed per row; aggregate slightly slower in this run because most rows pay reducer startup |
+
+Interpretation: foxctl already has strong token/cost evidence for shell-shaped
+orientation output, especially `ls`, `grep`, and `git log`. The latency claim
+needs to distinguish hot in-process reducer/runtime benchmarks from cold
+CLI-subprocess reports. The webpage should present "smaller context fast" and
+"cold shell wrapper has startup overhead" as separate facts rather than claiming
+every structured command is faster than native shell.
+
+Bounded `gather_context` report:
+
+| Report | Result | Notes |
+|--------|--------|-------|
+| repoindex refresh | `40.3s`, `1,813` files, `32,142` symbols, `33,774` nodes, `151,026` edges | forced rebuild against current dirty worktree after `index repo status` reported a stale zero-node store |
+| one-case smoke after refresh | pass rate `1.00`, path recall `0.86`, fact recall `1.00`, duration `7.26s`, emitted context `1,096` chars | `/private/tmp/foxctl-benchmarks/gather-context-case1-bin-20260513T234000Z.json` |
+| one-case head-to-head after refresh | gather pass rate `1.00`, path recall `0.86`, fact recall `1.00`, duration `9.32s`, emitted context `1,182` chars | `/private/tmp/foxctl-benchmarks/gather-context-head-to-head-openrouter-native-fixed-after-reindex-20260513T233351Z.json` |
+| two-case orientation harness | pass rate `0.50`, mean path recall `0.762`, mean fact recall `1.00`, mean duration `17.4s`, mean emitted context `1,842` chars | `/private/tmp/foxctl-benchmarks/orientation-gather-context-20260513T233000Z.json` |
+
+Interpretation: the bounded gather path is now runnable and measurable. The
+first case passes after repoindex refresh; the second case still misses
+`internal/rlm/run_spec.go` at the reduction stage, so this lane is useful
+evidence but not yet strong enough for a broad "foxctl beats native explorers"
+claim.
+
+Dataset-matched `code_search_ensemble` trace-symbol report:
+
+| Report | Result | Notes |
+|--------|--------|-------|
+| deterministic `foxctl-trace-symbol` suite | `6` cases, pass rate `0.67`, mean path recall `1.00`, mean correctness `0.92`, mean duration `11.75s` | `/private/tmp/foxctl-benchmarks/code-search-foxctl-trace-symbol-20260514T001000Z.json` |
+| context footprint | mean loaded token estimate `2,144`, emitted token estimate `703`, parent input-token savings estimate `1,441`, compaction ratio `0.33` | direct runtime tool output, no live LLM |
+| old native mini trace on same dataset | `65,963` total tokens for one batched native explorer run | token usage only; no parsed quality rows in the current report contract |
+
+Interpretation: for the same trace-symbol dataset, the deterministic foxctl
+controller emits roughly `4.2k` evidence tokens across six cases versus the old
+native explorer's `65.9k` transcript-token total. That is a useful token-class
+comparison, but it is not a complete head-to-head because the native transcript
+still needs parsed path/fact recall rows.
+
+Native explorer/subagent comparison now has one authenticated smoke row, but it
+is still a narrow one-case result. The checked-in baseline in
+[code-search-evals.md](../../general/code-search-evals.md#native-subagent-baselines)
+records a 2026-04-30 mini explorer trace with `65,963` total tokens for the
+trace-symbol suite. A fresh unauthenticated `openai:gpt-5.4-mini` attempt was
+saved at
+`/private/tmp/foxctl-benchmarks/native-gpt54mini-case1-20260513T234500Z.json`
+and correctly records `baseline_error_count: 1`.
+
+The authenticated OpenRouter rerun for
+`openrouter:openai/gpt-5.4-mini` is saved at
+`/private/tmp/foxctl-benchmarks/native-openrouter-gpt54mini-case1-fixed-20260513T233351Z.json`.
+It completed without tool-adapter errors but failed the eval: pass rate `0.00`,
+mean quality `0.14`, `0.00` path/fact recall, `89.5s`, `199,620` total tokens,
+and `9` tool calls. Imported beside the refreshed `gather_context` row, the
+head-to-head report shows gather pass rate `1.00` versus native `0.00`, path
+recall `0.86` versus `0.00`, fact recall `1.00` versus `0.00`, and `9.6x`
+duration speedup.
+
+This is evidence for a homepage claim about the benchmark lane, not the final
+claim. The native run still needs a broader multi-case baseline and provider
+cost calculation before the website says foxctl broadly beats native explorers.
+Also note the discovered runtime fix: the agent repoindex adapter was passing
+the literal string `inline_mode` instead of the requested mode. That bug is now
+covered by focused runtime tests, and eval target reports no longer serialize
+API keys.
+
+The `gather_context` and `eval agents` commands now have `--case-limit` so
+quick benchmark smoke runs can bound dataset rows separately from evidence
+budget. `--timeout` is per case and `--limit` controls gathered evidence, not
+dataset rows.
 
 ## Benchmark Categories
 
@@ -283,7 +395,8 @@ Benchmarks to add or formalize:
 | Benchmark | Measures | Fixture shape |
 |-----------|----------|---------------|
 | hook category benchmark | pre/post/stop/session hook latency | existing `benchmark-hooks.sh` samples |
-| shell reducer benchmark | raw vs reduced shell output cost | fixed noisy command outputs |
+| shell reducer benchmark | routing overhead for supported commands | fixed command argv set |
+| shell reducer savings report | raw vs reduced bytes, tokens, latency, and input-cost estimate | `typical-bash` orientation command preset |
 | MCP adapter benchmark | request/response overhead without live provider calls | fake MCP server |
 | provider config benchmark | provider resolution overhead | fixed config fixtures |
 | docs-site build benchmark | documentation app build time | optional non-Go lane |
@@ -435,6 +548,7 @@ Baseline benchmark commands:
 ```bash
 make benchmark-manifest
 make bench-go
+RUN_GATHER_CONTEXT=0 make bench-orientation
 ./bin/foxctl benchmark manifest validate
 ./bin/foxctl benchmark manifest list --gate default
 ./bin/foxctl benchmark manifest packages --gate default
@@ -451,14 +565,22 @@ Extended benchmark commands:
 
 ```bash
 ./scripts/benchmark-hooks.sh 5 all
+go run ./cmd/foxctl shell report --preset typical-bash --save-file /private/tmp/foxctl-benchmarks/shell-typical.json --input-token-price-per-million-usd 1
+RUN_GATHER_CONTEXT=1 GATHER_CASE_LIMIT=2 ./scripts/benchmark-orientation-harness.sh
 make eval-retrieval-foxctl-mixed
 make eval-retrieval-foxctl-cochange
-./bin/foxctl eval gather-context --eval-dataset-file testdata/evals/gather-context/foxctl-repo-grounded.jsonl --report-file /private/tmp/foxctl-benchmarks/gather-context.json
+./bin/foxctl eval gather-context --eval-dataset-file testdata/evals/gather-context/foxctl-repo-grounded.jsonl --case-limit 2 --report-file /private/tmp/foxctl-benchmarks/gather-context.json
 ./bin/foxctl eval longcot --dataset testdata/evals/longcot/fixture.jsonl --dry-run --save --output-dir /private/tmp/foxctl-benchmarks/longcot
 ```
 
 The manifest is the source of truth for which commands are default versus
 extended.
+
+Current retrieval note: `make eval-retrieval-foxctl` now resolves
+`~/.foxctl/templates/obsidian-vault` when present and falls back to the
+repo-local ACA vault fixture. That lane is intentionally kept visible but
+advisory until vault paths, expected fixtures, and embedder health are
+reconciled into a stable saved artifact.
 
 ## Ready Frontier
 
@@ -471,6 +593,8 @@ Completed in the baseline tranche:
    WFQ scheduling.
 5. Add deterministic repoindex/DAG and RLM planner/policy benchmarks.
 6. Add behavior-focused manifest validation tests.
+7. Add an offline orientation harness for homepage-ready shell and tool budget
+   evidence.
 
 Needs a decision:
 
@@ -482,6 +606,9 @@ Needs a decision:
 3. Extended eval cadence: manual only, nightly, or pre-release.
 4. Whether docs-site build timing belongs in this epic or in a separate docs
    quality epic.
+5. Whether to re-embed `~/.foxctl` before the next semantic retrieval artifact
+   run. This snapshot refreshed repoindex but did not re-embed because no
+   embedding provider configuration or API key was available in the shell.
 
 Dependencies:
 
@@ -491,6 +618,8 @@ Dependencies:
 3. Benchstat or equivalent comparison tooling in the local developer path.
 4. A clear separation between official-style no-tool evals and internal
    tool-using experiments.
+5. A completed native explorer/subagent baseline imported through the eval
+   external-results path before the website claims foxctl beats native agents.
 
 ## Room Import Command
 

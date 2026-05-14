@@ -4,7 +4,7 @@
 |-------|--------|
 | Status | Draft |
 | Scope | Add explicit milestone exit-policy status on top of milestone contract, evidence lanes, review, and summary so coordinators can see whether a milestone is actually ready to exit and, in a later slice, optionally enforce that policy |
-| Related | [room-milestone-contract.md](./room-milestone-contract.md), [room-milestone-evidence-policy.md](./room-milestone-evidence-policy.md), [room-milestone-synthesis.md](./room-milestone-synthesis.md), [room-evidence-lanes.md](./room-evidence-lanes.md), [room-epic-health-pulse.md](./room-epic-health-pulse.md) |
+| Related | [room-milestone-contract.md](../../archive/plans/features/room-milestone-contract.md), [room-milestone-evidence-policy.md](../../archive/plans/features/room-milestone-evidence-policy.md), [room-milestone-synthesis.md](../../archive/plans/features/room-milestone-synthesis.md), [room-evidence-lanes.md](../../archive/plans/features/room-evidence-lanes.md), [room-epic-health-pulse.md](../../archive/plans/features/room-epic-health-pulse.md) |
 
 ## Why this slice
 

@@ -20,7 +20,7 @@ Cross-references:
 The redesigned cockpit uses a three-lane layout per DESIGN.md principle 2
 ("Main Lane, Detail Lane, Evidence Lane"). The layout replaces the current
 four-region shell (top bar / transcript / composer / right rail) defined in
-[go-tui-agent-shell.md](../go-tui-agent-shell.md) with an entity-centric,
+[go-tui-agent-shell.md](../../plans/go-tui-agent-shell.md) with an entity-centric,
 agent-first model.
 
 ### Main Lane (left, ~40% width)
@@ -99,7 +99,7 @@ event firehose.
 
 ### Reconciliation with go-tui-agent-shell.md Four-Region Shell
 
-The prior plan at [go-tui-agent-shell.md](../go-tui-agent-shell.md) defines
+The prior plan at [go-tui-agent-shell.md](../../plans/go-tui-agent-shell.md) defines
 a four-region layout: top bar, center transcript, bottom composer, and right
 rail with tabs (Memory, Continuity, Workers, Task).
 
@@ -344,8 +344,8 @@ conflicts with existing bindings. Every conflict is acknowledged.
 | Ctrl+W | Workers view (in main lane) | **Conflict:** `shell.gsx:275` maps Ctrl+W to `setRail(RailWorkers)`. **Resolution:** Workers are now first-class rows in the agent inventory (Main lane), not a rail tab. Ctrl+W filters/focuses the inventory to show workers. |
 | Ctrl+B | Task/board screen | **Conflict:** `shell.gsx:276` maps Ctrl+B to `setRail(RailTask)`. **Resolution:** Task/board becomes a secondary screen reachable via `Ctrl+B`, not a rail tab. |
 | Ctrl+X | Cancel in-flight ask | **Conflict:** `shell.gsx:299` conditionally maps Ctrl+X to `submitCancel()` when `enqueueCancel` is non-nil. **Acknowledged:** same binding, same purpose. |
-| Ctrl+L | Focus transcript / main lane | **No conflict.** The prior plan at [go-tui-agent-shell.md](../go-tui-agent-shell.md) recommends Ctrl+L for transcript focus, but `keys.go` and `shell.gsx` do not bind it. |
-| Ctrl+J | Focus composer / detail lane | **No conflict.** Recommended in [go-tui-agent-shell.md](../go-tui-agent-shell.md) but not bound in the current code. |
+| Ctrl+L | Focus transcript / main lane | **No conflict.** The prior plan at [go-tui-agent-shell.md](../../plans/go-tui-agent-shell.md) recommends Ctrl+L for transcript focus, but `keys.go` and `shell.gsx` do not bind it. |
+| Ctrl+J | Focus composer / detail lane | **No conflict.** Recommended in [go-tui-agent-shell.md](../../plans/go-tui-agent-shell.md) but not bound in the current code. |
 
 ### Conflict Summary
 
@@ -433,7 +433,7 @@ specifies the progressive reveal for four categories.
 
 ## Three-Plane Memory Model
 
-Per [go-tui-agent-shell.md](../go-tui-agent-shell.md) section "Memory
+Per [go-tui-agent-shell.md](../../plans/go-tui-agent-shell.md) section "Memory
 Information Architecture", the shell must preserve separation between three
 memory planes. These planes are not merged into one generic "memory" list.
 
@@ -515,7 +515,7 @@ in this information architecture.
 
 ### Relationship to go-tui-agent-shell.md
 
-The canonical plan at [go-tui-agent-shell.md](../go-tui-agent-shell.md)
+The canonical plan at [go-tui-agent-shell.md](../../plans/go-tui-agent-shell.md)
 defines a four-region shell: top bar (assistant metadata), center transcript,
 bottom composer, and right rail (tabbed: Memory, Continuity, Workers, Task).
 The recommended focus keys include Ctrl+L (transcript), Ctrl+J (composer),

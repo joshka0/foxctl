@@ -37,14 +37,13 @@ This directory contains active planning documents and implementation roadmaps.
 - `features/foxctl-evolve-plan.md` — plan for a foxctl-native repo-evolution tool built on DB-backed experiment state, CAS artifacts, and existing worktree primitives.
 - `features/foxctl-benchmark-suite-epic.md` — baseline-implemented benchmark epic for Go runtime, DAG/repoindex, RLM, rooms, hooks, and retrieval evidence.
 - `features/longcot-eval-contract-plan.md` — LongCoT eval contract plan for measuring RLM scaffold, staged reasoning, and token efficiency under the canonical runtime surface.
-- `features/aca-self-evolving-memory-layer.md`
 - `jidoctl-v2-hybrid-interface.md`
 - `chat-platform-adapter.md`
-- `teams-sre-integrations-plan.md`
 - `k8s-sql-storage.md`
-- `embedding-quality-roadmap/README.md`
 - `k8s/00-overview.md`
-- `migration_to_v2/INTEGRATION_PLAN.md`
+- `tui-redesign/architecture.md`
+- `tui-redesign/component-spec.md`
+- `tui-redesign/adrs/`
 
 ## Legacy Note
 

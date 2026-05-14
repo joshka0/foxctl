@@ -3,7 +3,7 @@
 **Status:** Active plan; initial eval shell and multiple scaffolded RLM
 conditions have landed
 **Created:** 2026-04-19  
-**Related:** [LongCoT eval investigation](../../research/longcot-eval-investigation.md), [RLM next steps](foxctl-rlm-next-steps.md), [RLM retrieval findings](rlm-retrieval-findings.md), [RLM integration outline](foxctl-rlm-integration-outline.md), [RLM query runtime spec](../../spec/rlm_query_runtime.md)
+**Related:** [LongCoT eval investigation](../../research/longcot-eval-investigation.md), [RLM next steps](../../archive/plans/features/foxctl-rlm-next-steps.md), [RLM retrieval findings](../../archive/plans/features/rlm-retrieval-findings.md), [RLM integration outline](../../archive/plans/features/foxctl-rlm-integration-outline.md), [RLM query runtime spec](../../spec/rlm_query_runtime.md)
 
 ## Summary
 

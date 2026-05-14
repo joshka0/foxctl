@@ -15,7 +15,7 @@ The current TUI has three bounded runtime goroutines that share ~80% structural 
 
 3. **`ConsoleCancelRuntime`** at `internal/interfaces/tui/console_cancel_runtime.go:85` — request-driven runtime that submits enqueued cancel requests. Its `run()` loop is at `internal/interfaces/tui/console_cancel_runtime.go:173`. Uses the identical pattern: `context.WithCancel`, `sync.Once`, `sync.WaitGroup`, `requests`/`updates` channels (buffer sizes 16 at lines 9–10). Exposes `Enqueue(ctx, req)`, `Updates()`, `Stop()`, `Close()`.
 
-The audit ([audit-current-tui.md](../audit-current-tui.md) section (h), pain point #2) identifies these three runtimes as near-identical boilerplate. Each has its own `sendUpdate()` helper, its own buffer-size constants, its own `Enqueue()`/`Updates()`/`Stop()`/`Close()` surface. Adding a fourth runtime (e.g., an events watcher or rooms subscription) would require copying ~150 lines of boilerplate.
+The audit ([audit-current-tui.md](../../../archive/plans/audit-current-tui.md) section (h), pain point #2) identifies these three runtimes as near-identical boilerplate. Each has its own `sendUpdate()` helper, its own buffer-size constants, its own `Enqueue()`/`Updates()`/`Stop()`/`Close()` surface. Adding a fourth runtime (e.g., an events watcher or rooms subscription) would require copying ~150 lines of boilerplate.
 
 The mission's [AGENTS.md](../../../../AGENTS.md) engineering principles require "bounded channels with explicit backpressure policy" and "leak-free shutdown verified by `goleak` or `runtime.NumGoroutine()` delta." Each existing runtime individually satisfies these, but there is no shared enforcement.
 

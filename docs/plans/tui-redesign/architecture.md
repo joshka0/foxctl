@@ -10,7 +10,7 @@ four-region shell plan.
 It is an M1 deliverable satisfying VAL-DOCS-003, VAL-DOCS-009, VAL-DOCS-010,
 VAL-DOCS-012, and VAL-DOCS-014.
 
-**Prerequisite:** [audit-current-tui.md](./audit-current-tui.md) must be read
+**Prerequisite:** [audit-current-tui.md](../../archive/plans/audit-current-tui.md) must be read
 first — the audit findings are referenced throughout.
 
 ---
@@ -462,7 +462,7 @@ list.
 
 ## Traceability Table
 
-This table maps audit findings from [audit-current-tui.md](./audit-current-tui.md)
+This table maps audit findings from [audit-current-tui.md](../../archive/plans/audit-current-tui.md)
 section (h) to the architectural decisions above (or marks them deferred with
 rationale). It satisfies VAL-DOCS-012.
 
@@ -574,13 +574,13 @@ map directly to concrete decisions in this document:
 
 ## Cross-References
 
-- [audit-current-tui.md](./audit-current-tui.md) — audit findings cited in the
+- [audit-current-tui.md](../../archive/plans/audit-current-tui.md) — audit findings cited in the
   Traceability Table.
-- [research-go-tui.md](./research-go-tui.md) — go-tui v0.11.0 API reference.
-- [information-architecture.md](./information-architecture.md) — three-lane
+- [research-go-tui.md](../../archive/plans/research-go-tui.md) — go-tui v0.11.0 API reference.
+- [information-architecture.md](../../archive/plans/information-architecture.md) — three-lane
   layout, keybinding table, progressive reveal, screen inventory.
 - [component-spec.md](./component-spec.md) — per-widget contract for M2.
-- [integration-map.md](./integration-map.md) — API/stream adapter table.
+- [integration-map.md](../../archive/plans/integration-map.md) — API/stream adapter table.
 - [docs/plans/go-tui-agent-shell.md](../go-tui-agent-shell.md) — prior
   four-region shell plan (reconciled above).
 - [DESIGN.md](../../../DESIGN.md) — product shape and UX principles.

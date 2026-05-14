@@ -17,7 +17,7 @@ The current TUI state management has two interconnected problems:
 
 `TranscriptEntry.Kind` at `internal/interfaces/tui/models.go:75` is a `string`. The kind values are scattered across the codebase: `"pending"`, `"ask"`, `"reply"`, `"event"`, `"cmd"`, `"draft"`, `"status"`, `"error"`, `"tool"`, `"counts"`, `"next"`, `"brief"`, `"epic"`, `"plan"`, `"inflight"`, `"agent"`, `"console"`, `"connected"`, `"heartbeat"`. The `MapConsoleStreamEventToTranscriptEntry` function at `internal/interfaces/tui/event_stream.go:136` maps event types to kinds using string comparison. There is no typed enum, no exhaustive switch, and no compile-time guarantee that a new kind is handled in all mapping functions.
 
-The audit ([audit-current-tui.md](../audit-current-tui.md) section (h), pain points #3 and #4) identifies both issues as authoring hazards. Adding a new transcript kind requires finding and updating every string comparison in the codebase.
+The audit ([audit-current-tui.md](../../../archive/plans/audit-current-tui.md) section (h), pain points #3 and #4) identifies both issues as authoring hazards. Adding a new transcript kind requires finding and updating every string comparison in the codebase.
 
 ## Decision
 

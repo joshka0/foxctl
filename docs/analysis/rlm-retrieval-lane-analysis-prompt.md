@@ -399,7 +399,7 @@ const (
 
 ---
 
-## Current Eval Results (from `docs/plans/features/rlm-retrieval-findings.md`)
+## Current Eval Results (from `docs/archive/plans/features/rlm-retrieval-findings.md`)
 
 Benchmark: `foxctl-mixed.yaml`
 

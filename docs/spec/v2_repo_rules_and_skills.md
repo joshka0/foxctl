@@ -26,7 +26,7 @@ not define v1 fallback routing controls.
 
 - `docs/spec/v2_greenfield_bootstrap.md`
 - `docs/plans/v2-greenfield-bootstrap.md`
-- `docs/plans/features/v2-skills-parity-plan.md`
+- `docs/archive/plans/features/v2-skills-parity-plan.md`
 - `docs/general/runtime-orchestration.md`
 - `docs/general/agent-daemon.md`
 - `docs/general/memory.md`
