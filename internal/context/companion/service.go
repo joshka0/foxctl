@@ -132,7 +132,7 @@ type ServiceConfig struct {
 	// SessionRecallProvider injects related prior sessions into the prompt when configured.
 	SessionRecallProvider SessionRecallProvider
 
-	// TopOfMindProvider returns compact ACA top-of-mind context for the current workspace.
+	// TopOfMindProvider returns compact ContextWiki top-of-mind context for the current workspace.
 	TopOfMindProvider func(ctx context.Context, workspace string) (HarnessLayer, error)
 
 	// TaskContinuityProvider returns compact task continuity context for the current workspace.

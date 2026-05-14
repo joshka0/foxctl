@@ -524,7 +524,7 @@ func resolveContextVaultPath(explicit string) string {
 	if value := strings.TrimSpace(explicit); value != "" {
 		return value
 	}
-	for _, key := range []string{"FOXCTL_ACA_VAULT_PATH", "FOXCTL_OBSIDIAN_VAULT_PATH"} {
+	for _, key := range []string{"FOXCTL_CONTEXTWIKI_VAULT_PATH", "FOXCTL_ACA_VAULT_PATH", "FOXCTL_OBSIDIAN_VAULT_PATH"} {
 		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
 			return value
 		}

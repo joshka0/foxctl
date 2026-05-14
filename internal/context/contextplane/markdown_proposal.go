@@ -14,7 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// MarkdownProposalInput captures one review-first ACA draft generated from a
+// MarkdownProposalInput captures one review-first ContextWiki draft generated from a
 // structured runtime source such as room-agile state.
 type MarkdownProposalInput struct {
 	NoteType       string         `json:"note_type"`
@@ -42,7 +42,7 @@ type MarkdownProposalResult struct {
 	Proposal       MemoryProposal `json:"proposal"`
 }
 
-// DraftMarkdownProposal writes one stable ACA inbox draft and records the
+// DraftMarkdownProposal writes one stable ContextWiki inbox draft and records the
 // corresponding review-required memory proposal. Repeated calls with the same
 // dedupe key and identical draft content return already_current.
 func (s *WorkspaceStore) DraftMarkdownProposal(ctx context.Context, in MarkdownProposalInput) (MarkdownProposalResult, error) {
@@ -64,7 +64,7 @@ func (s *WorkspaceStore) DraftMarkdownProposal(ctx context.Context, in MarkdownP
 	}
 	title := strings.TrimSpace(in.Title)
 	if title == "" {
-		title = firstNonEmpty(sourceID, "AgentCTL ACA Draft")
+		title = firstNonEmpty(sourceID, "ContextWiki Draft")
 	}
 	project := firstNonEmpty(strings.TrimSpace(in.Project), filepath.Base(layout.WorkspacePath))
 	folder := strings.Trim(strings.TrimSpace(in.Folder), "/")
@@ -130,7 +130,7 @@ func (s *WorkspaceStore) DraftMarkdownProposal(ctx context.Context, in MarkdownP
 		ReviewRequired: true,
 		Confidence:     firstNonZeroFloat64(in.Confidence, 0.82),
 		BlastRadius:    firstNonEmpty(strings.TrimSpace(in.BlastRadius), "medium"),
-		Summary:        firstNonEmpty(strings.TrimSpace(in.Summary), fmt.Sprintf("Review ACA draft for %s %s.", sourceKind, sourceID)),
+		Summary:        firstNonEmpty(strings.TrimSpace(in.Summary), fmt.Sprintf("Review ContextWiki draft for %s %s.", sourceKind, sourceID)),
 		SourceRefs: uniqueEvidenceRefs(append([]contextengine.EvidenceRef{
 			{Type: contextengine.RefTypePath, Ref: "draft:" + draftRel},
 			{Type: contextengine.RefTypePath, Ref: sourceKind + ":" + sourceID},

@@ -762,7 +762,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, geminiKey 
 		}()
 	}
 
-	// Search ACA blended context (top-of-mind + latest handoff + vault hits)
+	// Search ContextWiki blended context (top-of-mind + latest handoff + vault hits)
 	if scopeSet[ScopeContext] {
 		wg.Add(1)
 		go func() {
@@ -2838,7 +2838,7 @@ func resolveSemanticSearchVaultPath(explicit string) string {
 	if trimmed := strings.TrimSpace(explicit); trimmed != "" {
 		return trimmed
 	}
-	for _, key := range []string{"FOXCTL_ACA_VAULT_PATH", "FOXCTL_OBSIDIAN_VAULT_PATH"} {
+	for _, key := range []string{"FOXCTL_CONTEXTWIKI_VAULT_PATH", "FOXCTL_ACA_VAULT_PATH", "FOXCTL_OBSIDIAN_VAULT_PATH"} {
 		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
 			return value
 		}

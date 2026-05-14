@@ -438,7 +438,7 @@ func newEvalCorrectionsCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&suiteRef, "suite", "", "Correction eval suite name or path")
 	cmd.Flags().StringVar(&workspacePath, "workspace", "", "Workspace path")
-	cmd.Flags().StringVar(&vaultPath, "vault-path", "", "Vault path (required for ACA correction cases)")
+	cmd.Flags().StringVar(&vaultPath, "vault-path", "", "Vault path (required for ContextWiki correction cases)")
 	cmd.Flags().StringVar(&format, "format", "markdown", "Output format: markdown")
 	return cmd
 }
@@ -888,7 +888,7 @@ func newEvalRetrievalCommand() *cobra.Command {
 	cmd.Flags().StringVar(&vaultPath, "vault-path", "", "Vault path")
 	cmd.Flags().IntVar(&limit, "limit", 10, "Maximum hits per retrieval mode")
 	cmd.Flags().StringVar(&format, "format", "markdown", "Output companion format: markdown or json")
-	cmd.Flags().StringSliceVar(&modes, "mode", []string{"baseline", "lexical", "semantic", "blended"}, "Retrieval modes to evaluate (also available: skill_default, skill_context, skill_default_plus_context, aca_control_only, aca_vault_only, aca_repo_hints, aca_canonical_only, aca_package_fallback, aca_query_typed, aca_default, aca_semantic_anchors, aca_cochange, aca_cochange_continuity, cochange_artifacts, repoindex_search, repoindex_semantic_search, repoindex_dag, repoindex_semantic_dag, rlm_llm, rlm_llm_codeintel, rlm_llm_code_staged)")
+	cmd.Flags().StringSliceVar(&modes, "mode", []string{"baseline", "lexical", "semantic", "blended"}, "Retrieval modes to evaluate (also available: skill_default, skill_context, skill_default_plus_context, contextwiki_default, contextwiki_query_typed, contextwiki_semantic_anchors, contextwiki_cochange, aca_* legacy aliases, cochange_artifacts, repoindex_search, repoindex_semantic_search, repoindex_dag, repoindex_semantic_dag, rlm_llm, rlm_llm_codeintel, rlm_llm_code_staged)")
 	cmd.Flags().StringVar(&policyFile, "policy-file", "", "Optional YAML file with retrieval suite defaults and metric thresholds")
 	cmd.Flags().BoolVar(&failOnAlerts, "fail-on-alerts", false, "Exit with an error when any retrieval metric alert is present")
 	cmd.Flags().BoolVar(&rebuildIndex, "rebuild-index", true, "Rebuild the vault index before evaluation")
@@ -1009,7 +1009,7 @@ func normalizeEvalModes(modes []string) []string {
 	out := make([]string, 0, len(modes))
 	seen := map[string]struct{}{}
 	for _, mode := range modes {
-		mode = strings.ToLower(strings.TrimSpace(mode))
+		mode = canonicalEvalMode(strings.ToLower(strings.TrimSpace(mode)))
 		if mode == "" {
 			continue
 		}
@@ -1020,6 +1020,33 @@ func normalizeEvalModes(modes []string) []string {
 		out = append(out, mode)
 	}
 	return out
+}
+
+func canonicalEvalMode(mode string) string {
+	switch mode {
+	case "contextwiki", "contextwiki_default":
+		return "aca_default"
+	case "contextwiki_control_only":
+		return "aca_control_only"
+	case "contextwiki_vault_only":
+		return "aca_vault_only"
+	case "contextwiki_repo_hints":
+		return "aca_repo_hints"
+	case "contextwiki_canonical_only":
+		return "aca_canonical_only"
+	case "contextwiki_package_fallback":
+		return "aca_package_fallback"
+	case "contextwiki_query_typed":
+		return "aca_query_typed"
+	case "contextwiki_semantic_anchors":
+		return "aca_semantic_anchors"
+	case "contextwiki_cochange":
+		return "aca_cochange"
+	case "contextwiki_cochange_continuity":
+		return "aca_cochange_continuity"
+	default:
+		return mode
+	}
 }
 
 func evalModesRequireVault(modes []string) bool {

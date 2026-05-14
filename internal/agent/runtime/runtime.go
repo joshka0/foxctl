@@ -73,6 +73,14 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func contextWikiVaultEnv() string {
+	return firstNonEmpty(
+		os.Getenv("FOXCTL_CONTEXTWIKI_VAULT_PATH"),
+		os.Getenv("FOXCTL_ACA_VAULT_PATH"),
+		os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH"),
+	)
+}
+
 type runtimeToolHandler func(context.Context, map[string]any) (string, error)
 
 func (r *Runtime) resolveEffectiveLLMTarget(cfg types.AgentConfig) (string, string) {
@@ -1884,10 +1892,7 @@ func (e *agentToolExecutor) executeContextRetrieve(ctx context.Context, args map
 	}
 	vaultPath := stringArg(args, "vault_path")
 	if strings.TrimSpace(vaultPath) == "" {
-		vaultPath = strings.TrimSpace(os.Getenv("FOXCTL_ACA_VAULT_PATH"))
-	}
-	if strings.TrimSpace(vaultPath) == "" {
-		vaultPath = strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH"))
+		vaultPath = contextWikiVaultEnv()
 	}
 	if strings.TrimSpace(vaultPath) == "" {
 		return "", fmt.Errorf("vault_path is required")
@@ -1908,10 +1913,7 @@ func (e *agentToolExecutor) executeObsidianIndexSearch(ctx context.Context, args
 	}
 	vaultPath := stringArg(args, "vault_path")
 	if strings.TrimSpace(vaultPath) == "" {
-		vaultPath = strings.TrimSpace(os.Getenv("FOXCTL_ACA_VAULT_PATH"))
-	}
-	if strings.TrimSpace(vaultPath) == "" {
-		vaultPath = strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH"))
+		vaultPath = contextWikiVaultEnv()
 	}
 	if strings.TrimSpace(vaultPath) == "" {
 		return "", fmt.Errorf("vault_path is required")
@@ -1932,10 +1934,7 @@ func (e *agentToolExecutor) executeObsidianRead(ctx context.Context, args map[st
 	}
 	vaultPath := stringArg(args, "vault_path")
 	if strings.TrimSpace(vaultPath) == "" {
-		vaultPath = strings.TrimSpace(os.Getenv("FOXCTL_ACA_VAULT_PATH"))
-	}
-	if strings.TrimSpace(vaultPath) == "" {
-		vaultPath = strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH"))
+		vaultPath = contextWikiVaultEnv()
 	}
 	if strings.TrimSpace(vaultPath) == "" {
 		return "", fmt.Errorf("vault_path is required")
@@ -1951,10 +1950,7 @@ func (e *agentToolExecutor) executeObsidianRelated(ctx context.Context, args map
 	}
 	vaultPath := stringArg(args, "vault_path")
 	if strings.TrimSpace(vaultPath) == "" {
-		vaultPath = strings.TrimSpace(os.Getenv("FOXCTL_ACA_VAULT_PATH"))
-	}
-	if strings.TrimSpace(vaultPath) == "" {
-		vaultPath = strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH"))
+		vaultPath = contextWikiVaultEnv()
 	}
 	if strings.TrimSpace(vaultPath) == "" {
 		return "", fmt.Errorf("vault_path is required")
@@ -2869,7 +2865,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			},
 			engine.ToolDef{
 				Name:        "semantic_search_code",
-				Description: "Code-only semantic search over symbols and codemaps. Use this when you need file discovery without session, memory, or ACA noise.",
+				Description: "Code-only semantic search over symbols and codemaps. Use this when you need file discovery without session, memory, or ContextWiki noise.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 						"query":{"type":"string","description":"Natural language query describing what code to find"},
 						"limit":{"type":"integer","description":"Maximum results to return (default 20)"},
@@ -2896,7 +2892,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			},
 			engine.ToolDef{
 				Name:        "semantic_search_context",
-				Description: "ACA/context-only semantic retrieval over top-of-mind, handoffs, and configured vault context.",
+				Description: "ContextWiki-only semantic retrieval over top-of-mind, handoffs, and configured vault context.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 						"query":{"type":"string","description":"Natural language query describing what context to retrieve"},
 						"limit":{"type":"integer","description":"Maximum results to return (default 20)"},
@@ -3017,15 +3013,15 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			},
 			engine.ToolDef{
 				Name:        "context_show",
-				Description: "Read the current ACA top-of-mind bundle for the workspace.",
+				Description: "Read the current ContextWiki top-of-mind bundle for the workspace.",
 				Parameters:  json.RawMessage(`{"type":"object","properties":{}}`),
 			},
 			engine.ToolDef{
 				Name:        "context_retrieve",
-				Description: "Blend ACA control-plane state with vault retrieval for a focused question.",
+				Description: "Blend ContextWiki control-plane state with vault retrieval for a focused question.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"query":{"type":"string","description":"Question or topic to retrieve context for"},
-					"vault_path":{"type":"string","description":"Vault path (optional if FOXCTL_ACA_VAULT_PATH or FOXCTL_OBSIDIAN_VAULT_PATH is set)"},
+					"vault_path":{"type":"string","description":"Vault path (optional if FOXCTL_CONTEXTWIKI_VAULT_PATH, FOXCTL_ACA_VAULT_PATH, or FOXCTL_OBSIDIAN_VAULT_PATH is set)"},
 					"limit":{"type":"integer","description":"Maximum result count (default 5)"}
 				},"required":["query"]}`),
 			},
@@ -3034,7 +3030,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "Search the local Obsidian vault index. Supports optional semantic note search.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"query":{"type":"string","description":"Vault search query"},
-					"vault_path":{"type":"string","description":"Vault path (optional if FOXCTL_ACA_VAULT_PATH or FOXCTL_OBSIDIAN_VAULT_PATH is set)"},
+					"vault_path":{"type":"string","description":"Vault path (optional if FOXCTL_CONTEXTWIKI_VAULT_PATH, FOXCTL_ACA_VAULT_PATH, or FOXCTL_OBSIDIAN_VAULT_PATH is set)"},
 					"limit":{"type":"integer","description":"Maximum result count (default 10)"},
 					"semantic":{"type":"boolean","description":"Use semantic note search if enabled"}
 				},"required":["query"]}`),
@@ -3044,7 +3040,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "Read a note from the Obsidian vault.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"path":{"type":"string","description":"Vault note path"},
-					"vault_path":{"type":"string","description":"Vault path (optional if FOXCTL_ACA_VAULT_PATH or FOXCTL_OBSIDIAN_VAULT_PATH is set)"}
+					"vault_path":{"type":"string","description":"Vault path (optional if FOXCTL_CONTEXTWIKI_VAULT_PATH, FOXCTL_ACA_VAULT_PATH, or FOXCTL_OBSIDIAN_VAULT_PATH is set)"}
 				},"required":["path"]}`),
 			},
 			engine.ToolDef{
@@ -3052,7 +3048,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "List related notes from the Obsidian vault using links, backlinks, aliases, or the local index.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"path":{"type":"string","description":"Vault note path"},
-					"vault_path":{"type":"string","description":"Vault path (optional if FOXCTL_ACA_VAULT_PATH or FOXCTL_OBSIDIAN_VAULT_PATH is set)"},
+					"vault_path":{"type":"string","description":"Vault path (optional if FOXCTL_CONTEXTWIKI_VAULT_PATH, FOXCTL_ACA_VAULT_PATH, or FOXCTL_OBSIDIAN_VAULT_PATH is set)"},
 					"limit":{"type":"integer","description":"Maximum result count (default 10)"}
 				},"required":["path"]}`),
 			},
@@ -3407,7 +3403,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 		tools = append(tools,
 			engine.ToolDef{
 				Name:        "semantic_search_context",
-				Description: "ACA/context-only semantic retrieval over top-of-mind, handoffs, and configured vault context.",
+				Description: "ContextWiki-only semantic retrieval over top-of-mind, handoffs, and configured vault context.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 						"query":{"type":"string","description":"Natural language query describing what context to retrieve"},
 						"limit":{"type":"integer","description":"Maximum results to return (default 20)"},
@@ -3416,15 +3412,15 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			},
 			engine.ToolDef{
 				Name:        "context_show",
-				Description: "Read the current ACA top-of-mind bundle for the workspace.",
+				Description: "Read the current ContextWiki top-of-mind bundle for the workspace.",
 				Parameters:  json.RawMessage(`{"type":"object","properties":{}}`),
 			},
 			engine.ToolDef{
 				Name:        "context_retrieve",
-				Description: "Blend ACA control-plane state with vault retrieval for a focused question.",
+				Description: "Blend ContextWiki control-plane state with vault retrieval for a focused question.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"query":{"type":"string","description":"Question or topic to retrieve context for"},
-					"vault_path":{"type":"string","description":"Vault path (optional if FOXCTL_ACA_VAULT_PATH or FOXCTL_OBSIDIAN_VAULT_PATH is set)"},
+					"vault_path":{"type":"string","description":"Vault path (optional if FOXCTL_CONTEXTWIKI_VAULT_PATH, FOXCTL_ACA_VAULT_PATH, or FOXCTL_OBSIDIAN_VAULT_PATH is set)"},
 					"limit":{"type":"integer","description":"Maximum result count (default 5)"}
 				},"required":["query"]}`),
 			},
@@ -3433,7 +3429,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "Search the local Obsidian vault index. Supports optional semantic note search.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"query":{"type":"string","description":"Vault search query"},
-					"vault_path":{"type":"string","description":"Vault path (optional if FOXCTL_ACA_VAULT_PATH or FOXCTL_OBSIDIAN_VAULT_PATH is set)"},
+					"vault_path":{"type":"string","description":"Vault path (optional if FOXCTL_CONTEXTWIKI_VAULT_PATH, FOXCTL_ACA_VAULT_PATH, or FOXCTL_OBSIDIAN_VAULT_PATH is set)"},
 					"limit":{"type":"integer","description":"Maximum result count (default 10)"},
 					"semantic":{"type":"boolean","description":"Use semantic note search if enabled"}
 				},"required":["query"]}`),
@@ -3443,7 +3439,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "Read a note from the Obsidian vault.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"path":{"type":"string","description":"Vault note path"},
-					"vault_path":{"type":"string","description":"Vault path (optional if FOXCTL_ACA_VAULT_PATH or FOXCTL_OBSIDIAN_VAULT_PATH is set)"}
+					"vault_path":{"type":"string","description":"Vault path (optional if FOXCTL_CONTEXTWIKI_VAULT_PATH, FOXCTL_ACA_VAULT_PATH, or FOXCTL_OBSIDIAN_VAULT_PATH is set)"}
 				},"required":["path"]}`),
 			},
 			engine.ToolDef{
@@ -3451,13 +3447,13 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "List related notes from the Obsidian vault using links, backlinks, aliases, or the local index.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"path":{"type":"string","description":"Vault note path"},
-					"vault_path":{"type":"string","description":"Vault path (optional if FOXCTL_ACA_VAULT_PATH or FOXCTL_OBSIDIAN_VAULT_PATH is set)"},
+					"vault_path":{"type":"string","description":"Vault path (optional if FOXCTL_CONTEXTWIKI_VAULT_PATH, FOXCTL_ACA_VAULT_PATH, or FOXCTL_OBSIDIAN_VAULT_PATH is set)"},
 					"limit":{"type":"integer","description":"Maximum result count (default 10)"}
 				},"required":["path"]}`),
 			},
 			engine.ToolDef{
 				Name:        "context_filter",
-				Description: "LLM-powered context filtering for ACA and vault retrieval output.",
+				Description: "LLM-powered context filtering for ContextWiki and vault retrieval output.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"prompt":{"type":"string","description":"What context to select"},
 					"source":{"type":"object","properties":{"text":{"type":"string"},"chunks":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"text":{"type":"string"}}}}}},

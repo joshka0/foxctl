@@ -15,7 +15,7 @@ import (
 func newContextCoChangeCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "cochange",
-		Short: "Build and inspect ACA co-change cluster artifacts",
+		Short: "Build and inspect ContextWiki co-change cluster artifacts",
 	}
 	cmd.AddCommand(
 		newContextCoChangeBuildCommand(),

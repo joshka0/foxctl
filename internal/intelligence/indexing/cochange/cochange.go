@@ -293,7 +293,7 @@ func Score(commits []Commit, cfg Config) map[string][]Neighbor {
 	return out
 }
 
-// PersonalizedRank computes the ACA-style personalized prior from scored
+// PersonalizedRank computes the ContextWiki-style personalized prior from scored
 // co-change commits without performing IO.
 func PersonalizedRank(seedPaths []string, commits []Commit, cfg Config) map[string]float64 {
 	cfg = normalizeConfig(cfg)

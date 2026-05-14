@@ -20,7 +20,7 @@ func newContextImportEvidenceCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "import-evidence",
-		Short: "Import external text or transcript evidence into the ACA inbox",
+		Short: "Import external text or transcript evidence into the ContextWiki inbox",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if strings.TrimSpace(vaultPath) == "" {
 				return fmt.Errorf("--vault-path is required")

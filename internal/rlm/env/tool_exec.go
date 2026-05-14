@@ -6729,6 +6729,7 @@ func (a *ReadOnlyAdapter) contextPacksFn(limit int) contextengine.ContextPackFun
 	}
 	vaultPath := firstNonEmpty(strings.TrimSpace(a.vaultPath),
 		strings.TrimSpace(os.Getenv("FOXCTL_RLM_VAULT_PATH")),
+		strings.TrimSpace(os.Getenv("FOXCTL_CONTEXTWIKI_VAULT_PATH")),
 		strings.TrimSpace(os.Getenv("FOXCTL_ACA_VAULT_PATH")),
 		strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH")),
 	)

@@ -21,7 +21,9 @@ By default they evaluate:
 - `aca_query_typed`
 
 Those mode IDs keep the old `aca_` prefix for compatibility with existing
-fixtures and reports. In prose, call the lane ContextWiki retrieval.
+fixtures and reports. CLI callers may also use `contextwiki_default` and
+`contextwiki_query_typed`; foxctl normalizes them to the legacy result IDs.
+In prose, call the lane ContextWiki retrieval.
 
 ## Stable Commands
 

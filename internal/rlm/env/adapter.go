@@ -434,6 +434,7 @@ func (a *ReadOnlyAdapter) semanticSearchCode(ctx context.Context, args json.RawM
 	}
 	if vaultPath := firstNonEmpty(strings.TrimSpace(a.vaultPath),
 		strings.TrimSpace(os.Getenv("FOXCTL_RLM_VAULT_PATH")),
+		strings.TrimSpace(os.Getenv("FOXCTL_CONTEXTWIKI_VAULT_PATH")),
 		strings.TrimSpace(os.Getenv("FOXCTL_ACA_VAULT_PATH")),
 		strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH")),
 	); vaultPath != "" {
@@ -640,6 +641,7 @@ func (a *ReadOnlyAdapter) loadFile(args json.RawMessage) (map[string]any, error)
 func (a *ReadOnlyAdapter) searchVault(ctx context.Context, args json.RawMessage) (map[string]any, error) {
 	vaultPath := firstNonEmpty(strings.TrimSpace(a.vaultPath),
 		strings.TrimSpace(os.Getenv("FOXCTL_RLM_VAULT_PATH")),
+		strings.TrimSpace(os.Getenv("FOXCTL_CONTEXTWIKI_VAULT_PATH")),
 		strings.TrimSpace(os.Getenv("FOXCTL_ACA_VAULT_PATH")),
 		strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH")),
 	)
@@ -688,6 +690,7 @@ func (a *ReadOnlyAdapter) readNote(args json.RawMessage) (map[string]any, error)
 	}
 	vaultPath := firstNonEmpty(strings.TrimSpace(a.vaultPath),
 		strings.TrimSpace(os.Getenv("FOXCTL_RLM_VAULT_PATH")),
+		strings.TrimSpace(os.Getenv("FOXCTL_CONTEXTWIKI_VAULT_PATH")),
 		strings.TrimSpace(os.Getenv("FOXCTL_ACA_VAULT_PATH")),
 		strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH")),
 	)

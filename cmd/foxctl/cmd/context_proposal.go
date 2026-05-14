@@ -15,7 +15,7 @@ func newContextProposalsCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "proposals",
-		Short: "List recorded ACA memory proposals",
+		Short: "List recorded ContextWiki memory proposals",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			target := resolveContextWorkspace(workspacePath)
 			store := contextplane.NewWorkspaceStore(target)
@@ -41,7 +41,7 @@ func newContextProposalCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "proposal <id>",
-		Short: "Read or update one ACA memory proposal",
+		Short: "Read or update one ContextWiki memory proposal",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := resolveContextWorkspace(workspacePath)
@@ -74,7 +74,7 @@ func newContextProposalApplyCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "apply <id>",
-		Short: "Apply one low-risk ACA memory proposal",
+		Short: "Apply one low-risk ContextWiki memory proposal",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := resolveContextWorkspace(workspacePath)
@@ -106,7 +106,7 @@ func newContextProposalMergeCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "merge <id>",
-		Short: "Merge one evidence-backed ACA proposal into a canonical vault note",
+		Short: "Merge one evidence-backed ContextWiki proposal into a canonical vault note",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(vaultPath) == "" {
@@ -143,7 +143,7 @@ func newContextProposalRejectCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "reject <id>",
-		Short: "Reject one ACA memory proposal",
+		Short: "Reject one ContextWiki memory proposal",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := resolveContextWorkspace(workspacePath)

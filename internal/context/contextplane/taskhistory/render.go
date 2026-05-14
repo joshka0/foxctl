@@ -64,7 +64,7 @@ func RenderHookContextWithArtifact(pack Pack, artifactDigest string) string {
 		b.WriteString(strings.Join(shortenStrings(pack.FilesTouched, 4), ", "))
 	}
 	if len(pack.ACANotes) > 0 {
-		b.WriteString("\n\n**ACA notes:** ")
+		b.WriteString("\n\n**ContextWiki notes:** ")
 		notes := make([]string, 0, minInt(3, len(pack.ACANotes)))
 		for _, hit := range pack.ACANotes[:minInt(3, len(pack.ACANotes))] {
 			notes = append(notes, hit.Path)

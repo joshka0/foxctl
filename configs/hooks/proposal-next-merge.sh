@@ -11,7 +11,7 @@ fi
 
 workspace="${FOXCTL_WORKSPACE:-${CLAUDE_PROJECT_DIR:-$(pwd)}}"
 payload="$(cat)"
-vault_path="${FOXCTL_ACA_VAULT_PATH:-${FOXCTL_OBSIDIAN_VAULT_PATH:-$(printf '%s' "$payload" | jq -r '.vault_path // ""' 2>/dev/null || echo "")}}"
+vault_path="${FOXCTL_CONTEXTWIKI_VAULT_PATH:-${FOXCTL_ACA_VAULT_PATH:-${FOXCTL_OBSIDIAN_VAULT_PATH:-$(printf '%s' "$payload" | jq -r '.vault_path // ""' 2>/dev/null || echo "")}}}"
 
 args=(hooks proposal-next-merge --workspace "$workspace")
 if [[ -n "$vault_path" ]]; then

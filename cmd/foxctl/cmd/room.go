@@ -1699,7 +1699,7 @@ func newRoomRetroShowCommand() *cobra.Command {
 func newRoomACACommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "aca",
-		Short: "Promote high-signal agile room artifacts into ACA drafts",
+		Short: "Promote high-signal agile room artifacts into ContextWiki drafts",
 	}
 	cmd.AddCommand(
 		newRoomACAPromoteCommand(),
@@ -1711,7 +1711,7 @@ func newRoomACAPromoteCommand() *cobra.Command {
 	var workspace string
 	cmd := &cobra.Command{
 		Use:   "promote <epic|milestone|retro|validation> <room-id> <source-id>",
-		Short: "Draft one ACA proposal note from a room-agile artifact",
+		Short: "Draft one ContextWiki proposal note from a room-agile artifact",
 		Args:  cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRoomACAPromote(cmd, workspace, args[1], args[0], args[2])
@@ -7068,7 +7068,7 @@ func buildRoomACAPromotionInput(absWorkspace, roomID string, room agent.RoomSumm
 		}
 		status := stringField(anyMap(validation["meta"]), "status")
 		if status != "fail" && status != "blocked" && status != "waived" {
-			return roomACAPromotionPrepared{}, fmt.Errorf("validation %q is not high-signal enough for ACA promotion yet; promote fail, blocked, or waived validations in the first slice", sourceID)
+			return roomACAPromotionPrepared{}, fmt.Errorf("validation %q is not high-signal enough for ContextWiki promotion yet; promote fail, blocked, or waived validations in the first slice", sourceID)
 		}
 		milestone := roomMilestoneViewByID(buildRoomMilestoneViews(messages), stringField(story, "milestone_id"))
 		epic := roomEpicViewByID(epics, stringField(story, "epic_id"))
@@ -7128,7 +7128,7 @@ func roomACAPromoteEpic(absWorkspace, roomID string, room agent.RoomSummary, mes
 			SourceKind:     "epic",
 			SourceID:       epicID,
 			Title:          title,
-			Summary:        fmt.Sprintf("Review ACA epic draft for %s. %s", title, summaryText),
+			Summary:        fmt.Sprintf("Review ContextWiki epic draft for %s. %s", title, summaryText),
 			Body:           body,
 			Frontmatter:    frontmatter,
 			DedupeKey:      fmt.Sprintf("room_agile_draft|room_epic|%s", epicID),
@@ -7189,7 +7189,7 @@ func roomACAPromoteMilestone(absWorkspace, roomID, project string, epic, milesto
 			SourceKind:     "milestone",
 			SourceID:       milestoneID,
 			Title:          title,
-			Summary:        fmt.Sprintf("Review ACA milestone draft for %s. %s", title, firstNonEmpty(stringField(summaryMeta, "summary"), stringField(anyMap(milestone["meta"]), "objective"), title)),
+			Summary:        fmt.Sprintf("Review ContextWiki milestone draft for %s. %s", title, firstNonEmpty(stringField(summaryMeta, "summary"), stringField(anyMap(milestone["meta"]), "objective"), title)),
 			Body:           body,
 			Frontmatter:    frontmatter,
 			DedupeKey:      fmt.Sprintf("room_agile_draft|room_milestone|%s", milestoneID),
@@ -7243,7 +7243,7 @@ func roomACAPromoteRetro(absWorkspace, roomID, project string, epic, update map[
 			SourceKind:     "guidance_update",
 			SourceID:       updateID,
 			Title:          title,
-			Summary:        fmt.Sprintf("Review ACA retro draft for %s. %s", title, firstNonEmpty(stringField(meta, "impact"), title)),
+			Summary:        fmt.Sprintf("Review ContextWiki retro draft for %s. %s", title, firstNonEmpty(stringField(meta, "impact"), title)),
 			Body:           body,
 			Frontmatter:    frontmatter,
 			DedupeKey:      fmt.Sprintf("room_agile_draft|room_retro|%s", updateID),
@@ -7302,7 +7302,7 @@ func roomACAPromoteValidation(absWorkspace, roomID, project string, epic, milest
 			SourceKind:     "story_validation",
 			SourceID:       validationID,
 			Title:          fmt.Sprintf("%s validation", title),
-			Summary:        fmt.Sprintf("Review ACA validation draft for story %s after a %s validation outcome.", title, stringField(meta, "status")),
+			Summary:        fmt.Sprintf("Review ContextWiki validation draft for story %s after a %s validation outcome.", title, stringField(meta, "status")),
 			Body:           body,
 			Frontmatter:    frontmatter,
 			DedupeKey:      fmt.Sprintf("room_agile_draft|room_validation|%s", validationID),

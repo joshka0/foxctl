@@ -15,7 +15,7 @@ instructions, and command output. Prefer these names in new docs.
 | Knowledge plane | Durable human-readable knowledge: repo docs, Obsidian notes, vault links, bridge metadata, and reviewed promotions. |
 | Retrieval plane | Queryable evidence surfaces: repoindex hints, semantic note search, context engine evidence packs, and retrieval traces. |
 | ACA | Legacy abbreviation for the ContextWiki/context-system work. Avoid in new prose except when explaining old names. |
-| Legacy `aca_` identifiers | Existing eval modes, environment variables, and internal tool names may keep `aca_` for compatibility. Explain them as ContextWiki behavior in prose. |
+| Legacy `aca_` identifiers | Existing eval modes, environment variables, persisted table names, and internal tool names may keep `aca_` for compatibility. Prefer new `contextwiki` aliases where available and explain old names as ContextWiki behavior in prose. |
 | Top-of-mind | The current workspace orientation bundle agents can load at session start. |
 | Handoff | A bounded continuity record describing what happened, what changed, and what should happen next. |
 | Observation | A structured fact or repeated pattern captured from a session, command, evaluation, or operator action. |

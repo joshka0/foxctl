@@ -49,7 +49,7 @@ const (
 	RoleMemoryFactScout AgentRole = "memory_fact_scout"
 	// RoleMemoryTimelineScout reconstructs updates and supersession across memory and sessions.
 	RoleMemoryTimelineScout AgentRole = "memory_timeline_scout"
-	// RoleACAContextScout gathers ACA, task continuity, and vault-backed durable context.
+	// RoleACAContextScout gathers ContextWiki, task continuity, and vault-backed durable context.
 	RoleACAContextScout AgentRole = "aca_context_scout"
 
 	// RoleOverseer is a coordination agent that manages agent hierarchies.

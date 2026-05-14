@@ -287,7 +287,7 @@ const (
 )
 
 // KEY GAP: vault bootstrap uses env vars for path resolution:
-//   FOXCTL_RLM_VAULT_PATH || FOXCTL_ACA_VAULT_PATH || FOXCTL_OBSIDIAN_VAULT_PATH
+//   FOXCTL_RLM_VAULT_PATH || FOXCTL_CONTEXTWIKI_VAULT_PATH || FOXCTL_ACA_VAULT_PATH || FOXCTL_OBSIDIAN_VAULT_PATH
 // If none set → VaultHandles = nil, search_vault silently returns empty
 ```
 

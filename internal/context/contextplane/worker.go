@@ -13,7 +13,7 @@ import (
 	taskstore "github.com/joshka0/foxctl/internal/storage/tasks"
 )
 
-// WorkerConfig configures the daemonized ACA maintenance worker.
+// WorkerConfig configures the daemonized ContextWiki maintenance worker.
 type WorkerConfig struct {
 	Config    config.Config
 	Workspace string
@@ -21,12 +21,12 @@ type WorkerConfig struct {
 	Interval  time.Duration
 }
 
-// Worker keeps ACA orientation and maintenance state fresh for one workspace.
+// Worker keeps ContextWiki orientation and maintenance state fresh for one workspace.
 type Worker struct {
 	cfg WorkerConfig
 }
 
-// NewWorker returns a background ACA maintenance worker.
+// NewWorker returns a background ContextWiki maintenance worker.
 func NewWorker(cfg WorkerConfig) *Worker {
 	if cfg.Interval <= 0 {
 		cfg.Interval = 5 * time.Minute

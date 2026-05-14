@@ -178,11 +178,13 @@ Current hook behavior:
   - keeps the existing session capture path
   - writes a ContextWiki handoff with `foxctl capture`
   - can emit structured observations or tensions through `foxctl context infer --apply`
-  - can draft a promotion automatically when `FOXCTL_ACA_AUTO_PROMOTE=1`
+  - can draft a promotion automatically when `FOXCTL_CONTEXTWIKI_AUTO_PROMOTE=1`
+    (`FOXCTL_ACA_AUTO_PROMOTE` remains as a legacy alias)
 - `SubagentStop` via `configs/hooks/subagent-stop.sh`
   - writes a bounded ContextWiki handoff for subagent completion
   - can emit structured observations or tensions through `foxctl context infer --apply`
-  - can draft a promotion automatically when `FOXCTL_ACA_AUTO_PROMOTE=1`
+  - can draft a promotion automatically when `FOXCTL_CONTEXTWIKI_AUTO_PROMOTE=1`
+    (`FOXCTL_ACA_AUTO_PROMOTE` remains as a legacy alias)
 - task continuity hook wrapper via `configs/hooks/task-continuity-summary.sh`
   - uses `foxctl context task-history-summary`
   - emits prompt-ready continuity context plus `task_continuity_artifact`
@@ -344,7 +346,8 @@ Current behavior:
 
 Controls:
 
-- `FOXCTL_ACA_MAINTENANCE_INTERVAL`
+- `FOXCTL_CONTEXTWIKI_MAINTENANCE_INTERVAL`
+  - legacy alias: `FOXCTL_ACA_MAINTENANCE_INTERVAL`
   - optional duration override for the refresh ticker; the environment variable
     keeps the old prefix for compatibility
 - `FOXCTL_OBSIDIAN_VAULT_PATH`

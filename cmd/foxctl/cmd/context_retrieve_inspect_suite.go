@@ -63,7 +63,7 @@ func newContextRetrieveInspectSuiteCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "retrieve-inspect-suite",
-		Short: "Inspect ACA retrieval misses across a suite and summarize deterministic corrections",
+		Short: "Inspect ContextWiki retrieval misses across a suite and summarize deterministic corrections",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if strings.TrimSpace(suiteRef) == "" {
 				return fmt.Errorf("--suite is required")
@@ -234,7 +234,7 @@ func newContextRetrieveInspectSuiteCommand() *cobra.Command {
 	cmd.Flags().StringVar(&suiteRef, "suite", "", "Retrieval suite name or path")
 	cmd.Flags().StringVar(&controlSuiteRef, "control-suite", "", "Optional control retrieval suite name or path")
 	cmd.Flags().IntVar(&limit, "limit", 5, "Maximum ranked vault hits")
-	cmd.Flags().BoolVar(&apply, "apply", false, "Persist generated ACA observations for misses")
+	cmd.Flags().BoolVar(&apply, "apply", false, "Persist generated ContextWiki observations for misses")
 	cmd.Flags().BoolVar(&applyPolicyPatch, "apply-policy-patch", false, "Apply the safe retrieval policy patch only if the suite evaluation accepts it")
 	cmd.Flags().BoolVar(&draftWhenPromotable, "draft-when-promotable", false, "Draft promotion notes for repeated missing_package_note observations")
 	return cmd

@@ -127,7 +127,7 @@ type Service struct {
 	fileSummaryWorkerCancel context.CancelFunc
 	fileSummaryMemoryStore  storage.MemoryStore // Memory store for file summary worker (close on shutdown)
 
-	// ACA maintenance loop
+	// ContextWiki maintenance loop
 	acaMaintenanceCtx    context.Context
 	acaMaintenanceCancel context.CancelFunc
 	acaMaintenanceWG     sync.WaitGroup
@@ -359,7 +359,7 @@ func (s *Service) startLeaderWorkers(ctx context.Context) error {
 		}
 	}
 	if err := s.startACAMaintenanceLoop(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: ACA maintenance loop failed to start: %v\n", err)
+		fmt.Fprintf(os.Stderr, "warning: ContextWiki maintenance loop failed to start: %v\n", err)
 		if firstErr == nil {
 			firstErr = err
 		}
@@ -1348,7 +1348,7 @@ func (s *Service) startACAMaintenanceLoop(ctx context.Context) error {
 	go func() {
 		defer s.acaMaintenanceWG.Done()
 		if err := worker.Run(s.acaMaintenanceCtx); err != nil && !errors.Is(err, context.Canceled) {
-			fmt.Fprintf(os.Stderr, "ACA maintenance: worker stopped with error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "ContextWiki maintenance: worker stopped with error: %v\n", err)
 		}
 	}()
 	return nil
@@ -1364,7 +1364,10 @@ func (s *Service) stopACAMaintenanceLoop() {
 }
 
 func acaMaintenanceInterval() time.Duration {
-	raw := strings.TrimSpace(os.Getenv("FOXCTL_ACA_MAINTENANCE_INTERVAL"))
+	raw := firstNonEmptyString(
+		os.Getenv("FOXCTL_CONTEXTWIKI_MAINTENANCE_INTERVAL"),
+		os.Getenv("FOXCTL_ACA_MAINTENANCE_INTERVAL"),
+	)
 	if raw == "" {
 		return acaMaintenanceTick
 	}
@@ -1376,10 +1379,20 @@ func acaMaintenanceInterval() time.Duration {
 }
 
 func acaMaintenanceVaultPath() string {
-	if value := strings.TrimSpace(os.Getenv("FOXCTL_ACA_VAULT_PATH")); value != "" {
-		return value
+	return firstNonEmptyString(
+		os.Getenv("FOXCTL_CONTEXTWIKI_VAULT_PATH"),
+		os.Getenv("FOXCTL_ACA_VAULT_PATH"),
+		os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH"),
+	)
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
 	}
-	return strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH"))
+	return ""
 }
 
 // startFileSummaryWorker initializes and starts the background file summary worker.

@@ -19,6 +19,16 @@ func TestNormalizeEvalModes_IncludesSkillModesWhenRequested(t *testing.T) {
 	}
 }
 
+func TestNormalizeEvalModes_AcceptsContextWikiAliases(t *testing.T) {
+	t.Parallel()
+
+	got := normalizeEvalModes([]string{"contextwiki_default", "contextwiki_query_typed", "contextwiki_semantic_anchors", "contextwiki_default"})
+	want := []string{"aca_default", "aca_query_typed", "aca_semantic_anchors"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalizeEvalModes()=%v want %v", got, want)
+	}
+}
+
 func TestExtractSemanticSearchResultPaths(t *testing.T) {
 	t.Parallel()
 

@@ -27,7 +27,7 @@ var inferenceRules = []inferenceRule{
 	},
 }
 
-// InferInsights converts a compact summary into structured ACA observation/tension suggestions.
+// InferInsights converts a compact summary into structured ContextWiki observation/tension suggestions.
 func InferInsights(summary, project, area string, evidenceRefs []string) InferenceResult {
 	summary = normalizeSummary(summary)
 	if summary == "" {

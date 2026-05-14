@@ -25,7 +25,7 @@ func newContextRetrieveInspectCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "retrieve-inspect",
-		Short: "Inspect one ACA retrieval miss and propose a deterministic correction",
+		Short: "Inspect one ContextWiki retrieval miss and propose a deterministic correction",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if strings.TrimSpace(query) == "" {
 				return fmt.Errorf("--query is required")
@@ -129,7 +129,7 @@ func newContextRetrieveInspectCommand() *cobra.Command {
 
 			summary := inspection.Proposal.Summary
 			if summary == "" {
-				summary = fmt.Sprintf("ACA retrieval inspection classified this case as %s.", inspection.Classification)
+				summary = fmt.Sprintf("ContextWiki retrieval inspection classified this case as %s.", inspection.Classification)
 			}
 
 			return envelope.Write(cmd.OutOrStdout(), envelope.OK("context/retrieve_inspect", map[string]any{
@@ -156,7 +156,7 @@ func newContextRetrieveInspectCommand() *cobra.Command {
 	cmd.Flags().StringSliceVar(&expectedPaths, "expected-path", nil, "Expected repo or note path (repeatable)")
 	cmd.Flags().IntVar(&limit, "limit", 5, "Maximum ranked vault hits")
 	cmd.Flags().BoolVar(&semanticAnchors, "semantic-anchors", false, "Use repoindex semantic anchor evidence as retrieval hints")
-	cmd.Flags().BoolVar(&apply, "apply", false, "Persist the generated ACA observation and proposal")
+	cmd.Flags().BoolVar(&apply, "apply", false, "Persist the generated ContextWiki observation and proposal")
 	cmd.Flags().BoolVar(&applyPolicyPatch, "apply-policy-patch", false, "Apply the suggested retrieval policy patch when safe")
 	cmd.Flags().BoolVar(&draftWhenPromotable, "draft-when-promotable", false, "Draft a promotion note when the generated observation is promotable")
 	return cmd

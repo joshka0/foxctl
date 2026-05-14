@@ -224,7 +224,8 @@ is set, the maintenance loop:
 - Recomputes vault health
 - Folds health findings into ContextWiki maintenance tasks
 
-Control the maintenance interval with `FOXCTL_ACA_MAINTENANCE_INTERVAL`. The
+Control the maintenance interval with `FOXCTL_CONTEXTWIKI_MAINTENANCE_INTERVAL`
+(`FOXCTL_ACA_MAINTENANCE_INTERVAL` is still accepted as a legacy alias). The
 environment variable keeps the old prefix for compatibility.
 
 ## Default vault layout

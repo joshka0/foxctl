@@ -89,7 +89,7 @@ Return the smallest chronology that explains the current best view.
 Task:
 ` + prompt)
 	case ScoutRoleACAContext:
-		return strings.TrimSpace(`You are an ACA context scout.
+		return strings.TrimSpace(`You are a ContextWiki context scout.
 Recover durable top-of-mind, handoff, and vault-backed context relevant to the task.
 Return only the most useful durable context blocks.
 

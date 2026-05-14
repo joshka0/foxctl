@@ -31,7 +31,7 @@ type claudeSettings struct {
 func newContextHooksCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "hooks",
-		Short: "Manage ACA hook wiring for Claude settings",
+		Short: "Manage ContextWiki hook wiring for Claude settings",
 	}
 	cmd.AddCommand(newContextHooksInstallCommand())
 	return cmd
@@ -43,7 +43,7 @@ func newContextHooksInstallCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "install",
-		Short: "Install ACA lifecycle hooks into workspace .claude/settings.json",
+		Short: "Install ContextWiki lifecycle hooks into workspace .claude/settings.json",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			target := resolveContextWorkspace(workspacePath)
 			settingsPath := filepath.Join(target, ".claude", "settings.json")

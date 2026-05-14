@@ -227,7 +227,7 @@ func buildMemoryScoutPrompt(role, query string, limit int) string {
 	case ScoutRoleMemoryTimeline:
 		return strings.TrimSpace("Reconstruct the update timeline for this query and identify the current best view: " + query + "." + limitHint + ` Return JSON only with this shape: {"summary":"...","current_best_view":"...","timeline":[{"ts":"...","kind":"statement|update|retraction|decision","value":"...","source":"tool-name","evidence_refs":["..."],"supersedes":"...","confidence":0.0}],"gaps":["..."]}.`)
 	case ScoutRoleACAContext:
-		return strings.TrimSpace("Gather the durable ACA, handoff, and vault-backed context relevant to this query: " + query + "." + limitHint + ` Return JSON only with this shape: {"summary":"...","context_blocks":[{"lane":"top_of_mind|task_continuity|vault|related_note","summary":"...","refs":["..."]}],"gaps":["..."]}.`)
+		return strings.TrimSpace("Gather the durable ContextWiki, handoff, and vault-backed context relevant to this query: " + query + "." + limitHint + ` Return JSON only with this shape: {"summary":"...","context_blocks":[{"lane":"top_of_mind|task_continuity|vault|related_note","summary":"...","refs":["..."]}],"gaps":["..."]}.`)
 	default:
 		return strings.TrimSpace(query)
 	}

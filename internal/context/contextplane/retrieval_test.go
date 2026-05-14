@@ -458,6 +458,30 @@ func TestLoadRetrievalOptions_PackageFallbackFromPolicy(t *testing.T) {
 	_ = ctx
 }
 
+func TestLoadRetrievalOptions_ContextWikiPolicyAlias(t *testing.T) {
+	workspace := t.TempDir()
+	store := NewWorkspaceStore(workspace)
+	layout, err := store.EnsureLayout()
+	if err != nil {
+		t.Fatalf("EnsureLayout: %v", err)
+	}
+	body := []byte("contextwiki:\n  package_note_fallback: true\n  semantic_anchors: true\n  co_change_commit_limit: 15\n")
+	if err := os.WriteFile(layout.RetrievalPolicyPath, body, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	opts := store.loadRetrievalOptions()
+	if !opts.UsePackageNoteFallback {
+		t.Fatalf("expected contextwiki.package_note_fallback to enable package fallback")
+	}
+	if !opts.UseSemanticAnchors {
+		t.Fatalf("expected contextwiki.semantic_anchors to enable semantic anchors")
+	}
+	if opts.CoChangeCommitLimit != 15 {
+		t.Fatalf("expected contextwiki.co_change_commit_limit=15, got %d", opts.CoChangeCommitLimit)
+	}
+}
+
 func TestFilterNoisyPaths(t *testing.T) {
 	got := filterNoisyPaths([]string{
 		"internal/context/contextplane/store.go",

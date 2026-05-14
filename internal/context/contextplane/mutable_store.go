@@ -18,7 +18,7 @@ func (s *WorkspaceStore) openMutableDB(ctx context.Context) (*sql.DB, func() err
 	if _, err := s.EnsureLayout(); err != nil {
 		return nil, nil, err
 	}
-	db, closeFn, err := dbutil.OpenStoreDB(ctx, s.layout.RuntimeDir, "ACA", acaDBFile, migrateMutableStore)
+	db, closeFn, err := dbutil.OpenStoreDB(ctx, s.layout.RuntimeDir, "ContextWiki", acaDBFile, migrateMutableStore)
 	if err != nil {
 		return nil, nil, fmt.Errorf("contextplane: open mutable db: %w", err)
 	}

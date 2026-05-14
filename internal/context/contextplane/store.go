@@ -17,7 +17,7 @@ import (
 	obsidiantool "github.com/joshka0/foxctl/internal/tooling/tools/obsidian"
 )
 
-// WorkspaceStore persists workspace-local ACA runtime files under .foxctl/.
+// WorkspaceStore persists workspace-local ContextWiki runtime files under .foxctl/.
 type WorkspaceStore struct {
 	layout Layout
 }
@@ -72,7 +72,7 @@ func (s *WorkspaceStore) Layout() Layout {
 	return s.layout
 }
 
-// EnsureLayout creates the ACA workspace scaffold and seeds default policy/template files.
+// EnsureLayout creates the ContextWiki workspace scaffold and seeds default policy/template files.
 func (s *WorkspaceStore) EnsureLayout() (Layout, error) {
 	for _, dir := range []string{
 		s.layout.RootDir,
@@ -170,7 +170,7 @@ func (s *WorkspaceStore) LoadTopOfMind() (TopOfMind, error) {
 	return top, nil
 }
 
-// BuildReport synthesizes a current-view projection from persisted ACA state.
+// BuildReport synthesizes a current-view projection from persisted ContextWiki state.
 func (s *WorkspaceStore) BuildReport() (Report, error) {
 	if _, err := s.EnsureLayout(); err != nil {
 		return Report{}, err
@@ -647,7 +647,7 @@ func (s *WorkspaceStore) NextProposalMergeTask(ctx context.Context, limit int) (
 	return nil, nil
 }
 
-// RecordRetrievalCorrectionRun persists one ACA retrieval correction run summary.
+// RecordRetrievalCorrectionRun persists one ContextWiki retrieval correction run summary.
 func (s *WorkspaceStore) RecordRetrievalCorrectionRun(run RetrievalCorrectionRun) error {
 	db, closeFn, err := s.openMutableDB(context.Background())
 	if err != nil {
@@ -663,7 +663,7 @@ func (s *WorkspaceStore) RecordRetrievalCorrectionRun(run RetrievalCorrectionRun
 	return insertRetrievalCorrectionRunRow(context.Background(), db, run)
 }
 
-// ListRetrievalCorrectionRuns returns persisted ACA retrieval correction runs, newest first.
+// ListRetrievalCorrectionRuns returns persisted ContextWiki retrieval correction runs, newest first.
 func (s *WorkspaceStore) ListRetrievalCorrectionRuns(limit int) ([]RetrievalCorrectionRun, error) {
 	db, closeFn, err := s.openMutableDB(context.Background())
 	if err != nil {
@@ -673,7 +673,7 @@ func (s *WorkspaceStore) ListRetrievalCorrectionRuns(limit int) ([]RetrievalCorr
 	return listRetrievalCorrectionRunRows(context.Background(), db, limit)
 }
 
-// GetRetrievalCorrectionRun returns one persisted ACA retrieval correction run by ID.
+// GetRetrievalCorrectionRun returns one persisted ContextWiki retrieval correction run by ID.
 func (s *WorkspaceStore) GetRetrievalCorrectionRun(id string) (*RetrievalCorrectionRun, error) {
 	db, closeFn, err := s.openMutableDB(context.Background())
 	if err != nil {
@@ -1033,7 +1033,7 @@ func proposalMaintenancePriority(proposal MemoryProposal) int {
 func summarizeMaintenanceTitle(t Tension) string {
 	statement := strings.TrimSpace(t.Statement)
 	if statement == "" {
-		return "Resolve ACA maintenance tension"
+		return "Resolve ContextWiki maintenance tension"
 	}
 	if len(statement) > 72 {
 		statement = statement[:69] + "..."

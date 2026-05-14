@@ -100,7 +100,7 @@ func (b *Bootstrapper) Close() error {
 	return firstErr
 }
 
-// Build prepares an RLM environment from ACA, repo index, vault index, and optional companion state.
+// Build prepares an RLM environment from ContextWiki, repo index, vault index, and optional companion state.
 func (b *Bootstrapper) Build(ctx context.Context, task rlm.Task) (rlm.Environment, error) {
 	env := rlm.Environment{
 		Tools: DefaultTools(),
@@ -206,6 +206,7 @@ func (b *Bootstrapper) loadVaultHandles(ctx context.Context, query string) ([]st
 	query = strings.TrimSpace(query)
 	vaultPath := firstNonEmpty(strings.TrimSpace(b.cfg.VaultPath),
 		strings.TrimSpace(os.Getenv("FOXCTL_RLM_VAULT_PATH")),
+		strings.TrimSpace(os.Getenv("FOXCTL_CONTEXTWIKI_VAULT_PATH")),
 		strings.TrimSpace(os.Getenv("FOXCTL_ACA_VAULT_PATH")),
 		strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH")),
 	)

@@ -18,7 +18,7 @@ import (
 func newContextCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "context",
-		Short: "Inspect and promote ACA workspace control-plane state",
+		Short: "Inspect and promote ContextWiki workspace control-plane state",
 	}
 	cmd.AddCommand(
 		newContextShowCommand(),
@@ -85,7 +85,7 @@ func newContextReportCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "report",
-		Short: "Build a synthesized ACA current-state report",
+		Short: "Build a synthesized ContextWiki current-state report",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			target := resolveContextWorkspace(workspacePath)
 			store := contextplane.NewWorkspaceStore(target)
@@ -114,7 +114,7 @@ func newContextRetrieveCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "retrieve",
-		Short: "Blend ACA state with ranked vault hits",
+		Short: "Blend ContextWiki state with ranked vault hits",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if strings.TrimSpace(query) == "" {
 				return fmt.Errorf("--query is required")
@@ -173,7 +173,7 @@ func newContextNextCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "next",
-		Short: "Select the next ACA task candidate from the workspace task store",
+		Short: "Select the next ContextWiki task candidate from the workspace task store",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			target := resolveContextWorkspace(workspacePath)
 			ctx := cmd.Context()
@@ -211,7 +211,7 @@ func newContextDispatchCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "dispatch",
-		Short: "Build a bounded ACA task packet for the selected or next task",
+		Short: "Build a bounded ContextWiki task packet for the selected or next task",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			target := resolveContextWorkspace(workspacePath)
 			ctx := cmd.Context()
@@ -564,7 +564,7 @@ func newContextInferCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "infer",
-		Short: "Infer ACA observations and tensions from a compact summary",
+		Short: "Infer ContextWiki observations and tensions from a compact summary",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if strings.TrimSpace(summary) == "" {
 				return fmt.Errorf("--summary is required")

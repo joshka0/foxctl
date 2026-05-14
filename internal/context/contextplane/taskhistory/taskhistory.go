@@ -1737,7 +1737,7 @@ func summarizePack(pack Pack) string {
 		fmt.Sprintf("%d session(s)", len(pack.Sessions)),
 		fmt.Sprintf("%d repo anchor(s)", len(pack.RepoAnchors)),
 		fmt.Sprintf("%d dag anchor(s)", len(pack.DAGAnchors)),
-		fmt.Sprintf("%d ACA note(s)", len(pack.ACANotes)),
+		fmt.Sprintf("%d ContextWiki note(s)", len(pack.ACANotes)),
 	}
 	if len(pack.FilesTouched) > 0 {
 		parts = append(parts, "top files: "+strings.Join(shortenStrings(pack.FilesTouched, 3), ", "))

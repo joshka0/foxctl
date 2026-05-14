@@ -511,7 +511,7 @@ func End(ctx context.Context, deps Dependencies, req EndRequest) (EndResponse, e
 	if response.CaptureStatus == "" || (response.CaptureStatus != "captured" && response.CaptureStatus != "exists" && response.CaptureStatus != "scanned") {
 		return response, nil
 	}
-	if envEnabled("FOXCTL_ACA_DISABLED") {
+	if envEnabledAny("FOXCTL_CONTEXTWIKI_DISABLED", "FOXCTL_ACA_DISABLED") {
 		return response, nil
 	}
 
@@ -525,7 +525,7 @@ func End(ctx context.Context, deps Dependencies, req EndRequest) (EndResponse, e
 	if err == nil {
 		response.HandoffPath = handoffPath
 		recordInsights(store, target, summary, []string{"session:" + firstNonEmpty(response.CapturedSessionID, sessionID, "unknown")})
-		if envEnabled("FOXCTL_ACA_AUTO_PROMOTE") {
+		if envEnabledAny("FOXCTL_CONTEXTWIKI_AUTO_PROMOTE", "FOXCTL_ACA_AUTO_PROMOTE") {
 			response.PromotionDraft = autoPromote(store, handoffPath)
 		}
 	}
@@ -546,7 +546,7 @@ func SubagentStop(_ context.Context, deps Dependencies, req SubagentStopRequest)
 		return SubagentStopResponse{}, fmt.Errorf("detect workspace")
 	}
 	response := SubagentStopResponse{Workspace: target}
-	if envEnabled("FOXCTL_ACA_DISABLED") {
+	if envEnabledAny("FOXCTL_CONTEXTWIKI_DISABLED", "FOXCTL_ACA_DISABLED") {
 		return response, nil
 	}
 	store := contextplane.NewWorkspaceStore(target)
@@ -562,7 +562,7 @@ func SubagentStop(_ context.Context, deps Dependencies, req SubagentStopRequest)
 	if err == nil {
 		response.HandoffPath = handoffPath
 		recordInsights(store, target, summary, []string{"agent:" + agentID})
-		if envEnabled("FOXCTL_ACA_AUTO_PROMOTE") {
+		if envEnabledAny("FOXCTL_CONTEXTWIKI_AUTO_PROMOTE", "FOXCTL_ACA_AUTO_PROMOTE") {
 			response.PromotionDraft = autoPromote(store, handoffPath)
 		}
 	}
@@ -785,6 +785,15 @@ func nullableString(value string) any {
 		return value
 	}
 	return nil
+}
+
+func envEnabledAny(names ...string) bool {
+	for _, name := range names {
+		if envEnabled(name) {
+			return true
+		}
+	}
+	return false
 }
 
 func envEnabled(name string) bool {

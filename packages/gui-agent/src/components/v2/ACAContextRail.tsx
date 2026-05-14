@@ -516,7 +516,7 @@ function ReviewQueueCard({
             <InfoBlock
               label="Suggested destination"
               value={packet.target_path || 'n/a'}
-              tooltip="The project note ACA thinks this update should land in after review."
+              tooltip="The project note ContextWiki thinks this update should land in after review."
             />
           </div>
 
@@ -529,7 +529,8 @@ function ReviewQueueCard({
           {mergeDisabled && (
             <div className="rounded-md border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
               GUI merging is unavailable until the server knows where the project
-              vault lives. Set `FOXCTL_ACA_VAULT_PATH` or `FOXCTL_OBSIDIAN_VAULT_PATH`
+              vault lives. Set `FOXCTL_CONTEXTWIKI_VAULT_PATH`,
+              `FOXCTL_ACA_VAULT_PATH`, or `FOXCTL_OBSIDIAN_VAULT_PATH`
               on the server, then refresh this page.
             </div>
           )}

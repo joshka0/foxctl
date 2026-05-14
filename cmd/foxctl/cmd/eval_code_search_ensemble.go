@@ -330,7 +330,7 @@ func newEvalCodeSearchEnsembleCommand() *cobra.Command {
 	cmd.Flags().StringVar(&llmPlannerProvider, "llm-planner-provider", "", "Provider override for bounded planner")
 	cmd.Flags().StringVar(&llmPlannerModel, "llm-planner-model", "", "Model override for bounded planner")
 	cmd.Flags().IntVar(&llmPlannerMaxCandidates, "llm-planner-max-candidates", 8, "Maximum probes supplied to the bounded planner")
-	cmd.Flags().BoolVar(&includeACA, "include-aca", false, "Enable bounded ACA note/concept guidance during candidate bootstrap")
+	cmd.Flags().BoolVar(&includeACA, "include-aca", false, "Enable bounded ContextWiki note/concept guidance during candidate bootstrap")
 	cmd.Flags().BoolVar(&llmSelector, "llm-selector", false, "Enable bounded LLM adjudication over top execution-trace candidates")
 	cmd.Flags().StringVar(&llmProvider, "llm-selector-provider", "", "Provider override for bounded selector")
 	cmd.Flags().StringVar(&llmModel, "llm-selector-model", "", "Model override for bounded selector")
