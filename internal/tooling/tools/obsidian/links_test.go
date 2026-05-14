@@ -24,7 +24,7 @@ See [[ContextWiki MOC]] and [[ContextWiki L1 Top of Mind|Top of Mind]].
 	if len(result.Aliases) != 1 || result.Aliases[0] != "ContextWiki Layers" {
 		t.Fatalf("aliases=%v", result.Aliases)
 	}
-	if len(result.Headings) != 1 || result.Headings[0].Anchor != "aca-memory-layers" {
+	if len(result.Headings) != 1 || result.Headings[0].Anchor != "contextwiki-memory-layers" {
 		t.Fatalf("headings=%v", result.Headings)
 	}
 	if len(result.Outgoing) != 2 {
