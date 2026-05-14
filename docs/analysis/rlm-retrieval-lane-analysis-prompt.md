@@ -14,7 +14,7 @@
 The three retrieval lanes are:
 1. **Code Lane** — repo symbols, files, repo graph
 2. **Memory Lane** — companion episodes, artifact trajectories, scenes
-3. **Context Lane** — ACA top-of-mind, handoffs, Obsidian vault notes
+3. **Context Lane** — ContextWiki top-of-mind, handoffs, Obsidian vault notes
 
 ---
 
@@ -51,8 +51,8 @@ type Tool struct {
 
 // Environment is the typed external state visible to the runtime.
 type Environment struct {
-    TopOfMind       map[string]any   // ACA top-of-mind JSON blob
-    LatestHandoff   map[string]any   // latest ACA handoff JSON blob
+    TopOfMind       map[string]any   // ContextWiki top-of-mind JSON blob
+    LatestHandoff   map[string]any   // latest ContextWiki handoff JSON blob
     ActiveThreadIDs []string         // companion thread IDs
     SceneHandles    []string         // "conversation:<id>", "episode:<n>"
     ArtifactHandles []string         // "trajectory:<id>", "artifact:<sha256>"
@@ -216,8 +216,8 @@ func ResolveToolPolicy(available []Tool, profile string) (ToolPolicy, error) {
 
 ```go
 // === CONTEXT LANE (4 tools) ===
-{Name: "get_top_of_mind",    Description: "Load the ACA top-of-mind bundle for the workspace.", ReadOnly: true},
-{Name: "get_latest_handoff", Description: "Load the latest ACA handoff for the workspace.", ReadOnly: true},
+{Name: "get_top_of_mind",    Description: "Load the ContextWiki top-of-mind bundle for the workspace.", ReadOnly: true},
+{Name: "get_latest_handoff", Description: "Load the latest ContextWiki handoff for the workspace.", ReadOnly: true},
 {Name: "search_vault",       Description: "Search the Obsidian or vault knowledge plane for relevant notes.", ReadOnly: true,
     Parameters: {query: string, limit: int}},
 {Name: "read_note",          Description: "Load one durable note by note handle or vault-relative path.", ReadOnly: true,
@@ -287,7 +287,7 @@ const (
 )
 
 // KEY GAP: vault bootstrap uses env vars for path resolution:
-//   FOXCTL_RLM_VAULT_PATH || FOXCTL_ACA_VAULT_PATH || FOXCTL_OBSIDIAN_VAULT_PATH
+//   FOXCTL_RLM_VAULT_PATH || FOXCTL_CONTEXTWIKI_VAULT_PATH || FOXCTL_CONTEXTWIKI_VAULT_PATH || FOXCTL_OBSIDIAN_VAULT_PATH
 // If none set → VaultHandles = nil, search_vault silently returns empty
 ```
 
@@ -332,7 +332,7 @@ const (
 // 2. selectMemoryScoutRoles(lanes, max_scouts):
 //    - "facts"/"fact"    → ScoutRoleMemoryFact = "memory_fact_scout"
 //    - "timeline"/"time" → ScoutRoleMemoryTimeline = "memory_timeline_scout"
-//    - "aca"/"context"   → ScoutRoleACAContext = "aca_context_scout"
+//    - "aca"/"context"   → ScoutRoleContextWiki = "contextwiki_scout"
 //    - empty lanes → all 3 roles
 // 3. For each role, call a.subcall(ctx, Task{prompt: buildMemoryScoutPrompt(role, query), Role: role}, env)
 // 4. Each subcall runs a child LLM iteration (max_depth=0, max_iterations=3, max_subcalls=0)
@@ -344,7 +344,7 @@ const (
 //                         Return: {summary, claims:[{key,value,status,source,evidence_refs,confidence}], gaps}
 // memory_timeline_scout: "Reconstruct the update timeline... identify the current best view."
 //                         Return: {summary, current_best_view, timeline:[{ts,kind,value,source,...}], gaps}
-// aca_context_scout:     "Gather the durable ACA, handoff, and vault-backed context..."
+// contextwiki_scout:     "Gather the durable ContextWiki, handoff, and vault-backed context..."
 //                         Return: {summary, context_blocks:[{lane,summary,refs}], gaps}
 
 // KEY ISSUE: memory_ensemble_retrieve requires a.subcall != nil.
@@ -358,7 +358,7 @@ const (
 // Tool sets per scout role:
 // memory_fact_scout:    search_artifacts, load_artifact, search_scenes, get_scene, search_vault, read_note
 // memory_timeline_scout: search_scenes, get_scene, search_artifacts, load_artifact, get_latest_handoff
-// aca_context_scout:    get_top_of_mind, get_latest_handoff, search_vault, read_note
+// contextwiki_scout:    get_top_of_mind, get_latest_handoff, search_vault, read_note
 
 // NOTE: search_scenes uses SQL LIKE '%query%' — no semantic search for memory lane
 // NOTE: no session_recall or session_timeline skill exposed in any scout role
@@ -392,7 +392,7 @@ const (
 // These are internal routing labels, not user-visible
 
 // KEY ISSUES:
-// - No ACA/memory cross-pollination (include_history, include_aca are reserved/ignored)
+// - No ContextWiki/memory cross-pollination (include_history, include_contextwiki are reserved/ignored)
 // - The LLM planner/selector add latency and LLM cost with currently unclear eval benefit
 // - obsidianindex and companion DB are NOT queried inside the ensemble
 ```
@@ -405,16 +405,16 @@ Benchmark: `foxctl-mixed.yaml`
 
 | Mode | hit@5 | MRR | Notes |
 |------|-------|-----|-------|
-| `skill_context` (ACA-only) | **0.86** | **0.79** | Strongest overall |
-| `skill_default_plus_context` (ACA+code) | 0.86 | 0.71 | Good recall, weaker ranking |
-| `repoindex_dag` | 0.29 | 0.10 | Best non-ACA structural lane |
+| `skill_context` (ContextWiki-only) | **0.86** | **0.79** | Strongest overall |
+| `skill_default_plus_context` (ContextWiki+code) | 0.86 | 0.71 | Good recall, weaker ranking |
+| `repoindex_dag` | 0.29 | 0.10 | Best non-ContextWiki structural lane |
 | `repoindex_search` | 0.14 | 0.07 | |
 | `rlm_llm` (free mode) | 0.14 | 0.07 | Same as raw FTS — tool loop not helping |
 | `rlm_llm_code_staged` | **0.00** | **0.00** | Broken on current evals |
 
-Benchmark: `praze-mixed.yaml` — all modes near zero except ACA (0.12 hit@5).
+Benchmark: `praze-mixed.yaml` — all modes near zero except ContextWiki (0.12 hit@5).
 
-**Key interpretation:** ACA-only dominates. The RLM runtime is real and tool-using, but the controller is currently no better than a plain FTS call.
+**Key interpretation:** ContextWiki-only dominates. The RLM runtime is real and tool-using, but the controller is currently no better than a plain FTS call.
 
 ---
 
@@ -446,7 +446,7 @@ This is **explicitly prohibited** by AGENTS.md rule #16: _"Never use keyword heu
 ### `memory_ensemble_retrieve` requires subcall to be wired
 Returns `{supported: false}` if `subcall` not set. Only a few callers wire it.
 
-### `include_history` and `include_aca` are reserved/unimplemented
+### `include_history` and `include_contextwiki` are reserved/unimplemented
 Both fields exist in `codeSearchEnsembleInput.Constraints` but are explicitly marked "ignored in the first slice."
 
 ### `search_scenes` uses LIKE substring match
@@ -510,7 +510,7 @@ For each of the three lanes, answer these questions:
 
 8. **Staged plan for memory_recall**: `memory_recall` route has no staged phases. What should the phases look like, analogous to the code_retrieval 3-phase plan?
 
-9. **ACA dominance**: ACA-only wins on evals (hit@5 0.86). The RLM tool loop adds no measurable improvement over raw FTS. What is the hypothesis for why? What would fix it?
+9. **ContextWiki dominance**: ContextWiki-only wins on evals (hit@5 0.86). The RLM tool loop adds no measurable improvement over raw FTS. What is the hypothesis for why? What would fix it?
 
 ---
 
@@ -538,7 +538,7 @@ Produce a single markdown document with this structure:
 ### Failure Modes
 ### Cross-Lane Interactions
 
-## Lane 3: Context Retrieval (ACA/Vault)
+## Lane 3: Context Retrieval (ContextWiki/Vault)
 ### Tools
 ### Bootstrap
 ### Retrieval Funnel

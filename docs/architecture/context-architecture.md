@@ -4,22 +4,37 @@ vault_refs:
   - notes/repo/foxctl/platform-and-web.md
   - notes/repo/foxctl/semantic-and-memory.md
 ---
-# AgentCTL Context Architecture
+# ContextWiki Architecture
 
 Status: current first slice
 
-This document describes the first implemented slice of the AgentCTL Context Architecture (ACA): a workspace-local control plane scaffold plus a computed orientation bundle.
+This document describes the first implemented slice of ContextWiki: a
+workspace-local context system with a control plane, knowledge plane, and
+retrieval plane.
 
-The intended direction is for this layer to grow over time into an external, current database of what is happening in the workspace: active frontier state, resumable handoffs, repeated observations, tensions, and promotion-ready drafts.
+ContextWiki is the user-facing name. ContextWiki was the old internal abbreviation.
+Use **ContextWiki** in docs and operator-facing surfaces, and **context system**
+when describing the implementation that powers it.
+
+The intended direction is for this layer to grow over time into an external,
+current database of what is happening in the workspace: active frontier state,
+resumable handoffs, repeated observations, tensions, and promotion-ready drafts.
 
 ## Intent
 
-ACA separates:
+ContextWiki separates:
 
 - a control plane for active work continuity
 - a knowledge plane for durable human-readable notes
 
-The implemented slice now includes a real control-plane runtime, an Obsidian adapter and local vault index, MCP surfaces for ACA and vault operations, and a bounded daemon maintenance loop. It still stops short of the full long-horizon `contextd` design from the larger proposal.
+ContextWiki is wiki-like in the narrow sense that it creates a linked, curated
+knowledge surface for a workspace. The important distinction is that it also
+includes runtime control-plane state, retrieval evidence, review/promotion
+proposals, and provenance boundaries. A wiki can be one knowledge plane inside
+ContextWiki; the context system decides what is current, reviewed,
+retrievable, and safe to provide to agents.
+
+The implemented slice now includes a real control-plane runtime, an Obsidian adapter and local vault index, MCP surfaces for ContextWiki and vault operations, and a bounded daemon maintenance loop. It still stops short of the full long-horizon `contextd` design from the larger proposal.
 
 ## Implemented Surface
 
@@ -77,12 +92,12 @@ Behavior:
 - detects the current workspace root
 - reads existing task and session state from the persistent stores under `~/.foxctl/`
 - derives a bounded `top_of_mind` bundle
-- scaffolds workspace-local ACA files under `.foxctl/` if they do not exist
+- scaffolds workspace-local ContextWiki files under `.foxctl/` if they do not exist
 - persists structured runtime artifacts for handoffs, observations, and tensions
 - reads persisted runtime artifacts back out through a stable CLI surface
 - builds a synthesized current-state report from top-of-mind, latest handoff, merged observations, and open tensions
-- blends ACA control-plane state with ranked vault-index hits through `context retrieve`
-- can inspect one ACA retrieval miss, or a full retrieval suite, record misses as observations, propose deterministic corrective actions, and persist suite reports to CAS through `context retrieve-inspect*`
+- blends ContextWiki control-plane state with ranked vault-index hits through `context retrieve`
+- can inspect one ContextWiki retrieval miss, or a full retrieval suite, record misses as observations, propose deterministic corrective actions, and persist suite reports to CAS through `context retrieve-inspect*`
 - boosts vault hits with repo-index-derived file and symbol hints when the workspace repo index is available
 - optionally reranks top vault hits semantically when rerank is enabled through environment configuration
 - links open tensions to relevant indexed notes through `context contradictions`
@@ -90,16 +105,16 @@ Behavior:
 - infers structured observations and tensions from stop/subagent summaries
 - drafts promotion notes into the vault inbox from handoff records or repeated observations
 - can import transcript/text evidence into the vault inbox through `context import-evidence`, using deterministic extraction or an optional local OpenAI-compatible summarizer lane
-- evidence imports now seed the ACA proposal lane, so repeated topic imports dedupe into one proposal record instead of only accumulating isolated inbox drafts
-- evidence-backed proposals can include a suggested canonical target note and bounded review heading when ACA finds a credible landing note in the existing vault graph
+- evidence imports now seed the ContextWiki proposal lane, so repeated topic imports dedupe into one proposal record instead of only accumulating isolated inbox drafts
+- evidence-backed proposals can include a suggested canonical target note and bounded review heading when ContextWiki finds a credible landing note in the existing vault graph
 - applying an evidence-backed proposal now prepares a reviewed-merge job toward that suggested target instead of merging canonical notes automatically
 - `context proposal apply|merge` now return a stable `work_packet` object so hooks and agents can consume merge intent without re-parsing proposal payloads
 - daemon maintenance now projects prepared low-risk proposal work packets into `proposal_merge` maintenance tasks, so the next merge step is surfaced automatically
 - `context next-proposal-merge --claim` and `hooks proposal-next-merge` now claim the selected packet in proposal state, keeping it hidden until `proposal merge` or `proposal release-merge`
-- the GUI Context explorer now surfaces the next prepared ACA merge packet for the selected agent workspace, with claim/release/merge actions and a small sidebar badge when work is pending
+- the GUI Context explorer now surfaces the next prepared ContextWiki merge packet for the selected agent workspace, with claim/release/merge actions and a small sidebar badge when work is pending
 - explicitly review-merges promotion drafts into canonical vault notes through a bounded merge path
 - merges repeated observations and tensions into stable records instead of blindly appending duplicates
-- can persist deduped ACA memory proposals from retrieval-inspection flows and expose low-risk apply/reject surfaces for proposal review
+- can persist deduped ContextWiki memory proposals from retrieval-inspection flows and expose low-risk apply/reject surfaces for proposal review
 - refreshes top-of-mind and rethink state in a leader-safe daemon maintenance loop when the daemon is running with a workspace
 - exposes a first Phase 1 Obsidian adapter through CLI and MCP
 - includes an initial Phase 2 vault index for note/headings/links/aliases
@@ -146,12 +161,12 @@ Behavior:
 
 ## Hook Wiring
 
-ACA lifecycle wiring is now available through the existing Claude shell-hook path under `configs/hooks/` plus the sample Claude settings file at `configs/claude-settings.json`.
+ContextWiki lifecycle wiring is now available through the existing Claude shell-hook path under `configs/hooks/` plus the sample Claude settings file at `configs/claude-settings.json`.
 
 Bootstrap command:
 
 - `foxctl context hooks install`
-  - merges ACA `SessionStart`, `Stop`, and `SubagentStop` hook entries into workspace `.claude/settings.json`
+  - merges ContextWiki `SessionStart`, `Stop`, and `SubagentStop` hook entries into workspace `.claude/settings.json`
   - preserves existing `env`, `permissions`, and unrelated hook entries
 
 Current hook behavior:
@@ -161,13 +176,13 @@ Current hook behavior:
   - injects the latest orientation markdown from `.foxctl/exports/latest-orientation.md`
 - `Stop` via `configs/hooks/session-end.sh`
   - keeps the existing session capture path
-  - writes an ACA handoff with `foxctl capture`
+  - writes a ContextWiki handoff with `foxctl capture`
   - can emit structured observations or tensions through `foxctl context infer --apply`
-  - can draft a promotion automatically when `FOXCTL_ACA_AUTO_PROMOTE=1`
+  - can draft a promotion automatically when `FOXCTL_CONTEXTWIKI_AUTO_PROMOTE=1`
 - `SubagentStop` via `configs/hooks/subagent-stop.sh`
-  - writes a bounded ACA handoff for subagent completion
+  - writes a bounded ContextWiki handoff for subagent completion
   - can emit structured observations or tensions through `foxctl context infer --apply`
-  - can draft a promotion automatically when `FOXCTL_ACA_AUTO_PROMOTE=1`
+  - can draft a promotion automatically when `FOXCTL_CONTEXTWIKI_AUTO_PROMOTE=1`
 - task continuity hook wrapper via `configs/hooks/task-continuity-summary.sh`
   - uses `foxctl context task-history-summary`
   - emits prompt-ready continuity context plus `task_continuity_artifact`
@@ -196,7 +211,7 @@ Task continuity delivery split:
 
 ## MCP Read Surface
 
-The MCP facade now exposes first-class ACA read tools:
+The MCP facade now exposes first-class ContextWiki read tools:
 
 - `context_show`
 - `context_report`
@@ -213,7 +228,7 @@ The MCP facade now exposes first-class ACA read tools:
 - `context_promote`
 - `context_merge_promotion`
 
-These provide direct ACA access without routing through generic `foxctl_run`.
+These provide direct ContextWiki access without routing through generic `foxctl_run`.
 
 ## Transcript Family History
 
@@ -316,7 +331,7 @@ Current limitation:
 
 ## Daemon Maintenance
 
-When the daemon is started with a workspace, leader workers now include a bounded ACA maintenance loop.
+When the daemon is started with a workspace, leader workers now include a bounded ContextWiki maintenance loop.
 
 Current behavior:
 
@@ -325,21 +340,21 @@ Current behavior:
 - if `FOXCTL_OBSIDIAN_VAULT_PATH` is set:
   - rebuilds the local Obsidian index
   - recomputes vault health
-  - folds health findings into ACA maintenance tasks
+  - folds health findings into ContextWiki maintenance tasks
 
 Controls:
 
-- `FOXCTL_ACA_MAINTENANCE_INTERVAL`
+- `FOXCTL_CONTEXTWIKI_MAINTENANCE_INTERVAL`
   - optional duration override for the refresh ticker
 - `FOXCTL_OBSIDIAN_VAULT_PATH`
   - optional vault path for health-driven maintenance refresh
 - `FOXCTL_OBSIDIAN_SEMANTIC_ENABLED`
-  - explicit override for semantic note search in ACA retrieval
+  - explicit override for semantic note search in ContextWiki retrieval
   - use `false` or `0` to force lexical-only behavior
 - `FOXCTL_OPENAI_COMPAT_BASE_URL`
 - `FOXCTL_OPENAI_COMPAT_EMBEDDING_MODEL`
 - `FOXCTL_OPENAI_COMPAT_API_KEY`
-  - when an OpenAI-compatible embedding endpoint is configured, ACA retrieval now enables semantic search automatically and `context retrieve` effectively defaults to blended retrieval
+  - when an OpenAI-compatible embedding endpoint is configured, ContextWiki retrieval now enables semantic search automatically and `context retrieve` effectively defaults to blended retrieval
 
 Recommended `foxctl` setup:
 
@@ -396,23 +411,23 @@ The workspace-local `.foxctl/runtime/` tree is the control-plane seed. The globa
 Persistence split:
 
 - `top_of_mind.json` and handoff JSON files remain file-backed for easy inspection
-- mutable ACA collections now use `.foxctl/runtime/contextplane.db`
+- mutable ContextWiki collections now use `.foxctl/runtime/contextplane.db`
   - observations
   - tensions
   - promotion jobs
   - maintenance tasks
   - memory proposals
   - evidence import runs
-- legacy NDJSON files remain part of the scaffold, but mutable ACA state is now loaded into the dedicated store and updated there
+- legacy NDJSON files remain part of the scaffold, but mutable ContextWiki state is now loaded into the dedicated store and updated there
 
 ## Retrieval Policy Note
 
-ACA retrieval policy lives in `.foxctl/policy/retrieval.yaml`.
+ContextWiki retrieval policy lives in `.foxctl/policy/retrieval.yaml`.
 
 One useful opt-in setting is:
 
 ```yaml
-aca:
+contextwiki:
   package_note_fallback: true
 ```
 
@@ -420,11 +435,11 @@ Enable this when:
 
 - the repo has strong canonical package-note coverage
 - package/runtime/controller queries are common
-- agents need deterministic ACA retrieval behavior rather than prompt-only note targeting
+- agents need deterministic ContextWiki retrieval behavior rather than prompt-only note targeting
 
-This helped on `praze`-style package queries, where deterministic mapping from repo paths to canonical package-note paths improved ACA retrieval. It is less necessary on `foxctl`, where the default ACA vault lane is already strong.
+This helped on `praze`-style package queries, where deterministic mapping from repo paths to canonical package-note paths improved ContextWiki retrieval. It is less necessary on `foxctl`, where the default ContextWiki vault lane is already strong.
 
-A concrete example policy file is available at [docs/examples/aca-retrieval-policy-package-fallback.yaml](../examples/aca-retrieval-policy-package-fallback.yaml).
+A concrete example policy file is available at [docs/examples/contextwiki-retrieval-policy-package-fallback.yaml](../examples/contextwiki-retrieval-policy-package-fallback.yaml).
 
 ## Obsidian CLI Convention
 
@@ -517,4 +532,4 @@ Expected next increments:
 1. Add repo-graph-driven path and symbol backlinks from the code index into vault ranking and note lookup.
 2. Promote beyond heuristic observation capture into richer semantic clustering and deduplication.
 3. Extend reviewed merge into a fuller human-review state machine for canonical notes.
-4. Add a richer bootstrap path that can also install ACA wrappers into external user-home hook layouts.
+4. Add a richer bootstrap path that can also install ContextWiki wrappers into external user-home hook layouts.

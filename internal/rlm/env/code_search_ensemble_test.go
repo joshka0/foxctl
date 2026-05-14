@@ -186,7 +186,7 @@ func TestCodeSearchPathProbesAvoidBroadPrefixForNamespacedSkills(t *testing.T) {
 	}
 }
 
-func TestApplyACAGuidanceCandidatesAddsRepoPaths(t *testing.T) {
+func TestApplyContextWikiGuidanceCandidatesAddsRepoPaths(t *testing.T) {
 	t.Parallel()
 
 	workspace := t.TempDir()
@@ -204,15 +204,15 @@ func TestApplyACAGuidanceCandidatesAddsRepoPaths(t *testing.T) {
 			Symbols:   []string{"IngressWaitlistAPI"},
 		},
 	}
-	applied := applyACAGuidanceCandidates(workspace, "praze waitlist ingress", candidates, hits, codeSearchTaskFileLocate, nil)
+	applied := applyContextWikiGuidanceCandidates(workspace, "praze waitlist ingress", candidates, hits, codeSearchTaskFileLocate, nil)
 	if applied != 1 {
 		t.Fatalf("applied=%d", applied)
 	}
 	item := candidates["infra/k8s/waitlist/ingress.yaml"]
 	if item == nil {
-		t.Fatalf("missing ACA-seeded candidate: %#v", candidates)
+		t.Fatalf("missing ContextWiki-seeded candidate: %#v", candidates)
 	}
-	if !candidateHasSource(item, "aca_guidance") {
+	if !candidateHasSource(item, "contextwiki_guidance") {
 		t.Fatalf("sources=%v", item.Sources)
 	}
 	if item.Support <= 0.8 {
@@ -223,7 +223,7 @@ func TestApplyACAGuidanceCandidatesAddsRepoPaths(t *testing.T) {
 	}
 }
 
-func TestApplyACAGuidanceCandidatesSkipsExcludedPaths(t *testing.T) {
+func TestApplyContextWikiGuidanceCandidatesSkipsExcludedPaths(t *testing.T) {
 	t.Parallel()
 
 	workspace := t.TempDir()
@@ -240,7 +240,7 @@ func TestApplyACAGuidanceCandidatesSkipsExcludedPaths(t *testing.T) {
 			RepoPaths: []string{"infra/k8s/waitlist/ingress.yaml"},
 		},
 	}
-	applied := applyACAGuidanceCandidates(workspace, "praze waitlist ingress", candidates, hits, codeSearchTaskFileLocate, []string{"infra/k8s/waitlist/ingress.yaml"})
+	applied := applyContextWikiGuidanceCandidates(workspace, "praze waitlist ingress", candidates, hits, codeSearchTaskFileLocate, []string{"infra/k8s/waitlist/ingress.yaml"})
 	if applied != 0 {
 		t.Fatalf("applied=%d", applied)
 	}
@@ -249,7 +249,7 @@ func TestApplyACAGuidanceCandidatesSkipsExcludedPaths(t *testing.T) {
 	}
 }
 
-func TestApplyACAGuidanceCandidatesSkipsRepoPathsOutsideWorkspace(t *testing.T) {
+func TestApplyContextWikiGuidanceCandidatesSkipsRepoPathsOutsideWorkspace(t *testing.T) {
 	t.Parallel()
 
 	candidates := map[string]*codeSearchCandidate{}
@@ -259,7 +259,7 @@ func TestApplyACAGuidanceCandidatesSkipsRepoPathsOutsideWorkspace(t *testing.T) 
 			RepoPaths: []string{"infra/k8s/waitlist/ingress.yaml"},
 		},
 	}
-	applied := applyACAGuidanceCandidates(t.TempDir(), "praze waitlist ingress", candidates, hits, codeSearchTaskFileLocate, nil)
+	applied := applyContextWikiGuidanceCandidates(t.TempDir(), "praze waitlist ingress", candidates, hits, codeSearchTaskFileLocate, nil)
 	if applied != 0 {
 		t.Fatalf("applied=%d", applied)
 	}
@@ -268,7 +268,7 @@ func TestApplyACAGuidanceCandidatesSkipsRepoPathsOutsideWorkspace(t *testing.T) 
 	}
 }
 
-func TestApplyACAGuidanceCandidatesSkipsLowOverlapHits(t *testing.T) {
+func TestApplyContextWikiGuidanceCandidatesSkipsLowOverlapHits(t *testing.T) {
 	t.Parallel()
 
 	workspace := t.TempDir()
@@ -287,7 +287,7 @@ func TestApplyACAGuidanceCandidatesSkipsLowOverlapHits(t *testing.T) {
 			Title:     "Father in scripts",
 		},
 	}
-	applied := applyACAGuidanceCandidates(workspace, "argocd application praze auth", candidates, hits, codeSearchTaskFileLocate, nil)
+	applied := applyContextWikiGuidanceCandidates(workspace, "argocd application praze auth", candidates, hits, codeSearchTaskFileLocate, nil)
 	if applied != 0 {
 		t.Fatalf("applied=%d", applied)
 	}
@@ -296,7 +296,7 @@ func TestApplyACAGuidanceCandidatesSkipsLowOverlapHits(t *testing.T) {
 	}
 }
 
-func TestApplyACAGuidanceSupportBoostsExactInfraCandidate(t *testing.T) {
+func TestApplyContextWikiGuidanceSupportBoostsExactInfraCandidate(t *testing.T) {
 	t.Parallel()
 
 	candidates := map[string]*codeSearchCandidate{
@@ -320,7 +320,7 @@ func TestApplyACAGuidanceSupportBoostsExactInfraCandidate(t *testing.T) {
 		},
 	}
 
-	applied := applyACAGuidanceSupport("praze waitlist ingress", candidates, hits, codeSearchRouteInfraResource, codeSearchTaskFileLocate, nil)
+	applied := applyContextWikiGuidanceSupport("praze waitlist ingress", candidates, hits, codeSearchRouteInfraResource, codeSearchTaskFileLocate, nil)
 	if applied != 1 {
 		t.Fatalf("applied=%d", applied)
 	}
@@ -328,7 +328,7 @@ func TestApplyACAGuidanceSupportBoostsExactInfraCandidate(t *testing.T) {
 	if candidate == nil {
 		t.Fatal("missing candidate")
 	}
-	if !candidateHasSource(candidate, "aca_route_infra_exact") {
+	if !candidateHasSource(candidate, "contextwiki_route_infra_exact") {
 		t.Fatalf("sources=%v", candidate.Sources)
 	}
 	if candidate.Support <= 2.0 {
@@ -339,7 +339,7 @@ func TestApplyACAGuidanceSupportBoostsExactInfraCandidate(t *testing.T) {
 	}
 }
 
-func TestApplyACAGuidanceSupportInfraPrefersResourceRolePath(t *testing.T) {
+func TestApplyContextWikiGuidanceSupportInfraPrefersResourceRolePath(t *testing.T) {
 	t.Parallel()
 
 	candidates := map[string]*codeSearchCandidate{
@@ -366,14 +366,14 @@ func TestApplyACAGuidanceSupportInfraPrefersResourceRolePath(t *testing.T) {
 		},
 	}
 
-	applied := applyACAGuidanceSupport("argocd application praze auth", candidates, hits, codeSearchRouteInfraResource, codeSearchTaskFileLocate, nil)
+	applied := applyContextWikiGuidanceSupport("argocd application praze auth", candidates, hits, codeSearchRouteInfraResource, codeSearchTaskFileLocate, nil)
 	if applied != 1 {
 		t.Fatalf("applied=%d", applied)
 	}
-	if !candidateHasSource(candidates["platform/10-argocd/apps/65-praze-auth.yaml"], "aca_route_infra_exact") {
+	if !candidateHasSource(candidates["platform/10-argocd/apps/65-praze-auth.yaml"], "contextwiki_route_infra_exact") {
 		t.Fatalf("resource candidate sources=%v", candidates["platform/10-argocd/apps/65-praze-auth.yaml"].Sources)
 	}
-	if candidateHasSource(candidates["platform/10-argocd/apps/10-shared.yaml"], "aca_route_infra_exact") {
+	if candidateHasSource(candidates["platform/10-argocd/apps/10-shared.yaml"], "contextwiki_route_infra_exact") {
 		t.Fatalf("shared candidate sources=%v", candidates["platform/10-argocd/apps/10-shared.yaml"].Sources)
 	}
 }
@@ -397,7 +397,7 @@ func TestPreferredInfraAnchorPathsUsesResourceRoleFirst(t *testing.T) {
 	}
 }
 
-func TestApplyACAGuidanceSupportDoesNotIntroduceNewCandidates(t *testing.T) {
+func TestApplyContextWikiGuidanceSupportDoesNotIntroduceNewCandidates(t *testing.T) {
 	t.Parallel()
 
 	candidates := map[string]*codeSearchCandidate{
@@ -416,7 +416,7 @@ func TestApplyACAGuidanceSupportDoesNotIntroduceNewCandidates(t *testing.T) {
 		},
 	}
 
-	applied := applyACAGuidanceSupport("workspace retrieval", candidates, hits, codeSearchRoutePackageOwner, codeSearchTaskFileLocate, nil)
+	applied := applyContextWikiGuidanceSupport("workspace retrieval", candidates, hits, codeSearchRoutePackageOwner, codeSearchTaskFileLocate, nil)
 	if applied != 0 {
 		t.Fatalf("applied=%d", applied)
 	}
@@ -425,7 +425,7 @@ func TestApplyACAGuidanceSupportDoesNotIntroduceNewCandidates(t *testing.T) {
 	}
 }
 
-func TestApplyACAGuidanceSupportBoostsPackageSymbolOverlap(t *testing.T) {
+func TestApplyContextWikiGuidanceSupportBoostsPackageSymbolOverlap(t *testing.T) {
 	t.Parallel()
 
 	candidates := map[string]*codeSearchCandidate{
@@ -445,20 +445,20 @@ func TestApplyACAGuidanceSupportBoostsPackageSymbolOverlap(t *testing.T) {
 		},
 	}
 
-	applied := applyACAGuidanceSupport("workspace store retrieval", candidates, hits, codeSearchRoutePackageOwner, codeSearchTaskFileLocate, nil)
+	applied := applyContextWikiGuidanceSupport("workspace store retrieval", candidates, hits, codeSearchRoutePackageOwner, codeSearchTaskFileLocate, nil)
 	if applied < 2 {
 		t.Fatalf("applied=%d", applied)
 	}
 	candidate := candidates["internal/context/contextplane/retrieval.go"]
-	if !candidateHasSource(candidate, "aca_route_package_exact") {
+	if !candidateHasSource(candidate, "contextwiki_route_package_exact") {
 		t.Fatalf("sources=%v", candidate.Sources)
 	}
-	if !candidateHasSource(candidate, "aca_route_package_symbol") {
+	if !candidateHasSource(candidate, "contextwiki_route_package_symbol") {
 		t.Fatalf("sources=%v", candidate.Sources)
 	}
 }
 
-func TestApplyACAGuidanceSupportAddsPackageFamilyRepoPaths(t *testing.T) {
+func TestApplyContextWikiGuidanceSupportAddsPackageFamilyRepoPaths(t *testing.T) {
 	t.Parallel()
 
 	candidates := map[string]*codeSearchCandidate{
@@ -496,17 +496,17 @@ func TestApplyACAGuidanceSupportAddsPackageFamilyRepoPaths(t *testing.T) {
 		},
 	}
 
-	applied := applyACAGuidanceSupport("skills main runtime wiring", candidates, hits, codeSearchRoutePackageOwner, codeSearchTaskFileLocate, nil)
+	applied := applyContextWikiGuidanceSupport("skills main runtime wiring", candidates, hits, codeSearchRoutePackageOwner, codeSearchTaskFileLocate, nil)
 	if applied < 2 {
 		t.Fatalf("applied=%d", applied)
 	}
 	mainCandidate := candidates["internal/adapters/skillslib/skillmain/main.go"]
-	if mainCandidate == nil || !candidateHasSource(mainCandidate, "aca_route_package_anchor") {
+	if mainCandidate == nil || !candidateHasSource(mainCandidate, "contextwiki_route_package_anchor") {
 		t.Fatalf("sources=%v", mainCandidate.Sources)
 	}
 }
 
-func TestApplyACAGuidanceSupportAddsSkillmainAnchorAgainstCompetingCandidates(t *testing.T) {
+func TestApplyContextWikiGuidanceSupportAddsSkillmainAnchorAgainstCompetingCandidates(t *testing.T) {
 	t.Parallel()
 
 	candidates := map[string]*codeSearchCandidate{
@@ -542,12 +542,12 @@ func TestApplyACAGuidanceSupportAddsSkillmainAnchorAgainstCompetingCandidates(t 
 		},
 	}
 
-	applied := applyACAGuidanceSupport("Which file anchors the skills main runtime wiring package?", candidates, hits, codeSearchRoutePackageOwner, codeSearchTaskFileLocate, nil)
+	applied := applyContextWikiGuidanceSupport("Which file anchors the skills main runtime wiring package?", candidates, hits, codeSearchRoutePackageOwner, codeSearchTaskFileLocate, nil)
 	if applied < 1 {
 		t.Fatalf("applied=%d", applied)
 	}
 	mainCandidate := candidates["internal/adapters/skillslib/skillmain/main.go"]
-	if mainCandidate == nil || !candidateHasSource(mainCandidate, "aca_route_package_anchor") {
+	if mainCandidate == nil || !candidateHasSource(mainCandidate, "contextwiki_route_package_anchor") {
 		t.Fatalf("main candidate=%#v", mainCandidate)
 	}
 }
@@ -564,15 +564,15 @@ func TestPackageGuidanceSpecificityScorePrefersPrimaryAnchorPath(t *testing.T) {
 			"internal/adapters/skillslib/skillmain/main.go",
 		},
 	}
-	scoreWithPrimary := packageACAGuidanceSpecificityScore("Which file anchors the skills main runtime wiring package?", hit)
+	scoreWithPrimary := packageContextWikiGuidanceSpecificityScore("Which file anchors the skills main runtime wiring package?", hit)
 	hit.PrimaryAnchorPath = ""
-	scoreWithoutPrimary := packageACAGuidanceSpecificityScore("Which file anchors the skills main runtime wiring package?", hit)
+	scoreWithoutPrimary := packageContextWikiGuidanceSpecificityScore("Which file anchors the skills main runtime wiring package?", hit)
 	if scoreWithPrimary <= scoreWithoutPrimary {
 		t.Fatalf("scoreWithPrimary=%v scoreWithoutPrimary=%v", scoreWithPrimary, scoreWithoutPrimary)
 	}
 }
 
-func TestApplyACAGuidanceSupportPrefersPrimaryPackageAnchor(t *testing.T) {
+func TestApplyContextWikiGuidanceSupportPrefersPrimaryPackageAnchor(t *testing.T) {
 	t.Parallel()
 
 	candidates := map[string]*codeSearchCandidate{
@@ -600,7 +600,7 @@ func TestApplyACAGuidanceSupportPrefersPrimaryPackageAnchor(t *testing.T) {
 		},
 	}
 
-	applyACAGuidanceSupport("Which file anchors the skills main runtime wiring package?", candidates, hits, codeSearchRoutePackageOwner, codeSearchTaskFileLocate, nil)
+	applyContextWikiGuidanceSupport("Which file anchors the skills main runtime wiring package?", candidates, hits, codeSearchRoutePackageOwner, codeSearchTaskFileLocate, nil)
 	if candidates["internal/adapters/skillslib/skillmain/main.go"].Support <= candidates["internal/adapters/skillslib/skillmain/breakers.go"].Support {
 		t.Fatalf("main=%v breakers=%v", candidates["internal/adapters/skillslib/skillmain/main.go"].Support, candidates["internal/adapters/skillslib/skillmain/breakers.go"].Support)
 	}
@@ -639,7 +639,7 @@ func TestPrioritizedFileLocateGroundingCandidatesPrefersInfraExact(t *testing.T)
 		},
 		{
 			Path:    "platform/10-argocd/apps/65-praze-auth.yaml",
-			Sources: map[string]struct{}{"aca_route_infra_exact": {}, "search_repo": {}},
+			Sources: map[string]struct{}{"contextwiki_route_infra_exact": {}, "search_repo": {}},
 			Support: 1.0,
 		},
 	}
@@ -655,12 +655,12 @@ func TestPrioritizedFileLocateGroundingCandidatesDoesNotFrontloadSecondPackageAn
 	ranked := []*codeSearchCandidate{
 		{
 			Path:    "internal/adapters/skillslib/skillmain/main.go",
-			Sources: map[string]struct{}{"aca_route_package_anchor": {}, "search_repo": {}},
+			Sources: map[string]struct{}{"contextwiki_route_package_anchor": {}, "search_repo": {}},
 			Support: 1.4,
 		},
 		{
 			Path:    "internal/adapters/skillslib/skillmain/breakers.go",
-			Sources: map[string]struct{}{"aca_route_package_anchor": {}, "search_repo": {}},
+			Sources: map[string]struct{}{"contextwiki_route_package_anchor": {}, "search_repo": {}},
 			Support: 1.2,
 		},
 		{
@@ -688,12 +688,12 @@ func TestPrioritizedFileLocateGroundingCandidatesDoesNotFrontloadSecondInfraAnch
 	ranked := []*codeSearchCandidate{
 		{
 			Path:    "platform/10-argocd/apps/65-praze-auth.yaml",
-			Sources: map[string]struct{}{"aca_route_infra_exact": {}, "search_repo": {}},
+			Sources: map[string]struct{}{"contextwiki_route_infra_exact": {}, "search_repo": {}},
 			Support: 1.5,
 		},
 		{
 			Path:    "platform/10-argocd/apps-dev/65-praze-auth.yaml",
-			Sources: map[string]struct{}{"aca_route_infra_exact": {}, "search_repo": {}},
+			Sources: map[string]struct{}{"contextwiki_route_infra_exact": {}, "search_repo": {}},
 			Support: 1.3,
 		},
 		{
@@ -721,12 +721,12 @@ func TestRankCodeSearchCandidatesFileLocateDemotesSecondaryPackageAnchor(t *test
 	candidates := map[string]*codeSearchCandidate{
 		"internal/adapters/skillslib/skillmain/main.go": {
 			Path:    "internal/adapters/skillslib/skillmain/main.go",
-			Sources: map[string]struct{}{"aca_route_package_anchor": {}, "aca_route_package_primary_anchor": {}, "aca_route_package_exact": {}},
+			Sources: map[string]struct{}{"contextwiki_route_package_anchor": {}, "contextwiki_route_package_primary_anchor": {}, "contextwiki_route_package_exact": {}},
 			Support: 1.0,
 		},
 		"internal/adapters/skillslib/skillmain/breakers.go": {
 			Path:    "internal/adapters/skillslib/skillmain/breakers.go",
-			Sources: map[string]struct{}{"aca_route_package_anchor": {}, "aca_route_package_secondary_anchor": {}, "aca_route_package_exact": {}},
+			Sources: map[string]struct{}{"contextwiki_route_package_anchor": {}, "contextwiki_route_package_secondary_anchor": {}, "contextwiki_route_package_exact": {}},
 			Support: 1.0,
 		},
 		"internal/intelligence/searchindex/model.go": {
@@ -759,12 +759,12 @@ func TestRankCodeSearchCandidatesFileLocateDemotesSecondaryInfraAnchor(t *testin
 	candidates := map[string]*codeSearchCandidate{
 		"platform/10-argocd/apps/65-praze-auth.yaml": {
 			Path:    "platform/10-argocd/apps/65-praze-auth.yaml",
-			Sources: map[string]struct{}{"aca_route_infra_exact": {}, "aca_route_infra_primary_anchor": {}, "search_repo": {}},
+			Sources: map[string]struct{}{"contextwiki_route_infra_exact": {}, "contextwiki_route_infra_primary_anchor": {}, "search_repo": {}},
 			Support: 1.0,
 		},
 		"platform/10-argocd/apps-dev/65-praze-auth.yaml": {
 			Path:    "platform/10-argocd/apps-dev/65-praze-auth.yaml",
-			Sources: map[string]struct{}{"aca_route_infra_exact": {}, "aca_route_infra_secondary_anchor": {}, "search_repo": {}},
+			Sources: map[string]struct{}{"contextwiki_route_infra_exact": {}, "contextwiki_route_infra_secondary_anchor": {}, "search_repo": {}},
 			Support: 1.0,
 		},
 		"platform/10-argocd/apps/60-praze.yaml": {
@@ -798,7 +798,7 @@ func TestBuildFileLocateEvidenceBucketsGroupsSelectedFiles(t *testing.T) {
 	rankedByPath := map[string]*codeSearchCandidate{
 		"internal/adapters/skillslib/skillmain/main.go": {
 			Path:    "internal/adapters/skillslib/skillmain/main.go",
-			Sources: map[string]struct{}{"aca_route_package_primary_anchor": {}},
+			Sources: map[string]struct{}{"contextwiki_route_package_primary_anchor": {}},
 		},
 		"internal/domain/agent/agent.go": {
 			Path:    "internal/domain/agent/agent.go",
@@ -810,7 +810,7 @@ func TestBuildFileLocateEvidenceBucketsGroupsSelectedFiles(t *testing.T) {
 		},
 		"internal/adapters/skillslib/skillmain/breakers.go": {
 			Path:    "internal/adapters/skillslib/skillmain/breakers.go",
-			Sources: map[string]struct{}{"aca_route_package_secondary_anchor": {}},
+			Sources: map[string]struct{}{"contextwiki_route_package_secondary_anchor": {}},
 		},
 	}
 
@@ -832,7 +832,7 @@ func TestBuildCodeSearchCandidateTraceIncludesFileLocateMetadata(t *testing.T) {
 	ranked := []*codeSearchCandidate{
 		{
 			Path:    "internal/adapters/skillslib/skillmain/main.go",
-			Sources: map[string]struct{}{"aca_route_package_primary_anchor": {}, "aca_route_package_anchor": {}},
+			Sources: map[string]struct{}{"contextwiki_route_package_primary_anchor": {}, "contextwiki_route_package_anchor": {}},
 			Support: 1.0,
 		},
 	}
@@ -852,12 +852,12 @@ func TestPrioritizedFileLocateGroundingCandidatesPrefersDiverseComplements(t *te
 	ranked := []*codeSearchCandidate{
 		{
 			Path:    "platform/10-argocd/apps/65-praze-auth.yaml",
-			Sources: map[string]struct{}{"aca_route_infra_exact": {}, "aca_route_infra_primary_anchor": {}, "search_repo": {}},
+			Sources: map[string]struct{}{"contextwiki_route_infra_exact": {}, "contextwiki_route_infra_primary_anchor": {}, "search_repo": {}},
 			Support: 1.5,
 		},
 		{
 			Path:    "platform/10-argocd/apps-dev/65-praze-auth.yaml",
-			Sources: map[string]struct{}{"aca_route_infra_exact": {}, "aca_route_infra_secondary_anchor": {}, "search_repo": {}},
+			Sources: map[string]struct{}{"contextwiki_route_infra_exact": {}, "contextwiki_route_infra_secondary_anchor": {}, "search_repo": {}},
 			Support: 1.3,
 		},
 		{
@@ -884,10 +884,10 @@ func TestPrioritizedFileLocateGroundingCandidatesPrefersDiverseComplements(t *te
 	}
 }
 
-func TestBestACASymbolForPathPrefersMatchingSuffix(t *testing.T) {
+func TestBestContextWikiSymbolForPathPrefersMatchingSuffix(t *testing.T) {
 	t.Parallel()
 
-	got := bestACASymbolForPath("lib/jido/agent_server/directive_exec.ex", []string{
+	got := bestContextWikiSymbolForPath("lib/jido/agent_server/directive_exec.ex", []string{
 		"Jido.AgentServer.ChildInfo",
 		"Jido.AgentServer.DirectiveExec",
 	})
@@ -896,7 +896,7 @@ func TestBestACASymbolForPathPrefersMatchingSuffix(t *testing.T) {
 	}
 }
 
-func TestApplyACAGuidanceSupportAddsElixirStorageAnchor(t *testing.T) {
+func TestApplyContextWikiGuidanceSupportAddsElixirStorageAnchor(t *testing.T) {
 	t.Parallel()
 
 	candidates := map[string]*codeSearchCandidate{
@@ -916,17 +916,17 @@ func TestApplyACAGuidanceSupportAddsElixirStorageAnchor(t *testing.T) {
 		},
 	}
 
-	applied := applyACAGuidanceSupport("storage package", candidates, hits, codeSearchRoutePackageOwner, codeSearchTaskFileLocate, nil)
+	applied := applyContextWikiGuidanceSupport("storage package", candidates, hits, codeSearchRoutePackageOwner, codeSearchTaskFileLocate, nil)
 	if applied < 1 {
 		t.Fatalf("applied=%d", applied)
 	}
 	etsCandidate := candidates["lib/jido/storage/ets.ex"]
-	if etsCandidate == nil || !candidateHasSource(etsCandidate, "aca_route_package_anchor") {
+	if etsCandidate == nil || !candidateHasSource(etsCandidate, "contextwiki_route_package_anchor") {
 		t.Fatalf("ets candidate=%#v", etsCandidate)
 	}
 }
 
-func TestApplyACAGuidanceSupportMarksDirectiveExecAsPackageAnchor(t *testing.T) {
+func TestApplyContextWikiGuidanceSupportMarksDirectiveExecAsPackageAnchor(t *testing.T) {
 	t.Parallel()
 
 	candidates := map[string]*codeSearchCandidate{
@@ -954,17 +954,17 @@ func TestApplyACAGuidanceSupportMarksDirectiveExecAsPackageAnchor(t *testing.T) 
 		},
 	}
 
-	applied := applyACAGuidanceSupport("agent_server package", candidates, hits, codeSearchRoutePackageOwner, codeSearchTaskFileLocate, nil)
+	applied := applyContextWikiGuidanceSupport("agent_server package", candidates, hits, codeSearchRoutePackageOwner, codeSearchTaskFileLocate, nil)
 	if applied < 1 {
 		t.Fatalf("applied=%d", applied)
 	}
 	directiveExec := candidates["lib/jido/agent_server/directive_exec.ex"]
-	if directiveExec == nil || !candidateHasSource(directiveExec, "aca_route_package_anchor") {
+	if directiveExec == nil || !candidateHasSource(directiveExec, "contextwiki_route_package_anchor") {
 		t.Fatalf("directive_exec=%#v", directiveExec)
 	}
 }
 
-func TestSelectACAPackageAnchorPathsPrefersSymbolAndQueryAlignedFile(t *testing.T) {
+func TestSelectContextWikiPackageAnchorPathsPrefersSymbolAndQueryAlignedFile(t *testing.T) {
 	t.Parallel()
 
 	candidates := map[string]*codeSearchCandidate{
@@ -984,7 +984,7 @@ func TestSelectACAPackageAnchorPathsPrefersSymbolAndQueryAlignedFile(t *testing.
 			Support: 0.7,
 		},
 	}
-	got := selectACAPackageAnchorPaths(
+	got := selectContextWikiPackageAnchorPaths(
 		[]string{
 			"lib/jido/agent_server/child_info.ex",
 			"lib/jido/agent_server/directive_exec.ex",
@@ -1002,7 +1002,7 @@ func TestSelectACAPackageAnchorPathsPrefersSymbolAndQueryAlignedFile(t *testing.
 	}
 }
 
-func TestSelectACAPackageAnchorPathsPrefersSkillmainMain(t *testing.T) {
+func TestSelectContextWikiPackageAnchorPathsPrefersSkillmainMain(t *testing.T) {
 	t.Parallel()
 
 	candidates := map[string]*codeSearchCandidate{
@@ -1017,7 +1017,7 @@ func TestSelectACAPackageAnchorPathsPrefersSkillmainMain(t *testing.T) {
 			Support: 1.0,
 		},
 	}
-	got := selectACAPackageAnchorPaths(
+	got := selectContextWikiPackageAnchorPaths(
 		[]string{
 			"internal/adapters/skillslib/skillmain/context.go",
 			"internal/adapters/skillslib/skillmain/main.go",
@@ -1035,7 +1035,7 @@ func TestSelectACAPackageAnchorPathsPrefersSkillmainMain(t *testing.T) {
 	}
 }
 
-func TestPackageACAGuidanceHitsFromSearchHitsPrefersSpecificPackageNote(t *testing.T) {
+func TestPackageContextWikiGuidanceHitsFromSearchHitsPrefersSpecificPackageNote(t *testing.T) {
 	t.Parallel()
 
 	hits := []obsidianindex.SearchHit{
@@ -1056,13 +1056,13 @@ func TestPackageACAGuidanceHitsFromSearchHitsPrefersSpecificPackageNote(t *testi
 		},
 	}
 
-	got := packageACAGuidanceHitsFromSearchHits("/Users/joshka/repos/githubs/jido", "storage package", hits, 1)
+	got := packageContextWikiGuidanceHitsFromSearchHits("/Users/joshka/repos/githubs/jido", "storage package", hits, 1)
 	if len(got) != 1 || got[0].Path != "notes/repo/jido/packages/storage.md" {
 		t.Fatalf("got=%v", got)
 	}
 }
 
-func TestPackageACAGuidanceHitsFromSearchHitsPrefersSkillmainOverSemanticSearch(t *testing.T) {
+func TestPackageContextWikiGuidanceHitsFromSearchHitsPrefersSkillmainOverSemanticSearch(t *testing.T) {
 	t.Parallel()
 
 	hits := []obsidianindex.SearchHit{
@@ -1084,13 +1084,13 @@ func TestPackageACAGuidanceHitsFromSearchHitsPrefersSkillmainOverSemanticSearch(
 		},
 	}
 
-	got := packageACAGuidanceHitsFromSearchHits("/Users/joshka/repos/personal/foxctl", "skills main runtime wiring", hits, 1)
+	got := packageContextWikiGuidanceHitsFromSearchHits("/Users/joshka/repos/personal/foxctl", "skills main runtime wiring", hits, 1)
 	if len(got) != 1 || got[0].Path != "notes/repo/foxctl/packages/internal-adapters-skillslib-skillmain.md" {
 		t.Fatalf("got=%v", got)
 	}
 }
 
-func TestTopACAGuidanceSupportHitsPrefersSkillmainOverSemanticSearch(t *testing.T) {
+func TestTopContextWikiGuidanceSupportHitsPrefersSkillmainOverSemanticSearch(t *testing.T) {
 	t.Parallel()
 
 	hits := []contextplane.RetrievalHit{
@@ -1112,7 +1112,7 @@ func TestTopACAGuidanceSupportHitsPrefersSkillmainOverSemanticSearch(t *testing.
 		},
 	}
 
-	got := topACAGuidanceSupportHits("skills main runtime wiring", hits, codeSearchRoutePackageOwner, codeSearchTaskFileLocate)
+	got := topContextWikiGuidanceSupportHits("skills main runtime wiring", hits, codeSearchRoutePackageOwner, codeSearchTaskFileLocate)
 	if len(got) != 1 || got[0].Path != "notes/repo/foxctl/packages/internal-adapters-skillslib-skillmain.md" {
 		t.Fatalf("got=%v", got)
 	}
@@ -1140,8 +1140,8 @@ func TestPackageGuidancePipelinePrefersSkillmainOverSemanticSearch(t *testing.T)
 		},
 	}
 
-	hits := packageACAGuidanceHitsFromSearchHits("/Users/joshka/repos/personal/foxctl", "skills main runtime wiring", searchHits, 6)
-	got := topACAGuidanceSupportHits("skills main runtime wiring", hits, codeSearchRoutePackageOwner, codeSearchTaskFileLocate)
+	hits := packageContextWikiGuidanceHitsFromSearchHits("/Users/joshka/repos/personal/foxctl", "skills main runtime wiring", searchHits, 6)
+	got := topContextWikiGuidanceSupportHits("skills main runtime wiring", hits, codeSearchRoutePackageOwner, codeSearchTaskFileLocate)
 	if len(got) != 1 || got[0].Path != "notes/repo/foxctl/packages/internal-adapters-skillslib-skillmain.md" {
 		t.Fatalf("got=%v", got)
 	}
@@ -1169,14 +1169,14 @@ func TestPackageGuidancePipelinePrefersSkillmainOverSemanticSearchWithRealScores
 		},
 	}
 
-	hits := packageACAGuidanceHitsFromSearchHits("/Users/joshka/repos/personal/foxctl", "Which file anchors the skills main runtime wiring package?", searchHits, 6)
-	got := topACAGuidanceSupportHits("Which file anchors the skills main runtime wiring package?", hits, codeSearchRoutePackageOwner, codeSearchTaskFileLocate)
+	hits := packageContextWikiGuidanceHitsFromSearchHits("/Users/joshka/repos/personal/foxctl", "Which file anchors the skills main runtime wiring package?", searchHits, 6)
+	got := topContextWikiGuidanceSupportHits("Which file anchors the skills main runtime wiring package?", hits, codeSearchRoutePackageOwner, codeSearchTaskFileLocate)
 	if len(got) != 1 || got[0].Path != "notes/repo/foxctl/packages/internal-adapters-skillslib-skillmain.md" {
 		t.Fatalf("got=%v", got)
 	}
 }
 
-func TestShouldUsePackageACAGuidanceAcceptsSpecificSkillmainNote(t *testing.T) {
+func TestShouldUsePackageContextWikiGuidanceAcceptsSpecificSkillmainNote(t *testing.T) {
 	t.Parallel()
 
 	hits := []contextplane.RetrievalHit{
@@ -1188,12 +1188,12 @@ func TestShouldUsePackageACAGuidanceAcceptsSpecificSkillmainNote(t *testing.T) {
 		},
 	}
 
-	if !shouldUsePackageACAGuidance(codeSearchRouteCode, "Which file anchors the skills main runtime wiring package?", hits) {
+	if !shouldUsePackageContextWikiGuidance(codeSearchRouteCode, "Which file anchors the skills main runtime wiring package?", hits) {
 		t.Fatal("expected package guidance override for specific skillmain note")
 	}
 }
 
-func TestShouldUsePackageACAGuidanceRejectsWeakGenericPackageMatch(t *testing.T) {
+func TestShouldUsePackageContextWikiGuidanceRejectsWeakGenericPackageMatch(t *testing.T) {
 	t.Parallel()
 
 	hits := []contextplane.RetrievalHit{
@@ -1205,7 +1205,7 @@ func TestShouldUsePackageACAGuidanceRejectsWeakGenericPackageMatch(t *testing.T)
 		},
 	}
 
-	if shouldUsePackageACAGuidance(codeSearchRouteCode, "Where is the eval code-search-ensemble command implemented?", hits) {
+	if shouldUsePackageContextWikiGuidance(codeSearchRouteCode, "Where is the eval code-search-ensemble command implemented?", hits) {
 		t.Fatal("expected weak package hit to be ignored for generic code query")
 	}
 }
@@ -1246,7 +1246,7 @@ func TestPromoteCodeSearchRouteFamilyAcceptsSpecificPackagePromotion(t *testing.
 	}
 }
 
-func TestTopACAGuidanceSupportHitsPrefersSpecificInfraConcepts(t *testing.T) {
+func TestTopContextWikiGuidanceSupportHitsPrefersSpecificInfraConcepts(t *testing.T) {
 	t.Parallel()
 
 	hits := []contextplane.RetrievalHit{
@@ -1270,7 +1270,7 @@ func TestTopACAGuidanceSupportHitsPrefersSpecificInfraConcepts(t *testing.T) {
 		},
 	}
 
-	top := topACAGuidanceSupportHits("argocd application praze auth", hits, codeSearchRouteInfraResource, codeSearchTaskFileLocate)
+	top := topContextWikiGuidanceSupportHits("argocd application praze auth", hits, codeSearchRouteInfraResource, codeSearchTaskFileLocate)
 	if len(top) != 2 {
 		t.Fatalf("top=%v", top)
 	}
@@ -1417,7 +1417,7 @@ func TestInferCodeSearchRouteFamilyFromCandidatesKeepsCode(t *testing.T) {
 func TestInferCodeSearchRouteFamilyFromCandidatesCochange(t *testing.T) {
 	t.Parallel()
 
-	if got := inferCodeSearchRouteFamilyFromCandidates(codeSearchTaskChangeImpact, "What changes when ACA retrieval moves?", map[string]*codeSearchCandidate{}); got != codeSearchRouteCochangeHistory {
+	if got := inferCodeSearchRouteFamilyFromCandidates(codeSearchTaskChangeImpact, "What changes when ContextWiki retrieval moves?", map[string]*codeSearchCandidate{}); got != codeSearchRouteCochangeHistory {
 		t.Fatalf("route=%q", got)
 	}
 }

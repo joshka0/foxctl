@@ -11,4 +11,4 @@ updated: 2026-03-09
 
 # ADR-0001 Context Architecture
 
-Adopt the ACA dual-plane model and keep durable knowledge outside the runtime control plane.
+Adopt the ContextWiki dual-plane model and keep durable knowledge outside the runtime control plane.

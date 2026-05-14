@@ -19,7 +19,7 @@ import (
 )
 
 func TestContextRetrieveInspect_AppliesPolicyPatch(t *testing.T) {
-	h := newACAInspectHarness(t)
+	h := newContextWikiInspectHarness(t)
 	expectedPath := "internal/storage/memory/store.go"
 	noteRelPath := filepath.Join("notes", "repo", filepath.Base(h.workspacePath), "packages", "internal-storage-memory.md")
 	notePath := filepath.Join(h.vaultRoot, noteRelPath)
@@ -81,7 +81,7 @@ Reference anchor for package coverage.
 }
 
 func TestContextRetrieveInspectSuite_EmitsArtifactAndAcceptsControlSuite(t *testing.T) {
-	h := newACAInspectHarness(t)
+	h := newContextWikiInspectHarness(t)
 	noteRelPath := filepath.Join("notes", "repo", filepath.Base(h.workspacePath), "packages", "internal-storage-memory.md")
 	writeTestVaultNote(t, filepath.Join(h.vaultRoot, noteRelPath), `---
 title: Canonical Package Anchor
@@ -167,7 +167,7 @@ queries:
 }
 
 func TestContextRetrieveInspectSuite_DraftsPromotionWhenObservationRepeats(t *testing.T) {
-	h := newACAInspectHarness(t)
+	h := newContextWikiInspectHarness(t)
 
 	targetSuitePath := filepath.Join(t.TempDir(), "target.yaml")
 	if err := os.WriteFile(targetSuitePath, []byte(`name: target
@@ -225,7 +225,7 @@ queries:
 }
 
 func TestContextRetrieveInspectRunsAndArtifactCommands(t *testing.T) {
-	h := newACAInspectHarness(t)
+	h := newContextWikiInspectHarness(t)
 	noteRelPath := filepath.Join("notes", "repo", filepath.Base(h.workspacePath), "packages", "internal-storage-memory.md")
 	writeTestVaultNote(t, filepath.Join(h.vaultRoot, noteRelPath), `---
 title: Canonical Package Anchor
@@ -324,13 +324,13 @@ queries:
 	}
 }
 
-type acaInspectHarness struct {
+type contextWikiInspectHarness struct {
 	cfg           config.Config
 	workspacePath string
 	vaultRoot     string
 }
 
-func newACAInspectHarness(t *testing.T) acaInspectHarness {
+func newContextWikiInspectHarness(t *testing.T) contextWikiInspectHarness {
 	t.Helper()
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
@@ -339,14 +339,14 @@ func newACAInspectHarness(t *testing.T) acaInspectHarness {
 	if err != nil {
 		t.Fatalf("config load: %v", err)
 	}
-	workspacePath := filepath.Join(tmp, "aca-inspect")
+	workspacePath := filepath.Join(tmp, "contextwiki-inspect")
 	if err := os.MkdirAll(workspacePath, 0o755); err != nil {
 		t.Fatalf("mkdir workspace: %v", err)
 	}
 	store := contextplane.NewWorkspaceStore(workspacePath)
 	if _, err := store.SaveTopOfMind(contextplane.TopOfMind{
 		WorkspaceID:  filepath.Base(workspacePath),
-		Objective:    "Improve ACA retrieval",
+		Objective:    "Improve ContextWiki retrieval",
 		Phase:        "experiment",
 		RelevantRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "internal/storage/memory/store.go"}},
 		UpdatedAt:    time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC),
@@ -357,7 +357,7 @@ func newACAInspectHarness(t *testing.T) acaInspectHarness {
 	if err := os.MkdirAll(vaultRoot, 0o755); err != nil {
 		t.Fatalf("mkdir vault: %v", err)
 	}
-	return acaInspectHarness{
+	return contextWikiInspectHarness{
 		cfg:           cfg,
 		workspacePath: workspacePath,
 		vaultRoot:     vaultRoot,
@@ -374,7 +374,7 @@ func writeTestVaultNote(t *testing.T, path, body string) {
 	}
 }
 
-func rebuildTestVaultIndex(t *testing.T, h acaInspectHarness) {
+func rebuildTestVaultIndex(t *testing.T, h contextWikiInspectHarness) {
 	t.Helper()
 	index, err := obsidianindex.Open(context.Background(), h.cfg.Storage.Root, h.vaultRoot)
 	if err != nil {

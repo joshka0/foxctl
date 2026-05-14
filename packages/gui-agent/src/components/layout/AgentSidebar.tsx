@@ -165,8 +165,8 @@ export function AgentSidebar({ activeView, onViewChange }: AgentSidebarProps) {
     workspacesData?.current?.trim() ||
     ''
 
-  const { data: acaOverview } = useQuery({
-    queryKey: ['aca-overview', contextWorkspaceRoot],
+  const { data: contextWikiOverview } = useQuery({
+    queryKey: ['contextwiki-overview', contextWorkspaceRoot],
     queryFn: () =>
       getContextOverview({
         workspace: contextWorkspaceRoot,
@@ -179,10 +179,10 @@ export function AgentSidebar({ activeView, onViewChange }: AgentSidebarProps) {
 
   const preparedMergeBadge = useMemo(() => {
     const total =
-      (acaOverview?.stats.prepared_merge_count ?? 0) +
-      (acaOverview?.stats.claimed_merge_count ?? 0)
+      (contextWikiOverview?.stats.prepared_merge_count ?? 0) +
+      (contextWikiOverview?.stats.claimed_merge_count ?? 0)
     return total > 0 ? Math.min(total, 99) : undefined
-  }, [acaOverview?.stats.claimed_merge_count, acaOverview?.stats.prepared_merge_count])
+  }, [contextWikiOverview?.stats.claimed_merge_count, contextWikiOverview?.stats.prepared_merge_count])
 
   const focusContext = useMemo(() => {
     if (selectedAgent) {

@@ -6,9 +6,9 @@ description: Typed evidence, retrieval lanes, episodes, and feedback in foxctl's
 Status: Current architecture guide for the implemented core.
 
 The context engine is the typed retrieval substrate under newer context work. It
-does not replace ACA. ACA is the workspace control and knowledge plane;
-contextengine provides domain types, lane retrieval, evidence packs, and durable
-episode records that ACA and other callers can use.
+does not replace ContextWiki. ContextWiki is the workspace control and knowledge
+plane; the context engine provides domain types, lane retrieval, evidence
+packs, and durable episode records that ContextWiki and other callers can use.
 
 ## What it stores
 
@@ -59,7 +59,7 @@ The context engine organizes retrieval into lanes:
 |---|---|
 | `code` | Code search hits and snippets |
 | `memory` | Memory claims and durable facts |
-| `context` | Top-of-mind, handoffs, and ACA context packets |
+| `context` | Top-of-mind, handoffs, and ContextWiki packets |
 | `task` | Task-local context and related tasks |
 | `mixed` | Concurrent lane fan-out and typed ref fusion |
 
@@ -67,16 +67,16 @@ The context engine organizes retrieval into lanes:
 results by `EvidenceRef.Type` plus `EvidenceRef.Ref`. Partial lane failures are
 recorded in metadata so callers can degrade instead of losing all evidence.
 
-## Relationship to ACA
+## Relationship to ContextWiki
 
-ACA owns workspace continuity and the knowledge-plane workflow:
+ContextWiki owns workspace continuity and the knowledge-plane workflow:
 
 - `.foxctl/runtime/top_of_mind.json`
 - handoffs, observations, tensions, and proposals
 - Obsidian vault search and bridge reconciliation
 - retrieval inspection and correction proposals
 
-Contextengine provides the typed retrieval representation:
+The context engine provides the typed retrieval representation:
 
 - `EvidencePack`
 - `EvidenceNode`
@@ -87,8 +87,8 @@ Contextengine provides the typed retrieval representation:
 The clean boundary is:
 
 ```text
-ACA and callers decide what context is useful
-  -> contextengine records typed evidence and retrieval telemetry
+ContextWiki and callers decide what context is useful
+  -> context engine records typed evidence and retrieval telemetry
   -> stores keep episodes, feedback, projections, and large payload CAS refs
 ```
 
@@ -119,4 +119,3 @@ semantic search when the first problem is meaning-based candidate discovery.
 - [internal/context/contextengine](https://github.com/joshka0/foxctl/tree/main/internal/context/contextengine)
 - [internal/storage/contextengine](https://github.com/joshka0/foxctl/tree/main/internal/storage/contextengine)
 - [docs/architecture/context-architecture.md](https://github.com/joshka0/foxctl/blob/main/docs/architecture/context-architecture.md)
-

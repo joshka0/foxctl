@@ -52,7 +52,7 @@
     "VAL-DOCS-010": ".gsx toolchain section has exact regeneration commands, editable/forbidden globs, 6-step add-view checklist",
     "VAL-DOCS-011": "Progressive Reveal section with 4-row mapping for transcript rows, tool activity, events, errors",
     "VAL-DOCS-012": "Traceability table has 6 rows mapping all audit findings to decisions with resolution stances",
-    "VAL-DOCS-013": "Three-Plane Memory Model with Companion Memory, Named Durable Memory, ACA/Continuity; all have projection/heuristic labeling",
+    "VAL-DOCS-013": "Three-Plane Memory Model with Companion Memory, Named Durable Memory, ContextWiki/Continuity; all have projection/heuristic labeling",
     "VAL-DOCS-014": "Surface Ownership table maps 8 cockpit surfaces to all 5 DESIGN.md surfaces with duplication resolutions",
     "VAL-DOCS-015": "All 5 ADRs cite ≥1 path:line reference (17 total citations across all ADRs)"
   }

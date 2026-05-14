@@ -18,7 +18,7 @@ import (
 // SinkRequest is the expected JSON body for POST /api/sink.
 type SinkRequest struct {
 	// VaultPath is deprecated. The sink root is server-controlled via
-	// FOXCTL_ACA_VAULT_PATH or FOXCTL_OBSIDIAN_VAULT_PATH.
+	// FOXCTL_CONTEXTWIKI_VAULT_PATH or FOXCTL_OBSIDIAN_VAULT_PATH.
 	VaultPath string `json:"vaultPath"`
 	FilePath  string `json:"filePath"`
 	Content   string `json:"content"`

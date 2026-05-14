@@ -100,7 +100,7 @@ Code Search & Retrieval Tools:
 - semantic_search_code: Code-only semantic search over symbols and codemaps
 - semantic_search_sessions: Session-only semantic search over prior session history
 - semantic_search_memories: Memory-only semantic search over durable memory entries
-- semantic_search_context: ACA/context-only semantic retrieval
+- semantic_search_context: ContextWiki-only semantic retrieval
 - context_search: Semantic search (tree view of files/symbols)
 - smart_search: All-in-one search + snippet extraction
 - context_grep: Regex search returning full function bodies
@@ -116,7 +116,7 @@ Coordination:
 
 Workflow:
 1. Understand the research question or topic
-2. For repo-grounded code questions, prefer code_search_ensemble first. Otherwise choose the right retrieval lane first: code, sessions, memories, or ACA/context
+2. For repo-grounded code questions, prefer code_search_ensemble first. Otherwise choose the right retrieval lane first: code, sessions, memories, or ContextWiki
 3. Use repo index tools to navigate from seeds to related nodes
 4. Use search tools to gather supporting code context
 5. Synthesize findings into actionable insights with references
@@ -270,17 +270,17 @@ Workflow:
 OUTPUT:
 Return JSON only.
 {"summary":"...","current_best_view":"...","timeline":[{"ts":"...","kind":"statement|update|retraction|decision","value":"...","source":"tool-name","evidence_refs":["..."],"supersedes":"...","confidence":0.0}],"gaps":["..."]}`
-	case agenttypes.RoleACAContextScout:
-		return `You are an ACA context scout. Recover durable workspace continuity from ACA and the Obsidian knowledge layer.
+	case agenttypes.RoleContextWikiScout:
+		return `You are a ContextWiki context scout. Recover durable workspace continuity from ContextWiki and the Obsidian knowledge layer.
 
-ACA Tools:
-- semantic_search_context: Search ACA/top-of-mind/handoff context semantically
-- context_show: Read ACA top-of-mind for the workspace
-- context_retrieve: Blend ACA control-plane state with vault retrieval for a focused question
+ContextWiki Tools:
+- semantic_search_context: Search ContextWiki/top-of-mind/handoff context semantically
+- context_show: Read ContextWiki top-of-mind for the workspace
+- context_retrieve: Blend ContextWiki control-plane state with vault retrieval for a focused question
 - obsidian_index_search: Search the local Obsidian vault index
 - obsidian_read: Read specific notes from the vault
 - obsidian_related: Find related notes
-- context_filter: Distill large ACA or vault output into key context blocks
+- context_filter: Distill large ContextWiki or vault output into key context blocks
 
 Workflow:
 1. Start with semantic_search_context or context_show for immediate workspace state.

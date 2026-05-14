@@ -5,7 +5,7 @@ description: Build, promote, reconcile, and index the Obsidian knowledge layer t
 
 The Obsidian bridge turns repo documentation and code structure into a queryable
 knowledge layer stored in an Obsidian vault. It is the knowledge-plane half of
-foxctl's dual-plane [ACA context architecture](/context/aca/): ACA manages
+foxctl's dual-plane [ContextWiki](/context/contextwiki/): ContextWiki manages
 active workspace state (top-of-mind, handoffs, observations, tensions), while
 the Obsidian bridge provides durable human-readable notes that survive across
 sessions.
@@ -20,7 +20,7 @@ architectural intent. The Obsidian bridge solves this by:
 2. Linking repo documentation to vault notes with bidirectional metadata.
 3. Indexing notes, headings, wikilinks, aliases, tags, and embeddings for fast
    retrieval.
-4. Keeping the knowledge layer queryable by ACA retrieval, hooks, and agent
+4. Keeping the knowledge layer queryable by ContextWiki retrieval, hooks, and agent
    workflows.
 
 The bridge never silently rewrites canonical prose. It drafts into an inbox,
@@ -182,7 +182,7 @@ Once indexed, vault notes are queryable through several paths:
 | `foxctl obsidian index search --semantic` | Semantic search over note embeddings |
 | `foxctl obsidian index related --path ...` | Index-backed related note lookup |
 
-ACA retrieval blends vault-index hits with repo-index file and symbol hints when
+ContextWiki retrieval blends vault-index hits with repo-index file and symbol hints when
 the workspace repo index is available. When an embedding provider is configured,
 `context retrieve` defaults to blended retrieval.
 
@@ -222,9 +222,9 @@ is set, the maintenance loop:
 
 - Rebuilds the local Obsidian index on a ticker
 - Recomputes vault health
-- Folds health findings into ACA maintenance tasks
+- Folds health findings into ContextWiki maintenance tasks
 
-Control the maintenance interval with `FOXCTL_ACA_MAINTENANCE_INTERVAL`.
+Control the maintenance interval with `FOXCTL_CONTEXTWIKI_MAINTENANCE_INTERVAL`.
 
 ## Default vault layout
 
@@ -246,14 +246,14 @@ bridge drafts archive under `ops/`.
 
 | System | Role |
 |---|---|
-| [ACA](/context/aca/) | Workspace control plane — top-of-mind, handoffs, observations, tensions |
+| [ContextWiki](/context/contextwiki/) | Workspace control plane — top-of-mind, handoffs, observations, tensions |
 | [Context engine](/context/context-engine/) | Typed evidence substrate — evidence packs, retrieval episodes, feedback |
 | Obsidian bridge | Knowledge plane — durable notes, vault index, docs reconciliation |
 
 The clean boundary is:
 
 ```text
-ACA decides what workspace context is useful
+ContextWiki decides what workspace context is useful
   -> Obsidian bridge provides durable knowledge notes
   -> Context engine records typed evidence and retrieval telemetry
 ```
@@ -263,4 +263,3 @@ ACA decides what workspace context is useful
 - [docs/architecture/context-architecture.md](https://github.com/joshka0/foxctl/blob/main/docs/architecture/context-architecture.md)
 - [docs/general/memory.md](https://github.com/joshka0/foxctl/blob/main/docs/general/memory.md)
 - [AGENTS.md](https://github.com/joshka0/foxctl/blob/main/AGENTS.md)
-

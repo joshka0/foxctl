@@ -114,7 +114,7 @@ func ResolveToolPolicy(available []Tool, profile string) (ToolPolicy, error) {
 		}, nil
 	case ToolProfileMemoryContext, ToolProfileMemoryRecall:
 		// Memory/context debug: certified context first, then raw memory and
-		// ACA/context lanes for diagnostics.
+		// ContextWiki/context lanes for diagnostics.
 		allow := map[string]struct{}{
 			"gather_context":       {},
 			"gather_test_context":  {},

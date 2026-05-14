@@ -1674,7 +1674,7 @@ func registerRoomTools(s *server.MCPServer) {
 
 	s.AddTool(
 		mcp.NewTool("room_agile",
-			mcp.WithDescription("Command-backed agile room protocol. Actions: epic_start, epic_import_factory, epic_ask, epic_answer, epic_finalize, epic_close, epic_shape, epic_checkpoint, epic_show, epic_resume, epic_health, epic_grade, epic_next, milestone_start, milestone_contract, milestone_criteria, milestone_review, milestone_summary, milestone_show, story_propose, story_accept, story_add, story_state, story_validate, story_show, log_append, log_show, retro_add, retro_show, aca_promote, workpack_show, workpack_sync."),
+			mcp.WithDescription("Command-backed agile room protocol. Actions: epic_start, epic_import_factory, epic_ask, epic_answer, epic_finalize, epic_close, epic_shape, epic_checkpoint, epic_show, epic_resume, epic_health, epic_grade, epic_next, milestone_start, milestone_contract, milestone_criteria, milestone_review, milestone_summary, milestone_show, story_propose, story_accept, story_add, story_state, story_validate, story_show, log_append, log_show, retro_add, retro_show, contextwiki_promote, workpack_show, workpack_sync."),
 			mcp.WithString("action", mcp.Required(), mcp.Description("Agile room action to run")),
 			mcp.WithString("workspace", mcp.Description("Workspace root override (default: .)")),
 			mcp.WithString("room_id", mcp.Description("Room id")),
@@ -1688,8 +1688,8 @@ func registerRoomTools(s *server.MCPServer) {
 			mcp.WithString("proposal_id", mcp.Description("Milestone proposal id")),
 			mcp.WithString("story_proposal_id", mcp.Description("Story proposal id")),
 			mcp.WithString("story_id", mcp.Description("Story id")),
-			mcp.WithString("source_id", mcp.Description("ACA promotion source id")),
-			mcp.WithString("target_kind", mcp.Description("ACA promotion target kind: epic, milestone, retro, validation")),
+			mcp.WithString("source_id", mcp.Description("ContextWiki promotion source id")),
+			mcp.WithString("target_kind", mcp.Description("ContextWiki promotion target kind: epic, milestone, retro, validation")),
 			mcp.WithString("validator_type", mcp.Description("Story validation type: review, test, integration, user_test, manual_check, audit")),
 			mcp.WithString("validation_status", mcp.Description("Story validation status: pass, fail, blocked, waived")),
 			mcp.WithString("artifact_path", mcp.Description("Optional validation artifact path")),
@@ -5319,13 +5319,13 @@ func handleRoomAgileTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.Cal
 		argv = appendStringFlagArgs(argv, "--workspace", workspace)
 		argv = appendStringFlagArgs(argv, "--milestone", getStringArg(args, "milestone_id", ""))
 		argv = appendIntFlagArgs(argv, "--limit", getIntArg(args, "limit", 0))
-	case "aca_promote":
+	case "contextwiki_promote":
 		targetKind := getStringArg(args, "target_kind", "")
 		sourceID := firstNonEmpty(getStringArg(args, "source_id", ""), getStringArg(args, "epic_id", ""), getStringArg(args, "milestone_id", ""), getStringArg(args, "story_id", ""))
 		if targetKind == "" || sourceID == "" {
-			return mcp.NewToolResultError("target_kind and source_id are required for room_agile aca_promote"), nil
+			return mcp.NewToolResultError("target_kind and source_id are required for room_agile contextwiki_promote"), nil
 		}
-		argv = []string{"aca", "promote", targetKind, roomID, sourceID}
+		argv = []string{"contextwiki", "promote", targetKind, roomID, sourceID}
 		argv = appendStringFlagArgs(argv, "--workspace", workspace)
 	case "workpack_show":
 		epicID := getStringArg(args, "epic_id", "")

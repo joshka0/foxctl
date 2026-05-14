@@ -14,8 +14,8 @@ The foxctl CLI is organized by job, not by binary implementation. Each command f
 | `foxctl index repo` | Repo graph build, search, expand, and DAG queries | [Repoindex and DAG grep](/retrieval/repoindex-and-dag-grep/) |
 | `foxctl agent` | Spawn, ask, watch, resume, and manage agents | [Agent lifecycle](/agents/lifecycle/) |
 | `foxctl room` | Durable room messages, tasks, and coordination | [Rooms](/collaboration/rooms/) |
-| `foxctl obsidian` | ACA vault graph, bridge, and index refresh | [Obsidian bridge](/context/obsidian-bridge/) |
-| `foxctl context` | Context summaries and evidence import | [ACA](/context/aca/) |
+| `foxctl obsidian` | ContextWiki vault graph, bridge, and index refresh | [Obsidian bridge](/context/obsidian-bridge/) |
+| `foxctl context` | Context summaries and evidence import | [ContextWiki](/context/contextwiki/) |
 | `foxctl mcp` | MCP status and serving | [Providers and MCP](/integrations/providers-and-mcp/) |
 | `foxctl openapi` | OpenAPI-backed provider integration | [OpenAPI and plugins](/integrations/openapi-and-plugins/) |
 | `foxctl shell` | Structured read-only command-shaped retrieval | — |
@@ -143,9 +143,9 @@ foxctl memory search "query"
 
 See [Memory and continuity](/memory/continuity/) for the full memory API.
 
-## ACA / Obsidian refresh
+## ContextWiki / Obsidian refresh
 
-When repo docs or structure change, refresh the ACA knowledge layer:
+When repo docs or structure change, refresh the ContextWiki knowledge layer:
 
 ```bash
 foxctl obsidian graph build --workspace . --vault-path "/path/to/vault"

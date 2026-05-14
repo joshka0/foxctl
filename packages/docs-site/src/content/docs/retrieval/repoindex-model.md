@@ -87,6 +87,11 @@ Repoindex can use source-local retrieval hints:
 These are evidence hints, not instructions. Place them near a strong owner and
 avoid global catch-all anchors.
 
+Use `Index:` blocks for discoverability and soft graph edges. Use semantic
+anchors for typed, evidence-only claims such as invariants, protocols,
+decisions, risks, doc links, and tests. For the full mental model, see
+[repoindex and PageIndex](/retrieval/repoindex-pageindex/#semantic-commenting).
+
 ## Query shapes
 
 Use repoindex search when you need named graph entries:
@@ -123,8 +128,8 @@ foxctl run code/dag_grep --input '{
 |---|---|
 | Meaning-based candidate discovery | `code/semantic_search` |
 | Full function extraction | `code/context_grep` or `code/snippet_extract` |
-| Agent task continuity | ACA and context engine |
-| Long-term memory claims | Memory store and ACA proposal flow |
+| Agent task continuity | ContextWiki and context engine |
+| Long-term memory claims | Memory store and ContextWiki proposal flow |
 | Ranking policy and LLM summarization | App code |
 
 ## Canonical sources
@@ -132,4 +137,3 @@ foxctl run code/dag_grep --input '{
 - [docs/general/repoindex.md](https://github.com/joshka0/foxctl/blob/main/docs/general/repoindex.md)
 - [docs/spec/repo_graph_index_and_dag_grep.md](https://github.com/joshka0/foxctl/blob/main/docs/spec/repo_graph_index_and_dag_grep.md)
 - [internal/intelligence/indexing/repoindex](https://github.com/joshka0/foxctl/tree/main/internal/intelligence/indexing/repoindex)
-

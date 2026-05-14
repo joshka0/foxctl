@@ -122,13 +122,13 @@ work across sibling worktrees should share transcript continuity.`,
 
 	cmd.Flags().StringVar(&workspacePath, "workspace", "", "Workspace path (default: auto-detect from cwd)")
 	cmd.Flags().StringVar(&taskID, "task-id", "", "Explicit task ID (default: selected/active task)")
-	cmd.Flags().StringVar(&vaultPath, "vault-path", "", "Optional vault path for ACA durable note retrieval")
+	cmd.Flags().StringVar(&vaultPath, "vault-path", "", "Optional vault path for ContextWiki durable note retrieval")
 	cmd.Flags().IntVar(&sessionLimit, "session-limit", 5, "Maximum relevant sessions to include")
 	cmd.Flags().IntVar(&handoffLimit, "handoff-limit", 10, "Maximum handoffs to include")
 	cmd.Flags().IntVar(&fileLimit, "file-limit", 12, "Maximum touched files to retain")
 	cmd.Flags().IntVar(&gitCommitLimit, "git-limit", 3, "Maximum git commits per file")
 	cmd.Flags().IntVar(&anchorLimit, "anchor-limit", 8, "Maximum repo anchors to include")
-	cmd.Flags().IntVar(&noteLimit, "note-limit", 5, "Maximum ACA notes to include")
+	cmd.Flags().IntVar(&noteLimit, "note-limit", 5, "Maximum ContextWiki notes to include")
 	cmd.Flags().StringVar(&transcriptHistoryScope, "transcript-history-scope", string(taskhistory.TranscriptHistoryScopeAuto), "Transcript history scope: auto, workspace, or family")
 	return cmd
 }
@@ -193,13 +193,13 @@ work across sibling worktrees should share transcript continuity.`,
 
 	cmd.Flags().StringVar(&workspacePath, "workspace", "", "Workspace path (default: auto-detect from cwd)")
 	cmd.Flags().StringVar(&taskID, "task-id", "", "Explicit task ID (default: selected/active task)")
-	cmd.Flags().StringVar(&vaultPath, "vault-path", "", "Optional vault path for ACA durable note retrieval")
+	cmd.Flags().StringVar(&vaultPath, "vault-path", "", "Optional vault path for ContextWiki durable note retrieval")
 	cmd.Flags().IntVar(&sessionLimit, "session-limit", 5, "Maximum relevant sessions to include")
 	cmd.Flags().IntVar(&handoffLimit, "handoff-limit", 10, "Maximum handoffs to include")
 	cmd.Flags().IntVar(&fileLimit, "file-limit", 12, "Maximum touched files to retain")
 	cmd.Flags().IntVar(&gitCommitLimit, "git-limit", 3, "Maximum git commits per file")
 	cmd.Flags().IntVar(&anchorLimit, "anchor-limit", 8, "Maximum repo anchors to include")
-	cmd.Flags().IntVar(&noteLimit, "note-limit", 5, "Maximum ACA notes to include")
+	cmd.Flags().IntVar(&noteLimit, "note-limit", 5, "Maximum ContextWiki notes to include")
 	cmd.Flags().StringVar(&transcriptHistoryScope, "transcript-history-scope", string(taskhistory.TranscriptHistoryScopeAuto), "Transcript history scope: auto, workspace, or family")
 	return cmd
 }

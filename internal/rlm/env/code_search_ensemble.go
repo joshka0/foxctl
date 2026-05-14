@@ -43,10 +43,10 @@ type codeSearchEnsembleInput struct {
 	Planner        codeSearchLLMPlannerInput  `json:"llm_planner,omitempty"`
 	Selector       codeSearchLLMSelectorInput `json:"llm_selector,omitempty"`
 	Constraints    struct {
-		ExcludePaths     []string `json:"exclude_paths"`
-		IncludeHistory   bool     `json:"include_history"`
-		IncludeACA       bool     `json:"include_aca"`
-		RequireGrounding *bool    `json:"require_grounding"`
+		ExcludePaths       []string `json:"exclude_paths"`
+		IncludeHistory     bool     `json:"include_history"`
+		IncludeContextWiki bool     `json:"include_contextwiki"`
+		RequireGrounding   *bool    `json:"require_grounding"`
 	} `json:"constraints"`
 	Budget struct {
 		MaxSteps      int  `json:"max_steps"`
@@ -207,18 +207,18 @@ func (a *ReadOnlyAdapter) codeSearchEnsemble(ctx context.Context, args json.RawM
 	}
 	preferredSymbolProbes := codeSearchSymbolProbes(input.Query)
 	metadata := map[string]any{
-		"task_type_defaulted": defaulted,
-		"lanes_used":          []string{},
-		"grounded":            false,
-		"scouts_used":         []string{},
-		"history_requested":   input.Constraints.IncludeHistory,
-		"aca_requested":       input.Constraints.IncludeACA,
+		"task_type_defaulted":   defaulted,
+		"lanes_used":            []string{},
+		"grounded":              false,
+		"scouts_used":           []string{},
+		"history_requested":     input.Constraints.IncludeHistory,
+		"contextwiki_requested": input.Constraints.IncludeContextWiki,
 	}
 
 	candidates := map[string]*codeSearchCandidate{}
 	gaps := make([]string, 0, 4)
 	var routeFamily codeSearchRouteFamily
-	var acaHits []contextplane.RetrievalHit
+	var contextWikiHits []contextplane.RetrievalHit
 	plannerOut := codeSearchLLMPlannerOutput{}
 	if input.Planner.Enabled {
 		stageStart := time.Now()
@@ -594,35 +594,35 @@ func (a *ReadOnlyAdapter) codeSearchEnsemble(ctx context.Context, args json.RawM
 
 	routeFamily = inferCodeSearchRouteFamilyFromCandidates(taskType, input.Query, candidates)
 	metadata["route_family"] = string(routeFamily)
-	autoACA := taskType == codeSearchTaskFileLocate || isCodeSearchImpactLikeTask(taskType)
-	metadata["aca_auto_enabled"] = autoACA
-	if input.Constraints.IncludeACA || autoACA {
+	autoContextWiki := taskType == codeSearchTaskFileLocate || isCodeSearchImpactLikeTask(taskType)
+	metadata["contextwiki_auto_enabled"] = autoContextWiki
+	if input.Constraints.IncludeContextWiki || autoContextWiki {
 		stageStart := time.Now()
-		var acaErr error
-		acaHits, acaErr = a.searchACAGuidance(ctx, input.Query, routeFamily, minInt(input.Budget.MaxCandidates, 6))
-		a.telemetry.record("aca_guidance", time.Since(stageStart), nil)
-		if acaErr != nil {
-			gaps = append(gaps, "aca guidance failed: "+acaErr.Error())
-		} else if len(acaHits) > 0 {
-			acaRouteFamily := inferCodeSearchRouteFamily(taskType, acaHits)
+		var contextWikiErr error
+		contextWikiHits, contextWikiErr = a.searchContextWikiGuidance(ctx, input.Query, routeFamily, minInt(input.Budget.MaxCandidates, 6))
+		a.telemetry.record("contextwiki_guidance", time.Since(stageStart), nil)
+		if contextWikiErr != nil {
+			gaps = append(gaps, "ContextWiki guidance failed: "+contextWikiErr.Error())
+		} else if len(contextWikiHits) > 0 {
+			contextWikiRouteFamily := inferCodeSearchRouteFamily(taskType, contextWikiHits)
 			if taskType == codeSearchTaskFileLocate && routeFamily != codeSearchRouteInfraResource {
-				packageHits, packageErr := a.searchACAGuidance(ctx, input.Query, codeSearchRoutePackageOwner, minInt(input.Budget.MaxCandidates, 6))
+				packageHits, packageErr := a.searchContextWikiGuidance(ctx, input.Query, codeSearchRoutePackageOwner, minInt(input.Budget.MaxCandidates, 6))
 				if packageErr != nil {
-					gaps = append(gaps, "aca package guidance failed: "+packageErr.Error())
-				} else if shouldUsePackageACAGuidance(routeFamily, input.Query, packageHits) {
-					acaHits = packageHits
-					acaRouteFamily = codeSearchRoutePackageOwner
+					gaps = append(gaps, "ContextWiki package guidance failed: "+packageErr.Error())
+				} else if shouldUsePackageContextWikiGuidance(routeFamily, input.Query, packageHits) {
+					contextWikiHits = packageHits
+					contextWikiRouteFamily = codeSearchRoutePackageOwner
 				}
 			}
-			routeFamily = promoteCodeSearchRouteFamily(routeFamily, input.Query, taskType, acaHits, acaRouteFamily)
+			routeFamily = promoteCodeSearchRouteFamily(routeFamily, input.Query, taskType, contextWikiHits, contextWikiRouteFamily)
 			metadata["route_family"] = string(routeFamily)
-			metadata["aca_guidance"] = summarizeACAGuidanceHits(acaHits, 4)
+			metadata["contextwiki_guidance"] = summarizeContextWikiGuidanceHits(contextWikiHits, 4)
 		}
 	}
 
-	if len(acaHits) > 0 && len(candidates) > 0 {
-		if applied := applyACAGuidanceSupport(input.Query, candidates, acaHits, routeFamily, taskType, excluded); applied > 0 {
-			addLane("aca_guidance")
+	if len(contextWikiHits) > 0 && len(candidates) > 0 {
+		if applied := applyContextWikiGuidanceSupport(input.Query, candidates, contextWikiHits, routeFamily, taskType, excluded); applied > 0 {
+			addLane("contextwiki_guidance")
 		}
 	}
 
@@ -1047,13 +1047,13 @@ func (a *ReadOnlyAdapter) searchRepoMotifs(ctx context.Context, query string, li
 	return contextplane.SearchRepoMotifArtifacts(ctx, a.workspaceRoot, query, limit, memStore, nil)
 }
 
-func (a *ReadOnlyAdapter) searchACAGuidance(ctx context.Context, query string, routeFamily codeSearchRouteFamily, limit int) ([]contextplane.RetrievalHit, error) {
+func (a *ReadOnlyAdapter) searchContextWikiGuidance(ctx context.Context, query string, routeFamily codeSearchRouteFamily, limit int) ([]contextplane.RetrievalHit, error) {
 	if strings.TrimSpace(query) == "" || strings.TrimSpace(a.workspaceRoot) == "" {
 		return nil, nil
 	}
 	vaultPath := firstNonEmpty(strings.TrimSpace(a.vaultPath),
 		strings.TrimSpace(os.Getenv("FOXCTL_RLM_VAULT_PATH")),
-		strings.TrimSpace(os.Getenv("FOXCTL_ACA_VAULT_PATH")),
+		strings.TrimSpace(os.Getenv("FOXCTL_CONTEXTWIKI_VAULT_PATH")),
 		strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH")),
 	)
 	if vaultPath == "" {
@@ -1068,7 +1068,7 @@ func (a *ReadOnlyAdapter) searchACAGuidance(ctx context.Context, query string, r
 	}
 	defer func() { _ = index.Close() }()
 	if routeFamily == codeSearchRoutePackageOwner {
-		return searchPackageACAGuidance(index, a.workspaceRoot, query, limit)
+		return searchPackageContextWikiGuidance(index, a.workspaceRoot, query, limit)
 	}
 	repoStore, err := repoindex.Open(ctx, a.cfg.Storage.Root, a.workspaceRoot)
 	if err != nil {
@@ -1097,7 +1097,7 @@ func (a *ReadOnlyAdapter) searchACAGuidance(ctx context.Context, query string, r
 	return result.VaultHits, nil
 }
 
-func searchPackageACAGuidance(index obsidianindex.Store, workspaceRoot, query string, limit int) ([]contextplane.RetrievalHit, error) {
+func searchPackageContextWikiGuidance(index obsidianindex.Store, workspaceRoot, query string, limit int) ([]contextplane.RetrievalHit, error) {
 	if index == nil || strings.TrimSpace(query) == "" || strings.TrimSpace(workspaceRoot) == "" {
 		return nil, nil
 	}
@@ -1106,10 +1106,10 @@ func searchPackageACAGuidance(index obsidianindex.Store, workspaceRoot, query st
 	if err != nil {
 		return nil, err
 	}
-	return packageACAGuidanceHitsFromSearchHits(workspaceRoot, query, hits, limit), nil
+	return packageContextWikiGuidanceHitsFromSearchHits(workspaceRoot, query, hits, limit), nil
 }
 
-func packageACAGuidanceHitsFromSearchHits(workspaceRoot, query string, hits []obsidianindex.SearchHit, limit int) []contextplane.RetrievalHit {
+func packageContextWikiGuidanceHitsFromSearchHits(workspaceRoot, query string, hits []obsidianindex.SearchHit, limit int) []contextplane.RetrievalHit {
 	if len(hits) == 0 || strings.TrimSpace(workspaceRoot) == "" {
 		return nil
 	}
@@ -1133,7 +1133,7 @@ func packageACAGuidanceHitsFromSearchHits(workspaceRoot, query string, hits []ob
 			continue
 		}
 		score := maxInt(0, hit.Score)
-		score += int(acaGuidanceTitleAffinity(hit.Title, query) * 120)
+		score += int(contextWikiGuidanceTitleAffinity(hit.Title, query) * 120)
 		anchorPaths := preferredPackageAnchorPaths(contextplane.RetrievalHit{
 			PrimaryAnchorPath: hit.PrimaryAnchorPath,
 			AnchorPaths:       hit.AnchorPaths,
@@ -1185,80 +1185,80 @@ func packageACAGuidanceHitsFromSearchHits(workspaceRoot, query string, hits []ob
 	return out
 }
 
-func shouldUsePackageACAGuidance(routeFamily codeSearchRouteFamily, query string, hits []contextplane.RetrievalHit) bool {
+func shouldUsePackageContextWikiGuidance(routeFamily codeSearchRouteFamily, query string, hits []contextplane.RetrievalHit) bool {
 	if len(hits) == 0 {
 		return false
 	}
 	if routeFamily == codeSearchRoutePackageOwner {
 		return true
 	}
-	return packageACAGuidanceSpecificityScore(query, hits[0]) >= 1.25
+	return packageContextWikiGuidanceSpecificityScore(query, hits[0]) >= 1.25
 }
 
 func promoteCodeSearchRouteFamily(current codeSearchRouteFamily, query, taskType string, hits []contextplane.RetrievalHit, inferred codeSearchRouteFamily) codeSearchRouteFamily {
 	if current != codeSearchRouteCode || inferred == codeSearchRouteCode {
 		return current
 	}
-	if inferred == codeSearchRoutePackageOwner && !shouldUsePackageACAGuidance(current, query, hits) {
+	if inferred == codeSearchRoutePackageOwner && !shouldUsePackageContextWikiGuidance(current, query, hits) {
 		return current
 	}
 	return inferred
 }
 
-func applyACAGuidanceCandidates(workspaceRoot, query string, candidates map[string]*codeSearchCandidate, hits []contextplane.RetrievalHit, taskType string, excluded []string) int {
+func applyContextWikiGuidanceCandidates(workspaceRoot, query string, candidates map[string]*codeSearchCandidate, hits []contextplane.RetrievalHit, taskType string, excluded []string) int {
 	if len(candidates) == 0 && len(hits) == 0 {
 		return 0
 	}
 	applied := 0
 	for _, hit := range hits {
-		if acaGuidanceMatchCount(hit, taskType, query) < 2 {
+		if contextWikiGuidanceMatchCount(hit, taskType, query) < 2 {
 			continue
 		}
-		repoPaths := limitedACARepoPaths(workspaceRoot, hit, 6)
+		repoPaths := limitedContextWikiRepoPaths(workspaceRoot, hit, 6)
 		if len(repoPaths) == 0 {
 			continue
 		}
-		support := codeSearchACAGuidanceSupport(taskType, hit)
+		support := codeSearchContextWikiGuidanceSupport(taskType, hit)
 		why := "aca guidance from " + strings.TrimSpace(hit.Path)
 		for _, repoPath := range repoPaths {
 			repoPath = normalizeCodeSearchPath(repoPath)
 			if repoPath == "" || isExcludedCodeSearchPath(repoPath, excluded) {
 				continue
 			}
-			symbolName := firstCodeLikeACASymbol(hit.Symbols)
-			addCodeSearchCandidate(candidates, repoPath, why, "aca_guidance", support, 0, symbolName, "")
+			symbolName := firstCodeLikeContextWikiSymbol(hit.Symbols)
+			addCodeSearchCandidate(candidates, repoPath, why, "contextwiki_guidance", support, 0, symbolName, "")
 			applied++
 		}
 	}
 	return applied
 }
 
-func applyACAGuidanceSupport(query string, candidates map[string]*codeSearchCandidate, hits []contextplane.RetrievalHit, routeFamily codeSearchRouteFamily, taskType string, excluded []string) int {
+func applyContextWikiGuidanceSupport(query string, candidates map[string]*codeSearchCandidate, hits []contextplane.RetrievalHit, routeFamily codeSearchRouteFamily, taskType string, excluded []string) int {
 	if len(candidates) == 0 || len(hits) == 0 {
 		return 0
 	}
-	exactSource, exactSupport, symbolSource, symbolSupport := acaGuidanceSupportWeights(routeFamily, taskType)
+	exactSource, exactSupport, symbolSource, symbolSupport := contextWikiGuidanceSupportWeights(routeFamily, taskType)
 	if exactSupport <= 0 && symbolSupport <= 0 {
 		return 0
 	}
-	hits = topACAGuidanceSupportHits(query, hits, routeFamily, taskType)
+	hits = topContextWikiGuidanceSupportHits(query, hits, routeFamily, taskType)
 	if len(hits) == 0 {
 		return 0
 	}
 	applied := 0
-	minMatches := acaGuidanceMinimumMatchCount(routeFamily, taskType)
+	minMatches := contextWikiGuidanceMinimumMatchCount(routeFamily, taskType)
 	queryTerms := codeSearchPathTerms(query)
 	exactProbes := codeSearchExactProbes(query)
 	pathProbes := codeSearchPathProbes(query)
 	for _, hit := range hits {
-		if acaGuidanceMatchCount(hit, taskType, query) < minMatches {
+		if contextWikiGuidanceMatchCount(hit, taskType, query) < minMatches {
 			continue
 		}
 		repoPaths := normalizeCodeSearchPaths(hit.RepoPaths)
 		if routeFamily == codeSearchRoutePackageOwner {
 			packageAnchors := preferredPackageAnchorPaths(hit)
 			if len(packageAnchors) == 0 {
-				packageAnchors = selectACAPackageAnchorPaths(repoPaths, candidates, hit.Symbols, queryTerms, pathProbes, exactProbes, 2)
+				packageAnchors = selectContextWikiPackageAnchorPaths(repoPaths, candidates, hit.Symbols, queryTerms, pathProbes, exactProbes, 2)
 			}
 			primaryAnchor := normalizeCodeSearchPath(hit.PrimaryAnchorPath)
 			for idx, repoPath := range packageAnchors {
@@ -1272,17 +1272,17 @@ func applyACAGuidanceSupport(query string, candidates map[string]*codeSearchCand
 				if primaryAnchor != "" && repoPath == primaryAnchor {
 					support = 1.35
 				}
-				symbolName := bestACASymbolForPath(repoPath, hit.Symbols)
-				anchorRoleSource := "aca_route_package_secondary_anchor"
+				symbolName := bestContextWikiSymbolForPath(repoPath, hit.Symbols)
+				anchorRoleSource := "contextwiki_route_package_secondary_anchor"
 				if idx == 0 || (primaryAnchor != "" && repoPath == primaryAnchor) {
-					anchorRoleSource = "aca_route_package_primary_anchor"
+					anchorRoleSource = "contextwiki_route_package_primary_anchor"
 				}
 				if candidates[repoPath] == nil {
-					if !shouldIntroduceACAPackageAnchorCandidate(repoPath, primaryAnchor, candidates) {
+					if !shouldIntroduceContextWikiPackageAnchorCandidate(repoPath, primaryAnchor, candidates) {
 						continue
 					}
-					addCodeSearchCandidate(candidates, repoPath, "aca package anchor from "+strings.TrimSpace(hit.Path), "aca_route_package_anchor", support, 0, symbolName, "")
-					addCodeSearchCandidate(candidates, repoPath, "aca package anchor role from "+strings.TrimSpace(hit.Path), anchorRoleSource, 0, 0, "", "")
+					addCodeSearchCandidate(candidates, repoPath, "ContextWiki package anchor from "+strings.TrimSpace(hit.Path), "contextwiki_route_package_anchor", support, 0, symbolName, "")
+					addCodeSearchCandidate(candidates, repoPath, "ContextWiki package anchor role from "+strings.TrimSpace(hit.Path), anchorRoleSource, 0, 0, "", "")
 					applied++
 					continue
 				}
@@ -1290,8 +1290,8 @@ func applyACAGuidanceSupport(query string, candidates map[string]*codeSearchCand
 				if candidate.Sources == nil {
 					candidate.Sources = map[string]struct{}{}
 				}
-				if _, ok := candidate.Sources["aca_route_package_anchor"]; !ok {
-					candidate.Sources["aca_route_package_anchor"] = struct{}{}
+				if _, ok := candidate.Sources["contextwiki_route_package_anchor"]; !ok {
+					candidate.Sources["contextwiki_route_package_anchor"] = struct{}{}
 					applied++
 				}
 				candidate.Sources[anchorRoleSource] = struct{}{}
@@ -1326,13 +1326,13 @@ func applyACAGuidanceSupport(query string, candidates map[string]*codeSearchCand
 			}
 			if routeFamily == codeSearchRouteInfraResource {
 				if primaryExactPath != "" && repoPath == primaryExactPath {
-					candidate.Sources["aca_route_infra_primary_anchor"] = struct{}{}
+					candidate.Sources["contextwiki_route_infra_primary_anchor"] = struct{}{}
 				} else if primaryExactPath != "" {
-					candidate.Sources["aca_route_infra_secondary_anchor"] = struct{}{}
+					candidate.Sources["contextwiki_route_infra_secondary_anchor"] = struct{}{}
 				}
 			}
 			candidate.Support += exactSupport
-			if symbolName := bestACASymbolForPath(repoPath, hit.Symbols); symbolName != "" {
+			if symbolName := bestContextWikiSymbolForPath(repoPath, hit.Symbols); symbolName != "" {
 				candidate.Symbols = append(candidate.Symbols, symbolName)
 			}
 		}
@@ -1343,7 +1343,7 @@ func applyACAGuidanceSupport(query string, candidates map[string]*codeSearchCand
 			if candidate == nil || candidate.Path == "" || isExcludedCodeSearchPath(candidate.Path, excluded) {
 				continue
 			}
-			if !acaGuidanceSymbolOverlap(candidate, hit.Symbols) {
+			if !contextWikiGuidanceSymbolOverlap(candidate, hit.Symbols) {
 				continue
 			}
 			if candidate.Sources == nil {
@@ -1359,7 +1359,7 @@ func applyACAGuidanceSupport(query string, candidates map[string]*codeSearchCand
 	return applied
 }
 
-func acaGuidanceMinimumMatchCount(routeFamily codeSearchRouteFamily, taskType string) int {
+func contextWikiGuidanceMinimumMatchCount(routeFamily codeSearchRouteFamily, taskType string) int {
 	if routeFamily == codeSearchRoutePackageOwner {
 		return 1
 	}
@@ -1369,7 +1369,7 @@ func acaGuidanceMinimumMatchCount(routeFamily codeSearchRouteFamily, taskType st
 	return 2
 }
 
-func topACAGuidanceSupportHits(query string, hits []contextplane.RetrievalHit, routeFamily codeSearchRouteFamily, taskType string) []contextplane.RetrievalHit {
+func topContextWikiGuidanceSupportHits(query string, hits []contextplane.RetrievalHit, routeFamily codeSearchRouteFamily, taskType string) []contextplane.RetrievalHit {
 	if len(hits) == 0 {
 		return nil
 	}
@@ -1384,7 +1384,7 @@ func topACAGuidanceSupportHits(query string, hits []contextplane.RetrievalHit, r
 	}
 	scored := make([]scoredHit, 0, len(hits))
 	for _, hit := range hits {
-		score := acaGuidanceSupportHitScore(query, hit, routeFamily, taskType)
+		score := contextWikiGuidanceSupportHitScore(query, hit, routeFamily, taskType)
 		if score <= 0 {
 			continue
 		}
@@ -1406,21 +1406,21 @@ func topACAGuidanceSupportHits(query string, hits []contextplane.RetrievalHit, r
 	return out
 }
 
-func acaGuidanceSupportHitScore(query string, hit contextplane.RetrievalHit, routeFamily codeSearchRouteFamily, taskType string) int {
+func contextWikiGuidanceSupportHitScore(query string, hit contextplane.RetrievalHit, routeFamily codeSearchRouteFamily, taskType string) int {
 	if routeFamily == codeSearchRoutePackageOwner {
 		queryTerms := codeSearchPathTerms(query)
 		score := maxInt(0, hit.Score)
 		if strings.Contains(strings.ToLower(strings.TrimSpace(hit.Path)), "/packages/") {
 			score += 30
 		}
-		score += int(acaGuidanceTitleAffinity(hit.Title, query) * 200)
+		score += int(contextWikiGuidanceTitleAffinity(hit.Title, query) * 200)
 		score += int(anchorPathAffinityScore(preferredPackageAnchorPaths(hit), queryTerms) * 160)
 		if primary := normalizeCodeSearchPath(hit.PrimaryAnchorPath); primary != "" {
 			score += int(packageAnchorBasenameQueryAffinity(primary, queryTerms) * 80)
 		}
 		return score
 	}
-	score := acaGuidanceMatchCount(hit, taskType, query) * 100
+	score := contextWikiGuidanceMatchCount(hit, taskType, query) * 100
 	if score == 0 {
 		return 0
 	}
@@ -1452,7 +1452,7 @@ func acaGuidanceSupportHitScore(query string, hit contextplane.RetrievalHit, rou
 	return score
 }
 
-func acaGuidanceTitleAffinity(title, query string) float64 {
+func contextWikiGuidanceTitleAffinity(title, query string) float64 {
 	titleTerms := splitCodeSearchProbe(title)
 	queryTerms := codeSearchPathTerms(query)
 	if len(titleTerms) == 0 || len(queryTerms) == 0 {
@@ -1489,24 +1489,24 @@ func acaGuidanceTitleAffinity(title, query string) float64 {
 	return clampScore(score / float64(len(queryTerms)))
 }
 
-func acaGuidanceSupportWeights(routeFamily codeSearchRouteFamily, taskType string) (exactSource string, exactSupport float64, symbolSource string, symbolSupport float64) {
+func contextWikiGuidanceSupportWeights(routeFamily codeSearchRouteFamily, taskType string) (exactSource string, exactSupport float64, symbolSource string, symbolSupport float64) {
 	switch routeFamily {
 	case codeSearchRouteInfraResource:
-		return "aca_route_infra_exact", 1.35, "aca_route_infra_symbol", 0.35
+		return "contextwiki_route_infra_exact", 1.35, "contextwiki_route_infra_symbol", 0.35
 	case codeSearchRoutePackageOwner:
-		return "aca_route_package_exact", 0.95, "aca_route_package_symbol", 0.45
+		return "contextwiki_route_package_exact", 0.95, "contextwiki_route_package_symbol", 0.45
 	case codeSearchRouteCochangeHistory:
-		return "aca_route_cochange_exact", 0.85, "aca_route_cochange_symbol", 0.2
+		return "contextwiki_route_cochange_exact", 0.85, "contextwiki_route_cochange_symbol", 0.2
 	default:
 		if taskType == codeSearchTaskExecutionTrace {
-			return "aca_route_code_exact", 0.0, "aca_route_code_symbol", 0.0
+			return "contextwiki_route_code_exact", 0.0, "contextwiki_route_code_symbol", 0.0
 		}
-		return "aca_route_code_exact", 0.55, "aca_route_code_symbol", 0.2
+		return "contextwiki_route_code_exact", 0.55, "contextwiki_route_code_symbol", 0.2
 	}
 }
 
-func acaGuidanceSymbolOverlap(candidate *codeSearchCandidate, acaSymbols []string) bool {
-	if candidate == nil || len(candidate.Symbols) == 0 || len(acaSymbols) == 0 {
+func contextWikiGuidanceSymbolOverlap(candidate *codeSearchCandidate, contextWikiSymbols []string) bool {
+	if candidate == nil || len(candidate.Symbols) == 0 || len(contextWikiSymbols) == 0 {
 		return false
 	}
 	for _, candidateSymbol := range candidate.Symbols {
@@ -1514,17 +1514,17 @@ func acaGuidanceSymbolOverlap(candidate *codeSearchCandidate, acaSymbols []strin
 		if candidateSymbol == "" {
 			continue
 		}
-		for _, acaSymbol := range acaSymbols {
-			acaSymbol = strings.TrimSpace(strings.ToLower(acaSymbol))
-			if acaSymbol == "" {
+		for _, contextWikiSymbol := range contextWikiSymbols {
+			contextWikiSymbol = strings.TrimSpace(strings.ToLower(contextWikiSymbol))
+			if contextWikiSymbol == "" {
 				continue
 			}
 			switch {
-			case candidateSymbol == acaSymbol:
+			case candidateSymbol == contextWikiSymbol:
 				return true
-			case strings.HasSuffix(candidateSymbol, "."+acaSymbol):
+			case strings.HasSuffix(candidateSymbol, "."+contextWikiSymbol):
 				return true
-			case strings.HasSuffix(acaSymbol, "."+candidateSymbol):
+			case strings.HasSuffix(contextWikiSymbol, "."+candidateSymbol):
 				return true
 			}
 		}
@@ -1532,12 +1532,12 @@ func acaGuidanceSymbolOverlap(candidate *codeSearchCandidate, acaSymbols []strin
 	return false
 }
 
-func limitedACARepoPaths(workspaceRoot string, hit contextplane.RetrievalHit, limit int) []string {
+func limitedContextWikiRepoPaths(workspaceRoot string, hit contextplane.RetrievalHit, limit int) []string {
 	paths := normalizeCodeSearchPaths(hit.RepoPaths)
 	if strings.TrimSpace(workspaceRoot) != "" {
 		filtered := make([]string, 0, len(paths))
 		for _, repoPath := range paths {
-			if acaRepoPathExists(workspaceRoot, repoPath) {
+			if contextWikiRepoPathExists(workspaceRoot, repoPath) {
 				filtered = append(filtered, repoPath)
 			}
 		}
@@ -1549,7 +1549,7 @@ func limitedACARepoPaths(workspaceRoot string, hit contextplane.RetrievalHit, li
 	return paths
 }
 
-func shouldIntroduceACAPackageAnchorCandidate(repoPath, primaryAnchor string, candidates map[string]*codeSearchCandidate) bool {
+func shouldIntroduceContextWikiPackageAnchorCandidate(repoPath, primaryAnchor string, candidates map[string]*codeSearchCandidate) bool {
 	repoPath = normalizeCodeSearchPath(repoPath)
 	primaryAnchor = normalizeCodeSearchPath(primaryAnchor)
 	if repoPath == "" {
@@ -1580,7 +1580,7 @@ func shouldIntroduceACAPackageAnchorCandidate(repoPath, primaryAnchor string, ca
 	return false
 }
 
-func firstCodeLikeACASymbol(symbols []string) string {
+func firstCodeLikeContextWikiSymbol(symbols []string) string {
 	for _, symbol := range symbols {
 		symbol = strings.TrimSpace(symbol)
 		if isLikelyGroundedSymbolName(symbol) {
@@ -1590,10 +1590,10 @@ func firstCodeLikeACASymbol(symbols []string) string {
 	return ""
 }
 
-func bestACASymbolForPath(repoPath string, symbols []string) string {
+func bestContextWikiSymbolForPath(repoPath string, symbols []string) string {
 	repoPath = normalizeCodeSearchPath(repoPath)
 	if repoPath == "" || len(symbols) == 0 {
-		return firstCodeLikeACASymbol(symbols)
+		return firstCodeLikeContextWikiSymbol(symbols)
 	}
 	base := strings.ToLower(strings.TrimSuffix(filepath.Base(repoPath), filepath.Ext(repoPath)))
 	best := ""
@@ -1625,10 +1625,10 @@ func bestACASymbolForPath(repoPath string, symbols []string) string {
 	if best != "" {
 		return best
 	}
-	return firstCodeLikeACASymbol(symbols)
+	return firstCodeLikeContextWikiSymbol(symbols)
 }
 
-func codeSearchACAGuidanceSupport(taskType string, hit contextplane.RetrievalHit) float64 {
+func codeSearchContextWikiGuidanceSupport(taskType string, hit contextplane.RetrievalHit) float64 {
 	base := 0.65
 	switch taskType {
 	case codeSearchTaskFileLocate, codeSearchTaskSymbolInspect:
@@ -1651,7 +1651,7 @@ func codeSearchACAGuidanceSupport(taskType string, hit contextplane.RetrievalHit
 	return base
 }
 
-func acaGuidanceMatchCount(hit contextplane.RetrievalHit, taskType, query string) int {
+func contextWikiGuidanceMatchCount(hit contextplane.RetrievalHit, taskType, query string) int {
 	queryTerms := codeSearchPathTerms(query)
 	if len(queryTerms) == 0 {
 		return 0
@@ -1672,7 +1672,7 @@ func acaGuidanceMatchCount(hit contextplane.RetrievalHit, taskType, query string
 	return matches
 }
 
-func summarizeACAGuidanceHits(hits []contextplane.RetrievalHit, limit int) []map[string]any {
+func summarizeContextWikiGuidanceHits(hits []contextplane.RetrievalHit, limit int) []map[string]any {
 	if len(hits) == 0 {
 		return nil
 	}
@@ -1697,7 +1697,7 @@ func summarizeACAGuidanceHits(hits []contextplane.RetrievalHit, limit int) []map
 	return out
 }
 
-func acaRepoPathExists(workspaceRoot, repoPath string) bool {
+func contextWikiRepoPathExists(workspaceRoot, repoPath string) bool {
 	workspaceRoot = strings.TrimSpace(workspaceRoot)
 	repoPath = normalizeCodeSearchPath(repoPath)
 	if workspaceRoot == "" || repoPath == "" {
@@ -1717,12 +1717,12 @@ func inferCodeSearchRouteFamily(taskType string, hits []contextplane.RetrievalHi
 		}
 	}
 	for _, hit := range hits {
-		if acaHitLooksPackageOwner(hit) {
+		if contextWikiHitLooksPackageOwner(hit) {
 			return codeSearchRoutePackageOwner
 		}
 	}
 	for _, hit := range hits {
-		if acaHitLooksInfraResource(hit) {
+		if contextWikiHitLooksInfraResource(hit) {
 			return codeSearchRouteInfraResource
 		}
 	}
@@ -1735,12 +1735,12 @@ func inferCodeSearchRouteFamily(taskType string, hits []contextplane.RetrievalHi
 	return codeSearchRouteCode
 }
 
-func acaHitLooksPackageOwner(hit contextplane.RetrievalHit) bool {
+func contextWikiHitLooksPackageOwner(hit contextplane.RetrievalHit) bool {
 	pathValue := strings.ToLower(strings.TrimSpace(hit.Path))
 	if !strings.Contains(pathValue, "/packages/") {
 		return false
 	}
-	return !acaHitRepoPathsLookInfra(hit.RepoPaths)
+	return !contextWikiHitRepoPathsLookInfra(hit.RepoPaths)
 }
 
 func inferCodeSearchRouteFamilyFromCandidates(taskType, query string, candidates map[string]*codeSearchCandidate) codeSearchRouteFamily {
@@ -1838,14 +1838,14 @@ func dominantCodeSearchPackageFamily(query string, candidates map[string]*codeSe
 	return bestFamily, true
 }
 
-func selectACAPackageAnchorPaths(repoPaths []string, candidates map[string]*codeSearchCandidate, acaSymbols []string, queryTerms, pathProbes, exactProbes []string, limit int) []string {
+func selectContextWikiPackageAnchorPaths(repoPaths []string, candidates map[string]*codeSearchCandidate, contextWikiSymbols []string, queryTerms, pathProbes, exactProbes []string, limit int) []string {
 	if len(repoPaths) == 0 {
 		return nil
 	}
 	if limit <= 0 {
 		limit = 1
 	}
-	symbolProbes := packageAnchorSymbolProbes(acaSymbols)
+	symbolProbes := packageAnchorSymbolProbes(contextWikiSymbols)
 	type scoredPath struct {
 		path  string
 		score float64
@@ -1937,7 +1937,7 @@ func anchorPathAffinityScore(paths, queryTerms []string) float64 {
 	return clampScore(best)
 }
 
-func packageACAGuidanceSpecificityScore(query string, hit contextplane.RetrievalHit) float64 {
+func packageContextWikiGuidanceSpecificityScore(query string, hit contextplane.RetrievalHit) float64 {
 	if strings.TrimSpace(query) == "" {
 		return 0
 	}
@@ -1946,7 +1946,7 @@ func packageACAGuidanceSpecificityScore(query string, hit contextplane.Retrieval
 	if len(anchorPaths) == 0 {
 		anchorPaths = normalizeCodeSearchPaths(hit.RepoPaths)
 	}
-	score := acaGuidanceTitleAffinity(hit.Title, query)*2.0 + anchorPathAffinityScore(anchorPaths, queryTerms)
+	score := contextWikiGuidanceTitleAffinity(hit.Title, query)*2.0 + anchorPathAffinityScore(anchorPaths, queryTerms)
 	if primary := normalizeCodeSearchPath(hit.PrimaryAnchorPath); primary != "" {
 		score += packageAnchorBasenameQueryAffinity(primary, queryTerms) * 0.5
 	}
@@ -2026,7 +2026,7 @@ func isPreferredFileLocateAnchorCandidate(candidate *codeSearchCandidate) bool {
 	if candidate == nil {
 		return false
 	}
-	return candidateHasAnySource(candidate, "aca_route_package_anchor", "aca_route_infra_exact")
+	return candidateHasAnySource(candidate, "contextwiki_route_package_anchor", "contextwiki_route_infra_exact")
 }
 
 func cloneAnchorRoles(raw map[string][]string) map[string][]string {
@@ -2148,15 +2148,15 @@ func codeSearchCandidateLooksInfraResource(candidate *codeSearchCandidate) bool 
 	return false
 }
 
-func acaHitLooksInfraResource(hit contextplane.RetrievalHit) bool {
+func contextWikiHitLooksInfraResource(hit contextplane.RetrievalHit) bool {
 	pathValue := strings.ToLower(strings.TrimSpace(hit.Path))
 	if strings.Contains(pathValue, "/concepts/") {
 		return true
 	}
-	return acaHitRepoPathsLookInfra(hit.RepoPaths)
+	return contextWikiHitRepoPathsLookInfra(hit.RepoPaths)
 }
 
-func acaHitRepoPathsLookInfra(repoPaths []string) bool {
+func contextWikiHitRepoPathsLookInfra(repoPaths []string) bool {
 	for _, repoPath := range repoPaths {
 		repoPath = strings.ToLower(strings.TrimSpace(repoPath))
 		switch {
@@ -2799,10 +2799,10 @@ func rankCodeSearchCandidatesWithPlan(candidates map[string]*codeSearchCandidate
 	preferredAnchorDirs := map[string]struct{}{}
 	primaryAnchorLeaderByBase := map[string]string{}
 	for _, candidate := range candidates {
-		if candidateHasAnySource(candidate, "aca_route_package_exact", "aca_route_package_anchor") {
+		if candidateHasAnySource(candidate, "contextwiki_route_package_exact", "contextwiki_route_package_anchor") {
 			hasPackageGuidance = true
 		}
-		if candidateHasAnySource(candidate, "aca_route_package_primary_anchor", "aca_route_infra_primary_anchor") {
+		if candidateHasAnySource(candidate, "contextwiki_route_package_primary_anchor", "contextwiki_route_infra_primary_anchor") {
 			dir := strings.TrimSpace(filepath.ToSlash(filepath.Dir(candidate.Path)))
 			if dir != "" && dir != "." {
 				preferredAnchorDirs[dir] = struct{}{}
@@ -2874,18 +2874,18 @@ func rankCodeSearchCandidatesWithPlan(candidates map[string]*codeSearchCandidate
 				candidate.Support -= 0.85
 			}
 		}
-		if taskType == codeSearchTaskFileLocate && candidateHasSource(candidate, "aca_route_package_anchor") {
+		if taskType == codeSearchTaskFileLocate && candidateHasSource(candidate, "contextwiki_route_package_anchor") {
 			switch {
-			case candidateHasSource(candidate, "aca_route_package_primary_anchor"):
+			case candidateHasSource(candidate, "contextwiki_route_package_primary_anchor"):
 				candidate.Support += 2.4
-			case candidateHasSource(candidate, "aca_route_package_secondary_anchor"):
+			case candidateHasSource(candidate, "contextwiki_route_package_secondary_anchor"):
 				candidate.Support += 0.4
 			default:
 				candidate.Support += 2.4
 			}
 		}
 		if taskType == codeSearchTaskFileLocate {
-			if candidateHasAnySource(candidate, "aca_route_package_primary_anchor", "aca_route_infra_primary_anchor") {
+			if candidateHasAnySource(candidate, "contextwiki_route_package_primary_anchor", "contextwiki_route_infra_primary_anchor") {
 				candidate.Support += 1.1
 				base := strings.TrimSpace(strings.TrimSuffix(filepath.Base(candidate.Path), filepath.Ext(candidate.Path)))
 				base = strings.TrimSuffix(base, "_test")
@@ -2893,7 +2893,7 @@ func rankCodeSearchCandidatesWithPlan(candidates map[string]*codeSearchCandidate
 					candidate.Support -= 1.75
 				}
 			}
-			if candidateHasAnySource(candidate, "aca_route_package_secondary_anchor", "aca_route_infra_secondary_anchor") {
+			if candidateHasAnySource(candidate, "contextwiki_route_package_secondary_anchor", "contextwiki_route_infra_secondary_anchor") {
 				dir := strings.TrimSpace(filepath.ToSlash(filepath.Dir(candidate.Path)))
 				if _, ok := preferredAnchorDirs[dir]; ok {
 					candidate.Support -= 2.5
@@ -2906,9 +2906,9 @@ func rankCodeSearchCandidatesWithPlan(candidates map[string]*codeSearchCandidate
 			}
 		}
 		if taskType == codeSearchTaskFileLocate && hasPackageGuidance {
-			if candidateHasSource(candidate, "aca_route_package_secondary_anchor") {
+			if candidateHasSource(candidate, "contextwiki_route_package_secondary_anchor") {
 				candidate.Support -= 0.6
-			} else if candidateHasAnySource(candidate, "aca_route_package_exact", "aca_route_package_anchor") {
+			} else if candidateHasAnySource(candidate, "contextwiki_route_package_exact", "contextwiki_route_package_anchor") {
 				candidate.Support += 1.2
 			} else {
 				candidate.Support -= 0.8
@@ -3855,9 +3855,9 @@ func fileLocateAnchorRole(candidate *codeSearchCandidate) string {
 		return ""
 	}
 	switch {
-	case candidateHasAnySource(candidate, "aca_route_package_primary_anchor", "aca_route_infra_primary_anchor"):
+	case candidateHasAnySource(candidate, "contextwiki_route_package_primary_anchor", "contextwiki_route_infra_primary_anchor"):
 		return "primary_anchor"
-	case candidateHasAnySource(candidate, "aca_route_package_secondary_anchor", "aca_route_infra_secondary_anchor"):
+	case candidateHasAnySource(candidate, "contextwiki_route_package_secondary_anchor", "contextwiki_route_infra_secondary_anchor"):
 		return "secondary_anchor"
 	default:
 		return ""
@@ -3886,7 +3886,7 @@ func inferFileLocateAnchorRoles(ranked []*codeSearchCandidate, selectedPaths map
 		if _, ok := out[candidate.Path]; ok {
 			continue
 		}
-		if !candidateHasSource(candidate, "aca_route_infra_exact") {
+		if !candidateHasSource(candidate, "contextwiki_route_infra_exact") {
 			continue
 		}
 		rank, ok := selectedPaths[candidate.Path]
@@ -3906,7 +3906,7 @@ func inferFileLocateAnchorRoles(ranked []*codeSearchCandidate, selectedPaths map
 			if _, ok := out[candidate.Path]; ok {
 				continue
 			}
-			if candidateHasSource(candidate, "aca_route_infra_exact") {
+			if candidateHasSource(candidate, "contextwiki_route_infra_exact") {
 				primaryPath = candidate.Path
 				break
 			}
@@ -3923,7 +3923,7 @@ func inferFileLocateAnchorRoles(ranked []*codeSearchCandidate, selectedPaths map
 		if _, ok := out[candidate.Path]; ok {
 			continue
 		}
-		if candidateHasSource(candidate, "aca_route_infra_exact") {
+		if candidateHasSource(candidate, "contextwiki_route_infra_exact") {
 			out[candidate.Path] = "secondary_anchor"
 		}
 	}

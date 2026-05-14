@@ -15,7 +15,7 @@ This directory contains active planning documents and implementation roadmaps.
 - `features/eino-go-native-runtime-plan.md` — Eino `AgentEngine` integration + Go-native `RuntimeSpawner`/reconciler; Jido optional path.
 - `features/opentui-agent-terminal-facades.md` — facade backlog for a greenfield OpenTUI agent terminal over v2 runtime, room, orchestration, skills, jobs, MCP, and CAS APIs.
 - `features/remote-workbench-session-handoff.md` — plan for moving a pi-mono-inspired TUI workbench to a Tailscale remote and continuing from browser/terminal attachments.
-- `features/semantic-code-anchors.md` — plan for typed code comments as repo graph edges, semantic envelope anchors, and ACA retrieval signals.
+- `features/semantic-code-anchors.md` — plan for typed code comments as repo graph edges, semantic envelope anchors, and ContextWiki retrieval signals.
 - `features/ladybugdb-graph-projection-spike.md` — gated spike plan for testing LadybugDB as a disposable repo graph projection without changing canonical repoindex/Turso storage or default Go builds.
 - `features/official-docs-production-release.md` — vetted Starlight docs-site plan, supply-chain gate, information architecture, and production documentation release matrix.
 - `features/durable-execution-recovery.md` — plan for v2 orchestration-first crash recovery using the orchestration card projection as the durable retry queue; runner checkpointing is deferred until side effects are replay-safe.

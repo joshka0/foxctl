@@ -57,22 +57,22 @@ Evidence: test output showing lane, ref type, and episode assertions pass.
 
 ---
 
-### VAL-RLM-003: Context lane returns EvidencePack from TopOfMind + handoffs + ACA + vault
+### VAL-RLM-003: Context lane returns EvidencePack from TopOfMind + handoffs + ContextWiki + vault
 
-`retrieve_context` assembles context from TopOfMind, handoffs, ACA bundle, and
+`retrieve_context` assembles context from TopOfMind, handoffs, ContextWiki bundle, and
 vault knowledge and returns an `EvidencePack` with `lane: "context"`.
 
 When called:
-1. Loads TopOfMind bundle and latest handoff from the ACA.
+1. Loads TopOfMind bundle and latest handoff from the ContextWiki.
 2. Queries the vault knowledge plane for related notes.
-3. Returns an `EvidencePack` with entries typed as `aca_ref`, `handoff_ref`,
+3. Returns an `EvidencePack` with entries typed as `contextwiki_ref`, `handoff_ref`,
    `vault_ref`, `tom_ref`.
 4. Sets `Lane` to `"context"`.
 5. Records a `RetrievalEpisode`.
 
 **Pass:** `EvidencePack.Lane == "context"`, contains at least one entry sourced
-from ACA/vault/handoff/TopOfMind, and `RetrievalEpisode` is recorded.
-**Fail:** Lane is wrong, no ACA-derived entries, or no episode recorded.
+from ContextWiki/vault/handoff/TopOfMind, and `RetrievalEpisode` is recorded.
+**Fail:** Lane is wrong, no ContextWiki-derived entries, or no episode recorded.
 
 Tool: `go test`
 Evidence: test output showing lane, entry source types, and episode assertions

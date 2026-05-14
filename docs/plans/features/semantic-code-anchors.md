@@ -7,7 +7,7 @@ Last Updated: 2026-05-06
 ## Goal
 
 Turn high-signal code comments into typed semantic anchors that improve repo
-graph search, ACA retrieval, embeddings, review, and agent memory without
+graph search, ContextWiki retrieval, embeddings, review, and agent memory without
 turning source files into long-form memory storage.
 
 The core idea is:
@@ -28,7 +28,7 @@ intent, not only by symbol names and raw code tokens.
 The target retrieval path is:
 
 ```text
-source anchor -> repo graph edge -> semantic envelope -> embedding -> ACA retrieval
+source anchor -> repo graph edge -> semantic envelope -> embedding -> ContextWiki retrieval
 ```
 
 The restraint is as important as the feature: code comments are semantic ports,
@@ -36,13 +36,13 @@ not the memory store.
 
 ## Existing System Fit
 
-This plan extends the current ACA, repoindex, and embedding stack rather than
+This plan extends the current ContextWiki, repoindex, and embedding stack rather than
 creating a parallel `agentgraph` system.
 
 Relevant existing pieces:
 
-- [AgentCTL context architecture](../../architecture/context-architecture.md)
-  already separates the ACA control plane from the durable Obsidian knowledge
+- [ContextWiki architecture](../../architecture/context-architecture.md)
+  already separates the ContextWiki control plane from the durable Obsidian knowledge
   plane.
 - [Memory](../../general/memory.md) documents named memory persistence,
   workspace scoping, optional embeddings, and `code/semantic_search` memory
@@ -85,7 +85,7 @@ still needs the review gates called out below.
 | PR-B4 eval fixture | Landed | five positive and three control queries cover beacon/domain/protocol/risk behavior and forbidden broad-query paths |
 | PR-B.5 empirical git layer | Landed | `--cochange`, `EdgeCoChangesWith`, scorer, and repoindex emission are explicit; temp-git tests cover repeated co-change, giant commits, recency, caps, symmetry, generated/lockfile handling, and freshness |
 | PR-C semantic envelope | Landed | digest/golden coverage includes anchor target, relation, linked doc/test target, provider version, cap config, section flags, and metadata-only co-change |
-| PR-D ACA retrieval blend | Landed | `context retrieve --semantic-anchors`, validated semantic hints, boost path, inspect classifications, eval modes, and deduped review-required proposals are covered |
+| PR-D ContextWiki retrieval blend | Landed | `context retrieve --semantic-anchors`, validated semantic hints, boost path, inspect classifications, eval modes, and deduped review-required proposals are covered |
 | PR-E anchor proposals and curator | Landed for review-gated proposals | `semantic_anchor_patch` proposal kind and review-required proposal plumbing exist; automatic source rewrites remain out of scope |
 | PR-F Obsidian bridge | Landed | inbox-first concept-note drafts, `repo_anchors`/`repo_symbols`/`repo_docs` reconciliation, and orphan/missing-note health checks are covered |
 | PR-G agent workflow | Landed | touched-file hook advisory, graph diff output, linked-test contracts, trust-critical-without-tests warnings, and portable `semantic-commenting` skill contract exist |
@@ -119,7 +119,7 @@ not carry the same authority.
 | Structural graph | AST/import/call/symbol extraction | What the code does structurally | High factual authority |
 | Semantic anchors | Tiny source comments | What humans or agents intentionally connect | Evidence-level until reviewed |
 | Git empirical layer | Co-change, freshness, volatility | What tends to move together or changed recently | Context signal, not truth |
-| Durable knowledge | ACA proposals, memorycore, docs, Obsidian | Reviewed explanations and policies | Depends on lifecycle and trust |
+| Durable knowledge | ContextWiki proposals, memorycore, docs, Obsidian | Reviewed explanations and policies | Depends on lifecycle and trust |
 
 Rules:
 
@@ -210,7 +210,7 @@ This package owns `EvidencePlane`, `EvidenceAuthority`, `EvidenceSource`,
 `EvidenceMeta`, `ValidateAllowedAuthorityEffects`, `ValidateEvidenceMeta`, and
 `ValidateRenderSurface`. It must not import repoindex, searchindex,
 semanticanchors, contextplane, memorycore, storage, Obsidian packages, or
-`internal/v2`. `semanticanchors`, repoindex explain, and later ACA/context
+`internal/v2`. `semanticanchors`, repoindex explain, and later ContextWiki and context
 bundle assembly should all import this contract instead of re-declaring local
 copies.
 
@@ -304,7 +304,7 @@ target package for the memory gate is `internal/context/contextplane`, not
 `internal/intelligence/evidence`.
 
 PR-A1a should include this memory-aware validator as a companion contract test
-surface, even though it does not add ACA retrieval behavior. Tests must prove
+surface, even though it does not add ContextWiki retrieval behavior. Tests must prove
 `ValidateRenderSurface` can only establish generic evidence/render legality and
 is insufficient for durable instruction rendering without
 `ValidateMemoryRecordForInstruction`.
@@ -549,7 +549,7 @@ runtime-guardrail surfaces unless separately promoted through durable
 memorycore state that is active, reviewed, validated, and
 instruction-eligible.
 
-PR-D may not render semantic anchor evidence into ACA/context bundles until
+PR-D may not render semantic anchor evidence into ContextWiki or context bundles until
 context assembly calls `evidence.ValidateRenderSurface` for each evidence node
 and rejects instruction-sensitive surfaces for source anchors.
 
@@ -585,7 +585,7 @@ Reviewers should reject implementation patches that violate these invariants:
 7. Existing `Index:` comments remain readable during migration.
 8. Embedding text is generated from a deterministic semantic envelope, not from
    prompt-time freeform synthesis.
-9. Anchor proposals are reviewed through ACA/memorycore lifecycle before agents
+9. Anchor proposals are reviewed through ContextWiki/memorycore lifecycle before agents
    edit source comments automatically.
 10. Anchor IDs must not include secrets, tokens, user PII, terminal output,
     URLs, absolute paths, path traversal, or transient session IDs.
@@ -636,7 +636,7 @@ capped co-change neighbors, and a capped code excerpt.
 
 ### Anchor Proposal
 
-A reviewed ACA proposal to add, remove, or change anchors. Agents may propose
+A reviewed ContextWiki proposal to add, remove, or change anchors. Agents may propose
 anchor changes, but source edits should stay visible in normal diffs.
 
 ### Curator
@@ -2031,7 +2031,7 @@ Projection paths must validate before rendering semantic evidence:
 - agent-tool semantic output
 - DAG/expand explain surfaces
 - future searchindex envelope providers
-- future ACA retrieval
+- future ContextWiki retrieval
 - future Obsidian bridge/graph output
 
 Invalid metadata is omitted from semantic evidence or downgraded to opaque
@@ -2277,7 +2277,7 @@ Rules:
 
 - Do not encode co-change in source comments.
 - Do not turn co-change directly into semantic anchors.
-- Strong co-change may create an ACA proposal or inspect suggestion, never a
+- Strong co-change may create a ContextWiki proposal or inspect suggestion, never a
   source edit.
 - Co-change can help retrieval and review as context signal after eval gating.
 - Freshness is metadata about extraction, verification, and recency. It does not
@@ -2292,7 +2292,7 @@ trusted anchor target = reviewed by docs, tests, or memorycore lifecycle
 
 ### Co-Change Storage
 
-Use existing ACA co-change machinery as the starting point, but expose an
+Use existing ContextWiki co-change machinery as the starting point, but expose an
 index-level empirical projection when needed. Avoid creating a second,
 contradictory co-change implementation.
 
@@ -2301,12 +2301,12 @@ Target architecture:
 ```text
 shared co-change collector/scorer
         |
-        +--> ACA personalized prior
+        +--> ContextWiki personalized prior
         |
         +--> repoindex inspect/top-K projection
 ```
 
-The shared scorer should preserve the existing ACA semantics around commit
+The shared scorer should preserve the existing ContextWiki semantics around commit
 limits, max files per commit, half-life decay, giant commit handling, noisy path
 filtering, and generated/lockfile downweighting.
 
@@ -2324,7 +2324,7 @@ or:
 internal/intelligence/indexing/repoindex/cochange
 ```
 
-Both ACA/contextplane and repoindex inspect can then consume the same collector.
+Both `internal/context/contextplane` and repoindex inspect can then consume the same collector.
 The shared API should accept deterministic config:
 
 ```go
@@ -2552,7 +2552,7 @@ Do not include:
 - secrets or redacted values
 - full docs
 - full tests
-- live ACA state
+- live ContextWiki state
 - linter warning timestamps
 
 Line movement from formatting should not force re-embedding if the anchor
@@ -2678,7 +2678,7 @@ Only reviewed docs/tests/validated memory should raise confidence. Only
 explicit active policy should make an anchor-derived record
 instruction-eligible.
 
-ACA should eventually represent source anchor edits as typed proposals before
+ContextWiki should eventually represent source anchor edits as typed proposals before
 automatic source rewrites. Do not add or wire this in PR-A/PR-B unless it is a
 dead declaration with no behavior:
 
@@ -2754,10 +2754,10 @@ allowed authority effects:
   or omit the edge from instruction-sensitive surfaces entirely.
 ```
 
-## ACA Integration
+## ContextWiki Integration
 
-Semantic anchors should become another high-signal input to ACA retrieval, not a
-replacement for ACA.
+Semantic anchors should become another high-signal input to ContextWiki retrieval, not a
+replacement for ContextWiki.
 
 ### Retrieval
 
@@ -2788,12 +2788,12 @@ query -> beacon:agent-terminal-safety
       -> linked tests and docs
 ```
 
-Do not change ACA ranking until parser, graph edges, explain output, and a
+Do not change ContextWiki ranking until parser, graph edges, explain output, and a
 small eval fixture are proven.
 
 ### Proposal Governance
 
-ACA proposal examples:
+ContextWiki proposal examples:
 
 - add an invariant anchor to a trust-critical function
 - remove a stale test anchor whose target no longer exists
@@ -2960,7 +2960,7 @@ Follow the package topology boundary:
 | Co-change and freshness projection | `internal/intelligence/indexing/repoindex` or neighboring intelligence package |
 | Semantic envelope generation | `internal/intelligence/indexing/embeddingtext` and `internal/intelligence/searchindex` |
 | Anchor lint/explain CLI | `cmd/foxctl/cmd` calling intelligence packages |
-| ACA retrieval blending and proposals | `internal/context/contextplane` |
+| ContextWiki retrieval blending and proposals | `internal/context/contextplane` |
 | Memory lifecycle/trust projection | `internal/context/memorycore` |
 | Durable SQL tables if needed | `internal/storage/*` |
 | Obsidian note/bridge integration | `internal/tooling/tools/obsidian` and `internal/storage/obsidianindex` |
@@ -2970,7 +2970,7 @@ Do not place this under `internal/v2`.
 ### Searchindex Enrichment Seam
 
 `internal/intelligence/searchindex` should not directly know about repoindex,
-ACA, memorycore, Obsidian, and git. Add a narrow optional provider seam for PR-C
+ContextWiki, memorycore, Obsidian, and git. Add a narrow optional provider seam for PR-C
 instead:
 
 Naming caution: `searchindex.Anchor` already means a retrieval-hit location.
@@ -3137,7 +3137,7 @@ Curator can propose changes when anchors are:
 - used by many symbols but missing a canonical note
 - duplicated under multiple scopes
 
-Curator must not silently rewrite source. It should create ACA proposals or
+Curator must not silently rewrite source. It should create ContextWiki proposals or
 normal diffs for review.
 
 Bad curator behavior:
@@ -3152,7 +3152,7 @@ Bad curator behavior:
 ### PR-A1a: Evidence and Memory Gate Only
 
 Smallest safe first implementation slice. This should land before parser,
-source scanning, repoindex, CLI explain, Obsidian, searchindex, ACA retrieval,
+source scanning, repoindex, CLI explain, Obsidian, searchindex, ContextWiki retrieval,
 co-change, memory promotion, or source rewrite work.
 
 Tasks:
@@ -3222,7 +3222,7 @@ Tasks:
   surfaces through the PR-A1a render barrier
 - add metadata codec/validation only after `ResolveAnchorOccurrence` tests pass
 
-No repoindex, searchindex, ACA retrieval/ranking, or source rewrite changes.
+No repoindex, searchindex, ContextWiki retrieval/ranking, or source rewrite changes.
 PR-A1 should not touch `internal/context/contextplane` except to keep PR-A1a
 tests compiling if exported type names changed during review.
 
@@ -3448,14 +3448,14 @@ Tasks:
 
 ### PR-B4: Small Eval Fixture
 
-Goal: create the acceptance gate before embeddings and ACA ranking.
+Goal: create the acceptance gate before embeddings and ContextWiki ranking.
 
 Tasks:
 
 - add five positive query fixtures
 - add three negative/control query fixtures
 - verify explainability and no broad-anchor hijack
-- treat this as a hard gate before PR-C searchindex envelope work or PR-D ACA
+- treat this as a hard gate before PR-C searchindex envelope work or PR-D ContextWiki
   retrieval blending
 
 ### PR-B4 Acceptance: Anchor-Aware Repoindex Eval Fixture
@@ -3509,7 +3509,7 @@ Tasks:
 - reuse the PR-B1 `EdgeSetEmpirical` and reserved `EdgeCoChangesWith` constant;
   PR-B.5 adds the first real co-change edge emitter and keeps it out of
   structural/default traversal
-- do not change ACA ranking by default
+- do not change ContextWiki ranking by default
 - do not change embeddings by default
 - do not create source anchors automatically
 
@@ -3532,7 +3532,7 @@ Tasks:
 - prove raw code plus anchors retrieves better than raw code alone on a small
   fixture suite
 
-### PR-D: ACA Retrieval Blend Behind Flags and Evals
+### PR-D: ContextWiki Retrieval Blend Behind Flags and Evals
 
 Goal: route task queries through anchors when useful.
 
@@ -3687,7 +3687,7 @@ Tests that can wait for later PRs:
 - parser grammar, source comment extraction, owner binding, redaction of anchor
   syntax, `AnchorResolution`, semantic-anchor edge metadata, repoindex edge
   sets and DAG behavior, Obsidian anchor-concept filtering, searchindex
-  semantic envelope, ACA retrieval blend, co-change scoring, and source
+  semantic envelope, ContextWiki retrieval blend, co-change scoring, and source
   rewrite/proposal flows
 
 ### PR-A Parser Tests
@@ -4092,7 +4092,7 @@ default traversal unchanged.
 | Co-change | temp git fixture covers recency, giant commits, caps, symmetry |
 | Embedding envelope | golden tests prove stable ordering, provider behavior, and digest behavior |
 | Retrieval | anchor-aware queries improve fixture suite results behind flags |
-| ACA proposals | duplicate findings dedupe into one proposal |
+| ContextWiki proposals | duplicate findings dedupe into one proposal |
 | Obsidian bridge | generated anchor notes remain inbox-first |
 | Safety | secrets/transient values are rejected by lint |
 
@@ -4102,7 +4102,7 @@ default traversal unchanged.
 
 Mitigation: inline anchors are tiny and typed. Block relation syntax and
 long-form comments stay outside the current goal until evals justify them.
-Longer notes live in ACA proposals, Obsidian notes, docs, or memorycore records.
+Longer notes live in ContextWiki proposals, Obsidian notes, docs, or memorycore records.
 
 ### Risk: Bad Anchors Become False Authority
 
@@ -4144,7 +4144,7 @@ scan arbitrary source text, string literals, or Markdown prose.
 
 Mitigation: PR-C adds an optional `CodeEnvelopeProvider` enrichment seam.
 Searchindex consumes deterministic envelope bits instead of importing repoindex,
-ACA, Obsidian, memorycore, or git directly.
+ContextWiki, Obsidian, memorycore, or git directly.
 
 ### Risk: All Signals Become Scores
 
@@ -4205,7 +4205,7 @@ Completed proof points:
 - Semantic envelope proof: digest coverage includes anchor target, relation,
   linked doc/test target, provider version, cap config, section flags, and
   metadata-only co-change.
-- ACA retrieval/proposal proof: semantic-anchor eval modes exist, semantic hints
+- ContextWiki retrieval/proposal proof: semantic-anchor eval modes exist, semantic hints
   validate evidence metadata, and repeated `semantic_anchor_patch` proposals
   dedupe while remaining review-required.
 - Obsidian and agent workflow: inbox-first note drafts, bridge backlinks,
@@ -4229,8 +4229,8 @@ as authoritative only after a fresh repoindex build has completed.
    daemon rewrites. Proposal flows may prepare patches, but application stays
    review-gated.
 4. The first acceptance gate is the PR-B4 anchor-aware repoindex eval fixture,
-   followed by ACA retrieval evals.
-5. Co-change lives in repoindex as explicit empirical edges and ACA as retrieval
+   followed by ContextWiki retrieval evals.
+5. Co-change lives in repoindex as explicit empirical edges and ContextWiki as retrieval
    priors; it must remain out of structural defaults and out of embedding text
    by default.
 

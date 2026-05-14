@@ -86,8 +86,8 @@ func DefaultDefs() []coretool.ToolDef {
 			prop("render", "string", "none, tree, mermaid"),
 		)),
 
-		readOnlyDef("context/show", "Read the ACA top-of-mind bundle.", schemaObject()),
-		readOnlyDef("context/retrieve", "Blend ACA state with vault retrieval.", schemaObject(
+		readOnlyDef("context/show", "Read the ContextWiki top-of-mind bundle.", schemaObject()),
+		readOnlyDef("context/retrieve", "Blend ContextWiki state with vault retrieval.", schemaObject(
 			req("query", "string", "Question or topic"),
 			prop("vault_path", "string", "Optional vault path"),
 			prop("limit", "integer", "Maximum result count"),

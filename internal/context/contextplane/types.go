@@ -283,7 +283,7 @@ type MaintenanceTask struct {
 	CreatedAt  time.Time           `json:"created_at"`
 }
 
-// RetrievalCorrectionRun records one persisted ACA retrieval correction report.
+// RetrievalCorrectionRun records one persisted ContextWiki retrieval correction report.
 type RetrievalCorrectionRun struct {
 	ID              string                          `json:"id"`
 	Suite           string                          `json:"suite"`
@@ -312,7 +312,7 @@ type GraphCorrectionRun struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
-// MemoryProposal records one typed, deduped suggestion for evolving ACA memory state.
+// MemoryProposal records one typed, deduped suggestion for evolving ContextWiki memory state.
 type MemoryProposal struct {
 	ID               string                      `json:"id"`
 	DedupeKey        string                      `json:"dedupe_key,omitempty"`
@@ -437,7 +437,7 @@ type ControlProposalState struct {
 	LatestApplyResult *ApplyResult         `json:"latest_apply_result,omitempty"`
 }
 
-// EvidenceImportRun records one external-evidence intake into the ACA inbox.
+// EvidenceImportRun records one external-evidence intake into the ContextWiki inbox.
 type EvidenceImportRun struct {
 	ID             string    `json:"id"`
 	SourceKind     string    `json:"source_kind"`
@@ -504,7 +504,7 @@ type RetrievalWeights struct {
 	SemanticMatch  int `json:"semantic_match"`
 }
 
-// RetrievalOptions controls which ACA retrieval components participate in one query.
+// RetrievalOptions controls which ContextWiki retrieval components participate in one query.
 // The default path should remain behavior-compatible with existing Retrieve().
 type RetrievalOptions struct {
 	IncludeTopOfMindResult    bool     `json:"include_top_of_mind_result"`
@@ -725,7 +725,7 @@ type TaskPacket struct {
 	GeneratedAt     time.Time                   `json:"generated_at"`
 }
 
-// Layout describes the workspace-local ACA runtime scaffold.
+// Layout describes the workspace-local ContextWiki runtime scaffold.
 type Layout struct {
 	WorkspacePath          string
 	RootDir                string

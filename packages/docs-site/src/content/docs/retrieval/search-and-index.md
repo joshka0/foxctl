@@ -45,6 +45,10 @@ Tree options:
 - `tree_max_children: 50` — cap items per directory
 - `tree_include_summaries: false` — disable summaries for faster output
 
+This smart table-of-contents shape is the same retrieval instinct behind
+repoindex. For the PageIndex comparison, see
+[repoindex and PageIndex](/retrieval/repoindex-pageindex/).
+
 ### Scope filtering
 
 Narrow results to specific source types:

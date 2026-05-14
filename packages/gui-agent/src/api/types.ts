@@ -606,7 +606,7 @@ export interface OrchestrationCardActionResult {
   ts: string;
 }
 
-export interface ACAProposalWorkPacket {
+export interface ContextWikiProposalWorkPacket {
   proposal_id: string;
   proposal_kind: string;
   action: string;
@@ -622,28 +622,28 @@ export interface ACAProposalWorkPacket {
   next_command?: string;
 }
 
-export interface ACAMaintenanceTask {
+export interface ContextWikiMaintenanceTask {
   id: string;
   title: string;
   kind: string;
   priority: number;
   reason: string;
   source_refs?: string[];
-  work_packet?: ACAProposalWorkPacket | null;
+  work_packet?: ContextWikiProposalWorkPacket | null;
   status: string;
   created_at: string;
 }
 
-export interface ACANextProposalMergeResult {
+export interface ContextWikiNextProposalMergeResult {
   workspace_path: string;
   vault_path?: string;
   found: boolean;
-  task?: ACAMaintenanceTask | null;
-  work_packet?: ACAProposalWorkPacket | null;
+  task?: ContextWikiMaintenanceTask | null;
+  work_packet?: ContextWikiProposalWorkPacket | null;
   claimed?: boolean;
 }
 
-export interface ACAEvidenceImportRun {
+export interface ContextWikiEvidenceImportRun {
   id: string;
   source_kind: string;
   source_ref: string;
@@ -657,7 +657,7 @@ export interface ACAEvidenceImportRun {
   created_at: string;
 }
 
-export interface ACAPromotionJob {
+export interface ContextWikiPromotionJob {
   id: string;
   source_ref: string;
   source_kind: string;
@@ -668,7 +668,7 @@ export interface ACAPromotionJob {
   created_at: string;
 }
 
-export interface ACAOverviewStats {
+export interface ContextWikiOverviewStats {
   proposal_count: number;
   active_proposal_count: number;
   prepared_merge_count: number;
@@ -678,18 +678,18 @@ export interface ACAOverviewStats {
   promotion_merged_count: number;
 }
 
-export interface ACAOverview {
+export interface ContextWikiOverview {
   workspace_path: string;
   vault_path?: string;
-  stats: ACAOverviewStats;
-  next_proposal_merge?: ACAMaintenanceTask | null;
-  claimed_proposal_merge?: ACAMaintenanceTask | null;
-  proposals: ACAMemoryProposal[];
-  evidence_imports: ACAEvidenceImportRun[];
-  promotion_jobs: ACAPromotionJob[];
+  stats: ContextWikiOverviewStats;
+  next_proposal_merge?: ContextWikiMaintenanceTask | null;
+  claimed_proposal_merge?: ContextWikiMaintenanceTask | null;
+  proposals: ContextWikiMemoryProposal[];
+  evidence_imports: ContextWikiEvidenceImportRun[];
+  promotion_jobs: ContextWikiPromotionJob[];
 }
 
-export interface ACAMemoryProposal {
+export interface ContextWikiMemoryProposal {
   id: string;
   dedupe_key?: string;
   kind: string;

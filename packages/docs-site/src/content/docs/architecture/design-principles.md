@@ -39,7 +39,7 @@ Examples:
 | Workspace source files | Repoindex graph |
 | Memory and session stores | Semantic memory search |
 | Vault markdown | Obsidian index |
-| ACA runtime files | Top-of-mind and proposal projections |
+| ContextWiki runtime files | Top-of-mind and proposal projections |
 | Tool output | CAS artifact plus envelope summary |
 
 Do not dual-write first. Prove that a projection can be deleted and rebuilt
@@ -84,7 +84,7 @@ Use the right retrieval plane:
 | Context grep | "Show the function or file around this exact hit" |
 | Repoindex | "Trace relationships between files, packages, symbols, and concepts" |
 | DAG grep | "Explain a bounded graph neighborhood" |
-| ACA | "What does this workspace already know about the task?" |
+| ContextWiki | "What does this workspace already know about the task?" |
 | Context engine | "Fuse typed evidence and record retrieval feedback" |
 
 Graph traversal is not a replacement for embedding search. Embedding search is

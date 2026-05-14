@@ -17,7 +17,7 @@ func newContextRetrieveInspectRunsCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "retrieve-inspect-runs",
-		Short: "List persisted ACA retrieval correction runs",
+		Short: "List persisted ContextWiki retrieval correction runs",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			target := resolveContextWorkspace(workspacePath)
 			store := contextplane.NewWorkspaceStore(target)
@@ -57,7 +57,7 @@ func newContextRetrieveInspectArtifactCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "retrieve-inspect-artifact",
-		Short: "Read a persisted ACA retrieval inspection artifact from CAS",
+		Short: "Read a persisted ContextWiki retrieval inspection artifact from CAS",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if strings.TrimSpace(artifact) == "" {
 				return fmt.Errorf("--artifact is required")

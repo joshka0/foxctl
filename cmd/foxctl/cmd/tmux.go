@@ -1398,7 +1398,7 @@ func newTmuxObserveCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "observe <target>",
-		Short: "Promote the latest mux bridge message in a pane into an ACA observation",
+		Short: "Promote the latest mux bridge message in a pane into a ContextWiki observation",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := tmuxbridge.New()
@@ -1437,7 +1437,7 @@ func newTmuxObserveCommand() *cobra.Command {
 				path, appendErr = store.AppendObservation(obs)
 				if appendErr != nil {
 					return protocol.WriteError(cmd.OutOrStdout(), "foxctl.tmux.observe", protocol.ErrorCodeERuntime, appendErr.Error(), map[string]any{
-						"hint": "Check workspace permissions and ACA layout under .foxctl/runtime/.",
+						"hint": "Check workspace permissions and ContextWiki layout under .foxctl/runtime/.",
 					}, protocol.WithSource("cli"))
 				}
 			}
@@ -1461,7 +1461,7 @@ func newTmuxObserveCommand() *cobra.Command {
 	cmd.Flags().IntVar(&count, "count", 1, "Observed count")
 	cmd.Flags().StringVar(&project, "project", "", "Project name")
 	cmd.Flags().StringVar(&area, "area", "tmux-collab", "Observation area")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview without persisting to ACA")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview without persisting to ContextWiki")
 	return cmd
 }
 

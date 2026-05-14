@@ -20,7 +20,7 @@ import (
 	"github.com/joshka0/foxctl/internal/storage/obsidianindex"
 )
 
-func TestRetrieveBlendsACAStateAndVaultHits(t *testing.T) {
+func TestRetrieveBlendsContextWikiStateAndVaultHits(t *testing.T) {
 	ctx := context.Background()
 	workspace := t.TempDir()
 	storageRoot := t.TempDir()
@@ -432,7 +432,7 @@ func TestLoadRetrievalOptions_PackageFallbackFromPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureLayout: %v", err)
 	}
-	body := []byte("aca:\n  package_note_fallback: true\n  co_change_prior: true\n  co_change_commit_limit: 12\n  co_change_max_files_per_commit: 7\n  co_change_half_life_days: 45\n  continuity_bundles: false\n")
+	body := []byte("contextwiki:\n  package_note_fallback: true\n  co_change_prior: true\n  co_change_commit_limit: 12\n  co_change_max_files_per_commit: 7\n  co_change_half_life_days: 45\n  continuity_bundles: false\n")
 	if err := os.WriteFile(layout.RetrievalPolicyPath, body, 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -508,7 +508,7 @@ func TestRetrieveWithOptions_CoChangePriorBoostsRelatedRepoPaths(t *testing.T) {
 	store := NewWorkspaceStore(workspace)
 	if _, err := store.SaveTopOfMind(TopOfMind{
 		WorkspaceID:  "ws-test",
-		Objective:    "Refine ACA retrieval",
+		Objective:    "Refine ContextWiki retrieval",
 		Phase:        "design",
 		RelevantRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "internal/context/contextplane/store.go"}},
 		UpdatedAt:    time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC),

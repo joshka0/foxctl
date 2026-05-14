@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { ACAContextRail } from '@/components/v2/ACAContextRail'
+import { ContextWikiContextRail } from '@/components/v2/ContextWikiContextRail'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
@@ -736,7 +736,7 @@ export function ContextExplorer() {
       </div>
       <ScrollArea className="flex-1">
         <div className="p-4 space-y-3">
-          <ACAContextRail selectedAgentWorkspaceRoot={workspaceRoot} />
+          <ContextWikiContextRail selectedAgentWorkspaceRoot={workspaceRoot} />
           <Card>
             <CollapsibleSection
               title="Context Diagnostics"

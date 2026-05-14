@@ -146,21 +146,27 @@ func summarizeEvidenceWithFallback(ctx context.Context, content string) (Evidenc
 }
 
 func newLocalEvidenceLLMClient() (verification.LLMClient, bool) {
-	baseURL := strings.TrimSpace(os.Getenv("FOXCTL_ACA_L6_BASE_URL"))
+	baseURL := firstNonEmpty(
+		os.Getenv("FOXCTL_CONTEXTWIKI_L6_BASE_URL"),
+	)
 	if baseURL == "" {
 		baseURL = strings.TrimSpace(os.Getenv("FOXCTL_OPENAI_COMPAT_BASE_URL"))
 	}
 	if baseURL == "" {
 		return nil, false
 	}
-	model := strings.TrimSpace(os.Getenv("FOXCTL_ACA_L6_MODEL"))
+	model := firstNonEmpty(
+		os.Getenv("FOXCTL_CONTEXTWIKI_L6_MODEL"),
+	)
 	if model == "" {
 		model = strings.TrimSpace(os.Getenv("FOXCTL_OPENAI_COMPAT_MODEL"))
 	}
 	if model == "" {
 		model = llmproviders.DefaultModelForProvider("lmstudio")
 	}
-	apiKey := strings.TrimSpace(os.Getenv("FOXCTL_ACA_L6_API_KEY"))
+	apiKey := firstNonEmpty(
+		os.Getenv("FOXCTL_CONTEXTWIKI_L6_API_KEY"),
+	)
 	if apiKey == "" {
 		apiKey = strings.TrimSpace(os.Getenv("FOXCTL_OPENAI_COMPAT_API_KEY"))
 	}
@@ -181,7 +187,7 @@ func newLocalEvidenceLLMClient() (verification.LLMClient, bool) {
 }
 
 func summarizeEvidenceWithLocalModel(ctx context.Context, client verification.LLMClient, content string) (EvidenceExtraction, error) {
-	systemPrompt := `You are a local ACA L6 summarizer. Produce a lightweight evidence extraction.
+	systemPrompt := `You are a local ContextWiki L6 summarizer. Produce a lightweight evidence extraction.
 Return only valid JSON with keys:
 summary, claims, frameworks, action_items, open_questions.
 Keep the summary to 2-4 sentences.
@@ -361,7 +367,7 @@ func suggestedEvidenceTitle(sourceKind, sourceRef, content string) string {
 }
 
 func inferLocalProcessorModel() string {
-	if model := strings.TrimSpace(os.Getenv("FOXCTL_ACA_L6_MODEL")); model != "" {
+	if model := strings.TrimSpace(os.Getenv("FOXCTL_CONTEXTWIKI_L6_MODEL")); model != "" {
 		return model
 	}
 	if model := strings.TrimSpace(os.Getenv("FOXCTL_OPENAI_COMPAT_MODEL")); model != "" {

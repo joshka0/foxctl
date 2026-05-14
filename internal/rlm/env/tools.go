@@ -296,7 +296,7 @@ func DefaultTools() []rlm.Tool {
 				"constraints": map[string]any{
 					"type":                 "object",
 					"additionalProperties": true,
-					"description":          "Optional debug constraints such as exclude_paths, include_history, include_aca, or require_grounding.",
+					"description":          "Optional debug constraints such as exclude_paths, include_history, include_contextwiki, or require_grounding.",
 				},
 				"budget": map[string]any{
 					"type":                 "object",
@@ -338,7 +338,7 @@ func DefaultTools() []rlm.Tool {
 		},
 		{
 			Name:        "retrieve_context",
-			Description: "Retrieve context evidence from the ACA top-of-mind projection, handoffs, and workspace knowledge layer. Returns an EvidencePack with context-lane evidence nodes.",
+			Description: "Retrieve context evidence from the ContextWiki top-of-mind projection, handoffs, and workspace knowledge layer. Returns an EvidencePack with context-lane evidence nodes.",
 			Parameters: objectSchema(map[string]any{
 				"query": map[string]any{
 					"type":        "string",

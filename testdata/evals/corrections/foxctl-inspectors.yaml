@@ -1,22 +1,22 @@
 name: foxctl-inspectors
 cases:
-  - id: aca-storage-memory
-    method: aca_retrieve
+  - id: contextwiki-storage-memory
+    method: contextwiki_retrieve
     query: "storage memory package"
     expected_any_of:
       - internal/storage/memory/store.go
     expected_classification: "package_note_fallback_disabled"
     expected_fix_contains: "package-note fallback"
-    notes: "ACA currently finds the broader semantic/memory map first and proposes enabling package-note fallback."
+    notes: "ContextWiki currently finds the broader semantic/memory map first and proposes enabling package-note fallback."
 
-  - id: aca-skillmain
-    method: aca_retrieve
+  - id: contextwiki-skillmain
+    method: contextwiki_retrieve
     query: "skills main runtime wiring"
     expected_any_of:
       - internal/adapters/skillslib/skillmain/main.go
     expected_classification: "missing_vault_coverage"
     expected_fix_contains: "durable note coverage"
-    notes: "ACA currently has no useful durable note hit for this query family."
+    notes: "ContextWiki currently has no useful durable note hit for this query family."
 
   - id: dag-web-api
     method: repoindex_dag

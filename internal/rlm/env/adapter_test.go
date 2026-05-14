@@ -1122,7 +1122,7 @@ func TestReadOnlyAdapterGatherContextAnswerSurfaceGraphSummaryOptIn(t *testing.T
 	}
 }
 
-func TestReadOnlyAdapterGatherContextIncludesACAContext(t *testing.T) {
+func TestReadOnlyAdapterGatherContextIncludesContextWikiContext(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -1151,10 +1151,10 @@ The certified bundle gate requires runtime certification before an answerer trus
 	}
 
 	workspaceID := ws.ID(workspace)
-	acaStore := contextplane.NewWorkspaceStore(workspace)
-	if _, err := acaStore.SaveTopOfMind(contextplane.TopOfMind{
+	contextWikiStore := contextplane.NewWorkspaceStore(workspace)
+	if _, err := contextWikiStore.SaveTopOfMind(contextplane.TopOfMind{
 		WorkspaceID: workspaceID,
-		Objective:   "Wire ACA context into gather_context",
+		Objective:   "Wire ContextWiki context into gather_context",
 		Phase:       "implementation",
 		UpdatedAt:   time.Date(2026, 4, 30, 12, 0, 0, 0, time.UTC),
 	}); err != nil {
@@ -1166,7 +1166,7 @@ The certified bundle gate requires runtime certification before an answerer trus
 	adapter := NewReadOnlyAdapter(cfg, workspace, vault, nil, rlm.Environment{
 		TopOfMind: map[string]any{
 			"workspace_id": workspaceID,
-			"objective":    "Wire ACA context into gather_context",
+			"objective":    "Wire ContextWiki context into gather_context",
 			"phase":        "implementation",
 		},
 		LatestHandoff: map[string]any{
@@ -1202,7 +1202,7 @@ The certified bundle gate requires runtime certification before an answerer trus
 		t.Fatalf("missing handoff fact: %s", joined)
 	}
 	if !strings.Contains(joined, "certified bundle gate requires runtime certification") {
-		t.Fatalf("missing ACA vault fact: %s", joined)
+		t.Fatalf("missing ContextWiki vault fact: %s", joined)
 	}
 	if bundle.SourceCoverage["context"] == 0 {
 		t.Fatalf("source coverage missing context lane: %#v", bundle.SourceCoverage)
@@ -1358,8 +1358,8 @@ func TestReadOnlyAdapterMemoryEnsembleRetrieveStructuredFindings(t *testing.T) {
 			}, nil
 		default:
 			return rlm.Result{
-				Answer:       `{"summary":"No durable ACA context beyond the active codename update.","context_blocks":[{"lane":"top_of_mind","summary":"codename rollout in progress","refs":["note:aca"]}]}`,
-				EvidenceRefs: []string{"artifact:aca"},
+				Answer:       `{"summary":"No durable ContextWiki context beyond the active codename update.","context_blocks":[{"lane":"top_of_mind","summary":"codename rollout in progress","refs":["note:contextwiki"]}]}`,
+				EvidenceRefs: []string{"artifact:contextwiki"},
 			}, nil
 		}
 	})

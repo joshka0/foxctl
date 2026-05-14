@@ -13,13 +13,13 @@ This runtime is:
 - external-state oriented
 - evidence-producing
 
-It is not a replacement for ACA, companion memory, or embeddings.
+It is not a replacement for ContextWiki, companion memory, or embeddings.
 
 ## Core Position
 
 `foxctl` uses three different layers:
 
-- memory and ACA for durable structured state
+- memory and ContextWiki for durable structured state
 - embeddings and indexes for candidate generation
 - RLM for selective reasoning over large external state
 
@@ -195,7 +195,7 @@ Do not use RLM for every query.
 
 Recommended routing:
 
-- use normal ACA/repo/vault retrieval for simple tasks
+- use normal ContextWiki/repo/vault retrieval for simple tasks
 - use RLM only for:
   - large-context inspection
   - cross-session synthesis
@@ -221,7 +221,7 @@ First version is not:
 - a fully autonomous recursive agent
 - a write-capable recursive planner
 - a replacement for companion memory
-- a replacement for ACA
+- a replacement for ContextWiki
 - a replacement for repo/vault retrieval
 
 ## Recommended First Deliverables
@@ -229,7 +229,7 @@ First version is not:
 1. `internal/rlm`
    - read-only runner interfaces
    - no-op/local experimental implementation
-2. environment bootstrap from ACA + companion + repo/vault handles
+2. environment bootstrap from ContextWiki + companion + repo/vault handles
 3. trajectory logging for all RLM runs
 4. experimental CLI entrypoint
 

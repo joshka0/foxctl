@@ -59,16 +59,18 @@ func defaultRetrievalWeights() RetrievalWeights {
 }
 
 type retrievalPolicyFile struct {
-	RankingWeights map[string]int `yaml:"ranking_weights"`
-	ACA            struct {
-		PackageNoteFallback       bool `yaml:"package_note_fallback"`
-		SemanticAnchors           bool `yaml:"semantic_anchors"`
-		CoChangePrior             bool `yaml:"co_change_prior"`
-		CoChangeCommitLimit       int  `yaml:"co_change_commit_limit"`
-		CoChangeMaxFilesPerCommit int  `yaml:"co_change_max_files_per_commit"`
-		CoChangeHalfLifeDays      int  `yaml:"co_change_half_life_days"`
-		ContinuityBundles         bool `yaml:"continuity_bundles"`
-	} `yaml:"aca"`
+	RankingWeights map[string]int             `yaml:"ranking_weights"`
+	ContextWiki    retrievalPolicyContextWiki `yaml:"contextwiki"`
+}
+
+type retrievalPolicyContextWiki struct {
+	PackageNoteFallback       bool `yaml:"package_note_fallback"`
+	SemanticAnchors           bool `yaml:"semantic_anchors"`
+	CoChangePrior             bool `yaml:"co_change_prior"`
+	CoChangeCommitLimit       int  `yaml:"co_change_commit_limit"`
+	CoChangeMaxFilesPerCommit int  `yaml:"co_change_max_files_per_commit"`
+	CoChangeHalfLifeDays      int  `yaml:"co_change_half_life_days"`
+	ContinuityBundles         bool `yaml:"continuity_bundles"`
 }
 
 func DefaultRetrievalOptions() RetrievalOptions {
@@ -151,34 +153,35 @@ func (s *WorkspaceStore) loadRetrievalOptions() RetrievalOptions {
 	if err := yaml.Unmarshal(body, &policy); err != nil {
 		return opts
 	}
-	opts.UsePackageNoteFallback = policy.ACA.PackageNoteFallback
-	opts.UseSemanticAnchors = policy.ACA.SemanticAnchors
+	contextWikiPolicy := policy.ContextWiki
+	opts.UsePackageNoteFallback = contextWikiPolicy.PackageNoteFallback
+	opts.UseSemanticAnchors = contextWikiPolicy.SemanticAnchors
 	opts.UseRepoMotifPrior = true
-	opts.UseCoChangePrior = policy.ACA.CoChangePrior
-	if policy.ACA.CoChangeCommitLimit > 0 {
-		opts.CoChangeCommitLimit = policy.ACA.CoChangeCommitLimit
+	opts.UseCoChangePrior = contextWikiPolicy.CoChangePrior
+	if contextWikiPolicy.CoChangeCommitLimit > 0 {
+		opts.CoChangeCommitLimit = contextWikiPolicy.CoChangeCommitLimit
 	}
-	if policy.ACA.CoChangeMaxFilesPerCommit > 0 {
-		opts.CoChangeMaxFilesPerCommit = policy.ACA.CoChangeMaxFilesPerCommit
+	if contextWikiPolicy.CoChangeMaxFilesPerCommit > 0 {
+		opts.CoChangeMaxFilesPerCommit = contextWikiPolicy.CoChangeMaxFilesPerCommit
 	}
-	if policy.ACA.CoChangeHalfLifeDays > 0 {
-		opts.CoChangeHalfLifeDays = policy.ACA.CoChangeHalfLifeDays
+	if contextWikiPolicy.CoChangeHalfLifeDays > 0 {
+		opts.CoChangeHalfLifeDays = contextWikiPolicy.CoChangeHalfLifeDays
 	}
-	opts.UseContinuityBundles = policy.ACA.ContinuityBundles
+	opts.UseContinuityBundles = contextWikiPolicy.ContinuityBundles
 	return opts
 }
 
-// Retrieve blends ACA state with ranked vault hits.
+// Retrieve blends ContextWiki state with ranked vault hits.
 func (s *WorkspaceStore) Retrieve(ctx context.Context, index obsidianindex.Store, repo *repoindex.Store, semanticProvider semantic.EmbeddingProvider, query string, limit int) (RetrievalResult, error) {
 	return s.RetrieveWithOptionsAndMemory(ctx, index, repo, semanticProvider, nil, query, limit, s.loadRetrievalOptions())
 }
 
-// RetrieveWithOptions blends ACA state with ranked vault hits under explicit retrieval options.
+// RetrieveWithOptions blends ContextWiki state with ranked vault hits under explicit retrieval options.
 func (s *WorkspaceStore) RetrieveWithOptions(ctx context.Context, index obsidianindex.Store, repo *repoindex.Store, semanticProvider semantic.EmbeddingProvider, query string, limit int, opts RetrievalOptions) (RetrievalResult, error) {
 	return s.RetrieveWithOptionsAndMemory(ctx, index, repo, semanticProvider, nil, query, limit, opts)
 }
 
-// RetrieveWithOptionsAndMemory blends ACA state with ranked vault hits and optional memory-backed structural priors.
+// RetrieveWithOptionsAndMemory blends ContextWiki state with ranked vault hits and optional memory-backed structural priors.
 func (s *WorkspaceStore) RetrieveWithOptionsAndMemory(ctx context.Context, index obsidianindex.Store, repo *repoindex.Store, semanticProvider semantic.EmbeddingProvider, memStore storage.MemoryStore, query string, limit int, opts RetrievalOptions) (RetrievalResult, error) {
 	if limit <= 0 {
 		limit = 5

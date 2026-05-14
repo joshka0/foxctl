@@ -15,7 +15,7 @@ const (
 )
 
 // CodeEnvelopeProvider supplies deterministic semantic context for code
-// documents without coupling searchindex to repoindex, git, ACA, or memorycore.
+// documents without coupling searchindex to repoindex, git, ContextWiki, or memorycore.
 type CodeEnvelopeProvider interface {
 	BuildCodeEnvelope(ctx context.Context, req CodeEnvelopeRequest) (SemanticEnvelopeBits, error)
 }

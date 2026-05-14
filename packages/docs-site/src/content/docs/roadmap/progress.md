@@ -27,7 +27,7 @@ that is still evolving through plans, evals, and benchmark validation.
 | Refactor intelligence | Finds hotspots, repeated change patterns, and deterministic refactor targets | Active implementation and validation work |
 | Slop function detection | Flags AI-generated sprawl and low-confidence code shape | Active detection backlog |
 | RLM helper runtime | Supports recursive helper pipelines, LongCoT evals, and smolvm experiments | Experimental |
-| ACA memory evolution | Improves self-corrective retrieval and memory derivation | Active research and plan-backed work |
+| ContextWiki memory evolution | Improves self-corrective retrieval and memory derivation | Active research and plan-backed work |
 | Room workpacks and milestones | Makes multi-agent work auditable through evidence lanes and exit policies | Active room workflow backlog |
 | OpenSandbox integration | Adds sandboxed workspace execution as an adapter surface | Planned integration work |
 

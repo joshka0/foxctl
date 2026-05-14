@@ -20,6 +20,7 @@ contributors
 | -------------------------------------------------- | ------------------------------------------------ |
 | [README.md](README.md)                             | Overview, quick start                            |
 | [docs/README.md](docs/README.md)                   | Canonical documentation map                      |
+| [docs/glossary.md](docs/glossary.md)               | Foxctl terminology and naming rules              |
 | [docs/DOC_LIFECYCLE.md](docs/DOC_LIFECYCLE.md)     | Documentation lifecycle policy                   |
 | [docs/start/README.md](docs/start/README.md)       | Fast orientation guides                          |
 | [docs/architecture/package-topology.md](docs/architecture/package-topology.md) | Canonical `internal/*` package placement map |
@@ -37,7 +38,7 @@ contributors
 | [docs/architecture/chat-platform-adapter.md](docs/architecture/chat-platform-adapter.md) | Chat adapter runtime architecture (current) |
 | [docs/architecture/kubernetes-runtime.md](docs/architecture/kubernetes-runtime.md) | Kubernetes runtime architecture (current) |
 | [docs/architecture/postgres-storage.md](docs/architecture/postgres-storage.md) | PostgreSQL + CAS storage architecture |
-| [docs/architecture/context-architecture.md](docs/architecture/context-architecture.md) | ACA dual-plane context + Obsidian knowledge layer |
+| [docs/architecture/context-architecture.md](docs/architecture/context-architecture.md) | ContextWiki dual-plane context + Obsidian knowledge layer |
 | [docs/architecture/simulator-agents.md](docs/architecture/simulator-agents.md) | Simulator agent pattern for app/API integrations |
 | [docs/archive/impl_plan/chat-platform-adapter.md](docs/archive/impl_plan/chat-platform-adapter.md) | Implementation plan + historical notes |
 | [docs/archive/impl_plan/k8s-sql-storage.md](docs/archive/impl_plan/k8s-sql-storage.md) | Historical implementation plan (now partially complete) |
@@ -78,10 +79,11 @@ contributors
 11. **Terminology coaching** — when the user asks something technical but uses imprecise language, provide the correct terminology in parentheses as a mini-lesson (e.g., "Fixed. Added scrolling *(in CSS terms: `overflow-y: auto` to handle content overflow)*")
 12. **Docs link hygiene** — run `make check-doc-links` for markdown/doc updates; CI enforces this via `.github/workflows/docs.yml`
 13. **Go-native runtime rules (v2)** — prefer `Run(ctx)` components, bounded channels, single-writer state ownership, and immutable snapshots for high-read paths
-14. **ACA vault refresh** — after repo docs, repo graph, or bridge metadata changes, rebuild the Obsidian layer with `foxctl obsidian graph build`, `graph promote`, `bridge reconcile`, and `index build`
+14. **ContextWiki vault refresh** — after repo docs, repo graph, or bridge metadata changes, rebuild the Obsidian layer with `foxctl obsidian graph build`, `graph promote`, `bridge reconcile`, and `index build`
 15. **Task continuity split** — use `foxctl context task-history-summary` for Codex/agents/scripts *(structured summary + artifact pointer)* and `configs/hooks/task-continuity-summary.sh` for hook injection *(prompt-ready wrapper output)*
 16. **Never use keyword heuristics** — do not route, classify, promote, or suppress behavior using ad hoc substring/keyword matching; these heuristics are brittle. Prefer explicit schemas, typed signals, scored features, tests, or learned policies.
 17. **`internal/*` placement rule** — before adding a new `internal/*` package or extending `internal/v2/*`, read [docs/architecture/package-topology.md](docs/architecture/package-topology.md) and place the work by family model, not by local preference
+18. **Terminology** — use [docs/glossary.md](docs/glossary.md) for foxctl-specific language. Use ContextWiki for the workspace knowledge layer and reserve ContextWiki for legacy references only.
 
 ## Run Command Choice
 
@@ -124,9 +126,9 @@ as the review gate for package placement.
 - If the correct family is unclear, update the topology doc or the migration
   epic before adding more ambiguous structure.
 
-## ACA / Obsidian Refresh
+## ContextWiki / Obsidian Refresh
 
-When repo docs or structure change, refresh the ACA knowledge layer *(in this system: graph rebuild + docs bridge reconcile + vault reindex)*:
+When repo docs or structure change, refresh the ContextWiki knowledge layer *(in this system: graph rebuild + docs bridge reconcile + vault reindex)*:
 
 ```bash
 foxctl obsidian graph build --workspace . --vault-path "/path/to/vault"

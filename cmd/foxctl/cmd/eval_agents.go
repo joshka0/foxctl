@@ -206,7 +206,7 @@ func newEvalAgentsCommand() *cobra.Command {
 				resolvedRoles = []string{
 					string(agenttypes.RoleMemoryFactScout),
 					string(agenttypes.RoleMemoryTimelineScout),
-					string(agenttypes.RoleACAContextScout),
+					string(agenttypes.RoleContextWikiScout),
 					string(agenttypes.RoleSubcallWorker),
 					string(agenttypes.RoleResearcher),
 				}
@@ -290,7 +290,7 @@ func newEvalAgentsCommand() *cobra.Command {
 	cmd.Flags().StringSliceVar(&externalResults, "external-results", nil, "Optional JSONL file of external baseline results to merge into the report (repeatable)")
 	cmd.Flags().StringVar(&agentRef, "agent-ref", "", "Existing agent ID/slug/name whose memory lineage the memory scouts should inspect")
 	cmd.Flags().StringVar(&conversationID, "conversation-id", "", "Optional conversation lineage override for agent_memory_* tool calls")
-	cmd.Flags().StringVar(&vaultPath, "vault-path", "", "Optional vault path to expose to ACA/Obsidian tools via environment")
+	cmd.Flags().StringVar(&vaultPath, "vault-path", "", "Optional vault path to expose to ContextWiki/Obsidian tools via environment")
 	cmd.Flags().DurationVar(&timeout, "timeout", 90*time.Second, "Per-run timeout")
 	cmd.Flags().IntVar(&maxIterations, "max-iterations", 6, "Per-run max iterations")
 	cmd.Flags().Float64Var(&passThreshold, "pass-threshold", 0.8, "Quality threshold for pass/fail")
@@ -408,15 +408,15 @@ func withTemporaryVaultEnv(vaultPath string, fn func()) {
 		fn()
 		return
 	}
-	prevACA, hasACA := os.LookupEnv("FOXCTL_ACA_VAULT_PATH")
+	prevContextWiki, hasContextWiki := os.LookupEnv("FOXCTL_CONTEXTWIKI_VAULT_PATH")
 	prevObs, hasObs := os.LookupEnv("FOXCTL_OBSIDIAN_VAULT_PATH")
-	_ = os.Setenv("FOXCTL_ACA_VAULT_PATH", vaultPath)
+	_ = os.Setenv("FOXCTL_CONTEXTWIKI_VAULT_PATH", vaultPath)
 	_ = os.Setenv("FOXCTL_OBSIDIAN_VAULT_PATH", vaultPath)
 	defer func() {
-		if hasACA {
-			_ = os.Setenv("FOXCTL_ACA_VAULT_PATH", prevACA)
+		if hasContextWiki {
+			_ = os.Setenv("FOXCTL_CONTEXTWIKI_VAULT_PATH", prevContextWiki)
 		} else {
-			_ = os.Unsetenv("FOXCTL_ACA_VAULT_PATH")
+			_ = os.Unsetenv("FOXCTL_CONTEXTWIKI_VAULT_PATH")
 		}
 		if hasObs {
 			_ = os.Setenv("FOXCTL_OBSIDIAN_VAULT_PATH", prevObs)
@@ -464,9 +464,9 @@ func buildAgentEvalPrompt(role string, evalCase promptEvalCase, agentRef, conver
 	case string(agenttypes.RoleMemoryTimelineScout):
 		b.WriteString("Focus on changes over time, updates, retractions, and the current best view.\n")
 		b.WriteString("Prefer semantic_search_sessions before broader timeline or memory exploration.\n")
-	case string(agenttypes.RoleACAContextScout):
-		b.WriteString("Focus on ACA top-of-mind, task continuity, and vault-backed durable context.\n")
-		b.WriteString("Prefer semantic_search_context before broader ACA or vault exploration.\n")
+	case string(agenttypes.RoleContextWikiScout):
+		b.WriteString("Focus on ContextWiki top-of-mind, task continuity, and vault-backed durable context.\n")
+		b.WriteString("Prefer semantic_search_context before broader ContextWiki or vault exploration.\n")
 	case string(agenttypes.RoleResearcher):
 		if isCodingLocate {
 			b.WriteString("Use only the shortest path to verified repo files: search, inspect the top evidence, and stop.\n")
@@ -477,7 +477,7 @@ func buildAgentEvalPrompt(role string, evalCase promptEvalCase, agentRef, conver
 			}
 		} else {
 			b.WriteString("Use your role's normal tool strategy.\n")
-			b.WriteString("This is a memory-focused evaluation. Prefer the most direct memory or session tools available before broader repo, ACA, or vault exploration.\n")
+			b.WriteString("This is a memory-focused evaluation. Prefer the most direct memory or session tools available before broader repo, ContextWiki, or vault exploration.\n")
 			b.WriteString("If one direct memory lane already answers the question, stop there instead of broadening the search.\n")
 		}
 	case string(agenttypes.RoleSemanticScout):
@@ -494,7 +494,7 @@ func buildAgentEvalPrompt(role string, evalCase promptEvalCase, agentRef, conver
 	default:
 		if !isCodingLocate {
 			b.WriteString("Use your role's normal tool strategy.\n")
-			b.WriteString("This is a memory-focused evaluation. Prefer the most direct memory or session tools available before broader repo, ACA, or vault exploration.\n")
+			b.WriteString("This is a memory-focused evaluation. Prefer the most direct memory or session tools available before broader repo, ContextWiki, or vault exploration.\n")
 			b.WriteString("If one direct memory lane already answers the question, stop there instead of broadening the search.\n")
 		}
 	}

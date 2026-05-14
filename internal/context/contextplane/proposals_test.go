@@ -19,20 +19,20 @@ func TestRecordRetrievalProposalDedupes(t *testing.T) {
 		RetrievedPaths: []string{"notes/repo/foxctl/semantic-and-memory.md"},
 		Classification: "package_note_fallback_disabled",
 		Observation: Observation{
-			Statement:    "ACA retrieval missed deterministic package-note fallback.",
+			Statement:    "ContextWiki retrieval missed deterministic package-note fallback.",
 			Confidence:   0.82,
 			Count:        1,
 			Project:      "foxctl",
-			Area:         "aca-retrieval",
+			Area:         "contextwiki-retrieval",
 			EvidenceRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "storage memory package"}},
 			FirstSeen:    time.Now().UTC(),
 			LastSeen:     time.Now().UTC(),
 		},
 		Proposal: RetrievalCorrectionAction{
 			Kind:       "policy_patch",
-			Summary:    "Enable deterministic ACA package-note fallback for this workspace.",
+			Summary:    "Enable deterministic ContextWiki package-note fallback for this workspace.",
 			PolicyPath: ".foxctl/policy/retrieval.yaml",
-			PolicyPatch: "aca:\n" +
+			PolicyPatch: "contextwiki:\n" +
 				"  package_note_fallback: true\n",
 		},
 		GeneratedAt: time.Now().UTC(),
@@ -70,7 +70,7 @@ func TestRecordRetrievalProposalDedupesSemanticAnchorPatchReviewWork(t *testing.
 		RetrievedPaths: []string{"internal/runtime/terminal/tmuxbridge/bridge.go"},
 		Classification: "missing_semantic_anchor",
 		Observation: Observation{
-			Statement:  "ACA retrieval missed a semantic anchor for read-before-write.",
+			Statement:  "ContextWiki retrieval missed a semantic anchor for read-before-write.",
 			Confidence: 0.8,
 			Count:      1,
 			Project:    "foxctl",
@@ -113,9 +113,9 @@ func TestApplyAndRejectMemoryProposal(t *testing.T) {
 		Status:         "open",
 		Confidence:     0.82,
 		BlastRadius:    "low",
-		Summary:        "Enable deterministic ACA package-note fallback for this workspace.",
+		Summary:        "Enable deterministic ContextWiki package-note fallback for this workspace.",
 		ProposedChange: map[string]any{
-			"policy_patch":          "aca:\n  package_note_fallback: true\n",
+			"policy_patch":          "contextwiki:\n  package_note_fallback: true\n",
 			"package_note_fallback": true,
 		},
 		CreatedAt: time.Now().UTC(),
@@ -152,7 +152,7 @@ func TestApplyAndRejectMemoryProposal(t *testing.T) {
 		Status:         "open",
 		Confidence:     0.68,
 		BlastRadius:    "high",
-		Summary:        "ACA retrieved notes, but ranking did not surface the expected path set.",
+		Summary:        "ContextWiki retrieved notes, but ranking did not surface the expected path set.",
 		CreatedAt:      time.Now().UTC(),
 		UpdatedAt:      time.Now().UTC(),
 	})
@@ -171,19 +171,19 @@ func TestApplyAndRejectMemoryProposal(t *testing.T) {
 func TestApplyEvidenceProposalPreparesReviewJob(t *testing.T) {
 	store := NewWorkspaceStore(t.TempDir())
 	proposal, err := store.RecordMemoryProposal(context.Background(), MemoryProposal{
-		DedupeKey:      "methodology_draft|aca-vocabulary",
+		DedupeKey:      "methodology_draft|contextwiki-vocabulary",
 		Kind:           PolicyKindMethodologyDraft,
 		Classification: "external_evidence",
 		Status:         "prepared",
 		ReviewRequired: true,
 		Confidence:     0.72,
 		BlastRadius:    "high",
-		Summary:        "Review imported evidence for a methodology or doctrine update: ACA Vocabulary Review. Suggested target: notes/repo/aca-inspect/semantic-and-memory.md.",
+		Summary:        "Review imported evidence for a methodology or doctrine update: ContextWiki Vocabulary Review. Suggested target: notes/repo/contextwiki-inspect/semantic-and-memory.md.",
 		ProposedChange: map[string]any{
 			"evidence_import_id":         "E-123",
-			"title":                      "ACA Vocabulary Review",
-			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/aca-inspect/aca-vocabulary-review.md",
-			"suggested_target_note_path": "notes/repo/aca-inspect/semantic-and-memory.md",
+			"title":                      "ContextWiki Vocabulary Review",
+			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/contextwiki-inspect/contextwiki-vocabulary-review.md",
+			"suggested_target_note_path": "notes/repo/contextwiki-inspect/semantic-and-memory.md",
 			"suggested_target_heading":   "Review",
 		},
 		EvaluationStatus: "accepted",
@@ -209,13 +209,13 @@ func TestApplyEvidenceProposalPreparesReviewJob(t *testing.T) {
 	if jobMap.SourceKind != "evidence_import" {
 		t.Fatalf("source_kind=%q want evidence_import", jobMap.SourceKind)
 	}
-	if got := result["target_path"]; got != "notes/repo/aca-inspect/semantic-and-memory.md" {
+	if got := result["target_path"]; got != "notes/repo/contextwiki-inspect/semantic-and-memory.md" {
 		t.Fatalf("target_path=%v", got)
 	}
 	if got := result["heading"]; got != "Review" {
 		t.Fatalf("heading=%v", got)
 	}
-	if packet.Action != "merge_promotion" || packet.TargetPath != "notes/repo/aca-inspect/semantic-and-memory.md" || !packet.RequiresVaultPath {
+	if packet.Action != "merge_promotion" || packet.TargetPath != "notes/repo/contextwiki-inspect/semantic-and-memory.md" || !packet.RequiresVaultPath {
 		t.Fatalf("unexpected work packet: %+v", packet)
 	}
 	jobs, err := store.ListPromotionJobs(10)
@@ -231,10 +231,10 @@ func TestMergeMemoryProposal(t *testing.T) {
 	workspace := t.TempDir()
 	store := NewWorkspaceStore(workspace)
 	vaultRoot := filepath.Join(t.TempDir(), "vault")
-	if err := os.MkdirAll(filepath.Join(vaultRoot, "notes", "repo", "aca-inspect"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(vaultRoot, "notes", "repo", "contextwiki-inspect"), 0o755); err != nil {
 		t.Fatalf("mkdir vault: %v", err)
 	}
-	targetPath := filepath.Join(vaultRoot, "notes", "repo", "aca-inspect", "semantic-and-memory.md")
+	targetPath := filepath.Join(vaultRoot, "notes", "repo", "contextwiki-inspect", "semantic-and-memory.md")
 	if err := os.WriteFile(targetPath, []byte(`---
 title: semantic and memory
 type: map
@@ -250,38 +250,38 @@ Existing review block.
 `), 0o644); err != nil {
 		t.Fatalf("write target note: %v", err)
 	}
-	draftRel := "inbox/drafted-from-foxctl/external-evidence/aca-inspect/aca-vocabulary-review.md"
+	draftRel := "inbox/drafted-from-foxctl/external-evidence/contextwiki-inspect/contextwiki-vocabulary-review.md"
 	draftAbs := filepath.Join(vaultRoot, filepath.FromSlash(draftRel))
 	if err := os.MkdirAll(filepath.Dir(draftAbs), 0o755); err != nil {
 		t.Fatalf("mkdir draft dir: %v", err)
 	}
 	if err := os.WriteFile(draftAbs, []byte(`---
-title: ACA Vocabulary Review
+title: ContextWiki Vocabulary Review
 type: evidence
 status: draft
 trust: raw
 ---
 
-# ACA Vocabulary Review
+# ContextWiki Vocabulary Review
 
-Imported evidence says we should unify ACA vocabulary.
+Imported evidence says we should unify ContextWiki vocabulary.
 `), 0o644); err != nil {
 		t.Fatalf("write draft note: %v", err)
 	}
 	proposal, err := store.RecordMemoryProposal(context.Background(), MemoryProposal{
-		DedupeKey:      "methodology_draft|aca-vocabulary",
+		DedupeKey:      "methodology_draft|contextwiki-vocabulary",
 		Kind:           PolicyKindMethodologyDraft,
 		Classification: "external_evidence",
 		Status:         "prepared",
 		ReviewRequired: true,
 		Confidence:     0.72,
 		BlastRadius:    "high",
-		Summary:        "Review imported evidence for a methodology or doctrine update: ACA Vocabulary Review. Suggested target: notes/repo/aca-inspect/semantic-and-memory.md.",
+		Summary:        "Review imported evidence for a methodology or doctrine update: ContextWiki Vocabulary Review. Suggested target: notes/repo/contextwiki-inspect/semantic-and-memory.md.",
 		ProposedChange: map[string]any{
 			"evidence_import_id":         "E-123",
-			"title":                      "ACA Vocabulary Review",
+			"title":                      "ContextWiki Vocabulary Review",
 			"draft_path":                 draftRel,
-			"suggested_target_note_path": "notes/repo/aca-inspect/semantic-and-memory.md",
+			"suggested_target_note_path": "notes/repo/contextwiki-inspect/semantic-and-memory.md",
 			"suggested_target_heading":   "Review",
 		},
 		EvaluationStatus: "accepted",
@@ -302,7 +302,7 @@ Imported evidence says we should unify ACA vocabulary.
 	if merge.MergedAs != "append" {
 		t.Fatalf("merged_as=%q want append", merge.MergedAs)
 	}
-	if packet.Status != "merged" || packet.TargetPath != "notes/repo/aca-inspect/semantic-and-memory.md" || packet.PromotionJobID == "" {
+	if packet.Status != "merged" || packet.TargetPath != "notes/repo/contextwiki-inspect/semantic-and-memory.md" || packet.PromotionJobID == "" {
 		t.Fatalf("unexpected merge packet: %+v", packet)
 	}
 	body, err := os.ReadFile(targetPath)
@@ -310,7 +310,7 @@ Imported evidence says we should unify ACA vocabulary.
 		t.Fatalf("read target note: %v", err)
 	}
 	text := string(body)
-	if !strings.Contains(text, "### Reviewed Merge") || !strings.Contains(text, "Imported evidence says we should unify ACA vocabulary.") {
+	if !strings.Contains(text, "### Reviewed Merge") || !strings.Contains(text, "Imported evidence says we should unify ContextWiki vocabulary.") {
 		t.Fatalf("unexpected merged note:\n%s", text)
 	}
 }
@@ -318,17 +318,17 @@ Imported evidence says we should unify ACA vocabulary.
 func TestClaimAndReleaseProposalMergeTask(t *testing.T) {
 	store := NewWorkspaceStore(t.TempDir())
 	proposal, err := store.RecordMemoryProposal(context.Background(), MemoryProposal{
-		DedupeKey:      "external_evidence_import|aca-vocabulary-claim",
+		DedupeKey:      "external_evidence_import|contextwiki-vocabulary-claim",
 		Kind:           PolicyKindExternalImport,
 		Classification: "external_evidence",
 		Status:         "prepared",
 		ReviewRequired: true,
 		Confidence:     0.72,
 		BlastRadius:    "medium",
-		Summary:        "Review imported evidence draft for merge consideration: ACA Vocabulary Review. Suggested target: notes/repo/aca-inspect/semantic-and-memory.md.",
+		Summary:        "Review imported evidence draft for merge consideration: ContextWiki Vocabulary Review. Suggested target: notes/repo/contextwiki-inspect/semantic-and-memory.md.",
 		ProposedChange: map[string]any{
-			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/aca-inspect/aca-vocabulary-review.md",
-			"suggested_target_note_path": "notes/repo/aca-inspect/semantic-and-memory.md",
+			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/contextwiki-inspect/contextwiki-vocabulary-review.md",
+			"suggested_target_note_path": "notes/repo/contextwiki-inspect/semantic-and-memory.md",
 			"suggested_target_heading":   "Review",
 		},
 		EvaluationStatus: "accepted",

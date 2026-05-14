@@ -35,7 +35,7 @@ func TestFixtureVault_LinkRichNote(t *testing.T) {
 	}
 	text := string(body)
 	for _, want := range []string{
-		"[[ACA Memory Layers]]",
+		"[[ContextWiki Memory Layers]]",
 		"[[Compact Handoff Pattern]]",
 		"[[ADR-0001 Context Architecture]]",
 	} {

@@ -1,13 +1,13 @@
 ---
 name: foxctl-context
-description: ACA control plane, transcript-family history, Obsidian context architecture, and refactor scout/advisor quick entrypoint.
+description: ContextWiki control plane, transcript-family history, Obsidian context architecture, and refactor scout/advisor quick entrypoint.
 ---
 
 # AgentCTL Context
 
-Use this when you are working on ACA, transcript-history continuity, or context architecture in `foxctl`.
+Use this when you are working on ContextWiki, transcript-history continuity, or context architecture in `foxctl`.
 
-## Core ACA
+## Core ContextWiki
 
 ```bash
 foxctl orient
@@ -49,7 +49,7 @@ Useful outputs:
 - `recurring_mistakes`
 - `support_metadata`
 
-## Obsidian / ACA knowledge layer
+## Obsidian / ContextWiki knowledge layer
 
 ```bash
 foxctl obsidian index build --vault-path <vault>

@@ -73,7 +73,7 @@ The intended room policy is:
 
 That keeps replies human-readable and parseable without depending on fragile prose.
 
-## ACA Promotion
+## ContextWiki Promotion
 
 Promote only derived facts, not raw pane dumps. Good examples:
 
@@ -83,6 +83,6 @@ foxctl mux observe agent-b \
   --statement "agent-b is reviewing mailbox ack semantics in internal/runtime/actor/supervisor.go"
 ```
 
-If a tmux exchange produced durable repo knowledge, capture it through the existing ACA and Obsidian flow after review.
+If a tmux exchange produced durable repo knowledge, capture it through the existing ContextWiki and Obsidian flow after review.
 
 Reference doc: [`docs/general/tmux-collaboration.md`](../../../docs/general/tmux-collaboration.md)

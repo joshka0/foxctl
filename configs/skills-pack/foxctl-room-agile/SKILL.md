@@ -56,7 +56,7 @@ This skill adds the explicit agile layer:
 - `log append` is the cross-session delivery journal for the epic
 - `story validate` attaches proof at the story level
 - `~/.foxctl/epics/<epic-id>/...` is the rich markdown/artifact mirror; room state stays canonical
-- `room aca promote` projects high-signal completed agile artifacts into ACA draft notes for later semantic retrieval
+- `room contextwiki promote` projects high-signal completed agile artifacts into ContextWiki draft notes for later semantic retrieval
 
 ## Operating sequence
 
@@ -255,22 +255,22 @@ foxctl room milestone summary <room-id> <milestone-id> \
   --guidance "Use milestone summary for synthesis, not proof"
 ```
 
-### 9. Promote durable work into ACA drafts when the signal is worth keeping
+### 9. Promote durable work into ContextWiki drafts when the signal is worth keeping
 
-Use ACA promotion for completed/high-signal artifacts, not routine chat churn:
+Use ContextWiki promotion for completed/high-signal artifacts, not routine chat churn:
 
 ```bash
-foxctl room aca promote epic <room-id> <epic-id>
-foxctl room aca promote milestone <room-id> <milestone-id>
-foxctl room aca promote retro <room-id> <guidance-update-id>
-foxctl room aca promote validation <room-id> <validation-id>
+foxctl room contextwiki promote epic <room-id> <epic-id>
+foxctl room contextwiki promote milestone <room-id> <milestone-id>
+foxctl room contextwiki promote retro <room-id> <guidance-update-id>
+foxctl room contextwiki promote validation <room-id> <validation-id>
 ```
 
 Rules:
 
 - the room/work-pack remain canonical
-- ACA promotion is review-first and draft-only in v1
-- routine green validations should usually stay out of ACA
+- ContextWiki promotion is review-first and draft-only in v1
+- routine green validations should usually stay out of ContextWiki
 - failed, blocked, and waived validations are the safest first promotion targets
 
 `milestone review` is the verdict.

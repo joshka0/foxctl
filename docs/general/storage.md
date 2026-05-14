@@ -36,7 +36,7 @@ Source of truth: `internal/storage/registry.go`.
 
 ## Schema Reality Checks
 
-This section reflects current table names in code (not legacy aliases).
+This section reflects current table names in code.
 
 | Database | Current anchors |
 |---------|------------------|

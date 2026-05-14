@@ -140,8 +140,8 @@
       "steps": [
         {
           "action": "Find 'Three-Plane Memory Model' section in information-architecture.md",
-          "expected": "Section exists naming Companion Memory, Named Durable Memory, and ACA/Continuity as three distinct surfaces",
-          "observed": "'Three-Plane Memory Model' section found (after Progressive Reveal). Contains three named subsections: 'Companion Memory', 'Named Durable Memory', and 'ACA / Continuity'. Introductory text states: 'the shell must preserve separation between three memory planes. These planes are not merged into one generic \"memory\" list.'"
+          "expected": "Section exists naming Companion Memory, Named Durable Memory, and ContextWiki/Continuity as three distinct surfaces",
+          "observed": "'Three-Plane Memory Model' section found (after Progressive Reveal). Contains three named subsections: 'Companion Memory', 'Named Durable Memory', and 'ContextWiki / Continuity'. Introductory text states: 'the shell must preserve separation between three memory planes. These planes are not merged into one generic \"memory\" list.'"
         },
         {
           "action": "Verify Companion Memory subsection specifies cockpit surface and projection/heuristic labeling",
@@ -154,9 +154,9 @@
           "observed": "Cockpit surface: 'Evidence drawer under a \"Durable Memory\" sub-section within the Memory tab.' Shows search, list by type, stats. Projection/heuristic labeling: 'Search results are ranked by semantic similarity, which is a **heuristic**. Per DESIGN.md \"Honest Surfaces,\" the UI labels search results with \"Similarity: <score>\" and shows the match type (semantic, exact, tag) explicitly. The UI does not present ranked results as if they are an authoritative or canonical ordering.'"
         },
         {
-          "action": "Verify ACA / Continuity subsection specifies cockpit surface and projection/heuristic labeling",
+          "action": "Verify ContextWiki / Continuity subsection specifies cockpit surface and projection/heuristic labeling",
           "expected": "Specifies which cockpit surface exposes this plane and includes projection/heuristic labeling",
-          "observed": "Cockpit surface: 'Evidence drawer under the \"Continuity\" sub-tab (accessible via Ctrl+Y).' Shows top-of-mind summary, task-history summary, latest handoff, open tensions/observations, family-history summary. Projection/heuristic labeling: ACA summaries labeled 'ACA summary — synthesized from session timeline and memory artifacts' (projected, not canonical). Handoff records labeled 'Stored handoff' (canonical). Tensions labeled 'From ACA observations' (machine-extracted) vs 'Operator-logged' (manual) to show provenance."
+          "observed": "Cockpit surface: 'Evidence drawer under the \"Continuity\" sub-tab (accessible via Ctrl+Y).' Shows top-of-mind summary, task-history summary, latest handoff, open tensions/observations, family-history summary. Projection/heuristic labeling: ContextWiki summaries labeled 'ContextWiki summary — synthesized from session timeline and memory artifacts' (projected, not canonical). Handoff records labeled 'Stored handoff' (canonical). Tensions labeled 'From ContextWiki observations' (machine-extracted) vs 'Operator-logged' (manual) to show provenance."
         }
       ],
       "evidence": {
@@ -164,7 +164,7 @@
         "subsections_found": {
           "Companion Memory": "Present. Cockpit surface: Evidence drawer Memory sub-tab. Projection labeling: 'Assembled context — what the model will remember if you send a prompt right now'. Heuristic labeling: 'Relevance score (heuristic)'.",
           "Named Durable Memory": "Present. Cockpit surface: Evidence drawer Durable Memory sub-section. Heuristic labeling: 'Similarity: <score>' with match type shown.",
-          "ACA / Continuity": "Present. Cockpit surface: Evidence drawer Continuity sub-tab. Projection labeling: 'ACA summary — synthesized from session timeline and memory artifacts'. Provenance labeling: 'From ACA observations' vs 'Operator-logged'."
+          "ContextWiki / Continuity": "Present. Cockpit surface: Evidence drawer Continuity sub-tab. Projection labeling: 'ContextWiki summary — synthesized from session timeline and memory artifacts'. Provenance labeling: 'From ContextWiki observations' vs 'Operator-logged'."
         },
         "projection_heuristic_labeling": "All three planes include at least one sentence covering projection/heuristic labeling per DESIGN.md 'Honest Surfaces' principle."
       },
@@ -173,5 +173,5 @@
   ],
   "frictions": [],
   "blockers": [],
-  "summary": "Tested 3 assertions: all 3 passed. VAL-DOCS-004: All 8 sections (a)-(h) present with required content. Keybinding table has 19 rows with proper format; all 8 conflicts cross-referenced against keys.go and shell.gsx are acknowledged. Minor note: KeyRight/KeyLeft rail-cycling bindings in shell.gsx are not explicitly acknowledged as being superseded. VAL-DOCS-011: Progressive Reveal section contains complete 4-row mapping for transcript rows, tool activity, events, and errors with Summary Default, User Action, and Raw View columns. VAL-DOCS-013: Three-Plane Memory Model section has all three named subsections (Companion Memory, Named Durable Memory, ACA/Continuity), each specifying cockpit surface and projection/heuristic labeling per DESIGN.md Honest Surfaces."
+  "summary": "Tested 3 assertions: all 3 passed. VAL-DOCS-004: All 8 sections (a)-(h) present with required content. Keybinding table has 19 rows with proper format; all 8 conflicts cross-referenced against keys.go and shell.gsx are acknowledged. Minor note: KeyRight/KeyLeft rail-cycling bindings in shell.gsx are not explicitly acknowledged as being superseded. VAL-DOCS-011: Progressive Reveal section contains complete 4-row mapping for transcript rows, tool activity, events, and errors with Summary Default, User Action, and Raw View columns. VAL-DOCS-013: Three-Plane Memory Model section has all three named subsections (Companion Memory, Named Durable Memory, ContextWiki/Continuity), each specifying cockpit surface and projection/heuristic labeling per DESIGN.md Honest Surfaces."
 }

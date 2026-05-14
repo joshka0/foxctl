@@ -350,9 +350,9 @@ Current confidence by language:
   helpers and nested app workspaces, but they still trail Go on richer
   framework-root modeling
 
-## ACA Fit
+## ContextWiki Fit
 
-The refactor workflow fits into ACA as follows:
+The refactor workflow fits into ContextWiki as follows:
 
 - `L0` active run:
   use `foxctl refactor scout` to get the current hotspot surface
@@ -370,7 +370,7 @@ The intended usage is:
 1. run the scout on a narrow, single-language scope
 2. inspect the top seams and hotspots
 3. choose one seam family or function hotspot to act on
-4. capture the decision into ACA notes if the seam is durable or recurring
+4. capture the decision into ContextWiki notes if the seam is durable or recurring
 
 ## Current Read
 

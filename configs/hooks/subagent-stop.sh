@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Thin SubagentStop wrapper: delegate ACA capture to Go.
+# Thin SubagentStop wrapper: delegate ContextWiki capture to Go.
 
 set -euo pipefail
 

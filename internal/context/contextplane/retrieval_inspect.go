@@ -73,12 +73,12 @@ func (s *WorkspaceStore) SetRetrievalPackageNoteFallback(enabled bool) (string, 
 			return "", fmt.Errorf("decode retrieval policy: %w", err)
 		}
 	}
-	aca, _ := doc["aca"].(map[string]any)
-	if aca == nil {
-		aca = map[string]any{}
+	contextWiki, _ := doc["contextwiki"].(map[string]any)
+	if contextWiki == nil {
+		contextWiki = map[string]any{}
 	}
-	aca["package_note_fallback"] = enabled
-	doc["aca"] = aca
+	contextWiki["package_note_fallback"] = enabled
+	doc["contextwiki"] = contextWiki
 	updated, err := yaml.Marshal(doc)
 	if err != nil {
 		return "", fmt.Errorf("encode retrieval policy: %w", err)
@@ -132,7 +132,7 @@ func (s *WorkspaceStore) InspectRetrieval(
 			Observation:    buildRetrievalObservation(filepath.Base(s.layout.WorkspacePath), "matched", query, expectedPaths, "", result.VaultHits),
 			Proposal: RetrievalCorrectionAction{
 				Kind:    "none",
-				Summary: "ACA retrieval already matched the expected path set.",
+				Summary: "ContextWiki retrieval already matched the expected path set.",
 			},
 			SemanticAnchorHints: result.SemanticAnchorHints,
 			GeneratedAt:         time.Now().UTC(),
@@ -179,9 +179,9 @@ func (s *WorkspaceStore) InspectRetrieval(
 		classification = "package_note_fallback_disabled"
 		proposal = RetrievalCorrectionAction{
 			Kind:        "policy_patch",
-			Summary:     "Enable deterministic ACA package-note fallback for this workspace.",
+			Summary:     "Enable deterministic ContextWiki package-note fallback for this workspace.",
 			PolicyPath:  s.layout.RetrievalPolicyPath,
-			PolicyPatch: "aca:\n  package_note_fallback: true\n",
+			PolicyPatch: "contextwiki:\n  package_note_fallback: true\n",
 		}
 	case candidateExists && len(expectedRepoPaths) > 0 && !searchHitMatchesExpected(candidateHit, expectedPaths):
 		classification = "bridge_metadata_gap"
@@ -191,7 +191,7 @@ func (s *WorkspaceStore) InspectRetrieval(
 		}
 		proposal = RetrievalCorrectionAction{
 			Kind:              "metadata_patch",
-			Summary:           fmt.Sprintf("Add repo path metadata to %s so ACA can connect it to the expected files.", targetPath),
+			Summary:           fmt.Sprintf("Add repo path metadata to %s so ContextWiki can connect it to the expected files.", targetPath),
 			TargetNotePath:    targetPath,
 			SupportingNote:    targetPath,
 			ExpectedRepoPaths: expectedRepoPaths,
@@ -211,14 +211,14 @@ func (s *WorkspaceStore) InspectRetrieval(
 		classification = "ranking_mismatch"
 		proposal = RetrievalCorrectionAction{
 			Kind:           "manual_review",
-			Summary:        "ACA retrieved notes, but ranking did not surface the expected path set.",
+			Summary:        "ContextWiki retrieved notes, but ranking did not surface the expected path set.",
 			SupportingNote: firstRetrievedPath(result.VaultHits),
 		}
 	default:
 		classification = "missing_vault_coverage"
 		proposal = RetrievalCorrectionAction{
 			Kind:    "manual_review",
-			Summary: "ACA found no useful durable note coverage for this query.",
+			Summary: "ContextWiki found no useful durable note coverage for this query.",
 		}
 	}
 
@@ -264,7 +264,7 @@ func SummarizeRetrievalInspections(items []RetrievalInspection) RetrievalInspect
 	sort.Strings(packageCandidates)
 	summary.PackageNoteCandidates = packageCandidates
 	if summary.PolicyPatchCandidate {
-		summary.RecommendedActions = append(summary.RecommendedActions, "Enable aca.package_note_fallback and rerun ACA retrieval.")
+		summary.RecommendedActions = append(summary.RecommendedActions, "Enable contextwiki.package_note_fallback and rerun ContextWiki retrieval.")
 	}
 	if len(summary.PackageNoteCandidates) > 0 {
 		summary.RecommendedActions = append(summary.RecommendedActions, "Draft canonical package notes for the missing package-note targets.")
@@ -292,7 +292,7 @@ func PersistRetrievalInspectionReport(ctx context.Context, casRoot string, repor
 	if err != nil {
 		return "", err
 	}
-	obj, err := store.Put(ctx, bytes.NewReader(append(body, '\n')), "application/json", []string{"aca-retrieval-inspection"})
+	obj, err := store.Put(ctx, bytes.NewReader(append(body, '\n')), "application/json", []string{"contextwiki-retrieval-inspection"})
 	if err != nil {
 		return "", err
 	}
@@ -502,7 +502,7 @@ func buildRetrievalObservation(project, classification, query string, expectedPa
 		Confidence:   retrievalObservationConfidence(classification),
 		Count:        1,
 		Project:      strings.TrimSpace(project),
-		Area:         "aca-retrieval",
+		Area:         "contextwiki-retrieval",
 		EvidenceRefs: stringsToEvidenceRefs(uniqueStrings(evidence)),
 		FirstSeen:    now,
 		LastSeen:     now,
@@ -516,17 +516,17 @@ func retrievalObservationStatement(classification, query, candidateNote string, 
 	}
 	switch classification {
 	case "package_note_fallback_disabled":
-		return fmt.Sprintf("ACA retrieval missed deterministic package-note fallback for %s on query %q.", target, strings.TrimSpace(query))
+		return fmt.Sprintf("ContextWiki retrieval missed deterministic package-note fallback for %s on query %q.", target, strings.TrimSpace(query))
 	case "missing_package_note":
-		return fmt.Sprintf("ACA retrieval lacks a canonical package note for %s.", target)
+		return fmt.Sprintf("ContextWiki retrieval lacks a canonical package note for %s.", target)
 	case "bridge_metadata_gap":
-		return fmt.Sprintf("ACA retrieval note metadata is missing repo path coverage for %s.", target)
+		return fmt.Sprintf("ContextWiki retrieval note metadata is missing repo path coverage for %s.", target)
 	case "ranking_mismatch":
-		return fmt.Sprintf("ACA retrieval ranked the wrong notes for query %q against %s.", strings.TrimSpace(query), target)
+		return fmt.Sprintf("ContextWiki retrieval ranked the wrong notes for query %q against %s.", strings.TrimSpace(query), target)
 	case "matched":
-		return fmt.Sprintf("ACA retrieval matched the expected path set for query %q.", strings.TrimSpace(query))
+		return fmt.Sprintf("ContextWiki retrieval matched the expected path set for query %q.", strings.TrimSpace(query))
 	default:
-		return fmt.Sprintf("ACA retrieval found no durable note coverage for query %q.", strings.TrimSpace(query))
+		return fmt.Sprintf("ContextWiki retrieval found no durable note coverage for query %q.", strings.TrimSpace(query))
 	}
 }
 

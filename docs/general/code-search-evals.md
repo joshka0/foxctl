@@ -31,7 +31,7 @@ All of these targets call checked-in wrapper scripts which in turn call:
 - `--eval-dataset-file <checked-in dataset>`
 - `--policy-file <checked-in policy>`
 - `--tool-profile repo-grounded`
-- `--include-aca`
+- `--include-contextwiki`
 
 ## Datasets
 
@@ -68,7 +68,7 @@ You can also override thresholds directly:
 
 If a checked-in policy file already sets those values, passing the flag again overrides the file.
 
-For ACA retrieval evals, see [retrieval-evals.md](retrieval-evals.md).
+For ContextWiki retrieval evals, see [retrieval-evals.md](retrieval-evals.md).
 
 ## `gather_context` Polyglot Fixture
 

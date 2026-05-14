@@ -489,7 +489,7 @@ func (s *Server) Handler() http.Handler {
 	// --- Search (Phase 11) ---
 	apiMux.HandleFunc("/api/search", api.SearchHandler(s.cfg, s.log))
 
-	// --- ACA Context / Proposal Merge ---
+	// --- ContextWiki / Proposal Merge ---
 	apiMux.HandleFunc("/api/context/overview", api.ContextOverviewHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/context/next-proposal-merge", api.ContextNextProposalMergeHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/context/next-proposal-merge/claim", api.ContextNextProposalMergeHandler(s.cfg, s.log))

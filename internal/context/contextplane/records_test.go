@@ -230,7 +230,7 @@ func TestBuildReportAndGenerateMaintenanceTasks(t *testing.T) {
 	store := NewWorkspaceStore(t.TempDir())
 	if _, err := store.SaveTopOfMind(TopOfMind{
 		WorkspaceID:   "ws-test",
-		Objective:     "Formalize ACA",
+		Objective:     "Formalize ContextWiki",
 		Phase:         "design",
 		ActiveTaskIDs: []string{"T-1042"},
 		NextActions:   []string{"Draft ADR-0001"},
@@ -270,7 +270,7 @@ func TestBuildReportAndGenerateMaintenanceTasks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildReport: %v", err)
 	}
-	if report.Objective != "Formalize ACA" {
+	if report.Objective != "Formalize ContextWiki" {
 		t.Fatalf("objective=%q", report.Objective)
 	}
 	if report.LatestHandoff == nil {
@@ -324,17 +324,17 @@ func TestLoadHandoffAcceptsWorkspaceRelativePath(t *testing.T) {
 func TestGenerateMaintenanceTasksIncludesPreparedLowRiskProposalMerge(t *testing.T) {
 	store := NewWorkspaceStore(t.TempDir())
 	if _, err := store.RecordMemoryProposal(context.Background(), MemoryProposal{
-		DedupeKey:      "external_evidence_import|aca-vocabulary",
+		DedupeKey:      "external_evidence_import|contextwiki-vocabulary",
 		Kind:           "external_evidence_import",
 		Classification: "external_evidence",
 		Status:         "prepared",
 		ReviewRequired: true,
 		Confidence:     0.72,
 		BlastRadius:    "medium",
-		Summary:        "Review imported evidence draft for merge consideration: ACA Vocabulary Review. Suggested target: notes/repo/aca-inspect/semantic-and-memory.md.",
+		Summary:        "Review imported evidence draft for merge consideration: ContextWiki Vocabulary Review. Suggested target: notes/repo/contextwiki-inspect/semantic-and-memory.md.",
 		ProposedChange: map[string]any{
-			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/aca-inspect/aca-vocabulary-review.md",
-			"suggested_target_note_path": "notes/repo/aca-inspect/semantic-and-memory.md",
+			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/contextwiki-inspect/contextwiki-vocabulary-review.md",
+			"suggested_target_note_path": "notes/repo/contextwiki-inspect/semantic-and-memory.md",
 			"suggested_target_heading":   "Review",
 		},
 		EvaluationStatus: "accepted",
@@ -346,17 +346,17 @@ func TestGenerateMaintenanceTasksIncludesPreparedLowRiskProposalMerge(t *testing
 		t.Fatalf("RecordMemoryProposal: %v", err)
 	}
 	if _, err := store.RecordMemoryProposal(context.Background(), MemoryProposal{
-		DedupeKey:      "methodology_draft|aca-doctrine",
+		DedupeKey:      "methodology_draft|contextwiki-doctrine",
 		Kind:           "methodology_draft",
 		Classification: "external_evidence",
 		Status:         "prepared",
 		ReviewRequired: true,
 		Confidence:     0.72,
 		BlastRadius:    "high",
-		Summary:        "Review imported evidence for a methodology or doctrine update: ACA Doctrine Review.",
+		Summary:        "Review imported evidence for a methodology or doctrine update: ContextWiki Doctrine Review.",
 		ProposedChange: map[string]any{
-			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/aca-inspect/aca-doctrine-review.md",
-			"suggested_target_note_path": "notes/repo/aca-inspect/semantic-and-memory.md",
+			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/contextwiki-inspect/contextwiki-doctrine-review.md",
+			"suggested_target_note_path": "notes/repo/contextwiki-inspect/semantic-and-memory.md",
 			"suggested_target_heading":   "Review",
 		},
 		EvaluationStatus: "accepted",
@@ -381,7 +381,7 @@ func TestGenerateMaintenanceTasksIncludesPreparedLowRiskProposalMerge(t *testing
 	if task.WorkPacket == nil {
 		t.Fatal("expected work packet")
 	}
-	if task.WorkPacket.TargetPath != "notes/repo/aca-inspect/semantic-and-memory.md" {
+	if task.WorkPacket.TargetPath != "notes/repo/contextwiki-inspect/semantic-and-memory.md" {
 		t.Fatalf("target=%q", task.WorkPacket.TargetPath)
 	}
 }

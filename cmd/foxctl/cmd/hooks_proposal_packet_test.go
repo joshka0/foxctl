@@ -13,19 +13,19 @@ func TestHooksProposalPacketCommand(t *testing.T) {
 	workspace := t.TempDir()
 	store := contextplane.NewWorkspaceStore(workspace)
 	proposal, err := store.RecordMemoryProposal(context.Background(), contextplane.MemoryProposal{
-		DedupeKey:      "methodology_draft|aca-vocabulary-hook",
+		DedupeKey:      "methodology_draft|contextwiki-vocabulary-hook",
 		Kind:           "methodology_draft",
 		Classification: "external_evidence",
 		Status:         "open",
 		ReviewRequired: true,
 		Confidence:     0.72,
 		BlastRadius:    "high",
-		Summary:        "Review imported evidence for a methodology or doctrine update: ACA Vocabulary Review. Suggested target: notes/repo/aca-inspect/semantic-and-memory.md.",
+		Summary:        "Review imported evidence for a methodology or doctrine update: ContextWiki Vocabulary Review. Suggested target: notes/repo/contextwiki-inspect/semantic-and-memory.md.",
 		ProposedChange: map[string]any{
 			"evidence_import_id":         "E-789",
-			"title":                      "ACA Vocabulary Review",
-			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/aca-inspect/aca-vocabulary-review.md",
-			"suggested_target_note_path": "notes/repo/aca-inspect/semantic-and-memory.md",
+			"title":                      "ContextWiki Vocabulary Review",
+			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/contextwiki-inspect/contextwiki-vocabulary-review.md",
+			"suggested_target_note_path": "notes/repo/contextwiki-inspect/semantic-and-memory.md",
 			"suggested_target_heading":   "Review",
 		},
 		CreatedAt: time.Now().UTC(),

@@ -6,7 +6,7 @@
   "diffReviewed": true,
   "status": "pass",
   "codeReview": {
-    "summary": "The information-architecture.md document (583 lines) thoroughly covers all eight required sections (a)–(h), the Progressive Reveal section (4-row mapping), and the Three-Plane Memory Model with distinct subsections for Companion Memory, Named Durable Memory, and ACA/Continuity. The keybinding table (22 entries) was cross-checked against keys.go (lines 38–40: ESC, q, Ctrl+C as hard-quit bindings) and shell.gsx (lines 269–299: FocusGroup Tab/Shift-Tab, rail tabs Ctrl+M/Y/W/B, Enter for composer submit, Ctrl+X for cancel, arrow keys for cycleRail). All 8 conflicts are correctly identified and acknowledged with appropriate resolution notes. The document passes `make check-doc-links` and existing Go tests. The worker followed the tui-docs-worker skill procedure correctly.",
+    "summary": "The information-architecture.md document (583 lines) thoroughly covers all eight required sections (a)–(h), the Progressive Reveal section (4-row mapping), and the Three-Plane Memory Model with distinct subsections for Companion Memory, Named Durable Memory, and ContextWiki/Continuity. The keybinding table (22 entries) was cross-checked against keys.go (lines 38–40: ESC, q, Ctrl+C as hard-quit bindings) and shell.gsx (lines 269–299: FocusGroup Tab/Shift-Tab, rail tabs Ctrl+M/Y/W/B, Enter for composer submit, Ctrl+X for cancel, arrow keys for cycleRail). All 8 conflicts are correctly identified and acknowledged with appropriate resolution notes. The document passes `make check-doc-links` and existing Go tests. The worker followed the tui-docs-worker skill procedure correctly.",
     "issues": [
       {
         "file": "docs/plans/tui-redesign/information-architecture.md",

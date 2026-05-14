@@ -8,7 +8,7 @@ This document defines the first tmux collaboration surface for `foxctl`:
 - `foxctl tmux` is the native create/read/send surface
 - `foxctl room` is the durable room timeline, task, and relay surface
 - `tmux-bridge` is an optional low-level helper
-- ACA and the Obsidian vault remain the durable continuity layers
+- ContextWiki and the Obsidian vault remain the durable continuity layers
 
 The point is to let multiple Codex or Claude panes interact while the TUI stays open, without turning tmux scrollback into canonical state.
 
@@ -38,7 +38,7 @@ Opening several AI agents in one tmux session is useful because:
 But tmux is still a terminal substrate, not a durable protocol. That means:
 
 - use tmux for live coordination
-- use mailbox, ACA, sessions, and vault notes for durable state
+- use mailbox, ContextWiki, sessions, and vault notes for durable state
 
 ## Command Surface
 
@@ -509,9 +509,9 @@ Bridge messages use a stable ASCII header:
 
 That keeps the exchange human-readable while still giving other agents a parseable cue.
 
-## ACA Fit
+## ContextWiki Fit
 
-Promote only derived facts into ACA. Good tmux-derived records are:
+Promote only derived facts into ContextWiki. Good tmux-derived records are:
 
 - observations
 - tensions
@@ -525,9 +525,9 @@ foxctl tmux observe agent-b \
   --statement "agent-b is reviewing mailbox ack semantics in internal/runtime/actor/supervisor.go"
 ```
 
-`foxctl tmux observe` reads the latest bridge message in the target pane, converts it into an ACA observation, and stores pane/session bridge refs as evidence.
+`foxctl tmux observe` reads the latest bridge message in the target pane, converts it into a ContextWiki observation, and stores pane/session bridge refs as evidence.
 
-Do not promote raw pane dumps directly into the vault. If a tmux exchange produces durable repo knowledge, summarize it first, then use the normal ACA and Obsidian promotion path.
+Do not promote raw pane dumps directly into the vault. If a tmux exchange produces durable repo knowledge, summarize it first, then use the normal ContextWiki and Obsidian promotion path.
 
 ## Scope Boundary
 
@@ -541,7 +541,7 @@ What tmux should not replace:
 
 - mailbox request/reply semantics
 - session continuity
-- ACA top-of-mind, observations, tensions, or handoffs
+- ContextWiki top-of-mind, observations, tensions, or handoffs
 - reviewed Obsidian notes
 
 ## Related

@@ -9,8 +9,8 @@ Codex-style command callers, and Jido-backed agents.
 
 Task continuity reconstitutes a bounded, hierarchical view of active work from:
 
-- ACA task packet state
-- ACA handoffs and durable notes
+- ContextWiki task packet state
+- ContextWiki handoffs and durable notes
 - linked sessions and timeline evidence
 - touched files and recent git history
 - repoindex anchors and DAG anchors

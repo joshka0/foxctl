@@ -18,7 +18,7 @@ authority, traversal, and review-gate invariants.
   - Go owner binding and repoindex graph emission behind explicit flags
   - repoindex semantic traversal vocabulary and filtering
   - semantic search envelope plumbing
-  - ACA retrieval hints behind `--semantic-anchors`
+  - ContextWiki retrieval hints behind `--semantic-anchors`
   - semantic anchor inspect/proposal plumbing
   - Obsidian default exclusion filter for anchor concept nodes
   - portable `semantic-commenting` skill contract
@@ -51,7 +51,7 @@ authority, traversal, and review-gate invariants.
      target, provider version, cap config, and section flags.
    - Prove co-change remains metadata-only by default.
    - Prove semantic source-anchor types do not alias `searchindex.Anchor`.
-6. Complete ACA retrieval and proposal proof.
+6. Complete ContextWiki retrieval and proposal proof.
    - Add retrieval eval coverage for `context retrieve --semantic-anchors`.
    - Prove semantic hints validate evidence metadata before rendering.
    - Prove stale/missing anchor inspect classifications create deduped
@@ -103,7 +103,7 @@ make check-doc-links
 git diff --check
 ```
 
-When docs, repo graph metadata, or bridge metadata changes, also refresh the ACA
+When docs, repo graph metadata, or bridge metadata changes, also refresh the ContextWiki
 knowledge layer using the commands in `AGENTS.md` if the needed vault paths are
 available.
 
@@ -111,7 +111,7 @@ available.
 
 - The plan's remaining-work items have matching code/tests or are explicitly
   moved to a new reviewed follow-up with rationale.
-- Anchor-aware repoindex evals, semantic envelope goldens, ACA retrieval evals,
+- Anchor-aware repoindex evals, semantic envelope goldens, ContextWiki retrieval evals,
   CLI lint/explain goldens, and co-change fixture tests pass.
 - Default structural traversal behavior is proven unchanged.
 - No semantic anchor, empirical edge, or generated hint becomes an instruction

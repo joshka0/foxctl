@@ -226,7 +226,7 @@ func newHooksSubagentStopCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "subagent-stop",
-		Short: "Handle SubagentStop ACA capture and promotion metadata",
+		Short: "Handle SubagentStop ContextWiki capture and promotion metadata",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
 			cfg, err := loadConfig(ctx)
@@ -891,7 +891,7 @@ func newHooksProposalPacketCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "proposal-packet",
-		Short: "Resolve an ACA proposal into hook-ready context and metadata",
+		Short: "Resolve a ContextWiki proposal into hook-ready context and metadata",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			payload, err := readOptionalProposalPacketPayload(cmd)
 			if err != nil {

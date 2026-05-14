@@ -9,7 +9,7 @@ import (
 const (
 	ScoutRoleMemoryFact     = "memory_fact_scout"
 	ScoutRoleMemoryTimeline = "memory_timeline_scout"
-	ScoutRoleACAContext     = "aca_context_scout"
+	ScoutRoleContextWiki    = "contextwiki_scout"
 )
 
 // NormalizeScoutRole returns the canonical scout role name or empty string when unsupported.
@@ -19,8 +19,8 @@ func NormalizeScoutRole(role string) string {
 		return ScoutRoleMemoryFact
 	case ScoutRoleMemoryTimeline:
 		return ScoutRoleMemoryTimeline
-	case ScoutRoleACAContext:
-		return ScoutRoleACAContext
+	case ScoutRoleContextWiki:
+		return ScoutRoleContextWiki
 	default:
 		return ""
 	}
@@ -52,7 +52,7 @@ func FilterToolsForScoutRole(tools []rlm.Tool, role string) []rlm.Tool {
 			"load_artifact":      {},
 			"get_latest_handoff": {},
 		}
-	case ScoutRoleACAContext:
+	case ScoutRoleContextWiki:
 		allowed = map[string]struct{}{
 			"get_top_of_mind":    {},
 			"get_latest_handoff": {},
@@ -88,8 +88,8 @@ Return the smallest chronology that explains the current best view.
 
 Task:
 ` + prompt)
-	case ScoutRoleACAContext:
-		return strings.TrimSpace(`You are an ACA context scout.
+	case ScoutRoleContextWiki:
+		return strings.TrimSpace(`You are a ContextWiki context scout.
 Recover durable top-of-mind, handoff, and vault-backed context relevant to the task.
 Return only the most useful durable context blocks.
 

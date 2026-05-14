@@ -1,5 +1,5 @@
 ---
-title: Refactor Scout and ACA
+title: Refactor Scout and ContextWiki
 type: map
 status: draft
 trust: reviewed
@@ -8,9 +8,9 @@ provenance_refs:
 updated: 2026-03-30
 ---
 
-# Refactor Scout and ACA
+# Refactor Scout and ContextWiki
 
-`foxctl` has a local refactor workflow that should feed ACA rather than live
+`foxctl` has a local refactor workflow that should feed ContextWiki rather than live
 outside it.
 
 ## What Exists
@@ -31,7 +31,7 @@ Primary usage:
 3. choose one seam family or function hotspot
 4. promote durable conclusions into the knowledge plane
 
-## ACA Placement
+## ContextWiki Placement
 
 - `L0` Active Run:
   current scout invocation and current shortlist

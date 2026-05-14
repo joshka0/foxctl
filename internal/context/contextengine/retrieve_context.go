@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// RetrieveContext retrieves context from TopOfMind projection and ACA.
+// RetrieveContext retrieves context from TopOfMind projection and ContextWiki.
 // VAL-RETR-003: Returns EvidencePack with Lane="context".
 // VAL-RETR-013: Includes TopOfMind as EvidenceNode in output pack.
 func RetrieveContext(ctx context.Context, cfg LaneConfig, queryFn ContextQueryFunc, query string) (EvidencePack, error) {
@@ -43,7 +43,7 @@ func RetrieveContext(ctx context.Context, cfg LaneConfig, queryFn ContextQueryFu
 	var nodes []EvidenceNode
 
 	if packet != nil {
-		// Create a node from the context packet (TopOfMind/handoff/ACA).
+		// Create a node from the context packet (TopOfMind/handoff/ContextWiki).
 		objRef := EvidenceRef{
 			Type:        RefTypeNote,
 			Ref:         "top_of_mind:" + cfg.WorkspaceID,

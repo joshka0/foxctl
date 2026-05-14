@@ -21,7 +21,7 @@ func TestDelegateContextShow(t *testing.T) {
 	store := contextplane.NewWorkspaceStore(workspaceRoot)
 	if _, err := store.SaveTopOfMind(contextplane.TopOfMind{
 		WorkspaceID: workspaceRoot,
-		Objective:   "Test ACA",
+		Objective:   "Test ContextWiki",
 		Phase:       "design",
 		UpdatedAt:   time.Now().UTC(),
 	}); err != nil {
@@ -42,7 +42,7 @@ func TestDelegateContextShow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if !strings.Contains(result.Output, `"objective":"Test ACA"`) {
+	if !strings.Contains(result.Output, `"objective":"Test ContextWiki"`) {
 		t.Fatalf("unexpected output: %s", result.Output)
 	}
 }
@@ -55,7 +55,7 @@ func TestDelegateObsidianReadAndIndexSearch(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(notePath), 0o755); err != nil {
 		t.Fatalf("mkdir vault: %v", err)
 	}
-	content := "---\ntitle: foxctl Repo Graph\ntype: map\nproject: foxctl\nstatus: reviewed\ntrust: canonical\n---\n\n# foxctl Repo Graph\n\nACA bridge.\n"
+	content := "---\ntitle: foxctl Repo Graph\ntype: map\nproject: foxctl\nstatus: reviewed\ntrust: canonical\n---\n\n# foxctl Repo Graph\n\nContextWiki bridge.\n"
 	if err := os.WriteFile(notePath, []byte(content), 0o644); err != nil {
 		t.Fatalf("write note: %v", err)
 	}
@@ -143,12 +143,12 @@ func TestDelegateFallsBackToClassicRegistry(t *testing.T) {
 	}
 }
 
-func TestNewDefaultExecutorUsesProfileGatingAndACADelegate(t *testing.T) {
+func TestNewDefaultExecutorUsesProfileGatingAndContextWikiDelegate(t *testing.T) {
 	workspaceRoot := t.TempDir()
 	store := contextplane.NewWorkspaceStore(workspaceRoot)
 	if _, err := store.SaveTopOfMind(contextplane.TopOfMind{
 		WorkspaceID: workspaceRoot,
-		Objective:   "Profile-gated ACA",
+		Objective:   "Profile-gated ContextWiki",
 		Phase:       "design",
 		UpdatedAt:   time.Now().UTC(),
 	}); err != nil {
@@ -169,7 +169,7 @@ func TestNewDefaultExecutorUsesProfileGatingAndACADelegate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if !strings.Contains(result.Output, `"objective":"Profile-gated ACA"`) {
+	if !strings.Contains(result.Output, `"objective":"Profile-gated ContextWiki"`) {
 		t.Fatalf("unexpected output: %s", result.Output)
 	}
 }

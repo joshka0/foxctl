@@ -391,7 +391,7 @@ func memoryProposalFromRetrievalInspection(inspection RetrievalInspection) Memor
 		ReviewRequired:   reviewRequired,
 		Confidence:       inspection.Observation.Confidence,
 		BlastRadius:      blastRadius,
-		Summary:          firstNonEmpty(strings.TrimSpace(inspection.Proposal.Summary), strings.TrimSpace(inspection.Observation.Statement), fmt.Sprintf("ACA proposal for %s", inspection.Classification)),
+		Summary:          firstNonEmpty(strings.TrimSpace(inspection.Proposal.Summary), strings.TrimSpace(inspection.Observation.Statement), fmt.Sprintf("ContextWiki proposal for %s", inspection.Classification)),
 		SourceRefs:       memoryProposalSourceRefs(inspection),
 		ProposedChange:   change,
 		EvaluationStatus: "not_evaluated",

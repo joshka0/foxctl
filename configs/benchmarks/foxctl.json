@@ -391,7 +391,7 @@
         "retrieval eval envelope",
         "policy summary"
       ],
-      "notes": "Keep this lane visible but advisory until fixtures, ACA vault paths, and embedder health are reconciled into a stable saved artifact."
+      "notes": "Keep this lane visible but advisory until fixtures, ContextWiki vault paths, and embedder health are reconciled into a stable saved artifact."
     },
     {
       "id": "retrieval.foxctl-mixed",

@@ -77,7 +77,7 @@ See [Rooms](/collaboration/rooms/) for the full room protocol.
 
 See [Memory and continuity](/memory/continuity/) for the full memory API.
 
-## ACA and Obsidian
+## ContextWiki and Obsidian
 
 | Task | Command |
 |---|---|

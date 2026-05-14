@@ -54,7 +54,6 @@ import type {
   AgentChatStreamEvent,
   AgentRuntimeTreeNode,
   Room,
-  RoomMessageEvent,
 } from "@/api/types";
 import { useAgentOperations } from "@/hooks/useAgentOperations";
 import { useViewStore } from "@/stores/viewStore";
