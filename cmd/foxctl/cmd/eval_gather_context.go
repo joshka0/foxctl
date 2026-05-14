@@ -102,6 +102,7 @@ type gatherContextBaselineComparison struct {
 	Model                    string  `json:"model,omitempty"`
 	Runner                   string  `json:"runner,omitempty"`
 	Count                    int     `json:"count"`
+	BaselineErrorCount       int     `json:"baseline_error_count,omitempty"`
 	GatherPassRate           float64 `json:"gather_pass_rate"`
 	BaselinePassRate         float64 `json:"baseline_pass_rate"`
 	PassRateDelta            float64 `json:"pass_rate_delta"`
@@ -115,6 +116,8 @@ type gatherContextBaselineComparison struct {
 	BaselineMeanDurationMS   float64 `json:"baseline_mean_duration_ms"`
 	DurationSpeedup          float64 `json:"duration_speedup,omitempty"`
 	BaselineMeanTokens       float64 `json:"baseline_mean_tokens,omitempty"`
+	BaselineMeanCachedInput  float64 `json:"baseline_mean_cached_input_tokens,omitempty"`
+	BaselineMeanReasoningOut float64 `json:"baseline_mean_reasoning_output_tokens,omitempty"`
 	BaselineMeanCostUSD      float64 `json:"baseline_mean_cost_usd,omitempty"`
 	EmittedCharsPerTokenMean float64 `json:"emitted_chars_per_token_mean,omitempty"`
 }
@@ -133,6 +136,7 @@ func newEvalGatherContextCommand() *cobra.Command {
 		timeout              time.Duration
 		passThreshold        float64
 		reportFile           string
+		caseLimit            int
 		limit                int
 		maxContextChars      int
 		lanes                []string
@@ -144,6 +148,8 @@ func newEvalGatherContextCommand() *cobra.Command {
 		rlmAgentMaxIters     int
 		rlmAgentRoute        string
 		rlmAgentPlanMode     string
+		baselineInputPrice   float64
+		baselineOutputPrice  float64
 	)
 
 	cmd := &cobra.Command{
@@ -168,6 +174,8 @@ func newEvalGatherContextCommand() *cobra.Command {
 			if len(evalCases) == 0 {
 				return writeOptimizeError(out, "eval.gather-context", "eval-dataset-file must contain at least one case")
 			}
+			loadedEvalCaseCount := len(evalCases)
+			evalCases = limitGatherContextEvalCases(evalCases, caseLimit)
 
 			prevPool := sqliteutil.GetGlobalPool()
 			sharedPool := sqliteutil.NewPool()
@@ -206,20 +214,25 @@ func newEvalGatherContextCommand() *cobra.Command {
 					}
 				}
 			}
+			applyAgentEvalTokenPrice(baselineResults, baselineInputPrice, baselineOutputPrice)
 			baselineSummaries = summarizeAgentEvalResults(baselineResults)
 			baselineComparisons = compareGatherContextToAgentBaselines(summary, baselineSummaries)
 			repoIndexFreshness := gatherContextEvalRepoIndexFreshness(ctx, cfg.Storage.Root, absWorkspace)
 			report := map[string]any{
-				"operation":                   "eval.gather-context",
-				"workspace_id":                absWorkspace,
-				"repo_state":                  gatherContextEvalRepoState(ctx, absWorkspace),
-				"eval_case_count":             len(evalCases),
-				"eval_cases":                  evalCases,
-				"tool_profile":                toolProfile,
-				"lanes":                       lanes,
-				"limit":                       limit,
-				"max_context_chars":           maxContextChars,
-				"pass_threshold":              passThreshold,
+				"operation":               "eval.gather-context",
+				"workspace_id":            absWorkspace,
+				"repo_state":              gatherContextEvalRepoState(ctx, absWorkspace),
+				"eval_case_count":         len(evalCases),
+				"eval_dataset_case_count": loadedEvalCaseCount,
+				"eval_case_limit":         caseLimit,
+				"eval_cases":              evalCases,
+				"tool_profile":            toolProfile,
+				"lanes":                   lanes,
+				"limit":                   limit,
+				"max_context_chars":       maxContextChars,
+				"pass_threshold":          passThreshold,
+				"baseline_input_token_price_per_million_usd":  baselineInputPrice,
+				"baseline_output_token_price_per_million_usd": baselineOutputPrice,
 				"results":                     results,
 				"summary":                     summary,
 				"agent_baseline_result_files": append([]string(nil), agentBaselineResults...),
@@ -257,6 +270,7 @@ func newEvalGatherContextCommand() *cobra.Command {
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Second, "Per-case timeout")
 	cmd.Flags().Float64Var(&passThreshold, "pass-threshold", 0.8, "Path-recall threshold for passing cases with expected_paths")
 	cmd.Flags().StringVar(&reportFile, "report-file", "", "Optional path to write the JSON report")
+	cmd.Flags().IntVar(&caseLimit, "case-limit", 0, "Maximum eval dataset rows to execute (0 means all)")
 	cmd.Flags().IntVar(&limit, "limit", 8, "Maximum evidence sources requested from gather_context")
 	cmd.Flags().IntVar(&maxContextChars, "max-context-chars", 6000, "Maximum approximate context chars emitted by gather_context")
 	cmd.Flags().StringSliceVar(&lanes, "lane", []string{"code"}, "Context lanes to gather (code, memory, context, task, mixed)")
@@ -268,8 +282,14 @@ func newEvalGatherContextCommand() *cobra.Command {
 	cmd.Flags().IntVar(&rlmAgentMaxIters, "rlm-agent-max-iterations", 5, "Max tool/model iterations per RLM mini-agent pass")
 	cmd.Flags().StringVar(&rlmAgentRoute, "rlm-agent-route", string(rlm.RouteProfileMixed), "Route profile for RLM mini-agent benchmark")
 	cmd.Flags().StringVar(&rlmAgentPlanMode, "rlm-agent-plan-mode", string(rlm.PlanModeFree), "Plan mode for RLM mini-agent benchmark")
+	cmd.Flags().Float64Var(&baselineInputPrice, "baseline-input-token-price-per-million-usd", 0, "Optional baseline input token price used for cost comparison when model pricing is unavailable")
+	cmd.Flags().Float64Var(&baselineOutputPrice, "baseline-output-token-price-per-million-usd", 0, "Optional baseline output token price used for cost comparison when model pricing is unavailable")
 	_ = cmd.MarkFlagRequired("eval-dataset-file")
 	return cmd
+}
+
+func limitGatherContextEvalCases(cases []promptEvalCase, limit int) []promptEvalCase {
+	return limitPromptEvalCases(cases, limit)
 }
 
 func gatherContextEvalRepoState(ctx context.Context, workspace string) map[string]any {
@@ -2240,6 +2260,7 @@ func compareGatherContextToAgentBaselines(summary gatherContextEvalSummary, base
 			Model:                    baseline.Model,
 			Runner:                   baseline.Runner,
 			Count:                    baseline.Count,
+			BaselineErrorCount:       baseline.ErrorCount,
 			GatherPassRate:           summary.PassRate,
 			BaselinePassRate:         baseline.PassRate,
 			PassRateDelta:            summary.PassRate - baseline.PassRate,
@@ -2252,6 +2273,8 @@ func compareGatherContextToAgentBaselines(summary gatherContextEvalSummary, base
 			GatherMeanDurationMS:     summary.MeanDurationMS,
 			BaselineMeanDurationMS:   baseline.MeanDurationMS,
 			BaselineMeanTokens:       baseline.MeanTokens,
+			BaselineMeanCachedInput:  baseline.MeanCachedInput,
+			BaselineMeanReasoningOut: baseline.MeanReasoningOut,
 			BaselineMeanCostUSD:      baseline.MeanCostUSD,
 			EmittedCharsPerTokenMean: emittedCharsPerBaselineToken(summary, baseline),
 		}
@@ -2345,16 +2368,19 @@ func renderGatherContextEvalMarkdown(workspace string, summary gatherContextEval
 	}
 	if len(comparisons) > 0 {
 		b.WriteString("\n## Agent Baselines\n\n")
-		b.WriteString("| Baseline | Pass Delta | Path Delta | Fact Delta | Speedup | Baseline Tokens |\n")
-		b.WriteString("| --- | ---: | ---: | ---: | ---: | ---: |\n")
+		b.WriteString("| Baseline | Errors | Pass Delta | Path Delta | Fact Delta | Speedup | Baseline Tokens | Cached Input | Reasoning Out |\n")
+		b.WriteString("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n")
 		for _, comparison := range comparisons {
-			b.WriteString(fmt.Sprintf("| %s | %.2f | %.2f | %.2f | %.2fx | %.1f |\n",
+			b.WriteString(fmt.Sprintf("| %s | %d | %.2f | %.2f | %.2f | %.2fx | %.1f | %.1f | %.1f |\n",
 				markdownCell(comparison.Label),
+				comparison.BaselineErrorCount,
 				comparison.PassRateDelta,
 				comparison.PathRecallDelta,
 				comparison.FactRecallDelta,
 				comparison.DurationSpeedup,
 				comparison.BaselineMeanTokens,
+				comparison.BaselineMeanCachedInput,
+				comparison.BaselineMeanReasoningOut,
 			))
 		}
 	}

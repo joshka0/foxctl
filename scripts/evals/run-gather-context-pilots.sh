@@ -10,13 +10,18 @@ DEARDAY_REPO="${DEARDAY_REPO:-$HOME/repos/personal/dearday}"
 OVERCHARGE_REPO="${OVERCHARGE_REPO:-$HOME/repos/personal/overcharge}"
 FRESH_CLONE="${FRESH_CLONE:-0}"
 CLONE_ROOT="${CLONE_ROOT:-/tmp/gather-context-pilot-repos/$(date -u +%Y%m%dT%H%M%SZ)}"
+# RUN_NATIVE is the legacy name for this provider-backed eval-agent lane.
+# Prefer RUN_PROVIDER_AGENT for new invocations.
 RUN_NATIVE="${RUN_NATIVE:-1}"
+RUN_PROVIDER_AGENT="${RUN_PROVIDER_AGENT:-$RUN_NATIVE}"
 RUN_RLM="${RUN_RLM:-0}"
 REBUILD_INDEX="${REBUILD_INDEX:-0}"
 RUN_REPOS="${RUN_REPOS:-praze,heartwood,dearday}"
 CASE_LIMIT="${CASE_LIMIT:-0}"
 CASE_ID_GREP="${CASE_ID_GREP:-}"
+# NATIVE_TARGET is kept as a compatibility alias; prefer PROVIDER_AGENT_TARGET.
 NATIVE_TARGET="${NATIVE_TARGET:-openai:gpt-5.4-mini}"
+PROVIDER_AGENT_TARGET="${PROVIDER_AGENT_TARGET:-$NATIVE_TARGET}"
 RLM_TARGET="${RLM_TARGET:-openai:gpt-5.4-mini}"
 TIMEOUT="${TIMEOUT:-90s}"
 NATIVE_TIMEOUT="${NATIVE_TIMEOUT:-180s}"
@@ -247,20 +252,20 @@ run_repo() {
     > "$dir/gather-context.out.json"
   attach_repo_state "$dir/gather-context.json" "$dir/repo-state.json"
 
-  if [[ "$RUN_NATIVE" == "1" ]]; then
-    echo "Running native mini subagent baseline for $name ($NATIVE_TARGET)"
+  if [[ "$RUN_PROVIDER_AGENT" == "1" ]]; then
+    echo "Running provider-backed foxctl eval-agent baseline for $name ($PROVIDER_AGENT_TARGET)"
     "$FOXCTL_BIN" eval agents \
       --workspace "$repo" \
       --eval-dataset-file "$selected_dataset" \
       --role researcher \
-      --target "$NATIVE_TARGET" \
+      --target "$PROVIDER_AGENT_TARGET" \
       --timeout "$NATIVE_TIMEOUT" \
       --max-iterations "$NATIVE_MAX_ITERATIONS" \
       --pass-threshold "$PASS_THRESHOLD" \
-      --report-file "$dir/native-mini-agent.json" \
-      > "$dir/native-mini-agent.out.json"
-    attach_repo_state "$dir/native-mini-agent.json" "$dir/repo-state.json"
-    results_to_jsonl "$dir/native-mini-agent.json" "$dir/native-mini-agent-results.jsonl"
+      --report-file "$dir/provider-agent.json" \
+      > "$dir/provider-agent.out.json"
+    attach_repo_state "$dir/provider-agent.json" "$dir/repo-state.json"
+    results_to_jsonl "$dir/provider-agent.json" "$dir/provider-agent-results.jsonl"
 
     echo "Running gather_context comparison import for $name"
     "$FOXCTL_BIN" eval gather-context \
@@ -272,7 +277,7 @@ run_repo() {
       --max-context-chars "$MAX_CONTEXT_CHARS" \
       --timeout "$TIMEOUT" \
       --pass-threshold "$PASS_THRESHOLD" \
-      --agent-baseline-results "$dir/native-mini-agent-results.jsonl" \
+      --agent-baseline-results "$dir/provider-agent-results.jsonl" \
       --report-file "$dir/head-to-head.json" \
       > "$dir/head-to-head.out.json"
     attach_repo_state "$dir/head-to-head.json" "$dir/repo-state.json"

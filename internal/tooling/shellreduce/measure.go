@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	actormemory "github.com/joshka0/foxctl/internal/runtime/actor/memory"
 	tiktoken "github.com/pkoukk/tiktoken-go"
@@ -13,7 +14,9 @@ import (
 
 // MeasureOptions controls raw-vs-reduced output comparison.
 type MeasureOptions struct {
-	TokenModel string
+	TokenModel                   string
+	ReducedDuration              time.Duration
+	InputTokenPricePerMillionUSD float64
 }
 
 // Measure compares raw command output against reduced summary text.
@@ -27,6 +30,10 @@ func Measure(ctx context.Context, workspace string, argv []string, reducedSummar
 	reducedTokens := counter.Count(reducedText)
 	rawBytes := len(rawText)
 	reducedBytes := len(reducedText)
+	reducedDurationMS := int(opts.ReducedDuration.Milliseconds())
+	durationSavedMS := raw.DurationMS - reducedDurationMS
+	rawCostUSD := tokenCostUSD(rawTokens, opts.InputTokenPricePerMillionUSD)
+	reducedCostUSD := tokenCostUSD(reducedTokens, opts.InputTokenPricePerMillionUSD)
 	advice := recommendReduction(rawBytes, reducedBytes, rawTokens, reducedTokens, raw.Error)
 
 	return map[string]any{
@@ -36,35 +43,47 @@ func Measure(ctx context.Context, workspace string, argv []string, reducedSummar
 			"kind":      counter.Kind,
 		},
 		"raw": map[string]any{
-			"command":         JoinCommand(raw.Argv),
-			"stdout_bytes":    len(raw.Stdout),
-			"stderr_bytes":    len(raw.Stderr),
-			"combined_bytes":  rawBytes,
-			"combined_tokens": rawTokens,
-			"exit_code":       raw.ExitCode,
-			"error":           raw.Error,
+			"command":                  JoinCommand(raw.Argv),
+			"stdout_bytes":             len(raw.Stdout),
+			"stderr_bytes":             len(raw.Stderr),
+			"combined_bytes":           rawBytes,
+			"combined_tokens":          rawTokens,
+			"duration_ms":              raw.DurationMS,
+			"exit_code":                raw.ExitCode,
+			"error":                    raw.Error,
+			"estimated_input_cost_usd": rawCostUSD,
 		},
 		"reduced": map[string]any{
-			"bytes":  reducedBytes,
-			"tokens": reducedTokens,
+			"bytes":                    reducedBytes,
+			"tokens":                   reducedTokens,
+			"duration_ms":              reducedDurationMS,
+			"estimated_input_cost_usd": reducedCostUSD,
 		},
 		"savings": map[string]any{
-			"bytes_saved":          rawBytes - reducedBytes,
-			"tokens_saved":         rawTokens - reducedTokens,
-			"bytes_saved_percent":  percentSaved(rawBytes, reducedBytes),
-			"tokens_saved_percent": percentSaved(rawTokens, reducedTokens),
+			"bytes_saved":                        rawBytes - reducedBytes,
+			"tokens_saved":                       rawTokens - reducedTokens,
+			"bytes_saved_percent":                percentSaved(rawBytes, reducedBytes),
+			"tokens_saved_percent":               percentSaved(rawTokens, reducedTokens),
+			"duration_saved_ms":                  durationSavedMS,
+			"duration_saved_percent":             percentSaved(raw.DurationMS, reducedDurationMS),
+			"estimated_input_cost_saved_usd":     rawCostUSD - reducedCostUSD,
+			"estimated_input_cost_saved_percent": percentSavedFloat(rawCostUSD, reducedCostUSD),
+		},
+		"pricing": map[string]any{
+			"input_token_price_per_million_usd": opts.InputTokenPricePerMillionUSD,
 		},
 		"advice": advice,
 	}
 }
 
 type rawExecResult struct {
-	Argv     []string
-	Stdout   string
-	Stderr   string
-	Combined string
-	ExitCode int
-	Error    string
+	Argv       []string
+	Stdout     string
+	Stderr     string
+	Combined   string
+	ExitCode   int
+	DurationMS int
+	Error      string
 }
 
 func executeRaw(ctx context.Context, workspace string, argv []string) rawExecResult {
@@ -84,7 +103,9 @@ func executeRaw(ctx context.Context, workspace string, argv []string) rawExecRes
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	started := time.Now()
 	err := cmd.Run()
+	durationMS := int(time.Since(started).Milliseconds())
 
 	exitCode := 0
 	if err != nil {
@@ -106,11 +127,12 @@ func executeRaw(ctx context.Context, workspace string, argv []string) rawExecRes
 	}
 
 	result := rawExecResult{
-		Argv:     rawArgv,
-		Stdout:   stdoutText,
-		Stderr:   stderrText,
-		Combined: combined,
-		ExitCode: exitCode,
+		Argv:       rawArgv,
+		Stdout:     stdoutText,
+		Stderr:     stderrText,
+		Combined:   combined,
+		ExitCode:   exitCode,
+		DurationMS: durationMS,
 	}
 	if err != nil {
 		result.Error = err.Error()
@@ -148,6 +170,20 @@ func percentSaved(rawSize, reducedSize int) float64 {
 		return 0
 	}
 	return float64(rawSize-reducedSize) * 100 / float64(rawSize)
+}
+
+func percentSavedFloat(rawSize, reducedSize float64) float64 {
+	if rawSize <= 0 {
+		return 0
+	}
+	return (rawSize - reducedSize) * 100 / rawSize
+}
+
+func tokenCostUSD(tokens int, pricePerMillion float64) float64 {
+	if tokens <= 0 || pricePerMillion <= 0 {
+		return 0
+	}
+	return float64(tokens) * pricePerMillion / 1_000_000
 }
 
 type tokenCounter struct {
@@ -252,6 +288,12 @@ func MeasureSummaryLine(measure map[string]any) string {
 		intValue(reduced["bytes"]),
 		floatValue(savings["bytes_saved_percent"]),
 	)
+	if rawMS := intValue(raw["duration_ms"]); rawMS > 0 || intValue(reduced["duration_ms"]) > 0 {
+		line += fmt.Sprintf("; ms: raw %d -> reduced %d (%.0f%% saved)", rawMS, intValue(reduced["duration_ms"]), floatValue(savings["duration_saved_percent"]))
+	}
+	if rawCost := floatValue(raw["estimated_input_cost_usd"]); rawCost > 0 {
+		line += fmt.Sprintf("; input cost: $%.6f -> $%.6f (%.0f%% saved)", rawCost, floatValue(reduced["estimated_input_cost_usd"]), floatValue(savings["estimated_input_cost_saved_percent"]))
+	}
 	advice := asMap(measure["advice"])
 	mode := stringValue(advice["mode"])
 	if mode == "" {

@@ -39,6 +39,40 @@ func TestValidateManifestRejectsUnsafeDefaultGate(t *testing.T) {
 	if !strings.Contains(err.Error(), "cannot require network in the default gate") {
 		t.Fatalf("ValidateManifest() error = %v", err)
 	}
+
+	manifest = minimalManifest()
+	manifest.Benchmarks[0].RequiresLLM = true
+	err = ValidateManifest(manifest)
+	if err == nil {
+		t.Fatal("ValidateManifest() error = nil, want unsafe default LLM gate error")
+	}
+	if !strings.Contains(err.Error(), "cannot require an LLM in the default gate") {
+		t.Fatalf("ValidateManifest() error = %v", err)
+	}
+}
+
+func TestValidateManifestRejectsAmbiguousGateSelection(t *testing.T) {
+	t.Parallel()
+
+	manifest := minimalManifest()
+	manifest.Benchmarks[0].DefaultGate = false
+	err := ValidateManifest(manifest)
+	if err == nil {
+		t.Fatal("ValidateManifest() error = nil, want missing gate error")
+	}
+	if !strings.Contains(err.Error(), "must set exactly one of default_gate or extended_gate") {
+		t.Fatalf("ValidateManifest() error = %v", err)
+	}
+
+	manifest = minimalManifest()
+	manifest.Benchmarks[0].ExtendedGate = true
+	err = ValidateManifest(manifest)
+	if err == nil {
+		t.Fatal("ValidateManifest() error = nil, want conflicting gate error")
+	}
+	if !strings.Contains(err.Error(), "must set exactly one of default_gate or extended_gate") {
+		t.Fatalf("ValidateManifest() error = %v", err)
+	}
 }
 
 func TestValidateManifestRejectsMissingMetricsAndArtifacts(t *testing.T) {
@@ -79,6 +113,26 @@ func TestValidateManifestRejectsDuplicateIDsAndUnknownCategories(t *testing.T) {
 	manifest.Benchmarks[0].Category = "missing"
 	if err := ValidateManifest(manifest); err == nil || !strings.Contains(err.Error(), "unknown category") {
 		t.Fatalf("ValidateManifest() error = %v, want unknown category", err)
+	}
+}
+
+func TestValidateManifestRejectsDuplicateCategoryIDsAndMissingCoverage(t *testing.T) {
+	t.Parallel()
+
+	manifest := minimalManifest()
+	manifest.Categories = append(manifest.Categories, manifest.Categories[0])
+	if err := ValidateManifest(manifest); err == nil || !strings.Contains(err.Error(), "duplicate category id") {
+		t.Fatalf("ValidateManifest() error = %v, want duplicate category id", err)
+	}
+
+	manifest = minimalManifest()
+	manifest.Categories = append(manifest.Categories, Category{
+		ID:     "repoindex",
+		Name:   "Repoindex",
+		Status: "planned",
+	})
+	if err := ValidateManifest(manifest); err == nil || !strings.Contains(err.Error(), "has no benchmark coverage") {
+		t.Fatalf("ValidateManifest() error = %v, want missing category coverage", err)
 	}
 }
 

@@ -355,19 +355,25 @@ func TestRouteArgvGoTestRace(t *testing.T) {
 func TestMeasureSummaryLine(t *testing.T) {
 	got := MeasureSummaryLine(map[string]any{
 		"raw": map[string]any{
-			"combined_tokens": 200.0,
-			"combined_bytes":  800.0,
+			"combined_tokens":          200.0,
+			"combined_bytes":           800.0,
+			"duration_ms":              40.0,
+			"estimated_input_cost_usd": 0.0002,
 		},
 		"reduced": map[string]any{
-			"tokens": 20.0,
-			"bytes":  120.0,
+			"tokens":                   20.0,
+			"bytes":                    120.0,
+			"duration_ms":              10.0,
+			"estimated_input_cost_usd": 0.00002,
 		},
 		"savings": map[string]any{
-			"tokens_saved_percent": 90.0,
-			"bytes_saved_percent":  85.0,
+			"tokens_saved_percent":               90.0,
+			"bytes_saved_percent":                85.0,
+			"duration_saved_percent":             75.0,
+			"estimated_input_cost_saved_percent": 90.0,
 		},
 	})
-	for _, want := range []string{"raw 200 -> reduced 20", "90% saved", "raw 800 -> reduced 120"} {
+	for _, want := range []string{"raw 200 -> reduced 20", "90% saved", "raw 800 -> reduced 120", "ms: raw 40 -> reduced 10", "input cost: $0.000200 -> $0.000020"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("summary missing %q\n%s", want, got)
 		}

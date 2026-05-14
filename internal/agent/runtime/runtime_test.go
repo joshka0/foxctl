@@ -836,6 +836,69 @@ func TestSummarizeToolData_Shell(t *testing.T) {
 	}
 }
 
+func TestBuildRepoIndexSearchInputPreservesInlineMode(t *testing.T) {
+	input, err := buildRepoIndexSearchInput(map[string]any{
+		"query":       " gather_context ",
+		"inline_mode": " preview ",
+		"limit":       float64(10),
+	}, "/tmp/workspace")
+	if err != nil {
+		t.Fatalf("buildRepoIndexSearchInput returned error: %v", err)
+	}
+	if got, want := input["query"], "gather_context"; got != want {
+		t.Fatalf("query=%v want %s", got, want)
+	}
+	if got, want := input["workspace"], "/tmp/workspace"; got != want {
+		t.Fatalf("workspace=%v want %s", got, want)
+	}
+	if got, want := input["limit"], 10; got != want {
+		t.Fatalf("limit=%v want %d", got, want)
+	}
+	if got, want := input["inline_mode"], "preview"; got != want {
+		t.Fatalf("inline_mode=%v want %s", got, want)
+	}
+}
+
+func TestBuildRepoIndexExpandInputPreservesInlineModeAndDirection(t *testing.T) {
+	input, err := buildRepoIndexExpandInput(map[string]any{
+		"seeds":        []any{"sym:one", "sym:two"},
+		"edge_types":   []any{"CALLS"},
+		"direction":    " in ",
+		"inline_mode":  " full ",
+		"depth":        float64(2),
+		"budget":       float64(12),
+		"per_node_cap": float64(4),
+	}, "")
+	if err != nil {
+		t.Fatalf("buildRepoIndexExpandInput returned error: %v", err)
+	}
+	if got, want := input["workspace"], "."; got != want {
+		t.Fatalf("workspace=%v want %s", got, want)
+	}
+	if got, want := input["direction"], "in"; got != want {
+		t.Fatalf("direction=%v want %s", got, want)
+	}
+	if got, want := input["inline_mode"], "full"; got != want {
+		t.Fatalf("inline_mode=%v want %s", got, want)
+	}
+	if got, want := input["depth"], 2; got != want {
+		t.Fatalf("depth=%v want %d", got, want)
+	}
+	if got, want := input["budget"], 12; got != want {
+		t.Fatalf("budget=%v want %d", got, want)
+	}
+	if got, want := input["per_node_cap"], 4; got != want {
+		t.Fatalf("per_node_cap=%v want %d", got, want)
+	}
+}
+
+func TestStringArgUsesEveryArgumentAsAKey(t *testing.T) {
+	args := map[string]any{"inline_mode": " preview "}
+	if got, want := stringArg(args, "inline_mode", ""), "preview"; got != want {
+		t.Fatalf("stringArg=%q want %q", got, want)
+	}
+}
+
 // --- Engine retry tests ---
 
 // mockLLMResponse returns a valid OpenAI-compatible JSON response.

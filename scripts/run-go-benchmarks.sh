@@ -3,24 +3,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-DEFAULT_PACKAGES=(
-  ./internal/domain/agent
-  ./internal/intelligence/indexing/repoindex
-  ./internal/platform/timeutil
-  ./internal/protocol
-  ./internal/rlm
-  ./internal/runtime/actor
-  ./internal/runtime/engine
-  ./internal/runtime/execution/exec
-  ./internal/runtime/execution/scheduler
-  ./internal/storage/cas
-  ./internal/storage/dbutil
-  ./internal/tooling/shellreduce
-)
-
 COUNT="${BENCH_COUNT:-3}"
 BENCHTIME="${BENCH_TIME:-1s}"
 PATTERN="${BENCH_PATTERN:-.}"
+GATE="${BENCH_GATE:-default}"
 OUT="${BENCH_OUT:-/private/tmp/foxctl-benchmarks/$(date -u +%Y%m%dT%H%M%SZ).txt}"
 
 if [[ "$COUNT" =~ ^[0-9]+$ ]] && (( COUNT < 1 )); then
@@ -28,9 +14,31 @@ if [[ "$COUNT" =~ ^[0-9]+$ ]] && (( COUNT < 1 )); then
   exit 2
 fi
 
+manifest_packages() {
+  local envelope packages
+
+  envelope="$(cd "$ROOT" && go run ./cmd/foxctl benchmark manifest packages --gate "$GATE")"
+  if [[ "$envelope" != *'"status":"ok"'* ]]; then
+    printf '%s\n' "$envelope" >&2
+    return 1
+  fi
+
+  packages="$(sed -n 's/.*"packages":\[\([^]]*\)\].*/\1/p' <<<"$envelope")"
+  if [[ -z "$packages" ]]; then
+    echo "benchmark manifest returned no Go packages for gate $GATE" >&2
+    return 1
+  fi
+
+  tr ',' '\n' <<<"$packages" | sed -n 's/^"\([^"]*\)"$/\1/p'
+}
+
 PACKAGES=("$@")
 if (( ${#PACKAGES[@]} == 0 )); then
-  PACKAGES=("${DEFAULT_PACKAGES[@]}")
+  mapfile -t PACKAGES < <(manifest_packages)
+fi
+if (( ${#PACKAGES[@]} == 0 )); then
+  echo "no benchmark packages resolved" >&2
+  exit 2
 fi
 
 mkdir -p "$(dirname "$OUT")"
@@ -39,6 +47,7 @@ mkdir -p "$(dirname "$OUT")"
   echo "# foxctl Go benchmarks"
   echo "# root: $ROOT"
   echo "# manifest: configs/benchmarks/foxctl.json"
+  echo "# gate: $GATE"
   echo "# packages: ${PACKAGES[*]}"
   echo "# pattern: $PATTERN"
   echo "# benchtime: $BENCHTIME"

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -61,6 +62,69 @@ func TestResolveAgentEvalTargetsExplicit(t *testing.T) {
 	}
 	if targets[1].Provider != "openrouter" || targets[1].Model != "minimax/minimax-m2.7" {
 		t.Fatalf("targets[1]=%+v", targets[1])
+	}
+}
+
+func TestAgentEvalTargetDoesNotMarshalAPIKey(t *testing.T) {
+	t.Parallel()
+
+	payload, err := json.Marshal(agentEvalTarget{
+		Label:    "openrouter:test",
+		Provider: "openrouter",
+		BaseURL:  "https://openrouter.ai/api/v1",
+		APIKey:   "do-not-serialize-me",
+		Model:    "test",
+		Runner:   "foxctl-agent-runtime",
+	})
+	if err != nil {
+		t.Fatalf("json marshal target: %v", err)
+	}
+	if strings.Contains(string(payload), "do-not-serialize-me") || strings.Contains(string(payload), "api_key") {
+		t.Fatalf("serialized target leaked API key: %s", payload)
+	}
+}
+
+func TestLimitPromptEvalCases(t *testing.T) {
+	t.Parallel()
+
+	cases := []promptEvalCase{
+		{ID: "one"},
+		{ID: "two"},
+		{ID: "three"},
+	}
+
+	if got := limitPromptEvalCases(cases, 0); len(got) != 3 {
+		t.Fatalf("limit 0 len=%d want 3", len(got))
+	}
+	if got := limitPromptEvalCases(cases, -1); len(got) != 3 {
+		t.Fatalf("negative limit len=%d want 3", len(got))
+	}
+	if got := limitPromptEvalCases(cases, 9); len(got) != 3 {
+		t.Fatalf("oversized limit len=%d want 3", len(got))
+	}
+	got := limitPromptEvalCases(cases, 2)
+	if len(got) != 2 {
+		t.Fatalf("limit 2 len=%d want 2", len(got))
+	}
+	if got[0].ID != "one" || got[1].ID != "two" {
+		t.Fatalf("limited cases=%v", got)
+	}
+}
+
+func TestApplyAgentEvalTokenPrice(t *testing.T) {
+	t.Parallel()
+
+	results := []agentEvalResult{
+		{InputTokens: 1000, OutputTokens: 500, TotalCostUSD: 99},
+		{InputTokens: 2000, OutputTokens: 0},
+	}
+	applyAgentEvalTokenPrice(results, 2, 10)
+
+	if got, want := results[0].TotalCostUSD, 0.007; got < 0.006999 || got > 0.007001 {
+		t.Fatalf("first cost=%v want %v", got, want)
+	}
+	if got, want := results[1].TotalCostUSD, 0.004; got < 0.003999 || got > 0.004001 {
+		t.Fatalf("second cost=%v want %v", got, want)
 	}
 }
 

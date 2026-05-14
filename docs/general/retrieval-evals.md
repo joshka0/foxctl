@@ -36,6 +36,7 @@ The wrappers use:
 
 - `FOXCTL_STORAGE_ROOT` if set
 - `FOXCTL_VAULT_PATH` if set, otherwise `~/.foxctl/templates/obsidian-vault`
+  when present, falling back to the repo-local `.foxctl/templates/obsidian-vault`
 - `--policy-file <checked-in policy>` internally
 
 ## Checked-In Suites
@@ -64,6 +65,42 @@ The `foxctl`, `jido`, and `praze` policies also carry mode-level minimum bands f
 - `hit@5`
 - `hit@10`
 - `MRR`
+
+Each per-query mode result also reports a simple budget block:
+
+- requested hit `limit`
+- returned hit/path count
+- returned path bytes
+- estimated returned path tokens
+
+Each mode result also records `duration_ms` for the retrieval call path, and the
+summary table reports average duration per available mode.
+
+When semantic retrieval is enabled, semantic-dependent modes perform a single
+embedder health probe before the query loop. If the LM Studio/OpenAI-compatible
+endpoint is down or the model is not loaded, those modes are marked unavailable
+with the provider error instead of silently falling back to lexical results.
+
+These budget fields intentionally measure the returned path list first. They do
+not yet measure full materialized context payload size, prompt tokens, or model
+usage tokens.
+
+## Refreshing ACA Inputs
+
+If a suite looks pathologically bad, refresh the current foxctl ACA/Obsidian
+inputs before treating the numbers as a ranking regression. Use the active
+foxctl vault path:
+
+```bash
+VAULT_PATH="${FOXCTL_VAULT_PATH:-$HOME/.foxctl/templates/obsidian-vault}"
+foxctl obsidian graph build --workspace . --vault-path "$VAULT_PATH"
+foxctl obsidian graph promote --workspace . --vault-path "$VAULT_PATH"
+foxctl obsidian bridge reconcile --workspace . --vault-path "$VAULT_PATH"
+foxctl obsidian index build --vault-path "$VAULT_PATH"
+```
+
+If the default home vault does not exist, the wrapper scripts fall back to the
+repo-local `.foxctl/templates/obsidian-vault` fixture.
 
 ## Current Expected Bands
 

@@ -509,10 +509,12 @@ func newEvalRetrievalCommand() *cobra.Command {
 			var index obsidianindex.Store
 			var repo *repoindex.Store
 			var semanticProvider semantic.EmbeddingProvider
+			var semanticProviderErr error
 			var workspaceStore *contextplane.WorkspaceStore
 			var acaMemStore storage.MemoryStore
 			var cochangeMemStore storage.MemoryStore
 			var cochangeProvider semantic.EmbeddingProvider
+			var cochangeProviderErr error
 			if hasMode(selectedModes, "cochange_artifacts") {
 				memStore, err := memorystore.OpenWithConfig(ctx, cfg)
 				if err != nil {
@@ -520,7 +522,7 @@ func newEvalRetrievalCommand() *cobra.Command {
 				}
 				cochangeMemStore = memStore
 				defer cochangeMemStore.Close()
-				cochangeProvider, _ = semantic.NewProviderForScope(
+				cochangeProvider, cochangeProviderErr = semantic.NewProviderForScope(
 					semantic.ScopeMemory,
 					cfg,
 					semantic.WithGeminiKey(os.Getenv("GEMINI_API_KEY")),
@@ -551,11 +553,29 @@ func newEvalRetrievalCommand() *cobra.Command {
 					return err
 				}
 				defer func() { _ = repo.Close() }()
-				semanticProvider = openObsidianSemanticProvider(cfg)
+				semanticProvider, semanticProviderErr = openObsidianSemanticProviderWithError(cfg)
 				workspaceStore = contextplane.NewWorkspaceStore(target)
 				if err := ensureTopOfMindForEval(ctx, cfg.Storage.Root, target, workspaceStore); err != nil {
 					return err
 				}
+			}
+			var semanticHealthErr error
+			if evalModesRequireSemanticHealth(selectedModes) && obsidianSemanticEnabled(cfg) {
+				semanticHealthErr = checkEvalSemanticProviderHealth(ctx, semanticProvider, semanticProviderErr)
+			}
+			var cochangeHealthErr error
+			if hasMode(selectedModes, "cochange_artifacts") && cochangeProvider != nil {
+				cochangeHealthErr = checkEvalSemanticProviderHealth(ctx, cochangeProvider, cochangeProviderErr)
+			}
+			type measuredModeRun struct {
+				paths    []string
+				duration time.Duration
+				err      error
+			}
+			measureMode := func(run func() ([]string, error)) measuredModeRun {
+				started := time.Now()
+				paths, err := run()
+				return measuredModeRun{paths: paths, duration: time.Since(started), err: err}
 			}
 			results := make([]retrievaleval.QueryResult, 0, len(suite.Queries))
 			for _, q := range suite.Queries {
@@ -565,47 +585,60 @@ func newEvalRetrievalCommand() *cobra.Command {
 					Notes: q.Notes,
 					Modes: map[string]retrievaleval.ModeResult{},
 				}
-				evaluate := func(mode string, paths []string, err error) retrievaleval.ModeResult {
-					return retrievaleval.EvaluateModeWithForbidden(mode, paths, q.ExpectedAnyOf, q.ForbiddenAnyOf, len(paths), err)
+				evaluate := func(mode string, run measuredModeRun) retrievaleval.ModeResult {
+					return retrievaleval.EvaluateModeWithBudgetAndDuration(mode, run.paths, q.ExpectedAnyOf, q.ForbiddenAnyOf, len(run.paths), limit, run.duration, run.err)
 				}
 				if hasMode(selectedModes, "baseline") {
-					hits, err := index.SearchNotes(ctx, q.Query, limit)
-					paths := extractSearchHitPaths(hits)
-					paths = filterEvalPaths(paths, true)
-					qr.Modes["baseline"] = evaluate("baseline", paths, err)
+					qr.Modes["baseline"] = evaluate("baseline", measureMode(func() ([]string, error) {
+						hits, err := index.SearchNotes(ctx, q.Query, limit)
+						paths := extractSearchHitPaths(hits)
+						return filterEvalPaths(paths, true), err
+					}))
 				}
 				if hasMode(selectedModes, "lexical") {
-					hits, err := index.SearchNotes(ctx, q.Query, limit)
-					paths := filterEvalPaths(extractSearchHitPaths(hits), canonicalOnly)
-					qr.Modes["lexical"] = evaluate("lexical", paths, err)
+					qr.Modes["lexical"] = evaluate("lexical", measureMode(func() ([]string, error) {
+						hits, err := index.SearchNotes(ctx, q.Query, limit)
+						return filterEvalPaths(extractSearchHitPaths(hits), canonicalOnly), err
+					}))
 				}
 				if hasMode(selectedModes, "semantic") {
-					if semanticProvider == nil {
-						qr.Modes["semantic"] = evaluate("semantic", nil, fmt.Errorf("semantic provider unavailable"))
-					} else {
+					qr.Modes["semantic"] = evaluate("semantic", measureMode(func() ([]string, error) {
+						if semanticHealthErr != nil {
+							return nil, semanticHealthErr
+						}
 						hits, err := index.SearchNotesSemantic(ctx, q.Query, semanticProvider, limit)
-						paths := filterEvalPaths(extractSearchHitPaths(hits), canonicalOnly)
-						qr.Modes["semantic"] = evaluate("semantic", paths, err)
-					}
+						return filterEvalPaths(extractSearchHitPaths(hits), canonicalOnly), err
+					}))
 				}
 				if hasMode(selectedModes, "blended") {
-					result, err := workspaceStore.Retrieve(ctx, index, repo, semanticProvider, q.Query, limit)
-					paths := filterEvalPaths(extractRetrievalHitPaths(result.VaultHits), canonicalOnly)
-					qr.Modes["blended"] = evaluate("blended", paths, err)
+					qr.Modes["blended"] = evaluate("blended", measureMode(func() ([]string, error) {
+						if semanticHealthErr != nil {
+							return nil, semanticHealthErr
+						}
+						result, err := workspaceStore.Retrieve(ctx, index, repo, semanticProvider, q.Query, limit)
+						paths := filterEvalPaths(extractRetrievalHitPaths(result.VaultHits), canonicalOnly)
+						return paths, err
+					}))
 				}
 				if hasMode(selectedModes, "skill_default") {
-					paths, err := runSemanticSearchEvalMode(ctx, target, vaultPath, q.Query, limit, []string{"symbols", "sessions", "memories", "tasks", "codemaps"})
-					qr.Modes["skill_default"] = evaluate("skill_default", paths, err)
+					qr.Modes["skill_default"] = evaluate("skill_default", measureMode(func() ([]string, error) {
+						return runSemanticSearchEvalMode(ctx, target, vaultPath, q.Query, limit, []string{"symbols", "sessions", "memories", "tasks", "codemaps"})
+					}))
 				}
 				if hasMode(selectedModes, "skill_context") {
-					paths, err := runSemanticSearchEvalMode(ctx, target, vaultPath, q.Query, limit, []string{"context"})
-					qr.Modes["skill_context"] = evaluate("skill_context", paths, err)
+					qr.Modes["skill_context"] = evaluate("skill_context", measureMode(func() ([]string, error) {
+						return runSemanticSearchEvalMode(ctx, target, vaultPath, q.Query, limit, []string{"context"})
+					}))
 				}
 				if hasMode(selectedModes, "skill_default_plus_context") {
-					paths, err := runSemanticSearchEvalMode(ctx, target, vaultPath, q.Query, limit, []string{"symbols", "sessions", "memories", "tasks", "codemaps", "context"})
-					qr.Modes["skill_default_plus_context"] = evaluate("skill_default_plus_context", paths, err)
+					qr.Modes["skill_default_plus_context"] = evaluate("skill_default_plus_context", measureMode(func() ([]string, error) {
+						return runSemanticSearchEvalMode(ctx, target, vaultPath, q.Query, limit, []string{"symbols", "sessions", "memories", "tasks", "codemaps", "context"})
+					}))
 				}
-				baseACAOpts := workspaceStore.CurrentRetrievalOptions()
+				baseACAOpts := contextplane.RetrievalOptions{}
+				if workspaceStore != nil {
+					baseACAOpts = workspaceStore.CurrentRetrievalOptions()
+				}
 				if hasMode(selectedModes, "aca_control_only") {
 					opts := baseACAOpts
 					opts.IncludeTopOfMindResult = true
@@ -616,8 +649,9 @@ func newEvalRetrievalCommand() *cobra.Command {
 					opts.UseCodeHints = false
 					opts.UseSemanticVaultSearch = false
 					opts.IncludeControlPlaneRefs = true
-					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
-					qr.Modes["aca_control_only"] = evaluate("aca_control_only", paths, err)
+					qr.Modes["aca_control_only"] = evaluate("aca_control_only", measureMode(func() ([]string, error) {
+						return runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
+					}))
 				}
 				if hasMode(selectedModes, "aca_vault_only") {
 					opts := baseACAOpts
@@ -629,8 +663,12 @@ func newEvalRetrievalCommand() *cobra.Command {
 					opts.UseCodeHints = false
 					opts.UseSemanticVaultSearch = true
 					opts.IncludeControlPlaneRefs = false
-					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
-					qr.Modes["aca_vault_only"] = evaluate("aca_vault_only", paths, err)
+					qr.Modes["aca_vault_only"] = evaluate("aca_vault_only", measureMode(func() ([]string, error) {
+						if semanticHealthErr != nil {
+							return nil, semanticHealthErr
+						}
+						return runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
+					}))
 				}
 				if hasMode(selectedModes, "aca_repo_hints") {
 					opts := baseACAOpts
@@ -642,8 +680,12 @@ func newEvalRetrievalCommand() *cobra.Command {
 					opts.UseCodeHints = true
 					opts.UseSemanticVaultSearch = true
 					opts.IncludeControlPlaneRefs = false
-					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
-					qr.Modes["aca_repo_hints"] = evaluate("aca_repo_hints", paths, err)
+					qr.Modes["aca_repo_hints"] = evaluate("aca_repo_hints", measureMode(func() ([]string, error) {
+						if semanticHealthErr != nil {
+							return nil, semanticHealthErr
+						}
+						return runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
+					}))
 				}
 				if hasMode(selectedModes, "aca_canonical_only") {
 					opts := baseACAOpts
@@ -656,8 +698,12 @@ func newEvalRetrievalCommand() *cobra.Command {
 					opts.UseSemanticVaultSearch = true
 					opts.AllowedTrusts = []string{"canonical", "reviewed"}
 					opts.IncludeControlPlaneRefs = false
-					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
-					qr.Modes["aca_canonical_only"] = evaluate("aca_canonical_only", paths, err)
+					qr.Modes["aca_canonical_only"] = evaluate("aca_canonical_only", measureMode(func() ([]string, error) {
+						if semanticHealthErr != nil {
+							return nil, semanticHealthErr
+						}
+						return runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
+					}))
 				}
 				if hasMode(selectedModes, "aca_package_fallback") {
 					opts := baseACAOpts
@@ -671,8 +717,12 @@ func newEvalRetrievalCommand() *cobra.Command {
 					opts.UsePackageNoteFallback = true
 					opts.AllowedTrusts = []string{"canonical", "reviewed"}
 					opts.IncludeControlPlaneRefs = false
-					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
-					qr.Modes["aca_package_fallback"] = evaluate("aca_package_fallback", paths, err)
+					qr.Modes["aca_package_fallback"] = evaluate("aca_package_fallback", measureMode(func() ([]string, error) {
+						if semanticHealthErr != nil {
+							return nil, semanticHealthErr
+						}
+						return runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
+					}))
 				}
 				if hasMode(selectedModes, "aca_query_typed") {
 					opts := baseACAOpts
@@ -686,69 +736,103 @@ func newEvalRetrievalCommand() *cobra.Command {
 					opts.AllowedTrusts = []string{"canonical", "reviewed"}
 					opts.UseQueryTypeBias = true
 					opts.IncludeControlPlaneRefs = false
-					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
-					qr.Modes["aca_query_typed"] = evaluate("aca_query_typed", paths, err)
+					qr.Modes["aca_query_typed"] = evaluate("aca_query_typed", measureMode(func() ([]string, error) {
+						if semanticHealthErr != nil {
+							return nil, semanticHealthErr
+						}
+						return runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
+					}))
 				}
 				if hasMode(selectedModes, "aca_default") {
 					opts := baseACAOpts
 					opts.IncludeControlPlaneRefs = false
-					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
-					qr.Modes["aca_default"] = evaluate("aca_default", paths, err)
+					qr.Modes["aca_default"] = evaluate("aca_default", measureMode(func() ([]string, error) {
+						if semanticHealthErr != nil {
+							return nil, semanticHealthErr
+						}
+						return runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
+					}))
 				}
 				if hasMode(selectedModes, "aca_semantic_anchors") {
 					opts := baseACAOpts
 					opts.IncludeControlPlaneRefs = false
 					opts.UseSemanticAnchors = true
-					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
-					qr.Modes["aca_semantic_anchors"] = evaluate("aca_semantic_anchors", paths, err)
+					qr.Modes["aca_semantic_anchors"] = evaluate("aca_semantic_anchors", measureMode(func() ([]string, error) {
+						if semanticHealthErr != nil {
+							return nil, semanticHealthErr
+						}
+						return runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
+					}))
 				}
 				if hasMode(selectedModes, "aca_cochange") {
 					opts := baseACAOpts
 					opts.IncludeControlPlaneRefs = false
 					opts.UseCoChangePrior = true
 					opts.UseContinuityBundles = false
-					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
-					qr.Modes["aca_cochange"] = evaluate("aca_cochange", paths, err)
+					qr.Modes["aca_cochange"] = evaluate("aca_cochange", measureMode(func() ([]string, error) {
+						if semanticHealthErr != nil {
+							return nil, semanticHealthErr
+						}
+						return runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
+					}))
 				}
 				if hasMode(selectedModes, "aca_cochange_continuity") {
 					opts := baseACAOpts
 					opts.IncludeControlPlaneRefs = false
 					opts.UseCoChangePrior = true
 					opts.UseContinuityBundles = true
-					paths, err := runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
-					qr.Modes["aca_cochange_continuity"] = evaluate("aca_cochange_continuity", paths, err)
+					qr.Modes["aca_cochange_continuity"] = evaluate("aca_cochange_continuity", measureMode(func() ([]string, error) {
+						if semanticHealthErr != nil {
+							return nil, semanticHealthErr
+						}
+						return runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
+					}))
 				}
 				if hasMode(selectedModes, "cochange_artifacts") {
-					paths, err := runCoChangeArtifactEvalMode(ctx, target, q.Query, limit, cochangeMemStore, cochangeProvider)
-					qr.Modes["cochange_artifacts"] = evaluate("cochange_artifacts", paths, err)
+					qr.Modes["cochange_artifacts"] = evaluate("cochange_artifacts", measureMode(func() ([]string, error) {
+						if cochangeProviderErr != nil {
+							return nil, fmt.Errorf("cochange semantic embedder unavailable: %w", cochangeProviderErr)
+						}
+						if cochangeHealthErr != nil {
+							return nil, cochangeHealthErr
+						}
+						return runCoChangeArtifactEvalMode(ctx, target, q.Query, limit, cochangeMemStore, cochangeProvider)
+					}))
 				}
 				if hasMode(selectedModes, "repoindex_search") {
-					paths, err := runRepoIndexSearchEvalMode(ctx, cfg.Storage.Root, target, q.Query, limit)
-					qr.Modes["repoindex_search"] = evaluate("repoindex_search", paths, err)
+					qr.Modes["repoindex_search"] = evaluate("repoindex_search", measureMode(func() ([]string, error) {
+						return runRepoIndexSearchEvalMode(ctx, cfg.Storage.Root, target, q.Query, limit)
+					}))
 				}
 				if hasMode(selectedModes, "repoindex_semantic_search") {
-					paths, err := runRepoIndexSearchEvalMode(ctx, cfg.Storage.Root, target, q.Query, limit)
-					qr.Modes["repoindex_semantic_search"] = evaluate("repoindex_semantic_search", paths, err)
+					qr.Modes["repoindex_semantic_search"] = evaluate("repoindex_semantic_search", measureMode(func() ([]string, error) {
+						return runRepoIndexSearchEvalMode(ctx, cfg.Storage.Root, target, q.Query, limit)
+					}))
 				}
 				if hasMode(selectedModes, "repoindex_dag") {
-					paths, err := runRepoIndexDAGEvalMode(ctx, cfg.Storage.Root, target, q.Query, limit, false)
-					qr.Modes["repoindex_dag"] = evaluate("repoindex_dag", paths, err)
+					qr.Modes["repoindex_dag"] = evaluate("repoindex_dag", measureMode(func() ([]string, error) {
+						return runRepoIndexDAGEvalMode(ctx, cfg.Storage.Root, target, q.Query, limit, false)
+					}))
 				}
 				if hasMode(selectedModes, "repoindex_semantic_dag") {
-					paths, err := runRepoIndexDAGEvalMode(ctx, cfg.Storage.Root, target, q.Query, limit, true)
-					qr.Modes["repoindex_semantic_dag"] = evaluate("repoindex_semantic_dag", paths, err)
+					qr.Modes["repoindex_semantic_dag"] = evaluate("repoindex_semantic_dag", measureMode(func() ([]string, error) {
+						return runRepoIndexDAGEvalMode(ctx, cfg.Storage.Root, target, q.Query, limit, true)
+					}))
 				}
 				if hasMode(selectedModes, "rlm_llm") {
-					paths, err := runRLMEvalMode(ctx, cfg, target, vaultPath, q.Query, limit, rlmenv.ToolProfileDefault)
-					qr.Modes["rlm_llm"] = evaluate("rlm_llm", paths, err)
+					qr.Modes["rlm_llm"] = evaluate("rlm_llm", measureMode(func() ([]string, error) {
+						return runRLMEvalMode(ctx, cfg, target, vaultPath, q.Query, limit, rlmenv.ToolProfileDefault)
+					}))
 				}
 				if hasMode(selectedModes, "rlm_llm_codeintel") {
-					paths, err := runRLMEvalMode(ctx, cfg, target, vaultPath, q.Query, limit, rlmenv.ToolProfileCodeIntel)
-					qr.Modes["rlm_llm_codeintel"] = evaluate("rlm_llm_codeintel", paths, err)
+					qr.Modes["rlm_llm_codeintel"] = evaluate("rlm_llm_codeintel", measureMode(func() ([]string, error) {
+						return runRLMEvalMode(ctx, cfg, target, vaultPath, q.Query, limit, rlmenv.ToolProfileCodeIntel)
+					}))
 				}
 				if hasMode(selectedModes, "rlm_llm_code_staged") {
-					paths, err := runRLMStagedEvalMode(ctx, cfg, target, vaultPath, q.Query, limit)
-					qr.Modes["rlm_llm_code_staged"] = evaluate("rlm_llm_code_staged", paths, err)
+					qr.Modes["rlm_llm_code_staged"] = evaluate("rlm_llm_code_staged", measureMode(func() ([]string, error) {
+						return runRLMStagedEvalMode(ctx, cfg, target, vaultPath, q.Query, limit)
+					}))
 				}
 				results = append(results, qr)
 			}
@@ -948,6 +1032,38 @@ func evalModesRequireVault(modes []string) bool {
 		}
 	}
 	return false
+}
+
+func evalModesRequireSemanticHealth(modes []string) bool {
+	for _, mode := range modes {
+		switch strings.ToLower(strings.TrimSpace(mode)) {
+		case "semantic", "blended",
+			"aca_vault_only", "aca_repo_hints", "aca_canonical_only", "aca_package_fallback", "aca_query_typed",
+			"aca_default", "aca_semantic_anchors", "aca_cochange", "aca_cochange_continuity":
+			return true
+		}
+	}
+	return false
+}
+
+func checkEvalSemanticProviderHealth(ctx context.Context, provider semantic.EmbeddingProvider, providerErr error) error {
+	if providerErr != nil {
+		return fmt.Errorf("semantic embedder unavailable: %w", providerErr)
+	}
+	if provider == nil {
+		return fmt.Errorf("semantic embedder unavailable: no embedding provider is configured for semantic retrieval")
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	vec, err := provider.Embed(probeCtx, "foxctl retrieval eval semantic health check")
+	if err != nil {
+		return fmt.Errorf("semantic embedder health check failed for model %q; verify the LM Studio/OpenAI-compatible embedding endpoint is running and the model is loaded: %w", provider.Model(), err)
+	}
+	if len(vec) == 0 {
+		return fmt.Errorf("semantic embedder health check failed for model %q: empty embedding", provider.Model())
+	}
+	return nil
 }
 
 type semanticSearchEvalOutput struct {

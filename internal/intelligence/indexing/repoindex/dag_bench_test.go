@@ -33,6 +33,12 @@ func BenchmarkDAGGrepStructuralExpansion(b *testing.B) {
 		if len(ids) > 0 && result.Stats.NodeCount == 0 {
 			b.Fatal("DAGGrep() returned no nodes")
 		}
+		if result.Stats.NodeCount > req.Budget {
+			b.Fatalf("DAGGrep() returned %d nodes, want at most budget %d", result.Stats.NodeCount, req.Budget)
+		}
+		if len(result.DAG.Layers) != result.Stats.NodeCount {
+			b.Fatalf("DAGGrep() layers=%d nodes=%d", len(result.DAG.Layers), result.Stats.NodeCount)
+		}
 	}
 }
 
@@ -54,8 +60,15 @@ func BenchmarkDAGGrepBudgetScaling(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for b.Loop() {
-				if _, err := qe.DAGGrep(ctx, req); err != nil {
+				result, err := qe.DAGGrep(ctx, req)
+				if err != nil {
 					b.Fatalf("DAGGrep() error = %v", err)
+				}
+				if result.Stats.NodeCount > budget {
+					b.Fatalf("DAGGrep() returned %d nodes, want at most budget %d", result.Stats.NodeCount, budget)
+				}
+				if result.Stats.EdgeCount != len(result.Graph.Edges) {
+					b.Fatalf("DAGGrep() edge stats=%d graph edges=%d", result.Stats.EdgeCount, len(result.Graph.Edges))
 				}
 			}
 		})

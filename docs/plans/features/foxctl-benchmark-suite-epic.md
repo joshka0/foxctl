@@ -134,27 +134,39 @@ Go hot-path benchmark highlights:
 | RLM run-spec resolve | `1.27 us/op` | Model-free RLM policy/planner setup is not the expensive part |
 | shell reducer route/summary | `3.79-3.94 us/op` route, `405-415 ns/op` summary | Hot reducer logic is cheap once inside the Go process |
 
-Tool skill cold-run report from
-`/private/tmp/foxctl-benchmarks/orientation-summary-20260513T233000Z.md`:
+Command-output comparison report from
+`/private/tmp/foxctl-benchmarks/command-output-counts-20260514T0725-broader-command-output-counts.json`:
 
-| Tool case | Native | Foxctl | Budget |
-|-----------|--------|--------|--------|
-| `fs/ls` over `internal` | `28 ms`, `251` tokens | `894 ms`, `309` tokens | `max_entries=200` |
-| `text/ripgrep` for `func ` | `35 ms`, `2,878` tokens | `198 ms`, `331` tokens | `max_matches=20` |
-| `code/context_grep` for `func ` | `20 ms`, `2,878` tokens | `198 ms`, `3,365` tokens | `max_matches=20`, `max_blocks=20` |
+| Binary | Same task | Native output | Foxctl output | Output delta |
+|--------|-----------|---------------|---------------|--------------|
+| `ls` | `ls -la internal` | `483` tokens, `1,002` bytes | `30` tokens, `106` bytes | `93.8%` fewer tokens |
+| `find` | `find internal/tooling -name '*.go'` | `825` tokens, `3,061` bytes | `66` tokens, `237` bytes | `92.0%` fewer tokens |
+| `cat` | `cat go.mod` | `7,520` tokens, `19,723` bytes | `1,011` tokens, `2,216` bytes | `86.6%` fewer tokens |
+| `head` | `head -n 80 cmd/foxctl/cmd/shell.go` | `679` tokens, `2,680` bytes | `580` tokens, `2,245` bytes | `14.6%` fewer tokens |
+| `tail` | `tail -n 80 cmd/foxctl/cmd/shell.go` | `655` tokens, `2,376` bytes | `623` tokens, `2,245` bytes | `4.9%` fewer tokens |
+| `grep` | `grep -rn 'func ' internal/tooling/shellreduce` | `4,779` tokens, `18,632` bytes | `53` tokens, `209` bytes | `98.9%` fewer tokens |
+| `sed` | `sed -n '1,120p' cmd/foxctl/cmd/shell.go` | `1,148` tokens, `4,617` bytes | `556` tokens, `2,216` bytes | `51.6%` fewer tokens |
+| `git status` | `git status --short` | `1,422` tokens, `5,095` bytes | `72` tokens, `215` bytes | `94.9%` fewer tokens |
+| `git diff` | `git diff --stat` | `1,760` tokens, `6,458` bytes | `182` tokens, `503` bytes | `89.7%` fewer tokens |
+| `git diff` | `git diff --name-only` | `1,313` tokens, `4,755` bytes | `225` tokens, `768` bytes | `82.9%` fewer tokens |
+| `git log` | `git log --stat -5` | `3,303` tokens, `11,464` bytes | `89` tokens, `337` bytes | `97.3%` fewer tokens |
+| `go test` | `go test ./internal/tooling/shellreduce` | `22` tokens, `68` bytes | `14` tokens, `41` bytes | `36.4%` fewer tokens |
+| total | twelve command-output rows where foxctl reduced output | `23,910` tokens, `79,932` bytes | `3,501` tokens, `11,338` bytes | `85.4%` fewer tokens |
 
-Interpretation: the current cold skill report shows real `foxctl run` tool
-startup overhead. `text/ripgrep` has a strong output-size win against native
-`rg`; `code/context_grep` deliberately returns function context, so its value is
-quality and structure rather than raw byte reduction for this fixture.
+Interpretation: this is the product-facing table shape. It compares native
+binary output against foxctl shell reduction for the same task and reports output
+counts directly. The product table is limited to command rows with measured
+output reductions. It is not a latency win. The broader run also exposed a
+router gap: `rg -m` / `rg --max-count` is not accepted yet even though the
+equivalent `grep` case works.
 
 Shell savings report:
 
 | Report | Raw | Reduced | Savings |
 |--------|-----|---------|---------|
-| orientation commands | `8,695` tokens, `31,940` bytes | `953` tokens, `3,550` bytes | `89.0%` token savings, `88.9%` byte savings |
-| estimated input cost at `$1/Mtok` | `$0.008695` | `$0.000953` | `$0.007742` saved |
-| cold command wall time | `0.60s` raw | `0.67s` reduced | mixed per row; aggregate slightly slower in this run because most rows pay reducer startup |
+| orientation commands | `23,910` tokens, `79,932` bytes | `3,501` tokens, `11,338` bytes | `85.4%` token savings, `85.8%` byte savings |
+| estimated input cost at `$1/Mtok` | `$0.023910` | `$0.003501` | `$0.020409` saved |
+| cold command wall time | `0.995s` raw | `6.085s` reduced | reduced path is slower cold; mixed per row |
 
 Interpretation: foxctl already has strong token/cost evidence for shell-shaped
 orientation output, especially `ls`, `grep`, and `git log`. The latency claim
@@ -167,8 +179,10 @@ Bounded `gather_context` report:
 
 | Report | Result | Notes |
 |--------|--------|-------|
+| incremental repoindex refresh samples | `30.96s`-`54.20s`, `1,813` files, `29,083` symbols, `31,665` nodes, `141,648` edges | requested incremental; fell back to a full graph rebuild for `partial_graph_rebuild_not_supported_for_global_edges_yet`; follow-up status reported freshness `current` |
 | repoindex refresh | `40.3s`, `1,813` files, `32,142` symbols, `33,774` nodes, `151,026` edges | forced rebuild against current dirty worktree after `index repo status` reported a stale zero-node store |
 | one-case smoke after refresh | pass rate `1.00`, path recall `0.86`, fact recall `1.00`, duration `7.26s`, emitted context `1,096` chars | `/private/tmp/foxctl-benchmarks/gather-context-case1-bin-20260513T234000Z.json` |
+| one-case head-to-head after fresh index | gather pass rate `1.00`, path recall `0.86`, fact recall `1.00`, duration `6.50s`, emitted context `1,096` chars | `/private/tmp/foxctl-benchmarks/gather-context-head-to-head-codex-native-subagent-case1-fresh-index-20260514T061655Z.json` |
 | one-case head-to-head after refresh | gather pass rate `1.00`, path recall `0.86`, fact recall `1.00`, duration `10.52s`, emitted context `1,182` chars | `/private/tmp/foxctl-benchmarks/gather-context-head-to-head-openrouter-native-fixed-after-reindex-priced-20260513T233351Z.json` |
 | two-case orientation harness | pass rate `0.50`, mean path recall `0.762`, mean fact recall `1.00`, mean duration `17.4s`, mean emitted context `1,842` chars | `/private/tmp/foxctl-benchmarks/orientation-gather-context-20260513T233000Z.json` |
 
@@ -192,8 +206,9 @@ native explorer's `65.9k` transcript-token total. That is a useful token-class
 comparison, but it is not a complete head-to-head because the native transcript
 still needs parsed path/fact recall rows.
 
-Native explorer/subagent comparison now has one authenticated smoke row, but it
-is still a narrow one-case result. The checked-in baseline in
+Provider-backed eval-agent comparison now has one authenticated smoke row, but
+it is still a narrow one-case result. The checked-in local Codex native-subagent
+baseline in
 [code-search-evals.md](../../general/code-search-evals.md#native-subagent-baselines)
 records a 2026-04-30 mini explorer trace with `65,963` total tokens for the
 trace-symbol suite. A fresh unauthenticated `openai:gpt-5.4-mini` attempt was
@@ -212,8 +227,22 @@ pass rate `1.00` versus native `0.00`, path recall `0.86` versus `0.00`, fact
 recall `1.00` versus `0.00`, and `8.5x` duration speedup.
 
 This is evidence for a homepage claim about the benchmark lane, not the final
-claim. The native run still needs a broader multi-case baseline and provider
-cost calculation before the website says foxctl broadly beats native explorers.
+claim. Do not describe the OpenRouter row as a local Codex native-subagent
+baseline. The local Codex row still needs a broader multi-case baseline and
+transcript import before the website says foxctl broadly beats native explorers.
+
+Clean local Codex native-subagent smoke, 2026-05-14:
+
+| Report | Result | Notes |
+|--------|--------|-------|
+| external JSONL | `/private/tmp/foxctl-benchmarks/codex-native-subagent-case1-20260514T060039Z.jsonl` | `provider: codex`, `runner: codex-native-subagent`, transcript path attached |
+| imported head-to-head | `/private/tmp/foxctl-benchmarks/gather-context-head-to-head-codex-native-subagent-case1-fresh-index-20260514T061655Z.json` | `gather_context` passed in `6.50s` with repoindex freshness `current`; local Codex subagent took `204.3s` |
+| scoring | gather path recall `0.86`, fact recall `1.00`; Codex path recall `1.00`, fact recall `0.14` | Codex found the path set but failed exact fact scoring, so do not summarize this as simple path failure |
+| budget | Codex transcript `1,202,987` total tokens, `1,049,728` cached input tokens, `8,051` output tokens, `3,658` reasoning tokens | inherited/cached context is large; keep cached tokens visible in summaries |
+
+This is the row the homepage should use when it talks about local Codex native
+subagents. The old OpenRouter row remains provider-backed eval-agent evidence,
+not a Codex-native baseline.
 Also note the discovered runtime fix: the agent repoindex adapter was passing
 the literal string `inline_mode` instead of the requested mode. That bug is now
 covered by focused runtime tests, and eval target reports no longer serialize
@@ -618,7 +647,7 @@ Dependencies:
 3. Benchstat or equivalent comparison tooling in the local developer path.
 4. A clear separation between official-style no-tool evals and internal
    tool-using experiments.
-5. A completed native explorer/subagent baseline imported through the eval
+5. A completed local Codex native-subagent baseline imported through the eval
    external-results path before the website claims foxctl beats native agents.
 
 ## Room Import Command

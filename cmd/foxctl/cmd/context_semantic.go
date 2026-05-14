@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -12,11 +13,16 @@ import (
 )
 
 func openObsidianSemanticProvider(cfg config.Config) semantic.EmbeddingProvider {
+	provider, _ := openObsidianSemanticProviderWithError(cfg)
+	return provider
+}
+
+func openObsidianSemanticProviderWithError(cfg config.Config) (semantic.EmbeddingProvider, error) {
 	if !obsidianSemanticEnabled(cfg) {
-		return nil
+		return nil, nil
 	}
-	if provider := openOpenAICompatSemanticProvider(cfg); provider != nil {
-		return provider
+	if provider, err := openOpenAICompatSemanticProviderWithError(cfg); provider != nil || err != nil {
+		return provider, err
 	}
 	provider, err := semantic.NewProviderForScope(
 		semantic.ScopeMemory,
@@ -24,9 +30,9 @@ func openObsidianSemanticProvider(cfg config.Config) semantic.EmbeddingProvider 
 		semantic.WithGeminiKey(os.Getenv("GEMINI_API_KEY")),
 	)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("create semantic embedding provider: %w", err)
 	}
-	return provider
+	return provider, nil
 }
 
 func obsidianSemanticEnabled(cfg config.Config) bool {
@@ -64,13 +70,18 @@ func lookupEnvBool(name string) (bool, bool) {
 }
 
 func openOpenAICompatSemanticProvider(cfg config.Config) semantic.EmbeddingProvider {
+	provider, _ := openOpenAICompatSemanticProviderWithError(cfg)
+	return provider
+}
+
+func openOpenAICompatSemanticProviderWithError(cfg config.Config) (semantic.EmbeddingProvider, error) {
 	providerName := strings.ToLower(strings.TrimSpace(cfg.Embedding.Provider))
 	override := strings.ToLower(strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_SEMANTIC_PROVIDER")))
 	if override != "" {
 		providerName = override
 	}
 	if providerName != "lmstudio" && providerName != "openai_compat" && providerName != "openai-compatible" {
-		return nil
+		return nil, nil
 	}
 	embedder, resolved, err := sourceimport.NewEmbedderFromConfig(sourceimport.EmbedderConfig{
 		Provider: providerNameToSourceImport(providerName),
@@ -91,13 +102,13 @@ func openOpenAICompatSemanticProvider(cfg config.Config) semantic.EmbeddingProvi
 		),
 	})
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("create OpenAI-compatible semantic embedder: %w", err)
 	}
 	return &openAICompatSemanticProvider{
 		inner: embedder,
 		model: resolved.Model,
 		dims:  resolved.Dimensions,
-	}
+	}, nil
 }
 
 func providerNameToSourceImport(name string) string {
