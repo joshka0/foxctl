@@ -3,8 +3,8 @@
 Date: 2026-03-14
 Status: Active evaluation / planning input
 Related:
-- [gui-agent-improvement-roadmap.md](gui-agent-improvement-roadmap.md)
-- [gui-agent-v2-rearchitecture.md](gui-agent-v2-rearchitecture.md)
+- [gui-agent-improvement-roadmap.md](../../plans/gui-agent-improvement-roadmap.md)
+- [gui-agent-v2-rearchitecture.md](../../plans/gui-agent-v2-rearchitecture.md)
 
 ## Scope
 
@@ -53,13 +53,13 @@ matches the current trust gap in those views.
 
 | Rank | Area | Severity | Problem | Evidence From Live Pass | Likely Ownership |
 | --- | --- | --- | --- | --- | --- |
-| 1 | Responsive layout | critical | Mobile layout is effectively broken. The desktop sidebar still occupies the left side on narrow screens and the main panel gets crushed into a thin strip. | `390x844` Runtime pass showed sidebar + content squeezed side-by-side instead of adapting to a mobile navigation pattern. | [AppShell.tsx](../../packages/gui-agent/src/components/layout/AppShell.tsx), [AgentSidebar.tsx](../../packages/gui-agent/src/components/layout/AgentSidebar.tsx) |
-| 2 | Runtime density | high | `Runtime` still collapses into a long, repetitive action-heavy inventory once the top summary ends. | Live pass on ~100 agents showed a wall of repeated `Workbench`, `Start`, `Stop`, and `Open Workbench` actions with weak row differentiation. | [AgentList.tsx](../../packages/gui-agent/src/components/agents/AgentList.tsx) |
-| 3 | Runtime action clarity | high | Actions are too generic and not uniquely targetable. | Browser automation had to fall back to refs because repeated action labels made specific targets hard to distinguish. This is also a human scanability problem. | [AgentList.tsx](../../packages/gui-agent/src/components/agents/AgentList.tsx) |
-| 4 | Evidence trust | medium | `Turns` / `Context` / `Artifacts` still feel heuristic, not canonical, and at least one real rendering issue remains. | Console warning during `Turns`: duplicate children with key `context.layered_bundle`; duplicated turn signal chips reinforced the "derived projection" feel. | [V2Explorers.tsx](../../packages/gui-agent/src/components/v2/V2Explorers.tsx) |
-| 5 | Lazy-load cold start | medium | Several non-runtime surfaces show the loading fallback long enough to feel "cold" rather than immediate. | `Rooms`, `Orchestration`, and `Turns` all visibly hit the `Loading ...` fallback before rendering. | [App.tsx](../../packages/gui-agent/src/App.tsx) |
-| 6 | Runtime/operator priority | medium | Runtime still over-emphasizes inventory management relative to incident triage. | The top summary is good, but the main body still rewards browsing and clicking through agents more than quick operator decisions. | [AgentList.tsx](../../packages/gui-agent/src/components/agents/AgentList.tsx) |
-| 7 | Evidence surface weight | low | `Turns`, `Context`, and `Artifacts` still look slightly too "first-class" relative to their confidence level. | The shell hierarchy is better, but the views themselves still present strong object framing for derived evidence. | [AppShell.tsx](../../packages/gui-agent/src/components/layout/AppShell.tsx), [AgentSidebar.tsx](../../packages/gui-agent/src/components/layout/AgentSidebar.tsx), [V2Explorers.tsx](../../packages/gui-agent/src/components/v2/V2Explorers.tsx) |
+| 1 | Responsive layout | critical | Mobile layout is effectively broken. The desktop sidebar still occupies the left side on narrow screens and the main panel gets crushed into a thin strip. | `390x844` Runtime pass showed sidebar + content squeezed side-by-side instead of adapting to a mobile navigation pattern. | [AppShell.tsx](../../../packages/gui-agent/src/components/layout/AppShell.tsx), [AgentSidebar.tsx](../../../packages/gui-agent/src/components/layout/AgentSidebar.tsx) |
+| 2 | Runtime density | high | `Runtime` still collapses into a long, repetitive action-heavy inventory once the top summary ends. | Live pass on ~100 agents showed a wall of repeated `Workbench`, `Start`, `Stop`, and `Open Workbench` actions with weak row differentiation. | [AgentList.tsx](../../../packages/gui-agent/src/components/agents/AgentList.tsx) |
+| 3 | Runtime action clarity | high | Actions are too generic and not uniquely targetable. | Browser automation had to fall back to refs because repeated action labels made specific targets hard to distinguish. This is also a human scanability problem. | [AgentList.tsx](../../../packages/gui-agent/src/components/agents/AgentList.tsx) |
+| 4 | Evidence trust | medium | `Turns` / `Context` / `Artifacts` still feel heuristic, not canonical, and at least one real rendering issue remains. | Console warning during `Turns`: duplicate children with key `context.layered_bundle`; duplicated turn signal chips reinforced the "derived projection" feel. | [V2Explorers.tsx](../../../packages/gui-agent/src/components/v2/V2Explorers.tsx) |
+| 5 | Lazy-load cold start | medium | Several non-runtime surfaces show the loading fallback long enough to feel "cold" rather than immediate. | `Rooms`, `Orchestration`, and `Turns` all visibly hit the `Loading ...` fallback before rendering. | [App.tsx](../../../packages/gui-agent/src/App.tsx) |
+| 6 | Runtime/operator priority | medium | Runtime still over-emphasizes inventory management relative to incident triage. | The top summary is good, but the main body still rewards browsing and clicking through agents more than quick operator decisions. | [AgentList.tsx](../../../packages/gui-agent/src/components/agents/AgentList.tsx) |
+| 7 | Evidence surface weight | low | `Turns`, `Context`, and `Artifacts` still look slightly too "first-class" relative to their confidence level. | The shell hierarchy is better, but the views themselves still present strong object framing for derived evidence. | [AppShell.tsx](../../../packages/gui-agent/src/components/layout/AppShell.tsx), [AgentSidebar.tsx](../../../packages/gui-agent/src/components/layout/AgentSidebar.tsx), [V2Explorers.tsx](../../../packages/gui-agent/src/components/v2/V2Explorers.tsx) |
 
 ## Ranked PR Slices
 
@@ -69,8 +69,8 @@ Priority: P0
 Goal: make `gui-agent` usable on mobile-width screens
 
 Scope:
-- [AppShell.tsx](../../packages/gui-agent/src/components/layout/AppShell.tsx)
-- [AgentSidebar.tsx](../../packages/gui-agent/src/components/layout/AgentSidebar.tsx)
+- [AppShell.tsx](../../../packages/gui-agent/src/components/layout/AppShell.tsx)
+- [AgentSidebar.tsx](../../../packages/gui-agent/src/components/layout/AgentSidebar.tsx)
 - any sidebar trigger / drawer state needed for narrow screens
 
 Acceptance:
@@ -86,7 +86,7 @@ Goal: make `Runtime` feel like an incident/operations surface instead of a
 long control list
 
 Scope:
-- [AgentList.tsx](../../packages/gui-agent/src/components/agents/AgentList.tsx)
+- [AgentList.tsx](../../../packages/gui-agent/src/components/agents/AgentList.tsx)
 
 Acceptance:
 - default runtime view emphasizes active, errored, and recently changed agents
@@ -101,7 +101,7 @@ Priority: P1
 Goal: make row actions human- and automation-targetable
 
 Scope:
-- [AgentList.tsx](../../packages/gui-agent/src/components/agents/AgentList.tsx)
+- [AgentList.tsx](../../../packages/gui-agent/src/components/agents/AgentList.tsx)
 - supporting button labels and accessible names
 
 Acceptance:
@@ -117,7 +117,7 @@ Priority: P1
 Goal: make `Turns` / `Context` / `Artifacts` feel internally reliable
 
 Scope:
-- [V2Explorers.tsx](../../packages/gui-agent/src/components/v2/V2Explorers.tsx)
+- [V2Explorers.tsx](../../../packages/gui-agent/src/components/v2/V2Explorers.tsx)
 
 Acceptance:
 - duplicate-key warning is removed
@@ -131,7 +131,7 @@ Priority: P2
 Goal: keep the bundle win without the cold-start feel
 
 Scope:
-- [App.tsx](../../packages/gui-agent/src/App.tsx)
+- [App.tsx](../../../packages/gui-agent/src/App.tsx)
 - optionally route-specific skeletons or per-surface fallbacks
 
 Acceptance:
@@ -146,8 +146,8 @@ Priority: P2
 Goal: clarify what Runtime is for once density is under control
 
 Scope:
-- [AgentList.tsx](../../packages/gui-agent/src/components/agents/AgentList.tsx)
-- possibly [AgentSidebar.tsx](../../packages/gui-agent/src/components/layout/AgentSidebar.tsx)
+- [AgentList.tsx](../../../packages/gui-agent/src/components/agents/AgentList.tsx)
+- possibly [AgentSidebar.tsx](../../../packages/gui-agent/src/components/layout/AgentSidebar.tsx)
 
 Acceptance:
 - Runtime answers "what needs attention?" before "what exists?"

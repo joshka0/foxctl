@@ -169,7 +169,7 @@ Bounded `gather_context` report:
 |--------|--------|-------|
 | repoindex refresh | `40.3s`, `1,813` files, `32,142` symbols, `33,774` nodes, `151,026` edges | forced rebuild against current dirty worktree after `index repo status` reported a stale zero-node store |
 | one-case smoke after refresh | pass rate `1.00`, path recall `0.86`, fact recall `1.00`, duration `7.26s`, emitted context `1,096` chars | `/private/tmp/foxctl-benchmarks/gather-context-case1-bin-20260513T234000Z.json` |
-| one-case head-to-head after refresh | gather pass rate `1.00`, path recall `0.86`, fact recall `1.00`, duration `9.32s`, emitted context `1,182` chars | `/private/tmp/foxctl-benchmarks/gather-context-head-to-head-openrouter-native-fixed-after-reindex-20260513T233351Z.json` |
+| one-case head-to-head after refresh | gather pass rate `1.00`, path recall `0.86`, fact recall `1.00`, duration `10.52s`, emitted context `1,182` chars | `/private/tmp/foxctl-benchmarks/gather-context-head-to-head-openrouter-native-fixed-after-reindex-priced-20260513T233351Z.json` |
 | two-case orientation harness | pass rate `0.50`, mean path recall `0.762`, mean fact recall `1.00`, mean duration `17.4s`, mean emitted context `1,842` chars | `/private/tmp/foxctl-benchmarks/orientation-gather-context-20260513T233000Z.json` |
 
 Interpretation: the bounded gather path is now runnable and measurable. The
@@ -206,10 +206,10 @@ The authenticated OpenRouter rerun for
 `/private/tmp/foxctl-benchmarks/native-openrouter-gpt54mini-case1-fixed-20260513T233351Z.json`.
 It completed without tool-adapter errors but failed the eval: pass rate `0.00`,
 mean quality `0.14`, `0.00` path/fact recall, `89.5s`, `199,620` total tokens,
-and `9` tool calls. Imported beside the refreshed `gather_context` row, the
-head-to-head report shows gather pass rate `1.00` versus native `0.00`, path
-recall `0.86` versus `0.00`, fact recall `1.00` versus `0.00`, and `9.6x`
-duration speedup.
+`$0.19962` normalized cost at `$1/Mtok`, and `9` tool calls. Imported beside
+the refreshed `gather_context` row, the priced head-to-head report shows gather
+pass rate `1.00` versus native `0.00`, path recall `0.86` versus `0.00`, fact
+recall `1.00` versus `0.00`, and `8.5x` duration speedup.
 
 This is evidence for a homepage claim about the benchmark lane, not the final
 claim. The native run still needs a broader multi-case baseline and provider
