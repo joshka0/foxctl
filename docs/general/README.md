@@ -25,6 +25,7 @@ Core subsystem guides, API references, and operational documentation for `foxctl
 
 - [search.md](search.md) - Semantic retrieval, reranking, and repo graph search.
 - [repoindex.md](repoindex.md) - Repo graph index terminology, build/query commands, and language coverage.
+- [repoindex-pageindex.md](repoindex-pageindex.md) - How PageIndex-style table-of-contents retrieval maps to repoindex, DAG grep, and semantic comments.
 - [code-search-evals.md](code-search-evals.md) - Stable code-search evaluation suites and policies.
 - [retrieval-evals.md](retrieval-evals.md) - ACA retrieval evaluation suites and expected bands.
 - [refactor-scout.md](refactor-scout.md) - Local refactor scout workflow, seam vocabulary, and advisor integration.

@@ -48,6 +48,7 @@ export default defineConfig({
             { slug: 'retrieval/search-and-index' },
             { slug: 'retrieval/repoindex-and-dag-grep' },
             { slug: 'retrieval/repoindex-model' },
+            { slug: 'retrieval/repoindex-pageindex' },
             { slug: 'context/aca' },
             { slug: 'context/context-engine' },
             { slug: 'memory/continuity' },

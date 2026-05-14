@@ -19,6 +19,13 @@ ACA separates:
 - a control plane for active work continuity
 - a knowledge plane for durable human-readable notes
 
+You can think of ACA as wiki-like in the narrow sense that it creates a linked,
+curated knowledge surface for a workspace. The important distinction is that ACA
+also includes runtime control-plane state, retrieval evidence, review/promotion
+proposals, and provenance boundaries. A wiki can be one knowledge plane inside
+ACA; ACA is the system that decides what is current, reviewed, retrievable, and
+safe to provide to agents.
+
 The implemented slice now includes a real control-plane runtime, an Obsidian adapter and local vault index, MCP surfaces for ACA and vault operations, and a bounded daemon maintenance loop. It still stops short of the full long-horizon `contextd` design from the larger proposal.
 
 ## Implemented Surface
