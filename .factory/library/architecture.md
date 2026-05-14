@@ -43,7 +43,7 @@ Conceptually the cockpit UI is organized into three interaction lanes
 
 - **Companion Memory** — per-agent conversation history.
 - **Named Durable Memory** — workspace-scoped durable memory.
-- **ACA / Continuity** — Obsidian knowledge layer.
+- **ContextWiki / Continuity** — Obsidian knowledge layer.
 
 The information-architecture doc (M1 deliverable) specifies which cockpit
 surfaces expose which planes and how projection/heuristic data is labeled.

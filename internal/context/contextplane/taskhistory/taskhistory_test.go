@@ -110,7 +110,7 @@ func TestCollectorCollectBuildsPack(t *testing.T) {
 			Pkg:     "internal/context/contextplane",
 			File:    "internal/context/contextplane/store.go",
 			Name:    "store.go",
-			Summary: "Workspace ACA store implementation.",
+			Summary: "Workspace ContextWiki store implementation.",
 		},
 		{
 			ID:      repoindex.NamespacedID(repoKey, "concept:compact-handoff-pattern"),
@@ -118,7 +118,7 @@ func TestCollectorCollectBuildsPack(t *testing.T) {
 			Pkg:     "internal/context/contextplane",
 			File:    "internal/context/contextplane/store.go",
 			Name:    "Compact Handoff Pattern",
-			Summary: "Compact handoff pattern for ACA.",
+			Summary: "Compact handoff pattern for ContextWiki.",
 		},
 	}, nil); err != nil {
 		t.Fatalf("ReplaceAll repoindex: %v", err)
@@ -186,8 +186,8 @@ func TestCollectorCollectBuildsPack(t *testing.T) {
 	if len(pack.DAGAnchors) == 0 {
 		t.Fatalf("dag anchors empty")
 	}
-	if len(pack.ACANotes) == 0 {
-		t.Fatalf("aca notes empty")
+	if len(pack.ContextWikiNotes) == 0 {
+		t.Fatalf("ContextWiki notes empty")
 	}
 	if pack.Summary == "" {
 		t.Fatalf("summary empty")
@@ -755,7 +755,7 @@ func TestCollectorPrefersInRepoTaskWhenTaskIDOmitted(t *testing.T) {
 	if _, err := taskDB.Add(ctx, taskstore.Task{
 		ID:          "repo-task",
 		WorkspaceID: wsID,
-		Title:       "Refine ACA retrieval",
+		Title:       "Refine ContextWiki retrieval",
 		ScopePath:   "internal/context/contextplane/retrieval.go",
 		Status:      taskstore.StatusPending,
 		CreatedAt:   time.Date(2026, 3, 14, 1, 0, 0, 0, time.UTC),
@@ -996,7 +996,7 @@ func TestCollectTranscriptFamilyOverview_FocusQuerySelectsMatchingLane(t *testin
 		{
 			owner: "sess-aca",
 			answers: []tphistory.HistoryAnswer{
-				{QuestionID: tphistory.HistoryQuestionObjective, Answer: "Install ACA hooks into workspace Claude settings.", Label: "aca hooks install", Confidence: 0.8},
+				{QuestionID: tphistory.HistoryQuestionObjective, Answer: "Install ContextWiki hooks into workspace Claude settings.", Label: "contextwiki hooks install", Confidence: 0.8},
 				{QuestionID: tphistory.HistoryQuestionAcceptedLearnings, Answer: "Documentation alignment with official Obsidian CLI syntax matters.", Confidence: 0.8},
 				{QuestionID: tphistory.HistoryQuestionNextStep, Answer: "Document the hook wiring and Obsidian authoring flow.", Confidence: 0.72},
 			},
@@ -1027,7 +1027,7 @@ func TestCollectTranscriptFamilyOverview_FocusQuerySelectsMatchingLane(t *testin
 	if len(overview.CurrentFocus) == 0 || overview.CurrentFocus[0] != "recursive memory consolidation" {
 		t.Fatalf("current_focus=%v", overview.CurrentFocus)
 	}
-	if containsString(overview.CurrentFocus, "aca hooks install") {
+	if containsString(overview.CurrentFocus, "contextwiki hooks install") {
 		t.Fatalf("current_focus=%v leaked unrelated lane", overview.CurrentFocus)
 	}
 }

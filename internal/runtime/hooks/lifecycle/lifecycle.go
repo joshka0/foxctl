@@ -511,12 +511,12 @@ func End(ctx context.Context, deps Dependencies, req EndRequest) (EndResponse, e
 	if response.CaptureStatus == "" || (response.CaptureStatus != "captured" && response.CaptureStatus != "exists" && response.CaptureStatus != "scanned") {
 		return response, nil
 	}
-	if envEnabledAny("FOXCTL_CONTEXTWIKI_DISABLED", "FOXCTL_ACA_DISABLED") {
+	if envEnabled("FOXCTL_CONTEXTWIKI_DISABLED") {
 		return response, nil
 	}
 
 	store := contextplane.NewWorkspaceStore(target)
-	taskID, objective := acaContext(store, response.CapturedSessionID)
+	taskID, objective := contextWikiContext(store, response.CapturedSessionID)
 	summary := firstSummaryLine(req.Payload.AssistantText)
 	if summary == "" {
 		summary = firstNonEmpty(objective, "Session ended; see captured session artifacts.")
@@ -525,7 +525,7 @@ func End(ctx context.Context, deps Dependencies, req EndRequest) (EndResponse, e
 	if err == nil {
 		response.HandoffPath = handoffPath
 		recordInsights(store, target, summary, []string{"session:" + firstNonEmpty(response.CapturedSessionID, sessionID, "unknown")})
-		if envEnabledAny("FOXCTL_CONTEXTWIKI_AUTO_PROMOTE", "FOXCTL_ACA_AUTO_PROMOTE") {
+		if envEnabled("FOXCTL_CONTEXTWIKI_AUTO_PROMOTE") {
 			response.PromotionDraft = autoPromote(store, handoffPath)
 		}
 	}
@@ -546,13 +546,13 @@ func SubagentStop(_ context.Context, deps Dependencies, req SubagentStopRequest)
 		return SubagentStopResponse{}, fmt.Errorf("detect workspace")
 	}
 	response := SubagentStopResponse{Workspace: target}
-	if envEnabledAny("FOXCTL_CONTEXTWIKI_DISABLED", "FOXCTL_ACA_DISABLED") {
+	if envEnabled("FOXCTL_CONTEXTWIKI_DISABLED") {
 		return response, nil
 	}
 	store := contextplane.NewWorkspaceStore(target)
 	sessionID := firstNonEmpty(os.Getenv("CLAUDE_SESSION_ID"), os.Getenv("FOXCTL_SESSION_ID"))
 	agentID := firstNonEmpty(os.Getenv("CLAUDE_AGENT_ID"), os.Getenv("FOXCTL_AGENT_ID"), "subagent")
-	taskID, objective := acaContext(store, agentID)
+	taskID, objective := contextWikiContext(store, agentID)
 	summary := firstSummaryLine(req.Payload.AssistantText)
 	if summary == "" {
 		summary = firstNonEmpty(objective, "Subagent completed bounded work.")
@@ -562,7 +562,7 @@ func SubagentStop(_ context.Context, deps Dependencies, req SubagentStopRequest)
 	if err == nil {
 		response.HandoffPath = handoffPath
 		recordInsights(store, target, summary, []string{"agent:" + agentID})
-		if envEnabledAny("FOXCTL_CONTEXTWIKI_AUTO_PROMOTE", "FOXCTL_ACA_AUTO_PROMOTE") {
+		if envEnabled("FOXCTL_CONTEXTWIKI_AUTO_PROMOTE") {
 			response.PromotionDraft = autoPromote(store, handoffPath)
 		}
 	}
@@ -672,7 +672,7 @@ func restoreContextForStart(ctx context.Context, deps Dependencies, workspacePat
 	return restoreContext, nil
 }
 
-func acaContext(store *contextplane.WorkspaceStore, fallbackTaskID string) (taskID, objective string) {
+func contextWikiContext(store *contextplane.WorkspaceStore, fallbackTaskID string) (taskID, objective string) {
 	top, err := store.LoadTopOfMind()
 	if err != nil {
 		return firstNonEmpty(fallbackTaskID, "hook-task"), ""
@@ -695,7 +695,7 @@ func captureHandoff(store *contextplane.WorkspaceStore, taskID, phase, summary, 
 }
 
 func recordInsights(store *contextplane.WorkspaceStore, workspacePath, summary string, evidenceRefs []string) {
-	inference := contextplane.InferInsights(summary, filepath.Base(workspacePath), "aca", evidenceRefs)
+	inference := contextplane.InferInsights(summary, filepath.Base(workspacePath), "contextwiki", evidenceRefs)
 	for _, obs := range inference.Observations {
 		_, _ = store.AppendObservation(obs)
 	}
@@ -785,15 +785,6 @@ func nullableString(value string) any {
 		return value
 	}
 	return nil
-}
-
-func envEnabledAny(names ...string) bool {
-	for _, name := range names {
-		if envEnabled(name) {
-			return true
-		}
-	}
-	return false
 }
 
 func envEnabled(name string) bool {

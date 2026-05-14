@@ -8,6 +8,6 @@ trust: canonical
 
 # AgentCTL Context
 
-- [[ACA Memory Layers]]
+- [[ContextWiki Memory Layers]]
 - [[Compact Handoff Pattern]]
 - [[ADR-0001 Context Architecture]]

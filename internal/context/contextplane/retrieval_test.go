@@ -20,7 +20,7 @@ import (
 	"github.com/joshka0/foxctl/internal/storage/obsidianindex"
 )
 
-func TestRetrieveBlendsACAStateAndVaultHits(t *testing.T) {
+func TestRetrieveBlendsContextWikiStateAndVaultHits(t *testing.T) {
 	ctx := context.Background()
 	workspace := t.TempDir()
 	storageRoot := t.TempDir()
@@ -432,7 +432,7 @@ func TestLoadRetrievalOptions_PackageFallbackFromPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureLayout: %v", err)
 	}
-	body := []byte("aca:\n  package_note_fallback: true\n  co_change_prior: true\n  co_change_commit_limit: 12\n  co_change_max_files_per_commit: 7\n  co_change_half_life_days: 45\n  continuity_bundles: false\n")
+	body := []byte("contextwiki:\n  package_note_fallback: true\n  co_change_prior: true\n  co_change_commit_limit: 12\n  co_change_max_files_per_commit: 7\n  co_change_half_life_days: 45\n  continuity_bundles: false\n")
 	if err := os.WriteFile(layout.RetrievalPolicyPath, body, 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -456,30 +456,6 @@ func TestLoadRetrievalOptions_PackageFallbackFromPolicy(t *testing.T) {
 		t.Fatalf("expected continuity_bundles=false from retrieval policy")
 	}
 	_ = ctx
-}
-
-func TestLoadRetrievalOptions_ContextWikiPolicyAlias(t *testing.T) {
-	workspace := t.TempDir()
-	store := NewWorkspaceStore(workspace)
-	layout, err := store.EnsureLayout()
-	if err != nil {
-		t.Fatalf("EnsureLayout: %v", err)
-	}
-	body := []byte("contextwiki:\n  package_note_fallback: true\n  semantic_anchors: true\n  co_change_commit_limit: 15\n")
-	if err := os.WriteFile(layout.RetrievalPolicyPath, body, 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	opts := store.loadRetrievalOptions()
-	if !opts.UsePackageNoteFallback {
-		t.Fatalf("expected contextwiki.package_note_fallback to enable package fallback")
-	}
-	if !opts.UseSemanticAnchors {
-		t.Fatalf("expected contextwiki.semantic_anchors to enable semantic anchors")
-	}
-	if opts.CoChangeCommitLimit != 15 {
-		t.Fatalf("expected contextwiki.co_change_commit_limit=15, got %d", opts.CoChangeCommitLimit)
-	}
 }
 
 func TestFilterNoisyPaths(t *testing.T) {
@@ -532,7 +508,7 @@ func TestRetrieveWithOptions_CoChangePriorBoostsRelatedRepoPaths(t *testing.T) {
 	store := NewWorkspaceStore(workspace)
 	if _, err := store.SaveTopOfMind(TopOfMind{
 		WorkspaceID:  "ws-test",
-		Objective:    "Refine ACA retrieval",
+		Objective:    "Refine ContextWiki retrieval",
 		Phase:        "design",
 		RelevantRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "internal/context/contextplane/store.go"}},
 		UpdatedAt:    time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC),

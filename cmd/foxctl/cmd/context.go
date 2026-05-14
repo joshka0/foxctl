@@ -574,7 +574,7 @@ func newContextInferCommand() *cobra.Command {
 				project = filepath.Base(target)
 			}
 			if strings.TrimSpace(area) == "" {
-				area = "aca"
+				area = "contextwiki"
 			}
 			inference := contextplane.InferInsights(summary, project, area, evidenceRefs)
 			createdObs := 0

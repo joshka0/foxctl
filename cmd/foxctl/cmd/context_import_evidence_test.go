@@ -11,7 +11,7 @@ import (
 )
 
 func TestContextImportEvidenceCommand(t *testing.T) {
-	h := newACAInspectHarness(t)
+	h := newContextWikiInspectHarness(t)
 	targetPath := filepath.Join(h.vaultRoot, "notes", "repo", filepath.Base(h.workspacePath), "semantic-and-memory.md")
 	writeTestVaultNote(t, targetPath, `---
 title: semantic and memory
@@ -21,7 +21,7 @@ trust: canonical
 ---
 # semantic and memory
 
-ACA vocabulary, retrieval, and memory conventions live here.
+ContextWiki vocabulary, retrieval, and memory conventions live here.
 `)
 
 	cmd := newContextImportEvidenceCommand()
@@ -32,8 +32,8 @@ ACA vocabulary, retrieval, and memory conventions live here.
 	cmd.SetArgs([]string{
 		"--workspace", h.workspacePath,
 		"--vault-path", h.vaultRoot,
-		"--title", "ACA Vocabulary Review",
-		"--text", "We should unify ACA vocabulary.\nAction: add an evidence intake lane.\nQuestion: Should local summarization be a separate layer?",
+		"--title", "ContextWiki Vocabulary Review",
+		"--text", "We should unify ContextWiki vocabulary.\nAction: add an evidence intake lane.\nQuestion: Should local summarization be a separate layer?",
 	})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
@@ -59,7 +59,7 @@ ACA vocabulary, retrieval, and memory conventions live here.
 		t.Fatalf("proposal.kind=%v want methodology_draft", proposal["kind"])
 	}
 	change := nestedMap(t, proposal, "proposed_change")
-	if change["suggested_target_note_path"] != "notes/repo/aca-inspect/semantic-and-memory.md" {
+	if change["suggested_target_note_path"] != "notes/repo/contextwiki-inspect/semantic-and-memory.md" {
 		t.Fatalf("suggested_target_note_path=%v", change["suggested_target_note_path"])
 	}
 }

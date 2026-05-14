@@ -1,6 +1,6 @@
 ---
 name: foxctl-context
-description: "Foxctl context workflows for ACA, transcript history, context architecture, Obsidian knowledge, and refactor scouting."
+description: "Foxctl context workflows for ContextWiki, transcript history, context architecture, Obsidian knowledge, and refactor scouting."
 ---
 
 ## What I do
@@ -8,20 +8,20 @@ description: "Foxctl context workflows for ACA, transcript history, context arch
 - Bundle the current context-architecture surfaces into one pack.
 - Cover the control plane (`context`, task continuity, family history).
 - Cover transcript-history ingest and lane summarization.
-- Cover ACA/Obsidian knowledge-layer workflows.
+- Cover ContextWiki/Obsidian knowledge-layer workflows.
 - Cover the local refactor scout/advisor layer when structural cleanup is part of the same context work.
 
 ## When to use me
 
-- You are working on ACA or context architecture in `foxctl`.
+- You are working on ContextWiki or context architecture in `foxctl`.
 - You need to restore or summarize transcript-derived continuity.
 - You want a repo-family or lane-specific transcript-history summary.
-- You are wiring or checking Obsidian/ACA bridge surfaces.
+- You are wiring or checking Obsidian/ContextWiki bridge surfaces.
 - You want refactor-entrypoint discovery that stays close to the current context/memory work.
 
 ## Core Commands
 
-### ACA / Context control plane
+### ContextWiki / Context control plane
 
 ```bash
 foxctl orient
@@ -96,7 +96,7 @@ Family summaries add:
 - `recurring_mistakes`
 - `support_metadata`
 
-### Obsidian / ACA knowledge layer
+### Obsidian / ContextWiki knowledge layer
 
 ```bash
 foxctl obsidian index build --vault-path <vault>
@@ -105,7 +105,7 @@ foxctl obsidian graph promote --workspace . --vault-path <vault>
 foxctl obsidian bridge reconcile --workspace . --vault-path <vault>
 ```
 
-Use these when repo docs, ACA notes, or bridge metadata changed.
+Use these when repo docs, ContextWiki notes, or bridge metadata changed.
 
 ### Refactor layer
 
@@ -141,11 +141,11 @@ foxctl context family-history-summary --workspace . \
   --date-to 2026-03-25
 ```
 
-### 4) Move from transcript history into durable ACA notes
+### 4) Move from transcript history into durable ContextWiki notes
 
 1. Persist transcript history with `derive-memory --memory-lane insight --persist-history`.
 2. Read task continuity or family history.
-3. Capture/promo through ACA:
+3. Capture/promo through ContextWiki:
 
 ```bash
 foxctl capture --workspace . --task-id <id> --summary "..."
@@ -158,13 +158,13 @@ foxctl context promote --workspace . --path <handoff-or-observation>
 foxctl refactor scout --path ./internal --language go
 ```
 
-Then keep the durable seam decision in ACA or transcript history instead of only in ad-hoc chat.
+Then keep the durable seam decision in ContextWiki or transcript history instead of only in ad-hoc chat.
 
 ## Current Read
 
 This pack is strongest for:
 
-- ACA and context-architecture implementation
+- ContextWiki and context-architecture implementation
 - transcript-history continuity work
 - repo-family/lane summaries
 - Obsidian bridge and graph workflows

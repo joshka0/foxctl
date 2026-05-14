@@ -462,9 +462,9 @@ func TestHandleContextProposals(t *testing.T) {
 		Status:         "open",
 		Confidence:     0.82,
 		BlastRadius:    "low",
-		Summary:        "Enable deterministic ACA package-note fallback for this workspace.",
+		Summary:        "Enable deterministic ContextWiki package-note fallback for this workspace.",
 		ProposedChange: map[string]any{
-			"policy_patch":          "aca:\n  package_note_fallback: true\n",
+			"policy_patch":          "contextwiki:\n  package_note_fallback: true\n",
 			"package_note_fallback": true,
 		},
 		CreatedAt: time.Now().UTC(),
@@ -490,10 +490,10 @@ func TestHandleContextProposalMerge(t *testing.T) {
 	workspace := t.TempDir()
 	store := contextplane.NewWorkspaceStore(workspace)
 	vaultRoot := filepath.Join(t.TempDir(), "vault")
-	if err := os.MkdirAll(filepath.Join(vaultRoot, "notes", "repo", "aca-inspect"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(vaultRoot, "notes", "repo", "contextwiki-inspect"), 0o755); err != nil {
 		t.Fatalf("mkdir vault: %v", err)
 	}
-	targetPath := filepath.Join(vaultRoot, "notes", "repo", "aca-inspect", "semantic-and-memory.md")
+	targetPath := filepath.Join(vaultRoot, "notes", "repo", "contextwiki-inspect", "semantic-and-memory.md")
 	if err := os.WriteFile(targetPath, []byte(`---
 title: semantic and memory
 type: map
@@ -509,38 +509,38 @@ Existing review block.
 `), 0o644); err != nil {
 		t.Fatalf("write target note: %v", err)
 	}
-	draftRel := "inbox/drafted-from-foxctl/external-evidence/aca-inspect/aca-vocabulary-review.md"
+	draftRel := "inbox/drafted-from-foxctl/external-evidence/contextwiki-inspect/contextwiki-vocabulary-review.md"
 	draftAbs := filepath.Join(vaultRoot, filepath.FromSlash(draftRel))
 	if err := os.MkdirAll(filepath.Dir(draftAbs), 0o755); err != nil {
 		t.Fatalf("mkdir draft dir: %v", err)
 	}
 	if err := os.WriteFile(draftAbs, []byte(`---
-title: ACA Vocabulary Review
+title: ContextWiki Vocabulary Review
 type: evidence
 status: draft
 trust: raw
 ---
 
-# ACA Vocabulary Review
+# ContextWiki Vocabulary Review
 
-Imported evidence says we should unify ACA vocabulary.
+Imported evidence says we should unify ContextWiki vocabulary.
 `), 0o644); err != nil {
 		t.Fatalf("write draft note: %v", err)
 	}
 	proposal, err := store.RecordMemoryProposal(context.Background(), contextplane.MemoryProposal{
-		DedupeKey:      "methodology_draft|aca-vocabulary-mcp",
+		DedupeKey:      "methodology_draft|contextwiki-vocabulary-mcp",
 		Kind:           "methodology_draft",
 		Classification: "external_evidence",
 		Status:         "prepared",
 		ReviewRequired: true,
 		Confidence:     0.72,
 		BlastRadius:    "high",
-		Summary:        "Review imported evidence for a methodology or doctrine update: ACA Vocabulary Review. Suggested target: notes/repo/aca-inspect/semantic-and-memory.md.",
+		Summary:        "Review imported evidence for a methodology or doctrine update: ContextWiki Vocabulary Review. Suggested target: notes/repo/contextwiki-inspect/semantic-and-memory.md.",
 		ProposedChange: map[string]any{
 			"evidence_import_id":         "E-999",
-			"title":                      "ACA Vocabulary Review",
+			"title":                      "ContextWiki Vocabulary Review",
 			"draft_path":                 draftRel,
-			"suggested_target_note_path": "notes/repo/aca-inspect/semantic-and-memory.md",
+			"suggested_target_note_path": "notes/repo/contextwiki-inspect/semantic-and-memory.md",
 			"suggested_target_heading":   "Review",
 		},
 		EvaluationStatus: "accepted",
@@ -572,17 +572,17 @@ func TestHandleContextNextProposalMerge(t *testing.T) {
 	workspace := t.TempDir()
 	store := contextplane.NewWorkspaceStore(workspace)
 	if _, err := store.RecordMemoryProposal(context.Background(), contextplane.MemoryProposal{
-		DedupeKey:      "external_evidence_import|aca-vocabulary-mcp-next",
+		DedupeKey:      "external_evidence_import|contextwiki-vocabulary-mcp-next",
 		Kind:           "external_evidence_import",
 		Classification: "external_evidence",
 		Status:         "prepared",
 		ReviewRequired: true,
 		Confidence:     0.72,
 		BlastRadius:    "medium",
-		Summary:        "Review imported evidence draft for merge consideration: ACA Vocabulary Review. Suggested target: notes/repo/aca-inspect/semantic-and-memory.md.",
+		Summary:        "Review imported evidence draft for merge consideration: ContextWiki Vocabulary Review. Suggested target: notes/repo/contextwiki-inspect/semantic-and-memory.md.",
 		ProposedChange: map[string]any{
-			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/aca-inspect/aca-vocabulary-review.md",
-			"suggested_target_note_path": "notes/repo/aca-inspect/semantic-and-memory.md",
+			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/contextwiki-inspect/contextwiki-vocabulary-review.md",
+			"suggested_target_note_path": "notes/repo/contextwiki-inspect/semantic-and-memory.md",
 			"suggested_target_heading":   "Review",
 		},
 		EvaluationStatus: "accepted",
@@ -600,7 +600,7 @@ func TestHandleContextNextProposalMerge(t *testing.T) {
 		t.Fatalf("handleContextNextProposalMerge: %v", err)
 	}
 	text := firstTextContent(result)
-	if text == "" || !strings.Contains(text, "\"found\": true") || !strings.Contains(text, "\"work_packet\"") || !strings.Contains(text, "\"target_path\": \"notes/repo/aca-inspect/semantic-and-memory.md\"") {
+	if text == "" || !strings.Contains(text, "\"found\": true") || !strings.Contains(text, "\"work_packet\"") || !strings.Contains(text, "\"target_path\": \"notes/repo/contextwiki-inspect/semantic-and-memory.md\"") {
 		t.Fatalf("unexpected result text: %s", text)
 	}
 }
@@ -636,7 +636,7 @@ func TestHandleContextReport(t *testing.T) {
 	store := contextplane.NewWorkspaceStore(workspace)
 	if _, err := store.SaveTopOfMind(contextplane.TopOfMind{
 		WorkspaceID: "ws-test",
-		Objective:   "Build ACA report",
+		Objective:   "Build ContextWiki report",
 		Phase:       "design",
 	}); err != nil {
 		t.Fatalf("SaveTopOfMind: %v", err)
@@ -649,7 +649,7 @@ func TestHandleContextReport(t *testing.T) {
 		t.Fatalf("handleContextReport: %v", err)
 	}
 	text := firstTextContent(result)
-	if text == "" || !strings.Contains(text, "Build ACA report") {
+	if text == "" || !strings.Contains(text, "Build ContextWiki report") {
 		t.Fatalf("unexpected result text: %s", text)
 	}
 }

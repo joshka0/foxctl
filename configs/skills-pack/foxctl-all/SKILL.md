@@ -75,7 +75,7 @@ List: `foxctl skills list`
 | `configs/skills-pack/foxctl-epic-pipeline/SKILL.md` | Import Factory missions or plan files into canonical room epics, shape them through status/scout/grade/frontier, and stop before implementation |
 
 ### Context Architecture & History
-For the bundled ACA/context-history workflow pack, see:
+For the bundled ContextWiki/context-history workflow pack, see:
 
 - `configs/skills-pack/foxctl-context/SKILL.md`
 
@@ -84,7 +84,7 @@ That pack covers:
 - `foxctl context task-history-summary`
 - `foxctl context family-history-summary`
 - transcript-history persistence via `sessions derive-memory --memory-lane insight --persist-history`
-- ACA / Obsidian bridge and graph flows
+- ContextWiki / Obsidian bridge and graph flows
 - `foxctl refactor scout` / `foxctl refactor advisor` when refactor discovery is part of the same context-workstream
 
 ### Codemaps & Indexing

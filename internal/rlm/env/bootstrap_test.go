@@ -16,7 +16,7 @@ import (
 	"github.com/joshka0/foxctl/internal/storage/obsidianindex"
 )
 
-func TestBootstrapBuildIncludesACAAndHandles(t *testing.T) {
+func TestBootstrapBuildIncludesContextWikiAndHandles(t *testing.T) {
 	ctx := context.Background()
 	workspace := t.TempDir()
 	storageRoot := t.TempDir()

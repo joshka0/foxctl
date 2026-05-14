@@ -318,7 +318,6 @@ func (d *Delegate) resolveVaultPath(args map[string]any) string {
 	}
 	return strings.TrimSpace(firstNonEmpty(
 		d.lookupEnv("FOXCTL_CONTEXTWIKI_VAULT_PATH"),
-		d.lookupEnv("FOXCTL_ACA_VAULT_PATH"),
 		d.lookupEnv("FOXCTL_OBSIDIAN_VAULT_PATH"),
 	))
 }

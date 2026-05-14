@@ -7,6 +7,6 @@ trust: canonical
 
 # AgentCTL Home
 
-- [[ACA Memory Layers]]
+- [[ContextWiki Memory Layers]]
 - [[AgentCTL Context]]
 - [[Projects]]

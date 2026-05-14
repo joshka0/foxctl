@@ -3664,7 +3664,7 @@ func TestRunRoomRetroAddRejectsUnknownKind(t *testing.T) {
 	assertRoomErrorContains(t, err, "unsupported retro kind")
 }
 
-func TestRunRoomACAPromoteEpicDraftsProposalAndIsIdempotent(t *testing.T) {
+func TestRunRoomContextWikiPromoteEpicDraftsProposalAndIsIdempotent(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	ctx := context.Background()
@@ -3673,13 +3673,13 @@ func TestRunRoomACAPromoteEpicDraftsProposalAndIsIdempotent(t *testing.T) {
 	epicID, milestoneID, _ := setupRoomAgileWorkpackFixture(t, ctx, workspace)
 
 	cmd, _ := newRoomTestCommand(ctx)
-	if err := runRoomRetroAdd(cmd, workspace, "human-a", "alpha", epicID, milestoneID, "quality", "Capture durable epic memory.", "Makes retrieval stronger later.", "Promote completed agile artifacts into ACA drafts.", []string{"aca", "room-agile"}, []string{"Implement room aca promote"}); err != nil {
+	if err := runRoomRetroAdd(cmd, workspace, "human-a", "alpha", epicID, milestoneID, "quality", "Capture durable epic memory.", "Makes retrieval stronger later.", "Promote completed agile artifacts into ContextWiki drafts.", []string{"contextwiki", "room-agile"}, []string{"Implement room contextwiki promote"}); err != nil {
 		t.Fatalf("runRoomRetroAdd: %v", err)
 	}
 
 	cmd, out := newRoomTestCommand(ctx)
-	if err := runRoomACAPromote(cmd, workspace, "alpha", "epic", epicID); err != nil {
-		t.Fatalf("runRoomACAPromote epic: %v", err)
+	if err := runRoomContextWikiPromote(cmd, workspace, "alpha", "epic", epicID); err != nil {
+		t.Fatalf("runRoomContextWikiPromote epic: %v", err)
 	}
 	data := decodeRoomEnvelope(t, out)
 	if got := data["promotion_state"]; got != "created" {
@@ -3697,21 +3697,21 @@ func TestRunRoomACAPromoteEpicDraftsProposalAndIsIdempotent(t *testing.T) {
 		t.Fatalf("proposal.kind=%v want room_agile_draft", got)
 	}
 
-	acaStore := contextplane.NewWorkspaceStore(workspace)
-	layout, err := acaStore.EnsureLayout()
+	contextWikiStore := contextplane.NewWorkspaceStore(workspace)
+	layout, err := contextWikiStore.EnsureLayout()
 	if err != nil {
 		t.Fatalf("EnsureLayout: %v", err)
 	}
 	draftBody := mustReadRoomTestFile(t, filepath.Join(layout.TemplatesDir, filepath.FromSlash(draftPath)))
 	for _, want := range []string{"note_type: room_epic", "room_id: alpha", "meta_json_path:", "[[room-milestones/", "Capture durable epic memory."} {
 		if !strings.Contains(draftBody, want) {
-			t.Fatalf("epic ACA draft missing %q:\n%s", want, draftBody)
+			t.Fatalf("epic ContextWiki draft missing %q:\n%s", want, draftBody)
 		}
 	}
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomACAPromote(cmd, workspace, "alpha", "epic", epicID); err != nil {
-		t.Fatalf("runRoomACAPromote epic second: %v", err)
+	if err := runRoomContextWikiPromote(cmd, workspace, "alpha", "epic", epicID); err != nil {
+		t.Fatalf("runRoomContextWikiPromote epic second: %v", err)
 	}
 	data = decodeRoomEnvelope(t, out)
 	if got := data["promotion_state"]; got != "already_current" {
@@ -3719,7 +3719,7 @@ func TestRunRoomACAPromoteEpicDraftsProposalAndIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestRunRoomACAPromoteValidationRequiresHighSignal(t *testing.T) {
+func TestRunRoomContextWikiPromoteValidationRequiresHighSignal(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()
 	workspace := t.TempDir()
@@ -3733,7 +3733,7 @@ func TestRunRoomACAPromoteValidationRequiresHighSignal(t *testing.T) {
 	passValidationID := decodeRoomEnvelope(t, out)["validation_id"].(string)
 
 	cmd, _ = newRoomTestCommand(ctx)
-	err := runRoomACAPromote(cmd, workspace, "alpha", "validation", passValidationID)
+	err := runRoomContextWikiPromote(cmd, workspace, "alpha", "validation", passValidationID)
 	assertRoomErrorContains(t, err, "not high-signal enough")
 
 	cmd, out = newRoomTestCommand(ctx)
@@ -3743,8 +3743,8 @@ func TestRunRoomACAPromoteValidationRequiresHighSignal(t *testing.T) {
 	blockedValidationID := decodeRoomEnvelope(t, out)["validation_id"].(string)
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomACAPromote(cmd, workspace, "alpha", "validation", blockedValidationID); err != nil {
-		t.Fatalf("runRoomACAPromote blocked validation: %v", err)
+	if err := runRoomContextWikiPromote(cmd, workspace, "alpha", "validation", blockedValidationID); err != nil {
+		t.Fatalf("runRoomContextWikiPromote blocked validation: %v", err)
 	}
 	data := decodeRoomEnvelope(t, out)
 	if got := data["promotion_state"]; got != "created" {
@@ -3758,15 +3758,15 @@ func TestRunRoomACAPromoteValidationRequiresHighSignal(t *testing.T) {
 		t.Fatal("expected blocked validation draft_path")
 	}
 
-	acaStore := contextplane.NewWorkspaceStore(workspace)
-	layout, err := acaStore.EnsureLayout()
+	contextWikiStore := contextplane.NewWorkspaceStore(workspace)
+	layout, err := contextWikiStore.EnsureLayout()
 	if err != nil {
 		t.Fatalf("EnsureLayout: %v", err)
 	}
 	draftBody := mustReadRoomTestFile(t, filepath.Join(layout.TemplatesDir, filepath.FromSlash(draftPath)))
 	for _, want := range []string{"note_type: room_validation", "validation_id: " + blockedValidationID, "meta_json_path:", "status: blocked", "[[room-milestones/"} {
 		if !strings.Contains(draftBody, want) {
-			t.Fatalf("validation ACA draft missing %q:\n%s", want, draftBody)
+			t.Fatalf("validation ContextWiki draft missing %q:\n%s", want, draftBody)
 		}
 	}
 }

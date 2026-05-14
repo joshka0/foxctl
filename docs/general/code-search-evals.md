@@ -31,7 +31,7 @@ All of these targets call checked-in wrapper scripts which in turn call:
 - `--eval-dataset-file <checked-in dataset>`
 - `--policy-file <checked-in policy>`
 - `--tool-profile repo-grounded`
-- `--include-aca`
+- `--include-contextwiki`
 
 ## Datasets
 

@@ -21,7 +21,7 @@ func TestRecordBuilderBuildUsesInjectedClockAndCopiesInput(t *testing.T) {
 			System:    "You are a planner.",
 			User:      "Compare option A vs B.",
 			ContextBlocks: []PromptContextBlock{
-				{Name: "top-of-mind", Source: "aca", Content: "context payload"},
+				{Name: "top-of-mind", Source: "contextwiki", Content: "context payload"},
 			},
 			ToolDefinitions: []PromptToolDefinition{
 				{Name: "code_search", Description: "semantic search"},

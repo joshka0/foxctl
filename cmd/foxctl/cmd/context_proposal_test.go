@@ -20,9 +20,9 @@ func TestContextProposalCommands(t *testing.T) {
 		Status:         "open",
 		Confidence:     0.82,
 		BlastRadius:    "low",
-		Summary:        "Enable deterministic ACA package-note fallback for this workspace.",
+		Summary:        "Enable deterministic ContextWiki package-note fallback for this workspace.",
 		ProposedChange: map[string]any{
-			"policy_patch":          "aca:\n  package_note_fallback: true\n",
+			"policy_patch":          "contextwiki:\n  package_note_fallback: true\n",
 			"package_note_fallback": true,
 		},
 		CreatedAt: time.Now().UTC(),
@@ -83,7 +83,7 @@ func TestContextProposalCommands(t *testing.T) {
 		Status:         "open",
 		Confidence:     0.68,
 		BlastRadius:    "high",
-		Summary:        "ACA retrieved notes, but ranking did not surface the expected path set.",
+		Summary:        "ContextWiki retrieved notes, but ranking did not surface the expected path set.",
 		CreatedAt:      time.Now().UTC(),
 		UpdatedAt:      time.Now().UTC(),
 	})
@@ -106,19 +106,19 @@ func TestContextProposalCommands(t *testing.T) {
 	}
 
 	evidence, err := store.RecordMemoryProposal(context.Background(), contextplane.MemoryProposal{
-		DedupeKey:      "methodology_draft|aca-vocabulary",
+		DedupeKey:      "methodology_draft|contextwiki-vocabulary",
 		Kind:           "methodology_draft",
 		Classification: "external_evidence",
 		Status:         "open",
 		ReviewRequired: true,
 		Confidence:     0.72,
 		BlastRadius:    "high",
-		Summary:        "Review imported evidence for a methodology or doctrine update: ACA Vocabulary Review. Suggested target: notes/repo/aca-inspect/semantic-and-memory.md.",
+		Summary:        "Review imported evidence for a methodology or doctrine update: ContextWiki Vocabulary Review. Suggested target: notes/repo/contextwiki-inspect/semantic-and-memory.md.",
 		ProposedChange: map[string]any{
 			"evidence_import_id":         "E-123",
-			"title":                      "ACA Vocabulary Review",
-			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/aca-inspect/aca-vocabulary-review.md",
-			"suggested_target_note_path": "notes/repo/aca-inspect/semantic-and-memory.md",
+			"title":                      "ContextWiki Vocabulary Review",
+			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/contextwiki-inspect/contextwiki-vocabulary-review.md",
+			"suggested_target_note_path": "notes/repo/contextwiki-inspect/semantic-and-memory.md",
 			"suggested_target_heading":   "Review",
 		},
 		CreatedAt: time.Now().UTC(),
@@ -142,16 +142,16 @@ func TestContextProposalCommands(t *testing.T) {
 		t.Fatalf("proposal.status=%v want prepared", evidenceAppliedProposal["status"])
 	}
 	resultMap := nestedMap(t, evidenceApplyData, "result")
-	if resultMap["target_path"] != "notes/repo/aca-inspect/semantic-and-memory.md" {
+	if resultMap["target_path"] != "notes/repo/contextwiki-inspect/semantic-and-memory.md" {
 		t.Fatalf("target_path=%v", resultMap["target_path"])
 	}
 	workPacket := nestedMap(t, evidenceApplyData, "work_packet")
-	if workPacket["action"] != "merge_promotion" || workPacket["target_path"] != "notes/repo/aca-inspect/semantic-and-memory.md" {
+	if workPacket["action"] != "merge_promotion" || workPacket["target_path"] != "notes/repo/contextwiki-inspect/semantic-and-memory.md" {
 		t.Fatalf("unexpected work_packet=%v", workPacket)
 	}
 
 	vaultRoot := filepath.Join(t.TempDir(), "vault")
-	targetAbs := filepath.Join(vaultRoot, "notes", "repo", "aca-inspect", "semantic-and-memory.md")
+	targetAbs := filepath.Join(vaultRoot, "notes", "repo", "contextwiki-inspect", "semantic-and-memory.md")
 	if err := os.MkdirAll(filepath.Dir(targetAbs), 0o755); err != nil {
 		t.Fatalf("mkdir target dir: %v", err)
 	}
@@ -170,38 +170,38 @@ Existing review block.
 `), 0o644); err != nil {
 		t.Fatalf("write target note: %v", err)
 	}
-	draftRel := "inbox/drafted-from-foxctl/external-evidence/aca-inspect/aca-vocabulary-review.md"
+	draftRel := "inbox/drafted-from-foxctl/external-evidence/contextwiki-inspect/contextwiki-vocabulary-review.md"
 	draftAbs := filepath.Join(vaultRoot, filepath.FromSlash(draftRel))
 	if err := os.MkdirAll(filepath.Dir(draftAbs), 0o755); err != nil {
 		t.Fatalf("mkdir draft dir: %v", err)
 	}
 	if err := os.WriteFile(draftAbs, []byte(`---
-title: ACA Vocabulary Review
+title: ContextWiki Vocabulary Review
 type: evidence
 status: draft
 trust: raw
 ---
 
-# ACA Vocabulary Review
+# ContextWiki Vocabulary Review
 
-Imported evidence says we should unify ACA vocabulary.
+Imported evidence says we should unify ContextWiki vocabulary.
 `), 0o644); err != nil {
 		t.Fatalf("write draft note: %v", err)
 	}
 	mergeProposal, err := store.RecordMemoryProposal(context.Background(), contextplane.MemoryProposal{
-		DedupeKey:      "methodology_draft|aca-vocabulary-merge",
+		DedupeKey:      "methodology_draft|contextwiki-vocabulary-merge",
 		Kind:           "methodology_draft",
 		Classification: "external_evidence",
 		Status:         "prepared",
 		ReviewRequired: true,
 		Confidence:     0.72,
 		BlastRadius:    "high",
-		Summary:        "Review imported evidence for a methodology or doctrine update: ACA Vocabulary Review. Suggested target: notes/repo/aca-inspect/semantic-and-memory.md.",
+		Summary:        "Review imported evidence for a methodology or doctrine update: ContextWiki Vocabulary Review. Suggested target: notes/repo/contextwiki-inspect/semantic-and-memory.md.",
 		ProposedChange: map[string]any{
 			"evidence_import_id":         "E-456",
-			"title":                      "ACA Vocabulary Review",
+			"title":                      "ContextWiki Vocabulary Review",
 			"draft_path":                 draftRel,
-			"suggested_target_note_path": "notes/repo/aca-inspect/semantic-and-memory.md",
+			"suggested_target_note_path": "notes/repo/contextwiki-inspect/semantic-and-memory.md",
 			"suggested_target_heading":   "Review",
 		},
 		EvaluationStatus: "accepted",
@@ -231,7 +231,7 @@ Imported evidence says we should unify ACA vocabulary.
 		t.Fatalf("merged_as=%v want append", mergeResult["merged_as"])
 	}
 	mergePacket := nestedMap(t, mergeData, "work_packet")
-	if mergePacket["status"] != "merged" || mergePacket["target_path"] != "notes/repo/aca-inspect/semantic-and-memory.md" {
+	if mergePacket["status"] != "merged" || mergePacket["target_path"] != "notes/repo/contextwiki-inspect/semantic-and-memory.md" {
 		t.Fatalf("unexpected work_packet=%v", mergePacket)
 	}
 }

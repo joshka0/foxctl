@@ -318,7 +318,7 @@ func (s *WorkspaceStore) AppendObservation(obs Observation) (string, error) {
 	if err := upsertObservationRow(context.Background(), db, obs); err != nil {
 		return "", fmt.Errorf("upsert observation: %w", err)
 	}
-	return filepath.Join(s.layout.RuntimeDir, acaDBFile), nil
+	return filepath.Join(s.layout.RuntimeDir, contextWikiDBFile), nil
 }
 
 // AppendTension appends a tension record to tensions.ndjson.
@@ -331,7 +331,7 @@ func (s *WorkspaceStore) AppendTension(tension Tension) (string, error) {
 	if err := upsertTensionRow(context.Background(), db, tension); err != nil {
 		return "", fmt.Errorf("upsert tension: %w", err)
 	}
-	return filepath.Join(s.layout.RuntimeDir, acaDBFile), nil
+	return filepath.Join(s.layout.RuntimeDir, contextWikiDBFile), nil
 }
 
 // ListObservations returns the most recent observations first.
@@ -1107,7 +1107,7 @@ ranking_weights:
   recency: 1
   reuse_frequency: 1
 
-aca:
+contextwiki:
   package_note_fallback: false
   co_change_prior: false
   co_change_commit_limit: 40

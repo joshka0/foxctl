@@ -13,17 +13,17 @@ func TestContextNextProposalMergeCommand(t *testing.T) {
 	workspace := t.TempDir()
 	store := contextplane.NewWorkspaceStore(workspace)
 	if _, err := store.RecordMemoryProposal(context.Background(), contextplane.MemoryProposal{
-		DedupeKey:      "external_evidence_import|aca-vocabulary-next",
+		DedupeKey:      "external_evidence_import|contextwiki-vocabulary-next",
 		Kind:           "external_evidence_import",
 		Classification: "external_evidence",
 		Status:         "prepared",
 		ReviewRequired: true,
 		Confidence:     0.72,
 		BlastRadius:    "medium",
-		Summary:        "Review imported evidence draft for merge consideration: ACA Vocabulary Review. Suggested target: notes/repo/aca-inspect/semantic-and-memory.md.",
+		Summary:        "Review imported evidence draft for merge consideration: ContextWiki Vocabulary Review. Suggested target: notes/repo/contextwiki-inspect/semantic-and-memory.md.",
 		ProposedChange: map[string]any{
-			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/aca-inspect/aca-vocabulary-review.md",
-			"suggested_target_note_path": "notes/repo/aca-inspect/semantic-and-memory.md",
+			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/contextwiki-inspect/contextwiki-vocabulary-review.md",
+			"suggested_target_note_path": "notes/repo/contextwiki-inspect/semantic-and-memory.md",
 			"suggested_target_heading":   "Review",
 		},
 		EvaluationStatus: "accepted",
@@ -48,7 +48,7 @@ func TestContextNextProposalMergeCommand(t *testing.T) {
 		t.Fatalf("found=%v want true", data["found"])
 	}
 	packet := nestedMap(t, data, "work_packet")
-	if packet["action"] != "merge_promotion" || packet["target_path"] != "notes/repo/aca-inspect/semantic-and-memory.md" {
+	if packet["action"] != "merge_promotion" || packet["target_path"] != "notes/repo/contextwiki-inspect/semantic-and-memory.md" {
 		t.Fatalf("unexpected work_packet=%v", packet)
 	}
 

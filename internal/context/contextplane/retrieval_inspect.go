@@ -73,12 +73,12 @@ func (s *WorkspaceStore) SetRetrievalPackageNoteFallback(enabled bool) (string, 
 			return "", fmt.Errorf("decode retrieval policy: %w", err)
 		}
 	}
-	aca, _ := doc["aca"].(map[string]any)
-	if aca == nil {
-		aca = map[string]any{}
+	contextWiki, _ := doc["contextwiki"].(map[string]any)
+	if contextWiki == nil {
+		contextWiki = map[string]any{}
 	}
-	aca["package_note_fallback"] = enabled
-	doc["aca"] = aca
+	contextWiki["package_note_fallback"] = enabled
+	doc["contextwiki"] = contextWiki
 	updated, err := yaml.Marshal(doc)
 	if err != nil {
 		return "", fmt.Errorf("encode retrieval policy: %w", err)
@@ -181,7 +181,7 @@ func (s *WorkspaceStore) InspectRetrieval(
 			Kind:        "policy_patch",
 			Summary:     "Enable deterministic ContextWiki package-note fallback for this workspace.",
 			PolicyPath:  s.layout.RetrievalPolicyPath,
-			PolicyPatch: "aca:\n  package_note_fallback: true\n",
+			PolicyPatch: "contextwiki:\n  package_note_fallback: true\n",
 		}
 	case candidateExists && len(expectedRepoPaths) > 0 && !searchHitMatchesExpected(candidateHit, expectedPaths):
 		classification = "bridge_metadata_gap"
@@ -292,7 +292,7 @@ func PersistRetrievalInspectionReport(ctx context.Context, casRoot string, repor
 	if err != nil {
 		return "", err
 	}
-	obj, err := store.Put(ctx, bytes.NewReader(append(body, '\n')), "application/json", []string{"aca-retrieval-inspection"})
+	obj, err := store.Put(ctx, bytes.NewReader(append(body, '\n')), "application/json", []string{"contextwiki-retrieval-inspection"})
 	if err != nil {
 		return "", err
 	}
@@ -502,7 +502,7 @@ func buildRetrievalObservation(project, classification, query string, expectedPa
 		Confidence:   retrievalObservationConfidence(classification),
 		Count:        1,
 		Project:      strings.TrimSpace(project),
-		Area:         "aca-retrieval",
+		Area:         "contextwiki-retrieval",
 		EvidenceRefs: stringsToEvidenceRefs(uniqueStrings(evidence)),
 		FirstSeen:    now,
 		LastSeen:     now,

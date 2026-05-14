@@ -201,12 +201,12 @@ func selectMemoryScoutRoles(lanes []string, maxScouts int) []string {
 			addRole(ScoutRoleMemoryFact)
 		case "timeline", "time":
 			addRole(ScoutRoleMemoryTimeline)
-		case "aca", "context":
-			addRole(ScoutRoleACAContext)
+		case "contextwiki", "context":
+			addRole(ScoutRoleContextWiki)
 		}
 	}
 	if len(roles) == 0 {
-		for _, role := range []string{ScoutRoleMemoryFact, ScoutRoleMemoryTimeline, ScoutRoleACAContext} {
+		for _, role := range []string{ScoutRoleMemoryFact, ScoutRoleMemoryTimeline, ScoutRoleContextWiki} {
 			addRole(role)
 		}
 	}
@@ -226,7 +226,7 @@ func buildMemoryScoutPrompt(role, query string, limit int) string {
 		return strings.TrimSpace("Find the current explicit facts, preferences, decisions, goals, or technical context that answer this query: " + query + "." + limitHint + ` Return JSON only with this shape: {"summary":"...","claims":[{"key":"...","value":"...","status":"current|candidate","source":"tool-name","evidence_refs":["..."],"confidence":0.0}],"gaps":["..."]}.`)
 	case ScoutRoleMemoryTimeline:
 		return strings.TrimSpace("Reconstruct the update timeline for this query and identify the current best view: " + query + "." + limitHint + ` Return JSON only with this shape: {"summary":"...","current_best_view":"...","timeline":[{"ts":"...","kind":"statement|update|retraction|decision","value":"...","source":"tool-name","evidence_refs":["..."],"supersedes":"...","confidence":0.0}],"gaps":["..."]}.`)
-	case ScoutRoleACAContext:
+	case ScoutRoleContextWiki:
 		return strings.TrimSpace("Gather the durable ContextWiki, handoff, and vault-backed context relevant to this query: " + query + "." + limitHint + ` Return JSON only with this shape: {"summary":"...","context_blocks":[{"lane":"top_of_mind|task_continuity|vault|related_note","summary":"...","refs":["..."]}],"gaps":["..."]}.`)
 	default:
 		return strings.TrimSpace(query)
@@ -306,15 +306,15 @@ func recommendAnswerBasis(roles []string, claims []memoryScoutClaim, timeline []
 	case len(claims) > 0 && len(contextBlocks) == 0:
 		return "facts"
 	case len(contextBlocks) > 0 && len(claims) == 0:
-		return "aca"
+		return "contextwiki"
 	case len(roles) == 1:
 		switch roles[0] {
 		case ScoutRoleMemoryFact:
 			return "facts"
 		case ScoutRoleMemoryTimeline:
 			return "timeline"
-		case ScoutRoleACAContext:
-			return "aca"
+		case ScoutRoleContextWiki:
+			return "contextwiki"
 		}
 	}
 	return "combined"
@@ -337,7 +337,7 @@ func buildMemoryEnsembleSummary(basis string, scoutSummaries []string, claims []
 			}
 			return strings.Join(lines, "\n")
 		}
-	case "aca":
+	case "contextwiki":
 		if len(contextBlocks) > 0 {
 			lines := make([]string, 0, min(2, len(contextBlocks)))
 			for _, block := range contextBlocks[:min(2, len(contextBlocks))] {
@@ -357,8 +357,8 @@ func lanesForRoles(roles []string) []string {
 			out = append(out, "facts")
 		case ScoutRoleMemoryTimeline:
 			out = append(out, "timeline")
-		case ScoutRoleACAContext:
-			out = append(out, "aca")
+		case ScoutRoleContextWiki:
+			out = append(out, "contextwiki")
 		}
 	}
 	return uniqueStrings(out)

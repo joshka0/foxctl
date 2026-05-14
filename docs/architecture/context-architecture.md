@@ -12,7 +12,7 @@ This document describes the first implemented slice of ContextWiki: a
 workspace-local context system with a control plane, knowledge plane, and
 retrieval plane.
 
-ContextWiki is the user-facing name. ACA was the old internal abbreviation.
+ContextWiki is the user-facing name. ContextWiki was the old internal abbreviation.
 Use **ContextWiki** in docs and operator-facing surfaces, and **context system**
 when describing the implementation that powers it.
 
@@ -179,12 +179,10 @@ Current hook behavior:
   - writes a ContextWiki handoff with `foxctl capture`
   - can emit structured observations or tensions through `foxctl context infer --apply`
   - can draft a promotion automatically when `FOXCTL_CONTEXTWIKI_AUTO_PROMOTE=1`
-    (`FOXCTL_ACA_AUTO_PROMOTE` remains as a legacy alias)
 - `SubagentStop` via `configs/hooks/subagent-stop.sh`
   - writes a bounded ContextWiki handoff for subagent completion
   - can emit structured observations or tensions through `foxctl context infer --apply`
   - can draft a promotion automatically when `FOXCTL_CONTEXTWIKI_AUTO_PROMOTE=1`
-    (`FOXCTL_ACA_AUTO_PROMOTE` remains as a legacy alias)
 - task continuity hook wrapper via `configs/hooks/task-continuity-summary.sh`
   - uses `foxctl context task-history-summary`
   - emits prompt-ready continuity context plus `task_continuity_artifact`
@@ -347,9 +345,7 @@ Current behavior:
 Controls:
 
 - `FOXCTL_CONTEXTWIKI_MAINTENANCE_INTERVAL`
-  - legacy alias: `FOXCTL_ACA_MAINTENANCE_INTERVAL`
-  - optional duration override for the refresh ticker; the environment variable
-    keeps the old prefix for compatibility
+  - optional duration override for the refresh ticker
 - `FOXCTL_OBSIDIAN_VAULT_PATH`
   - optional vault path for health-driven maintenance refresh
 - `FOXCTL_OBSIDIAN_SEMANTIC_ENABLED`
@@ -431,7 +427,7 @@ ContextWiki retrieval policy lives in `.foxctl/policy/retrieval.yaml`.
 One useful opt-in setting is:
 
 ```yaml
-aca:
+contextwiki:
   package_note_fallback: true
 ```
 
@@ -443,7 +439,7 @@ Enable this when:
 
 This helped on `praze`-style package queries, where deterministic mapping from repo paths to canonical package-note paths improved ContextWiki retrieval. It is less necessary on `foxctl`, where the default ContextWiki vault lane is already strong.
 
-A concrete example policy file is available at [docs/examples/aca-retrieval-policy-package-fallback.yaml](../examples/aca-retrieval-policy-package-fallback.yaml).
+A concrete example policy file is available at [docs/examples/contextwiki-retrieval-policy-package-fallback.yaml](../examples/contextwiki-retrieval-policy-package-fallback.yaml).
 
 ## Obsidian CLI Convention
 

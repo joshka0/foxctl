@@ -61,7 +61,6 @@ func defaultRetrievalWeights() RetrievalWeights {
 type retrievalPolicyFile struct {
 	RankingWeights map[string]int             `yaml:"ranking_weights"`
 	ContextWiki    retrievalPolicyContextWiki `yaml:"contextwiki"`
-	ACA            retrievalPolicyContextWiki `yaml:"aca"`
 }
 
 type retrievalPolicyContextWiki struct {
@@ -154,7 +153,7 @@ func (s *WorkspaceStore) loadRetrievalOptions() RetrievalOptions {
 	if err := yaml.Unmarshal(body, &policy); err != nil {
 		return opts
 	}
-	contextWikiPolicy := policy.contextWikiPolicy()
+	contextWikiPolicy := policy.ContextWiki
 	opts.UsePackageNoteFallback = contextWikiPolicy.PackageNoteFallback
 	opts.UseSemanticAnchors = contextWikiPolicy.SemanticAnchors
 	opts.UseRepoMotifPrior = true
@@ -170,25 +169,6 @@ func (s *WorkspaceStore) loadRetrievalOptions() RetrievalOptions {
 	}
 	opts.UseContinuityBundles = contextWikiPolicy.ContinuityBundles
 	return opts
-}
-
-func (p retrievalPolicyFile) contextWikiPolicy() retrievalPolicyContextWiki {
-	out := p.ACA
-	contextWiki := p.ContextWiki
-	out.PackageNoteFallback = out.PackageNoteFallback || contextWiki.PackageNoteFallback
-	out.SemanticAnchors = out.SemanticAnchors || contextWiki.SemanticAnchors
-	out.CoChangePrior = out.CoChangePrior || contextWiki.CoChangePrior
-	out.ContinuityBundles = out.ContinuityBundles || contextWiki.ContinuityBundles
-	if contextWiki.CoChangeCommitLimit > 0 {
-		out.CoChangeCommitLimit = contextWiki.CoChangeCommitLimit
-	}
-	if contextWiki.CoChangeMaxFilesPerCommit > 0 {
-		out.CoChangeMaxFilesPerCommit = contextWiki.CoChangeMaxFilesPerCommit
-	}
-	if contextWiki.CoChangeHalfLifeDays > 0 {
-		out.CoChangeHalfLifeDays = contextWiki.CoChangeHalfLifeDays
-	}
-	return out
 }
 
 // Retrieve blends ContextWiki state with ranked vault hits.

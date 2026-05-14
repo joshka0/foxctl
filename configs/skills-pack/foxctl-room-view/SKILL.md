@@ -51,7 +51,7 @@ Use `room status` to understand health. Use `mux list/read` to understand viewer
 - `foxctl room restore` when the real goal is to revive an existing room participant in one step
 - `foxctl mux list` for viewer metadata
 - `foxctl mux read` for PTY inspection
-- `foxctl mux observe` when a live pane exchange should become durable ACA evidence
+- `foxctl mux observe` when a live pane exchange should become durable ContextWiki evidence
 - `foxctl mux send` for a manual terminal poke outside the normal room transport path
 - `foxctl room restore` should be preferred over manual `mux create` + `room rebind` when you are reviving an existing participant runtime
 

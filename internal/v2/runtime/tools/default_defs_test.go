@@ -10,7 +10,7 @@ import (
 	"github.com/joshka0/foxctl/internal/v2/runtime/tools"
 )
 
-func TestDefaultDefsIncludeACAAndObsidianReadTools(t *testing.T) {
+func TestDefaultDefsIncludeContextWikiAndObsidianReadTools(t *testing.T) {
 	t.Parallel()
 
 	names := canonicalNames(tools.DefaultDefs())
@@ -43,7 +43,7 @@ func TestExtensionDefsKeepHeartwoodOutOfPortableDefaults(t *testing.T) {
 	}
 }
 
-func TestNewDefaultCatalogResolvesCompanionACAAndObsidianTools(t *testing.T) {
+func TestNewDefaultCatalogResolvesCompanionContextWikiAndObsidianTools(t *testing.T) {
 	t.Parallel()
 
 	catalog, err := tools.NewDefaultCatalog(nil, false)

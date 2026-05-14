@@ -10,7 +10,6 @@ code graph evidence, memory, handoffs, observations, reviewed notes, and
 retrieval policy so agents can recover current context without treating every
 note as an instruction.
 
-The old internal abbreviation was ACA. Use **ContextWiki** in user-facing docs.
 Use **context system** when describing the implementation that powers it.
 
 The short version:
@@ -100,7 +99,6 @@ Use the names this way:
 | ContextWiki control plane | Current work state: top-of-mind, handoffs, observations, tensions, proposals |
 | Knowledge plane | Durable docs and vault notes |
 | Retrieval plane | Repoindex hints, semantic note search, and context engine evidence |
-| ACA | Legacy abbreviation only |
 
 ## Canonical sources
 

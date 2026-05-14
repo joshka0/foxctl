@@ -25,17 +25,17 @@ func TestContextNextProposalMergeHandlerAndRelease(t *testing.T) {
 	cfg := config.Config{Storage: config.StorageSettings{Root: t.TempDir()}}
 	store := contextplane.NewWorkspaceStore(workspace)
 	proposal, err := store.RecordMemoryProposal(context.Background(), contextplane.MemoryProposal{
-		DedupeKey:      "external_evidence_import|aca-vocabulary-api",
+		DedupeKey:      "external_evidence_import|contextwiki-vocabulary-api",
 		Kind:           "external_evidence_import",
 		Classification: "external_evidence",
 		Status:         "prepared",
 		ReviewRequired: true,
 		Confidence:     0.72,
 		BlastRadius:    "medium",
-		Summary:        "Review imported evidence draft for merge consideration: ACA Vocabulary Review. Suggested target: notes/repo/aca-inspect/semantic-and-memory.md.",
+		Summary:        "Review imported evidence draft for merge consideration: ContextWiki Vocabulary Review. Suggested target: notes/repo/contextwiki-inspect/semantic-and-memory.md.",
 		ProposedChange: map[string]any{
-			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/aca-inspect/aca-vocabulary-review.md",
-			"suggested_target_note_path": "notes/repo/aca-inspect/semantic-and-memory.md",
+			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/contextwiki-inspect/contextwiki-vocabulary-review.md",
+			"suggested_target_note_path": "notes/repo/contextwiki-inspect/semantic-and-memory.md",
 			"suggested_target_heading":   "Review",
 		},
 		EvaluationStatus: "accepted",
@@ -109,22 +109,22 @@ func TestContextOverviewHandler(t *testing.T) {
 		t.Fatalf("mkdir target note: %v", err)
 	}
 	if err := os.WriteFile(targetNotePath, []byte(`---
-title: ACA operator rail for platform and web
+title: ContextWiki operator rail for platform and web
 trust: canonical
 type: map
 ---
 
-This note covers the ACA operator surface, workspace-aware proposal routing,
+This note covers the ContextWiki operator surface, workspace-aware proposal routing,
 reviewed merge actions, and GUI control-plane integration.
 `), 0o644); err != nil {
 		t.Fatalf("write target note: %v", err)
 	}
 
 	imported, err := store.ImportEvidence(context.Background(), cfg.Storage.Root, vaultPath, contextplane.EvidenceImportInput{
-		Title:      "ACA GUI operator notes",
+		Title:      "ContextWiki GUI operator notes",
 		SourceKind: "transcript",
 		SourceRef:  "team-retro",
-		Content:    "ACA needs an explicit operator surface with workspace-aware proposal routing and reviewed merge actions.",
+		Content:    "ContextWiki needs an explicit operator surface with workspace-aware proposal routing and reviewed merge actions.",
 	})
 	if err != nil {
 		t.Fatalf("ImportEvidence: %v", err)
@@ -139,18 +139,18 @@ reviewed merge actions, and GUI control-plane integration.
 		t.Fatalf("ClaimNextProposalMergeTask: %v", err)
 	}
 	if _, err := store.RecordMemoryProposal(context.Background(), contextplane.MemoryProposal{
-		DedupeKey:      "external_evidence_import|aca-gui-pending",
+		DedupeKey:      "external_evidence_import|contextwiki-gui-pending",
 		Kind:           "external_evidence_import",
 		Classification: "external_evidence",
 		Status:         "prepared",
 		ReviewRequired: true,
 		Confidence:     0.66,
 		BlastRadius:    "medium",
-		Summary:        "Review imported ACA GUI evidence for merge consideration.",
+		Summary:        "Review imported ContextWiki GUI evidence for merge consideration.",
 		ProposedChange: map[string]any{
-			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/foxctl/aca-gui-pending.md",
+			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/foxctl/contextwiki-gui-pending.md",
 			"suggested_target_note_path": "notes/repo/foxctl/platform-and-web.md",
-			"suggested_target_heading":   "ACA GUI",
+			"suggested_target_heading":   "ContextWiki GUI",
 		},
 		EvaluationStatus: "accepted",
 		ApplyStatus:      "review_prepared",

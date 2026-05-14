@@ -13,17 +13,17 @@ func TestHooksProposalNextMergeCommand(t *testing.T) {
 	workspace := t.TempDir()
 	store := contextplane.NewWorkspaceStore(workspace)
 	if _, err := store.RecordMemoryProposal(context.Background(), contextplane.MemoryProposal{
-		DedupeKey:      "external_evidence_import|aca-vocabulary-hook-next",
+		DedupeKey:      "external_evidence_import|contextwiki-vocabulary-hook-next",
 		Kind:           "external_evidence_import",
 		Classification: "external_evidence",
 		Status:         "prepared",
 		ReviewRequired: true,
 		Confidence:     0.72,
 		BlastRadius:    "medium",
-		Summary:        "Review imported evidence draft for merge consideration: ACA Vocabulary Review. Suggested target: notes/repo/aca-inspect/semantic-and-memory.md.",
+		Summary:        "Review imported evidence draft for merge consideration: ContextWiki Vocabulary Review. Suggested target: notes/repo/contextwiki-inspect/semantic-and-memory.md.",
 		ProposedChange: map[string]any{
-			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/aca-inspect/aca-vocabulary-review.md",
-			"suggested_target_note_path": "notes/repo/aca-inspect/semantic-and-memory.md",
+			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/contextwiki-inspect/contextwiki-vocabulary-review.md",
+			"suggested_target_note_path": "notes/repo/contextwiki-inspect/semantic-and-memory.md",
 			"suggested_target_heading":   "Review",
 		},
 		EvaluationStatus: "accepted",

@@ -160,7 +160,7 @@ func handleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Message, co
 func shouldEnforceResearchExecution(agentRole, question string) bool {
 	role := strings.ToLower(strings.TrimSpace(agentRole))
 	switch role {
-	case "researcher", "semantic_scout", "dag_scout", "symbol_scout", "annotation_scout", "memory_fact_scout", "memory_timeline_scout", "aca_context_scout":
+	case "researcher", "semantic_scout", "dag_scout", "symbol_scout", "annotation_scout", "memory_fact_scout", "memory_timeline_scout", "contextwiki_scout":
 		// Skip strict enforcement for very short conversational asks.
 		q := strings.ToLower(strings.TrimSpace(question))
 		if q == "" {

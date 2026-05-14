@@ -128,9 +128,9 @@ type Service struct {
 	fileSummaryMemoryStore  storage.MemoryStore // Memory store for file summary worker (close on shutdown)
 
 	// ContextWiki maintenance loop
-	acaMaintenanceCtx    context.Context
-	acaMaintenanceCancel context.CancelFunc
-	acaMaintenanceWG     sync.WaitGroup
+	contextWikiMaintenanceCtx    context.Context
+	contextWikiMaintenanceCancel context.CancelFunc
+	contextWikiMaintenanceWG     sync.WaitGroup
 
 	// Agent orchestration
 	agentMu             sync.Mutex
@@ -204,10 +204,10 @@ func NewService(cfg config.Config, opts ServiceOptions) (*Service, error) {
 }
 
 const (
-	daemonLeaseName     = "agent_daemon"
-	daemonLeaseTTL      = 45 * time.Second
-	daemonLeaseInterval = 15 * time.Second
-	acaMaintenanceTick  = 5 * time.Minute
+	daemonLeaseName            = "agent_daemon"
+	daemonLeaseTTL             = 45 * time.Second
+	daemonLeaseInterval        = 15 * time.Second
+	contextWikiMaintenanceTick = 5 * time.Minute
 )
 
 func coordinationIsShared(cfg dbdriver.Config) bool {
@@ -358,7 +358,7 @@ func (s *Service) startLeaderWorkers(ctx context.Context) error {
 			firstErr = err
 		}
 	}
-	if err := s.startACAMaintenanceLoop(ctx); err != nil {
+	if err := s.startContextWikiMaintenanceLoop(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: ContextWiki maintenance loop failed to start: %v\n", err)
 		if firstErr == nil {
 			firstErr = err
@@ -379,7 +379,7 @@ func (s *Service) stopLeaderWorkers() {
 	s.stopContextUpdater()
 	s.stopFileSummaryWorker()
 	s.stopAgentOrchestration()
-	s.stopACAMaintenanceLoop()
+	s.stopContextWikiMaintenanceLoop()
 	s.stopFlowEngine()
 }
 
@@ -1326,8 +1326,8 @@ func (s *Service) stopContextUpdater() {
 	s.contextUpdaterCtx = nil
 }
 
-func (s *Service) startACAMaintenanceLoop(ctx context.Context) error {
-	if s.acaMaintenanceCancel != nil {
+func (s *Service) startContextWikiMaintenanceLoop(ctx context.Context) error {
+	if s.contextWikiMaintenanceCancel != nil {
 		return nil
 	}
 	if strings.TrimSpace(s.opts.Workspace) == "" {
@@ -1337,51 +1337,47 @@ func (s *Service) startACAMaintenanceLoop(ctx context.Context) error {
 	if workspacePath == "" {
 		return nil
 	}
-	s.acaMaintenanceCtx, s.acaMaintenanceCancel = context.WithCancel(ctx)
+	s.contextWikiMaintenanceCtx, s.contextWikiMaintenanceCancel = context.WithCancel(ctx)
 	worker := contextplane.NewWorker(contextplane.WorkerConfig{
 		Config:    s.cfg,
 		Workspace: workspacePath,
-		VaultPath: acaMaintenanceVaultPath(),
-		Interval:  acaMaintenanceInterval(),
+		VaultPath: contextWikiMaintenanceVaultPath(),
+		Interval:  contextWikiMaintenanceInterval(),
 	})
-	s.acaMaintenanceWG.Add(1)
+	s.contextWikiMaintenanceWG.Add(1)
 	go func() {
-		defer s.acaMaintenanceWG.Done()
-		if err := worker.Run(s.acaMaintenanceCtx); err != nil && !errors.Is(err, context.Canceled) {
+		defer s.contextWikiMaintenanceWG.Done()
+		if err := worker.Run(s.contextWikiMaintenanceCtx); err != nil && !errors.Is(err, context.Canceled) {
 			fmt.Fprintf(os.Stderr, "ContextWiki maintenance: worker stopped with error: %v\n", err)
 		}
 	}()
 	return nil
 }
 
-func (s *Service) stopACAMaintenanceLoop() {
-	if s.acaMaintenanceCancel != nil {
-		s.acaMaintenanceCancel()
-		s.acaMaintenanceCancel = nil
+func (s *Service) stopContextWikiMaintenanceLoop() {
+	if s.contextWikiMaintenanceCancel != nil {
+		s.contextWikiMaintenanceCancel()
+		s.contextWikiMaintenanceCancel = nil
 	}
-	s.acaMaintenanceWG.Wait()
-	s.acaMaintenanceCtx = nil
+	s.contextWikiMaintenanceWG.Wait()
+	s.contextWikiMaintenanceCtx = nil
 }
 
-func acaMaintenanceInterval() time.Duration {
-	raw := firstNonEmptyString(
-		os.Getenv("FOXCTL_CONTEXTWIKI_MAINTENANCE_INTERVAL"),
-		os.Getenv("FOXCTL_ACA_MAINTENANCE_INTERVAL"),
-	)
+func contextWikiMaintenanceInterval() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("FOXCTL_CONTEXTWIKI_MAINTENANCE_INTERVAL"))
 	if raw == "" {
-		return acaMaintenanceTick
+		return contextWikiMaintenanceTick
 	}
 	interval, err := time.ParseDuration(raw)
 	if err != nil || interval <= 0 {
-		return acaMaintenanceTick
+		return contextWikiMaintenanceTick
 	}
 	return interval
 }
 
-func acaMaintenanceVaultPath() string {
+func contextWikiMaintenanceVaultPath() string {
 	return firstNonEmptyString(
 		os.Getenv("FOXCTL_CONTEXTWIKI_VAULT_PATH"),
-		os.Getenv("FOXCTL_ACA_VAULT_PATH"),
 		os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH"),
 	)
 }

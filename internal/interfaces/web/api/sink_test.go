@@ -17,7 +17,7 @@ import (
 
 func TestSinkHandlerWritesUnderConfiguredVault(t *testing.T) {
 	vault := t.TempDir()
-	t.Setenv("FOXCTL_ACA_VAULT_PATH", vault)
+	t.Setenv("FOXCTL_CONTEXTWIKI_VAULT_PATH", vault)
 	t.Setenv("FOXCTL_OBSIDIAN_VAULT_PATH", "")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sink", strings.NewReader(`{
@@ -63,7 +63,7 @@ func TestSinkHandlerWritesUnderConfiguredVault(t *testing.T) {
 func TestSinkHandlerRejectsRequestControlledVaultPath(t *testing.T) {
 	vault := t.TempDir()
 	outside := t.TempDir()
-	t.Setenv("FOXCTL_ACA_VAULT_PATH", vault)
+	t.Setenv("FOXCTL_CONTEXTWIKI_VAULT_PATH", vault)
 	t.Setenv("FOXCTL_OBSIDIAN_VAULT_PATH", "")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sink", strings.NewReader(`{
@@ -86,7 +86,7 @@ func TestSinkHandlerRejectsRequestControlledVaultPath(t *testing.T) {
 func TestSinkHandlerRejectsTraversalPath(t *testing.T) {
 	vault := t.TempDir()
 	parent := filepath.Dir(vault)
-	t.Setenv("FOXCTL_ACA_VAULT_PATH", vault)
+	t.Setenv("FOXCTL_CONTEXTWIKI_VAULT_PATH", vault)
 	t.Setenv("FOXCTL_OBSIDIAN_VAULT_PATH", "")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sink", strings.NewReader(`{
@@ -108,7 +108,7 @@ func TestSinkHandlerRejectsTraversalPath(t *testing.T) {
 func TestSinkHandlerRejectsSymlinkDirectoryEscape(t *testing.T) {
 	vault := t.TempDir()
 	outside := t.TempDir()
-	t.Setenv("FOXCTL_ACA_VAULT_PATH", vault)
+	t.Setenv("FOXCTL_CONTEXTWIKI_VAULT_PATH", vault)
 	t.Setenv("FOXCTL_OBSIDIAN_VAULT_PATH", "")
 
 	if err := os.Symlink(outside, filepath.Join(vault, "linked")); err != nil {
@@ -133,7 +133,7 @@ func TestSinkHandlerRejectsSymlinkDirectoryEscape(t *testing.T) {
 func TestSinkHandlerRejectsSymlinkTarget(t *testing.T) {
 	vault := t.TempDir()
 	outside := t.TempDir()
-	t.Setenv("FOXCTL_ACA_VAULT_PATH", vault)
+	t.Setenv("FOXCTL_CONTEXTWIKI_VAULT_PATH", vault)
 	t.Setenv("FOXCTL_OBSIDIAN_VAULT_PATH", "")
 
 	outsideTarget := filepath.Join(outside, "target.md")
@@ -164,7 +164,7 @@ func TestSinkHandlerRejectsSymlinkTarget(t *testing.T) {
 }
 
 func TestSinkHandlerRequiresConfiguredVaultPath(t *testing.T) {
-	t.Setenv("FOXCTL_ACA_VAULT_PATH", "")
+	t.Setenv("FOXCTL_CONTEXTWIKI_VAULT_PATH", "")
 	t.Setenv("FOXCTL_OBSIDIAN_VAULT_PATH", "")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sink", strings.NewReader(`{

@@ -52,7 +52,7 @@ func newContextHooksInstallCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("load claude settings: %w", err)
 			}
-			installed := mergeACAHooks(&settings)
+			installed := mergeContextWikiHooks(&settings)
 
 			out := map[string]any{
 				"workspace_path": target,
@@ -108,7 +108,7 @@ func writeClaudeSettings(path string, settings claudeSettings) error {
 	return os.WriteFile(path, body, 0o644)
 }
 
-func mergeACAHooks(settings *claudeSettings) map[string]bool {
+func mergeContextWikiHooks(settings *claudeSettings) map[string]bool {
 	if settings.Hooks == nil {
 		settings.Hooks = map[string][]claudeHookMatcher{}
 	}

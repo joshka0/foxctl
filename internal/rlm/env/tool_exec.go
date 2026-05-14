@@ -6730,7 +6730,6 @@ func (a *ReadOnlyAdapter) contextPacksFn(limit int) contextengine.ContextPackFun
 	vaultPath := firstNonEmpty(strings.TrimSpace(a.vaultPath),
 		strings.TrimSpace(os.Getenv("FOXCTL_RLM_VAULT_PATH")),
 		strings.TrimSpace(os.Getenv("FOXCTL_CONTEXTWIKI_VAULT_PATH")),
-		strings.TrimSpace(os.Getenv("FOXCTL_ACA_VAULT_PATH")),
 		strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH")),
 	)
 	if vaultPath == "" {
@@ -6755,9 +6754,9 @@ func (a *ReadOnlyAdapter) contextPacksFn(limit int) contextengine.ContextPackFun
 			repoStore = repo
 			defer func() { _ = repoStore.Close() }()
 		}
-		var memStoreForACA storage.MemoryStore
+		var memStoreForContextWiki storage.MemoryStore
 		if memStore, err := memorystore.OpenWithConfig(ctx, a.cfg); err == nil {
-			memStoreForACA = memStore
+			memStoreForContextWiki = memStore
 			defer func() { _ = memStore.Close() }()
 		}
 
@@ -6767,7 +6766,7 @@ func (a *ReadOnlyAdapter) contextPacksFn(limit int) contextengine.ContextPackFun
 		opts.IncludeLatestHandoff = false
 		opts.IncludeVaultHits = true
 		opts.IncludeControlPlaneRefs = false
-		result, err := workspaceStore.RetrieveWithOptionsAndMemory(ctx, index, repoStore, nil, memStoreForACA, query, effectiveLimit, opts)
+		result, err := workspaceStore.RetrieveWithOptionsAndMemory(ctx, index, repoStore, nil, memStoreForContextWiki, query, effectiveLimit, opts)
 		if err != nil {
 			hits, searchErr := index.SearchNotes(ctx, query, effectiveLimit)
 			if searchErr != nil {
@@ -6777,7 +6776,7 @@ func (a *ReadOnlyAdapter) contextPacksFn(limit int) contextengine.ContextPackFun
 			if len(pack.Nodes) == 0 {
 				return nil, nil
 			}
-			pack.Metadata["source"] = "aca_vault_search_fallback"
+			pack.Metadata["source"] = "contextwiki_vault_search_fallback"
 			pack.Metadata["fallback_error"] = err.Error()
 			return []contextengine.EvidencePack{pack}, nil
 		}
@@ -6788,7 +6787,7 @@ func (a *ReadOnlyAdapter) contextPacksFn(limit int) contextengine.ContextPackFun
 		if pack.Metadata == nil {
 			pack.Metadata = map[string]any{}
 		}
-		pack.Metadata["source"] = "aca_retrieval"
+		pack.Metadata["source"] = "contextwiki_retrieval"
 		return []contextengine.EvidencePack{pack}, nil
 	}
 }
@@ -6809,7 +6808,7 @@ func directContextPackFromObsidianHits(workspaceID, query string, hits []obsidia
 			statement = path
 		}
 		nodes = append(nodes, contextengine.EvidenceNode{
-			ID:          fmt.Sprintf("aca_vault_hit_%d_%s", i, strings.ReplaceAll(path, "/", "_")),
+			ID:          fmt.Sprintf("contextwiki_vault_hit_%d_%s", i, strings.ReplaceAll(path, "/", "_")),
 			WorkspaceID: workspaceID,
 			NodeType:    contextengine.EvidenceNodeTypeRetrieval,
 			Ref: contextengine.EvidenceRef{
@@ -6835,13 +6834,13 @@ func directContextPackFromObsidianHits(workspaceID, query string, hits []obsidia
 		})
 	}
 	return contextengine.EvidencePack{
-		ID:          "aca_vault_search:" + workspaceID,
+		ID:          "contextwiki_vault_search:" + workspaceID,
 		WorkspaceID: workspaceID,
 		Query:       strings.TrimSpace(query),
 		Lane:        contextengine.LaneContext,
 		Nodes:       nodes,
 		Metadata: map[string]any{
-			"source": "aca_vault_search",
+			"source": "contextwiki_vault_search",
 		},
 	}
 }

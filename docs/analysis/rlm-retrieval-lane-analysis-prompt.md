@@ -287,7 +287,7 @@ const (
 )
 
 // KEY GAP: vault bootstrap uses env vars for path resolution:
-//   FOXCTL_RLM_VAULT_PATH || FOXCTL_CONTEXTWIKI_VAULT_PATH || FOXCTL_ACA_VAULT_PATH || FOXCTL_OBSIDIAN_VAULT_PATH
+//   FOXCTL_RLM_VAULT_PATH || FOXCTL_CONTEXTWIKI_VAULT_PATH || FOXCTL_CONTEXTWIKI_VAULT_PATH || FOXCTL_OBSIDIAN_VAULT_PATH
 // If none set → VaultHandles = nil, search_vault silently returns empty
 ```
 
@@ -332,7 +332,7 @@ const (
 // 2. selectMemoryScoutRoles(lanes, max_scouts):
 //    - "facts"/"fact"    → ScoutRoleMemoryFact = "memory_fact_scout"
 //    - "timeline"/"time" → ScoutRoleMemoryTimeline = "memory_timeline_scout"
-//    - "aca"/"context"   → ScoutRoleACAContext = "aca_context_scout"
+//    - "aca"/"context"   → ScoutRoleContextWiki = "contextwiki_scout"
 //    - empty lanes → all 3 roles
 // 3. For each role, call a.subcall(ctx, Task{prompt: buildMemoryScoutPrompt(role, query), Role: role}, env)
 // 4. Each subcall runs a child LLM iteration (max_depth=0, max_iterations=3, max_subcalls=0)
@@ -344,7 +344,7 @@ const (
 //                         Return: {summary, claims:[{key,value,status,source,evidence_refs,confidence}], gaps}
 // memory_timeline_scout: "Reconstruct the update timeline... identify the current best view."
 //                         Return: {summary, current_best_view, timeline:[{ts,kind,value,source,...}], gaps}
-// aca_context_scout:     "Gather the durable ContextWiki, handoff, and vault-backed context..."
+// contextwiki_scout:     "Gather the durable ContextWiki, handoff, and vault-backed context..."
 //                         Return: {summary, context_blocks:[{lane,summary,refs}], gaps}
 
 // KEY ISSUE: memory_ensemble_retrieve requires a.subcall != nil.
@@ -358,7 +358,7 @@ const (
 // Tool sets per scout role:
 // memory_fact_scout:    search_artifacts, load_artifact, search_scenes, get_scene, search_vault, read_note
 // memory_timeline_scout: search_scenes, get_scene, search_artifacts, load_artifact, get_latest_handoff
-// aca_context_scout:    get_top_of_mind, get_latest_handoff, search_vault, read_note
+// contextwiki_scout:    get_top_of_mind, get_latest_handoff, search_vault, read_note
 
 // NOTE: search_scenes uses SQL LIKE '%query%' — no semantic search for memory lane
 // NOTE: no session_recall or session_timeline skill exposed in any scout role
@@ -392,7 +392,7 @@ const (
 // These are internal routing labels, not user-visible
 
 // KEY ISSUES:
-// - No ContextWiki/memory cross-pollination (include_history, include_aca are reserved/ignored)
+// - No ContextWiki/memory cross-pollination (include_history, include_contextwiki are reserved/ignored)
 // - The LLM planner/selector add latency and LLM cost with currently unclear eval benefit
 // - obsidianindex and companion DB are NOT queried inside the ensemble
 ```
@@ -446,7 +446,7 @@ This is **explicitly prohibited** by AGENTS.md rule #16: _"Never use keyword heu
 ### `memory_ensemble_retrieve` requires subcall to be wired
 Returns `{supported: false}` if `subcall` not set. Only a few callers wire it.
 
-### `include_history` and `include_aca` are reserved/unimplemented
+### `include_history` and `include_contextwiki` are reserved/unimplemented
 Both fields exist in `codeSearchEnsembleInput.Constraints` but are explicitly marked "ignored in the first slice."
 
 ### `search_scenes` uses LIKE substring match

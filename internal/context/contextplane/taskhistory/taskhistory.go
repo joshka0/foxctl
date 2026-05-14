@@ -79,21 +79,21 @@ type Options struct {
 }
 
 type Pack struct {
-	WorkspacePath string                       `json:"workspace_path"`
-	WorkspaceID   string                       `json:"workspace_id"`
-	GeneratedAt   time.Time                    `json:"generated_at"`
-	Task          contextplane.TaskCandidate   `json:"task"`
-	TaskPacket    contextplane.TaskPacket      `json:"task_packet"`
-	Handoffs      []contextplane.HandoffRecord `json:"handoffs,omitempty"`
-	FilesTouched  []string                     `json:"files_touched,omitempty"`
-	ExternalRefs  []string                     `json:"external_refs,omitempty"`
-	Sessions      []SessionSummary             `json:"sessions,omitempty"`
-	GitHistory    []GitFileHistory             `json:"git_history,omitempty"`
-	RepoAnchors   []repoquery.Anchor           `json:"repo_anchors,omitempty"`
-	DAGAnchors    []repoquery.Anchor           `json:"dag_anchors,omitempty"`
-	ACANotes      []contextplane.RetrievalHit  `json:"aca_notes,omitempty"`
-	Transcript    *TranscriptHistory           `json:"transcript,omitempty"`
-	Summary       string                       `json:"summary,omitempty"`
+	WorkspacePath    string                       `json:"workspace_path"`
+	WorkspaceID      string                       `json:"workspace_id"`
+	GeneratedAt      time.Time                    `json:"generated_at"`
+	Task             contextplane.TaskCandidate   `json:"task"`
+	TaskPacket       contextplane.TaskPacket      `json:"task_packet"`
+	Handoffs         []contextplane.HandoffRecord `json:"handoffs,omitempty"`
+	FilesTouched     []string                     `json:"files_touched,omitempty"`
+	ExternalRefs     []string                     `json:"external_refs,omitempty"`
+	Sessions         []SessionSummary             `json:"sessions,omitempty"`
+	GitHistory       []GitFileHistory             `json:"git_history,omitempty"`
+	RepoAnchors      []repoquery.Anchor           `json:"repo_anchors,omitempty"`
+	DAGAnchors       []repoquery.Anchor           `json:"dag_anchors,omitempty"`
+	ContextWikiNotes []contextplane.RetrievalHit  `json:"contextwiki_notes,omitempty"`
+	Transcript       *TranscriptHistory           `json:"transcript,omitempty"`
+	Summary          string                       `json:"summary,omitempty"`
 }
 
 type TranscriptHistory struct {
@@ -176,7 +176,7 @@ func (c Collector) Collect(ctx context.Context, opts Options) (Pack, error) {
 		return Pack{}, err
 	}
 	query := buildTaskQuery(packet)
-	acaQuery := buildTaskACAQuery(packet)
+	contextWikiQuery := buildTaskContextWikiQuery(packet)
 	handoffs, err := c.relevantHandoffs(opts.HandoffLimit, packet.Task.ID)
 	if err != nil {
 		return Pack{}, err
@@ -194,27 +194,27 @@ func (c Collector) Collect(ctx context.Context, opts Options) (Pack, error) {
 	if err != nil {
 		return Pack{}, err
 	}
-	notes, err := c.collectACANotes(ctx, acaQuery, opts.NoteLimit)
+	notes, err := c.collectContextWikiNotes(ctx, contextWikiQuery, opts.NoteLimit)
 	if err != nil {
 		return Pack{}, err
 	}
 
 	pack := Pack{
-		WorkspacePath: opts.WorkspacePath,
-		WorkspaceID:   opts.WorkspaceID,
-		GeneratedAt:   time.Now().UTC(),
-		Task:          packet.Task,
-		TaskPacket:    packet,
-		Handoffs:      handoffs,
-		FilesTouched:  filesTouched,
-		ExternalRefs:  externalRefs,
-		Sessions:      sessions,
-		GitHistory:    gitHistory,
-		RepoAnchors:   repoAnchors,
-		DAGAnchors:    dagAnchors,
-		ACANotes:      notes,
+		WorkspacePath:    opts.WorkspacePath,
+		WorkspaceID:      opts.WorkspaceID,
+		GeneratedAt:      time.Now().UTC(),
+		Task:             packet.Task,
+		TaskPacket:       packet,
+		Handoffs:         handoffs,
+		FilesTouched:     filesTouched,
+		ExternalRefs:     externalRefs,
+		Sessions:         sessions,
+		GitHistory:       gitHistory,
+		RepoAnchors:      repoAnchors,
+		DAGAnchors:       dagAnchors,
+		ContextWikiNotes: notes,
 	}
-	pack.Transcript, _ = c.collectTranscriptHistory(ctx, opts.WorkspacePath, buildTaskACAQuery(packet), opts.TranscriptHistoryScope)
+	pack.Transcript, _ = c.collectTranscriptHistory(ctx, opts.WorkspacePath, buildTaskContextWikiQuery(packet), opts.TranscriptHistoryScope)
 	pack.Summary = summarizePack(pack)
 	return pack, nil
 }
@@ -316,7 +316,7 @@ func buildTaskQuery(packet contextplane.TaskPacket) string {
 	return normalizeQueryText(strings.Join(uniqueStrings(parts), " "))
 }
 
-func buildTaskACAQuery(packet contextplane.TaskPacket) string {
+func buildTaskContextWikiQuery(packet contextplane.TaskPacket) string {
 	if title := strings.TrimSpace(packet.Task.Title); title != "" {
 		return normalizeQueryText(title)
 	}
@@ -561,7 +561,7 @@ func (c Collector) collectRepoContext(ctx context.Context, query string, opts Op
 	return searchOut.Anchors, dagOut.Anchors, nil
 }
 
-func (c Collector) collectACANotes(ctx context.Context, query string, noteLimit int) ([]contextplane.RetrievalHit, error) {
+func (c Collector) collectContextWikiNotes(ctx context.Context, query string, noteLimit int) ([]contextplane.RetrievalHit, error) {
 	if c.VaultIndex == nil || strings.TrimSpace(query) == "" {
 		return nil, nil
 	}
@@ -1737,7 +1737,7 @@ func summarizePack(pack Pack) string {
 		fmt.Sprintf("%d session(s)", len(pack.Sessions)),
 		fmt.Sprintf("%d repo anchor(s)", len(pack.RepoAnchors)),
 		fmt.Sprintf("%d dag anchor(s)", len(pack.DAGAnchors)),
-		fmt.Sprintf("%d ContextWiki note(s)", len(pack.ACANotes)),
+		fmt.Sprintf("%d ContextWiki note(s)", len(pack.ContextWikiNotes)),
 	}
 	if len(pack.FilesTouched) > 0 {
 		parts = append(parts, "top files: "+strings.Join(shortenStrings(pack.FilesTouched, 3), ", "))

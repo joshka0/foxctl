@@ -37,7 +37,7 @@ signature:
     - name: vault_path
       type: string
       required: false
-      description: Optional vault path override for scope=["context"] (otherwise uses FOXCTL_CONTEXTWIKI_VAULT_PATH, FOXCTL_ACA_VAULT_PATH, or FOXCTL_OBSIDIAN_VAULT_PATH)
+      description: Optional vault path override for scope=["context"] (otherwise uses FOXCTL_CONTEXTWIKI_VAULT_PATH or FOXCTL_OBSIDIAN_VAULT_PATH)
     - name: limit
       type: integer
       required: false
@@ -209,7 +209,7 @@ signature:
       - FOXCTL_RERANK_MODEL: Reranker model (Qwen/Qwen3-Reranker-0.6B by default)
       - TURSO_DATABASE_URL: Remote Turso database URL (required for remote=true)
       - TURSO_AUTH_TOKEN: Remote Turso auth token (required for remote=true)
-      - FOXCTL_CONTEXTWIKI_VAULT_PATH, FOXCTL_ACA_VAULT_PATH, or FOXCTL_OBSIDIAN_VAULT_PATH: Vault path for scope=["context"]
+      - FOXCTL_CONTEXTWIKI_VAULT_PATH or FOXCTL_OBSIDIAN_VAULT_PATH: Vault path for scope=["context"]
 
       Without an API key:
       - Symbol search works via BM25 text matching and ripgrep fallback

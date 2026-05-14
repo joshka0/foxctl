@@ -95,10 +95,10 @@ If you are replying manually with `type`, keep the stable header format:
 [tmux-bridge from=agent-b pane=%4 reply_to=agent-b] I reviewed the mailbox code; the lease path looks safe.
 ```
 
-## ACA Fit
+## ContextWiki Fit
 
 tmux is the live coordination plane.
-ACA is the durable continuity plane.
+ContextWiki is the durable continuity plane.
 
 Promote only derived facts:
 

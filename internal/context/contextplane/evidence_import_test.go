@@ -26,16 +26,16 @@ trust: canonical
 ---
 # semantic and memory
 
-ACA vocabulary, retrieval, and memory conventions live here.
+ContextWiki vocabulary, retrieval, and memory conventions live here.
 `), 0o644); err != nil {
 		t.Fatalf("write target note: %v", err)
 	}
 
 	result, err := store.ImportEvidence(context.Background(), filepath.Join(t.TempDir(), "cas"), vaultRoot, EvidenceImportInput{
-		Title:      "ACA Vocabulary Evidence Intake",
+		Title:      "ContextWiki Vocabulary Evidence Intake",
 		SourceKind: "transcript",
 		SourceRef:  "/tmp/retro.txt",
-		Content: "We should unify ACA vocabulary.\n" +
+		Content: "We should unify ContextWiki vocabulary.\n" +
 			"Action: add a proposal store for memory changes.\n" +
 			"Question: Should L5 ingest live under context or obsidian?\n" +
 			"This pattern helps keep retrieval fixes reviewable and bounded.\n",
@@ -74,7 +74,7 @@ ACA vocabulary, retrieval, and memory conventions live here.
 	}
 
 	second, err := store.ImportEvidence(context.Background(), filepath.Join(t.TempDir(), "cas-2"), vaultRoot, EvidenceImportInput{
-		Title:      "ACA Vocabulary Evidence Intake",
+		Title:      "ContextWiki Vocabulary Evidence Intake",
 		SourceKind: "transcript",
 		SourceRef:  "/tmp/retro-2.txt",
 		Content:    "Policy update suggestion.\nWorkflow change.\nConvention should be documented.\n",

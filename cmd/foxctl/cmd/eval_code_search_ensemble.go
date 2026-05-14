@@ -209,7 +209,7 @@ func newEvalCodeSearchEnsembleCommand() *cobra.Command {
 		llmPlannerProvider      string
 		llmPlannerModel         string
 		llmPlannerMaxCandidates int
-		includeACA              bool
+		includeContextWiki      bool
 		llmSelector             bool
 		llmProvider             string
 		llmModel                string
@@ -265,7 +265,7 @@ func newEvalCodeSearchEnsembleCommand() *cobra.Command {
 
 			results := make([]codeSearchEnsembleEvalResult, 0, len(evalCases))
 			for _, evalCase := range evalCases {
-				results = append(results, runSingleCodeSearchEnsembleEval(ctx, cfg, absWorkspace, strings.TrimSpace(vaultPath), evalCase, timeout, toolProfile, maxCandidates, maxFiles, maxSnippets, passThreshold, llmPlanner, llmReplanner, llmPlannerProvider, llmPlannerModel, llmPlannerMaxCandidates, includeACA, llmSelector, llmProvider, llmModel, llmMaxCandidates))
+				results = append(results, runSingleCodeSearchEnsembleEval(ctx, cfg, absWorkspace, strings.TrimSpace(vaultPath), evalCase, timeout, toolProfile, maxCandidates, maxFiles, maxSnippets, passThreshold, llmPlanner, llmReplanner, llmPlannerProvider, llmPlannerModel, llmPlannerMaxCandidates, includeContextWiki, llmSelector, llmProvider, llmModel, llmMaxCandidates))
 			}
 
 			summary := summarizeCodeSearchEnsembleEvalResults(results, alertPolicy)
@@ -330,7 +330,7 @@ func newEvalCodeSearchEnsembleCommand() *cobra.Command {
 	cmd.Flags().StringVar(&llmPlannerProvider, "llm-planner-provider", "", "Provider override for bounded planner")
 	cmd.Flags().StringVar(&llmPlannerModel, "llm-planner-model", "", "Model override for bounded planner")
 	cmd.Flags().IntVar(&llmPlannerMaxCandidates, "llm-planner-max-candidates", 8, "Maximum probes supplied to the bounded planner")
-	cmd.Flags().BoolVar(&includeACA, "include-aca", false, "Enable bounded ContextWiki note/concept guidance during candidate bootstrap")
+	cmd.Flags().BoolVar(&includeContextWiki, "include-contextwiki", false, "Enable bounded ContextWiki note/concept guidance during candidate bootstrap")
 	cmd.Flags().BoolVar(&llmSelector, "llm-selector", false, "Enable bounded LLM adjudication over top execution-trace candidates")
 	cmd.Flags().StringVar(&llmProvider, "llm-selector-provider", "", "Provider override for bounded selector")
 	cmd.Flags().StringVar(&llmModel, "llm-selector-model", "", "Model override for bounded selector")
@@ -353,7 +353,7 @@ func runSingleCodeSearchEnsembleEval(
 	llmReplanner bool,
 	llmPlannerProvider, llmPlannerModel string,
 	llmPlannerMaxCandidates int,
-	includeACA bool,
+	includeContextWiki bool,
 	llmSelector bool,
 	llmProvider, llmModel string,
 	llmMaxCandidates int,
@@ -423,9 +423,9 @@ func runSingleCodeSearchEnsembleEval(
 			"max_candidates": llmMaxCandidates,
 		},
 		"constraints": map[string]any{
-			"exclude_paths":     append([]string(nil), evalCase.ExcludedPaths...),
-			"include_aca":       includeACA,
-			"require_grounding": evalCase.RequireGrounding || len(evalCase.ExpectedPaths) > 0,
+			"exclude_paths":       append([]string(nil), evalCase.ExcludedPaths...),
+			"include_contextwiki": includeContextWiki,
+			"require_grounding":   evalCase.RequireGrounding || len(evalCase.ExpectedPaths) > 0,
 		},
 		"budget": map[string]any{
 			"max_candidates": maxCandidates,

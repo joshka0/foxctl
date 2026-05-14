@@ -96,11 +96,11 @@ suite: foxctl
 limit: 10
 format: markdown
 modes:
-  - aca_default
-  - aca_query_typed
+  - contextwiki_default
+  - contextwiki_query_typed
 fail_on_alerts: true
 thresholds:
-  aca_default:
+  contextwiki_default:
     min_hit_rate_at_5: 0.80
     min_hit_rate_at_10: 0.90
     min_mrr: 0.75
@@ -119,12 +119,12 @@ thresholds:
 	if !policy.FailOnAlerts {
 		t.Fatalf("FailOnAlerts=false want true")
 	}
-	if got := policy.Thresholds["aca_default"].MinMeanReciprocalRank; got != 0.75 {
+	if got := policy.Thresholds["contextwiki_default"].MinMeanReciprocalRank; got != 0.75 {
 		t.Fatalf("min_mrr=%.2f want 0.75", got)
 	}
 
 	alerts := BuildAlerts([]Summary{{
-		Mode:               "aca_default",
+		Mode:               "contextwiki_default",
 		HitRateAt5:         0.70,
 		HitRateAt10:        0.85,
 		MeanReciprocalRank: 0.60,

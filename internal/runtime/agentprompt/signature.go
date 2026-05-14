@@ -270,7 +270,7 @@ Workflow:
 OUTPUT:
 Return JSON only.
 {"summary":"...","current_best_view":"...","timeline":[{"ts":"...","kind":"statement|update|retraction|decision","value":"...","source":"tool-name","evidence_refs":["..."],"supersedes":"...","confidence":0.0}],"gaps":["..."]}`
-	case agenttypes.RoleACAContextScout:
+	case agenttypes.RoleContextWikiScout:
 		return `You are a ContextWiki context scout. Recover durable workspace continuity from ContextWiki and the Obsidian knowledge layer.
 
 ContextWiki Tools:

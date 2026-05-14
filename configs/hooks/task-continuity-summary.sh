@@ -11,7 +11,7 @@ if ! command -v "$FOXCTL_BIN" >/dev/null 2>&1; then
 fi
 
 workspace="${FOXCTL_WORKSPACE:-${CLAUDE_PROJECT_DIR:-$(pwd)}}"
-vault_path="${FOXCTL_CONTEXTWIKI_VAULT_PATH:-${FOXCTL_ACA_VAULT_PATH:-${FOXCTL_OBSIDIAN_VAULT_PATH:-}}}"
+vault_path="${FOXCTL_CONTEXTWIKI_VAULT_PATH:-${FOXCTL_OBSIDIAN_VAULT_PATH:-}}"
 
 args=(context task-history-summary --workspace "$workspace")
 if [[ -n "${vault_path}" ]]; then

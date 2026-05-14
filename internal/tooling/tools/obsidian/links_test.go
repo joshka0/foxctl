@@ -9,19 +9,19 @@ import (
 func TestParseNoteLinks(t *testing.T) {
 	content := []byte(`---
 aliases:
-  - ACA Layers
+  - ContextWiki Layers
 ---
 
-# ACA Memory Layers
+# ContextWiki Memory Layers
 
-See [[ACA MOC]] and [[ACA L1 Top of Mind|Top of Mind]].
+See [[ContextWiki MOC]] and [[ContextWiki L1 Top of Mind|Top of Mind]].
 `)
 
-	result := ParseNoteLinks("ACA Memory Layers.md", content)
-	if result.Title != "ACA Memory Layers" {
+	result := ParseNoteLinks("ContextWiki Memory Layers.md", content)
+	if result.Title != "ContextWiki Memory Layers" {
 		t.Fatalf("title=%q", result.Title)
 	}
-	if len(result.Aliases) != 1 || result.Aliases[0] != "ACA Layers" {
+	if len(result.Aliases) != 1 || result.Aliases[0] != "ContextWiki Layers" {
 		t.Fatalf("aliases=%v", result.Aliases)
 	}
 	if len(result.Headings) != 1 || result.Headings[0].Anchor != "aca-memory-layers" {
@@ -37,26 +37,26 @@ See [[ACA MOC]] and [[ACA L1 Top of Mind|Top of Mind]].
 
 func TestRelatedNotes(t *testing.T) {
 	root := t.TempDir()
-	mustWrite(t, filepath.Join(root, "ACA Memory Layers.md"), `---
+	mustWrite(t, filepath.Join(root, "ContextWiki Memory Layers.md"), `---
 aliases:
-  - ACA Layers
+  - ContextWiki Layers
 ---
 
-# ACA Memory Layers
+# ContextWiki Memory Layers
 
-See [[ACA MOC]] and [[ACA L1 Top of Mind]].
+See [[ContextWiki MOC]] and [[ContextWiki L1 Top of Mind]].
 `)
-	mustWrite(t, filepath.Join(root, "ACA MOC.md"), `# ACA MOC
+	mustWrite(t, filepath.Join(root, "ContextWiki MOC.md"), `# ContextWiki MOC
 
-- [[ACA Memory Layers]]
+- [[ContextWiki Memory Layers]]
 `)
-	mustWrite(t, filepath.Join(root, "ACA L1 Top of Mind.md"), `# ACA L1 Top of Mind
+	mustWrite(t, filepath.Join(root, "ContextWiki L1 Top of Mind.md"), `# ContextWiki L1 Top of Mind
 
-Related to [[ACA Memory Layers]]
+Related to [[ContextWiki Memory Layers]]
 `)
 	mustWrite(t, filepath.Join(root, "Unrelated.md"), `# Unrelated`)
 
-	results, err := RelatedNotes(root, filepath.Join(root, "ACA Memory Layers.md"), LinkQueryOptions{
+	results, err := RelatedNotes(root, filepath.Join(root, "ContextWiki Memory Layers.md"), LinkQueryOptions{
 		IncludeDirect: true,
 		IncludeBack:   true,
 		IncludeAlias:  true,

@@ -31,5 +31,5 @@ ranking_weights:
   recency: 1
   reuse_frequency: 1
 
-aca:
+contextwiki:
   package_note_fallback: true

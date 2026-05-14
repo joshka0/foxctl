@@ -16,7 +16,7 @@ trust: reviewed
 ## Operational Inputs
 - Latest exported sessions
 - Promotion inbox
-- [[refactor-scout-and-aca]]
+- [[refactor-scout-and-contextwiki]]
 
 ## Repo Links
 - Paths

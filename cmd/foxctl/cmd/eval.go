@@ -313,8 +313,8 @@ func newEvalCorrectionsCommand() *cobra.Command {
 			var workspaceStore *contextplane.WorkspaceStore
 
 			for _, c := range suite.Cases {
-				if c.Method == "aca_retrieve" && strings.TrimSpace(vaultPath) == "" {
-					return fmt.Errorf("--vault-path is required for aca_retrieve correction cases")
+				if c.Method == "contextwiki_retrieve" && strings.TrimSpace(vaultPath) == "" {
+					return fmt.Errorf("--vault-path is required for contextwiki_retrieve correction cases")
 				}
 			}
 			if strings.TrimSpace(vaultPath) != "" {
@@ -355,7 +355,7 @@ func newEvalCorrectionsCommand() *cobra.Command {
 				var actualClass, actualFix string
 				var evalErr error
 				switch c.Method {
-				case "aca_retrieve":
+				case "contextwiki_retrieve":
 					res, err := workspaceStore.RetrieveWithOptions(ctx, index, repo, semanticProvider, c.Query, 5, workspaceStore.CurrentRetrievalOptions())
 					if err != nil {
 						evalErr = err
@@ -511,7 +511,7 @@ func newEvalRetrievalCommand() *cobra.Command {
 			var semanticProvider semantic.EmbeddingProvider
 			var semanticProviderErr error
 			var workspaceStore *contextplane.WorkspaceStore
-			var acaMemStore storage.MemoryStore
+			var contextWikiMemStore storage.MemoryStore
 			var cochangeMemStore storage.MemoryStore
 			var cochangeProvider semantic.EmbeddingProvider
 			var cochangeProviderErr error
@@ -536,8 +536,8 @@ func newEvalRetrievalCommand() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				acaMemStore = memStore
-				defer acaMemStore.Close()
+				contextWikiMemStore = memStore
+				defer contextWikiMemStore.Close()
 				index, err = obsidianindex.Open(ctx, cfg.Storage.Root, vaultPath)
 				if err != nil {
 					return err
@@ -635,12 +635,12 @@ func newEvalRetrievalCommand() *cobra.Command {
 						return runSemanticSearchEvalMode(ctx, target, vaultPath, q.Query, limit, []string{"symbols", "sessions", "memories", "tasks", "codemaps", "context"})
 					}))
 				}
-				baseACAOpts := contextplane.RetrievalOptions{}
+				baseContextWikiOpts := contextplane.RetrievalOptions{}
 				if workspaceStore != nil {
-					baseACAOpts = workspaceStore.CurrentRetrievalOptions()
+					baseContextWikiOpts = workspaceStore.CurrentRetrievalOptions()
 				}
-				if hasMode(selectedModes, "aca_control_only") {
-					opts := baseACAOpts
+				if hasMode(selectedModes, "contextwiki_control_only") {
+					opts := baseContextWikiOpts
 					opts.IncludeTopOfMindResult = true
 					opts.IncludeLatestHandoff = true
 					opts.IncludeVaultHits = false
@@ -649,12 +649,12 @@ func newEvalRetrievalCommand() *cobra.Command {
 					opts.UseCodeHints = false
 					opts.UseSemanticVaultSearch = false
 					opts.IncludeControlPlaneRefs = true
-					qr.Modes["aca_control_only"] = evaluate("aca_control_only", measureMode(func() ([]string, error) {
-						return runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
+					qr.Modes["contextwiki_control_only"] = evaluate("contextwiki_control_only", measureMode(func() ([]string, error) {
+						return runContextWikiEvalMode(ctx, workspaceStore, index, repo, semanticProvider, contextWikiMemStore, q.Query, limit, opts)
 					}))
 				}
-				if hasMode(selectedModes, "aca_vault_only") {
-					opts := baseACAOpts
+				if hasMode(selectedModes, "contextwiki_vault_only") {
+					opts := baseContextWikiOpts
 					opts.IncludeTopOfMindResult = false
 					opts.IncludeLatestHandoff = false
 					opts.IncludeVaultHits = true
@@ -663,15 +663,15 @@ func newEvalRetrievalCommand() *cobra.Command {
 					opts.UseCodeHints = false
 					opts.UseSemanticVaultSearch = true
 					opts.IncludeControlPlaneRefs = false
-					qr.Modes["aca_vault_only"] = evaluate("aca_vault_only", measureMode(func() ([]string, error) {
+					qr.Modes["contextwiki_vault_only"] = evaluate("contextwiki_vault_only", measureMode(func() ([]string, error) {
 						if semanticHealthErr != nil {
 							return nil, semanticHealthErr
 						}
-						return runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
+						return runContextWikiEvalMode(ctx, workspaceStore, index, repo, semanticProvider, contextWikiMemStore, q.Query, limit, opts)
 					}))
 				}
-				if hasMode(selectedModes, "aca_repo_hints") {
-					opts := baseACAOpts
+				if hasMode(selectedModes, "contextwiki_repo_hints") {
+					opts := baseContextWikiOpts
 					opts.IncludeTopOfMindResult = false
 					opts.IncludeLatestHandoff = false
 					opts.IncludeVaultHits = true
@@ -680,15 +680,15 @@ func newEvalRetrievalCommand() *cobra.Command {
 					opts.UseCodeHints = true
 					opts.UseSemanticVaultSearch = true
 					opts.IncludeControlPlaneRefs = false
-					qr.Modes["aca_repo_hints"] = evaluate("aca_repo_hints", measureMode(func() ([]string, error) {
+					qr.Modes["contextwiki_repo_hints"] = evaluate("contextwiki_repo_hints", measureMode(func() ([]string, error) {
 						if semanticHealthErr != nil {
 							return nil, semanticHealthErr
 						}
-						return runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
+						return runContextWikiEvalMode(ctx, workspaceStore, index, repo, semanticProvider, contextWikiMemStore, q.Query, limit, opts)
 					}))
 				}
-				if hasMode(selectedModes, "aca_canonical_only") {
-					opts := baseACAOpts
+				if hasMode(selectedModes, "contextwiki_canonical_only") {
+					opts := baseContextWikiOpts
 					opts.IncludeTopOfMindResult = false
 					opts.IncludeLatestHandoff = false
 					opts.IncludeVaultHits = true
@@ -698,15 +698,15 @@ func newEvalRetrievalCommand() *cobra.Command {
 					opts.UseSemanticVaultSearch = true
 					opts.AllowedTrusts = []string{"canonical", "reviewed"}
 					opts.IncludeControlPlaneRefs = false
-					qr.Modes["aca_canonical_only"] = evaluate("aca_canonical_only", measureMode(func() ([]string, error) {
+					qr.Modes["contextwiki_canonical_only"] = evaluate("contextwiki_canonical_only", measureMode(func() ([]string, error) {
 						if semanticHealthErr != nil {
 							return nil, semanticHealthErr
 						}
-						return runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
+						return runContextWikiEvalMode(ctx, workspaceStore, index, repo, semanticProvider, contextWikiMemStore, q.Query, limit, opts)
 					}))
 				}
-				if hasMode(selectedModes, "aca_package_fallback") {
-					opts := baseACAOpts
+				if hasMode(selectedModes, "contextwiki_package_fallback") {
+					opts := baseContextWikiOpts
 					opts.IncludeTopOfMindResult = false
 					opts.IncludeLatestHandoff = false
 					opts.IncludeVaultHits = true
@@ -717,15 +717,15 @@ func newEvalRetrievalCommand() *cobra.Command {
 					opts.UsePackageNoteFallback = true
 					opts.AllowedTrusts = []string{"canonical", "reviewed"}
 					opts.IncludeControlPlaneRefs = false
-					qr.Modes["aca_package_fallback"] = evaluate("aca_package_fallback", measureMode(func() ([]string, error) {
+					qr.Modes["contextwiki_package_fallback"] = evaluate("contextwiki_package_fallback", measureMode(func() ([]string, error) {
 						if semanticHealthErr != nil {
 							return nil, semanticHealthErr
 						}
-						return runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
+						return runContextWikiEvalMode(ctx, workspaceStore, index, repo, semanticProvider, contextWikiMemStore, q.Query, limit, opts)
 					}))
 				}
-				if hasMode(selectedModes, "aca_query_typed") {
-					opts := baseACAOpts
+				if hasMode(selectedModes, "contextwiki_query_typed") {
+					opts := baseContextWikiOpts
 					opts.IncludeTopOfMindResult = false
 					opts.IncludeLatestHandoff = false
 					opts.IncludeVaultHits = true
@@ -736,56 +736,56 @@ func newEvalRetrievalCommand() *cobra.Command {
 					opts.AllowedTrusts = []string{"canonical", "reviewed"}
 					opts.UseQueryTypeBias = true
 					opts.IncludeControlPlaneRefs = false
-					qr.Modes["aca_query_typed"] = evaluate("aca_query_typed", measureMode(func() ([]string, error) {
+					qr.Modes["contextwiki_query_typed"] = evaluate("contextwiki_query_typed", measureMode(func() ([]string, error) {
 						if semanticHealthErr != nil {
 							return nil, semanticHealthErr
 						}
-						return runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
+						return runContextWikiEvalMode(ctx, workspaceStore, index, repo, semanticProvider, contextWikiMemStore, q.Query, limit, opts)
 					}))
 				}
-				if hasMode(selectedModes, "aca_default") {
-					opts := baseACAOpts
+				if hasMode(selectedModes, "contextwiki_default") {
+					opts := baseContextWikiOpts
 					opts.IncludeControlPlaneRefs = false
-					qr.Modes["aca_default"] = evaluate("aca_default", measureMode(func() ([]string, error) {
+					qr.Modes["contextwiki_default"] = evaluate("contextwiki_default", measureMode(func() ([]string, error) {
 						if semanticHealthErr != nil {
 							return nil, semanticHealthErr
 						}
-						return runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
+						return runContextWikiEvalMode(ctx, workspaceStore, index, repo, semanticProvider, contextWikiMemStore, q.Query, limit, opts)
 					}))
 				}
-				if hasMode(selectedModes, "aca_semantic_anchors") {
-					opts := baseACAOpts
+				if hasMode(selectedModes, "contextwiki_semantic_anchors") {
+					opts := baseContextWikiOpts
 					opts.IncludeControlPlaneRefs = false
 					opts.UseSemanticAnchors = true
-					qr.Modes["aca_semantic_anchors"] = evaluate("aca_semantic_anchors", measureMode(func() ([]string, error) {
+					qr.Modes["contextwiki_semantic_anchors"] = evaluate("contextwiki_semantic_anchors", measureMode(func() ([]string, error) {
 						if semanticHealthErr != nil {
 							return nil, semanticHealthErr
 						}
-						return runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
+						return runContextWikiEvalMode(ctx, workspaceStore, index, repo, semanticProvider, contextWikiMemStore, q.Query, limit, opts)
 					}))
 				}
-				if hasMode(selectedModes, "aca_cochange") {
-					opts := baseACAOpts
+				if hasMode(selectedModes, "contextwiki_cochange") {
+					opts := baseContextWikiOpts
 					opts.IncludeControlPlaneRefs = false
 					opts.UseCoChangePrior = true
 					opts.UseContinuityBundles = false
-					qr.Modes["aca_cochange"] = evaluate("aca_cochange", measureMode(func() ([]string, error) {
+					qr.Modes["contextwiki_cochange"] = evaluate("contextwiki_cochange", measureMode(func() ([]string, error) {
 						if semanticHealthErr != nil {
 							return nil, semanticHealthErr
 						}
-						return runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
+						return runContextWikiEvalMode(ctx, workspaceStore, index, repo, semanticProvider, contextWikiMemStore, q.Query, limit, opts)
 					}))
 				}
-				if hasMode(selectedModes, "aca_cochange_continuity") {
-					opts := baseACAOpts
+				if hasMode(selectedModes, "contextwiki_cochange_continuity") {
+					opts := baseContextWikiOpts
 					opts.IncludeControlPlaneRefs = false
 					opts.UseCoChangePrior = true
 					opts.UseContinuityBundles = true
-					qr.Modes["aca_cochange_continuity"] = evaluate("aca_cochange_continuity", measureMode(func() ([]string, error) {
+					qr.Modes["contextwiki_cochange_continuity"] = evaluate("contextwiki_cochange_continuity", measureMode(func() ([]string, error) {
 						if semanticHealthErr != nil {
 							return nil, semanticHealthErr
 						}
-						return runACAEvalMode(ctx, workspaceStore, index, repo, semanticProvider, acaMemStore, q.Query, limit, opts)
+						return runContextWikiEvalMode(ctx, workspaceStore, index, repo, semanticProvider, contextWikiMemStore, q.Query, limit, opts)
 					}))
 				}
 				if hasMode(selectedModes, "cochange_artifacts") {
@@ -888,7 +888,7 @@ func newEvalRetrievalCommand() *cobra.Command {
 	cmd.Flags().StringVar(&vaultPath, "vault-path", "", "Vault path")
 	cmd.Flags().IntVar(&limit, "limit", 10, "Maximum hits per retrieval mode")
 	cmd.Flags().StringVar(&format, "format", "markdown", "Output companion format: markdown or json")
-	cmd.Flags().StringSliceVar(&modes, "mode", []string{"baseline", "lexical", "semantic", "blended"}, "Retrieval modes to evaluate (also available: skill_default, skill_context, skill_default_plus_context, contextwiki_default, contextwiki_query_typed, contextwiki_semantic_anchors, contextwiki_cochange, aca_* legacy aliases, cochange_artifacts, repoindex_search, repoindex_semantic_search, repoindex_dag, repoindex_semantic_dag, rlm_llm, rlm_llm_codeintel, rlm_llm_code_staged)")
+	cmd.Flags().StringSliceVar(&modes, "mode", []string{"baseline", "lexical", "semantic", "blended"}, "Retrieval modes to evaluate (also available: skill_default, skill_context, skill_default_plus_context, contextwiki_control_only, contextwiki_vault_only, contextwiki_repo_hints, contextwiki_canonical_only, contextwiki_package_fallback, contextwiki_query_typed, contextwiki_default, contextwiki_semantic_anchors, contextwiki_cochange, contextwiki_cochange_continuity, cochange_artifacts, repoindex_search, repoindex_semantic_search, repoindex_dag, repoindex_semantic_dag, rlm_llm, rlm_llm_codeintel, rlm_llm_code_staged)")
 	cmd.Flags().StringVar(&policyFile, "policy-file", "", "Optional YAML file with retrieval suite defaults and metric thresholds")
 	cmd.Flags().BoolVar(&failOnAlerts, "fail-on-alerts", false, "Exit with an error when any retrieval metric alert is present")
 	cmd.Flags().BoolVar(&rebuildIndex, "rebuild-index", true, "Rebuild the vault index before evaluation")
@@ -1009,7 +1009,7 @@ func normalizeEvalModes(modes []string) []string {
 	out := make([]string, 0, len(modes))
 	seen := map[string]struct{}{}
 	for _, mode := range modes {
-		mode = canonicalEvalMode(strings.ToLower(strings.TrimSpace(mode)))
+		mode = strings.ToLower(strings.TrimSpace(mode))
 		if mode == "" {
 			continue
 		}
@@ -1022,39 +1022,12 @@ func normalizeEvalModes(modes []string) []string {
 	return out
 }
 
-func canonicalEvalMode(mode string) string {
-	switch mode {
-	case "contextwiki", "contextwiki_default":
-		return "aca_default"
-	case "contextwiki_control_only":
-		return "aca_control_only"
-	case "contextwiki_vault_only":
-		return "aca_vault_only"
-	case "contextwiki_repo_hints":
-		return "aca_repo_hints"
-	case "contextwiki_canonical_only":
-		return "aca_canonical_only"
-	case "contextwiki_package_fallback":
-		return "aca_package_fallback"
-	case "contextwiki_query_typed":
-		return "aca_query_typed"
-	case "contextwiki_semantic_anchors":
-		return "aca_semantic_anchors"
-	case "contextwiki_cochange":
-		return "aca_cochange"
-	case "contextwiki_cochange_continuity":
-		return "aca_cochange_continuity"
-	default:
-		return mode
-	}
-}
-
 func evalModesRequireVault(modes []string) bool {
 	for _, mode := range modes {
 		switch mode {
 		case "baseline", "lexical", "semantic", "blended",
-			"aca_control_only", "aca_vault_only", "aca_repo_hints", "aca_canonical_only", "aca_package_fallback", "aca_query_typed",
-			"aca_default", "aca_semantic_anchors", "aca_cochange", "aca_cochange_continuity":
+			"contextwiki_control_only", "contextwiki_vault_only", "contextwiki_repo_hints", "contextwiki_canonical_only", "contextwiki_package_fallback", "contextwiki_query_typed",
+			"contextwiki_default", "contextwiki_semantic_anchors", "contextwiki_cochange", "contextwiki_cochange_continuity":
 			return true
 		}
 	}
@@ -1065,8 +1038,8 @@ func evalModesRequireSemanticHealth(modes []string) bool {
 	for _, mode := range modes {
 		switch strings.ToLower(strings.TrimSpace(mode)) {
 		case "semantic", "blended",
-			"aca_vault_only", "aca_repo_hints", "aca_canonical_only", "aca_package_fallback", "aca_query_typed",
-			"aca_default", "aca_semantic_anchors", "aca_cochange", "aca_cochange_continuity":
+			"contextwiki_vault_only", "contextwiki_repo_hints", "contextwiki_canonical_only", "contextwiki_package_fallback", "contextwiki_query_typed",
+			"contextwiki_default", "contextwiki_semantic_anchors", "contextwiki_cochange", "contextwiki_cochange_continuity":
 			return true
 		}
 	}
@@ -1180,7 +1153,7 @@ func runRepoIndexDAGEvalMode(ctx context.Context, storageRoot, workspacePath, qu
 	return paths, nil
 }
 
-func runACAEvalMode(
+func runContextWikiEvalMode(
 	ctx context.Context,
 	store *contextplane.WorkspaceStore,
 	index obsidianindex.Store,
@@ -1198,7 +1171,7 @@ func runACAEvalMode(
 	if err != nil {
 		return nil, err
 	}
-	return extractACAResultPaths(result, limit, opts), nil
+	return extractContextWikiResultPaths(result, limit, opts), nil
 }
 
 func runCoChangeArtifactEvalMode(ctx context.Context, workspacePath, query string, limit int, memStore storage.MemoryStore, provider semantic.EmbeddingProvider) ([]string, error) {
@@ -1392,7 +1365,7 @@ func extractRepoAnchorPaths(anchors []repoquery.Anchor) []string {
 	return out
 }
 
-func extractACAResultPaths(result contextplane.RetrievalResult, limit int, opts contextplane.RetrievalOptions) []string {
+func extractContextWikiResultPaths(result contextplane.RetrievalResult, limit int, opts contextplane.RetrievalOptions) []string {
 	seen := map[string]struct{}{}
 	out := make([]string, 0, limit)
 	appendPath := func(path string) {

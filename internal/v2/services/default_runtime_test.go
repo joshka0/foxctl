@@ -24,7 +24,7 @@ func TestNewDefaultRunService_ContextShowUsesRealDefaultExecutor(t *testing.T) {
 	store := contextplane.NewWorkspaceStore(workspace)
 	_, err := store.SaveTopOfMind(contextplane.TopOfMind{
 		WorkspaceID: "foxctl",
-		Objective:   "Streamline hooks and ACA parity",
+		Objective:   "Streamline hooks and ContextWiki parity",
 		Phase:       "design",
 		UpdatedAt:   time.Date(2026, time.March, 12, 11, 0, 0, 0, time.UTC),
 	})
@@ -86,7 +86,7 @@ func TestNewDefaultRunService_ContextShowUsesRealDefaultExecutor(t *testing.T) {
 	if !strings.Contains(call.ResultRef.Text, `"workspace_id":"foxctl"`) {
 		t.Fatalf("tool result=%q missing workspace_id", call.ResultRef.Text)
 	}
-	if !strings.Contains(call.ResultRef.Text, `"objective":"Streamline hooks and ACA parity"`) {
+	if !strings.Contains(call.ResultRef.Text, `"objective":"Streamline hooks and ContextWiki parity"`) {
 		t.Fatalf("tool result=%q missing objective", call.ResultRef.Text)
 	}
 	if eventStore.Count() == 0 {

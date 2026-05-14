@@ -238,7 +238,7 @@
    - `hooks_runtime_test.go` and `hooks_proposal_*_test.go` test individual hook commands.
    - Missing: end-to-end hook execution: trigger → hook script → context injection → skill run.
 
-9. **Obsidian/ACA Bridge Integration**
+9. **Obsidian/ContextWiki Bridge Integration**
    - No integration tests for `foxctl obsidian graph build → promote → bridge reconcile → index build`.
    - This is a critical knowledge-layer pipeline with no automated integration coverage.
 

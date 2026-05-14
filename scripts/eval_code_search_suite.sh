@@ -18,7 +18,7 @@ ARGS=(
   --vault-path "$VAULT_PATH"
   --eval-dataset-file "$DATASET"
   --tool-profile repo-grounded
-  --include-aca
+  --include-contextwiki
 )
 
 if [[ -n "$POLICY" ]]; then

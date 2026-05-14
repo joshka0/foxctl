@@ -92,7 +92,7 @@ func TestBuildToolCommand_AllowlistCanonicalizesAliases(t *testing.T) {
 	}
 }
 
-func TestNewDefaultToolCommandSpec_CompanionIncludesACAAndObsidian(t *testing.T) {
+func TestNewDefaultToolCommandSpec_CompanionIncludesContextWikiAndObsidian(t *testing.T) {
 	t.Parallel()
 
 	spec, err := NewDefaultToolCommandSpec(coretool.ProfileCompanion, "/repo", "bin/foxctl", nil, false)

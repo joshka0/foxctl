@@ -29,7 +29,7 @@ foxctl/internal/rlm/plan.go + plan_test.go: route profiles + plan modes (`free/g
 foxctl/internal/rlm/llm_runner.go + llm_runner_test.go: LLM tool-loop executor, staged phase orchestration, tool constraints, retrieved path extraction, parent tool telemetry metadata.
 foxctl/internal/rlm/lambda.go + lambda_classify.go + lambda_runner.go + lambda_test.go: lambda task typing, analytical `PlanLambda`, deterministic split/map/reduce flow, LLM usage points (classify/leaf judge/synthesize), metadata emission.
 
-foxctl/internal/rlm/env/bootstrap.go + bootstrap_test.go: environment materialization from ACA top-of-mind/handoff + repoindex + vault + optional companion DB + trajectory handles.
+foxctl/internal/rlm/env/bootstrap.go + bootstrap_test.go: environment materialization from ContextWiki top-of-mind/handoff + repoindex + vault + optional companion DB + trajectory handles.
 foxctl/internal/rlm/env/tools.go + tools_test.go: typed read-only tool schema catalog (including `memory_ensemble_retrieve`, `code_search_ensemble`, `subcall`).
 foxctl/internal/rlm/env/tool_profiles.go + tool_profiles_test.go: profile filtering (`default`, `code-intel`, `longcot-minimal`, `longcot-rlm`).
 foxctl/internal/rlm/env/scout_roles.go: role normalization/prompt decoration/tool narrowing for memory scouts.
@@ -108,7 +108,7 @@ This contract layer is reusable and already appropriately narrow.
 `Bootstrapper.Build` owns environment materialization:
 
 `Task.WorkspaceRoot`
-→ ACA top-of-mind JSON
+→ ContextWiki top-of-mind JSON
 → latest handoff JSON
 → companion DB scene/thread handles
 → repoindex projected handles

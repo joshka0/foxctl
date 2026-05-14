@@ -46,14 +46,14 @@ func TestObsidianSemanticEnabled(t *testing.T) {
 }
 
 func TestEvalModesRequireSemanticHealth(t *testing.T) {
-	if !evalModesRequireSemanticHealth([]string{"aca_default"}) {
-		t.Fatalf("aca_default should require semantic health")
+	if !evalModesRequireSemanticHealth([]string{"contextwiki_default"}) {
+		t.Fatalf("contextwiki_default should require semantic health")
 	}
 	if !evalModesRequireSemanticHealth([]string{"semantic"}) {
 		t.Fatalf("semantic should require semantic health")
 	}
-	if evalModesRequireSemanticHealth([]string{"repoindex_search", "aca_control_only"}) {
-		t.Fatalf("repoindex_search and aca_control_only should not require semantic health")
+	if evalModesRequireSemanticHealth([]string{"repoindex_search", "contextwiki_control_only"}) {
+		t.Fatalf("repoindex_search and contextwiki_control_only should not require semantic health")
 	}
 }
 

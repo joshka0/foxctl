@@ -186,7 +186,7 @@ func TestSelectMemoryScoutRolesDefaultsToDeterministicOrder(t *testing.T) {
 	t.Parallel()
 
 	got := selectMemoryScoutRoles(nil, 3)
-	want := []string{ScoutRoleMemoryFact, ScoutRoleMemoryTimeline, ScoutRoleACAContext}
+	want := []string{ScoutRoleMemoryFact, ScoutRoleMemoryTimeline, ScoutRoleContextWiki}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("selectMemoryScoutRoles()=%v want %v", got, want)
 	}

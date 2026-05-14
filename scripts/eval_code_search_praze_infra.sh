@@ -22,5 +22,5 @@ exec env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED="${CGO_ENABLED:-0}" go run 
   --eval-dataset-file "$ROOT/testdata/evals/code-search-ensemble/praze-infra-smoke.jsonl" \
   --policy-file "$ROOT/testdata/evals/code-search-ensemble/praze-infra-policy.yaml" \
   --tool-profile repo-grounded \
-  --include-aca \
+  --include-contextwiki \
   "$@"

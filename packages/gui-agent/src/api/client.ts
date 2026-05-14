@@ -1,7 +1,7 @@
 import type {
-  ACAMemoryProposal,
-  ACAOverview,
-  ACANextProposalMergeResult,
+  ContextWikiMemoryProposal,
+  ContextWikiOverview,
+  ContextWikiNextProposalMergeResult,
   AgentsListResponse,
   AgentRuntimeTree,
   AgentSpawnResponse,
@@ -490,7 +490,7 @@ export async function getContextOverview(params: {
   vault_path?: string;
   limit?: number;
   maintenance_limit?: number;
-}): Promise<ACAOverview> {
+}): Promise<ContextWikiOverview> {
   const query = new URLSearchParams();
   query.set("workspace", params.workspace);
   if (params.vault_path) query.set("vault_path", params.vault_path);
@@ -503,7 +503,7 @@ export async function getContextOverview(params: {
   ) {
     query.set("maintenance_limit", String(params.maintenance_limit));
   }
-  const env = await request<ApiEnvelope<ACAOverview>>(
+  const env = await request<ApiEnvelope<ContextWikiOverview>>(
     `/context/overview?${query.toString()}`,
   );
   return unwrapEnvelope(env);
@@ -514,9 +514,9 @@ export async function getContextNextProposalMerge(params: {
   vault_path?: string;
   limit?: number;
   claim?: boolean;
-}): Promise<ACANextProposalMergeResult> {
+}): Promise<ContextWikiNextProposalMergeResult> {
   if (params.claim) {
-    const env = await request<ApiEnvelope<ACANextProposalMergeResult>>(
+    const env = await request<ApiEnvelope<ContextWikiNextProposalMergeResult>>(
       "/context/next-proposal-merge/claim",
       {
         method: "POST",
@@ -535,7 +535,7 @@ export async function getContextNextProposalMerge(params: {
   if (typeof params.limit === "number" && Number.isFinite(params.limit)) {
     query.set("limit", String(params.limit));
   }
-  const env = await request<ApiEnvelope<ACANextProposalMergeResult>>(
+  const env = await request<ApiEnvelope<ContextWikiNextProposalMergeResult>>(
     `/context/next-proposal-merge?${query.toString()}`,
   );
   return unwrapEnvelope(env);
@@ -544,9 +544,9 @@ export async function getContextNextProposalMerge(params: {
 export async function releaseContextProposalMerge(params: {
   workspace: string;
   proposal_id: string;
-}): Promise<{ workspace_path: string; proposal: ACAMemoryProposal }> {
+}): Promise<{ workspace_path: string; proposal: ContextWikiMemoryProposal }> {
   const env = await request<
-    ApiEnvelope<{ workspace_path: string; proposal: ACAMemoryProposal }>
+    ApiEnvelope<{ workspace_path: string; proposal: ContextWikiMemoryProposal }>
   >(`/context/proposals/${params.proposal_id}/release-merge`, {
     method: "POST",
     body: JSON.stringify({
@@ -567,7 +567,7 @@ export async function mergeContextProposal(params: {
 }): Promise<{
   workspace_path: string;
   vault_path: string;
-  proposal: ACAMemoryProposal;
+  proposal: ContextWikiMemoryProposal;
   merge: Record<string, unknown>;
   work_packet: Record<string, unknown>;
 }> {
@@ -575,7 +575,7 @@ export async function mergeContextProposal(params: {
     ApiEnvelope<{
       workspace_path: string;
       vault_path: string;
-      proposal: ACAMemoryProposal;
+      proposal: ContextWikiMemoryProposal;
       merge: Record<string, unknown>;
       work_packet: Record<string, unknown>;
     }>

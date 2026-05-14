@@ -28,7 +28,7 @@
       "assertionId": "CAM-001",
       "description": "Context architecture dual-plane model documented",
       "status": "pass",
-      "reason": "Both ACA planes (projected + durable store) described"
+      "reason": "Both ContextWiki planes (projected + durable store) described"
     },
     {
       "assertionId": "CAM-002",

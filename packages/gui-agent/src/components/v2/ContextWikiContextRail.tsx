@@ -8,11 +8,11 @@ import {
   releaseContextProposalMerge,
 } from '@/api/client'
 import type {
-  ACAEvidenceImportRun,
-  ACAOverview,
-  ACAMaintenanceTask,
-  ACAMemoryProposal,
-  ACAPromotionJob,
+  ContextWikiEvidenceImportRun,
+  ContextWikiOverview,
+  ContextWikiMaintenanceTask,
+  ContextWikiMemoryProposal,
+  ContextWikiPromotionJob,
 } from '@/api/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -33,9 +33,9 @@ import {
   Sparkles,
 } from 'lucide-react'
 
-const ACA_OVERVIEW_LIMIT = 6
+const CONTEXTWIKI_OVERVIEW_LIMIT = 6
 
-export function ACAContextRail({
+export function ContextWikiContextRail({
   selectedAgentWorkspaceRoot,
 }: {
   selectedAgentWorkspaceRoot?: string
@@ -83,11 +83,11 @@ export function ACAContextRail({
       : 'Choose automatically'
 
   const overviewQuery = useQuery({
-    queryKey: ['aca-overview', effectiveWorkspaceRoot],
+    queryKey: ['contextwiki-overview', effectiveWorkspaceRoot],
     queryFn: () =>
       getContextOverview({
         workspace: effectiveWorkspaceRoot,
-        limit: ACA_OVERVIEW_LIMIT,
+        limit: CONTEXTWIKI_OVERVIEW_LIMIT,
       }),
     enabled: effectiveWorkspaceRoot.length > 0,
     staleTime: 5000,
@@ -127,12 +127,12 @@ export function ACAContextRail({
 
   useEffect(() => {
     if (!contextMutationSignal || !effectiveWorkspaceRoot) return
-    void queryClient.invalidateQueries({ queryKey: ['aca-overview', effectiveWorkspaceRoot] })
+    void queryClient.invalidateQueries({ queryKey: ['contextwiki-overview', effectiveWorkspaceRoot] })
   }, [contextMutationSignal, effectiveWorkspaceRoot, queryClient])
 
   const refresh = async () => {
     setActionError(null)
-    await queryClient.invalidateQueries({ queryKey: ['aca-overview', effectiveWorkspaceRoot] })
+    await queryClient.invalidateQueries({ queryKey: ['contextwiki-overview', effectiveWorkspaceRoot] })
     await overviewQuery.refetch()
   }
 
@@ -411,9 +411,9 @@ function ReviewQueueCard({
   onRefresh,
   busy,
 }: {
-  overview: ACAOverview | null
-  activeTask: ACAMaintenanceTask | null
-  claimedTask: ACAMaintenanceTask | null
+  overview: ContextWikiOverview | null
+  activeTask: ContextWikiMaintenanceTask | null
+  claimedTask: ContextWikiMaintenanceTask | null
   actionError: string | null
   mergeDisabled: boolean
   onClaim: () => void
@@ -529,9 +529,9 @@ function ReviewQueueCard({
           {mergeDisabled && (
             <div className="rounded-md border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
               GUI merging is unavailable until the server knows where the project
-              vault lives. Set `FOXCTL_CONTEXTWIKI_VAULT_PATH`,
-              `FOXCTL_ACA_VAULT_PATH`, or `FOXCTL_OBSIDIAN_VAULT_PATH`
-              on the server, then refresh this page.
+              vault lives. Set `FOXCTL_CONTEXTWIKI_VAULT_PATH` or
+              `FOXCTL_OBSIDIAN_VAULT_PATH` on the server, then refresh this
+              page.
             </div>
           )}
 
@@ -665,7 +665,7 @@ function ListCard({
   )
 }
 
-function ProposalRow({ proposal }: { proposal: ACAMemoryProposal }) {
+function ProposalRow({ proposal }: { proposal: ContextWikiMemoryProposal }) {
   return (
     <div className="rounded-md border border-border/60 bg-muted/15 px-3 py-2">
       <div className="flex items-start justify-between gap-2">
@@ -696,7 +696,7 @@ function ProposalRow({ proposal }: { proposal: ACAMemoryProposal }) {
   )
 }
 
-function EvidenceRow({ item }: { item: ACAEvidenceImportRun }) {
+function EvidenceRow({ item }: { item: ContextWikiEvidenceImportRun }) {
   return (
     <div className="rounded-md border border-border/60 bg-muted/15 px-3 py-2">
       <div className="flex items-start justify-between gap-2">
@@ -724,7 +724,7 @@ function EvidenceRow({ item }: { item: ACAEvidenceImportRun }) {
   )
 }
 
-function PromotionRow({ job }: { job: ACAPromotionJob }) {
+function PromotionRow({ job }: { job: ContextWikiPromotionJob }) {
   return (
     <div className="rounded-md border border-border/60 bg-muted/15 px-3 py-2">
       <div className="flex items-start justify-between gap-2">

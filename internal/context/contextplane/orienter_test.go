@@ -37,7 +37,7 @@ func TestOrienterBuildUsesTasksAndSessions(t *testing.T) {
 
 	active := tasks.Task{
 		ID:        "T-1042",
-		Title:     "Write ACA v0.1",
+		Title:     "Write ContextWiki v0.1",
 		Status:    tasks.StatusInProgress,
 		Gotchas:   "Preserve provenance; keep the vault human-readable",
 		PlanFile:  "docs/plans/context-architecture.md",
@@ -68,7 +68,7 @@ func TestOrienterBuildUsesTasksAndSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	if top.Objective != "Write ACA v0.1" {
+	if top.Objective != "Write ContextWiki v0.1" {
 		t.Fatalf("objective=%q", top.Objective)
 	}
 	if top.Phase != "execute" {

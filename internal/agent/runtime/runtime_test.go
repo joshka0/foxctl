@@ -117,8 +117,8 @@ func TestShouldPreferRawToolDataForMemoryScouts(t *testing.T) {
 	if !shouldPreferRawToolData(string(types.RoleMemoryFactScout), "agent_memory_search") {
 		t.Fatal("memory_fact_scout should prefer raw agent_memory_search payloads")
 	}
-	if !shouldPreferRawToolData(string(types.RoleACAContextScout), "context_retrieve") {
-		t.Fatal("aca_context_scout should prefer raw context_retrieve payloads")
+	if !shouldPreferRawToolData(string(types.RoleContextWikiScout), "context_retrieve") {
+		t.Fatal("contextwiki_scout should prefer raw context_retrieve payloads")
 	}
 	if shouldPreferRawToolData(string(types.RoleDAGScout), "agent_memory_search") {
 		t.Fatal("dag_scout should not prefer raw memory payloads")
@@ -679,18 +679,18 @@ func TestBuildToolDefsForRole_MemoryTimelineScout(t *testing.T) {
 	}
 }
 
-func TestBuildToolDefsForRole_ACAContextScout(t *testing.T) {
-	names := toolNamesForRole(types.RoleACAContextScout)
+func TestBuildToolDefsForRole_ContextWikiContextScout(t *testing.T) {
+	names := toolNamesForRole(types.RoleContextWikiScout)
 
 	for _, want := range []string{"think", "semantic_search_context", "context_show", "context_retrieve", "obsidian_index_search", "obsidian_read", "obsidian_related", "context_filter"} {
 		if !hasToolName(names, want) {
-			t.Errorf("aca_context_scout should have %q, got %v", want, names)
+			t.Errorf("contextwiki_scout should have %q, got %v", want, names)
 		}
 	}
 
 	for _, deny := range []string{"fs_read_file", "code_search", "fs_list_dir", "fs_write_file", "memory_query"} {
 		if hasToolName(names, deny) {
-			t.Errorf("aca_context_scout should NOT have %q", deny)
+			t.Errorf("contextwiki_scout should NOT have %q", deny)
 		}
 	}
 }

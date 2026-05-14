@@ -17,13 +17,11 @@ The wrappers standardize:
 
 By default they evaluate:
 
-- `aca_default`
-- `aca_query_typed`
+- `contextwiki_default`
+- `contextwiki_query_typed`
 
-Those mode IDs keep the old `aca_` prefix for compatibility with existing
-fixtures and reports. CLI callers may also use `contextwiki_default` and
-`contextwiki_query_typed`; foxctl normalizes them to the legacy result IDs.
-In prose, call the lane ContextWiki retrieval.
+Those mode IDs are the canonical retrieval lane names. In prose, call the lane
+ContextWiki retrieval.
 
 ## Stable Commands
 
@@ -115,11 +113,11 @@ These are the latest verified ContextWiki retrieval outputs available locally.
 
 Source: `/tmp/retrieval-policy-check/foxctl-20260329T131551Z.json`
 
-- `aca_default`
+- `contextwiki_default`
   - `hit@5 1.00`
   - `hit@10 1.00`
   - `MRR 1.00`
-- `aca_query_typed`
+- `contextwiki_query_typed`
   - `hit@5 1.00`
   - `hit@10 1.00`
   - `MRR 1.00`
@@ -133,11 +131,11 @@ Interpretation:
 
 Source: `/tmp/retrieval-docs-seq/jido-20260327T133927Z.json`
 
-- `aca_default`
+- `contextwiki_default`
   - `hit@5 1.00`
   - `hit@10 1.00`
   - `MRR 0.92`
-- `aca_query_typed`
+- `contextwiki_query_typed`
   - `hit@5 1.00`
   - `hit@10 1.00`
   - `MRR 0.92`
@@ -150,11 +148,11 @@ Interpretation:
 
 Source: `/tmp/retrieval-docs-seq/praze-20260327T133941Z.json`
 
-- `aca_default`
+- `contextwiki_default`
   - `hit@5 0.73`
   - `hit@10 0.82`
   - `MRR 0.68`
-- `aca_query_typed`
+- `contextwiki_query_typed`
   - `hit@5 0.73`
   - `hit@10 0.82`
   - `MRR 0.68`

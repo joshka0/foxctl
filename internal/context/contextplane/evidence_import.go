@@ -148,7 +148,6 @@ func summarizeEvidenceWithFallback(ctx context.Context, content string) (Evidenc
 func newLocalEvidenceLLMClient() (verification.LLMClient, bool) {
 	baseURL := firstNonEmpty(
 		os.Getenv("FOXCTL_CONTEXTWIKI_L6_BASE_URL"),
-		os.Getenv("FOXCTL_ACA_L6_BASE_URL"),
 	)
 	if baseURL == "" {
 		baseURL = strings.TrimSpace(os.Getenv("FOXCTL_OPENAI_COMPAT_BASE_URL"))
@@ -158,7 +157,6 @@ func newLocalEvidenceLLMClient() (verification.LLMClient, bool) {
 	}
 	model := firstNonEmpty(
 		os.Getenv("FOXCTL_CONTEXTWIKI_L6_MODEL"),
-		os.Getenv("FOXCTL_ACA_L6_MODEL"),
 	)
 	if model == "" {
 		model = strings.TrimSpace(os.Getenv("FOXCTL_OPENAI_COMPAT_MODEL"))
@@ -168,7 +166,6 @@ func newLocalEvidenceLLMClient() (verification.LLMClient, bool) {
 	}
 	apiKey := firstNonEmpty(
 		os.Getenv("FOXCTL_CONTEXTWIKI_L6_API_KEY"),
-		os.Getenv("FOXCTL_ACA_L6_API_KEY"),
 	)
 	if apiKey == "" {
 		apiKey = strings.TrimSpace(os.Getenv("FOXCTL_OPENAI_COMPAT_API_KEY"))
@@ -370,7 +367,7 @@ func suggestedEvidenceTitle(sourceKind, sourceRef, content string) string {
 }
 
 func inferLocalProcessorModel() string {
-	if model := firstNonEmpty(os.Getenv("FOXCTL_CONTEXTWIKI_L6_MODEL"), os.Getenv("FOXCTL_ACA_L6_MODEL")); model != "" {
+	if model := strings.TrimSpace(os.Getenv("FOXCTL_CONTEXTWIKI_L6_MODEL")); model != "" {
 		return model
 	}
 	if model := strings.TrimSpace(os.Getenv("FOXCTL_OPENAI_COMPAT_MODEL")); model != "" {

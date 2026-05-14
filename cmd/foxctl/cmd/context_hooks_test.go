@@ -2,7 +2,7 @@ package cmd
 
 import "testing"
 
-func TestMergeACAHooks(t *testing.T) {
+func TestMergeContextWikiHooks(t *testing.T) {
 	settings := claudeSettings{
 		Hooks: map[string][]claudeHookMatcher{
 			"Stop": {
@@ -16,7 +16,7 @@ func TestMergeACAHooks(t *testing.T) {
 		},
 	}
 
-	installed := mergeACAHooks(&settings)
+	installed := mergeContextWikiHooks(&settings)
 	if installed["Stop"] {
 		t.Fatalf("expected stop hook to be recognized as existing")
 	}

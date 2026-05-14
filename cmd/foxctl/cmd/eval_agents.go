@@ -206,7 +206,7 @@ func newEvalAgentsCommand() *cobra.Command {
 				resolvedRoles = []string{
 					string(agenttypes.RoleMemoryFactScout),
 					string(agenttypes.RoleMemoryTimelineScout),
-					string(agenttypes.RoleACAContextScout),
+					string(agenttypes.RoleContextWikiScout),
 					string(agenttypes.RoleSubcallWorker),
 					string(agenttypes.RoleResearcher),
 				}
@@ -409,21 +409,14 @@ func withTemporaryVaultEnv(vaultPath string, fn func()) {
 		return
 	}
 	prevContextWiki, hasContextWiki := os.LookupEnv("FOXCTL_CONTEXTWIKI_VAULT_PATH")
-	prevACA, hasACA := os.LookupEnv("FOXCTL_ACA_VAULT_PATH")
 	prevObs, hasObs := os.LookupEnv("FOXCTL_OBSIDIAN_VAULT_PATH")
 	_ = os.Setenv("FOXCTL_CONTEXTWIKI_VAULT_PATH", vaultPath)
-	_ = os.Setenv("FOXCTL_ACA_VAULT_PATH", vaultPath)
 	_ = os.Setenv("FOXCTL_OBSIDIAN_VAULT_PATH", vaultPath)
 	defer func() {
 		if hasContextWiki {
 			_ = os.Setenv("FOXCTL_CONTEXTWIKI_VAULT_PATH", prevContextWiki)
 		} else {
 			_ = os.Unsetenv("FOXCTL_CONTEXTWIKI_VAULT_PATH")
-		}
-		if hasACA {
-			_ = os.Setenv("FOXCTL_ACA_VAULT_PATH", prevACA)
-		} else {
-			_ = os.Unsetenv("FOXCTL_ACA_VAULT_PATH")
 		}
 		if hasObs {
 			_ = os.Setenv("FOXCTL_OBSIDIAN_VAULT_PATH", prevObs)
@@ -471,7 +464,7 @@ func buildAgentEvalPrompt(role string, evalCase promptEvalCase, agentRef, conver
 	case string(agenttypes.RoleMemoryTimelineScout):
 		b.WriteString("Focus on changes over time, updates, retractions, and the current best view.\n")
 		b.WriteString("Prefer semantic_search_sessions before broader timeline or memory exploration.\n")
-	case string(agenttypes.RoleACAContextScout):
+	case string(agenttypes.RoleContextWikiScout):
 		b.WriteString("Focus on ContextWiki top-of-mind, task continuity, and vault-backed durable context.\n")
 		b.WriteString("Prefer semantic_search_context before broader ContextWiki or vault exploration.\n")
 	case string(agenttypes.RoleResearcher):

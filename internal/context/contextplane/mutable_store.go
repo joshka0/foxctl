@@ -12,13 +12,13 @@ import (
 	"github.com/joshka0/foxctl/internal/storage/dbutil"
 )
 
-const acaDBFile = "contextplane.db"
+const contextWikiDBFile = "contextplane.db"
 
 func (s *WorkspaceStore) openMutableDB(ctx context.Context) (*sql.DB, func() error, error) {
 	if _, err := s.EnsureLayout(); err != nil {
 		return nil, nil, err
 	}
-	db, closeFn, err := dbutil.OpenStoreDB(ctx, s.layout.RuntimeDir, "ContextWiki", acaDBFile, migrateMutableStore)
+	db, closeFn, err := dbutil.OpenStoreDB(ctx, s.layout.RuntimeDir, "ContextWiki", contextWikiDBFile, migrateMutableStore)
 	if err != nil {
 		return nil, nil, fmt.Errorf("contextplane: open mutable db: %w", err)
 	}

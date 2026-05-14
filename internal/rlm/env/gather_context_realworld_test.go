@@ -394,7 +394,7 @@ func TestReadOnlyAdapterGatherContextExpandsReferencedDefinitions(t *testing.T) 
 
 func gather() {
 	_ = "latest_handoff"
-	_ = "aca_retrieval"
+	_ = "contextwiki_retrieval"
 	_, _ = contextengine.RetrieveContext(ctx, cfg, queryFn, query)
 }
 `)
@@ -410,8 +410,8 @@ func RetrieveContext(ctx context.Context, cfg LaneConfig, queryFn ContextQueryFu
 	})
 
 	out, err := adapter.Execute(ctx, "gather_context", mustJSON(map[string]any{
-		"query":             "Which code path makes durable ACA context, handoff summaries, vault-backed contextplane hits, and session recall visible?",
-		"required_evidence": []string{"latest_handoff", "aca_retrieval"},
+		"query":             "Which code path makes durable ContextWiki context, handoff summaries, vault-backed contextplane hits, and session recall visible?",
+		"required_evidence": []string{"latest_handoff", "contextwiki_retrieval"},
 		"lanes":             []string{"code"},
 		"limit":             5,
 		"response_mode":     "full",

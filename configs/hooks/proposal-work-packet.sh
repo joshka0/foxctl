@@ -13,7 +13,7 @@ workspace="${FOXCTL_WORKSPACE:-${CLAUDE_PROJECT_DIR:-$(pwd)}}"
 payload="$(cat)"
 proposal_id="${FOXCTL_PROPOSAL_ID:-$(printf '%s' "$payload" | jq -r '.proposal_id // .proposalID // ""' 2>/dev/null || echo "")}"
 action_name="${FOXCTL_PROPOSAL_ACTION:-$(printf '%s' "$payload" | jq -r '.action // "apply"' 2>/dev/null || echo "apply")}"
-vault_path="${FOXCTL_CONTEXTWIKI_VAULT_PATH:-${FOXCTL_ACA_VAULT_PATH:-${FOXCTL_OBSIDIAN_VAULT_PATH:-$(printf '%s' "$payload" | jq -r '.vault_path // ""' 2>/dev/null || echo "")}}}"
+vault_path="${FOXCTL_CONTEXTWIKI_VAULT_PATH:-${FOXCTL_OBSIDIAN_VAULT_PATH:-$(printf '%s' "$payload" | jq -r '.vault_path // ""' 2>/dev/null || echo "")}}"
 
 if [[ -z "$proposal_id" ]]; then
   echo '{}'
