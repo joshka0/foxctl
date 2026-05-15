@@ -26,6 +26,7 @@
         "@types/react": "19.2.14",
         "@types/react-dom": "19.2.3",
         "astro": "6.2.2",
+        "developer-icons": "6.0.5",
         "react": "19.2.5",
         "react-dom": "19.2.5",
         "tailwindcss": "4.1.18",
@@ -995,6 +996,8 @@
     "detect-libc": ["detect-libc@2.1.2", "", {}, "sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ=="],
 
     "devalue": ["devalue@5.8.0", "", {}, "sha512-2zA9pFEsnp7vWBZbXF5JAgAq0fsUIt/1XPbRiAmRV3lp/2C3upzH+sADiyy66aFCihoLEsrQHxNM5w1gIDfsBg=="],
+
+    "developer-icons": ["developer-icons@6.0.5", "", { "peerDependencies": { "react": "^18.2.0 || ^19.0.0", "react-dom": "^18.2.0 || ^19.0.0" } }, "sha512-piWJLHi65c/IQZYePqpW8L7RkKZPHi+r7HU2lmtFbvIMFHWef0dyu7RP8dHSqhSSOmImFqrP43cSsJBZbJ9z5g=="],
 
     "devlop": ["devlop@1.1.0", "", { "dependencies": { "dequal": "^2.0.0" } }, "sha512-RWmIqhcFf1lRYBvNmr7qTNuyCt/7/ns2jbpp1+PalgE/rDQcBT0fioSMUpJ93irlUhC5hrg4cYqe6U+0ImW0rA=="],
 

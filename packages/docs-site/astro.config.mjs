@@ -26,6 +26,9 @@ export default defineConfig({
         },
       ],
       customCss: ['./src/styles/starlight-overrides.css'],
+      components: {
+        SocialIcons: './src/components/DeveloperSocialIcons.astro',
+      },
       tableOfContents: {
         minHeadingLevel: 2,
         maxHeadingLevel: 3,

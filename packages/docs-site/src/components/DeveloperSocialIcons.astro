@@ -1,0 +1,66 @@
+---
+import config from 'virtual:starlight/user-config';
+import { GitHubDark, GitHubLight } from 'developer-icons';
+
+const links = config.social || [];
+---
+
+{
+  links.length > 0 && (
+    <>
+      {links.map(({ label, href }) => (
+        <a {href} rel="me" class="sl-flex dev-social-link">
+          <span class="sr-only">{label}</span>
+          <GitHubDark
+            className="dev-social-icon dev-social-icon-dark"
+            aria-hidden="true"
+            size={20}
+          />
+          <GitHubLight
+            className="dev-social-icon dev-social-icon-light"
+            aria-hidden="true"
+            size={20}
+          />
+        </a>
+      ))}
+    </>
+  )
+}
+
+<style>
+  @layer starlight.core {
+    a {
+      color: var(--sl-color-text-accent);
+      margin: -0.5em;
+      padding: 0.5em;
+    }
+
+    a:hover {
+      color: var(--sl-color-white);
+    }
+
+    .dev-social-link {
+      align-items: center;
+      justify-content: center;
+    }
+
+    .dev-social-icon {
+      display: block;
+      flex: 0 0 auto;
+      height: 1.2rem;
+      width: 1.2rem;
+    }
+
+    .dev-social-icon-light {
+      display: none;
+    }
+
+    :global(html[data-theme='dark']) .dev-social-icon-dark {
+      display: none;
+    }
+
+    :global(html[data-theme='dark']) .dev-social-icon-light {
+      display: block;
+    }
+  }
+</style>
