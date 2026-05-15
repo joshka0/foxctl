@@ -1,10 +1,12 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -16,13 +18,23 @@ import (
 type RoomAgileRequest struct {
 	Workspace string `json:"workspace,omitempty"`
 	Action    string `json:"action"`
-	Sender    string `json:"sender,omitempty"`
 	Actor     string `json:"actor,omitempty"`
 
 	EpicID      string `json:"epic_id,omitempty"`
 	MilestoneID string `json:"milestone_id,omitempty"`
 	StoryID     string `json:"story_id,omitempty"`
 	Limit       int    `json:"limit,omitempty"`
+
+	// Mutating-action fields (M4 story lifecycle).
+	State         string `json:"state,omitempty"`         // target state for story_state
+	Verdict       string `json:"verdict,omitempty"`      // pass/fail/waived for story_validate
+	ValidatorType string `json:"validator_type,omitempty"` // human/agent/harness for story_validate
+	Title         string `json:"title,omitempty"`        // story title for story_propose
+	Goal          string `json:"goal,omitempty"`         // story goal for story_propose
+	Notes         string `json:"notes,omitempty"`        // notes for story_propose/story_validate
+	ProposalID    string `json:"proposal_id,omitempty"`  // for story_accept
+	Command       string `json:"command,omitempty"`      // command that produced validation
+	Artifact      string `json:"artifact,omitempty"`     // artifact ref (sha256:...) for validation
 }
 
 func handleRoomAgileRoute(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string) {
@@ -36,17 +48,28 @@ func handleRoomAgileRoute(w http.ResponseWriter, r *http.Request, cfg config.Con
 		httpError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
 		return
 	}
-	req.Workspace = strings.TrimSpace(firstNonEmpty(req.Workspace, r.URL.Query().Get("workspace"), r.URL.Query().Get("workspace_id")))
+	workspace := strings.TrimSpace(req.Workspace)
+	if workspace == "" {
+		workspace = roomWorkspaceID(r)
+	}
+	if workspace == "" {
+		httpError(w, http.StatusBadRequest, "workspace is required")
+		return
+	}
 	req.Action = strings.TrimSpace(req.Action)
 	req.EpicID = strings.TrimSpace(req.EpicID)
 	req.MilestoneID = strings.TrimSpace(req.MilestoneID)
 	req.StoryID = strings.TrimSpace(req.StoryID)
 	req.Actor = strings.TrimSpace(req.Actor)
-	req.Sender = strings.TrimSpace(req.Sender)
-	if req.Workspace == "" {
-		httpError(w, http.StatusBadRequest, "workspace is required")
-		return
-	}
+	req.State = strings.TrimSpace(req.State)
+	req.Verdict = strings.TrimSpace(req.Verdict)
+	req.ValidatorType = strings.TrimSpace(req.ValidatorType)
+	req.Title = strings.TrimSpace(req.Title)
+	req.Goal = strings.TrimSpace(req.Goal)
+	req.Notes = strings.TrimSpace(req.Notes)
+	req.ProposalID = strings.TrimSpace(req.ProposalID)
+	req.Command = strings.TrimSpace(req.Command)
+	req.Artifact = strings.TrimSpace(req.Artifact)
 	if req.Action == "" {
 		httpError(w, http.StatusBadRequest, "action is required")
 		return
@@ -63,7 +86,7 @@ func handleRoomAgileRoute(w http.ResponseWriter, r *http.Request, cfg config.Con
 	}
 	defer store.Close()
 
-	messages, err := store.ListRoomMessages(r.Context(), req.Workspace, roomID, req.Limit)
+	messages, err := store.ListRoomMessages(r.Context(), workspace, roomID, req.Limit)
 	if err != nil {
 		if errors.Is(err, blackboard.ErrRoomNotFound) {
 			httpError(w, http.StatusNotFound, "room not found")
@@ -71,6 +94,45 @@ func handleRoomAgileRoute(w http.ResponseWriter, r *http.Request, cfg config.Con
 		}
 		log.Error().Err(err).Str("room_id", roomID).Str("action", req.Action).Msg("failed to load room-agile messages")
 		httpError(w, http.StatusInternalServerError, "failed to load room-agile messages")
+		return
+	}
+
+	mutatingActions := map[string]bool{
+		"story_state":    true,
+		"story_validate": true,
+		"story_propose":  true,
+		"story_accept":   true,
+	}
+
+	if mutatingActions[req.Action] {
+		result, err := buildRoomAgileMutatingResult(r.Context(), roomID, workspace, req, messages, store)
+		if err != nil {
+			if errors.Is(err, blackboard.ErrRoomNotFound) {
+				httpError(w, http.StatusNotFound, err.Error())
+				return
+			}
+			status := http.StatusBadRequest
+			if strings.Contains(err.Error(), "not found") {
+				status = http.StatusNotFound
+			}
+			httpError(w, status, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"action":    req.Action,
+			"room_id":   roomID,
+			"workspace": workspace,
+			"result": map[string]any{
+				"version": 1,
+				"status":  "ok",
+				"command": "foxctl.room.agile." + strings.ReplaceAll(req.Action, "_", "."),
+				"data":    result,
+				"meta": map[string]any{
+					"source": "web:/api/rooms/{room_id}/agile",
+				},
+				"error": map[string]any{},
+			},
+		})
 		return
 	}
 
@@ -82,7 +144,7 @@ func handleRoomAgileRoute(w http.ResponseWriter, r *http.Request, cfg config.Con
 	writeJSON(w, http.StatusOK, map[string]any{
 		"action":    req.Action,
 		"room_id":   roomID,
-		"workspace": req.Workspace,
+		"workspace": workspace,
 		"result": map[string]any{
 			"version": 1,
 			"status":  "ok",
@@ -385,4 +447,254 @@ func apiRoomAgileNext(status map[string]any, milestones, stories []map[string]an
 		}
 	}
 	return []map[string]any{{"action": "review_milestone", "reason": "no accepted stories are waiting to start"}}
+}
+
+// validStoryStates is the set of allowed lifecycle states for a story.
+var validStoryStates = map[string]bool{
+	"in_progress": true,
+	"in_review":   true,
+	"done":         true,
+	"waived":       true,
+}
+
+func validateStoryState(target string) error {
+	if !validStoryStates[target] {
+		return fmt.Errorf("invalid story state %q; valid: in_progress, in_review, done, waived", target)
+	}
+	return nil
+}
+
+// buildRoomAgileMutatingResult handles the four mutating story-lifecycle actions
+// (story_state, story_validate, story_propose, story_accept). Each action
+// builds a BoardMessage, persists it via store.SendMessage, and returns a
+// result map in the standard envelope shape.
+func buildRoomAgileMutatingResult(
+	ctx context.Context,
+	roomID string,
+	workspace string,
+	req RoomAgileRequest,
+	messages []agent.BoardMessage,
+	store blackboard.BoardStore,
+) (map[string]any, error) {
+	switch req.Action {
+	case "story_state":
+		return handleStoryState(ctx, roomID, workspace, req, messages, store)
+	case "story_validate":
+		return handleStoryValidate(ctx, roomID, workspace, req, messages, store)
+	case "story_propose":
+		return handleStoryPropose(ctx, roomID, workspace, req, store)
+	case "story_accept":
+		return handleStoryAccept(ctx, roomID, workspace, req, messages, store)
+	default:
+		return nil, fmt.Errorf("unsupported mutating action %q", req.Action)
+	}
+}
+
+func handleStoryState(
+	ctx context.Context,
+	roomID, workspace string,
+	req RoomAgileRequest,
+	messages []agent.BoardMessage,
+	store blackboard.BoardStore,
+) (map[string]any, error) {
+	if req.StoryID == "" {
+		return nil, fmt.Errorf("story_id is required for story_state")
+	}
+	if req.State == "" {
+		return nil, fmt.Errorf("state is required for story_state")
+	}
+	if err := validateStoryState(req.State); err != nil {
+		return nil, err
+	}
+
+	// Look up the story in existing messages.
+	stories := apiRoomAgileStories(messages)
+	story := findByID(stories, req.StoryID)
+	if story == nil {
+		return nil, fmt.Errorf("story %q not found", req.StoryID)
+	}
+
+	oldStatus := fmt.Sprint(story["status"])
+
+	body := fmt.Sprintf("State: %s\nPreviousStatus: %s", req.State, oldStatus)
+	if req.Notes != "" {
+		body += "\nNotes: " + req.Notes
+	}
+
+	msg := &agent.BoardMessage{
+		WorkspaceID:      workspace,
+		Stream:           agent.RoomStreamName(roomID),
+		Sender:           firstNonEmpty(req.Actor, "api"),
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindStoryState,
+		RelatedMessageID: req.StoryID,
+		Subject:          "Story State: " + req.State,
+		Body:             body,
+		Status:           agent.BoardMessageStatusUnread,
+		Priority:         agent.DefaultPriority,
+		CreatedAt:        time.Now().UTC(),
+	}
+	if err := store.SendMessage(ctx, msg); err != nil {
+		return nil, fmt.Errorf("failed to send story_state message: %w", err)
+	}
+
+	return map[string]any{
+		"message": apiMessageView(*msg),
+		"story": map[string]any{
+			"id":       story["id"],
+			"title":    story["title"],
+			"status":   req.State,
+			"previous": oldStatus,
+		},
+	}, nil
+}
+
+func handleStoryValidate(
+	ctx context.Context,
+	roomID, workspace string,
+	req RoomAgileRequest,
+	messages []agent.BoardMessage,
+	store blackboard.BoardStore,
+) (map[string]any, error) {
+	if req.StoryID == "" {
+		return nil, fmt.Errorf("story_id is required for story_validate")
+	}
+	if req.Verdict == "" {
+		return nil, fmt.Errorf("verdict is required for story_validate")
+	}
+	if req.ValidatorType == "" {
+		return nil, fmt.Errorf("validator_type is required for story_validate")
+	}
+
+	// Look up the story in existing messages.
+	stories := apiRoomAgileStories(messages)
+	story := findByID(stories, req.StoryID)
+	if story == nil {
+		return nil, fmt.Errorf("story %q not found", req.StoryID)
+	}
+
+	var bodyLines []string
+	bodyLines = append(bodyLines, "Verdict: "+req.Verdict)
+	bodyLines = append(bodyLines, "ValidatorType: "+req.ValidatorType)
+	if req.Command != "" {
+		bodyLines = append(bodyLines, "Command: "+req.Command)
+	}
+	if req.Artifact != "" {
+		bodyLines = append(bodyLines, "Artifact: "+req.Artifact)
+	}
+	if req.Notes != "" {
+		bodyLines = append(bodyLines, "Notes: "+req.Notes)
+	}
+
+	msg := &agent.BoardMessage{
+		WorkspaceID:      workspace,
+		Stream:           agent.RoomStreamName(roomID),
+		Sender:           firstNonEmpty(req.Actor, "api"),
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindStoryValidation,
+		RelatedMessageID: req.StoryID,
+		Subject:          "Story Validation: " + req.Verdict,
+		Body:             strings.Join(bodyLines, "\n"),
+		Status:           agent.BoardMessageStatusUnread,
+		Priority:         agent.DefaultPriority,
+		CreatedAt:        time.Now().UTC(),
+	}
+	if err := store.SendMessage(ctx, msg); err != nil {
+		return nil, fmt.Errorf("failed to send story_validate message: %w", err)
+	}
+
+	return map[string]any{
+		"message": apiMessageView(*msg),
+		"story_id": req.StoryID,
+	}, nil
+}
+
+func handleStoryPropose(
+	ctx context.Context,
+	roomID, workspace string,
+	req RoomAgileRequest,
+	store blackboard.BoardStore,
+) (map[string]any, error) {
+	if req.MilestoneID == "" {
+		return nil, fmt.Errorf("milestone_id is required for story_propose")
+	}
+	if req.Title == "" {
+		return nil, fmt.Errorf("title is required for story_propose")
+	}
+
+	var bodyLines []string
+	bodyLines = append(bodyLines, "Title: "+req.Title)
+	if req.Goal != "" {
+		bodyLines = append(bodyLines, "Goal: "+req.Goal)
+	}
+	if req.Notes != "" {
+		bodyLines = append(bodyLines, "Notes: "+req.Notes)
+	}
+
+	msg := &agent.BoardMessage{
+		WorkspaceID:      workspace,
+		Stream:           agent.RoomStreamName(roomID),
+		Sender:           firstNonEmpty(req.Actor, "api"),
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindStoryProposal,
+		RelatedMessageID: req.MilestoneID,
+		Subject:          "Story Proposal: " + req.Title,
+		Body:             strings.Join(bodyLines, "\n"),
+		Status:           agent.BoardMessageStatusUnread,
+		Priority:         agent.DefaultPriority,
+		CreatedAt:        time.Now().UTC(),
+	}
+	if err := store.SendMessage(ctx, msg); err != nil {
+		return nil, fmt.Errorf("failed to send story_propose message: %w", err)
+	}
+
+	return map[string]any{
+		"message": apiMessageView(*msg),
+	}, nil
+}
+
+func handleStoryAccept(
+	ctx context.Context,
+	roomID, workspace string,
+	req RoomAgileRequest,
+	messages []agent.BoardMessage,
+	store blackboard.BoardStore,
+) (map[string]any, error) {
+	if req.ProposalID == "" {
+		return nil, fmt.Errorf("proposal_id is required for story_accept")
+	}
+
+	// Find the proposal message by scanning raw messages.
+	var proposal *agent.BoardMessage
+	for i := range messages {
+		if messages[i].Kind == agent.BoardMessageKindStoryProposal && messages[i].ID == req.ProposalID {
+			proposal = &messages[i]
+			break
+		}
+	}
+	if proposal == nil {
+		return nil, fmt.Errorf("proposal %q not found", req.ProposalID)
+	}
+
+	msg := &agent.BoardMessage{
+		WorkspaceID:      workspace,
+		Stream:           agent.RoomStreamName(roomID),
+		Sender:           firstNonEmpty(req.Actor, "api"),
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindStory,
+		RelatedMessageID: proposal.RelatedMessageID, // the milestone ID
+		Subject:          "Story: " + strings.TrimPrefix(proposal.Subject, "Story Proposal: "),
+		Body:             proposal.Body,
+		Status:           agent.BoardMessageStatusUnread,
+		Priority:         agent.DefaultPriority,
+		CreatedAt:        time.Now().UTC(),
+	}
+	if err := store.SendMessage(ctx, msg); err != nil {
+		return nil, fmt.Errorf("failed to send story_accept message: %w", err)
+	}
+
+	return map[string]any{
+		"message":    apiMessageView(*msg),
+		"proposal_id": req.ProposalID,
+	}, nil
 }

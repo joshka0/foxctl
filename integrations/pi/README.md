@@ -66,6 +66,7 @@ pi --extension /path/to/foxctl.ts \
 | `--foxctl-epic` | `""` | Active room-agile epic id for epic commands |
 | `--foxctl-milestone` | `""` | Active room-agile milestone id for milestone commands |
 | `--foxctl-story` | `""` | Active room-agile story id for story commands |
+| `--foxctl-epic-context` | `true` | Inject active epic resume/health/next into `--foxctl-context` when `--foxctl-epic` is set |
 
 ## Available Tools
 
@@ -117,9 +118,9 @@ pi --extension /path/to/foxctl.ts \
 - `foxctl_room_terminal_register` — Register a room with the terminal gateway and return dogfood links
 
 ### Room Agile
-- `foxctl_room_agile` — Run read-only room-agile actions through `/api/rooms/{room_id}/agile`
+- `foxctl_room_agile` — Run room-agile actions through `/api/rooms/{room_id}/agile`
 
-Supported first-slice actions:
+Supported actions:
 
 - `epic_show`
 - `epic_resume`
@@ -127,6 +128,15 @@ Supported first-slice actions:
 - `epic_next`
 - `milestone_show`
 - `story_show`
+- `story_state` — transition a story to a new state (in_progress, in_review, done, waived)
+- `story_validate` — attach a validation record to a story
+- `story_propose` — propose a new story for a milestone
+- `story_accept` — accept a story proposal
+
+### Story Lifecycle
+- `foxctl_story_start` — Move a story to in_progress
+- `foxctl_story_review` — Move a story to in_review
+- `foxctl_story_validate` — Attach a validation record to a story
 
 ### Tasks
 - `foxctl_tasks_list` — List tasks (filter by status)
@@ -225,6 +235,9 @@ Supported first-slice actions:
 | `/epic-health` | Show health warnings for the configured room-agile epic |
 | `/milestones` | Show milestones, or the configured `--foxctl-milestone` when set |
 | `/stories` | Show stories, or the configured `--foxctl-story` when set |
+| `/story-start <story-id>` | Mark a story as in_progress |
+| `/story-review <story-id>` | Mark a story as in_review |
+| `/story-validate [verdict] [validator-type]` | Validate the configured `--foxctl-story` with verdict (pass/fail/waived) and validator type (human/agent/harness) |
 | `/foxctl-tasks` | List tasks |
 | `/foxctl-board` | Show board |
 | `/foxctl-stats` | Show stats |
@@ -239,6 +252,7 @@ Supported first-slice actions:
 - foxctl terminal gateway running for room terminal dogfood (`foxctl gateway --dev`)
 - repoindex built for `foxctl_repoindex_*` tools (`foxctl index repo build --workspace . --go --typescript --elixir`)
 - room-agile commands require `POST /api/rooms/{room_id}/agile` on the foxctl daemon
+- epic context injection requires `--foxctl-context`, `--foxctl-epic`, and `--foxctl-room` to be set
 
 ## Development
 
