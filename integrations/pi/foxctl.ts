@@ -17,8 +17,8 @@
  * Or copy to ~/.pi/extensions/ for auto-discovery.
  */
 
-import { StringEnum } from "@mariozechner/pi-ai";
-import { defineTool, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { StringEnum } from "@earendil-works/pi-ai";
+import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 // ============================================================================
@@ -176,6 +176,21 @@ function getRoom(pi: ExtensionAPI): string {
 	return typeof value === "string" ? value.trim() : "";
 }
 
+function getEpic(pi: ExtensionAPI): string {
+	const value = pi.getFlag("foxctl-epic");
+	return typeof value === "string" ? value.trim() : "";
+}
+
+function getMilestone(pi: ExtensionAPI): string {
+	const value = pi.getFlag("foxctl-milestone");
+	return typeof value === "string" ? value.trim() : "";
+}
+
+function getStory(pi: ExtensionAPI): string {
+	const value = pi.getFlag("foxctl-story");
+	return typeof value === "string" ? value.trim() : "";
+}
+
 function getActor(pi: ExtensionAPI): string {
 	const value = pi.getFlag("foxctl-actor");
 	return typeof value === "string" && value.trim() ? value.trim() : "actor:pi:local";
@@ -237,6 +252,18 @@ function withWorkspace(pi: ExtensionAPI, input: Record<string, unknown>): Record
 
 async function runFoxctlSkill(pi: ExtensionAPI, skill: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown>> {
 	return getClient(pi).post<Record<string, unknown>>(skillEndpoint(skill), withWorkspace(pi, input), signal);
+}
+
+async function runRoomAgile(pi: ExtensionAPI, params: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown>> {
+	const room = typeof params.room_id === "string" && params.room_id.trim() ? params.room_id.trim() : getRoom(pi);
+	if (!room) throw new Error("room_id is required or set --foxctl-room");
+	const input = withWorkspace(pi, {
+		...params,
+		room_id: undefined,
+		sender: typeof params.sender === "string" && params.sender.trim() ? params.sender : getActor(pi),
+		actor: typeof params.actor === "string" && params.actor.trim() ? params.actor : getActor(pi),
+	});
+	return getClient(pi).post<Record<string, unknown>>(`/api/rooms/${path(room)}/agile`, input, signal);
 }
 
 function jsonToolResult(details: Record<string, unknown>): { content: Array<{ type: "text"; text: string }>; details: Record<string, unknown> } {
@@ -1187,6 +1214,33 @@ const foxctlSearchTool = defineTool({
 			content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
 			details: result,
 		};
+	},
+});
+
+// --- Room Agile ---
+
+const FoxctlRoomAgileParams = Type.Object({
+	action: StringEnum(["epic_show", "epic_resume", "epic_health", "epic_next", "milestone_show", "story_show"] as const, {
+		description: "Read-only room-agile action",
+	}),
+	room_id: Type.Optional(Type.String({ description: "Room id; defaults to --foxctl-room" })),
+	workspace: Type.Optional(Type.String({ description: "Workspace root; defaults to --foxctl-workspace" })),
+	sender: Type.Optional(Type.String({ description: "Sender actor id; defaults to --foxctl-actor" })),
+	actor: Type.Optional(Type.String({ description: "Actor id for actor-specific reads; defaults to --foxctl-actor" })),
+	epic_id: Type.Optional(Type.String({ description: "Epic id for epic-specific actions" })),
+	milestone_id: Type.Optional(Type.String({ description: "Milestone id for milestone_show" })),
+	story_id: Type.Optional(Type.String({ description: "Story id for story_show" })),
+	limit: Type.Optional(Type.Number({ description: "Maximum room messages to inspect", default: 200 })),
+});
+
+const foxctlRoomAgileTool = defineTool({
+	name: "foxctl_room_agile",
+	label: "Foxctl Room Agile",
+	description: "Run read-only foxctl room-agile epic, milestone, and story actions through the daemon API.",
+	parameters: FoxctlRoomAgileParams,
+	async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+		const result = await runRoomAgile(getPi(), params as Record<string, unknown>, signal);
+		return jsonToolResult(result);
 	},
 });
 
@@ -2542,6 +2596,21 @@ export default function foxctlExtension(pi: ExtensionAPI) {
 		type: "string",
 		default: "",
 	});
+	pi.registerFlag("foxctl-epic", {
+		description: "foxctl room-agile epic ID to use for epic commands",
+		type: "string",
+		default: "",
+	});
+	pi.registerFlag("foxctl-milestone", {
+		description: "foxctl room-agile milestone ID to use for milestone commands",
+		type: "string",
+		default: "",
+	});
+	pi.registerFlag("foxctl-story", {
+		description: "foxctl room-agile story ID to use for story commands",
+		type: "string",
+		default: "",
+	});
 	pi.registerFlag("foxctl-actor", {
 		description: "foxctl actor ID for Pi room membership and messages",
 		type: "string",
@@ -2615,6 +2684,7 @@ export default function foxctlExtension(pi: ExtensionAPI) {
 		foxctlTaskCompleteTool,
 		// Search / Memory
 		foxctlSearchTool,
+		foxctlRoomAgileTool,
 		// Skill-backed foxctl tool facades
 		foxctlToolRunTool,
 		foxctlFSListTool,
@@ -2722,6 +2792,7 @@ export default function foxctlExtension(pi: ExtensionAPI) {
 		"foxctl_memory_query",
 		"foxctl_memory_search",
 		"foxctl_session_recall",
+		"foxctl_room_agile",
 		"foxctl_control_inbox",
 		"foxctl_control_inspect",
 		"foxctl_control_decide",
@@ -2925,6 +2996,67 @@ export default function foxctlExtension(pi: ExtensionAPI) {
 			} catch (e) {
 				ctx.ui.notify(`foxctl room status failed: ${e instanceof Error ? e.message : String(e)}`, "error");
 			}
+		},
+	});
+
+	const notifyRoomAgile = async (
+		ctx: Parameters<Parameters<typeof pi.registerCommand>[1]["handler"]>[1],
+		action: string,
+		extra: Record<string, unknown> = {},
+	) => {
+		try {
+			const result = await runRoomAgile(getPi(), { action, limit: 200, ...extra }, ctx.signal);
+			ctx.ui.notify(`${action}: ${JSON.stringify(result).slice(0, 700)}`, "info");
+		} catch (e) {
+			ctx.ui.notify(`foxctl room-agile ${action} failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+		}
+	};
+
+	pi.registerCommand("epic", {
+		description: "Show the configured foxctl room-agile epic, or list epics when --foxctl-epic is unset",
+		handler: async (_args, ctx) => {
+			const epicID = getEpic(getPi());
+			await notifyRoomAgile(ctx, "epic_show", epicID ? { epic_id: epicID } : {});
+		},
+	});
+
+	pi.registerCommand("epic-next", {
+		description: "Show next actions for the configured foxctl room-agile epic",
+		handler: async (_args, ctx) => {
+			const epicID = getEpic(getPi());
+			if (!epicID) {
+				ctx.ui.notify("Set --foxctl-epic before using /epic-next", "warning");
+				return;
+			}
+			await notifyRoomAgile(ctx, "epic_next", { epic_id: epicID });
+		},
+	});
+
+	pi.registerCommand("epic-health", {
+		description: "Show health warnings for the configured foxctl room-agile epic",
+		handler: async (_args, ctx) => {
+			const epicID = getEpic(getPi());
+			if (!epicID) {
+				ctx.ui.notify("Set --foxctl-epic before using /epic-health", "warning");
+				return;
+			}
+			await notifyRoomAgile(ctx, "epic_health", { epic_id: epicID });
+		},
+	});
+
+	pi.registerCommand("milestones", {
+		description: "Show foxctl room-agile milestones",
+		handler: async (_args, ctx) => {
+			const milestoneID = getMilestone(getPi());
+			await notifyRoomAgile(ctx, "milestone_show", milestoneID ? { milestone_id: milestoneID } : {});
+		},
+	});
+
+	pi.registerCommand("stories", {
+		description: "Show foxctl room-agile stories",
+		handler: async (_args, ctx) => {
+			const storyID = getStory(getPi());
+			await notifyRoomAgile(ctx, "story_show", storyID ? { story_id: storyID } : {});
 		},
 	});
 

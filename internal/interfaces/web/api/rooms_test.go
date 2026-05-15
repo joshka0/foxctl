@@ -306,6 +306,108 @@ func TestRoomDetailHandler_GetAndPostMessages(t *testing.T) {
 	}
 }
 
+func TestRoomDetailHandler_RoomAgileReadEndpoint(t *testing.T) {
+	cfg := orchestrationTestConfig(t.TempDir())
+	listHandler := RoomsListHandler(cfg, zerolog.Nop())
+	h := RoomDetailHandler(cfg, zerolog.Nop(), nil)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"id":"alpha",
+		"title":"Alpha Room",
+		"members":[{"actor_id":"human-a","role":"coordinator"}]
+	}`))
+	createRR := httptest.NewRecorder()
+	listHandler.ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
+	}
+
+	store, err := blackboard.OpenBoardStore(context.Background(), cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open board store: %v", err)
+	}
+	defer store.Close()
+
+	epic := agent.BoardMessage{
+		WorkspaceID: "ws1",
+		Stream:      agent.RoomStreamName("alpha"),
+		Sender:      "human-a",
+		Recipient:   agent.BroadcastRecipient,
+		Kind:        agent.BoardMessageKindEpic,
+		Subject:     "Epic: Pi integration",
+		Body:        "Goal: Make Pi understand room-agile state",
+	}
+	if err := store.SendMessage(context.Background(), &epic); err != nil {
+		t.Fatalf("send epic: %v", err)
+	}
+	finalize := agent.BoardMessage{
+		WorkspaceID:      "ws1",
+		Stream:           agent.RoomStreamName("alpha"),
+		Sender:           "human-a",
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindEpicFinalize,
+		RelatedMessageID: epic.ID,
+		Subject:          "Epic Finalized: Pi integration",
+		Body:             "Summary: ready for milestones",
+	}
+	if err := store.SendMessage(context.Background(), &finalize); err != nil {
+		t.Fatalf("send finalize: %v", err)
+	}
+	milestone := agent.BoardMessage{
+		WorkspaceID:      "ws1",
+		Stream:           agent.RoomStreamName("alpha"),
+		Sender:           "human-a",
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindMilestone,
+		RelatedMessageID: epic.ID,
+		Subject:          "Milestone: Backend API",
+		Body:             "EpicID: " + epic.ID + "\nObjective: expose read model",
+	}
+	if err := store.SendMessage(context.Background(), &milestone); err != nil {
+		t.Fatalf("send milestone: %v", err)
+	}
+	story := agent.BoardMessage{
+		WorkspaceID:      "ws1",
+		Stream:           agent.RoomStreamName("alpha"),
+		Sender:           "human-a",
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindStory,
+		RelatedMessageID: milestone.ID,
+		Subject:          "Story: Add endpoint",
+		Body:             "Expose agile reads",
+	}
+	if err := store.SendMessage(context.Background(), &story); err != nil {
+		t.Fatalf("send story: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/agile", strings.NewReader(fmt.Sprintf(`{
+		"workspace":"ws1",
+		"action":"epic_next",
+		"epic_id":"%s"
+	}`, epic.ID)))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	body := decodeResponseBody(t, rr)
+	result := body["result"].(map[string]any)
+	data := result["data"].(map[string]any)
+	status := data["status"].(map[string]any)
+	if got := int(status["milestone_count"].(float64)); got != 1 {
+		t.Fatalf("milestone_count=%d want 1", got)
+	}
+	if got := int(status["story_count"].(float64)); got != 1 {
+		t.Fatalf("story_count=%d want 1", got)
+	}
+	next := data["next"].([]any)
+	first := next[0].(map[string]any)
+	if got := first["action"]; got != "start_story" {
+		t.Fatalf("next action=%v want start_story", got)
+	}
+}
+
 func TestRoomDetailHandler_PostMessagesRequiresActiveLoop(t *testing.T) {
 	cfg := orchestrationTestConfig(t.TempDir())
 	listHandler := RoomsListHandler(cfg, zerolog.Nop())
