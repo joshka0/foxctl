@@ -238,12 +238,32 @@ Supported actions:
 | `/story-start <story-id>` | Mark a story as in_progress |
 | `/story-review <story-id>` | Mark a story as in_review |
 | `/story-validate [verdict] [validator-type]` | Validate the configured `--foxctl-story` with verdict (pass/fail/waived) and validator type (human/agent/harness) |
+| `/epic-select` | Interactively select an epic from the current room (overlay list) |
+| `/milestone-select` | Interactively select a milestone for the active epic |
+| `/story-select` | Interactively select a story for the active epic |
+| `/epic-refresh` | Refresh the epic status widget data from the daemon |
 | `/foxctl-tasks` | List tasks |
 | `/foxctl-board` | Show board |
 | `/foxctl-stats` | Show stats |
 | `/foxctl-context` | Show context plane |
 | `/foxctl-mcp` | Show MCP status |
 | `/foxctl-workspaces` | List workspaces |
+
+## TUI Widget & Keyboard Shortcuts
+
+When `--foxctl-epic` is set and the foxctl daemon is reachable, a **foxctl-epic widget** appears above the editor showing:
+
+- Epic title and status
+- Active milestone and story
+- Health warnings
+- Next recommended action
+
+The widget refreshes automatically after story lifecycle commands (`/story-start`, `/story-review`, `/story-validate`) and selector commands (`/epic-select`, `/milestone-select`, `/story-select`).
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+Shift+E` | Refresh the epic status widget |
+| `Ctrl+Shift+N` | Quick-select next story from active epic |
 
 ## Requirements
 
