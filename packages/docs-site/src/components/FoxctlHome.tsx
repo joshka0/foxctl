@@ -429,6 +429,17 @@ export default function FoxctlHome() {
             <Link className="fox-action" href="/start/docs-map/">
               Browse docs
             </Link>
+            <Link
+              className="fox-action fox-action-github"
+              href="https://github.com/joshka0/foxctl"
+              rel="noreferrer"
+              target="_blank"
+            >
+              <svg className="fox-devicon" aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.25.83-.58v-2.23c-3.34.72-4.05-1.6-4.05-1.6a3.18 3.18 0 0 0-1.33-1.76c-1.08-.73.09-.72.09-.72a2.52 2.52 0 0 1 1.83 1.24 2.55 2.55 0 0 0 3.49 1 2.56 2.56 0 0 1 .76-1.6c-2.67-.3-5.47-1.33-5.47-5.93a4.64 4.64 0 0 1 1.23-3.22 4.3 4.3 0 0 1 .12-3.18s1-.32 3.3 1.23a11.36 11.36 0 0 1 6 0c2.28-1.55 3.28-1.23 3.28-1.23.44 1.01.49 2.15.13 3.18a4.61 4.61 0 0 1 1.23 3.22c0 4.61-2.81 5.62-5.48 5.92.43.37.82 1.1.82 2.23v3.32c0 .32.22.7.83.58A12 12 0 0 0 12 .3Z" />
+              </svg>
+              GitHub
+            </Link>
           </div>
           <div className="fox-start-command" aria-label="First successful action">
             <span>Start here</span>

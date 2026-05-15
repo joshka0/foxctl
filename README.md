@@ -8,13 +8,15 @@
 [![Go Version](https://img.shields.io/badge/Go-1.26.1+-00ADD8.svg)](https://golang.org/dl/)
 [![Bun](https://img.shields.io/badge/Bun-optional-000000.svg)](https://bun.sh/)
 
-[Getting Started](#quick-start) · [Install](#install) · [Docs](#documentation) · [Development](#development)
+[Website](https://foxctl.com) · [Getting Started](#quick-start) · [Install](#install) · [Docs](https://foxctl.com/start/docs-map/) · [Development](#development)
 
 </div>
 
 ---
 
 foxctl is the repo-local control plane for AI-powered development workflows — skill execution, semantic code retrieval, session continuity, provider integrations, and durable multi-agent coordination.
+
+Public docs live at [foxctl.com](https://foxctl.com).
 
 ## Features
 
@@ -353,6 +355,7 @@ make check-doc-links
 
 Start with:
 
+- [foxctl.com](https://foxctl.com) — Public documentation site
 - [AGENTS.md](AGENTS.md) — AI assistant guide and command reference
 - [docs/README.md](docs/README.md) — Canonical documentation map
 - [docs/start/README.md](docs/start/README.md) — Fast orientation guides

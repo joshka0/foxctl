@@ -186,6 +186,18 @@ h1#_top {
   color: #ffffff;
 }
 
+.fox-action-github {
+  gap: 0.55rem;
+}
+
+.fox-devicon {
+  display: block;
+  flex: 0 0 auto;
+  fill: currentColor;
+  height: 1.1rem;
+  width: 1.1rem;
+}
+
 .fox-start-command {
   background: rgba(11, 16, 15, 0.78);
   border: 1px solid var(--fox-border);

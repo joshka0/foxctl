@@ -18,6 +18,13 @@ export default defineConfig({
         src: './src/assets/foxctl-logo.svg',
         alt: 'foxctl',
       },
+      social: [
+        {
+          icon: 'github',
+          label: 'GitHub',
+          href: 'https://github.com/joshka0/foxctl',
+        },
+      ],
       customCss: ['./src/styles/starlight-overrides.css'],
       tableOfContents: {
         minHeadingLevel: 2,
