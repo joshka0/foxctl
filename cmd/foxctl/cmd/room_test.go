@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10862,6 +10864,141 @@ func TestCollectRoomRelayTargetsByBackendSkipsHerdrForLegacyMuxFallback(t *testi
 	}
 	if len(skipped) != 2 {
 		t.Fatalf("skipped=%v want human plus herdr legacy skip", skipped)
+	}
+}
+
+func TestRelayRoomMessageHerdrSendsPaneSendInputToSocket(t *testing.T) {
+	server := startRoomTestFakeHerdrServer(t)
+	room := agent.RoomSummary{
+		ID: "alpha",
+		Members: []agent.RoomMember{
+			{ActorID: "human-a"},
+			{
+				ActorID: "codex-a",
+				DeliveryBinding: &agent.RoomDeliveryBinding{
+					MuxBackend:    "herdr",
+					MuxSession:    "dev-session",
+					MuxPaneID:     "w1-2",
+					TransportKind: "mux_pane",
+				},
+			},
+		},
+	}
+	msg := agent.BoardMessage{
+		ID:        "msg-1",
+		Sender:    "human-a",
+		Recipient: "codex-a",
+		Subject:   "Relay check",
+		Body:      "please handle the socket bridge",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	result := relayRoomMessageHerdr(ctx, room, msg, roomRelayOptions{HerdrSocketPath: server.socketPath})
+
+	if result.Backend != "herdr" {
+		t.Fatalf("backend=%q want herdr", result.Backend)
+	}
+	if result.DeliveredCount != 1 || result.FailedCount != 0 {
+		t.Fatalf("result=%+v want one delivered and no failures", result)
+	}
+	if len(result.DeliveredTo) != 1 || result.DeliveredTo[0] != "w1-2" {
+		t.Fatalf("delivered_to=%v want [w1-2]", result.DeliveredTo)
+	}
+
+	req := server.nextRequest(t)
+	if req.Method != "pane.send_input" {
+		t.Fatalf("method=%q want pane.send_input", req.Method)
+	}
+	var params struct {
+		PaneID string   `json:"pane_id"`
+		Text   string   `json:"text"`
+		Keys   []string `json:"keys"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		t.Fatalf("decode params: %v", err)
+	}
+	if params.PaneID != "w1-2" {
+		t.Fatalf("pane_id=%q want w1-2", params.PaneID)
+	}
+	if params.Text != formatRoomRelayContent(room, msg) {
+		t.Fatalf("text=%q want formatted room message", params.Text)
+	}
+	if len(params.Keys) != 1 || params.Keys[0] != "Enter" {
+		t.Fatalf("keys=%v want [Enter]", params.Keys)
+	}
+}
+
+type roomTestFakeHerdrServer struct {
+	socketPath string
+	requests   chan roomTestHerdrRequest
+}
+
+type roomTestHerdrRequest struct {
+	ID     string          `json:"id"`
+	Method string          `json:"method"`
+	Params json.RawMessage `json:"params"`
+}
+
+func startRoomTestFakeHerdrServer(t *testing.T) roomTestFakeHerdrServer {
+	t.Helper()
+	socketDir, err := os.MkdirTemp("/tmp", "hdr")
+	if err != nil {
+		t.Fatalf("mkdir fake herdr socket dir: %v", err)
+	}
+	socketPath := filepath.Join(socketDir, "herdr.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		_ = os.RemoveAll(socketDir)
+		t.Fatalf("listen fake herdr socket: %v", err)
+	}
+	requests := make(chan roomTestHerdrRequest, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		line, err := bufio.NewReader(conn).ReadBytes('\n')
+		if err != nil {
+			t.Errorf("read fake herdr request: %v", err)
+			return
+		}
+		var req roomTestHerdrRequest
+		if err := json.Unmarshal(line, &req); err != nil {
+			t.Errorf("decode fake herdr request: %v", err)
+			return
+		}
+		requests <- req
+		if err := json.NewEncoder(conn).Encode(map[string]any{
+			"id":     req.ID,
+			"result": map[string]any{"type": "pane_send_input"},
+		}); err != nil {
+			t.Errorf("write fake herdr response: %v", err)
+		}
+	}()
+	t.Cleanup(func() {
+		_ = listener.Close()
+		_ = os.RemoveAll(socketDir)
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Error("fake herdr server did not stop")
+		}
+	})
+	return roomTestFakeHerdrServer{socketPath: socketPath, requests: requests}
+}
+
+func (s roomTestFakeHerdrServer) nextRequest(t *testing.T) roomTestHerdrRequest {
+	t.Helper()
+	select {
+	case req := <-s.requests:
+		return req
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for fake herdr request")
+		return roomTestHerdrRequest{}
 	}
 }
 

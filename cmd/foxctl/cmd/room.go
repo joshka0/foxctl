@@ -541,7 +541,7 @@ func newRoomSendCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "send <room-id> <text>",
 		Short: "Append a durable message for room-loop delivery",
-		Long: "Stores the message in the room timeline, then delivers it to other participants' tmux/zellij panes " +
+		Long: "Stores the message in the room timeline, then delivers it to other participants' mux panes " +
 			"(same path as room relay / room loop) so targets see the line and an implicit submit. " +
 			"When this command runs inside tmux or zellij, foxctl also mux-submits the current pane by default " +
 			"(Enter-only) so your local shell/agent composer finishes. Use --no-live-relay if room loop already relays; " +
@@ -2150,7 +2150,7 @@ func newRoomJoinCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().StringVar(&role, "role", "", "Optional member role")
-	cmd.Flags().StringVar(&backend, "backend", "", "Optional transport backend binding (tmux|zellij)")
+	cmd.Flags().StringVar(&backend, "backend", "", "Optional transport backend binding (tmux|zellij|herdr)")
 	cmd.Flags().StringVar(&session, "session", "", "Optional transport session binding")
 	cmd.Flags().StringVar(&paneID, "pane-id", "", "Optional transport pane binding")
 	cmd.Flags().StringVar(&transportEndpoint, "transport-endpoint", "", "Transport endpoint (e.g. unix socket path for pane wrapper)")
@@ -2197,7 +2197,7 @@ func newRoomRebindCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().StringVar(&role, "role", "", "Optional member role override (defaults to existing role)")
-	cmd.Flags().StringVar(&backend, "backend", "", "Optional transport backend binding (tmux|zellij)")
+	cmd.Flags().StringVar(&backend, "backend", "", "Optional transport backend binding (tmux|zellij|herdr)")
 	cmd.Flags().StringVar(&session, "session", "", "Optional transport session binding")
 	cmd.Flags().StringVar(&paneID, "pane-id", "", "Optional transport pane binding")
 	cmd.Flags().StringVar(&transportEndpoint, "transport-endpoint", "", "Transport endpoint (e.g. unix socket path for pane wrapper)")
@@ -16141,7 +16141,7 @@ func runRoomRebind(cmd *cobra.Command, workspace, roomID, actorID, role, backend
 	}
 	if existing == nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.rebind", protocol.ErrorCodeENotFound, fmt.Sprintf("room member %q not found", actorID), map[string]any{
-			"hint": "Add the participant first with `foxctl room join`, then rebind its tmux/zellij transport.",
+			"hint": "Add the participant first with `foxctl room join`, then rebind its mux transport.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 
@@ -16153,7 +16153,7 @@ func runRoomRebind(cmd *cobra.Command, workspace, roomID, actorID, role, backend
 		identity, resolveErr := resolveRoomSender(cmd.Context(), actorID)
 		if resolveErr != nil {
 			return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.rebind", protocol.ErrorCodeEARG, resolveErr.Error(), map[string]any{
-				"hint": "Run inside tmux/zellij with --current or pass explicit --backend/--session/--pane-id values.",
+				"hint": "Run inside tmux/zellij with --current, or pass explicit --backend/--session/--pane-id values.",
 			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 		}
 		member.Backend = identity.Backend

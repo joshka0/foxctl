@@ -19,10 +19,13 @@ func TestResolveSocketPathOrder(t *testing.T) {
 		"HERDR_SESSION":     "envsession",
 	}
 
-	if got := ResolveSocketPath(Options{Session: "work", SocketPath: "/tmp/explicit.sock", Env: env}); got != "/xdg/herdr/sessions/work/herdr.sock" {
+	if got := ResolveSocketPath(Options{Session: "work", SocketPath: "/tmp/explicit.sock", Env: env}); got != "/tmp/explicit.sock" {
+		t.Fatalf("explicit socket override path = %q", got)
+	}
+	if got := ResolveSocketPath(Options{Session: "work", Env: env}); got != "/xdg/herdr/sessions/work/herdr.sock" {
 		t.Fatalf("explicit session path = %q", got)
 	}
-	if got := ResolveSocketPath(Options{Session: "default", SocketPath: "/tmp/explicit.sock", Env: env}); got != "/xdg/herdr/herdr.sock" {
+	if got := ResolveSocketPath(Options{Session: "default", Env: env}); got != "/xdg/herdr/herdr.sock" {
 		t.Fatalf("explicit default session path = %q", got)
 	}
 	if got := ResolveSocketPath(Options{SocketPath: "/tmp/explicit.sock", Env: env}); got != "/tmp/explicit.sock" {

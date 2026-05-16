@@ -1037,10 +1037,11 @@ func newTmuxSubmitCommand() *cobra.Command {
 			"room task assign/claim/complete fan out to panes by default. Sends keys to submit a drafted prompt in the target pane. " +
 			"Default is Escape then Enter for " +
 			"multi-line UIs; use --mode enter-only when the line is complete and only Enter should be sent.\n\n" +
-			"Use --room <room-id> with [target] as the room participant id to resolve tmux/zellij pane bindings " +
+			"Use --room <room-id> with [target] as the room participant id to resolve mux pane bindings " +
 			"from room storage (avoids mixing up foxctl room ids with zellij --session).\n\n" +
 			"Without --room: for tmux pass a pane label or id as [target]; for zellij use --session and optional " +
-			"--pane-id (keys go to the focused pane when pane id is omitted).",
+			"--pane-id (keys go to the focused pane when pane id is omitted); for herdr pass [target], --pane-id, " +
+			"or HERDR_PANE_ID.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			submitMode, err := parseMuxSubmitModeString(modeFlag)

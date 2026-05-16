@@ -155,11 +155,11 @@ func ResolveSocketPath(opts Options) string {
 	if env == nil {
 		env = processEnv()
 	}
-	if session := strings.TrimSpace(opts.Session); session != "" {
-		return sessionSocketPath(env, session)
-	}
 	if socketPath := strings.TrimSpace(opts.SocketPath); socketPath != "" {
 		return socketPath
+	}
+	if session := strings.TrimSpace(opts.Session); session != "" {
+		return sessionSocketPath(env, session)
 	}
 	if socketPath := strings.TrimSpace(env["HERDR_SOCKET_PATH"]); socketPath != "" {
 		return socketPath
