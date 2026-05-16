@@ -468,7 +468,6 @@ async function getFoxctlSnapshot(pi: ExtensionAPI, signal?: AbortSignal, prompt 
 	}
 
 	const epicID = getEpicOverride(pi);
-	const room = getRoom(pi);
 	if (room && epicID && isFlagEnabled(pi, "foxctl-epic-context")) {
 		try {
 			snapshot.epic_context = await runRoomAgile(pi, {
