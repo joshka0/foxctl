@@ -16,6 +16,7 @@ import (
 	"github.com/joshka0/foxctl/internal/domain/agent"
 	"github.com/joshka0/foxctl/internal/protocol"
 	"github.com/joshka0/foxctl/internal/runtime/terminal/agentpane"
+	"github.com/joshka0/foxctl/internal/runtime/terminal/herdrbridge"
 	"github.com/joshka0/foxctl/internal/runtime/terminal/tmuxbridge"
 	"github.com/joshka0/foxctl/internal/runtime/terminal/zellijbridge"
 	"github.com/joshka0/foxctl/internal/storage/blackboard"
@@ -143,6 +144,7 @@ func newTmuxListCommand() *cobra.Command {
 	var (
 		backend string
 		session string
+		socket  string
 		limit   int
 	)
 
@@ -163,6 +165,22 @@ func newTmuxListCommand() *cobra.Command {
 					"backend": "tmux",
 					"panes":   panes,
 					"count":   len(panes),
+				}, protocol.WithSource("cli"))
+			case "herdr":
+				client := herdrbridge.NewWithOptions(herdrbridge.Options{Session: session, SocketPath: socket})
+				panes, err := client.List(cmd.Context(), herdrbridge.ListOptions{})
+				if err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "foxctl.tmux.list", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+						"hint":        "Start Herdr first, pass --session <name>, or set HERDR_SOCKET_PATH.",
+						"socket_path": client.SocketPath(),
+					}, protocol.WithSource("cli"))
+				}
+				return protocol.WriteOK(cmd.OutOrStdout(), "foxctl.tmux.list", map[string]any{
+					"backend":     "herdr",
+					"session":     herdrMuxSessionLabel(session),
+					"socket_path": client.SocketPath(),
+					"panes":       panes,
+					"count":       len(panes),
 				}, protocol.WithSource("cli"))
 			case "zellij":
 				cfg, err := loadConfig(cmd.Context())
@@ -198,39 +216,82 @@ func newTmuxListCommand() *cobra.Command {
 				}, protocol.WithSource("cli"))
 			default:
 				return protocol.WriteError(cmd.OutOrStdout(), "foxctl.tmux.list", protocol.ErrorCodeEARG, fmt.Sprintf("unsupported backend %q", backend), map[string]any{
-					"hint": "Use --backend tmux or --backend zellij.",
+					"hint": "Use --backend tmux, zellij, or herdr.",
 				}, protocol.WithSource("cli"))
 			}
 		},
 	}
 
-	cmd.Flags().StringVar(&backend, "backend", "tmux", "Terminal backend to inspect (tmux|zellij)")
-	cmd.Flags().StringVar(&session, "session", "", "Zellij session name when --backend zellij (defaults to ZELLIJ_SESSION_NAME)")
+	cmd.Flags().StringVar(&backend, "backend", "tmux", "Terminal backend to inspect (tmux|zellij|herdr)")
+	cmd.Flags().StringVar(&session, "session", "", "Zellij session name or Herdr session namespace")
+	cmd.Flags().StringVar(&socket, "socket", "", "Herdr Unix socket path override when --backend herdr")
 	cmd.Flags().IntVar(&limit, "limit", 500, "Maximum agents to scan when --backend zellij")
 	return cmd
 }
 
 func newTmuxReadCommand() *cobra.Command {
-	var lines int
+	var (
+		backend   string
+		session   string
+		socket    string
+		source    string
+		format    string
+		stripANSI bool
+		lines     int
+	)
 
 	cmd := &cobra.Command{
 		Use:   "read <target>",
 		Short: "Capture the last N lines from a mux pane",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := tmuxbridge.New()
-			result, err := client.Read(cmd.Context(), args[0], lines)
-			if err != nil {
-				return protocol.WriteError(cmd.OutOrStdout(), "foxctl.tmux.read", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
-					"hint": "Use a pane id like %3 or a label set with tmux-bridge name <target> <label>.",
+			switch strings.TrimSpace(backend) {
+			case "", "tmux":
+				client := tmuxbridge.New()
+				result, err := client.Read(cmd.Context(), args[0], lines)
+				if err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "foxctl.tmux.read", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+						"hint": "Use a pane id like %3 or a label set with tmux-bridge name <target> <label>.",
+					}, protocol.WithSource("cli"))
+				}
+				return protocol.WriteOK(cmd.OutOrStdout(), "foxctl.tmux.read", map[string]any{
+					"backend": "tmux",
+					"capture": result,
+				}, protocol.WithSource("cli"))
+			case "herdr":
+				client := herdrbridge.NewWithOptions(herdrbridge.Options{Session: session, SocketPath: socket})
+				result, err := client.Read(cmd.Context(), args[0], herdrbridge.ReadOptions{
+					Source:       source,
+					Lines:        lines,
+					Format:       format,
+					StripANSI:    stripANSI,
+					StripANSISet: true,
+				})
+				if err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "foxctl.tmux.read", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+						"hint":        "Use a Herdr pane id like w...-1 or positional shorthand like 1-1.",
+						"socket_path": client.SocketPath(),
+					}, protocol.WithSource("cli"))
+				}
+				return protocol.WriteOK(cmd.OutOrStdout(), "foxctl.tmux.read", map[string]any{
+					"backend":     "herdr",
+					"socket_path": client.SocketPath(),
+					"capture":     result,
+				}, protocol.WithSource("cli"))
+			default:
+				return protocol.WriteError(cmd.OutOrStdout(), "foxctl.tmux.read", protocol.ErrorCodeEARG, fmt.Sprintf("unsupported backend %q", backend), map[string]any{
+					"hint": "Use --backend tmux or --backend herdr.",
 				}, protocol.WithSource("cli"))
 			}
-			return protocol.WriteOK(cmd.OutOrStdout(), "foxctl.tmux.read", map[string]any{
-				"capture": result,
-			}, protocol.WithSource("cli"))
 		},
 	}
 
+	cmd.Flags().StringVar(&backend, "backend", "tmux", "Terminal backend to read from (tmux|herdr)")
+	cmd.Flags().StringVar(&session, "session", "", "Herdr session namespace when --backend herdr")
+	cmd.Flags().StringVar(&socket, "socket", "", "Herdr Unix socket path override when --backend herdr")
+	cmd.Flags().StringVar(&source, "source", herdrbridge.ReadSourceRecent, "Herdr read source (visible|recent|recent_unwrapped)")
+	cmd.Flags().StringVar(&format, "format", herdrbridge.ReadFormatText, "Herdr read format (text|ansi)")
+	cmd.Flags().BoolVar(&stripANSI, "strip-ansi", true, "Strip ANSI when reading Herdr text")
 	cmd.Flags().IntVar(&lines, "lines", 50, "Number of scrollback lines to capture")
 	return cmd
 }
@@ -393,6 +454,20 @@ func resolveMuxCreateBackend(raw string) string {
 	}
 }
 
+func resolveMuxRuntimeBackend(raw string) string {
+	switch strings.TrimSpace(raw) {
+	case "", "auto":
+		if strings.TrimSpace(os.Getenv("ZELLIJ_SESSION_NAME")) != "" {
+			return "zellij"
+		}
+		return "tmux"
+	case "tmux", "zellij", "herdr":
+		return strings.TrimSpace(raw)
+	default:
+		return ""
+	}
+}
+
 func resolveMuxCreateSession(cmd *cobra.Command, backend, raw string) string {
 	value := strings.TrimSpace(raw)
 	if value != "" {
@@ -404,6 +479,16 @@ func resolveMuxCreateSession(cmd *cobra.Command, backend, raw string) string {
 		}
 	}
 	return "foxctl-collab"
+}
+
+func herdrMuxSessionLabel(session string) string {
+	if session = strings.TrimSpace(session); session != "" {
+		return session
+	}
+	if session = strings.TrimSpace(os.Getenv("HERDR_SESSION")); session != "" {
+		return session
+	}
+	return "default"
 }
 
 func runMuxCreateZellij(cmd *cobra.Command, session string, panes int, paneCommand, agent, agentMode string, agentArgs []string, agentSessionID, cwd, labelPrefix, parentParticipant, parentAgentID, roomID, roomAccess string, attach bool) (map[string]any, error) {
@@ -937,6 +1022,7 @@ func newTmuxSubmitCommand() *cobra.Command {
 	var (
 		backend   string
 		session   string
+		socket    string
 		modeFlag  string
 		paneID    string
 		roomID    string
@@ -1012,10 +1098,10 @@ func newTmuxSubmitCommand() *cobra.Command {
 				}
 				return protocol.WriteOK(cmd.OutOrStdout(), "foxctl.tmux.submit", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 			}
-			resolvedBackend := resolveMuxCreateBackend(strings.TrimSpace(backend))
+			resolvedBackend := resolveMuxRuntimeBackend(strings.TrimSpace(backend))
 			if resolvedBackend == "" {
 				return protocol.WriteError(cmd.OutOrStdout(), "foxctl.tmux.submit", protocol.ErrorCodeEARG, fmt.Sprintf("unsupported backend %q", backend), map[string]any{
-					"hint": "Use --backend auto, tmux, or zellij.",
+					"hint": "Use --backend auto, tmux, zellij, or herdr.",
 				}, protocol.WithSource("cli"))
 			}
 			switch resolvedBackend {
@@ -1068,16 +1154,43 @@ func newTmuxSubmitCommand() *cobra.Command {
 					"backend": "zellij",
 					"result":  result,
 				}, protocol.WithSource("cli"))
+			case "herdr":
+				resolvedPane := strings.TrimSpace(paneID)
+				if resolvedPane == "" && len(args) > 0 {
+					resolvedPane = strings.TrimSpace(args[0])
+				}
+				if resolvedPane == "" {
+					resolvedPane = strings.TrimSpace(os.Getenv("HERDR_PANE_ID"))
+				}
+				if resolvedPane == "" {
+					return protocol.WriteError(cmd.OutOrStdout(), "foxctl.tmux.submit", protocol.ErrorCodeEARG, "pane id is required for herdr submit", map[string]any{
+						"hint": "Pass [target], --pane-id, or run inside Herdr with HERDR_PANE_ID set.",
+					}, protocol.WithSource("cli"))
+				}
+				client := herdrbridge.NewWithOptions(herdrbridge.Options{Session: session, SocketPath: socket})
+				result, err := client.Submit(cmd.Context(), resolvedPane, herdrbridge.SubmitOptions{Mode: submitMode})
+				if err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "foxctl.tmux.submit", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+						"hint":        "Ensure the Herdr pane exists and the Herdr socket is reachable.",
+						"socket_path": client.SocketPath(),
+					}, protocol.WithSource("cli"))
+				}
+				return protocol.WriteOK(cmd.OutOrStdout(), "foxctl.tmux.submit", map[string]any{
+					"backend":     "herdr",
+					"socket_path": client.SocketPath(),
+					"result":      result,
+				}, protocol.WithSource("cli"))
 			default:
 				return protocol.WriteError(cmd.OutOrStdout(), "foxctl.tmux.submit", protocol.ErrorCodeEARG, fmt.Sprintf("unsupported backend %q", resolvedBackend), nil, protocol.WithSource("cli"))
 			}
 		},
 	}
 
-	cmd.Flags().StringVar(&backend, "backend", "auto", "Mux backend to submit against (auto|tmux|zellij)")
-	cmd.Flags().StringVar(&session, "session", "", "Zellij session name when --backend zellij (defaults to ZELLIJ_SESSION_NAME); ignored for tmux")
+	cmd.Flags().StringVar(&backend, "backend", "auto", "Mux backend to submit against (auto|tmux|zellij|herdr)")
+	cmd.Flags().StringVar(&session, "session", "", "Zellij session name or Herdr session namespace")
+	cmd.Flags().StringVar(&socket, "socket", "", "Herdr Unix socket path override when --backend herdr")
 	cmd.Flags().StringVar(&modeFlag, "mode", "escape-enter", "Submit key sequence (escape-enter|enter-only)")
-	cmd.Flags().StringVar(&paneID, "pane-id", "", "Zellij terminal pane id (e.g. terminal_2 or 2); defaults to ZELLIJ_PANE_ID when set")
+	cmd.Flags().StringVar(&paneID, "pane-id", "", "Zellij terminal pane id or Herdr pane id")
 	cmd.Flags().StringVar(&roomID, "room", "", "Foxctl room id: resolve session/pane from stored membership for participant [target]")
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root for --room lookup")
 	return cmd
@@ -1296,6 +1409,31 @@ func muxGroupControlForMember(ctx context.Context, member agent.RoomMember, acti
 				item.Error = err.Error()
 				return item
 			}
+		}
+		item.Status = "ok"
+		return item
+	case "herdr":
+		item.Backend = "herdr"
+		item.Via = "mux"
+		session, paneID, ok := resolveRoomMemberHerdrTarget(member)
+		if !ok || strings.TrimSpace(paneID) == "" {
+			item.Status = "skipped"
+			item.Error = "member has no resolvable herdr pane"
+			return item
+		}
+		item.Target = paneID
+		client := herdrbridge.NewWithOptions(herdrbridge.Options{Session: session})
+		var err error
+		if action == "interrupt" {
+			_, err = client.Interrupt(ctx, paneID)
+		} else {
+			mode := tmuxSubmitModeForParticipant(item.Participant)
+			_, err = client.Submit(ctx, paneID, herdrbridge.SubmitOptions{Mode: mode})
+		}
+		if err != nil {
+			item.Status = "failed"
+			item.Error = err.Error()
+			return item
 		}
 		item.Status = "ok"
 		return item

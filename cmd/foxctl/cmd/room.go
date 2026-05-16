@@ -23,6 +23,7 @@ import (
 	"github.com/joshka0/foxctl/internal/protocol"
 	"github.com/joshka0/foxctl/internal/runtime/orchestration/roomruntime"
 	"github.com/joshka0/foxctl/internal/runtime/terminal/agentpane"
+	"github.com/joshka0/foxctl/internal/runtime/terminal/herdrbridge"
 	"github.com/joshka0/foxctl/internal/runtime/terminal/tmuxbridge"
 	"github.com/joshka0/foxctl/internal/runtime/terminal/zellijbridge"
 	"github.com/joshka0/foxctl/internal/storage/agents"
@@ -2271,6 +2272,7 @@ func newRoomRelayCommand() *cobra.Command {
 		workspace string
 		backend   string
 		session   string
+		socket    string
 		plugin    string
 		poll      time.Duration
 		history   int
@@ -2283,13 +2285,16 @@ func newRoomRelayCommand() *cobra.Command {
 			return runRoomRelay(cmd, workspace, args[0], roomRelayOptions{
 				Backend:          backend,
 				ZellijSession:    session,
+				HerdrSession:     session,
+				HerdrSocketPath:  socket,
 				ZellijPluginPath: plugin,
 			}, poll, history)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
-	cmd.Flags().StringVar(&backend, "backend", "auto", "Terminal backend (auto|tmux|zellij)")
-	cmd.Flags().StringVar(&session, "session", "", "Zellij session name (defaults to ZELLIJ_SESSION_NAME when inside zellij)")
+	cmd.Flags().StringVar(&backend, "backend", "auto", "Terminal backend (auto|tmux|zellij|herdr)")
+	cmd.Flags().StringVar(&session, "session", "", "Zellij session name or Herdr session namespace")
+	cmd.Flags().StringVar(&socket, "socket", "", "Herdr Unix socket path override when --backend herdr")
 	cmd.Flags().StringVar(&plugin, "plugin-path", "", "Path to the zellij room relay plugin wasm")
 	cmd.Flags().DurationVar(&poll, "poll", 2*time.Second, "Polling interval")
 	cmd.Flags().IntVar(&history, "history", 0, "Number of most recent messages to replay into members before following")
@@ -2301,6 +2306,7 @@ func newRoomRelayOnceCommand() *cobra.Command {
 		workspace string
 		backend   string
 		session   string
+		socket    string
 		plugin    string
 	)
 	cmd := &cobra.Command{
@@ -2312,13 +2318,16 @@ func newRoomRelayOnceCommand() *cobra.Command {
 			return runRoomRelayOnce(cmd, workspace, args[0], args[1], roomRelayOptions{
 				Backend:          backend,
 				ZellijSession:    session,
+				HerdrSession:     session,
+				HerdrSocketPath:  socket,
 				ZellijPluginPath: plugin,
 			})
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
-	cmd.Flags().StringVar(&backend, "backend", "auto", "Terminal backend (auto|tmux|zellij)")
-	cmd.Flags().StringVar(&session, "session", "", "Zellij session name")
+	cmd.Flags().StringVar(&backend, "backend", "auto", "Terminal backend (auto|tmux|zellij|herdr)")
+	cmd.Flags().StringVar(&session, "session", "", "Zellij session name or Herdr session namespace")
+	cmd.Flags().StringVar(&socket, "socket", "", "Herdr Unix socket path override when --backend herdr")
 	cmd.Flags().StringVar(&plugin, "plugin-path", "", "Path to the zellij room relay plugin wasm")
 	return cmd
 }
@@ -18085,6 +18094,8 @@ type roomRelayOptions struct {
 	Backend          string
 	ZellijSession    string
 	ZellijPluginPath string
+	HerdrSession     string
+	HerdrSocketPath  string
 	TaskEventMode    string
 }
 
@@ -18111,6 +18122,8 @@ func relayRoomMessage(ctx context.Context, client *tmuxbridge.Client, room agent
 		return relayRoomMessageTmux(ctx, client, room, msg)
 	case "zellij":
 		return relayRoomMessageZellij(ctx, room, msg, relay)
+	case "herdr":
+		return relayRoomMessageHerdr(ctx, room, msg, relay)
 	default:
 		return roomRelayResult{
 			Backend: "unknown",
@@ -18322,6 +18335,43 @@ func relayRoomMessageTmux(ctx context.Context, client *tmuxbridge.Client, room a
 		}
 		result.DeliveredCount++
 		result.DeliveredTo = append(result.DeliveredTo, target)
+	}
+	return result
+}
+
+func relayRoomMessageHerdr(ctx context.Context, room agent.RoomSummary, msg agent.BoardMessage, relay roomRelayOptions) roomRelayResult {
+	result := roomRelayResult{Backend: "herdr"}
+	members, skipped := collectRoomRelayMembers(room, msg)
+	result.SkippedMembers = append(result.SkippedMembers, skipped...)
+	content := formatRoomRelayContent(room, msg)
+	for _, member := range members {
+		if roomMemberRelayBackend(member) != "herdr" {
+			continue
+		}
+		session, paneID, ok := resolveRoomMemberHerdrTarget(member)
+		if !ok || strings.TrimSpace(paneID) == "" {
+			aid := strings.TrimSpace(member.ActorID)
+			result.FailedCount++
+			result.FailedMembers = append(result.FailedMembers, aid)
+			result.DeliveryFailures = append(result.DeliveryFailures, roomRelayDeliveryFailure{Target: aid, Reason: "no herdr pane target"})
+			continue
+		}
+		if session == "" {
+			session = strings.TrimSpace(relay.HerdrSession)
+		}
+		client := herdrbridge.NewWithOptions(herdrbridge.Options{
+			Session:    session,
+			SocketPath: relay.HerdrSocketPath,
+		})
+		_, err := client.DeliverTextWithOptions(ctx, paneID, content, herdrbridge.DeliverOptions{Interrupt: msg.Interrupt})
+		if err != nil {
+			result.FailedCount++
+			result.FailedMembers = append(result.FailedMembers, paneID)
+			result.DeliveryFailures = append(result.DeliveryFailures, roomRelayDeliveryFailure{Target: paneID, Reason: err.Error()})
+			continue
+		}
+		result.DeliveredCount++
+		result.DeliveredTo = append(result.DeliveredTo, paneID)
 	}
 	return result
 }
@@ -19238,6 +19288,16 @@ func muxSubmitForRoomMember(ctx context.Context, member agent.RoomMember, submit
 			return nil, "", err
 		}
 		return res, "zellij", nil
+	case "herdr":
+		session, paneID, ok := resolveRoomMemberHerdrTarget(member)
+		if !ok || strings.TrimSpace(paneID) == "" {
+			return nil, "", fmt.Errorf("member %q has no resolvable herdr pane", member.ActorID)
+		}
+		res, err := herdrbridge.NewWithOptions(herdrbridge.Options{Session: session}).Submit(ctx, paneID, herdrbridge.SubmitOptions{Mode: submitMode})
+		if err != nil {
+			return nil, "", err
+		}
+		return res, "herdr", nil
 	default:
 		target := roomMemberTmuxTarget(member)
 		if strings.TrimSpace(target) == "" {
@@ -19368,16 +19428,21 @@ func collectRoomRelayTargetsByBackend(room agent.RoomSummary, msg agent.BoardMes
 			skipped = append(skipped, target)
 			continue
 		}
-		if roomMemberRelayBackend(member) != "zellij" {
+		switch roomMemberRelayBackend(member) {
+		case "zellij":
+			session, zellijTarget, ok := resolveRoomMemberZellijTarget(member)
+			if !ok {
+				failed = append(failed, target)
+				continue
+			}
+			zellijTargets[session] = append(zellijTargets[session], zellijTarget)
+		case "herdr":
+			// Herdr delivery is handled by the participant-transport path and by
+			// explicit backend=herdr relay. Do not route it through tmux fallback.
+			skipped = append(skipped, target)
+		default:
 			tmuxTargets = append(tmuxTargets, roomMemberTmuxTarget(member))
-			continue
 		}
-		session, zellijTarget, ok := resolveRoomMemberZellijTarget(member)
-		if !ok {
-			failed = append(failed, target)
-			continue
-		}
-		zellijTargets[session] = append(zellijTargets[session], zellijTarget)
 	}
 	return tmuxTargets, zellijTargets, failed, skipped
 }
@@ -19387,10 +19452,13 @@ func roomMemberRelayBackend(member agent.RoomMember) string {
 	binding := member.DeliveryBinding
 	if binding != nil {
 		if backend := strings.TrimSpace(binding.MuxBackend); backend != "" {
-			return backend
+			return strings.ToLower(backend)
 		}
 		if strings.EqualFold(strings.TrimSpace(binding.TransportKind), "mux_pane") {
 			if endpoint := strings.TrimSpace(binding.TransportEndpoint); endpoint != "" {
+				if _, ok := herdrbridge.ParseParticipantID(endpoint); ok {
+					return "herdr"
+				}
 				if _, _, ok := parseZellijParticipantID(endpoint); ok {
 					return "zellij"
 				}
@@ -19414,7 +19482,13 @@ func roomMemberRelayBackend(member agent.RoomMember) string {
 			if strings.HasPrefix(endpoint, "zellij:") {
 				return "zellij"
 			}
+			if strings.HasPrefix(endpoint, "herdr:") {
+				return "herdr"
+			}
 		}
+	}
+	if strings.HasPrefix(member.ActorID, "herdr:") {
+		return "herdr"
 	}
 	if strings.HasPrefix(member.ActorID, "zellij:") {
 		return "zellij"
@@ -19451,6 +19525,34 @@ func resolveRoomMemberZellijTarget(member agent.RoomMember) (string, string, boo
 	}
 	if session, paneID, ok := parseZellijParticipantID(member.ActorID); ok {
 		return session, formatZellijParticipantID(session, paneID), true
+	}
+	return "", "", false
+}
+
+func resolveRoomMemberHerdrTarget(member agent.RoomMember) (string, string, bool) {
+	member = normalizeRoomMember(member)
+	binding := member.DeliveryBinding
+	if binding != nil {
+		if strings.EqualFold(strings.TrimSpace(binding.TransportKind), "mux_pane") {
+			if endpoint := strings.TrimSpace(binding.TransportEndpoint); endpoint != "" {
+				if ref, ok := herdrbridge.ParseParticipantID(endpoint); ok {
+					return ref.Session, ref.PaneID, true
+				}
+			}
+		}
+		session := strings.TrimSpace(binding.MuxSession)
+		paneID := strings.TrimSpace(binding.MuxPaneID)
+		if paneID != "" && !member.Unbound {
+			return session, paneID, true
+		}
+		if endpoint := strings.TrimSpace(binding.TransportEndpoint); endpoint != "" && strings.HasPrefix(endpoint, "herdr:") {
+			if ref, ok := herdrbridge.ParseParticipantID(endpoint); ok {
+				return ref.Session, ref.PaneID, true
+			}
+		}
+	}
+	if ref, ok := herdrbridge.ParseParticipantID(member.ActorID); ok {
+		return ref.Session, ref.PaneID, true
 	}
 	return "", "", false
 }

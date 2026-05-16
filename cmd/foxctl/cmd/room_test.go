@@ -10832,6 +10832,39 @@ func TestCollectRoomRelayTargetsByBackendUsesBindingOnlyZellijTransport(t *testi
 	}
 }
 
+func TestCollectRoomRelayTargetsByBackendSkipsHerdrForLegacyMuxFallback(t *testing.T) {
+	tmuxTargets, zellijTargets, failed, skipped := collectRoomRelayTargetsByBackend(agent.RoomSummary{
+		Members: []agent.RoomMember{
+			{ActorID: "human-a"},
+			{
+				ActorID: "codex-a",
+				DeliveryBinding: &agent.RoomDeliveryBinding{
+					MuxBackend:        "herdr",
+					MuxSession:        "dev",
+					MuxPaneID:         "w1-2",
+					TransportEndpoint: "herdr:dev:w1-2",
+					TransportKind:     "mux_pane",
+				},
+			},
+		},
+	}, agent.BoardMessage{
+		Sender:    "human-a",
+		Recipient: "codex-a",
+	})
+	if len(tmuxTargets) != 0 {
+		t.Fatalf("tmuxTargets=%v want none", tmuxTargets)
+	}
+	if len(zellijTargets) != 0 {
+		t.Fatalf("zellijTargets=%v want none", zellijTargets)
+	}
+	if len(failed) != 0 {
+		t.Fatalf("failed=%v want none", failed)
+	}
+	if len(skipped) != 2 {
+		t.Fatalf("skipped=%v want human plus herdr legacy skip", skipped)
+	}
+}
+
 func TestRelayRoomMessageZellijTargetsPrefersPaneSocketForNamedTargets(t *testing.T) {
 	origDeliver := deliverAgentPane
 	defer func() { deliverAgentPane = origDeliver }()
@@ -10966,6 +10999,41 @@ func TestRoomMemberRelayBackendPrefersBindingOverMirroredLegacyFields(t *testing
 	})
 	if backend != "zellij" {
 		t.Fatalf("backend=%q want zellij", backend)
+	}
+}
+
+func TestRoomMemberRelayBackendResolvesHerdrBinding(t *testing.T) {
+	backend := roomMemberRelayBackend(agent.RoomMember{
+		ActorID: "codex-a",
+		DeliveryBinding: &agent.RoomDeliveryBinding{
+			MuxBackend:        "herdr",
+			MuxSession:        "dev",
+			MuxPaneID:         "w1-2",
+			TransportEndpoint: "herdr:dev:w1-2",
+			TransportKind:     "mux_pane",
+		},
+	})
+	if backend != "herdr" {
+		t.Fatalf("backend=%q want herdr", backend)
+	}
+}
+
+func TestResolveRoomMemberHerdrTargetUsesBindingTransportEndpoint(t *testing.T) {
+	session, target, ok := resolveRoomMemberHerdrTarget(agent.RoomMember{
+		ActorID: "codex-a",
+		DeliveryBinding: &agent.RoomDeliveryBinding{
+			MuxBackend:        "herdr",
+			MuxSession:        "ignored",
+			MuxPaneID:         "ignored",
+			TransportEndpoint: "herdr:dev:w1-2",
+			TransportKind:     "mux_pane",
+		},
+	})
+	if !ok {
+		t.Fatal("expected target")
+	}
+	if session != "dev" || target != "w1-2" {
+		t.Fatalf("session=%q target=%q want dev/w1-2", session, target)
 	}
 }
 

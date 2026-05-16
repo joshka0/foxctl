@@ -7,6 +7,7 @@ import (
 
 	"github.com/joshka0/foxctl/internal/domain/agent"
 	"github.com/joshka0/foxctl/internal/runtime/terminal/agentpane"
+	"github.com/joshka0/foxctl/internal/runtime/terminal/herdrbridge"
 	"github.com/joshka0/foxctl/internal/runtime/terminal/tmuxbridge"
 )
 
@@ -28,6 +29,8 @@ func participantTransportTarget(state agent.ParticipantState) (string, bool) {
 		return participantTmuxTarget(state), true
 	case "zellij":
 		return endpoint, true
+	case "herdr":
+		return participantHerdrTarget(state), true
 	default:
 		return "", false
 	}
@@ -49,6 +52,17 @@ func participantTmuxTarget(state agent.ParticipantState) string {
 	return endpoint
 }
 
+func participantHerdrTarget(state agent.ParticipantState) string {
+	endpoint := strings.TrimSpace(state.TransportEndpoint)
+	if endpoint == "" {
+		return ""
+	}
+	if ref, ok := herdrbridge.ParseParticipantID(endpoint); ok {
+		return ref.PaneID
+	}
+	return endpoint
+}
+
 // canTriggerViaParticipantState reports whether a participant should receive turn
 // trigger delivery through the foxctl-owned transport path (independent of mux
 // presentation attachment). This is the core of the transport-first model: if the
@@ -63,7 +77,7 @@ type relayParticipant struct {
 	ActorID       string
 	State         agent.ParticipantState
 	Target        string // resolved tmux/zellij target or pane socket path for delivery
-	Backend       string // "tmux" or "zellij"
+	Backend       string // "tmux", "zellij", or "herdr"
 	TransportKind string // "pane_socket", "mux_pane", or ""
 	Member        agent.RoomMember
 }
@@ -126,7 +140,7 @@ func collectRelayParticipants(room agent.RoomSummary, msg agent.BoardMessage) ([
 			ActorID:       actorID,
 			State:         state,
 			Target:        target,
-			Backend:       state.MuxBackend,
+			Backend:       strings.ToLower(strings.TrimSpace(state.MuxBackend)),
 			TransportKind: m.TransportKind,
 			Member:        m,
 		})
@@ -193,7 +207,7 @@ func relayViaParticipants(ctx context.Context, client *tmuxbridge.Client, room a
 			continue
 		}
 
-		// Mux transport delivery: tmux/zellij send-keys as the transport layer.
+		// Mux transport delivery: tmux/zellij/herdr send-keys as the transport layer.
 		content := formatRoomRelayContent(room, msg)
 		switch p.Backend {
 		case "tmux":
@@ -219,6 +233,33 @@ func relayViaParticipants(ctx context.Context, client *tmuxbridge.Client, room a
 			result.FailedCount += zellijResult.FailedCount
 			result.DeliveredTo = append(result.DeliveredTo, zellijResult.DeliveredTo...)
 			result.FailedMembers = append(result.FailedMembers, zellijResult.FailedMembers...)
+		case "herdr":
+			session, paneID, ok := resolveRoomMemberHerdrTarget(p.Member)
+			if !ok {
+				paneID = p.Target
+			}
+			if paneID == "" {
+				result.FailedCount++
+				result.FailedMembers = append(result.FailedMembers, p.ActorID)
+				result.DeliveryFailures = append(result.DeliveryFailures, roomRelayDeliveryFailure{
+					Target: p.ActorID,
+					Reason: "no herdr pane target",
+				})
+				continue
+			}
+			client := herdrbridge.NewWithOptions(herdrbridge.Options{Session: session})
+			_, err := client.DeliverTextWithOptions(ctx, paneID, content, herdrbridge.DeliverOptions{Interrupt: msg.Interrupt})
+			if err != nil {
+				result.FailedCount++
+				result.FailedMembers = append(result.FailedMembers, p.ActorID)
+				result.DeliveryFailures = append(result.DeliveryFailures, roomRelayDeliveryFailure{
+					Target: paneID,
+					Reason: err.Error(),
+				})
+				continue
+			}
+			result.DeliveredCount++
+			result.DeliveredTo = append(result.DeliveredTo, p.ActorID)
 		}
 	}
 	return result
