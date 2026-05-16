@@ -55,6 +55,26 @@ func TestParticipantStateFromRoomMember(t *testing.T) {
 			},
 		},
 		{
+			name: "herdr member with explicit backend",
+			member: RoomMember{
+				ActorID:  "codex-a",
+				Backend:  "herdr",
+				Session:  "dev-session",
+				PaneID:   "w1-2",
+				JoinedAt: now,
+			},
+			want: ParticipantState{
+				ActorID:           "codex-a",
+				Membership:        MembershipActive,
+				TransportEndpoint: "herdr:dev-session:w1-2",
+				Transport:         TransportUnknown,
+				Runtime:           RuntimeUnknown,
+				Presentation:      PresentationDetached,
+				MuxBackend:        "herdr",
+				CanTriggerTurn:    true,
+			},
+		},
+		{
 			name: "unbound member",
 			member: RoomMember{
 				ActorID:  "human-a",

@@ -85,7 +85,7 @@ type ParticipantState struct {
 	// Membership is the room membership status.
 	Membership ParticipantMembership `json:"membership"`
 
-	// TransportEndpoint is the transport address (e.g. "tmux:session:%123", "zellij:session:pane").
+	// TransportEndpoint is the transport address (e.g. "tmux:session:%123", "zellij:session:pane", "herdr:session:pane").
 	// Empty when the participant has no transport binding.
 	TransportEndpoint string `json:"transport_endpoint,omitempty"`
 
@@ -98,7 +98,7 @@ type ParticipantState struct {
 	// Presentation is the mux presentation attachment status.
 	Presentation PresentationAttachment `json:"presentation"`
 
-	// MuxBackend is "tmux", "zellij", or empty when no mux is involved.
+	// MuxBackend is "tmux", "zellij", "herdr", or empty when no mux is involved.
 	MuxBackend string `json:"mux_backend,omitempty"`
 
 	// Reason is a human-readable explanation when the participant is not fully available.
@@ -193,32 +193,68 @@ func ParticipantStateFromRoomMember(member RoomMember) ParticipantState {
 	// Pane socket transport: the member registered an foxctl pane wrapper.
 	// Presentation may still exist (via Backend/Session/PaneID) but transport
 	// goes through the socket, not the mux plugin.
-	if binding != nil && binding.TransportEndpoint != "" && strings.ToLower(binding.TransportKind) == PaneSocketTransportKind {
-		state.TransportEndpoint = binding.TransportEndpoint
-		state.Transport = TransportUnknown // caller should probe with ApplySocketProbe
-		state.MuxBackend = strings.ToLower(binding.MuxBackend)
-		if binding.MuxBackend != "" && binding.MuxPaneID != "" {
-			state.Presentation = PresentationDetached
-		} else {
-			state.Presentation = PresentationNone
-		}
-		state.CanTriggerTurn = true
-		return state
+	if isPaneSocketBinding(binding) {
+		return participantStateForPaneSocket(state, binding)
 	}
 
-	if member.Unbound || binding == nil || (strings.TrimSpace(binding.MuxPaneID) == "" && strings.TrimSpace(binding.MuxSession) == "") && strings.TrimSpace(binding.TransportEndpoint) == "" {
-		state.Membership = MembershipUnbound
-		state.Transport = TransportNone
+	if memberHasNoTransportBinding(member, binding) {
+		return participantStateWithoutTransport(state, member.Unbound)
+	}
+
+	state = participantStateForMuxBinding(state, actorID, binding)
+
+	// A participant with a transport endpoint can be triggered even without
+	// a live presentation attachment — the trigger path is transport-first.
+	state.CanTriggerTurn = state.TransportEndpoint != ""
+	if !state.CanTriggerTurn {
+		state.Reason = "no transport endpoint"
+	}
+
+	return state
+}
+
+func isPaneSocketBinding(binding *RoomDeliveryBinding) bool {
+	return binding != nil &&
+		binding.TransportEndpoint != "" &&
+		strings.ToLower(binding.TransportKind) == PaneSocketTransportKind
+}
+
+func participantStateForPaneSocket(state ParticipantState, binding *RoomDeliveryBinding) ParticipantState {
+	state.TransportEndpoint = binding.TransportEndpoint
+	state.Transport = TransportUnknown // caller should probe with ApplySocketProbe
+	state.MuxBackend = strings.ToLower(binding.MuxBackend)
+	if binding.MuxBackend != "" && binding.MuxPaneID != "" {
+		state.Presentation = PresentationDetached
+	} else {
 		state.Presentation = PresentationNone
-		state.CanTriggerTurn = false
-		if member.Unbound {
-			state.Reason = "member is unbound (no live transport binding)"
-		} else {
-			state.Reason = "no transport endpoint configured"
-		}
-		return state
 	}
+	state.CanTriggerTurn = true
+	return state
+}
 
+func memberHasNoTransportBinding(member RoomMember, binding *RoomDeliveryBinding) bool {
+	if member.Unbound || binding == nil {
+		return true
+	}
+	return strings.TrimSpace(binding.MuxPaneID) == "" &&
+		strings.TrimSpace(binding.MuxSession) == "" &&
+		strings.TrimSpace(binding.TransportEndpoint) == ""
+}
+
+func participantStateWithoutTransport(state ParticipantState, unbound bool) ParticipantState {
+	state.Membership = MembershipUnbound
+	state.Transport = TransportNone
+	state.Presentation = PresentationNone
+	state.CanTriggerTurn = false
+	if unbound {
+		state.Reason = "member is unbound (no live transport binding)"
+	} else {
+		state.Reason = "no transport endpoint configured"
+	}
+	return state
+}
+
+func participantStateForMuxBinding(state ParticipantState, actorID string, binding *RoomDeliveryBinding) ParticipantState {
 	state.MuxBackend = strings.ToLower(binding.MuxBackend)
 	switch state.MuxBackend {
 	case "tmux":
@@ -241,6 +277,18 @@ func ParticipantStateFromRoomMember(member RoomMember) ParticipantState {
 		}
 		state.Transport = TransportUnknown
 		state.Presentation = PresentationDetached
+	case "herdr":
+		session := binding.MuxSession
+		paneID := binding.MuxPaneID
+		if session != "" && paneID != "" {
+			state.TransportEndpoint = "herdr:" + session + ":" + paneID
+		} else if paneID != "" {
+			state.TransportEndpoint = paneID
+		} else if endpoint := strings.TrimSpace(binding.TransportEndpoint); strings.HasPrefix(endpoint, "herdr:") {
+			state.TransportEndpoint = endpoint
+		}
+		state.Transport = TransportUnknown
+		state.Presentation = PresentationDetached
 	default:
 		// Legacy members may have tmux-style actor IDs without explicit Backend.
 		if strings.HasPrefix(actorID, "tmux:") {
@@ -249,18 +297,13 @@ func ParticipantStateFromRoomMember(member RoomMember) ParticipantState {
 		} else if strings.HasPrefix(actorID, "zellij:") {
 			state.MuxBackend = "zellij"
 			state.TransportEndpoint = actorID
+		} else if strings.HasPrefix(actorID, "herdr:") {
+			state.MuxBackend = "herdr"
+			state.TransportEndpoint = actorID
 		}
 		state.Transport = TransportUnknown
 		state.Presentation = PresentationDetached
 	}
-
-	// A participant with a transport endpoint can be triggered even without
-	// a live presentation attachment — the trigger path is transport-first.
-	state.CanTriggerTurn = state.TransportEndpoint != ""
-	if !state.CanTriggerTurn {
-		state.Reason = "no transport endpoint"
-	}
-
 	return state
 }
 
@@ -275,7 +318,7 @@ func ApplySocketProbe(state ParticipantState, socketExists bool, sockErr error) 
 		return state
 	}
 	// Only probe pane_socket endpoints (unix socket paths, not mux address strings).
-	if strings.HasPrefix(state.TransportEndpoint, "tmux:") || strings.HasPrefix(state.TransportEndpoint, "zellij:") {
+	if strings.HasPrefix(state.TransportEndpoint, "tmux:") || strings.HasPrefix(state.TransportEndpoint, "zellij:") || strings.HasPrefix(state.TransportEndpoint, "herdr:") {
 		return state
 	}
 	if sockErr == nil && socketExists {
@@ -336,7 +379,7 @@ func roomMemberHasNormalizedTransportRoute(m RoomMember) bool {
 		}
 	}
 	actorID := strings.TrimSpace(m.ActorID)
-	return strings.HasPrefix(actorID, "tmux:") || strings.HasPrefix(actorID, "zellij:")
+	return strings.HasPrefix(actorID, "tmux:") || strings.HasPrefix(actorID, "zellij:") || strings.HasPrefix(actorID, "herdr:")
 }
 
 // BuildParticipantStates computes ParticipantState for every member in a room summary.
