@@ -66,7 +66,8 @@ func TestOrchestrationCardActionCommand_ReleaseMovesCardBackToTodo(t *testing.T)
 		t.Fatalf("seed apply: %v", err)
 	}
 
-	body := runOrchestrationCommand(t, cfg, newOrchestrationCardActionCommand(),
+	body := runOrchestrationCommand(
+		t, cfg, newOrchestrationCardActionCommand(),
 		"--workspace", "ws-1",
 		"--request-id", "req-orch-cli-action-001",
 		"--action", "release",
@@ -183,7 +184,8 @@ func TestOrchestrationCardRuntimeCommand_ReturnsRuntimeTree(t *testing.T) {
 		t.Fatalf("seed apply: %v", err)
 	}
 
-	body := runOrchestrationCommand(t, cfg, newOrchestrationCardRuntimeCommand(),
+	body := runOrchestrationCommand(
+		t, cfg, newOrchestrationCardRuntimeCommand(),
 		"--workspace", "ws-1",
 		"--depth", "2",
 		"issue-cli-runtime-001",
@@ -235,7 +237,8 @@ func TestOrchestrationDispatchIssueCommand_ProjectsRunningCard(t *testing.T) {
 	t.Setenv(v2jido.EnvJidoOrchestrationDispatchParentAgentID, "agent:dispatch-root")
 
 	cfg := setupOrchestrationTestEnv(t)
-	body := runOrchestrationCommand(t, cfg, newOrchestrationDispatchIssueCommand(),
+	body := runOrchestrationCommand(
+		t, cfg, newOrchestrationDispatchIssueCommand(),
 		"--workspace", "ws-1",
 		"--request-id", "req-orch-cli-dispatch-001",
 		"--issue-identifier", "ABC-CLI-DISPATCH-1",
@@ -508,7 +511,8 @@ func TestOrchestrationCardRuntimeCommand_ReturnsGoRuntimeTree(t *testing.T) {
 		t.Fatalf("upsert child worker: %v", err)
 	}
 
-	body := runOrchestrationCommand(t, cfg, newOrchestrationCardRuntimeCommand(),
+	body := runOrchestrationCommand(
+		t, cfg, newOrchestrationCardRuntimeCommand(),
 		"--workspace", "ws-1",
 		"--depth", "2",
 		"issue-cli-go-runtime-001",

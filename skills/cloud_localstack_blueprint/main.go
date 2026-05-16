@@ -119,7 +119,8 @@ func blueprint(scenario, runID, endpoint string) ([]resource, []string, error) {
 
 	switch scenario {
 	case "event-pipeline":
-		commands = append(commands,
+		commands = append(
+			commands,
 			fmt.Sprintf("aws --endpoint-url=%s s3api create-bucket --bucket %s", endpoint, bucket),
 			fmt.Sprintf("aws --endpoint-url=%s sqs create-queue --queue-name %s", endpoint, queue),
 		)
@@ -141,7 +142,8 @@ func runAWS(ctx context.Context, commandLine string) error {
 		return nil
 	}
 	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(
+		os.Environ(),
 		"AWS_ACCESS_KEY_ID=test",
 		"AWS_SECRET_ACCESS_KEY=test",
 		"AWS_DEFAULT_REGION=us-east-1",

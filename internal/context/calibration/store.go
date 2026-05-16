@@ -79,7 +79,8 @@ func DeleteProfile(ctx context.Context, store *memory.Store, workspace string) e
 
 // buildSummary creates a searchable summary string for the profile.
 func buildSummary(p *Profile) string {
-	return fmt.Sprintf("calibration v%d: %s verbosity, %s depth, %s formality, %s autonomy",
+	return fmt.Sprintf(
+		"calibration v%d: %s verbosity, %s depth, %s formality, %s autonomy",
 		p.Version,
 		p.Communication.Verbosity,
 		p.Communication.TechnicalDepth,

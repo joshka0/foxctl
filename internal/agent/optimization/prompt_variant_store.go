@@ -137,7 +137,8 @@ func (s *sqlPromptVariantStore) Save(ctx context.Context, variant PromptVariant)
 		metadataArg = nil
 	}
 
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(
+		ctx, `
 INSERT INTO prompt_variants (
 	id, workspace_id, agent_role, target_profile, mode, original_prompt, prompt,
 	original_score, optimized_score, improvement, candidate_count, metadata_json, created_at

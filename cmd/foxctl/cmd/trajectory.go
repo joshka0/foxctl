@@ -456,7 +456,8 @@ func streamEpisodesInline(ctx context.Context, out io.Writer, exporter trajector
 		seqVal := seq
 		finalVal := false
 		data := map[string]any{"episode": ep}
-		return protocol.WriteOK(out, trajectoryExportCommand, data,
+		return protocol.WriteOK(
+			out, trajectoryExportCommand, data,
 			protocol.WithSource("run"),
 			protocol.WithWorkspace(workspace),
 			protocol.WithMetaMutator(func(m *envelope.Meta) {
@@ -477,7 +478,8 @@ func streamEpisodesInline(ctx context.Context, out io.Writer, exporter trajector
 		"duration_ms": time.Since(start).Milliseconds(),
 	}
 	data := map[string]any{"summary": summary}
-	return protocol.WriteOK(out, trajectoryExportCommand, data,
+	return protocol.WriteOK(
+		out, trajectoryExportCommand, data,
 		protocol.WithSource("run"),
 		protocol.WithWorkspace(workspace),
 		protocol.WithMetaMutator(func(m *envelope.Meta) {

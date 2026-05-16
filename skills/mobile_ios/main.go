@@ -455,7 +455,8 @@ func tap(ctx context.Context, rc *skillmain.RunContext, udid string, x, y int) e
 
 // swipe performs a swipe gesture with start and end coordinates and gesture validation.
 func swipe(ctx context.Context, rc *skillmain.RunContext, udid string, x1, y1, x2, y2 int) error {
-	result := mobileutil.RunIDB(ctx, udid, "ui", "swipe",
+	result := mobileutil.RunIDB(
+		ctx, udid, "ui", "swipe",
 		strconv.Itoa(x1), strconv.Itoa(y1),
 		strconv.Itoa(x2), strconv.Itoa(y2),
 	)
@@ -650,7 +651,8 @@ func openURL(ctx context.Context, rc *skillmain.RunContext, udid, url string) er
 
 // setLocation sets the simulated GPS location with coordinate formatting and IDB command execution.
 func setLocation(ctx context.Context, rc *skillmain.RunContext, udid string, lat, long float64) error {
-	result := mobileutil.RunIDB(ctx, udid, "set_location",
+	result := mobileutil.RunIDB(
+		ctx, udid, "set_location",
 		strconv.FormatFloat(lat, 'f', 6, 64),
 		strconv.FormatFloat(long, 'f', 6, 64),
 	)

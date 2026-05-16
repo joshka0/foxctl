@@ -348,7 +348,8 @@ var securityPatterns = []securityPattern{
 
 // main is the skill entry point for code/security.
 func main() {
-	skillmain.Main(command, skillmain.Chain(run,
+	skillmain.Main(command, skillmain.Chain(
+		run,
 		skillmain.WithRecover[input](),
 	))
 }

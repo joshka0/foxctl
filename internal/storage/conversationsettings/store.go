@@ -257,7 +257,8 @@ func (s *sqlStore) Patch(ctx context.Context, conversationID string, patch Patch
 		toolsAllowJSON = sql.NullString{String: string(b), Valid: true}
 	}
 
-	_, err = tx.ExecContext(ctx, `
+	_, err = tx.ExecContext(
+		ctx, `
 		INSERT INTO conversation_settings (
 			conversation_id,
 			tools_allow_json,

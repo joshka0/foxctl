@@ -130,7 +130,8 @@ type output struct {
 
 // main is the skill entry point for lsp/gopls with comprehensive Go language server capabilities.
 func main() {
-	skillmain.Main("lsp/gopls", skillmain.Chain(run,
+	skillmain.Main("lsp/gopls", skillmain.Chain(
+		run,
 		skillmain.WithDynamicTimeout[Input](func(in Input) time.Duration {
 			if in.Timeout > 0 {
 				return time.Duration(in.Timeout) * time.Second

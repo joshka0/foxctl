@@ -417,7 +417,8 @@ func TestEvalLongCoTDryRunSaveWritesArtifacts(t *testing.T) {
 
 	outputDir := t.TempDir()
 	dataset := filepath.Join("..", "..", "..", "testdata", "evals", "longcot", "fixture.jsonl")
-	env, err := runEvalLongCoTForTest(t,
+	env, err := runEvalLongCoTForTest(
+		t,
 		"--dry-run",
 		"--dataset", dataset,
 		"--condition", string(longcoteval.ConditionBaselineNoToolsOfficial),

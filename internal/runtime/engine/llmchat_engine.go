@@ -621,7 +621,8 @@ func (e *LLMChatEngine) enforceRequiredContextQuery(choiceMessage oaiMessage, me
 		fmt.Fprintf(os.Stderr, "[CTX-POLICY] unsatisfied context query: nudging model and continuing\n")
 	}
 	assistantText := e.resolveAssistantContent(choiceMessage)
-	*messages = append(*messages,
+	*messages = append(
+		*messages,
 		oaiMessage{Role: "assistant", Content: assistantText},
 		oaiMessage{Role: "user", Content: "You MUST use the rlm_context_query tool to retrieve conversation context BEFORE responding. Please query context first, then respond."},
 	)
@@ -638,7 +639,8 @@ func (e *LLMChatEngine) finalizeAssistantChoice(ctx context.Context, choiceMessa
 	if len(output.ToolCalls) > 0 {
 		finalPrompt = boundedFinalizePrompt("You stopped without producing a text response.", output.ToolCalls)
 	}
-	finalizeMessages := append(messages,
+	finalizeMessages := append(
+		messages,
 		oaiMessage{Role: "assistant", Content: ""},
 		oaiMessage{Role: "user", Content: finalPrompt},
 	)

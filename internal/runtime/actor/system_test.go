@@ -67,7 +67,8 @@ func TestSystem_StartStop(t *testing.T) {
 	}
 	defer store.Close()
 
-	sys, err := NewSystem(store,
+	sys, err := NewSystem(
+		store,
 		WithWatcherOptions(WithPollInterval(10*time.Millisecond)),
 	)
 	if err != nil {
@@ -173,7 +174,8 @@ func TestSystem_WithOptions(t *testing.T) {
 		BackoffMultiplier: 1.5,
 	}
 
-	sys, err := NewSystem(store,
+	sys, err := NewSystem(
+		store,
 		WithSystemSupervisionStrategy(customStrategy),
 		WithWatcherOptions(WithPollInterval(100*time.Millisecond)),
 		WithAdapterOptions(WithDefaultVisibilityTimeout(time.Minute)),

@@ -259,13 +259,15 @@ func (b *Builder) recordArtifactSearch(path run.ArtifactSearchPath, capability r
 		if hits > 0 {
 			b.artifactSearchVectorHits.Add(int64(hits))
 		}
-		recordLatencyBucket(duration,
+		recordLatencyBucket(
+			duration,
 			&b.artifactVectorLatencyLE10MS,
 			&b.artifactVectorLatencyLE50MS,
 			&b.artifactVectorLatencyLE100MS,
 			&b.artifactVectorLatencyGT100MS,
 		)
-		recordHitBucket(hits,
+		recordHitBucket(
+			hits,
 			&b.artifactVectorHitsZero,
 			&b.artifactVectorHitsOneTo3,
 			&b.artifactVectorHitsFourTo10,
@@ -276,13 +278,15 @@ func (b *Builder) recordArtifactSearch(path run.ArtifactSearchPath, capability r
 		if hits > 0 {
 			b.artifactSearchFallbackHits.Add(int64(hits))
 		}
-		recordLatencyBucket(duration,
+		recordLatencyBucket(
+			duration,
 			&b.artifactFallbackLatencyLE10MS,
 			&b.artifactFallbackLatencyLE50MS,
 			&b.artifactFallbackLatencyLE100MS,
 			&b.artifactFallbackLatencyGT100MS,
 		)
-		recordHitBucket(hits,
+		recordHitBucket(
+			hits,
 			&b.artifactFallbackHitsZero,
 			&b.artifactFallbackHitsOneTo3,
 			&b.artifactFallbackHitsFourTo10,

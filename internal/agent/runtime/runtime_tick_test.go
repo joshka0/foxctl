@@ -28,7 +28,7 @@ func TestScheduledTickInterval_DefaultsToMinute(t *testing.T) {
 }
 
 func containsFold(haystack, needle string) bool {
-	return len(haystack) >= len(needle) && (stringContainsFold(haystack, needle))
+	return len(haystack) >= len(needle) && stringContainsFold(haystack, needle)
 }
 
 func stringContainsFold(haystack, needle string) bool {

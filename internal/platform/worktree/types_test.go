@@ -246,7 +246,7 @@ func TestManager_Interface(t *testing.T) {
 	// that a nil pointer would satisfy the interface signature.
 	// This is a compile-time check: if the interface changes,
 	// this test will fail to compile.
-	var _ Manager = (Manager)(nil)
+	var _ Manager = Manager(nil)
 }
 
 func TestOptions_EmptyIncludeExclude(t *testing.T) {

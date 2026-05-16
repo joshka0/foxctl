@@ -220,7 +220,8 @@ func (e *LLMChatEngine) RunStreaming(ctx context.Context, input EngineInput, str
 			if len(output.ToolCalls) > 0 {
 				finalPrompt = "You stopped without producing a text response. Write your complete report NOW.\n\nResearch:\n" + buildResearchSummary(output.ToolCalls)
 			}
-			finalizeMessages := append(messages,
+			finalizeMessages := append(
+				messages,
 				oaiMessage{Role: "assistant", Content: ""},
 				oaiMessage{Role: "user", Content: finalPrompt},
 			)

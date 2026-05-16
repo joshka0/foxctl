@@ -9,7 +9,8 @@ import (
 )
 
 func TestEvaluateModeAndSummarize(t *testing.T) {
-	mode := EvaluateModeWithBudgetAndDuration("lexical",
+	mode := EvaluateModeWithBudgetAndDuration(
+		"lexical",
 		[]string{
 			"notes/repo/foxctl/index.md",
 			"internal/runtime/terminal/tmuxbridge/client.go",

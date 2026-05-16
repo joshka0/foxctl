@@ -317,7 +317,8 @@ func TestRegisterFoxctlTools_RegistersFoxctlTools(t *testing.T) {
 }
 
 func TestRenderSkillExecutionResult_UsesEnvelopeOnExecError(t *testing.T) {
-	result, err := renderSkillExecutionResult(context.Background(), "mobile/android",
+	result, err := renderSkillExecutionResult(
+		context.Background(), "mobile/android",
 		[]byte(`{"status":"error","command":"mobile/android","data":{},"error":{"message":"adb not found"}}`),
 		[]byte("warning"),
 		errors.New("exit status 1"),

@@ -176,7 +176,8 @@ func (s *SQLiteStore) UpsertNode(ctx context.Context, node Node) error {
 		updated_at = excluded.updated_at
 	`
 
-	_, err = s.db.ExecContext(ctx, query,
+	_, err = s.db.ExecContext(
+		ctx, query,
 		node.Workspace,
 		node.NodeID,
 		string(node.NodeType),
@@ -304,7 +305,8 @@ func (s *SQLiteStore) TopNodes(ctx context.Context, opts TopNodesOptions) ([]Nod
 // UpdatePageRank updates a node's PageRank score.
 func (s *SQLiteStore) UpdatePageRank(ctx context.Context, workspace, nodeID string, pagerank float64) error {
 	workspace = ws.CanonicalID(workspace)
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.db.ExecContext(
+		ctx,
 		"UPDATE graph_nodes SET pagerank = $1, updated_at = $2 WHERE workspace = $3 AND node_id = $4",
 		pagerank, time.Now().UTC().Format(time.RFC3339), workspace, nodeID,
 	)
@@ -314,7 +316,8 @@ func (s *SQLiteStore) UpdatePageRank(ctx context.Context, workspace, nodeID stri
 // UpdateDegrees updates a node's in/out degree counts.
 func (s *SQLiteStore) UpdateDegrees(ctx context.Context, workspace, nodeID string, inDegree, outDegree int) error {
 	workspace = ws.CanonicalID(workspace)
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.db.ExecContext(
+		ctx,
 		"UPDATE graph_nodes SET in_degree = $1, out_degree = $2, updated_at = $3 WHERE workspace = $4 AND node_id = $5",
 		inDegree, outDegree, time.Now().UTC().Format(time.RFC3339), workspace, nodeID,
 	)
@@ -352,7 +355,8 @@ func (s *SQLiteStore) UpsertEdge(ctx context.Context, edge Edge) error {
 		created_at = excluded.created_at
 	`
 
-	_, err = s.db.ExecContext(ctx, query,
+	_, err = s.db.ExecContext(
+		ctx, query,
 		edge.ID,
 		edge.Workspace,
 		edge.FromID,
@@ -547,7 +551,8 @@ func (s *SQLiteStore) UpsertNodes(ctx context.Context, nodes []Node) error {
 		}
 		metadata, _ := json.Marshal(node.Metadata)
 
-		_, err = stmt.ExecContext(ctx,
+		_, err = stmt.ExecContext(
+			ctx,
 			node.Workspace,
 			node.NodeID,
 			string(node.NodeType),
@@ -620,7 +625,8 @@ func (s *SQLiteStore) UpsertEdges(ctx context.Context, edges []Edge) error {
 		}
 		metadata, _ := json.Marshal(edge.Metadata)
 
-		_, err = stmt.ExecContext(ctx,
+		_, err = stmt.ExecContext(
+			ctx,
 			edge.ID,
 			edge.Workspace,
 			edge.FromID,

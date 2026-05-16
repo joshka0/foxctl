@@ -200,7 +200,9 @@ func (m *MockBoardStore) AckMessages(ctx context.Context, workspaceID, actorID s
 func (m *MockBoardStore) CountMessagesByTask(ctx context.Context, workspaceID, taskID string) (admin, overseer, total int, err error) {
 	return 0, 0, 0, nil
 }
+
 func (m *MockBoardStore) Reserve(ctx context.Context, res *agent.FileReservation) error { return nil }
+
 func (m *MockBoardStore) CheckConflicts(ctx context.Context, workspaceID string, paths []string, holder string, mode agent.ReservationMode) ([]agent.ReservationConflict, error) {
 	return nil, nil
 }

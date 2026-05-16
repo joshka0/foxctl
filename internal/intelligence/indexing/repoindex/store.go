@@ -355,7 +355,8 @@ func (s *Store) ReplaceAll(ctx context.Context, nodes []Node, edges []Edge) erro
 		if updated.IsZero() {
 			updated = now
 		}
-		if _, err := stmtNode.ExecContext(ctx,
+		if _, err := stmtNode.ExecContext(
+			ctx,
 			node.ID,
 			s.repoKey,
 			string(node.Kind),
@@ -432,7 +433,8 @@ func (s *Store) ReplaceFileStates(ctx context.Context, states []FileState) error
 		if indexedAt.IsZero() {
 			indexedAt = now
 		}
-		if _, err := stmt.ExecContext(ctx,
+		if _, err := stmt.ExecContext(
+			ctx,
 			s.repoKey,
 			pathValue,
 			state.ContentHash,

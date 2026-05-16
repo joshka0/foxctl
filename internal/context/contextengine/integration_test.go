@@ -354,7 +354,8 @@ func TestIntegrationCrossArea_CommitFlow(t *testing.T) {
 		},
 		UpdatedAt: now,
 	}
-	err = store.PutProjection(ctx,
+	err = store.PutProjection(
+		ctx,
 		taskCtx.ProjectionMeta.ProjectionID,
 		wsID,
 		"task_context",

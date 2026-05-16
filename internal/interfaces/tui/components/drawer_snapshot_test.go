@@ -25,7 +25,8 @@ func TestSnapshotDrawerOpen(t *testing.T) {
 
 	mt := tui.NewMockTerminal(60, 15)
 	buf := tui.NewBuffer(60, 15)
-	d := NewDrawer("Agent Detail", content, 60, 15,
+	d := NewDrawer(
+		"Agent Detail", content, 60, 15,
 		WithDrawerOpen(true),
 		WithDrawerFocused(true),
 		WithDrawerWidth(30),
@@ -58,7 +59,8 @@ func TestSnapshotDrawerOpenScrolled(t *testing.T) {
 
 	mt := tui.NewMockTerminal(60, 10)
 	buf := tui.NewBuffer(60, 10)
-	d := NewDrawer("Evidence", content, 60, 10,
+	d := NewDrawer(
+		"Evidence", content, 60, 10,
 		WithDrawerOpen(true),
 		WithDrawerFocused(true),
 		WithDrawerWidth(30),
@@ -95,7 +97,8 @@ func TestDrawerFocusedVsUnfocusedBorder(t *testing.T) {
 	// Focused drawer.
 	mtF := tui.NewMockTerminal(40, 10)
 	bufF := tui.NewBuffer(40, 10)
-	dF := NewDrawer("Evidence", content, 40, 10,
+	dF := NewDrawer(
+		"Evidence", content, 40, 10,
 		WithDrawerOpen(true),
 		WithDrawerFocused(true),
 	)
@@ -105,7 +108,8 @@ func TestDrawerFocusedVsUnfocusedBorder(t *testing.T) {
 	// Unfocused drawer.
 	mtU := tui.NewMockTerminal(40, 10)
 	bufU := tui.NewBuffer(40, 10)
-	dU := NewDrawer("Evidence", content, 40, 10,
+	dU := NewDrawer(
+		"Evidence", content, 40, 10,
 		WithDrawerOpen(true),
 		WithDrawerFocused(false),
 	)

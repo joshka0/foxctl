@@ -134,7 +134,8 @@ func startDaemon(ctx context.Context, workspace string) (*Daemon, error) {
 	// multiple skill invocations. The ctx is only used for initialization timeout.
 	cmd := exec.Command(goplsPath, "serve")
 	cmd.Dir = workspace
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(
+		os.Environ(),
 		"GOFLAGS=-mod=readonly", // Faster startup
 	)
 

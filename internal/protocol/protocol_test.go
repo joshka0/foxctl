@@ -34,7 +34,8 @@ func TestOK(t *testing.T) {
 }
 
 func TestOKWithOptions(t *testing.T) {
-	env := OK("test.cmd", nil,
+	env := OK(
+		"test.cmd", nil,
 		WithSource("run"),
 		WithWorkspace("/tmp/ws"),
 		WithSkillVersion("1.0.0"),
@@ -567,7 +568,8 @@ func TestWithMetaMutatorOption(t *testing.T) {
 }
 
 func TestMultipleOptions(t *testing.T) {
-	env := OK("test", map[string]int{"n": 1},
+	env := OK(
+		"test", map[string]int{"n": 1},
 		WithSource("run"),
 		WithWorkspace("/ws"),
 		WithSkillVersion("v1"),
@@ -693,7 +695,8 @@ func TestTimestampIsSet(t *testing.T) {
 }
 
 func TestErrorWithOptions(t *testing.T) {
-	env := Error("test.error", ErrorCodeEPolicy, "policy violation",
+	env := Error(
+		"test.error", ErrorCodeEPolicy, "policy violation",
 		map[string]string{"rule": "network.egress"},
 		WithSource("run"),
 		WithWorkspace("/project"),
@@ -789,7 +792,8 @@ func TestValidateCASDigest(t *testing.T) {
 
 func TestValidateCacheMetadata(t *testing.T) {
 	t.Run("cache source with cache_key", func(t *testing.T) {
-		env := OK("test", nil,
+		env := OK(
+			"test", nil,
 			WithSource("cache"),
 			WithCacheKey("key123"),
 		)
@@ -818,7 +822,8 @@ func TestValidateCacheMetadata(t *testing.T) {
 
 func TestValidateMemoryMetadata(t *testing.T) {
 	t.Run("memory source with reference", func(t *testing.T) {
-		env := OK("test", nil,
+		env := OK(
+			"test", nil,
 			WithSource("memory"),
 			WithMemoryRef(&envelope.MemoryRef{Name: "recent", Type: "auto"}),
 		)
@@ -837,7 +842,8 @@ func TestValidateMemoryMetadata(t *testing.T) {
 	})
 
 	t.Run("memory source missing name", func(t *testing.T) {
-		env := OK("test", nil,
+		env := OK(
+			"test", nil,
 			WithSource("memory"),
 			WithMemoryRef(&envelope.MemoryRef{Name: "", Type: "auto"}),
 		)
@@ -848,7 +854,8 @@ func TestValidateMemoryMetadata(t *testing.T) {
 	})
 
 	t.Run("memory source missing type", func(t *testing.T) {
-		env := OK("test", nil,
+		env := OK(
+			"test", nil,
 			WithSource("memory"),
 			WithMemoryRef(&envelope.MemoryRef{Name: "recent", Type: ""}),
 		)

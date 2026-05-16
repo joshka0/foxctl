@@ -42,7 +42,8 @@ func (s *Store) Upsert(ctx context.Context, record coreworker.Record) error {
 	if err != nil {
 		return fmt.Errorf("v2 workers upsert metadata: %w", err)
 	}
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(
+		ctx, `
 		INSERT INTO v2_runtime_workers (
 			worker_id, backend_kind, backend_worker_ref, agent_id, run_id, session_id,
 			parent_agent_id, parent_worker_id, workspace_id, role, status, tag, pid,
@@ -153,7 +154,8 @@ func (s *Store) Active(ctx context.Context, backend coreworker.BackendKind) ([]c
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("v2 workers active: nil store")
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+selectColumns+` FROM v2_runtime_workers WHERE backend_kind = $1 AND status IN ($2, $3, $4) ORDER BY updated_at DESC, worker_id ASC`,
+	rows, err := s.db.QueryContext(
+		ctx, `SELECT `+selectColumns+` FROM v2_runtime_workers WHERE backend_kind = $1 AND status IN ($2, $3, $4) ORDER BY updated_at DESC, worker_id ASC`,
 		string(backend),
 		string(coreworker.StatusStarting),
 		string(coreworker.StatusRunning),

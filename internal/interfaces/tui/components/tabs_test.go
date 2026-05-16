@@ -410,7 +410,8 @@ func TestTabsOnChangeCallback(t *testing.T) {
 	t.Parallel()
 	labels := []string{"Agents", "Rooms", "Events"}
 	var lastIdx int
-	tabs := NewTabs(labels, 40,
+	tabs := NewTabs(
+		labels, 40,
 		WithTabsFocused(true),
 		WithTabsActiveIndex(0),
 		WithTabsOnChange(func(idx int) { lastIdx = idx }),
@@ -428,7 +429,8 @@ func TestTabsNoOnChangeWhenAlreadyAtBoundary(t *testing.T) {
 
 	// Already at first tab: moveFirst should NOT fire onChange.
 	var calls []int
-	tabs := NewTabs(labels, 40,
+	tabs := NewTabs(
+		labels, 40,
 		WithTabsFocused(true),
 		WithTabsActiveIndex(0),
 		WithTabsOnChange(func(idx int) { calls = append(calls, idx) }),
@@ -440,7 +442,8 @@ func TestTabsNoOnChangeWhenAlreadyAtBoundary(t *testing.T) {
 	}
 
 	// Already at last tab: moveLast should NOT fire onChange.
-	tabs2 := NewTabs(labels, 40,
+	tabs2 := NewTabs(
+		labels, 40,
 		WithTabsFocused(true),
 		WithTabsActiveIndex(2),
 		WithTabsOnChange(func(idx int) { calls = append(calls, idx) }),
@@ -452,7 +455,8 @@ func TestTabsNoOnChangeWhenAlreadyAtBoundary(t *testing.T) {
 	}
 
 	// Verify that moveFirst/moveLast DO fire when the index actually changes.
-	tabs3 := NewTabs(labels, 40,
+	tabs3 := NewTabs(
+		labels, 40,
 		WithTabsFocused(true),
 		WithTabsActiveIndex(1),
 		WithTabsOnChange(func(idx int) { calls = append(calls, idx) }),

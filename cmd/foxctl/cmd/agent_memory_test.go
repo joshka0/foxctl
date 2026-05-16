@@ -84,7 +84,8 @@ func TestAgentRoomPolicyAndInfoCommands_RoundTripDispatchDefaults(t *testing.T) 
 		t.Fatalf("create agent: %v", err)
 	}
 
-	policyBody := runAgentSubcommand(t, cfg, newAgentRoomPolicyCommand(),
+	policyBody := runAgentSubcommand(
+		t, cfg, newAgentRoomPolicyCommand(),
 		"--workspace", cfg.Home,
 		"--dispatch-policy", "lead_only",
 		"--dispatch-agent", "agent-room-cli-1",
@@ -95,7 +96,8 @@ func TestAgentRoomPolicyAndInfoCommands_RoundTripDispatchDefaults(t *testing.T) 
 		t.Fatalf("dispatch_policy=%v want lead_only", got)
 	}
 
-	infoBody := runAgentSubcommand(t, cfg, newAgentRoomInfoCommand(),
+	infoBody := runAgentSubcommand(
+		t, cfg, newAgentRoomInfoCommand(),
 		"--workspace", cfg.Home,
 		"agent-room-cli-1",
 	)

@@ -2319,7 +2319,8 @@ func renderGatherContextEvalMarkdown(workspace string, summary gatherContextEval
 			b.WriteString("| Role | Recall | Matched | Expected | Missing |\n")
 			b.WriteString("| --- | ---: | ---: | ---: | ---: |\n")
 			for _, score := range summary.RoleRecallByRole {
-				b.WriteString(fmt.Sprintf("| %s | %.2f | %d | %d | %d |\n",
+				b.WriteString(fmt.Sprintf(
+					"| %s | %.2f | %d | %d | %d |\n",
 					markdownCell(score.Role),
 					score.Recall,
 					score.MatchedCases,
@@ -2334,7 +2335,8 @@ func renderGatherContextEvalMarkdown(workspace string, summary gatherContextEval
 			b.WriteString("| Role | Coverage Hits | Cases |\n")
 			b.WriteString("| --- | ---: | ---: |\n")
 			for _, role := range sortedIntMapKeys(summary.PeripheralRoleCoverage) {
-				b.WriteString(fmt.Sprintf("| %s | %d | %d |\n",
+				b.WriteString(fmt.Sprintf(
+					"| %s | %d | %d |\n",
 					markdownCell(role),
 					summary.PeripheralRoleCoverage[role],
 					summary.WrongRolePeripheralCaseCount[role],
@@ -2353,7 +2355,8 @@ func renderGatherContextEvalMarkdown(workspace string, summary gatherContextEval
 		if result.StaleEval {
 			pass = "stale"
 		}
-		b.WriteString(fmt.Sprintf("| %s | %s | %.2f | %.2f | %.2f | %dms | %s | %d | %d | %s |\n",
+		b.WriteString(fmt.Sprintf(
+			"| %s | %s | %.2f | %.2f | %.2f | %dms | %s | %d | %d | %s |\n",
 			markdownCell(result.CaseID),
 			pass,
 			result.PathRecall,
@@ -2371,7 +2374,8 @@ func renderGatherContextEvalMarkdown(workspace string, summary gatherContextEval
 		b.WriteString("| Baseline | Errors | Pass Delta | Path Delta | Fact Delta | Speedup | Baseline Tokens | Cached Input | Reasoning Out |\n")
 		b.WriteString("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n")
 		for _, comparison := range comparisons {
-			b.WriteString(fmt.Sprintf("| %s | %d | %.2f | %.2f | %.2f | %.2fx | %.1f | %.1f | %.1f |\n",
+			b.WriteString(fmt.Sprintf(
+				"| %s | %d | %.2f | %.2f | %.2f | %.2fx | %.1f | %.1f | %.1f |\n",
 				markdownCell(comparison.Label),
 				comparison.BaselineErrorCount,
 				comparison.PassRateDelta,
@@ -2413,7 +2417,8 @@ func renderGatherContextRepoIndexFreshnessMarkdown(freshness map[string]any) str
 	if currentHead == "" {
 		currentHead = "unknown"
 	}
-	return fmt.Sprintf("Repoindex freshness: `%s` (index head `%s`, current head `%s`, index dirty `%t`, current dirty `%t`, stale/dirty mismatch `%t`)\n",
+	return fmt.Sprintf(
+		"Repoindex freshness: `%s` (index head `%s`, current head `%s`, index dirty `%t`, current dirty `%t`, stale/dirty mismatch `%t`)\n",
 		level,
 		indexHead,
 		currentHead,

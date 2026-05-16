@@ -44,27 +44,32 @@ func RoomOnboardingBlock(opts RoomOnboardingOptions) string {
 	}
 	switch strings.TrimSpace(strings.ToLower(roleLabel)) {
 	case "coordinator", "overseer":
-		lines = append(lines,
+		lines = append(
+			lines,
 			"- Because you are acting as coordinator, also read `foxctl-room-operator`.",
 			"- You are responsible for routing, stale work, review closure, and final coordinator decisions.",
 			fmt.Sprintf("- Coordinator controls: `foxctl room resolve %s <message-id> --mode read`, `foxctl room task assign|reassign|reclaim %s ...`, `foxctl room coordinator set %s <participant>`.", roomID, roomID, roomID),
 		)
 	case "reviewer", "security-review":
-		lines = append(lines,
+		lines = append(
+			lines,
 			"- Because you are acting as reviewer, also read `foxctl-room-operator`.",
 			"- Review behavior: findings first, then verdict (`approved` or `blocked`), then scope and any non-blocking follow-ups.",
 			"- Write review conclusions into the room timeline or task notes, not only pane chat.",
 		)
 	case "frontend-eng":
-		lines = append(lines,
+		lines = append(
+			lines,
 			"- Prioritize user-facing correctness, role-gating, accessibility, and keeping UI data contracts aligned with the live API.",
 		)
 	case "backend-eng":
-		lines = append(lines,
+		lines = append(
+			lines,
 			"- Prioritize contract safety, durable state, role enforcement, auditability, and deterministic tests before polish work.",
 		)
 	case "collaborator":
-		lines = append(lines,
+		lines = append(
+			lines,
 			"- Prefer explicit task ownership, concise durable updates, and early escalation over silent parallel work.",
 		)
 	}

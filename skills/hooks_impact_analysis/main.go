@@ -175,7 +175,8 @@ var languages = map[string]Language{
 
 // main is the skill entry point for hooks/impact_analysis.
 func main() {
-	skillmain.Main("hooks/impact_analysis", skillmain.Chain(run,
+	skillmain.Main("hooks/impact_analysis", skillmain.Chain(
+		run,
 		skillmain.WithRecover[hooks.Input](),
 	))
 }

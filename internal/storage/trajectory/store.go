@@ -231,7 +231,8 @@ func (s *sqlStore) InsertTrajectory(ctx context.Context, t Trajectory) (Trajecto
 		outcomeArg = nil
 	}
 
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(
+		ctx, `
 INSERT INTO trajectories (id, workspace_id, root_request_id, task_ids_json, epic_id, agent_role, job_id, trace_id, status, summary, artifact_digest, outcome_json, created_at, updated_at, session_id)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `,
@@ -289,7 +290,8 @@ func (s *sqlStore) UpdateTrajectory(ctx context.Context, t Trajectory) error {
 		outcomeArg = nil
 	}
 
-	result, err := s.db.ExecContext(ctx, `
+	result, err := s.db.ExecContext(
+		ctx, `
 UPDATE trajectories SET
 	root_request_id = ?, task_ids_json = ?, epic_id = ?, agent_role = ?, job_id = ?,
 	trace_id = ?, status = ?, summary = ?, artifact_digest = ?, outcome_json = ?, updated_at = ?, session_id = ?
@@ -531,7 +533,8 @@ func (s *sqlStore) InsertUserRequest(ctx context.Context, ur UserRequestCapture)
 		taskHintsArg = nil
 	}
 
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(
+		ctx, `
 INSERT INTO user_requests (id, workspace_id, actor, source, ts, text, command_context_json, task_hints_json)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 `,
@@ -636,7 +639,8 @@ func (s *sqlStore) InsertEvent(ctx context.Context, e Event) (Event, error) {
 		metaArg = nil
 	}
 
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(
+		ctx, `
 INSERT INTO trajectory_events (id, trajectory_id, workspace_id, ts, kind, actor, command, status, data_inline_json, data_artifact, meta_json)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `,
@@ -716,7 +720,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			metaArg = nil
 		}
 
-		_, err = stmt.ExecContext(ctx,
+		_, err = stmt.ExecContext(
+			ctx,
 			e.ID, e.TrajectoryID, workspaceID, sqlutil.FormatTimestamp(e.TS), string(e.Kind),
 			e.Actor, e.Command, e.Status, dataInlineArg, e.DataArtifact, metaArg,
 		)

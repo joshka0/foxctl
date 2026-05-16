@@ -269,7 +269,8 @@ func (r *Runtime) buildEngineInput(session *Session, userPrompt string) engine.E
 // appendToHistory records a user/assistant exchange in the session's conversation history.
 func appendToHistory(session *Session, userPrompt, assistantText string) {
 	session.mu.Lock()
-	session.ConversationHistory = append(session.ConversationHistory,
+	session.ConversationHistory = append(
+		session.ConversationHistory,
 		engine.Message{Role: engine.RoleUser, Content: userPrompt},
 		engine.Message{Role: engine.RoleAssistant, Content: assistantText},
 	)
@@ -1727,7 +1728,8 @@ func (e *agentToolExecutor) executeRepoIndexBuild(ctx context.Context, args map[
 			argsList = append(argsList, "--go-pattern", pattern)
 		}
 	}
-	argsList = append(argsList,
+	argsList = append(
+		argsList,
 		fmt.Sprintf("--go=%t", boolArgDefault(args, true, "include_go", "go")),
 		fmt.Sprintf("--python=%t", boolArg(args, "include_python", "python")),
 		fmt.Sprintf("--rust=%t", boolArg(args, "include_rust", "rust")),
@@ -2778,7 +2780,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 	// Scout roles only get their specialized tools — no base file tools
 	isScout := isRuntimeScoutRole(role)
 	if !isScout {
-		tools = append(tools,
+		tools = append(
+			tools,
 			engine.ToolDef{
 				Name:        "fs_read_file",
 				Description: "Read the contents of a file at the given path",
@@ -2811,7 +2814,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 
 	// Heartwood tools are available to non-scout agents except bounded subcall workers.
 	if !isScout && role != types.RoleSubcallWorker {
-		tools = append(tools,
+		tools = append(
+			tools,
 			engine.ToolDef{
 				Name:        "heartwood_state",
 				Description: "Fetch compact Heartwood participant state through the generated SpacetimeDB client.",
@@ -2852,7 +2856,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"File path to write"},"content":{"type":"string","description":"Content to write"}},"required":["path","content"]}`),
 		})
 	case types.RoleResearcher, types.RoleSubcallWorker:
-		tools = append(tools,
+		tools = append(
+			tools,
 			engine.ToolDef{
 				Name:        "context_search",
 				Description: "Search codebase for relevant files and symbols. Returns a tree view of matches with file paths and sizes.",
@@ -3099,7 +3104,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			},
 		)
 	case types.RoleSemanticScout:
-		tools = append(tools,
+		tools = append(
+			tools,
 			engine.ToolDef{
 				Name:        "context_search",
 				Description: "Search codebase for relevant files and symbols. Returns a tree view of matches with file paths and sizes.",
@@ -3139,7 +3145,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			},
 		)
 	case types.RoleDAGScout:
-		tools = append(tools,
+		tools = append(
+			tools,
 			engine.ToolDef{
 				Name:        "repo_index_build",
 				Description: "Build or refresh the repo graph index. Incremental is enabled by default; set incremental=false to force a full rebuild.",
@@ -3204,7 +3211,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			},
 		)
 	case types.RoleSymbolScout:
-		tools = append(tools,
+		tools = append(
+			tools,
 			engine.ToolDef{
 				Name:        "refactor_scout",
 				Description: "Rank likely refactor hotspots and entrypoints for a single language. Prefer this first for refactor-entrypoint questions.",
@@ -3240,7 +3248,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			},
 		)
 	case types.RoleAnnotationScout:
-		tools = append(tools,
+		tools = append(
+			tools,
 			engine.ToolDef{
 				Name:        "annotation_recall",
 				Description: "Search past session annotations using semantic similarity. Supports category filtering and multi-key sorting. Returns matching annotations with similarity scores, content previews, and metadata.",
@@ -3276,7 +3285,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			},
 		)
 	case types.RoleMemoryFactScout:
-		tools = append(tools,
+		tools = append(
+			tools,
 			engine.ToolDef{
 				Name:        "semantic_search_memories",
 				Description: "Memory-only semantic search over named memories and durable memory entries.",
@@ -3344,7 +3354,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			},
 		)
 	case types.RoleMemoryTimelineScout:
-		tools = append(tools,
+		tools = append(
+			tools,
 			engine.ToolDef{
 				Name:        "semantic_search_sessions",
 				Description: "Session-only semantic search over prior session summaries and related session context.",
@@ -3399,7 +3410,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			},
 		)
 	case types.RoleContextWikiScout:
-		tools = append(tools,
+		tools = append(
+			tools,
 			engine.ToolDef{
 				Name:        "semantic_search_context",
 				Description: "ContextWiki-only semantic retrieval over top-of-mind, handoffs, and configured vault context.",
@@ -3462,7 +3474,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 		)
 	case types.RoleOverseer:
 		// Overseer gets context gathering tools FIRST (for spawn prep)
-		tools = append(tools,
+		tools = append(
+			tools,
 			engine.ToolDef{
 				Name:        "context_search",
 				Description: "Search codebase for relevant files and symbols. Returns a tree view of matches with file paths and sizes. USE THIS BEFORE SPAWNING to gather context for agent prompts.",
@@ -3575,7 +3588,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 		)
 
 		// Agent management tools
-		tools = append(tools,
+		tools = append(
+			tools,
 			engine.ToolDef{
 				Name:        "agent_spawn",
 				Description: "Spawn subagents with DETAILED prompts. Include specific file paths, tool instructions, and context from context_search/session_timeline results.",
@@ -3621,7 +3635,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 
 	// Mailbox tools - available when MailboxStore is configured
 	if hasMailbox {
-		tools = append(tools,
+		tools = append(
+			tools,
 			engine.ToolDef{
 				Name:        "mail_inbox",
 				Description: "Check your inbox for messages from other agents, the overseer, or human operators",
@@ -3642,7 +3657,8 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 
 	// Blackboard tools - available when BoardStore is configured
 	if hasBoard {
-		tools = append(tools,
+		tools = append(
+			tools,
 			engine.ToolDef{
 				Name:        "bb_inbox",
 				Description: "Check the blackboard for coordination messages and work items in this workspace",

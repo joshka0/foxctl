@@ -81,7 +81,8 @@ func Build() {}
 		t.Fatalf("replace repoindex nodes: %v", err)
 	}
 
-	env, raw := executeIndexAnchorsTestCommand(t, cfg, newIndexAnchorsExplainCommand(),
+	env, raw := executeIndexAnchorsTestCommand(
+		t, cfg, newIndexAnchorsExplainCommand(),
 		"--workspace", workspace,
 		"--path", "internal/demo/demo.go",
 	)
@@ -162,7 +163,8 @@ func Build() {}
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	_, raw := executeIndexAnchorsTestCommand(t, cfg, newIndexAnchorsLintCommand(),
+	_, raw := executeIndexAnchorsTestCommand(
+		t, cfg, newIndexAnchorsLintCommand(),
 		"--workspace", workspace,
 		"--summary",
 	)

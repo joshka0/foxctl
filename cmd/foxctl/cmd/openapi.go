@@ -103,7 +103,8 @@ func newOpenAPIImportCommand() *cobra.Command {
 						data["memory"] = memoryInfo
 					}
 
-					return protocol.WriteOK(cmd.OutOrStdout(), "foxctl.openapi.import", data,
+					return protocol.WriteOK(
+						cmd.OutOrStdout(), "foxctl.openapi.import", data,
 						protocol.WithSource("run"),
 						protocol.WithWorkspace(workspaceID),
 					)
@@ -276,7 +277,8 @@ func newOpenAPIDescribeCommand() *cobra.Command {
 						"operations":      operations,
 					}
 
-					return protocol.WriteOK(cmd.OutOrStdout(), "foxctl.openapi.describe", data,
+					return protocol.WriteOK(
+						cmd.OutOrStdout(), "foxctl.openapi.describe", data,
 						protocol.WithSource("run"),
 						protocol.WithWorkspace(workspaceID),
 					)
@@ -364,7 +366,8 @@ func newOpenAPIValidateCommand() *cobra.Command {
 						data["error_count"] = len(errors)
 					}
 
-					return protocol.WriteOK(cmd.OutOrStdout(), "foxctl.openapi.validate", data,
+					return protocol.WriteOK(
+						cmd.OutOrStdout(), "foxctl.openapi.validate", data,
 						protocol.WithSource("run"),
 						protocol.WithWorkspace(workspaceID),
 					)

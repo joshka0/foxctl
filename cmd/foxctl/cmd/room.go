@@ -3528,7 +3528,8 @@ func annotateRoomSendBody(roomID, sender, recipient, body, hint string, ackRequi
 	} else {
 		lines = append(lines, fmt.Sprintf("Direct recipient: %s", recipient))
 	}
-	lines = append(lines,
+	lines = append(
+		lines,
 		fmt.Sprintf("Response requested: %t", replyExpected),
 		fmt.Sprintf("Acknowledgment requested: %t", ackRequired),
 	)
@@ -10605,7 +10606,8 @@ func buildRoomEpicScoutFindings(epic, health map[string]any) []map[string]any {
 
 	milestones := mapSlice(epic["milestones"])
 	if boolField(epic, "finalized") && len(milestones) == 0 {
-		findings = append(findings,
+		findings = append(
+			findings,
 			map[string]any{
 				"id":                       fmt.Sprintf("milestone_contract:epic:%s:missing_milestones", epicID),
 				"rule_family":              "milestone_contract",
@@ -17371,7 +17373,8 @@ func runRoomRedgreenInit(cmd *cobra.Command, workspace, roomID, slug, title, des
 			"hint": "Use a short identifier such as retry-logic or parser-phase-1.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
-	members := mergeRoomMembers(nil,
+	members := mergeRoomMembers(
+		nil,
 		agent.RoomMember{ActorID: coordinator, Role: "coordinator"},
 		agent.RoomMember{ActorID: redActor, Role: "reviewer"},
 		agent.RoomMember{ActorID: greenActor, Role: "reviewer"},
@@ -19609,7 +19612,8 @@ func normalizeRoomRecipient(recipient string) string {
 
 func roomProgressEnvelope(command string, seq int, final bool, data map[string]any, workspace string) envelope.Envelope {
 	finalCopy := final
-	env := protocol.OK(command, data,
+	env := protocol.OK(
+		command, data,
 		protocol.WithSource("cli"),
 		protocol.WithWorkspace(workspace),
 		protocol.WithMetaMutator(func(m *envelope.Meta) {

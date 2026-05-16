@@ -298,7 +298,8 @@ type LLMProvider = llmproviders.Provider
 
 // main is the skill entry point for session/summarize with multi-mode summarization capabilities.
 func main() {
-	skillmain.Main(command, skillmain.Chain(run,
+	skillmain.Main(command, skillmain.Chain(
+		run,
 		skillmain.WithTimeout[Input](5*time.Minute),
 		skillmain.WithRecover[Input](),
 	))
@@ -472,7 +473,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		}
 
 		// Update session with summary (including key_questions for session restore)
-		err = sessionStore.UpdateSummaryWithQuestions(ctx, session.ID,
+		err = sessionStore.UpdateSummaryWithQuestions(
+			ctx, session.ID,
 			summaryResp.Summary,
 			summaryResp.Accomplished,
 			summaryResp.Decisions,

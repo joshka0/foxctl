@@ -913,7 +913,8 @@ func (s *Store) UpdateLifecycle(ctx context.Context, name, workspace string, upd
 		entry.LastValidatedAt = update.LastValidatedAt.UTC()
 	}
 	entry.UpdatedAt = timeutil.NowUTC()
-	if _, err := s.db.ExecContext(ctx, `
+	if _, err := s.db.ExecContext(
+		ctx, `
 		UPDATE named_memory
 		SET lifecycle_state = $1,
 		    review_status = $2,

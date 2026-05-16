@@ -1014,7 +1014,8 @@ func (c *CockpitScreen) renderReady(width, height int) *gotui.Element {
 
 	// Render evidence drawer on top if open.
 	if drawerOpen {
-		drawer := components.NewDrawer(drawerTitle, drawerContent, width, contentHeight,
+		drawer := components.NewDrawer(
+			drawerTitle, drawerContent, width, contentHeight,
 			components.WithDrawerOpen(true),
 			components.WithDrawerFocused(true),
 			components.WithDrawerWidth(evidenceW),

@@ -37,7 +37,8 @@ func (s *Store) BeginTurnRequest(ctx context.Context, record run.TurnRequestReco
 	var out run.TurnRequestRecord
 	inserted := false
 	err := sqlutil.WithTransaction(ctx, s.db, func(tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `
+		res, err := tx.ExecContext(
+			ctx, `
 			INSERT INTO v2_turn_requests (
 				run_id, request_id, turn_id, status, output_json, error_json,
 				started_at, completed_at, updated_at
@@ -95,7 +96,8 @@ func (s *Store) RecoverStaleTurnRequest(ctx context.Context, record run.TurnRequ
 	var out run.TurnRequestRecord
 	recovered := false
 	err := sqlutil.WithTransaction(ctx, s.db, func(tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `
+		res, err := tx.ExecContext(
+			ctx, `
 			UPDATE v2_turn_requests
 			SET status = $1,
 				output_json = '',
@@ -164,7 +166,8 @@ func (s *Store) TouchTurnRequest(ctx context.Context, runID, requestID, turnID s
 	var out run.TurnRequestRecord
 	touched := false
 	err := sqlutil.WithTransaction(ctx, s.db, func(tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `
+		res, err := tx.ExecContext(
+			ctx, `
 			UPDATE v2_turn_requests
 			SET updated_at = $1
 			WHERE run_id = $2
@@ -218,7 +221,8 @@ func (s *Store) CompleteTurnRequest(ctx context.Context, record run.TurnRequestR
 
 	var out run.TurnRequestRecord
 	err := sqlutil.WithTransaction(ctx, s.db, func(tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `
+		res, err := tx.ExecContext(
+			ctx, `
 			UPDATE v2_turn_requests
 			SET status = $1,
 				output_json = $2,

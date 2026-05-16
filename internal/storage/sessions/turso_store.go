@@ -1286,7 +1286,8 @@ func (s *TursoStore) SaveChunkSummary(ctx context.Context, summary SessionChunkS
 	filesJSON, _ := sqlutil.FormatJSON(summary.Files)
 	errorsJSON, _ := sqlutil.FormatJSON(summary.Errors)
 
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(
+		ctx, `
 INSERT INTO session_chunk_summaries (
 	id, session_id, window_index, trigger, chunk_indices, chunk_index_min, chunk_index_max, tools, files, errors,
 	summary, summary_model, created_at, updated_at
@@ -1483,7 +1484,8 @@ func (s *TursoStore) SaveContextWindow(ctx context.Context, window ContextWindow
 		window.CreatedAt = now
 	}
 
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(
+		ctx, `
 INSERT INTO session_context_windows (
 	id, session_id, window_index, started_at, ended_at, pre_compact_tokens,
 	trigger, chunk_start, chunk_end, message_count, summary, embedding, embedding_model, created_at
@@ -1550,7 +1552,8 @@ ON CONFLICT(session_id, window_index) DO UPDATE SET
 			window.CreatedAt = now
 		}
 
-		_, err := stmt.ExecContext(ctx,
+		_, err := stmt.ExecContext(
+			ctx,
 			window.ID, window.SessionID, window.WindowIndex,
 			sqlutil.FormatTimestamp(window.StartedAt), sqlutil.FormatTimestamp(window.EndedAt),
 			window.PreCompactTokens, window.Trigger, window.ChunkStart, window.ChunkEnd,

@@ -268,7 +268,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		return skillerr.IO("set archive path", skillerr.WithCause(err))
 	}
 
-	output.Message = fmt.Sprintf("Archived %d chunks in %d context windows, compressed %.1f%% (%d -> %d bytes)",
+	output.Message = fmt.Sprintf(
+		"Archived %d chunks in %d context windows, compressed %.1f%% (%d -> %d bytes)",
 		len(result.Chunks),
 		len(result.Windows),
 		100.0*(1.0-float64(compressedSize)/float64(fileInfo.Size())),

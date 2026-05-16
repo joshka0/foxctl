@@ -432,7 +432,8 @@ func (a *ReadOnlyAdapter) semanticSearchCode(ctx context.Context, args json.RawM
 	if len(input.Scope) > 0 {
 		payload["scope"] = input.Scope
 	}
-	if vaultPath := firstNonEmpty(strings.TrimSpace(a.vaultPath),
+	if vaultPath := firstNonEmpty(
+		strings.TrimSpace(a.vaultPath),
 		strings.TrimSpace(os.Getenv("FOXCTL_RLM_VAULT_PATH")),
 		strings.TrimSpace(os.Getenv("FOXCTL_CONTEXTWIKI_VAULT_PATH")),
 		strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH")),
@@ -638,7 +639,8 @@ func (a *ReadOnlyAdapter) loadFile(args json.RawMessage) (map[string]any, error)
 }
 
 func (a *ReadOnlyAdapter) searchVault(ctx context.Context, args json.RawMessage) (map[string]any, error) {
-	vaultPath := firstNonEmpty(strings.TrimSpace(a.vaultPath),
+	vaultPath := firstNonEmpty(
+		strings.TrimSpace(a.vaultPath),
 		strings.TrimSpace(os.Getenv("FOXCTL_RLM_VAULT_PATH")),
 		strings.TrimSpace(os.Getenv("FOXCTL_CONTEXTWIKI_VAULT_PATH")),
 		strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH")),
@@ -686,7 +688,8 @@ func (a *ReadOnlyAdapter) readNote(args json.RawMessage) (map[string]any, error)
 	if err := json.Unmarshal(args, &input); err != nil {
 		return nil, err
 	}
-	vaultPath := firstNonEmpty(strings.TrimSpace(a.vaultPath),
+	vaultPath := firstNonEmpty(
+		strings.TrimSpace(a.vaultPath),
 		strings.TrimSpace(os.Getenv("FOXCTL_RLM_VAULT_PATH")),
 		strings.TrimSpace(os.Getenv("FOXCTL_CONTEXTWIKI_VAULT_PATH")),
 		strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH")),

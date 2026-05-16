@@ -97,7 +97,8 @@ func TestIntegration_FullMessageFlow(t *testing.T) {
 	}()
 
 	// Create supervisor
-	supervisor := NewSupervisor(mailbox,
+	supervisor := NewSupervisor(
+		mailbox,
 		WithEventBus(eventBus),
 		WithLeaseTimeout(time.Minute),
 	)
@@ -221,7 +222,8 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 
 	// Create actor that returns error and requests resume
 	cfg := DefaultConfig("error-agent")
-	actor := NewBaseActor(cfg,
+	actor := NewBaseActor(
+		cfg,
 		WithOnError(func(ctx context.Context, err error) Directive {
 			return DirectiveResume
 		}),

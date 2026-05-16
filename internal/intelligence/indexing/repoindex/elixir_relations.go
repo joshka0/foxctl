@@ -56,13 +56,15 @@ func extractElixirFileRelationsRegex(source string) []elixirFileRelation {
 	}
 	relations := make([]elixirFileRelation, 0, 8)
 	for _, match := range elixirDefimplRe.FindAllStringSubmatch(source, -1) {
-		relations = append(relations,
+		relations = append(
+			relations,
 			elixirFileRelation{TargetName: strings.TrimSpace(match[1]), Type: EdgeImplements, Weight: 0.95},
 			elixirFileRelation{TargetName: strings.TrimSpace(match[2]), Type: EdgeUsesSymbol, Weight: 0.95},
 		)
 	}
 	for _, match := range elixirBehaviourRe.FindAllStringSubmatch(source, -1) {
-		relations = append(relations,
+		relations = append(
+			relations,
 			elixirFileRelation{TargetName: strings.TrimSpace(match[1]), Type: EdgeImplements, Weight: 0.95},
 		)
 	}

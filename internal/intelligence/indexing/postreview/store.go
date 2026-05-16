@@ -111,7 +111,8 @@ func (s *sqlStore) Put(ctx context.Context, event indexing.PostReviewEvent) (ind
 
 	// Use INSERT OR IGNORE to avoid TOCTOU race. If a concurrent Put wins,
 	// this insert is a no-op and we fetch the existing row below.
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(
+		ctx, `
 INSERT OR IGNORE INTO post_review_events (
     id, workspace_id, task_id, review_id, review_kind, review_status,
     diff_applied_at, source, created_at, sequence, files_json, metadata_json
@@ -154,7 +155,8 @@ func (s *sqlStore) Get(ctx context.Context, id string) (indexing.PostReviewEvent
 }
 
 func (s *sqlStore) GetByReview(ctx context.Context, workspaceID, taskID, reviewID string) (indexing.PostReviewEvent, error) {
-	return s.scanOne(ctx,
+	return s.scanOne(
+		ctx,
 		`SELECT * FROM post_review_events WHERE workspace_id = ? AND task_id = ? AND review_id = ?`,
 		workspaceID, taskID, reviewID,
 	)
@@ -164,7 +166,8 @@ func (s *sqlStore) List(ctx context.Context, workspaceID string, limit int) ([]i
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.db.QueryContext(
+		ctx,
 		`SELECT * FROM post_review_events WHERE workspace_id = ? ORDER BY created_at DESC LIMIT ?`,
 		workspaceID, limit,
 	)

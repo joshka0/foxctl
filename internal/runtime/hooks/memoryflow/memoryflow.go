@@ -91,7 +91,8 @@ func DetectPrompt(req DetectorRequest) DetectorResponse {
 		return response
 	}
 
-	if matchesAny(prompt,
+	if matchesAny(
+		prompt,
 		`how did (we|i)`, `where did (we|i)`, `what was the`, `when did (we|i)`,
 		`didn.?t (we|i) already`, `like (we|i) did before`, `as we discussed`,
 		`previously`, `earlier (we|i)`, `last time (we|i)`, `remember when (we|i)`,
@@ -104,7 +105,8 @@ func DetectPrompt(req DetectorRequest) DetectorResponse {
 		return response
 	}
 
-	if matchesAny(prompt,
+	if matchesAny(
+		prompt,
 		`let.?s make sure`, `let.?s not forget to`, `make sure (we|to)`, `we need to make sure`, `don.?t forget to`, `we should make sure`,
 		`we need to`, `we should`, `we must`, `we have to`,
 		`todo:`, `fixme:`, `hack:`, `xxx:`,

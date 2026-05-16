@@ -46,5 +46,6 @@ func pgCreateVectorColumnSQL(tableName, columnName string, dimensions int) strin
 func pgCreateVectorIndexSQL(tableName, columnName, indexName string) string {
 	return fmt.Sprintf(
 		"CREATE INDEX IF NOT EXISTS %s ON %s USING hnsw (%s vector_cosine_ops) WITH (m = 16, ef_construction = 64)",
-		pgQuoteIdent(indexName), pgQuoteIdent(tableName), pgQuoteIdent(columnName))
+		pgQuoteIdent(indexName), pgQuoteIdent(tableName), pgQuoteIdent(columnName),
+	)
 }

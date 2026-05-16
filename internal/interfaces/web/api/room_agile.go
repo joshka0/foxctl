@@ -26,15 +26,15 @@ type RoomAgileRequest struct {
 	Limit       int    `json:"limit,omitempty"`
 
 	// Mutating-action fields (M4 story lifecycle).
-	State         string `json:"state,omitempty"`         // target state for story_state
-	Verdict       string `json:"verdict,omitempty"`      // pass/fail/waived for story_validate
+	State         string `json:"state,omitempty"`          // target state for story_state
+	Verdict       string `json:"verdict,omitempty"`        // pass/fail/waived for story_validate
 	ValidatorType string `json:"validator_type,omitempty"` // human/agent/harness for story_validate
-	Title         string `json:"title,omitempty"`        // story title for story_propose
-	Goal          string `json:"goal,omitempty"`         // story goal for story_propose
-	Notes         string `json:"notes,omitempty"`        // notes for story_propose/story_validate
-	ProposalID    string `json:"proposal_id,omitempty"`  // for story_accept
-	Command       string `json:"command,omitempty"`      // command that produced validation
-	Artifact      string `json:"artifact,omitempty"`     // artifact ref (sha256:...) for validation
+	Title         string `json:"title,omitempty"`          // story title for story_propose
+	Goal          string `json:"goal,omitempty"`           // story goal for story_propose
+	Notes         string `json:"notes,omitempty"`          // notes for story_propose/story_validate
+	ProposalID    string `json:"proposal_id,omitempty"`    // for story_accept
+	Command       string `json:"command,omitempty"`        // command that produced validation
+	Artifact      string `json:"artifact,omitempty"`       // artifact ref (sha256:...) for validation
 }
 
 func handleRoomAgileRoute(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string) {
@@ -453,8 +453,8 @@ func apiRoomAgileNext(status map[string]any, milestones, stories []map[string]an
 var validStoryStates = map[string]bool{
 	"in_progress": true,
 	"in_review":   true,
-	"done":         true,
-	"waived":       true,
+	"done":        true,
+	"waived":      true,
 }
 
 func validateStoryState(target string) error {
@@ -604,7 +604,7 @@ func handleStoryValidate(
 	}
 
 	return map[string]any{
-		"message": apiMessageView(*msg),
+		"message":  apiMessageView(*msg),
 		"story_id": req.StoryID,
 	}, nil
 }
@@ -694,7 +694,7 @@ func handleStoryAccept(
 	}
 
 	return map[string]any{
-		"message":    apiMessageView(*msg),
+		"message":     apiMessageView(*msg),
 		"proposal_id": req.ProposalID,
 	}, nil
 }

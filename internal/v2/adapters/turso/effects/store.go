@@ -61,7 +61,8 @@ func (s *Store) BeginModelEffect(ctx context.Context, record run.ModelEffectReco
 
 	var out run.ModelEffectRecord
 	err := sqlutil.WithTransaction(ctx, s.db, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `
+		_, err := tx.ExecContext(
+			ctx, `
 			INSERT INTO v2_model_effects (
 				run_id, request_id, turn_id, iteration_index, input_json, status, response_json,
 				error_message, created_at, updated_at
@@ -128,7 +129,8 @@ func (s *Store) CompleteModelEffect(ctx context.Context, record run.ModelEffectR
 			return nil
 		}
 
-		_, err = tx.ExecContext(ctx, `
+		_, err = tx.ExecContext(
+			ctx, `
 			UPDATE v2_model_effects
 			SET status = $1,
 				response_json = $2,
@@ -208,7 +210,8 @@ func (s *Store) BeginToolEffect(ctx context.Context, record run.ToolEffectRecord
 
 	var out run.ToolEffectRecord
 	err := sqlutil.WithTransaction(ctx, s.db, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `
+		_, err := tx.ExecContext(
+			ctx, `
 			INSERT INTO v2_tool_effects (
 				run_id, request_id, turn_id, iteration_index, tool_call_id, tool_name, args_json,
 				replay_policy, status, result_json, error_message, created_at, updated_at
@@ -280,7 +283,8 @@ func (s *Store) CompleteToolEffect(ctx context.Context, record run.ToolEffectRec
 			return nil
 		}
 
-		_, err = tx.ExecContext(ctx, `
+		_, err = tx.ExecContext(
+			ctx, `
 			UPDATE v2_tool_effects
 			SET status = $1,
 				result_json = $2,

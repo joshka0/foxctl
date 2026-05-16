@@ -73,7 +73,8 @@ func TestNew_WithOptions(t *testing.T) {
 
 	redactor := NewSecretRedactor()
 
-	m, err := New(context.Background(), db,
+	m, err := New(
+		context.Background(), db,
 		WithConfig(cfg),
 		WithRedactor(redactor),
 	)

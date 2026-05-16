@@ -114,7 +114,8 @@ func TestMemoryPutCommand(t *testing.T) {
 	cfg := setupMemoryTestEnv(t)
 	workspaceID := workspace.ID(cfg.Home)
 	payload := `{"version":1,"status":"ok","command":"test","data":{"value":1},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`
-	runMemoryCommand(t, cfg, newMemoryPutCommand(),
+	runMemoryCommand(
+		t, cfg, newMemoryPutCommand(),
 		"--name", "stored",
 		"--workspace", cfg.Home,
 		"--data", payload,
@@ -154,7 +155,8 @@ func TestMemoryPutCommandUsesWorkspaceFlag(t *testing.T) {
 	}
 	payload := `{"version":1,"status":"ok","command":"test","data":{"value":1},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`
 
-	env := runMemoryCommand(t, cfg, newMemoryPutCommand(),
+	env := runMemoryCommand(
+		t, cfg, newMemoryPutCommand(),
 		"--workspace", explicitWorkspace,
 		"--name", "scoped",
 		"--type", "decision",

@@ -96,7 +96,8 @@ func TestPipeline_RLMREPLBackendUsesRLMRunner(t *testing.T) {
 	if factory.runner.task.AgentID != "agent-main" {
 		t.Fatalf("task agent id = %q", factory.runner.task.AgentID)
 	}
-	assertEventTypes(t, store.Events(),
+	assertEventTypes(
+		t, store.Events(),
 		events.EventRunStarted,
 		events.EventTurnRecorded,
 		events.EventRunCompleted,

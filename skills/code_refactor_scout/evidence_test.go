@@ -48,7 +48,8 @@ func TestPickFindingSeedNodeMatchesExactFileAndNormalizedName(t *testing.T) {
 }
 
 func TestSuggestedReadPathsSkipsCurrentFileAndDedupes(t *testing.T) {
-	got := suggestedReadPaths("a.go",
+	got := suggestedReadPaths(
+		"a.go",
 		[]repoquery.Anchor{
 			{Path: "b.go"},
 			{Path: "a.go"},

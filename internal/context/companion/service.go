@@ -1305,7 +1305,8 @@ func (s *Service) retryGroundedTurn(
 	}
 
 	retryInput := input
-	retryInput.Messages = append(append([]engine.Message{}, input.Messages...),
+	retryInput.Messages = append(
+		append([]engine.Message{}, input.Messages...),
 		engine.NewUserMessage("RETRY CONTRACT: Your previous turn did not produce a usable evidence-backed answer. You MUST use available context/code tools before final response. Then provide specific findings with file references in `path:line` format. If evidence is missing, say so explicitly."),
 	)
 
@@ -1337,12 +1338,14 @@ func (s *Service) collectForcedResearchEvidence(
 
 	var steps []forcedStep
 	if explicitPath != "" {
-		steps = append(steps,
+		steps = append(
+			steps,
 			forcedStep{name: "fs.read_file", args: map[string]any{"path": explicitPath}},
 			forcedStep{name: "fs_read_file", args: map[string]any{"path": explicitPath}},
 		)
 	}
-	steps = append(steps,
+	steps = append(
+		steps,
 		forcedStep{name: "context_search", args: map[string]any{"query": query, "limit": 12}},
 		forcedStep{name: "smart_search", args: map[string]any{"question": query, "max_snippets": 8}},
 		forcedStep{name: "repo_index_search", args: map[string]any{"query": query, "limit": 20}},

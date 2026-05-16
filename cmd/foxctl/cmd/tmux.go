@@ -745,7 +745,8 @@ func wrapZellijPaneCommand(session, participantID, roomID, childCommand, startup
 	if strings.TrimSpace(startupProfile) != "" {
 		args = append(args, "--startup-profile", strings.TrimSpace(startupProfile))
 	}
-	args = append(args,
+	args = append(
+		args,
 		"--default-submit-mode", agentpane.SubmitModeNewline,
 		"--",
 		"sh", "-lc", childCommand,

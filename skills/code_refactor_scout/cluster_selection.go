@@ -183,7 +183,8 @@ func buildCallFamilyClusterInScope(
 	inScope func(*symbolObservation) bool,
 	filterPeers func([]callFamilyPeer) []callFamilyPeer,
 ) callFamilyCluster {
-	componentKeys, componentSet := collectClusterComponentKeys(state, startKey, visited, inScope,
+	componentKeys, componentSet := collectClusterComponentKeys(
+		state, startKey, visited, inScope,
 		func(key string) []callFamilyPeer {
 			return filterPeers(peerMap[key])
 		},
@@ -303,7 +304,8 @@ func buildStructuralSimilarityClusterInScope(
 	inScope func(*symbolObservation) bool,
 	filterPeers func([]similarObservation) []similarObservation,
 ) structuralSimilarityCluster {
-	componentKeys, componentSet := collectClusterComponentKeys(state, startKey, visited, inScope,
+	componentKeys, componentSet := collectClusterComponentKeys(
+		state, startKey, visited, inScope,
 		func(key string) []similarObservation {
 			return filterPeers(peerMap[key])
 		},

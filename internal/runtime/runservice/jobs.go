@@ -27,7 +27,8 @@ func (e *Executor) ensureJobStore() (err error) {
 		return err
 	}
 	defer errs.CloseOnErr(p, &err)
-	exec := executor.New(e.cfg.Paths.Jobs, p,
+	exec := executor.New(
+		e.cfg.Paths.Jobs, p,
 		executor.WithLogger(logger),
 		executor.WithCASPath(e.cfg.Paths.CAS),
 	)

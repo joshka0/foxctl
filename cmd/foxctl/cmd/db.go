@@ -416,7 +416,8 @@ func convertEmbeddingColumn(ctx context.Context, db dbdriver.DB, tableName strin
 	// Check if table has an embedding column (scope to current schema to avoid
 	// matching identically-named tables in other schemas).
 	var hasColumn bool
-	err := db.QueryRowContext(ctx,
+	err := db.QueryRowContext(
+		ctx,
 		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name=$1 AND column_name='embedding')",
 		tableName,
 	).Scan(&hasColumn)
@@ -429,7 +430,8 @@ func convertEmbeddingColumn(ctx context.Context, db dbdriver.DB, tableName strin
 
 	// Check if already vector type
 	var udtName string
-	err = db.QueryRowContext(ctx,
+	err = db.QueryRowContext(
+		ctx,
 		"SELECT udt_name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name=$1 AND column_name='embedding'",
 		tableName,
 	).Scan(&udtName)

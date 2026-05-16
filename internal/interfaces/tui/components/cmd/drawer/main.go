@@ -87,7 +87,8 @@ func main() {
 	var drawer *components.Drawer
 	switch mode {
 	case "open":
-		drawer = components.NewDrawer("Agent Detail", content, drawerWidth, drawerHeight,
+		drawer = components.NewDrawer(
+			"Agent Detail", content, drawerWidth, drawerHeight,
 			components.WithDrawerOpen(true),
 			components.WithDrawerFocused(true),
 			components.WithDrawerWidth(30),
@@ -97,7 +98,8 @@ func main() {
 		for i := range longContent {
 			longContent[i] = "Line of content that is fairly long to test scrolling"
 		}
-		drawer = components.NewDrawer("Evidence", longContent, drawerWidth, drawerHeight,
+		drawer = components.NewDrawer(
+			"Evidence", longContent, drawerWidth, drawerHeight,
 			components.WithDrawerOpen(true),
 			components.WithDrawerFocused(true),
 			components.WithDrawerWidth(30),

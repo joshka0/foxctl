@@ -94,7 +94,8 @@ const (
 
 // main is the skill entry point for calibration/generate.
 func main() {
-	skillmain.Main(command, skillmain.Chain(run,
+	skillmain.Main(command, skillmain.Chain(
+		run,
 		skillmain.WithTimeout[Input](10*time.Minute),
 		skillmain.WithRecover[Input](),
 	))
@@ -410,7 +411,8 @@ type extractResult struct {
 func extractSignals(ctx context.Context, rc *skillmain.RunContext, providers []llmproviders.Provider, sessionID string, windowIndex int, content string) (*LLMSignals, string, error) {
 	prompt := buildExtractionPrompt(sessionID, windowIndex, content)
 
-	r, err := skillmain.TryProviders(rc, skillmain.BreakerLLMProvider, ctx, providers,
+	r, err := skillmain.TryProviders(
+		rc, skillmain.BreakerLLMProvider, ctx, providers,
 		func(ctx context.Context, p llmproviders.Provider) (extractResult, error) {
 			var signals *LLMSignals
 			var e error

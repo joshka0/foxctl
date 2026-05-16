@@ -154,7 +154,8 @@ func TestBuildAgentEvalPromptForCodingLocateNarrowsResearcher(t *testing.T) {
 		ExcludedPaths: []string{"internal/rlm/env/**"},
 	}, "", "")
 
-	if !containsAll(got,
+	if !containsAll(
+		got,
 		"This is a repo-grounded file-location task.",
 		"Task type: file_locate.",
 		"Use only the shortest path to verified repo files",

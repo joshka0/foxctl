@@ -51,7 +51,8 @@ func TestValidateNetworkAccess_AllowsEgressPatterns(t *testing.T) {
 		},
 		{
 			name: "multiple patterns - first matches",
-			manifest: manifestWithNetwork("egress",
+			manifest: manifestWithNetwork(
+				"egress",
 				"api.github.com:443",
 				"*.amazonaws.com:443",
 			),
@@ -60,7 +61,8 @@ func TestValidateNetworkAccess_AllowsEgressPatterns(t *testing.T) {
 		},
 		{
 			name: "multiple patterns - second matches",
-			manifest: manifestWithNetwork("egress",
+			manifest: manifestWithNetwork(
+				"egress",
 				"api.github.com:443",
 				"*.amazonaws.com:443",
 			),
@@ -108,7 +110,8 @@ func TestValidateNetworkAccess_BlocksDisallowedAccess(t *testing.T) {
 		},
 		{
 			name: "multiple patterns - none match",
-			manifest: manifestWithNetwork("egress",
+			manifest: manifestWithNetwork(
+				"egress",
 				"api.github.com:443",
 				"*.amazonaws.com:443",
 			),

@@ -28,7 +28,8 @@ func TestIndexRepoSemanticAnchorsE2EIndexCommentsCoexist(t *testing.T) {
 	workspace := filepath.Join(tmp, "repo")
 	writeSemanticAnchorE2EFixture(t, workspace)
 
-	buildEnv, _ := executeSemanticAnchorE2ECommand(t, cfg, newIndexRepoBuildCommand(),
+	buildEnv, _ := executeSemanticAnchorE2ECommand(
+		t, cfg, newIndexRepoBuildCommand(),
 		"--workspace", workspace,
 		"--semantic-anchors",
 		"--include-tests",
@@ -64,7 +65,8 @@ func TestIndexRepoSemanticAnchorsE2EIndexCommentsCoexist(t *testing.T) {
 		t.Fatalf("Index comment related edge missing: %+v", indexEdges)
 	}
 
-	searchEnv, searchOut := executeSemanticAnchorE2ECommand(t, cfg, newIndexRepoSearchCommand(),
+	searchEnv, searchOut := executeSemanticAnchorE2ECommand(
+		t, cfg, newIndexRepoSearchCommand(),
 		"--workspace", workspace,
 		"--query", "no-send-without-read",
 		"--limit", "10",
@@ -76,7 +78,8 @@ func TestIndexRepoSemanticAnchorsE2EIndexCommentsCoexist(t *testing.T) {
 		t.Fatalf("search output missing semantic anchor target:\n%s", searchOut)
 	}
 
-	expandEnv, expandOut := executeSemanticAnchorE2ECommand(t, cfg, newIndexRepoExpandCommand(),
+	expandEnv, expandOut := executeSemanticAnchorE2ECommand(
+		t, cfg, newIndexRepoExpandCommand(),
 		"--workspace", workspace,
 		"--seed", guard.ID,
 		"--semantic-anchors",

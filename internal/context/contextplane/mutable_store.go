@@ -358,7 +358,8 @@ func upsertObservationRow(ctx context.Context, db *sql.DB, obs Observation) erro
 	if err != nil {
 		return fmt.Errorf("marshal observation refs: %w", err)
 	}
-	_, err = db.ExecContext(ctx, `
+	_, err = db.ExecContext(
+		ctx, `
 INSERT INTO aca_observations (id, merge_key, statement, confidence, count, project, area, evidence_refs, first_seen, last_seen)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(merge_key) DO UPDATE SET
@@ -402,7 +403,8 @@ func upsertTensionRow(ctx context.Context, db *sql.DB, tension Tension) error {
 	if err != nil {
 		return fmt.Errorf("marshal tension refs: %w", err)
 	}
-	_, err = db.ExecContext(ctx, `
+	_, err = db.ExecContext(
+		ctx, `
 INSERT INTO aca_tensions (id, merge_key, kind, statement, impact, related_refs, status, count, created_at, last_seen)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(merge_key) DO UPDATE SET
@@ -725,7 +727,8 @@ func insertRetrievalCorrectionRunRow(ctx context.Context, db *sql.DB, run Retrie
 	if err != nil {
 		return fmt.Errorf("marshal retrieval correction summary: %w", err)
 	}
-	_, err = db.ExecContext(ctx, `
+	_, err = db.ExecContext(
+		ctx, `
 INSERT INTO aca_retrieval_correction_runs (
 	id, suite, control_suite, artifact_digest, summary_json,
 	policy_candidate, policy_applied, policy_accepted, policy_reverted, draft_count, created_at
@@ -794,7 +797,8 @@ LIMIT 1
 }
 
 func insertGraphCorrectionRunRow(ctx context.Context, db *sql.DB, run GraphCorrectionRun) error {
-	_, err := db.ExecContext(ctx, `
+	_, err := db.ExecContext(
+		ctx, `
 INSERT INTO aca_graph_correction_runs (
 	id, method, suite, artifact_digest, queries, matched, misses, classification, recommended_fix, created_at
 )
@@ -880,7 +884,8 @@ func upsertMemoryProposalRow(ctx context.Context, db *sql.DB, proposal MemoryPro
 	if err != nil {
 		return fmt.Errorf("marshal proposal change: %w", err)
 	}
-	_, err = db.ExecContext(ctx, `
+	_, err = db.ExecContext(
+		ctx, `
 INSERT INTO aca_memory_proposals (
 	id, dedupe_key, kind, classification, status, review_required, confidence,
 	blast_radius, summary, source_refs, proposed_change_json, evaluation_status,
@@ -997,7 +1002,8 @@ LIMIT 1
 }
 
 func updateMemoryProposalRowStatus(ctx context.Context, db *sql.DB, id, status, evaluationStatus, applyStatus string) error {
-	_, err := db.ExecContext(ctx, `
+	_, err := db.ExecContext(
+		ctx, `
 UPDATE aca_memory_proposals
 SET status = ?, evaluation_status = ?, apply_status = ?, updated_at = ?
 WHERE id = ?
@@ -1037,7 +1043,8 @@ func upsertControlProposalRow(ctx context.Context, db *sql.DB, proposal ControlP
 	if err != nil {
 		return fmt.Errorf("marshal control proposal payload: %w", err)
 	}
-	_, err = db.ExecContext(ctx, `
+	_, err = db.ExecContext(
+		ctx, `
 INSERT INTO aca_control_proposals (
 	id, dedupe_key, kind, status, workspace_id, session_id, agent_id, room_id,
 	summary, source_refs, evidence_refs, payload_json, confidence, blast_radius,
@@ -1183,7 +1190,8 @@ func insertCoordinatorDecisionRow(ctx context.Context, db *sql.DB, decision Coor
 	if err != nil {
 		return fmt.Errorf("marshal coordinator decision constraints: %w", err)
 	}
-	_, err = db.ExecContext(ctx, `
+	_, err = db.ExecContext(
+		ctx, `
 INSERT INTO aca_coordinator_decisions (
 	id, proposal_id, workspace_id, decision_kind, authority_mode, status_after,
 	approval_actor, policy_id, policy_version, policy_hash, evidence_refs,
@@ -1268,7 +1276,8 @@ func insertApplyResultRow(ctx context.Context, db *sql.DB, result ApplyResult) e
 	if err != nil {
 		return fmt.Errorf("marshal apply result refs: %w", err)
 	}
-	_, err = db.ExecContext(ctx, `
+	_, err = db.ExecContext(
+		ctx, `
 INSERT OR IGNORE INTO aca_apply_results (
 	id, proposal_id, decision_id, idempotency_key, target_kind, target_id, status,
 	summary, result_json, error_message, evidence_refs, created_at
@@ -1321,7 +1330,8 @@ ORDER BY created_at DESC`
 }
 
 func updateMaintenanceTaskStatus(ctx context.Context, db *sql.DB, id, status string) error {
-	_, err := db.ExecContext(ctx, `
+	_, err := db.ExecContext(
+		ctx, `
 UPDATE aca_maintenance_tasks
 SET status = ?
 WHERE id = ?
@@ -1339,7 +1349,8 @@ func insertEvidenceImportRunRow(ctx context.Context, db *sql.DB, run EvidenceImp
 	if run.ID == "" {
 		run.ID = buildRecordID("E", run.CreatedAt)
 	}
-	_, err := db.ExecContext(ctx, `
+	_, err := db.ExecContext(
+		ctx, `
 INSERT INTO aca_evidence_import_runs (
 	id, source_kind, source_ref, title, draft_path, artifact_digest,
 	processor_kind, processor_model, summary, status, created_at

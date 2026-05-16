@@ -145,7 +145,8 @@ func TestExecutorLogsProgressFailures(t *testing.T) {
 		}
 		return buf, nil, nil
 	}
-	exec := New(root, persist,
+	exec := New(
+		root, persist,
 		WithRunner(runner),
 		WithLogger(logger),
 		withProgressWriterFactory(func(string) (*progressWriter, error) {

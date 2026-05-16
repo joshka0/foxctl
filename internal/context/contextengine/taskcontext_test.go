@@ -61,7 +61,8 @@ func TestTaskContext_StoredAsProjection(t *testing.T) {
 	}
 
 	// Store as projection
-	err = store.PutProjection(ctx,
+	err = store.PutProjection(
+		ctx,
 		tc.ProjectionMeta.ProjectionID,
 		tc.WorkspaceID,
 		tc.ProjectionMeta.ProjectionType,

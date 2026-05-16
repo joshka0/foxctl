@@ -761,9 +761,11 @@ func typeInferenceAnswerVerifier(answer string, input map[string]any) (HelperVer
 				break
 			}
 			gotStr := strings.TrimSpace(strings.ReplaceAll(
-				strings.ReplaceAll(fmt.Sprintf("%v", got), " ", ""), "\\t", ""))
+				strings.ReplaceAll(fmt.Sprintf("%v", got), " ", ""), "\\t", "",
+			))
 			expStr := strings.TrimSpace(strings.ReplaceAll(
-				strings.ReplaceAll(fmt.Sprintf("%v", ev), " ", ""), "\\t", ""))
+				strings.ReplaceAll(fmt.Sprintf("%v", ev), " ", ""), "\\t", "",
+			))
 			if gotStr != expStr {
 				allMatch = false
 				base.FirstFailure = fmt.Sprintf("key %s: got %v, want %v", k, got, ev)

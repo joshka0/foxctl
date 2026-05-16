@@ -76,7 +76,8 @@ func TestCreate_NewBranch(t *testing.T) {
 	defer cleanup()
 
 	mgr := NewManager()
-	result, err := mgr.Create(context.Background(), repoPath, "feat/x",
+	result, err := mgr.Create(
+		context.Background(), repoPath, "feat/x",
 		WithNewBranch(true),
 	)
 	require.NoError(t, err)
@@ -139,7 +140,8 @@ func TestCreate_FromRef(t *testing.T) {
 	require.NoError(t, runGit(repoPath, "commit", "-m", "second commit"))
 
 	mgr := NewManager()
-	result, err := mgr.Create(context.Background(), repoPath, "feat/from-tag",
+	result, err := mgr.Create(
+		context.Background(), repoPath, "feat/from-tag",
 		WithNewBranch(true),
 		WithRef("v1.0"),
 	)
@@ -161,7 +163,8 @@ func TestCreate_CustomBaseDir(t *testing.T) {
 	require.NoError(t, err)
 
 	mgr := NewManager()
-	result, err := mgr.Create(context.Background(), repoPath, "feat/custom",
+	result, err := mgr.Create(
+		context.Background(), repoPath, "feat/custom",
 		WithNewBranch(true),
 		WithBaseDir(baseDir),
 	)
@@ -179,7 +182,8 @@ func TestCreate_DefaultBaseDir(t *testing.T) {
 	defer cleanup()
 
 	mgr := NewManager()
-	result, err := mgr.Create(context.Background(), repoPath, "feat/default-basedir",
+	result, err := mgr.Create(
+		context.Background(), repoPath, "feat/default-basedir",
 		WithNewBranch(true),
 	)
 	require.NoError(t, err)
@@ -207,13 +211,15 @@ func TestCreate_DuplicateBranch(t *testing.T) {
 
 	mgr := NewManager()
 	// Create first worktree with new branch
-	result, err := mgr.Create(context.Background(), repoPath, "feat/dup",
+	result, err := mgr.Create(
+		context.Background(), repoPath, "feat/dup",
 		WithNewBranch(true),
 	)
 	require.NoError(t, err)
 
 	// Try creating again with same branch name + NewBranch
-	_, err = mgr.Create(context.Background(), repoPath, "feat/dup",
+	_, err = mgr.Create(
+		context.Background(), repoPath, "feat/dup",
 		WithNewBranch(true),
 	)
 	require.Error(t, err)
@@ -241,7 +247,8 @@ func TestCreate_PathValidation(t *testing.T) {
 	defer cleanup()
 
 	mgr := NewManager()
-	_, err := mgr.Create(context.Background(), repoPath, "../../../etc/passwd",
+	_, err := mgr.Create(
+		context.Background(), repoPath, "../../../etc/passwd",
 		WithNewBranch(true),
 	)
 	require.Error(t, err)

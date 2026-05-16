@@ -67,7 +67,8 @@ func TestCollectAndUpdate_FinalReply(t *testing.T) {
 	ch := make(chan consolepkg.Event, 8)
 
 	var editedContent string
-	evt := NewMessageEvent("test", UserRef{}, "chan1", "", "msg1",
+	evt := NewMessageEvent(
+		"test", UserRef{}, "chan1", "", "msg1",
 		func(content string, embeds []Embed) (MessageRef, error) {
 			return MessageRef{ChannelID: "chan1", MessageID: "reply1"}, nil
 		},
@@ -102,7 +103,8 @@ func TestCollectAndUpdate_PartialEdit_TruncatesToLimit(t *testing.T) {
 	ch := make(chan consolepkg.Event, 8)
 
 	var edits []string
-	evt := NewMessageEvent("test", UserRef{}, "chan1", "", "msg1",
+	evt := NewMessageEvent(
+		"test", UserRef{}, "chan1", "", "msg1",
 		func(content string, embeds []Embed) (MessageRef, error) {
 			return MessageRef{ChannelID: "chan1", MessageID: "reply1"}, nil
 		},

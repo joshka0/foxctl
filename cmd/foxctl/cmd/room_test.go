@@ -12746,7 +12746,8 @@ func TestProvisionSandbox_RollbackOnTmuxFailure(t *testing.T) {
 	// First create the worktree successfully to get its path
 	mgr := worktree.NewManager()
 	branchName := "sandbox/room-rollback-test"
-	wtResult, err := mgr.Create(ctx, workspace, branchName,
+	wtResult, err := mgr.Create(
+		ctx, workspace, branchName,
 		worktree.WithNewBranch(true),
 		worktree.WithBaseDir(wtRoot),
 	)

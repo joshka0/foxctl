@@ -412,7 +412,8 @@ CREATE TABLE agents (
 
 	insertAgent := func(id, prompt, createdAt string) {
 		t.Helper()
-		_, err := db.ExecContext(ctx, `
+		_, err := db.ExecContext(
+			ctx, `
 			INSERT INTO agents (id, ns, role, prompt, skills_allow, policy, share_bb, state, created_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id, "org/shared", "coder", prompt, "[]", "{}", "scoped", string(agent.StateStarting), createdAt,

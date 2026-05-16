@@ -154,7 +154,8 @@ func TestCopyFiles_IncludePatterns(t *testing.T) {
 	dstDir := filepath.Join(t.TempDir(), "dst")
 	require.NoError(t, os.MkdirAll(dstDir, 0o755))
 
-	err := mgr.CopyFiles(context.Background(), srcDir, dstDir,
+	err := mgr.CopyFiles(
+		context.Background(), srcDir, dstDir,
 		WithInclude("*.go", "*.mod"),
 	)
 	require.NoError(t, err)
@@ -178,7 +179,8 @@ func TestCopyFiles_ExcludePatterns(t *testing.T) {
 	require.NoError(t, os.MkdirAll(dstDir, 0o755))
 
 	mgr := NewManager()
-	err := mgr.CopyFiles(context.Background(), srcDir, dstDir,
+	err := mgr.CopyFiles(
+		context.Background(), srcDir, dstDir,
 		WithExclude("*.test.ts", "node_modules/**"),
 	)
 	require.NoError(t, err)
@@ -199,7 +201,8 @@ func TestCopyFiles_CombinedIncludeExclude(t *testing.T) {
 	require.NoError(t, os.MkdirAll(dstDir, 0o755))
 
 	mgr := NewManager()
-	err := mgr.CopyFiles(context.Background(), srcDir, dstDir,
+	err := mgr.CopyFiles(
+		context.Background(), srcDir, dstDir,
 		WithInclude("*.go"),
 		WithExclude("*_test.go"),
 	)
@@ -222,7 +225,8 @@ func TestCopyFiles_Dotfiles(t *testing.T) {
 	require.NoError(t, os.MkdirAll(dstDir, 0o755))
 
 	mgr := NewManager()
-	err := mgr.CopyFiles(context.Background(), srcDir, dstDir,
+	err := mgr.CopyFiles(
+		context.Background(), srcDir, dstDir,
 		WithInclude(".env*"),
 	)
 	require.NoError(t, err)
@@ -340,7 +344,8 @@ func TestHooks_PostCreateEnvVars(t *testing.T) {
 	require.NoError(t, os.WriteFile(hookScript, []byte(hookContent), 0o755))
 
 	mgr := NewManager()
-	result, err := mgr.Create(context.Background(), repoPath, "feat/hook-test",
+	result, err := mgr.Create(
+		context.Background(), repoPath, "feat/hook-test",
 		WithNewBranch(true),
 		WithHooks(HookConfig{
 			PostCreate: hookScript,
@@ -376,7 +381,8 @@ func TestHooks_PostCreateFailureDoesNotRollback(t *testing.T) {
 	defer cleanup()
 
 	mgr := NewManager()
-	result, err := mgr.Create(context.Background(), repoPath, "feat/hook-fail",
+	result, err := mgr.Create(
+		context.Background(), repoPath, "feat/hook-fail",
 		WithNewBranch(true),
 		WithHooks(HookConfig{
 			PostCreate: "sh -c 'exit 1'",
@@ -412,7 +418,8 @@ func TestHooks_PostRemoveExecutesAfterRemoval(t *testing.T) {
 	require.NoError(t, os.WriteFile(hookScript, []byte(hookContent), 0o755))
 
 	mgr := NewManager()
-	result, err := mgr.Create(context.Background(), repoPath, "feat/hook-rm",
+	result, err := mgr.Create(
+		context.Background(), repoPath, "feat/hook-rm",
 		WithNewBranch(true),
 	)
 	require.NoError(t, err)
@@ -420,7 +427,8 @@ func TestHooks_PostRemoveExecutesAfterRemoval(t *testing.T) {
 	wtPath := result.Path
 
 	// Remove with post-remove hook
-	err = mgr.Remove(context.Background(), repoPath, wtPath,
+	err = mgr.Remove(
+		context.Background(), repoPath, wtPath,
 		WithForce(true),
 		WithDeleteBranch(true),
 		WithHooks(HookConfig{
@@ -451,7 +459,8 @@ func TestHooks_TimeoutEnforcement(t *testing.T) {
 
 	mgr := NewManager()
 	start := time.Now()
-	result, err := mgr.Create(context.Background(), repoPath, "feat/hook-timeout",
+	result, err := mgr.Create(
+		context.Background(), repoPath, "feat/hook-timeout",
 		WithNewBranch(true),
 		WithHooks(HookConfig{
 			PostCreate: "sleep 60",
@@ -480,7 +489,8 @@ func TestHooks_NoHookConfiguredIsNoop(t *testing.T) {
 	defer cleanup()
 
 	mgr := NewManager()
-	result, err := mgr.Create(context.Background(), repoPath, "feat/no-hook",
+	result, err := mgr.Create(
+		context.Background(), repoPath, "feat/no-hook",
 		WithNewBranch(true),
 		// No hooks configured
 	)
@@ -502,7 +512,8 @@ func TestHooks_PostRemoveFailureDoesNotRollback(t *testing.T) {
 	defer cleanup()
 
 	mgr := NewManager()
-	result, err := mgr.Create(context.Background(), repoPath, "feat/hook-rm-fail",
+	result, err := mgr.Create(
+		context.Background(), repoPath, "feat/hook-rm-fail",
 		WithNewBranch(true),
 	)
 	require.NoError(t, err)
@@ -510,7 +521,8 @@ func TestHooks_PostRemoveFailureDoesNotRollback(t *testing.T) {
 	wtPath := result.Path
 
 	// Remove with failing hook
-	err = mgr.Remove(context.Background(), repoPath, wtPath,
+	err = mgr.Remove(
+		context.Background(), repoPath, wtPath,
 		WithForce(true),
 		WithDeleteBranch(true),
 		WithHooks(HookConfig{
@@ -638,7 +650,8 @@ func TestHooks_Integration(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(hookDir, "post_remove.sh"), []byte(postRemoveScript), 0o755))
 
 	mgr := NewManager()
-	result, err := mgr.Create(context.Background(), repoPath, "feat/integration",
+	result, err := mgr.Create(
+		context.Background(), repoPath, "feat/integration",
 		WithNewBranch(true),
 		WithHooks(HookConfig{
 			PostCreate: filepath.Join(hookDir, "post_create.sh"),
@@ -655,7 +668,8 @@ func TestHooks_Integration(t *testing.T) {
 	assert.Contains(t, string(data), "path="+result.Path)
 
 	// Remove with hooks
-	err = mgr.Remove(context.Background(), repoPath, result.Path,
+	err = mgr.Remove(
+		context.Background(), repoPath, result.Path,
 		WithForce(true),
 		WithDeleteBranch(true),
 		WithHooks(HookConfig{

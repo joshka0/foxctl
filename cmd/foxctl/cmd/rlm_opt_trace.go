@@ -195,7 +195,8 @@ func buildRLMTracePromptComponents(
 		})
 		if err == nil {
 			prompt.System = rlm.BuildLLMSystemPrompt(env, task)
-			prompt.ContextBlocks = append(prompt.ContextBlocks,
+			prompt.ContextBlocks = append(
+				prompt.ContextBlocks,
 				optdata.PromptContextBlock{Name: "effective_route_profile", Source: "rlm.run_spec.route_profile", Content: string(spec.RouteProfile)},
 				optdata.PromptContextBlock{Name: "effective_plan_mode", Source: "rlm.run_spec.plan_mode", Content: string(spec.PlanMode)},
 				optdata.PromptContextBlock{Name: "effective_tool_policy", Source: "rlm.run_spec.tool_policy", Content: jsonStringRLMTrace(spec.ToolPolicy)},
@@ -208,7 +209,8 @@ func buildRLMTracePromptComponents(
 		}
 		if rlm.NormalizePlanMode(planMode) == rlm.PlanModeLambda && ephemeralSkills {
 			prompt.System = rlm.HelperSolveDraftSystemPrompt()
-			prompt.ContextBlocks = append(prompt.ContextBlocks,
+			prompt.ContextBlocks = append(
+				prompt.ContextBlocks,
 				optdata.PromptContextBlock{Name: "helper_solve_system_prompt", Source: optdata.ComponentHelperSolveSystem, Content: rlm.HelperSolveDraftSystemPrompt()},
 				optdata.PromptContextBlock{Name: "helper_solve_draft_prompt_template", Source: optdata.ComponentHelperSolveDraft, Content: rlm.HelperSolveDraftPromptTemplate()},
 			)
@@ -219,7 +221,8 @@ func buildRLMTracePromptComponents(
 		helperEnabled := true
 		recursionEnabled := task.MaxDepth > 0 && task.MaxSubcalls > 0
 		prompt.System = buildRLMREPLCLISystemPromptForPolicy(kind, helperEnabled, recursionEnabled)
-		prompt.ContextBlocks = append(prompt.ContextBlocks,
+		prompt.ContextBlocks = append(
+			prompt.ContextBlocks,
 			optdata.PromptContextBlock{Name: "repl_system_prompt", Source: optdata.ComponentREPLSystemPrompt, Content: buildRLMREPLCLISystemPromptForPolicy(kind, helperEnabled, recursionEnabled)},
 			optdata.PromptContextBlock{Name: "repl_initial_state", Source: "rlm.repl.initial_state", Content: jsonStringRLMTrace(map[string]any{"official_prompt": strings.TrimSpace(task.Prompt)})},
 		)

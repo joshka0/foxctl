@@ -143,7 +143,8 @@ func (s *Store) Save(ctx context.Context, ann *TurnAnnotation) error {
 		}
 	}
 
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(
+		ctx, `
 INSERT INTO turn_annotations (
 	id, session_id, turn_index, context_window_index,
 	byte_offset, byte_length, line_num, timestamp,

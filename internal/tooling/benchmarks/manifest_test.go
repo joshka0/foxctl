@@ -140,7 +140,8 @@ func TestGoBenchmarkPackagesFiltersByGateAndDedupesInManifestOrder(t *testing.T)
 	t.Parallel()
 
 	manifest := minimalManifest()
-	manifest.Benchmarks = append(manifest.Benchmarks,
+	manifest.Benchmarks = append(
+		manifest.Benchmarks,
 		BenchmarkSpec{
 			ID:          "runtime.second",
 			Category:    "runtime",

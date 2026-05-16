@@ -855,7 +855,8 @@ func (l *repoIndexBuildProgressLogger) writeHeartbeat(interval time.Duration) {
 }
 
 func formatRepoIndexBuildProgress(start time.Time, progress repoindex.BuildProgress) string {
-	return fmt.Sprintf("repoindex build: %s phase=%s %s%s",
+	return fmt.Sprintf(
+		"repoindex build: %s phase=%s %s%s",
 		repoIndexProgressElapsed(start, progress.ElapsedMs),
 		emptyFallback(progress.Phase, "unknown"),
 		strings.TrimSpace(progress.Message),
@@ -868,7 +869,8 @@ func formatRepoIndexBuildHeartbeat(start time.Time, progress repoindex.BuildProg
 	if message != "" {
 		message = " last=\"" + message + "\""
 	}
-	return fmt.Sprintf("repoindex build: %s still running phase=%s%s%s",
+	return fmt.Sprintf(
+		"repoindex build: %s still running phase=%s%s%s",
 		repoIndexProgressElapsed(start, progress.ElapsedMs),
 		emptyFallback(progress.Phase, "unknown"),
 		message,
@@ -895,7 +897,8 @@ func formatRepoIndexBuildCounts(result repoindex.BuildResult) string {
 
 func repoIndexBuildOptionsMessage(absWorkspace string, patterns []string, includeGo, includePython, includeRust, includeCSharp, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun, incremental, includeSemanticAnchors, includeCoChange bool) string {
 	families := repoIndexBuildFamilies(includeGo, includePython, includeRust, includeCSharp, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell)
-	return fmt.Sprintf("workspace=%s families=%s go_patterns=%s include_tests=%t semantic_anchors=%t cochange=%t incremental=%t dry_run=%t",
+	return fmt.Sprintf(
+		"workspace=%s families=%s go_patterns=%s include_tests=%t semantic_anchors=%t cochange=%t incremental=%t dry_run=%t",
 		absWorkspace,
 		strings.Join(families, ","),
 		strings.Join(patterns, ","),
@@ -966,7 +969,8 @@ func repoIndexBuildFamilies(includeGo, includePython, includeRust, includeCSharp
 
 func formatRepoIndexDeltaCounts(delta repoindex.WorkspaceDelta) string {
 	counts := repoIndexDeltaCounts(delta)
-	return fmt.Sprintf("added=%d modified=%d deleted=%d untracked=%d unchanged=%d",
+	return fmt.Sprintf(
+		"added=%d modified=%d deleted=%d untracked=%d unchanged=%d",
 		counts["added"],
 		counts["modified"],
 		counts["deleted"],

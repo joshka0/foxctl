@@ -85,7 +85,8 @@ python3 -c 'import json,os; print(json.dumps({"path": os.environ["WORKDIR"]}))' 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	env := append(os.Environ(),
+	env := append(
+		os.Environ(),
 		fmt.Sprintf("FOXCTL_BIN=%s", foxctlBin),
 		fmt.Sprintf("WORKDIR=%s", workdir),
 	)

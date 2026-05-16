@@ -36,7 +36,8 @@ func TestSnapshotDetailPanePopulated(t *testing.T) {
 		}},
 	}
 
-	mt := renderDetailPaneEntity("agent-abc12345", StatusOK, sections, 50, 15,
+	mt := renderDetailPaneEntity(
+		"agent-abc12345", StatusOK, sections, 50, 15,
 		WithDPFocused(true),
 	)
 
@@ -45,7 +46,8 @@ func TestSnapshotDetailPanePopulated(t *testing.T) {
 }
 
 func TestSnapshotDetailPaneEmpty(t *testing.T) {
-	mt := renderDetailPane("agent-abc12345", StatusNone, nil, 50, 15,
+	mt := renderDetailPane(
+		"agent-abc12345", StatusNone, nil, 50, 15,
 		WithHasEntity(false),
 	)
 
@@ -63,7 +65,8 @@ func TestSnapshotDetailPaneScrolled(t *testing.T) {
 		{Title: "Details", Lines: lines},
 	}
 
-	dp := NewDetailPane("agent-abc12345", StatusOK, sections, 50, 10,
+	dp := NewDetailPane(
+		"agent-abc12345", StatusOK, sections, 50, 10,
 		WithHasEntity(true),
 		WithDPFocused(true),
 		WithScrollOffset(10), // scrolled down
@@ -98,7 +101,8 @@ func TestSnapshotDetailPaneTruncatedTitle(t *testing.T) {
 	}
 
 	// Use narrow width to force title truncation.
-	mt := renderDetailPaneEntity(longTitle, StatusWarn, sections, 25, 10,
+	mt := renderDetailPaneEntity(
+		longTitle, StatusWarn, sections, 25, 10,
 		WithDPFocused(true),
 	)
 
@@ -126,10 +130,12 @@ func TestSnapshotDetailPaneFocusedVsUnfocused(t *testing.T) {
 		{Title: "Info", Lines: []string{"data"}},
 	}
 
-	mtF := renderDetailPaneEntity("agent-x", StatusOK, sections, 40, 10,
+	mtF := renderDetailPaneEntity(
+		"agent-x", StatusOK, sections, 40, 10,
 		WithDPFocused(true),
 	)
-	mtU := renderDetailPaneEntity("agent-x", StatusOK, sections, 40, 10,
+	mtU := renderDetailPaneEntity(
+		"agent-x", StatusOK, sections, 40, 10,
 		WithDPFocused(false),
 	)
 

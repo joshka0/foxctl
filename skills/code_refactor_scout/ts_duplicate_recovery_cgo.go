@@ -285,7 +285,8 @@ func collectTSDuplicateRecoveryGroups(root *sitter.Node, content []byte) []tsDup
 		}
 		groups[candidate.Fingerprint] = newTSLineGroup(candidate.Fingerprint, candidate.Lines, *candidate)
 	})
-	return sortedTSLineGroups(groups,
+	return sortedTSLineGroups(
+		groups,
 		func(group *tsDuplicateRecoveryGroup, lines []int) { group.Lines = lines },
 		func(group *tsDuplicateRecoveryGroup) []int { return group.Lines },
 		func(group *tsDuplicateRecoveryGroup) string { return group.Fingerprint },
@@ -307,7 +308,8 @@ func collectTSDuplicatedErrorRemapGroups(root *sitter.Node, content []byte) []ts
 			groups[candidate.Fingerprint] = newTSLineGroup(candidate.Fingerprint, candidate.Lines, candidate)
 		}
 	})
-	return sortedTSLineGroups(groups,
+	return sortedTSLineGroups(
+		groups,
 		func(group *tsDuplicatedErrorRemapGroup, lines []int) { group.Lines = lines },
 		func(group *tsDuplicatedErrorRemapGroup) []int { return group.Lines },
 		func(group *tsDuplicatedErrorRemapGroup) string { return group.Fingerprint },
@@ -340,7 +342,8 @@ func collectTSRepeatedGuardGroups(root *sitter.Node, content []byte) []tsRepeate
 			})
 		}
 	})
-	return sortedTSLineGroups(groups,
+	return sortedTSLineGroups(
+		groups,
 		func(group *tsRepeatedGuardGroup, lines []int) { group.Lines = lines },
 		func(group *tsRepeatedGuardGroup) []int { return group.Lines },
 		func(group *tsRepeatedGuardGroup) string { return group.Fingerprint },

@@ -93,7 +93,8 @@ func (s *SQLStore) SaveRun(ctx context.Context, run model.Run) error {
 		return fmt.Errorf("evolve store save run: %w", err)
 	}
 	return sqlutil.WithTransaction(ctx, s.db, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `
+		_, err := tx.ExecContext(
+			ctx, `
 			INSERT INTO evolve_runs (
 				id, workspace_path, target_path, benchmark_command, metric, status, created_at, updated_at
 			) VALUES (
@@ -119,7 +120,8 @@ func (s *SQLStore) SaveRun(ctx context.Context, run model.Run) error {
 			return fmt.Errorf("upsert run: %w", err)
 		}
 		if run.Active {
-			_, err = tx.ExecContext(ctx, `
+			_, err = tx.ExecContext(
+				ctx, `
 				INSERT INTO evolve_active_runs (workspace_path, run_id) VALUES ($1, $2)
 				ON CONFLICT(workspace_path) DO UPDATE SET run_id = excluded.run_id`,
 				run.WorkspacePath,
@@ -195,7 +197,8 @@ func (s *SQLStore) SaveNode(ctx context.Context, node model.Node) error {
 	if err := node.Validate(); err != nil {
 		return fmt.Errorf("evolve store save node: %w", err)
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(
+		ctx, `
 		INSERT INTO evolve_nodes (
 			id, run_id, parent_id, status, hypothesis, score, eval_epoch, branch, worktree_path,
 			commit_sha, pruned_reason, current_attempt, evaluated_attempts, created_at, updated_at
@@ -279,7 +282,8 @@ func (s *SQLStore) SaveGate(ctx context.Context, gate model.Gate) error {
 	if err := gate.Validate(); err != nil {
 		return fmt.Errorf("evolve store save gate: %w", err)
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(
+		ctx, `
 		INSERT INTO evolve_gates (id, run_id, node_id, name, command, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT(node_id, name) DO UPDATE SET
@@ -316,7 +320,8 @@ func (s *SQLStore) SaveAttempt(ctx context.Context, attempt model.Attempt) error
 	if err := attempt.Validate(); err != nil {
 		return fmt.Errorf("evolve store save attempt: %w", err)
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(
+		ctx, `
 		INSERT INTO evolve_attempts (
 			id, node_id, attempt_no, status, score, benchmark_artifact, trace_artifact,
 			diff_artifact, error, started_at, finished_at
@@ -384,7 +389,8 @@ func (s *SQLStore) SaveGateResult(ctx context.Context, result model.GateResult) 
 	if err := result.Validate(); err != nil {
 		return fmt.Errorf("evolve store save gate result: %w", err)
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(
+		ctx, `
 		INSERT INTO evolve_gate_results (
 			attempt_id, gate_name, source_node_id, passed, return_code, log_artifact
 		) VALUES (
@@ -450,7 +456,8 @@ func (s *SQLStore) SaveAnnotation(ctx context.Context, annotation model.Annotati
 	if err := annotation.Validate(); err != nil {
 		return fmt.Errorf("evolve store save annotation: %w", err)
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(
+		ctx, `
 		INSERT INTO evolve_annotations (id, run_id, node_id, task_id, analysis, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT(id) DO UPDATE SET
@@ -510,7 +517,8 @@ func (s *SQLStore) SaveInfraEvent(ctx context.Context, event model.InfraEvent) e
 	if err := event.Validate(); err != nil {
 		return fmt.Errorf("evolve store save infra event: %w", err)
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(
+		ctx, `
 		INSERT INTO evolve_infra_events (id, run_id, message, breaking, created_at)
 		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT(id) DO UPDATE SET

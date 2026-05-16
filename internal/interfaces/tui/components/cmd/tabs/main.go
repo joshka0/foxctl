@@ -73,17 +73,20 @@ func main() {
 	var tabs *components.Tabs
 	switch mode {
 	case "focused":
-		tabs = components.NewTabs(labels, tabsWidth,
+		tabs = components.NewTabs(
+			labels, tabsWidth,
 			components.WithTabsActiveIndex(0),
 			components.WithTabsFocused(true),
 		)
 	case "unfocused":
-		tabs = components.NewTabs(labels, tabsWidth,
+		tabs = components.NewTabs(
+			labels, tabsWidth,
 			components.WithTabsActiveIndex(0),
 			components.WithTabsFocused(false),
 		)
 	case "middle":
-		tabs = components.NewTabs(labels, tabsWidth,
+		tabs = components.NewTabs(
+			labels, tabsWidth,
 			components.WithTabsActiveIndex(1),
 			components.WithTabsFocused(true),
 		)

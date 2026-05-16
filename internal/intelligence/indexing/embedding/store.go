@@ -194,7 +194,8 @@ func migrateLegacyJobs(ctx context.Context, db *sql.DB) error {
 
 		dedupeKey := dedupeKeyForSymbol(workspaceID, SymbolInput{SymbolID: symbolID}, contentDigest, "")
 
-		if _, err := stmt.ExecContext(ctx,
+		if _, err := stmt.ExecContext(
+			ctx,
 			id, workspaceID, payloadBytes, dedupeKey, state, priority, attempts, maxAttempts,
 			nullStringValue(errStr), createdAt, updatedAt, nullStringValue(scheduledStr), nullStringValue(completedStr),
 		); err != nil {

@@ -94,7 +94,8 @@ type LSPClient struct {
 }
 
 func main() {
-	skillmain.Main(command, skillmain.Chain(run,
+	skillmain.Main(command, skillmain.Chain(
+		run,
 		skillmain.WithDynamicTimeout[input](func(in input) time.Duration {
 			if in.Timeout > 0 {
 				return time.Duration(in.Timeout) * time.Second
