@@ -83,13 +83,15 @@ func main() {
 				"ask: 'fix lint errors' → running",
 			}},
 		}
-		dp = components.NewDetailPane("agent-abc12345", components.StatusOK, sections, 50, 15,
+		dp = components.NewDetailPane(
+			"agent-abc12345", components.StatusOK, sections, 50, 15,
 			components.WithHasEntity(true),
 			components.WithDPFocused(true),
 		)
 
 	case "empty":
-		dp = components.NewDetailPane("", components.StatusNone, nil, 50, 15,
+		dp = components.NewDetailPane(
+			"", components.StatusNone, nil, 50, 15,
 			components.WithHasEntity(false),
 		)
 
@@ -101,7 +103,8 @@ func main() {
 		sections := []components.Section{
 			{Title: "Details", Lines: lines},
 		}
-		dp = components.NewDetailPane("agent-abc12345", components.StatusOK, sections, 50, 15,
+		dp = components.NewDetailPane(
+			"agent-abc12345", components.StatusOK, sections, 50, 15,
 			components.WithHasEntity(true),
 			components.WithDPFocused(true),
 			components.WithScrollOffset(10),

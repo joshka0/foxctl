@@ -73,7 +73,8 @@ func newOptimizeDatasetExportRankedCommand() *cobra.Command {
 			if err != nil {
 				return writeOptimizeError(out, optimizeDatasetCommand, err.Error())
 			}
-			return protocol.WriteOK(out, optimizeDatasetCommand, data,
+			return protocol.WriteOK(
+				out, optimizeDatasetCommand, data,
 				protocol.WithSource("run"),
 				protocol.WithWorkspace(absWorkspace),
 				protocol.WithCASDigest(artifact),

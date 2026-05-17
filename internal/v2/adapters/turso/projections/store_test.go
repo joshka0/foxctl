@@ -84,7 +84,8 @@ func TestStoreListRunStatesFiltersAndClamp(t *testing.T) {
 		if i%5 == 0 {
 			actorID = "actor:b"
 		}
-		if _, err := db.ExecContext(ctx, `
+		if _, err := db.ExecContext(
+			ctx, `
 			INSERT INTO v2_run_state (
 				run_id, status, last_event_id, last_stream_version, command, request_id, actor_id, updated_at
 			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)

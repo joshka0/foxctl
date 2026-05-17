@@ -186,7 +186,8 @@ ON CONFLICT(id) DO UPDATE SET
 		}
 
 		now := timeutil.FormatRFC3339Nano(timeutil.NowUTC())
-		_, err = stmt.ExecContext(ctx,
+		_, err = stmt.ExecContext(
+			ctx,
 			prepared.ID,
 			prepared.WorkspaceID,
 			prepared.Scope,

@@ -46,7 +46,8 @@ func TestFollowTailEngaged(t *testing.T) {
 		lines[i] = fmt.Sprintf("initial-%d", i)
 	}
 
-	sv := NewStreamViewer(lines, 40, height,
+	sv := NewStreamViewer(
+		lines, 40, height,
 		WithSVFocused(true),
 	)
 
@@ -71,7 +72,8 @@ func TestFollowTailEngaged(t *testing.T) {
 	}
 
 	// Verify the last appended line is visible in the rendered output.
-	_, mt := renderStreamViewer(sv.lines, 40, height,
+	_, mt := renderStreamViewer(
+		sv.lines, 40, height,
 		WithSVFocused(true),
 		WithSVScrollOffset(sv.ScrollOffset()),
 		WithSVFollowTail(sv.FollowTail()),
@@ -93,7 +95,8 @@ func TestScrollUpDisengagesFollow(t *testing.T) {
 	height := 5
 	lines := makeLines(20) // more than viewport
 
-	sv := NewStreamViewer(lines, 40, height,
+	sv := NewStreamViewer(
+		lines, 40, height,
 		WithSVFocused(true),
 	)
 
@@ -129,7 +132,8 @@ func TestScrollAnchorPreservedAcrossAppends(t *testing.T) {
 	height := 5
 	lines := makeLines(20)
 
-	sv := NewStreamViewer(lines, 40, height,
+	sv := NewStreamViewer(
+		lines, 40, height,
 		WithSVFocused(true),
 	)
 
@@ -165,7 +169,8 @@ func TestPageUpPageDown(t *testing.T) {
 	height := 5
 	lines := makeLines(30) // well more than viewport
 
-	sv := NewStreamViewer(lines, 40, height,
+	sv := NewStreamViewer(
+		lines, 40, height,
 		WithSVFocused(true),
 	)
 
@@ -208,7 +213,8 @@ func TestPageDownCtrlBindings(t *testing.T) {
 	height := 5
 	lines := makeLines(20)
 
-	sv := NewStreamViewer(lines, 40, height,
+	sv := NewStreamViewer(
+		lines, 40, height,
 		WithSVFocused(true),
 	)
 
@@ -235,7 +241,8 @@ func TestPageUpDisengagesFollow(t *testing.T) {
 	height := 5
 	lines := makeLines(20)
 
-	sv := NewStreamViewer(lines, 40, height,
+	sv := NewStreamViewer(
+		lines, 40, height,
 		WithSVFocused(true),
 	)
 
@@ -321,7 +328,8 @@ func TestEndReEngagesFollow(t *testing.T) {
 	height := 5
 	lines := makeLines(20)
 
-	sv := NewStreamViewer(lines, 40, height,
+	sv := NewStreamViewer(
+		lines, 40, height,
 		WithSVFocused(true),
 	)
 
@@ -351,7 +359,8 @@ func TestStreamViewerUnfocusedIgnoresKeys(t *testing.T) {
 	t.Parallel()
 
 	lines := makeLines(20)
-	sv := NewStreamViewer(lines, 40, 5,
+	sv := NewStreamViewer(
+		lines, 40, 5,
 		WithSVFocused(false),
 	)
 
@@ -439,7 +448,8 @@ func TestMaxLinesOverflow(t *testing.T) {
 	const maxLines = 100
 	lines := makeLines(200)
 
-	sv := NewStreamViewer(lines, 40, 5,
+	sv := NewStreamViewer(
+		lines, 40, 5,
 		WithSVMaxLines(maxLines),
 	)
 

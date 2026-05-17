@@ -6727,7 +6727,8 @@ func (a *ReadOnlyAdapter) contextPacksFn(limit int) contextengine.ContextPackFun
 	if strings.TrimSpace(a.workspaceRoot) == "" || strings.TrimSpace(a.cfg.Storage.Root) == "" {
 		return nil
 	}
-	vaultPath := firstNonEmpty(strings.TrimSpace(a.vaultPath),
+	vaultPath := firstNonEmpty(
+		strings.TrimSpace(a.vaultPath),
 		strings.TrimSpace(os.Getenv("FOXCTL_RLM_VAULT_PATH")),
 		strings.TrimSpace(os.Getenv("FOXCTL_CONTEXTWIKI_VAULT_PATH")),
 		strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH")),

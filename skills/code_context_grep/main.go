@@ -176,13 +176,15 @@ func validateForMode(in input, mode Mode) error {
 	switch mode {
 	case ModeRipgrep:
 		if strings.TrimSpace(in.Pattern) == "" {
-			return skillerr.Arg("pattern is required for ripgrep mode",
+			return skillerr.Arg(
+				"pattern is required for ripgrep mode",
 				skillerr.WithHint("Set 'pattern', or use 'ast_pattern'/'ast_rule' for ast mode, or 'file_path' + 'line_start/line_end' for line mode."),
 			)
 		}
 	case ModeASTGrep:
 		if strings.TrimSpace(in.ASTPattern) == "" && strings.TrimSpace(in.ASTRule) == "" {
-			return skillerr.Arg("ast_pattern or ast_rule is required for ast mode",
+			return skillerr.Arg(
+				"ast_pattern or ast_rule is required for ast mode",
 				skillerr.WithHint("Provide 'ast_pattern' for simple structural matches or 'ast_rule' for YAML rule mode."),
 			)
 		}
@@ -192,12 +194,14 @@ func validateForMode(in input, mode Mode) error {
 			filePath = strings.TrimSpace(in.Path)
 		}
 		if filePath == "" {
-			return skillerr.Arg("file_path is required for line mode",
+			return skillerr.Arg(
+				"file_path is required for line mode",
 				skillerr.WithHint("Provide 'file_path' and at least one of 'line_start' or 'line_end'."),
 			)
 		}
 		if in.LineStart <= 0 && in.LineEnd <= 0 {
-			return skillerr.Arg("line_start or line_end is required for line mode",
+			return skillerr.Arg(
+				"line_start or line_end is required for line mode",
 				skillerr.WithHint("Example: {\"file_path\":\"main.go\",\"line_start\":10,\"line_end\":20}"),
 			)
 		}
@@ -216,7 +220,8 @@ func parseExpandTarget(value string) (codeblocks.Target, error) {
 	case "class":
 		return codeblocks.TargetClass, nil
 	default:
-		return codeblocks.TargetAny, skillerr.Arg("expand_to must be one of: function, block, class",
+		return codeblocks.TargetAny, skillerr.Arg(
+			"expand_to must be one of: function, block, class",
 			skillerr.WithHint("Set 'expand_to' to 'function', 'class', or 'block' to control expansion scope."),
 		)
 	}
@@ -230,7 +235,8 @@ func parsePatternMode(value string) (string, bool, error) {
 	case "literal", "fixed":
 		return "literal", true, nil
 	default:
-		return "regex", false, skillerr.Arg("pattern_mode must be one of: regex, literal",
+		return "regex", false, skillerr.Arg(
+			"pattern_mode must be one of: regex, literal",
 			skillerr.WithHint("Set pattern_mode to literal to treat the pattern as a literal string."),
 		)
 	}
@@ -247,7 +253,8 @@ func parseInlineMode(value string) (InlineMode, error) {
 	case InlineModeArtifactOnly:
 		return InlineModeArtifactOnly, nil
 	default:
-		return InlineModeAuto, skillerr.Arg("inline_mode must be one of: auto, full, preview, artifact_only",
+		return InlineModeAuto, skillerr.Arg(
+			"inline_mode must be one of: auto, full, preview, artifact_only",
 			skillerr.WithHint("Use inline_mode:\"preview\" to force compact inline blocks, or artifact_only to rely on the CAS artifact."),
 		)
 	}
@@ -420,7 +427,8 @@ func runLineExpansion(ctx context.Context, rc *skillmain.RunContext, in input, t
 			return skillerr.WrapIO("stat file", err)
 		}
 		if info.Size() > int64(in.MaxBytesPerFile) {
-			return skillerr.Arg("file exceeds max_bytes_per_file",
+			return skillerr.Arg(
+				"file exceeds max_bytes_per_file",
 				skillerr.WithHint("Increase 'max_bytes_per_file' if you need to expand a larger file."),
 			)
 		}

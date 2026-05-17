@@ -944,7 +944,8 @@ func (m *ConversationMemory) tombstoneHardStateEntries(ctx context.Context, tx *
 	defer ins.Close()
 
 	for _, row := range toTombstone {
-		if _, err := ins.ExecContext(ctx,
+		if _, err := ins.ExecContext(
+			ctx,
 			convID,
 			row.entryType,
 			row.key,

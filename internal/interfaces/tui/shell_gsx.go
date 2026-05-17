@@ -279,7 +279,8 @@ func (s *Shell) appendTranscriptEntry(entry TranscriptEntry) {
 func (s *Shell) KeyMap() tui.KeyMap {
 	keyMap := append(tui.KeyMap{}, s.focus.KeyMap()...)
 	keyMap = append(keyMap, stopBindings()...)
-	keyMap = append(keyMap,
+	keyMap = append(
+		keyMap,
 		tui.On(tui.Rune('m').Ctrl(), func(ke tui.KeyEvent) { s.setRail(RailMemory) }),
 		tui.On(tui.Rune('y').Ctrl(), func(ke tui.KeyEvent) { s.setRail(RailContinuity) }),
 		tui.On(tui.Rune('w').Ctrl(), func(ke tui.KeyEvent) { s.setRail(RailWorkers) }),

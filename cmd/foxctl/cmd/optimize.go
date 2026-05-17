@@ -167,7 +167,8 @@ func newOptimizeDatasetExportCommand() *cobra.Command {
 			if err != nil {
 				return writeOptimizeError(out, optimizeDatasetCommand, err.Error())
 			}
-			return protocol.WriteOK(out, optimizeDatasetCommand, data,
+			return protocol.WriteOK(
+				out, optimizeDatasetCommand, data,
 				protocol.WithSource(map[bool]string{true: "plan", false: "run"}[dryRun]),
 				protocol.WithWorkspace(absWorkspace),
 				protocol.WithCASDigest(artifact),
@@ -345,7 +346,8 @@ func newOptimizePatternsListCommand() *cobra.Command {
 			}
 
 			absWorkspace := absWorkspacePath(workspace)
-			return protocol.WriteOK(out, optimizePatternsCommand, data,
+			return protocol.WriteOK(
+				out, optimizePatternsCommand, data,
 				protocol.WithSource("run"),
 				protocol.WithWorkspace(absWorkspace),
 			)
@@ -402,7 +404,8 @@ func newOptimizePatternsClearCommand() *cobra.Command {
 			}
 
 			absWorkspace := absWorkspacePath(workspace)
-			return protocol.WriteOK(out, optimizePatternsCommand, data,
+			return protocol.WriteOK(
+				out, optimizePatternsCommand, data,
 				protocol.WithSource("run"),
 				protocol.WithWorkspace(absWorkspace),
 			)
@@ -464,7 +467,8 @@ func newOptimizePatternsHintsCommand() *cobra.Command {
 			}
 
 			absWorkspace := absWorkspacePath(workspace)
-			return protocol.WriteOK(out, optimizePatternsCommand, data,
+			return protocol.WriteOK(
+				out, optimizePatternsCommand, data,
 				protocol.WithSource("run"),
 				protocol.WithWorkspace(absWorkspace),
 			)
@@ -569,7 +573,8 @@ successful patterns.`,
 				"cli_command": cmd.CommandPath(),
 			}
 
-			return protocol.WriteOK(out, optimizeCommand, data,
+			return protocol.WriteOK(
+				out, optimizeCommand, data,
 				protocol.WithSource("run"),
 				protocol.WithWorkspace(absWorkspace),
 			)
@@ -756,7 +761,8 @@ calls are made during optimization unless you layer in a custom evaluator later.
 				data["saved_variant"] = savedVariant
 			}
 
-			return protocol.WriteOK(out, optimizePromptCommand, data,
+			return protocol.WriteOK(
+				out, optimizePromptCommand, data,
 				protocol.WithSource("run"),
 				protocol.WithWorkspace(absWorkspace),
 			)
@@ -922,7 +928,8 @@ func newOptimizePromptProposeCommand() *cobra.Command {
 				data["saved_variants"] = saved
 			}
 
-			return protocol.WriteOK(out, optimizePromptCommand, data,
+			return protocol.WriteOK(
+				out, optimizePromptCommand, data,
 				protocol.WithSource("run"),
 				protocol.WithWorkspace(absWorkspace),
 			)
@@ -1236,7 +1243,8 @@ func newOptimizePromptCycleCommand() *cobra.Command {
 				}
 			}
 
-			return protocol.WriteOK(out, optimizePromptCommand, data,
+			return protocol.WriteOK(
+				out, optimizePromptCommand, data,
 				protocol.WithSource("run"),
 				protocol.WithWorkspace(absWorkspace),
 				protocol.WithCASDigest(artifact),
@@ -1735,7 +1743,8 @@ func newOptimizePromptsListCommand() *cobra.Command {
 				"variants":       variants,
 				"cli_command":    cmd.CommandPath(),
 			}
-			return protocol.WriteOK(out, optimizePromptsCommand, data,
+			return protocol.WriteOK(
+				out, optimizePromptsCommand, data,
 				protocol.WithSource("run"),
 				protocol.WithWorkspace(absWorkspace),
 			)
@@ -1787,7 +1796,8 @@ func newOptimizePromptsShowCommand() *cobra.Command {
 				"variant":      variant,
 				"cli_command":  cmd.CommandPath(),
 			}
-			return protocol.WriteOK(out, optimizePromptsCommand, data,
+			return protocol.WriteOK(
+				out, optimizePromptsCommand, data,
 				protocol.WithSource("run"),
 				protocol.WithWorkspace(absWorkspace),
 			)
@@ -1978,7 +1988,8 @@ func newOptimizePromptsCompareCommand() *cobra.Command {
 			if err != nil {
 				return writeOptimizeError(out, optimizePromptsCommand, err.Error())
 			}
-			return protocol.WriteOK(out, optimizePromptsCommand, execution.Report,
+			return protocol.WriteOK(
+				out, optimizePromptsCommand, execution.Report,
 				protocol.WithSource("run"),
 				protocol.WithWorkspace(absWorkspace),
 				protocol.WithCASDigest(execution.Artifact),
@@ -2213,7 +2224,8 @@ func newOptimizePromptsCompareBatchCommand() *cobra.Command {
 					"models":   fallbackTarget.Models,
 				}
 			}
-			return protocol.WriteOK(out, optimizePromptsCommand, data,
+			return protocol.WriteOK(
+				out, optimizePromptsCommand, data,
 				protocol.WithSource("run"),
 				protocol.WithWorkspace(absWorkspace),
 			)
@@ -2402,7 +2414,8 @@ func newOptimizePromptsComparisonsListCommand() *cobra.Command {
 				"runs":         runs,
 				"cli_command":  cmd.CommandPath(),
 			}
-			return protocol.WriteOK(out, optimizePromptsCommand, data,
+			return protocol.WriteOK(
+				out, optimizePromptsCommand, data,
 				protocol.WithSource("run"),
 				protocol.WithWorkspace(absWorkspace),
 			)
@@ -2457,7 +2470,8 @@ func newOptimizePromptsComparisonsShowCommand() *cobra.Command {
 				"report":       report,
 				"cli_command":  cmd.CommandPath(),
 			}
-			return protocol.WriteOK(out, optimizePromptsCommand, data,
+			return protocol.WriteOK(
+				out, optimizePromptsCommand, data,
 				protocol.WithSource("run"),
 				protocol.WithWorkspace(absWorkspace),
 				protocol.WithCASDigest(run.ArtifactDigest),
@@ -2914,7 +2928,8 @@ func newOptimizeAnalyzeCommand() *cobra.Command {
 				"cli_command": cmd.CommandPath(),
 			}
 
-			return protocol.WriteOK(out, optimizeAnalyzeCommand, data,
+			return protocol.WriteOK(
+				out, optimizeAnalyzeCommand, data,
 				protocol.WithSource("run"),
 				protocol.WithWorkspace(absWorkspace),
 			)
@@ -3034,7 +3049,8 @@ func newOptimizeWeightsShowCommand() *cobra.Command {
 				"cli_command": cmd.CommandPath(),
 			}
 
-			return protocol.WriteOK(out, optimizeWeightsCommand, data,
+			return protocol.WriteOK(
+				out, optimizeWeightsCommand, data,
 				protocol.WithSource("run"),
 				protocol.WithWorkspace(absWorkspace),
 			)
@@ -3115,7 +3131,8 @@ to suggest improved weight distributions.`,
 				"cli_command": cmd.CommandPath(),
 			}
 
-			return protocol.WriteOK(out, optimizeWeightsCommand, data,
+			return protocol.WriteOK(
+				out, optimizeWeightsCommand, data,
 				protocol.WithSource("run"),
 				protocol.WithWorkspace(absWorkspace),
 			)
@@ -3188,7 +3205,8 @@ trajectories for an agent role.`,
 					"cli_command":   cmd.CommandPath(),
 				}
 
-				return protocol.WriteOK(out, optimizeCommand, data,
+				return protocol.WriteOK(
+					out, optimizeCommand, data,
 					protocol.WithSource("run"),
 					protocol.WithWorkspace(absWorkspace),
 				)
@@ -3212,7 +3230,8 @@ trajectories for an agent role.`,
 				"cli_command": cmd.CommandPath(),
 			}
 
-			return protocol.WriteOK(out, optimizeCommand, data,
+			return protocol.WriteOK(
+				out, optimizeCommand, data,
 				protocol.WithSource("run"),
 				protocol.WithWorkspace(absWorkspace),
 			)
@@ -3297,7 +3316,8 @@ func newOptimizeFeedbackAddCommand() *cobra.Command {
 				"cli_command":   cmd.CommandPath(),
 			}
 
-			return protocol.WriteOK(out, optimizeCommand, data,
+			return protocol.WriteOK(
+				out, optimizeCommand, data,
 				protocol.WithSource("run"),
 				protocol.WithWorkspace(absWorkspace),
 			)
@@ -3360,7 +3380,8 @@ func newOptimizeFeedbackStatsCommand() *cobra.Command {
 				"cli_command": cmd.CommandPath(),
 			}
 
-			return protocol.WriteOK(out, optimizeCommand, data,
+			return protocol.WriteOK(
+				out, optimizeCommand, data,
 				protocol.WithSource("run"),
 				protocol.WithWorkspace(absWorkspace),
 			)

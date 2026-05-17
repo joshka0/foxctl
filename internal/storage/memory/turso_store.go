@@ -765,7 +765,8 @@ UPDATE named_memory
 SET embedding = %s, embedding_model = ?, updated_at = ?
 WHERE %s
 `, vectorExpr, where)
-		result, err := s.db.ExecContext(ctx, stmt,
+		result, err := s.db.ExecContext(
+			ctx, stmt,
 			model,
 			sqlutil.FormatTimestamp(timeutil.NowUTC()),
 			fmt.Sprintf("symbol://%s/%s", workspaceID, symbolID),
@@ -1013,7 +1014,8 @@ func (s *TursoStore) UpdateLifecycle(ctx context.Context, name, workspace string
 		entry.LastValidatedAt = update.LastValidatedAt.UTC()
 	}
 	entry.UpdatedAt = timeutil.NowUTC()
-	if _, err := s.db.ExecContext(ctx, `
+	if _, err := s.db.ExecContext(
+		ctx, `
 		UPDATE named_memory
 		SET lifecycle_state = ?,
 		    review_status = ?,

@@ -38,7 +38,8 @@ type ModeValue struct {
 
 // main is the skill entry point for setup/foxctl_mode.
 func main() {
-	skillmain.Main(command, skillmain.Chain(run,
+	skillmain.Main(command, skillmain.Chain(
+		run,
 		skillmain.WithTimeout[Input](5*time.Second),
 		skillmain.WithRecover[Input](),
 	))
@@ -129,7 +130,8 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 // getMode retrieves the foxctl mode setting for a workspace with default fallback to disabled.
 func getMode(ctx context.Context, db *sql.DB, workspace string) (bool, error) {
 	var valueStr string
-	err := db.QueryRowContext(ctx,
+	err := db.QueryRowContext(
+		ctx,
 		`SELECT value FROM workspace_settings WHERE workspace_id = ? AND key = 'foxctl_mode'`,
 		workspace,
 	).Scan(&valueStr)

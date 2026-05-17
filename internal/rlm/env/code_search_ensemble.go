@@ -1051,7 +1051,8 @@ func (a *ReadOnlyAdapter) searchContextWikiGuidance(ctx context.Context, query s
 	if strings.TrimSpace(query) == "" || strings.TrimSpace(a.workspaceRoot) == "" {
 		return nil, nil
 	}
-	vaultPath := firstNonEmpty(strings.TrimSpace(a.vaultPath),
+	vaultPath := firstNonEmpty(
+		strings.TrimSpace(a.vaultPath),
 		strings.TrimSpace(os.Getenv("FOXCTL_RLM_VAULT_PATH")),
 		strings.TrimSpace(os.Getenv("FOXCTL_CONTEXTWIKI_VAULT_PATH")),
 		strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH")),

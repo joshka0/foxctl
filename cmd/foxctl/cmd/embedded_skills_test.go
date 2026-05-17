@@ -59,7 +59,8 @@ func TestFindSkillRepairsCorruptInstall(t *testing.T) {
 	if err := os.MkdirAll(corruptDir, 0o755); err != nil {
 		t.Fatalf("mkdir corrupt dir: %v", err)
 	}
-	copySkillFile(t,
+	copySkillFile(
+		t,
 		filepath.Join(repoRoot(t), "skills", "wasi_echo", "skill.yaml"),
 		filepath.Join(corruptDir, "skill.yaml"),
 	)

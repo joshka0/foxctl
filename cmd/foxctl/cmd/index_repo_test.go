@@ -80,7 +80,8 @@ func TestIndexRepoTracePathCommandUsesFreshStore(t *testing.T) {
 	ctx := context.Background()
 	cfg, workspace, nodes := setupIndexRepoNavigationCommandFixture(t, ctx)
 
-	env, stdout, err := executeIndexRepoNavigationCommand(ctx, cfg, newIndexRepoTracePathCommand(),
+	env, stdout, err := executeIndexRepoNavigationCommand(
+		ctx, cfg, newIndexRepoTracePathCommand(),
 		"--workspace", workspace,
 		"--src-id", nodes["caller"].ID,
 		"--dst-id", nodes["callee"].ID,
@@ -102,7 +103,8 @@ func TestIndexRepoTracePathCommandRejectsMissingEndpoint(t *testing.T) {
 	ctx := context.Background()
 	cfg, workspace, nodes := setupIndexRepoNavigationCommandFixture(t, ctx)
 
-	env, stdout, err := executeIndexRepoNavigationCommand(ctx, cfg, newIndexRepoTracePathCommand(),
+	env, stdout, err := executeIndexRepoNavigationCommand(
+		ctx, cfg, newIndexRepoTracePathCommand(),
 		"--workspace", workspace,
 		"--src-id", "missing-source",
 		"--dst-id", nodes["callee"].ID,
@@ -122,7 +124,8 @@ func TestIndexRepoTracePathCommandResolvesQueries(t *testing.T) {
 	ctx := context.Background()
 	cfg, workspace, nodes := setupIndexRepoNavigationCommandFixture(t, ctx)
 
-	env, stdout, err := executeIndexRepoNavigationCommand(ctx, cfg, newIndexRepoTracePathCommand(),
+	env, stdout, err := executeIndexRepoNavigationCommand(
+		ctx, cfg, newIndexRepoTracePathCommand(),
 		"--workspace", workspace,
 		"--src-query", "Caller",
 		"--dst-query", "Callee",
@@ -144,7 +147,8 @@ func TestIndexRepoSmartContextCommandResolvesQuery(t *testing.T) {
 	ctx := context.Background()
 	cfg, workspace, nodes := setupIndexRepoNavigationCommandFixture(t, ctx)
 
-	env, stdout, err := executeIndexRepoNavigationCommand(ctx, cfg, newIndexRepoSmartContextCommand(),
+	env, stdout, err := executeIndexRepoNavigationCommand(
+		ctx, cfg, newIndexRepoSmartContextCommand(),
 		"--workspace", workspace,
 		"--query", "Caller",
 	)
@@ -165,7 +169,8 @@ func TestIndexRepoBlastRadiusCommandResolvesQuery(t *testing.T) {
 	ctx := context.Background()
 	cfg, workspace, nodes := setupIndexRepoNavigationCommandFixture(t, ctx)
 
-	env, stdout, err := executeIndexRepoNavigationCommand(ctx, cfg, newIndexRepoBlastRadiusCommand(),
+	env, stdout, err := executeIndexRepoNavigationCommand(
+		ctx, cfg, newIndexRepoBlastRadiusCommand(),
 		"--workspace", workspace,
 		"--query", "Caller",
 	)
@@ -189,7 +194,8 @@ func TestIndexRepoSmartContextCommandRejectsDirtyIndex(t *testing.T) {
 		t.Fatalf("dirty workspace: %v", err)
 	}
 
-	env, stdout, err := executeIndexRepoNavigationCommand(ctx, cfg, newIndexRepoSmartContextCommand(),
+	env, stdout, err := executeIndexRepoNavigationCommand(
+		ctx, cfg, newIndexRepoSmartContextCommand(),
 		"--workspace", workspace,
 		"--node-id", nodes["caller"].ID,
 	)

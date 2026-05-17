@@ -1198,7 +1198,8 @@ func renderDAGMermaid(result repoindex.DAGGrepResult) string {
 		if dstLabel == "" {
 			dstLabel = dst
 		}
-		b.WriteString(fmt.Sprintf("  \"%s\"[\"%s\"] --> \"%s\"[\"%s\"]\n",
+		b.WriteString(fmt.Sprintf(
+			"  \"%s\"[\"%s\"] --> \"%s\"[\"%s\"]\n",
 			escapeMermaidID(src), escapeMermaidLabel(srcLabel),
 			escapeMermaidID(dst), escapeMermaidLabel(dstLabel),
 		))

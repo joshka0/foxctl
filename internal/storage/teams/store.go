@@ -147,7 +147,8 @@ func (s *sqlStore) UpsertTeam(ctx context.Context, team Team) (Team, error) {
 		descArg = nil
 	}
 
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(
+		ctx, `
 INSERT INTO teams (workspace_id, team_id, name, description, primary_epics, tags, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(workspace_id, team_id) DO UPDATE SET

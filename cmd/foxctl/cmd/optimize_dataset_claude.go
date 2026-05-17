@@ -104,7 +104,8 @@ func newOptimizeDatasetClaudeExportCommand() *cobra.Command {
 			if err != nil {
 				return writeOptimizeError(out, optimizeDatasetCommand, err.Error())
 			}
-			return protocol.WriteOK(out, optimizeDatasetCommand, data,
+			return protocol.WriteOK(
+				out, optimizeDatasetCommand, data,
 				protocol.WithSource(map[bool]string{true: "plan", false: "run"}[dryRun]),
 				protocol.WithWorkspace(absWorkspace),
 				protocol.WithCASDigest(artifact),
@@ -442,7 +443,8 @@ func newOptimizeDatasetClaudeRewriteCommand() *cobra.Command {
 						return writeOptimizeError(out, optimizeDatasetCommand, fmt.Sprintf("persist rewritten dataset: %v", err))
 					}
 					data["artifact"] = artifact
-					return protocol.WriteOK(out, optimizeDatasetCommand, data,
+					return protocol.WriteOK(
+						out, optimizeDatasetCommand, data,
 						protocol.WithSource("run"),
 						protocol.WithWorkspace(absWorkspace),
 						protocol.WithCASDigest(artifact),
@@ -463,7 +465,8 @@ func newOptimizeDatasetClaudeRewriteCommand() *cobra.Command {
 				}
 			}
 
-			return protocol.WriteOK(out, optimizeDatasetCommand, data,
+			return protocol.WriteOK(
+				out, optimizeDatasetCommand, data,
 				protocol.WithSource(map[bool]string{true: "plan", false: "run"}[dryRun]),
 				protocol.WithWorkspace(absWorkspace),
 			)
@@ -644,7 +647,8 @@ func newOptimizeDatasetClaudeLeaderboardCommand() *cobra.Command {
 			if strings.TrimSpace(debugOutputDir) != "" && dryRun {
 				data["would_write_debug_output_dir"] = debugOutputDir
 			}
-			return protocol.WriteOK(out, optimizeDatasetCommand, data,
+			return protocol.WriteOK(
+				out, optimizeDatasetCommand, data,
 				protocol.WithSource(map[bool]string{true: "plan", false: "run"}[dryRun]),
 				protocol.WithWorkspace(absWorkspace),
 			)
@@ -1839,7 +1843,8 @@ assistant: "Yes — M3 is episodes, M4 is narrative/self model."
 assistant: "I’ll start by wiring the store changes..."
 `
 
-	userPrompt := fmt.Sprintf("Approved user request:\n%s\n\nApproved assistant response:\n%s\n\nTools used:\n%s\n",
+	userPrompt := fmt.Sprintf(
+		"Approved user request:\n%s\n\nApproved assistant response:\n%s\n\nTools used:\n%s\n",
 		strings.TrimSpace(pair.UserRequest),
 		strings.TrimSpace(pair.AssistantResponse),
 		strings.Join(pair.ToolsUsed, ", "),

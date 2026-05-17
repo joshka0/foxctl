@@ -62,7 +62,8 @@ signature:
 }
 
 func TestMergeCodeSearchHitsAnnotatesRoleBuckets(t *testing.T) {
-	hits := mergeCodeSearchHitsWithOptions(4, codeSearchRequestOptions{}, nil,
+	hits := mergeCodeSearchHitsWithOptions(
+		4, codeSearchRequestOptions{}, nil,
 		[]rankedCodeSearchHit{{
 			Hit: contextengine.CodeSearchHit{
 				Path:  "backend/src/index.ts",
@@ -224,9 +225,10 @@ func TestExpandContextGraphAddsRequestedLocalFallbacks(t *testing.T) {
 }
 
 func TestMergeCodeSearchHitsSuppressesExcludedPaths(t *testing.T) {
-	hits := mergeCodeSearchHitsWithOptions(4, codeSearchRequestOptions{
-		ExcludedPaths: []string{"worktrees/", "client/Scripts/Autogen/"},
-	}, nil,
+	hits := mergeCodeSearchHitsWithOptions(
+		4, codeSearchRequestOptions{
+			ExcludedPaths: []string{"worktrees/", "client/Scripts/Autogen/"},
+		}, nil,
 		[]rankedCodeSearchHit{{
 			Hit: contextengine.CodeSearchHit{
 				Path:  "worktrees/test-integrations/apps/mobile/src/services/powersync.ts",
@@ -258,9 +260,10 @@ func TestMergeCodeSearchHitsSuppressesExcludedPaths(t *testing.T) {
 }
 
 func TestMergeCodeSearchHitsReservesCoverageAdmissionSlots(t *testing.T) {
-	hits := mergeCodeSearchHitsWithOptions(3, normalizeCodeSearchRequestOptions(codeSearchRequestOptions{
-		RequiredEvidence: []string{"controller policy"},
-	}), nil,
+	hits := mergeCodeSearchHitsWithOptions(
+		3, normalizeCodeSearchRequestOptions(codeSearchRequestOptions{
+			RequiredEvidence: []string{"controller policy"},
+		}), nil,
 		[]rankedCodeSearchHit{{Priority: 99, Hit: contextengine.CodeSearchHit{Path: "client/Scripts/Gameplay/PlayerController.cs", Symbol: "PlayerController", Score: 0.99}}},
 		[]rankedCodeSearchHit{{Priority: 98, Hit: contextengine.CodeSearchHit{Path: "server/src/tests.rs", Symbol: "controller_tests", Score: 0.98}}},
 		[]rankedCodeSearchHit{{Priority: 10, Hit: contextengine.CodeSearchHit{
@@ -321,7 +324,8 @@ func TestMergeCodeSearchHitsKeepsModuleEntrypointPromotion(t *testing.T) {
 	options := normalizeCodeSearchRequestOptions(codeSearchRequestOptions{
 		RequiredEvidence: []string{"server module", "tables", "protocol"},
 	})
-	hits := mergeCodeSearchHitsWithOptions(32, options,
+	hits := mergeCodeSearchHitsWithOptions(
+		32, options,
 		[]contextengine.CodeSearchHit{
 			{Path: "server/src/lib.rs", Score: 0.1, Language: "rust"},
 			{Path: "server/src/tables.rs", Score: 0.9, Language: "rust"},
@@ -2460,10 +2464,11 @@ func TestReadOnlyAdapterRequiredDefinitionRepairFindsSiblingPolicyDefinition(t *
 func TestMergeCodeSearchHitsAppliesLanguageAndPathConstraints(t *testing.T) {
 	t.Parallel()
 
-	hits := mergeCodeSearchHitsWithOptions(8, normalizeCodeSearchRequestOptions(codeSearchRequestOptions{
-		Languages:    []string{"elixir"},
-		PathPrefixes: []string{"apps/api"},
-	}), nil,
+	hits := mergeCodeSearchHitsWithOptions(
+		8, normalizeCodeSearchRequestOptions(codeSearchRequestOptions{
+			Languages:    []string{"elixir"},
+			PathPrefixes: []string{"apps/api"},
+		}), nil,
 		[]rankedCodeSearchHit{{Priority: 90, Hit: contextengine.CodeSearchHit{Path: "apps/api/lib/payments.ex", Score: 0.9}}},
 		[]rankedCodeSearchHit{{Priority: 95, Hit: contextengine.CodeSearchHit{Path: "apps/api/deps/phoenix/lib/router.ex", Score: 0.99}}},
 		[]rankedCodeSearchHit{{Priority: 94, Hit: contextengine.CodeSearchHit{Path: "apps/web/src/router.ts", Score: 0.99}}},

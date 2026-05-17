@@ -63,6 +63,10 @@ pi --extension /path/to/foxctl.ts \
 | `--foxctl-workspace` | `.` | Workspace root used by filesystem, code, repoindex, memory, room, and task tools |
 | `--foxctl-context` | `false` | Inject foxctl workspace/task/room context before each Pi agent turn |
 | `--foxctl-memory-context` | `true` | Include prompt-keyed `memory/query` and `session/recall` evidence in `--foxctl-context` hook injection |
+| `--foxctl-epic` | `""` | Active room-agile epic id for epic commands |
+| `--foxctl-milestone` | `""` | Active room-agile milestone id for milestone commands |
+| `--foxctl-story` | `""` | Active room-agile story id for story commands |
+| `--foxctl-epic-context` | `true` | Inject active epic resume/health/next into `--foxctl-context` when `--foxctl-epic` is set |
 
 ## Available Tools
 
@@ -112,6 +116,27 @@ pi --extension /path/to/foxctl.ts \
 - `foxctl_room_send` — Send a message to a room
 - `foxctl_room_terminal_links` — Get local/tailnet room terminal dogfood links
 - `foxctl_room_terminal_register` — Register a room with the terminal gateway and return dogfood links
+
+### Room Agile
+- `foxctl_room_agile` — Run room-agile actions through `/api/rooms/{room_id}/agile`
+
+Supported actions:
+
+- `epic_show`
+- `epic_resume`
+- `epic_health`
+- `epic_next`
+- `milestone_show`
+- `story_show`
+- `story_state` — transition a story to a new state (in_progress, in_review, done, waived)
+- `story_validate` — attach a validation record to a story
+- `story_propose` — propose a new story for a milestone
+- `story_accept` — accept a story proposal
+
+### Story Lifecycle
+- `foxctl_story_start` — Move a story to in_progress
+- `foxctl_story_review` — Move a story to in_review
+- `foxctl_story_validate` — Attach a validation record to a story
 
 ### Tasks
 - `foxctl_tasks_list` — List tasks (filter by status)
@@ -205,6 +230,18 @@ pi --extension /path/to/foxctl.ts \
 | `/foxctl-agents` | List agents |
 | `/foxctl-rooms` | List rooms |
 | `/foxctl-terminal` | Register and show the configured room's compatibility browser terminal |
+| `/epic` | Show the configured `--foxctl-epic`, or list epics when unset |
+| `/epic-next` | Show next actions for the configured room-agile epic |
+| `/epic-health` | Show health warnings for the configured room-agile epic |
+| `/milestones` | Show milestones, or the configured `--foxctl-milestone` when set |
+| `/stories` | Show stories, or the configured `--foxctl-story` when set |
+| `/story-start <story-id>` | Mark a story as in_progress |
+| `/story-review <story-id>` | Mark a story as in_review |
+| `/story-validate [verdict] [validator-type]` | Validate the configured `--foxctl-story` with verdict (pass/fail/waived) and validator type (human/agent/harness) |
+| `/epic-select` | Interactively select an epic from the current room (overlay list) |
+| `/milestone-select` | Interactively select a milestone for the active epic |
+| `/story-select` | Interactively select a story for the active epic |
+| `/epic-refresh` | Refresh the epic status widget data from the daemon |
 | `/foxctl-tasks` | List tasks |
 | `/foxctl-board` | Show board |
 | `/foxctl-stats` | Show stats |
@@ -212,12 +249,30 @@ pi --extension /path/to/foxctl.ts \
 | `/foxctl-mcp` | Show MCP status |
 | `/foxctl-workspaces` | List workspaces |
 
+## TUI Widget & Keyboard Shortcuts
+
+When `--foxctl-epic` is set and the foxctl daemon is reachable, a **foxctl-epic widget** appears above the editor showing:
+
+- Epic title and status
+- Active milestone and story
+- Health warnings
+- Next recommended action
+
+The widget refreshes automatically after story lifecycle commands (`/story-start`, `/story-review`, `/story-validate`) and selector commands (`/epic-select`, `/milestone-select`, `/story-select`).
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+Shift+E` | Refresh the epic status widget |
+| `Ctrl+Shift+N` | Quick-select next story from active epic |
+
 ## Requirements
 
 - [pi](https://github.com/badlogic/pi-mono) interactive mode
 - foxctl daemon running (`foxctl web serve`)
 - foxctl terminal gateway running for room terminal dogfood (`foxctl gateway --dev`)
 - repoindex built for `foxctl_repoindex_*` tools (`foxctl index repo build --workspace . --go --typescript --elixir`)
+- room-agile commands require `POST /api/rooms/{room_id}/agile` on the foxctl daemon
+- epic context injection requires `--foxctl-context`, `--foxctl-epic`, and `--foxctl-room` to be set
 
 ## Development
 

@@ -199,7 +199,8 @@ func TestFocusIndicatorColoredLeftBorder(t *testing.T) {
 	items := makeItems(5)
 
 	// Render with focus
-	mt := renderEntityList(items, 40, 10,
+	mt := renderEntityList(
+		items, 40, 10,
 		WithSelectedIndex(0),
 		WithFocused(true),
 	)
@@ -220,7 +221,8 @@ func TestUnfocusedNoFocusBorder(t *testing.T) {
 	items := makeItems(5)
 
 	// Render without focus
-	mt := renderEntityList(items, 40, 10,
+	mt := renderEntityList(
+		items, 40, 10,
 		WithSelectedIndex(0),
 		WithFocused(false),
 	)
@@ -236,7 +238,8 @@ func TestFocusIndicatorNotFontWeightOnly(t *testing.T) {
 	t.Parallel()
 	items := makeItems(5)
 
-	mt := renderEntityList(items, 40, 10,
+	mt := renderEntityList(
+		items, 40, 10,
 		WithSelectedIndex(0),
 		WithFocused(true),
 	)

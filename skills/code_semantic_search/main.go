@@ -320,7 +320,8 @@ type TimelineRollup struct {
 
 // main is the skill entry point for code/semantic_search.
 func main() {
-	skillmain.Main(Command, skillmain.Chain(run,
+	skillmain.Main(Command, skillmain.Chain(
+		run,
 		skillmain.WithTimeout[Input](DefaultTotalTimeout),
 		skillmain.WithRecover[Input](),
 	))
@@ -3246,7 +3247,8 @@ func synthesizeResults(ctx context.Context, rc *skillmain.RunContext, query stri
 
 	prompt := buildSynthesisPrompt(query, results)
 
-	summary, err := skillmain.TryProviders(rc, skillmain.BreakerLLMProvider, ctx, providers,
+	summary, err := skillmain.TryProviders(
+		rc, skillmain.BreakerLLMProvider, ctx, providers,
 		func(ctx context.Context, provider LLMProvider) (*SynthesisSummary, error) {
 			s, e := callLLMProvider(ctx, provider, prompt)
 			if e == nil {

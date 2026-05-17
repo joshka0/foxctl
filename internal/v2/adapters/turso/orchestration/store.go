@@ -70,7 +70,8 @@ func (s *Store) Apply(ctx context.Context, evt coreevents.Event) error {
 	defer func() { _ = tx.Rollback() }()
 
 	appliedAt := sqlutil.FormatTimestamp(s.now().UTC())
-	res, err := tx.ExecContext(ctx, `
+	res, err := tx.ExecContext(
+		ctx, `
 		INSERT OR IGNORE INTO v2_orchestration_applied_events (
 			event_id, command, scope_id, request_id, applied_at
 		) VALUES ($1, $2, $3, $4, $5)
@@ -103,7 +104,8 @@ func (s *Store) Apply(ctx context.Context, evt coreevents.Event) error {
 		lastEventAt = sqlutil.FormatTimestamp(card.LastEventAt.UTC())
 	}
 
-	_, err = tx.ExecContext(ctx, `
+	_, err = tx.ExecContext(
+		ctx, `
 		INSERT INTO v2_orchestration_cards (
 			issue_id, workspace_id, issue_identifier, title, state, lane, tracker_state, policy_status,
 			last_outcome, eligibility, denial_reason, suggestion, run_id, agent_id, actor_id, attempt,

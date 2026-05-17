@@ -72,7 +72,8 @@ func main() {
 	cfg.VividMaxTurns = 5    // Keep last 5 turns vivid
 	cfg.RecentWindowDays = 1 // 1 day for testing
 
-	companionMemory, err := companion.NewConversationMemory(db,
+	companionMemory, err := companion.NewConversationMemory(
+		db,
 		companion.WithMemoryConfig(cfg),
 		companion.WithMemoryStore(memoryStore, "test-workspace"),
 	)

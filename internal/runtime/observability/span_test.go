@@ -13,7 +13,8 @@ func TestStartSpan_Success(t *testing.T) {
 	defer SetSamplerForTesting(nil)
 
 	ctx := context.Background()
-	ctx, done, builder := StartSpan(ctx, OpSkillRun,
+	ctx, done, builder := StartSpan(
+		ctx, OpSkillRun,
 		WithSpanComponent(ComponentSkill),
 		WithSpanCommand("test/skill"),
 		WithSpanSubtype("test"),
@@ -80,7 +81,8 @@ func TestStartSpan_WithExistingTraceID(t *testing.T) {
 	ctx := context.Background()
 
 	// Start span with explicit trace ID
-	ctx, done, builder := StartSpan(ctx, OpSkillRun,
+	ctx, done, builder := StartSpan(
+		ctx, OpSkillRun,
 		WithSpanTraceID(existingTraceID),
 	)
 	defer done(nil)
@@ -102,7 +104,8 @@ func TestStartSpan_AllOptions(t *testing.T) {
 	defer SetSamplerForTesting(nil)
 
 	ctx := context.Background()
-	_, done, builder := StartSpan(ctx, OpSkillRun,
+	_, done, builder := StartSpan(
+		ctx, OpSkillRun,
 		WithSpanTraceID("trace123"),
 		WithSpanParentID("parent456"),
 		WithSpanComponent(ComponentHook),
@@ -175,7 +178,8 @@ func TestStartSpan_NilOptions(t *testing.T) {
 
 	ctx := context.Background()
 	// Should not panic with nil options
-	_, done, builder := StartSpan(ctx, OpSkillRun,
+	_, done, builder := StartSpan(
+		ctx, OpSkillRun,
 		nil, // nil option should be ignored
 		WithSpanCommand("test"),
 		nil, // another nil
@@ -192,7 +196,8 @@ func TestWithSpanDataMap_Empty(t *testing.T) {
 	defer SetSamplerForTesting(nil)
 
 	ctx := context.Background()
-	_, done, builder := StartSpan(ctx, OpSkillRun,
+	_, done, builder := StartSpan(
+		ctx, OpSkillRun,
 		WithSpanDataMap(nil),              // nil map
 		WithSpanDataMap(map[string]any{}), // empty map
 	)

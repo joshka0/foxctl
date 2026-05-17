@@ -70,7 +70,8 @@ func (m *ConversationMemory) InsertEvent(ctx context.Context, event *Conversatio
 	}
 
 	var insertedID int64
-	if err := m.db.QueryRowContext(ctx, `
+	if err := m.db.QueryRowContext(
+		ctx, `
 		INSERT INTO companion_events (
 			conversation_id,
 			event_type,

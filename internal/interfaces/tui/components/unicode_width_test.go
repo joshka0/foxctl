@@ -335,7 +335,8 @@ func TestSnapshotEntityListCJKRoleLabel(t *testing.T) {
 		{ID: "cjk3", Label: "agent-計画者", SubLabel: "busy"},
 	}
 
-	mt := renderEntityList(items, 35, 5,
+	mt := renderEntityList(
+		items, 35, 5,
 		WithSelectedIndex(0),
 		WithFocused(true),
 	)

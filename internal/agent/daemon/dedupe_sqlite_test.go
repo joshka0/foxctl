@@ -60,7 +60,8 @@ func TestSQLiteDedupeStore_Cleanup(t *testing.T) {
 
 	// Insert old record
 	// Manually insert to control timestamp
-	_, err = store.db.ExecContext(ctx,
+	_, err = store.db.ExecContext(
+		ctx,
 		`INSERT INTO daemon_dedupe (agent_id, message_id, processed_at) VALUES (?, ?, ?)`,
 		"agent-1", "old-msg", time.Now().Add(-2*time.Hour).Unix(),
 	)

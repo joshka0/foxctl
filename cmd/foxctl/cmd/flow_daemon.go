@@ -284,7 +284,8 @@ func isConnectionError(err error) bool {
 		return false
 	}
 	msg := err.Error()
-	return containsAny(msg,
+	return containsAny(
+		msg,
 		"connect to daemon",
 		"connection refused",
 		"no such file or directory",

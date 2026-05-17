@@ -158,7 +158,8 @@ func (s *boardSQLStore) UpsertRoom(ctx context.Context, room agent.Room) (agent.
 	room.UpdatedAt = now
 
 	err = retryBoardBusy(ctx, func() error {
-		_, execErr := s.db.ExecContext(ctx, `
+		_, execErr := s.db.ExecContext(
+			ctx, `
 		INSERT INTO room_metadata (workspace_id, room_id, stream, title, description, dispatch_policy, dispatch_agent_ids, sandbox_config, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(workspace_id, room_id) DO UPDATE SET
@@ -210,7 +211,8 @@ func (s *boardSQLStore) EnsureRoom(ctx context.Context, workspaceID, roomID, tit
 	}
 
 	err := retryBoardBusy(ctx, func() error {
-		_, execErr := s.db.ExecContext(ctx, `
+		_, execErr := s.db.ExecContext(
+			ctx, `
 		INSERT INTO room_metadata (workspace_id, room_id, stream, title, description, dispatch_policy, dispatch_agent_ids, sandbox_config, created_at, updated_at)
 		VALUES (?, ?, ?, ?, '', ?, '[]', '', ?, ?)
 		ON CONFLICT(workspace_id, room_id) DO UPDATE SET
@@ -274,7 +276,8 @@ func (s *boardSQLStore) ReplaceRoomMembers(ctx context.Context, workspaceID, roo
 			member.JoinedAt = time.Now().UTC()
 		}
 		if err := retryBoardBusy(ctx, func() error {
-			_, execErr := tx.ExecContext(ctx, `
+			_, execErr := tx.ExecContext(
+				ctx, `
 			INSERT INTO room_members (
 				workspace_id, room_id, actor_id, role, backend, session, pane_id, unbound, joined_at,
 				transport_endpoint, transport_kind, delivery_submit_mode, delivery_health, delivery_fallback_policy
@@ -326,7 +329,8 @@ func (s *boardSQLStore) UpdateRoomMemberTransport(ctx context.Context, workspace
 	var result sql.Result
 	err := retryBoardBusy(ctx, func() error {
 		var execErr error
-		result, execErr = s.db.ExecContext(ctx, `
+		result, execErr = s.db.ExecContext(
+			ctx, `
 			UPDATE room_members
 			SET transport_endpoint = ?, transport_kind = ?
 			WHERE workspace_id = ? AND room_id = ? AND actor_id = ?`,
@@ -364,7 +368,8 @@ func (s *boardSQLStore) UpdateRoomMemberBinding(ctx context.Context, workspaceID
 	var result sql.Result
 	err := retryBoardBusy(ctx, func() error {
 		var execErr error
-		result, execErr = s.db.ExecContext(ctx, `
+		result, execErr = s.db.ExecContext(
+			ctx, `
 			UPDATE room_members
 			SET backend = ?, session = ?, pane_id = ?, unbound = ?, transport_endpoint = ?, transport_kind = ?,
 			    delivery_submit_mode = ?, delivery_health = ?, delivery_fallback_policy = ?

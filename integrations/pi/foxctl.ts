@@ -17,8 +17,9 @@
  * Or copy to ~/.pi/extensions/ for auto-discovery.
  */
 
-import { StringEnum } from "@mariozechner/pi-ai";
-import { defineTool, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { StringEnum } from "@earendil-works/pi-ai";
+import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Key, SelectList, truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
 // ============================================================================
@@ -176,6 +177,21 @@ function getRoom(pi: ExtensionAPI): string {
 	return typeof value === "string" ? value.trim() : "";
 }
 
+function getEpic(pi: ExtensionAPI): string {
+	const value = pi.getFlag("foxctl-epic");
+	return typeof value === "string" ? value.trim() : "";
+}
+
+function getMilestone(pi: ExtensionAPI): string {
+	const value = pi.getFlag("foxctl-milestone");
+	return typeof value === "string" ? value.trim() : "";
+}
+
+function getStory(pi: ExtensionAPI): string {
+	const value = pi.getFlag("foxctl-story");
+	return typeof value === "string" ? value.trim() : "";
+}
+
 function getActor(pi: ExtensionAPI): string {
 	const value = pi.getFlag("foxctl-actor");
 	return typeof value === "string" && value.trim() ? value.trim() : "actor:pi:local";
@@ -206,10 +222,43 @@ function commandToArgv(command: string): string[] {
 }
 
 function formatFoxctlContext(parts: Record<string, unknown>): string {
-	return [
-		"Foxctl workspace context:",
-		JSON.stringify(parts, null, 2),
-	].join("\n");
+	const sections: string[] = ["Foxctl workspace context:"];
+
+	// Epic context summary header
+	const epicCtx = parts.epic_context as Record<string, unknown> | undefined;
+	const epicHealth = parts.epic_health as Record<string, unknown> | undefined;
+	const epicNext = parts.epic_next as Record<string, unknown> | undefined;
+	if (epicCtx) {
+		const epic = epicCtx.epic as Record<string, unknown> | undefined;
+		const status = epicCtx.status as Record<string, unknown> | undefined;
+		if (epic) {
+			sections.push(`\nEpic: ${epic.title || epic.id} (${epic.status || "unknown"})`);
+		}
+		if (status) {
+			sections.push(`  Milestones: ${status.milestone_count}, Stories: ${status.story_count}, Open: ${status.open_story_count}`);
+		}
+		const health = epicHealth?.health as Record<string, unknown> | undefined;
+		if (health) {
+			sections.push(`  Health: ${health.status}${health.warnings && (health.warnings as string[]).length > 0 ? ` — ${(health.warnings as string[]).join(", ")}` : ""}`);
+		}
+		const next = epicNext?.next as Array<Record<string, unknown>> | undefined;
+		if (next && next.length > 0) {
+			sections.push(`  Next: ${next[0].action}${next[0].title ? ` — ${next[0].title}` : ""}${next[0].reason ? ` (${next[0].reason})` : ""}`);
+		}
+		const milestone = parts.milestone as Record<string, unknown> | undefined;
+		if (milestone?.milestone) {
+			const ms = milestone.milestone as Record<string, unknown>;
+			sections.push(`  Milestone: ${ms.title || ms.id} (${ms.status || "open"})`);
+		}
+		const story = parts.story as Record<string, unknown> | undefined;
+		if (story?.story) {
+			const st = story.story as Record<string, unknown>;
+			sections.push(`  Story: ${st.title || st.id} (${st.status || "accepted"})`);
+		}
+	}
+
+	sections.push(JSON.stringify(parts, null, 2));
+	return sections.join("\n");
 }
 
 function skillEndpoint(skill: string): string {
@@ -237,6 +286,18 @@ function withWorkspace(pi: ExtensionAPI, input: Record<string, unknown>): Record
 
 async function runFoxctlSkill(pi: ExtensionAPI, skill: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown>> {
 	return getClient(pi).post<Record<string, unknown>>(skillEndpoint(skill), withWorkspace(pi, input), signal);
+}
+
+async function runRoomAgile(pi: ExtensionAPI, params: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown>> {
+	const room = typeof params.room_id === "string" && params.room_id.trim() ? params.room_id.trim() : getRoom(pi);
+	if (!room) throw new Error("room_id is required or set --foxctl-room");
+	const input = withWorkspace(pi, {
+		...params,
+		room_id: undefined,
+		sender: typeof params.sender === "string" && params.sender.trim() ? params.sender : getActor(pi),
+		actor: typeof params.actor === "string" && params.actor.trim() ? params.actor : getActor(pi),
+	});
+	return getClient(pi).post<Record<string, unknown>>(`/api/rooms/${path(room)}/agile`, input, signal);
 }
 
 function jsonToolResult(details: Record<string, unknown>): { content: Array<{ type: "text"; text: string }>; details: Record<string, unknown> } {
@@ -406,6 +467,45 @@ async function getFoxctlSnapshot(pi: ExtensionAPI, signal?: AbortSignal, prompt 
 		}, signal);
 	}
 
+	const epicID = getEpicOverride(pi);
+	if (room && epicID && isFlagEnabled(pi, "foxctl-epic-context")) {
+		try {
+			snapshot.epic_context = await runRoomAgile(pi, {
+				action: "epic_resume",
+				epic_id: epicID,
+				limit: 100,
+			}, signal);
+			snapshot.epic_health = await runRoomAgile(pi, {
+				action: "epic_health",
+				epic_id: epicID,
+				limit: 100,
+			}, signal);
+			snapshot.epic_next = await runRoomAgile(pi, {
+				action: "epic_next",
+				epic_id: epicID,
+				limit: 100,
+			}, signal);
+			const milestoneID = getMilestoneOverride(pi);
+			if (milestoneID) {
+				snapshot.milestone = await runRoomAgile(pi, {
+					action: "milestone_show",
+					milestone_id: milestoneID,
+					limit: 100,
+				}, signal);
+			}
+			const storyID = getStoryOverride(pi);
+			if (storyID) {
+				snapshot.story = await runRoomAgile(pi, {
+					action: "story_show",
+					story_id: storyID,
+					limit: 100,
+				}, signal);
+			}
+		} catch (e) {
+			snapshot.epic_context_error = e instanceof Error ? e.message : String(e);
+		}
+	}
+
 	return snapshot;
 }
 
@@ -447,6 +547,195 @@ async function gatherFoxctlContext(pi: ExtensionAPI, signal?: AbortSignal): Prom
 	}
 
 	return result;
+}
+
+// ============================================================================
+// TUI Components (M5: Rich TUI Panel)
+// ============================================================================
+
+/** Runtime flag overrides for selector commands. These take precedence over pi.getFlag(). */
+const _flagOverrides: Record<string, string> = {};
+
+/** Get a flag value, checking runtime overrides first. */
+function getOverriddenFlag(pi: ExtensionAPI, name: string): string {
+	if (name in _flagOverrides) return _flagOverrides[name];
+	const value = pi.getFlag(name);
+	return typeof value === "string" ? value.trim() : "";
+}
+
+function getEpicOverride(pi: ExtensionAPI): string {
+	return getOverriddenFlag(pi, "foxctl-epic");
+}
+
+function getMilestoneOverride(pi: ExtensionAPI): string {
+	return getOverriddenFlag(pi, "foxctl-milestone");
+}
+
+function getStoryOverride(pi: ExtensionAPI): string {
+	return getOverriddenFlag(pi, "foxctl-story");
+}
+
+interface EpicWidgetData {
+	epic?: { id: string; title?: string; status?: string };
+	milestone?: { id: string; title?: string; status?: string };
+	story?: { id: string; title?: string; status?: string };
+	health?: { status?: string; warnings?: string[] };
+	next?: Array<{ action?: string; title?: string; reason?: string }>;
+}
+
+class EpicStatusWidget implements Component {
+	private cachedWidth?: number;
+	private cachedLines?: string[];
+
+	constructor(
+		private data: EpicWidgetData,
+		private theme: { fg: (color: string, text: string) => string },
+	) {}
+
+	update(data: EpicWidgetData): void {
+		this.data = data;
+		this.cachedWidth = undefined;
+		this.cachedLines = undefined;
+	}
+
+	invalidate(): void {
+		this.cachedWidth = undefined;
+		this.cachedLines = undefined;
+	}
+
+	render(width: number): string[] {
+		if (this.cachedLines && this.cachedWidth === width) return this.cachedLines;
+		const lines: string[] = [];
+		const t = this.theme;
+		const { epic, milestone, story, health, next } = this.data;
+
+		if (!epic) {
+			lines.push(t.fg("dim", " No active epic — use /epic-select or set --foxctl-epic"));
+			this.padLines(lines, width);
+			this.cachedWidth = width;
+			this.cachedLines = lines;
+			return lines;
+		}
+
+		// Line 1: Epic header
+		const epicTitle = truncateToWidth((epic.title || epic.id), width - 20, "");
+		const epicStatus = epic.status || "?";
+		lines.push(` ${t.fg("accent", "Epic:")} ${epicTitle}  ${t.fg("dim", `[${epicStatus}]`)}`);
+
+		// Line 2: Milestone
+		if (milestone) {
+			const msTitle = truncateToWidth((milestone.title || milestone.id), width - 28, "");
+			lines.push(` ${t.fg("muted", "MS:")} ${msTitle}  ${t.fg("dim", `[${milestone.status || "open"}]`)}`);
+		}
+
+		// Line 3: Current story
+		if (story) {
+			const stTitle = truncateToWidth((story.title || story.id), width - 22, "");
+			lines.push(` ${t.fg("muted", "Story:")} ${stTitle}  ${t.fg("dim", `[${story.status || "accepted"}]`)}`);
+		}
+
+		// Line 4: Health warnings
+		if (health?.warnings && health.warnings.length > 0) {
+			const warnText = health.warnings.join(", ");
+			lines.push(` ${t.fg("warning", "⚠")} ${t.fg("warning", truncateToWidth(warnText, width - 4))}`);
+		}
+
+		// Line 5: Next action
+		if (next && next.length > 0) {
+			const n = next[0]!;
+			const nextText = `${n.action || "next"}${n.title ? ` — ${n.title}` : ""}${n.reason ? ` (${n.reason})` : ""}`;
+			lines.push(` ${t.fg("success", "→")} ${t.fg("dim", truncateToWidth(nextText, width - 4))}`);
+		}
+
+		this.padLines(lines, width);
+		this.cachedWidth = width;
+		this.cachedLines = lines;
+		return lines;
+	}
+
+	private padLines(lines: string[], width: number): void {
+		for (let i = 0; i < lines.length; i++) {
+			const vis = visibleWidth(lines[i]!);
+			if (vis < width) lines[i] += " ".repeat(width - vis);
+			if (vis > width) lines[i] = truncateToWidth(lines[i]!, width, "");
+		}
+	}
+}
+
+async function fetchEpicWidgetData(pi: ExtensionAPI, signal?: AbortSignal): Promise<EpicWidgetData> {
+	const room = getRoom(pi);
+	const epicID = getEpicOverride(pi);
+	if (!room || !epicID) return {};
+
+	const data: EpicWidgetData = {};
+
+	try {
+		const epicRes = await runRoomAgile(pi, { action: "epic_resume", epic_id: epicID, limit: 200 }, signal);
+		const epicData = (epicRes.result as Record<string, unknown>)?.data as Record<string, unknown> | undefined;
+		const epic = epicData?.epic as Record<string, unknown> | undefined;
+		if (epic) data.epic = { id: String(epic.id || epicID), title: String(epic.title || ""), status: String(epic.status || "") };
+
+		// Resolve active milestone
+		const milestoneID = getMilestoneOverride(pi);
+		if (milestoneID && epicData?.milestones) {
+			const milestones = epicData.milestones as Array<Record<string, unknown>>;
+			const ms = milestones.find((m) => m.id === milestoneID);
+			if (ms) data.milestone = { id: String(ms.id), title: String(ms.title || ""), status: String(ms.status || "open") };
+		}
+
+		// Resolve active story
+		const storyID = getStoryOverride(pi);
+		if (storyID && epicData?.stories) {
+			const stories = epicData.stories as Array<Record<string, unknown>>;
+			const st = stories.find((s) => s.id === storyID);
+			if (st) data.story = { id: String(st.id), title: String(st.title || ""), status: String(st.status || "accepted") };
+		}
+	} catch { /* epic_resume failed, partial data */ }
+
+	try {
+		const healthRes = await runRoomAgile(pi, { action: "epic_health", epic_id: epicID, limit: 200 }, signal);
+		const h = (healthRes.result as Record<string, unknown>)?.data as Record<string, unknown> | undefined;
+		const health = h?.health as Record<string, unknown> | undefined;
+		if (health) {
+			data.health = {
+				status: String(health.status || ""),
+				warnings: Array.isArray(health.warnings) ? health.warnings.map(String) : [],
+			};
+		}
+	} catch { /* health unavailable */ }
+
+	try {
+		const nextRes = await runRoomAgile(pi, { action: "epic_next", epic_id: epicID, limit: 200 }, signal);
+		const n = (nextRes.result as Record<string, unknown>)?.data as Record<string, unknown> | undefined;
+		if (Array.isArray(n?.next)) {
+			data.next = (n!.next as Array<Record<string, unknown>>).map((item) => ({
+				action: String(item.action || ""),
+				title: String(item.title || ""),
+				reason: String(item.reason || ""),
+			}));
+		}
+	} catch { /* next unavailable */ }
+
+	return data;
+}
+
+async function refreshEpicWidget(pi: ExtensionAPI, ctx: { signal?: AbortSignal }): Promise<void> {
+	const widget = (pi as any).__foxctlEpicWidget as EpicStatusWidget | undefined;
+	if (!widget) return;
+	try {
+		const data = await fetchEpicWidgetData(pi, ctx.signal);
+		widget.update(data);
+	} catch { /* non-fatal */ }
+}
+
+function buildSelectListTheme(theme: { fg: (color: string, text: string) => string }) {
+	return {
+		selectedPrefix: (s: string) => theme.fg("accent", s),
+		selectedText: (s: string) => theme.fg("accent", s),
+		description: (s: string) => theme.fg("muted", s),
+		scrollInfo: (s: string) => theme.fg("dim", s),
+		noMatch: (s: string) => theme.fg("dim", s),
+	};
 }
 
 // ============================================================================
@@ -1187,6 +1476,123 @@ const foxctlSearchTool = defineTool({
 			content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
 			details: result,
 		};
+	},
+});
+
+// --- Room Agile ---
+
+const FoxctlRoomAgileParams = Type.Object({
+	action: StringEnum([
+		"epic_show", "epic_resume", "epic_health", "epic_next",
+		"milestone_show", "story_show",
+		// M4 mutating actions:
+		"story_state", "story_validate", "story_propose", "story_accept",
+	] as const, {
+		description: "Room-agile action (read or mutating)",
+	}),
+	room_id: Type.Optional(Type.String({ description: "Room id; defaults to --foxctl-room" })),
+	workspace: Type.Optional(Type.String({ description: "Workspace root; defaults to --foxctl-workspace" })),
+	sender: Type.Optional(Type.String({ description: "Sender actor id; defaults to --foxctl-actor" })),
+	actor: Type.Optional(Type.String({ description: "Actor id for actor-specific reads; defaults to --foxctl-actor" })),
+	epic_id: Type.Optional(Type.String({ description: "Epic id for epic-specific actions" })),
+	milestone_id: Type.Optional(Type.String({ description: "Milestone id for milestone_show" })),
+	story_id: Type.Optional(Type.String({ description: "Story id for story_show" })),
+	limit: Type.Optional(Type.Number({ description: "Maximum room messages to inspect", default: 200 })),
+	// M4 mutating-action fields:
+	state: Type.Optional(Type.String({ description: "Target story state: in_progress, in_review, done, waived" })),
+	verdict: Type.Optional(Type.String({ description: "Validation verdict: pass, fail, waived" })),
+	validator_type: Type.Optional(Type.String({ description: "Validator type: human, agent, harness" })),
+	title: Type.Optional(Type.String({ description: "Story title for story_propose" })),
+	goal: Type.Optional(Type.String({ description: "Story goal for story_propose" })),
+	notes: Type.Optional(Type.String({ description: "Notes for story_propose or story_validate" })),
+	proposal_id: Type.Optional(Type.String({ description: "Proposal ID for story_accept" })),
+	command: Type.Optional(Type.String({ description: "Command that produced validation evidence" })),
+	artifact: Type.Optional(Type.String({ description: "Artifact digest (sha256:...) for validation evidence" })),
+});
+
+const foxctlRoomAgileTool = defineTool({
+	name: "foxctl_room_agile",
+	label: "Foxctl Room Agile",
+	description: "Run foxctl room-agile epic, milestone, story, and story lifecycle actions through the daemon API.",
+	parameters: FoxctlRoomAgileParams,
+	async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+		const result = await runRoomAgile(getPi(), params as Record<string, unknown>, signal);
+		return jsonToolResult(result);
+	},
+});
+
+// --- M4 Story Lifecycle Tools ---
+
+const FoxctlStoryStartParams = Type.Object({
+	story_id: Type.String({ description: "Story ID to start" }),
+	room_id: Type.Optional(Type.String({ description: "Room ID; defaults to --foxctl-room" })),
+	notes: Type.Optional(Type.String({ description: "Optional notes" })),
+});
+
+const foxctlStoryStartTool = defineTool({
+	name: "foxctl_story_start",
+	label: "Foxctl Story Start",
+	description: "Move a story to in_progress state.",
+	parameters: FoxctlStoryStartParams,
+	async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+		const result = await runRoomAgile(getPi(), {
+			action: "story_state",
+			story_id: params.story_id,
+			state: "in_progress",
+			notes: params.notes,
+		}, signal);
+		return jsonToolResult(result);
+	},
+});
+
+const FoxctlStoryReviewParams = Type.Object({
+	story_id: Type.String({ description: "Story ID to move to review" }),
+	room_id: Type.Optional(Type.String({ description: "Room ID; defaults to --foxctl-room" })),
+	notes: Type.Optional(Type.String({ description: "Optional notes" })),
+});
+
+const foxctlStoryReviewTool = defineTool({
+	name: "foxctl_story_review",
+	label: "Foxctl Story Review",
+	description: "Move a story to in_review state.",
+	parameters: FoxctlStoryReviewParams,
+	async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+		const result = await runRoomAgile(getPi(), {
+			action: "story_state",
+			story_id: params.story_id,
+			state: "in_review",
+			notes: params.notes,
+		}, signal);
+		return jsonToolResult(result);
+	},
+});
+
+const FoxctlStoryValidateParams = Type.Object({
+	story_id: Type.String({ description: "Story ID to validate" }),
+	verdict: StringEnum(["pass", "fail", "waived"] as const, { description: "Validation verdict" }),
+	validator_type: StringEnum(["human", "agent", "harness"] as const, { description: "Who/what is validating" }),
+	command: Type.Optional(Type.String({ description: "Command that ran" })),
+	artifact: Type.Optional(Type.String({ description: "Artifact digest" })),
+	notes: Type.Optional(Type.String({ description: "Validation notes" })),
+	room_id: Type.Optional(Type.String({ description: "Room ID; defaults to --foxctl-room" })),
+});
+
+const foxctlStoryValidateTool = defineTool({
+	name: "foxctl_story_validate",
+	label: "Foxctl Story Validate",
+	description: "Attach a validation record to a story.",
+	parameters: FoxctlStoryValidateParams,
+	async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+		const result = await runRoomAgile(getPi(), {
+			action: "story_validate",
+			story_id: params.story_id,
+			verdict: params.verdict,
+			validator_type: params.validator_type,
+			command: params.command,
+			artifact: params.artifact,
+			notes: params.notes,
+		}, signal);
+		return jsonToolResult(result);
 	},
 });
 
@@ -2542,6 +2948,21 @@ export default function foxctlExtension(pi: ExtensionAPI) {
 		type: "string",
 		default: "",
 	});
+	pi.registerFlag("foxctl-epic", {
+		description: "foxctl room-agile epic ID to use for epic commands",
+		type: "string",
+		default: "",
+	});
+	pi.registerFlag("foxctl-milestone", {
+		description: "foxctl room-agile milestone ID to use for milestone commands",
+		type: "string",
+		default: "",
+	});
+	pi.registerFlag("foxctl-story", {
+		description: "foxctl room-agile story ID to use for story commands",
+		type: "string",
+		default: "",
+	});
 	pi.registerFlag("foxctl-actor", {
 		description: "foxctl actor ID for Pi room membership and messages",
 		type: "string",
@@ -2569,6 +2990,11 @@ export default function foxctlExtension(pi: ExtensionAPI) {
 	});
 	pi.registerFlag("foxctl-memory-context", {
 		description: "Include foxctl memory/query and session/recall evidence in --foxctl-context hook injection",
+		type: "boolean",
+		default: true,
+	});
+	pi.registerFlag("foxctl-epic-context", {
+		description: "Inject active room-agile epic resume/health/next into --foxctl-context when --foxctl-epic is set",
 		type: "boolean",
 		default: true,
 	});
@@ -2615,6 +3041,10 @@ export default function foxctlExtension(pi: ExtensionAPI) {
 		foxctlTaskCompleteTool,
 		// Search / Memory
 		foxctlSearchTool,
+		foxctlRoomAgileTool,
+		foxctlStoryStartTool,
+		foxctlStoryReviewTool,
+		foxctlStoryValidateTool,
 		// Skill-backed foxctl tool facades
 		foxctlToolRunTool,
 		foxctlFSListTool,
@@ -2722,6 +3152,10 @@ export default function foxctlExtension(pi: ExtensionAPI) {
 		"foxctl_memory_query",
 		"foxctl_memory_search",
 		"foxctl_session_recall",
+		"foxctl_room_agile",
+		"foxctl_story_start",
+		"foxctl_story_review",
+		"foxctl_story_validate",
 		"foxctl_control_inbox",
 		"foxctl_control_inspect",
 		"foxctl_control_decide",
@@ -2928,6 +3362,297 @@ export default function foxctlExtension(pi: ExtensionAPI) {
 		},
 	});
 
+	const notifyRoomAgile = async (
+		ctx: Parameters<Parameters<typeof pi.registerCommand>[1]["handler"]>[1],
+		action: string,
+		extra: Record<string, unknown> = {},
+	) => {
+		try {
+			const result = await runRoomAgile(getPi(), { action, limit: 200, ...extra }, ctx.signal);
+			ctx.ui.notify(`${action}: ${JSON.stringify(result).slice(0, 700)}`, "info");
+		} catch (e) {
+			ctx.ui.notify(`foxctl room-agile ${action} failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+		}
+	};
+
+	pi.registerCommand("epic", {
+		description: "Show the configured foxctl room-agile epic, or list epics when --foxctl-epic is unset",
+		handler: async (_args, ctx) => {
+			const epicID = getEpicOverride(getPi());
+			await notifyRoomAgile(ctx, "epic_show", epicID ? { epic_id: epicID } : {});
+		},
+	});
+
+	pi.registerCommand("epic-next", {
+		description: "Show next actions for the configured foxctl room-agile epic",
+		handler: async (_args, ctx) => {
+			const epicID = getEpicOverride(getPi());
+			if (!epicID) {
+				ctx.ui.notify("Set --foxctl-epic before using /epic-next", "warning");
+				return;
+			}
+			await notifyRoomAgile(ctx, "epic_next", { epic_id: epicID });
+		},
+	});
+
+	pi.registerCommand("epic-health", {
+		description: "Show health warnings for the configured foxctl room-agile epic",
+		handler: async (_args, ctx) => {
+			const epicID = getEpicOverride(getPi());
+			if (!epicID) {
+				ctx.ui.notify("Set --foxctl-epic before using /epic-health", "warning");
+				return;
+			}
+			await notifyRoomAgile(ctx, "epic_health", { epic_id: epicID });
+		},
+	});
+
+	pi.registerCommand("milestones", {
+		description: "Show foxctl room-agile milestones",
+		handler: async (_args, ctx) => {
+			const milestoneID = getMilestoneOverride(getPi());
+			await notifyRoomAgile(ctx, "milestone_show", milestoneID ? { milestone_id: milestoneID } : {});
+		},
+	});
+
+	pi.registerCommand("stories", {
+		description: "Show foxctl room-agile stories",
+		handler: async (_args, ctx) => {
+			const storyID = getStoryOverride(getPi());
+			await notifyRoomAgile(ctx, "story_show", storyID ? { story_id: storyID } : {});
+		},
+	});
+
+	// M4 Story Lifecycle commands
+
+	pi.registerCommand("story-start", {
+		description: "Mark a story as in_progress",
+		handler: async (args, ctx) => {
+			const storyID = args.trim() || getStoryOverride(getPi());
+			if (!storyID) {
+				ctx.ui.notify("Usage: /story-start <story-id> or set --foxctl-story", "warning");
+				return;
+			}
+			await notifyRoomAgile(ctx, "story_state", { story_id: storyID, state: "in_progress" });
+			await refreshEpicWidget(getPi(), ctx);
+		},
+	});
+
+	pi.registerCommand("story-review", {
+		description: "Mark a story as in_review",
+		handler: async (args, ctx) => {
+			const storyID = args.trim() || getStoryOverride(getPi());
+			if (!storyID) {
+				ctx.ui.notify("Usage: /story-review <story-id> or set --foxctl-story", "warning");
+				return;
+			}
+			await notifyRoomAgile(ctx, "story_state", { story_id: storyID, state: "in_review" });
+			await refreshEpicWidget(getPi(), ctx);
+		},
+	});
+
+	pi.registerCommand("story-validate", {
+		description: "Validate a story with verdict and validator type",
+		handler: async (args, ctx) => {
+			const storyID = getStoryOverride(getPi());
+			if (!storyID) {
+				ctx.ui.notify("Set --foxctl-story before using /story-validate", "warning");
+				return;
+			}
+			const parts = args.trim().split(/\s+/);
+			const verdict = parts[0] || "pass";
+			const validatorType = parts[1] || "human";
+			await notifyRoomAgile(ctx, "story_validate", {
+				story_id: storyID,
+				verdict,
+				validator_type: validatorType,
+			});
+			await refreshEpicWidget(getPi(), ctx);
+		},
+	});
+
+	// M5: Interactive selectors and widget refresh commands
+
+	pi.registerCommand("epic-select", {
+		description: "Interactively select an active epic from the current room",
+		handler: async (_args, ctx) => {
+			const room = getRoom(getPi());
+			if (!room) {
+				ctx.ui.notify("Set --foxctl-room before selecting an epic", "warning");
+				return;
+			}
+			try {
+				const epicRes = await runRoomAgile(getPi(), { action: "epic_show", limit: 200 }, ctx.signal);
+				const epicData = (epicRes.result as Record<string, unknown>)?.data as Record<string, unknown> | undefined;
+				const epics = (epicData?.epics || []) as Array<Record<string, unknown>>;
+				if (epics.length === 0) {
+					ctx.ui.notify("No epics found in this room", "info");
+					return;
+				}
+
+				const result = await ctx.ui.custom<{ id: string; title: string } | undefined>(
+					(tui, theme, _keybindings, done) => {
+						const selectTheme = buildSelectListTheme(theme);
+						const items = epics.map((ep) => ({
+							value: String(ep.id || ""),
+							label: String(ep.title || ep.id || "untitled"),
+							description: String(ep.status || ""),
+						}));
+						const list = new SelectList(items, 10, selectTheme);
+						list.onSelect = (item) => done({ id: item.value, title: item.label });
+						list.onCancel = () => done(undefined);
+						return list;
+					},
+					{ overlay: true },
+				);
+
+				if (result) {
+					_flagOverrides["foxctl-epic"] = result.id;
+					ctx.ui.notify(`Active epic: ${result.title} (${result.id})`, "info");
+					await refreshEpicWidget(getPi(), ctx);
+				}
+			} catch (e) {
+				ctx.ui.notify(`epic-select failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+			}
+		},
+	});
+
+	pi.registerCommand("milestone-select", {
+		description: "Interactively select a milestone for the active epic",
+		handler: async (_args, ctx) => {
+			const epicID = getEpicOverride(getPi());
+			if (!epicID) {
+				ctx.ui.notify("Set --foxctl-epic before selecting a milestone", "warning");
+				return;
+			}
+			try {
+				const res = await runRoomAgile(getPi(), { action: "epic_resume", epic_id: epicID, limit: 200 }, ctx.signal);
+				const epicData = (res.result as Record<string, unknown>)?.data as Record<string, unknown> | undefined;
+				const milestones = (epicData?.milestones || []) as Array<Record<string, unknown>>;
+				if (milestones.length === 0) {
+					ctx.ui.notify("No milestones found for this epic", "info");
+					return;
+				}
+
+				const result = await ctx.ui.custom<{ id: string; title: string } | undefined>(
+					(tui, theme, _kb, done) => {
+						const selectTheme = buildSelectListTheme(theme);
+						const items = milestones.map((ms) => ({
+							value: String(ms.id || ""),
+							label: String(ms.title || ms.id || "untitled"),
+							description: String(ms.status || "open"),
+						}));
+						const list = new SelectList(items, 10, selectTheme);
+						list.onSelect = (item) => done({ id: item.value, title: item.label });
+						list.onCancel = () => done(undefined);
+						return list;
+					},
+					{ overlay: true },
+				);
+
+				if (result) {
+					_flagOverrides["foxctl-milestone"] = result.id;
+					ctx.ui.notify(`Active milestone: ${result.title} (${result.id})`, "info");
+					await refreshEpicWidget(getPi(), ctx);
+				}
+			} catch (e) {
+				ctx.ui.notify(`milestone-select failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+			}
+		},
+	});
+
+	pi.registerCommand("story-select", {
+		description: "Interactively select a story for the active epic",
+		handler: async (_args, ctx) => {
+			const epicID = getEpicOverride(getPi());
+			if (!epicID) {
+				ctx.ui.notify("Set --foxctl-epic before selecting a story", "warning");
+				return;
+			}
+			try {
+				const res = await runRoomAgile(getPi(), { action: "epic_resume", epic_id: epicID, limit: 200 }, ctx.signal);
+				const epicData = (res.result as Record<string, unknown>)?.data as Record<string, unknown> | undefined;
+				const stories = (epicData?.stories || []) as Array<Record<string, unknown>>;
+				if (stories.length === 0) {
+					ctx.ui.notify("No stories found for this epic", "info");
+					return;
+				}
+
+				const result = await ctx.ui.custom<{ id: string; title: string } | undefined>(
+					(tui, theme, _kb, done) => {
+						const selectTheme = buildSelectListTheme(theme);
+						const items = stories.map((st) => ({
+							value: String(st.id || ""),
+							label: String(st.title || st.id || "untitled"),
+							description: String(st.status || "accepted"),
+						}));
+						const list = new SelectList(items, 10, selectTheme);
+						list.onSelect = (item) => done({ id: item.value, title: item.label });
+						list.onCancel = () => done(undefined);
+						return list;
+					},
+					{ overlay: true },
+				);
+
+				if (result) {
+					_flagOverrides["foxctl-story"] = result.id;
+					ctx.ui.notify(`Active story: ${result.title} (${result.id})`, "info");
+					await refreshEpicWidget(getPi(), ctx);
+				}
+			} catch (e) {
+				ctx.ui.notify(`story-select failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+			}
+		},
+	});
+
+	pi.registerCommand("epic-refresh", {
+		description: "Refresh the epic status widget from the foxctl daemon",
+		handler: async (_args, ctx) => {
+			await refreshEpicWidget(getPi(), ctx);
+			ctx.ui.notify("Epic widget refreshed", "info");
+		},
+	});
+
+	pi.registerShortcut(Key.ctrlShift("e"), {
+		description: "Refresh foxctl epic status widget",
+		handler: async (ctx) => {
+			if (!ctx.hasUI) return;
+			await refreshEpicWidget(getPi(), ctx);
+		},
+	});
+
+	pi.registerShortcut(Key.ctrlShift("n"), {
+		description: "Quick-select next story from active epic",
+		handler: async (ctx) => {
+			if (!ctx.hasUI) return;
+			const epicID = getEpicOverride(getPi());
+			if (!epicID) {
+				ctx.ui.notify("No active epic — use /epic-select first", "warning");
+				return;
+			}
+			try {
+				const nextRes = await runRoomAgile(getPi(), { action: "epic_next", epic_id: epicID, limit: 200 }, ctx.signal);
+				const n = (nextRes.result as Record<string, unknown>)?.data as Record<string, unknown> | undefined;
+				const next = (n?.next || []) as Array<Record<string, unknown>>;
+				if (next.length === 0) {
+					ctx.ui.notify("No next actions available", "info");
+					return;
+				}
+				const first = next[0]!;
+				const storyID = String(first.story_id || first.id || "");
+				if (storyID) {
+					_flagOverrides["foxctl-story"] = storyID;
+					ctx.ui.notify(`Next story: ${first.title || storyID}`, "info");
+					await refreshEpicWidget(getPi(), ctx);
+				} else {
+					ctx.ui.notify(`Next action: ${first.action || "unknown"} — ${first.reason || ""}`, "info");
+				}
+			} catch (e) {
+				ctx.ui.notify(`Next story failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+			}
+		},
+	});
+
 	pi.registerCommand("tasks", {
 		description: "Show tasks for the configured foxctl room",
 		handler: async (_args, ctx) => {
@@ -3091,7 +3816,49 @@ export default function foxctlExtension(pi: ExtensionAPI) {
 			const health = await client.get<{ data?: { version?: string; database_driver?: string } }>("/api/health", ctx.signal);
 			const version = health.data?.version || "unknown";
 			const db = health.data?.database_driver || "unknown";
-			ctx.ui.setStatus("foxctl", room ? `foxctl ${version} ${db} room:${room}` : `foxctl ${version} ${db}`);
+			let statusText = room ? `foxctl ${version} ${db} room:${room}` : `foxctl ${version} ${db}`;
+			const epicID = getEpicOverride(getPi());
+			if (epicID) {
+				try {
+					const epicRes = await runRoomAgile(getPi(), { action: "epic_resume", epic_id: epicID, limit: 10 }, ctx.signal);
+					const epicData = (epicRes.result as Record<string, unknown>)?.data as Record<string, unknown> | undefined;
+					const epic = epicData?.epic as Record<string, unknown> | undefined;
+					if (epic) {
+						const short = (epic.title as string || epicID).slice(0, 30);
+						statusText += ` epic:${short} (${epic.status || "?"})`;
+					}
+					const milestoneID = getMilestoneOverride(getPi());
+					if (milestoneID && epicData?.milestones) {
+						const milestones = epicData.milestones as Array<Record<string, unknown>>;
+						const ms = milestones.find((m) => m.id === milestoneID);
+						if (ms) statusText += ` ms:${(ms.title as string || milestoneID).slice(0, 20)}`;
+					}
+					const storyID = getStoryOverride(getPi());
+					if (storyID && epicData?.stories) {
+						const stories = epicData.stories as Array<Record<string, unknown>>;
+						const st = stories.find((s) => s.id === storyID);
+						if (st) statusText += ` story:${(st.title as string || storyID).slice(0, 20)} (${st.status || "?"})`;
+					}
+				} catch {
+					statusText += ` epic:${epicID.slice(0, 12)}`;
+				}
+			}
+			ctx.ui.setStatus("foxctl", statusText);
+
+			// M5: Set up epic status widget above the editor
+			const epicIDForWidget = getEpicOverride(getPi());
+			if (epicIDForWidget) {
+				try {
+					const widgetData = await fetchEpicWidgetData(getPi(), ctx.signal);
+					ctx.ui.setWidget("foxctl-epic", (tui, theme) => {
+						const widget = new EpicStatusWidget(widgetData, theme);
+						(getPi() as any).__foxctlEpicWidget = widget;
+						return widget;
+					});
+				} catch {
+					// Widget unavailable, non-fatal
+				}
+			}
 		} catch (e) {
 			ctx.ui.setStatus("foxctl", "foxctl offline");
 			ctx.ui.notify(`foxctl unreachable: ${e instanceof Error ? e.message : String(e)}`, "warning");

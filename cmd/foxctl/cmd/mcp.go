@@ -712,7 +712,8 @@ func runMCPServer(ctx context.Context, opts mcpServerOptions) error {
 	}
 
 	info := buildinfo.Current()
-	s := server.NewMCPServer("foxctl", info.Version,
+	s := server.NewMCPServer(
+		"foxctl", info.Version,
 		server.WithToolCapabilities(true),
 	)
 
@@ -1026,7 +1027,8 @@ func registerMCPPipeTool(s *server.MCPServer) {
 
 	if _, exists := s.ListTools()["mcp_pipe"]; !exists {
 		s.AddTool(
-			mcp.NewTool("mcp_pipe",
+			mcp.NewTool(
+				"mcp_pipe",
 				mcp.WithDescription("Run a supported foxctl MCP tool, project the pre-truncation result with a GJSON path, and only then apply output truncation."),
 				mcp.WithString("tool", mcp.Required(), mcp.Description("Upstream foxctl MCP tool name to execute.")),
 				mcp.WithObject("args", mcp.Description("Arguments to pass to the upstream tool as a JSON object.")),
@@ -1038,7 +1040,8 @@ func registerMCPPipeTool(s *server.MCPServer) {
 
 	if _, exists := s.ListTools()["mcp_keys"]; !exists {
 		s.AddTool(
-			mcp.NewTool("mcp_keys",
+			mcp.NewTool(
+				"mcp_keys",
 				mcp.WithDescription("Run a supported foxctl MCP tool and return wildcard key paths from the pre-truncation result to help build follow-up projections."),
 				mcp.WithString("tool", mcp.Required(), mcp.Description("Upstream foxctl MCP tool name to inspect.")),
 				mcp.WithObject("args", mcp.Description("Arguments to pass to the upstream tool as a JSON object.")),
@@ -1062,7 +1065,8 @@ func registerTools(s *server.MCPServer) {
 
 	// web_search - Unified search across providers (exa, tavily, perplexity)
 	s.AddTool(
-		mcp.NewTool("web_search",
+		mcp.NewTool(
+			"web_search",
 			mcp.WithDescription("Search the web for current information. Returns relevant results with snippets."),
 			mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
 			mcp.WithNumber("max_results", mcp.Description("Max results to return (default: 10, max: 20)")),
@@ -1074,7 +1078,8 @@ func registerTools(s *server.MCPServer) {
 
 	// web_extract - Simplified tavily-extract
 	s.AddTool(
-		mcp.NewTool("web_extract",
+		mcp.NewTool(
+			"web_extract",
 			mcp.WithDescription("Extract content from URLs. Returns markdown-formatted page content."),
 			mcp.WithArray("urls", mcp.Required(), mcp.WithStringItems(), mcp.Description("URLs to extract content from")),
 		),
@@ -1083,7 +1088,8 @@ func registerTools(s *server.MCPServer) {
 
 	// docs_lookup - Simplified context7 (resolve + get-library-docs combined)
 	s.AddTool(
-		mcp.NewTool("docs_lookup",
+		mcp.NewTool(
+			"docs_lookup",
 			mcp.WithDescription("Look up documentation for a library or framework. Automatically resolves library ID."),
 			mcp.WithString("library", mcp.Required(), mcp.Description("Library name (e.g., 'react', 'nextjs', 'express')")),
 			mcp.WithString("topic", mcp.Description("Topic to focus on (e.g., 'hooks', 'routing')")),
@@ -1093,7 +1099,8 @@ func registerTools(s *server.MCPServer) {
 
 	// code_search - Simplified exa code search
 	s.AddTool(
-		mcp.NewTool("code_search",
+		mcp.NewTool(
+			"code_search",
 			mcp.WithDescription("Search for code examples and programming context. Best for API usage, patterns, and implementations."),
 			mcp.WithString("query", mcp.Required(), mcp.Description("Code search query (e.g., 'React useState hook examples')")),
 		),
@@ -1102,7 +1109,8 @@ func registerTools(s *server.MCPServer) {
 
 	// ask - Simplified perplexity
 	s.AddTool(
-		mcp.NewTool("ask",
+		mcp.NewTool(
+			"ask",
 			mcp.WithDescription("Ask a question and get a comprehensive answer with citations. Good for research and explanations."),
 			mcp.WithString("question", mcp.Required(), mcp.Description("Question to ask")),
 		),
@@ -1111,7 +1119,8 @@ func registerTools(s *server.MCPServer) {
 
 	// web_crawl - Tavily crawl for recursive website crawling
 	s.AddTool(
-		mcp.NewTool("web_crawl",
+		mcp.NewTool(
+			"web_crawl",
 			mcp.WithDescription("Crawl a website recursively starting from a URL. Good for exploring site structure."),
 			mcp.WithString("url", mcp.Required(), mcp.Description("Starting URL to crawl")),
 			mcp.WithNumber("max_depth", mcp.Description("Max depth to crawl (default: 2)")),
@@ -1122,7 +1131,8 @@ func registerTools(s *server.MCPServer) {
 
 	// web_map - Tavily map for URL structure discovery
 	s.AddTool(
-		mcp.NewTool("web_map",
+		mcp.NewTool(
+			"web_map",
 			mcp.WithDescription("Map the URL structure of a website. Returns a list of discovered URLs."),
 			mcp.WithString("url", mcp.Required(), mcp.Description("Website URL to map")),
 			mcp.WithNumber("limit", mcp.Description("Max URLs to discover (default: 50)")),
@@ -1132,7 +1142,8 @@ func registerTools(s *server.MCPServer) {
 
 	// web_search_general - Exa general web search (not code-specific)
 	s.AddTool(
-		mcp.NewTool("web_search_general",
+		mcp.NewTool(
+			"web_search_general",
 			mcp.WithDescription("General web search using Exa AI. Better for finding articles, blogs, and discussions."),
 			mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
 			mcp.WithNumber("num_results", mcp.Description("Number of results (default: 8)")),
@@ -1144,7 +1155,8 @@ func registerTools(s *server.MCPServer) {
 
 	// expo_build - Trigger EAS build
 	s.AddTool(
-		mcp.NewTool("expo_build",
+		mcp.NewTool(
+			"expo_build",
 			mcp.WithDescription("Trigger an EAS cloud build for iOS or Android."),
 			mcp.WithString("platform", mcp.Required(), mcp.Description("Platform: 'ios', 'android', or 'all'")),
 			mcp.WithString("profile", mcp.Description("Build profile (default: 'development')")),
@@ -1154,7 +1166,8 @@ func registerTools(s *server.MCPServer) {
 
 	// expo_update - Publish OTA update
 	s.AddTool(
-		mcp.NewTool("expo_update",
+		mcp.NewTool(
+			"expo_update",
 			mcp.WithDescription("Publish an over-the-air update to a channel."),
 			mcp.WithString("channel", mcp.Required(), mcp.Description("Update channel (e.g., 'production', 'preview')")),
 			mcp.WithString("message", mcp.Description("Update message")),
@@ -1164,7 +1177,8 @@ func registerTools(s *server.MCPServer) {
 
 	// expo_screenshot - Take simulator screenshot
 	s.AddTool(
-		mcp.NewTool("expo_screenshot",
+		mcp.NewTool(
+			"expo_screenshot",
 			mcp.WithDescription("Take a screenshot from iOS Simulator or Android Emulator."),
 			mcp.WithString("platform", mcp.Description("Platform: 'ios' or 'android' (default: 'ios')")),
 		),
@@ -1175,7 +1189,8 @@ func registerTools(s *server.MCPServer) {
 
 	// supabase_query - Execute SQL query
 	s.AddTool(
-		mcp.NewTool("supabase_query",
+		mcp.NewTool(
+			"supabase_query",
 			mcp.WithDescription("Execute a SQL query against the Supabase database."),
 			mcp.WithString("sql", mcp.Required(), mcp.Description("SQL query to execute")),
 		),
@@ -1184,7 +1199,8 @@ func registerTools(s *server.MCPServer) {
 
 	// supabase_tables - List database tables
 	s.AddTool(
-		mcp.NewTool("supabase_tables",
+		mcp.NewTool(
+			"supabase_tables",
 			mcp.WithDescription("List all tables in the Supabase database with their schemas."),
 		),
 		handleSupabaseTables,
@@ -1192,7 +1208,8 @@ func registerTools(s *server.MCPServer) {
 
 	// supabase_logs - Get service logs
 	s.AddTool(
-		mcp.NewTool("supabase_logs",
+		mcp.NewTool(
+			"supabase_logs",
 			mcp.WithDescription("Get logs from Supabase services (postgres, auth, storage, etc)."),
 			mcp.WithString("service", mcp.Description("Service: 'postgres', 'auth', 'storage', 'realtime', 'edge_functions'")),
 			mcp.WithNumber("limit", mcp.Description("Number of log entries (default: 100)")),
@@ -1204,7 +1221,8 @@ func registerTools(s *server.MCPServer) {
 
 	// browser_navigate - Navigate to URL
 	s.AddTool(
-		mcp.NewTool("browser_navigate",
+		mcp.NewTool(
+			"browser_navigate",
 			mcp.WithDescription("Navigate the browser to a URL."),
 			mcp.WithString("url", mcp.Required(), mcp.Description("URL to navigate to")),
 		),
@@ -1213,7 +1231,8 @@ func registerTools(s *server.MCPServer) {
 
 	// browser_screenshot - Take screenshot
 	s.AddTool(
-		mcp.NewTool("browser_screenshot",
+		mcp.NewTool(
+			"browser_screenshot",
 			mcp.WithDescription("Take a screenshot of the current browser page."),
 			mcp.WithString("name", mcp.Description("Screenshot filename (optional)")),
 			mcp.WithBoolean("full_page", mcp.Description("Capture full page (default: false)")),
@@ -1223,7 +1242,8 @@ func registerTools(s *server.MCPServer) {
 
 	// browser_click - Click element
 	s.AddTool(
-		mcp.NewTool("browser_click",
+		mcp.NewTool(
+			"browser_click",
 			mcp.WithDescription("Click an element on the page."),
 			mcp.WithString("selector", mcp.Required(), mcp.Description("CSS selector or text to click")),
 		),
@@ -1232,7 +1252,8 @@ func registerTools(s *server.MCPServer) {
 
 	// browser_fill - Fill form input
 	s.AddTool(
-		mcp.NewTool("browser_fill",
+		mcp.NewTool(
+			"browser_fill",
 			mcp.WithDescription("Fill a form input with text."),
 			mcp.WithString("selector", mcp.Required(), mcp.Description("CSS selector for input")),
 			mcp.WithString("value", mcp.Required(), mcp.Description("Value to fill")),
@@ -1242,7 +1263,8 @@ func registerTools(s *server.MCPServer) {
 
 	// browser_content - Get page content
 	s.AddTool(
-		mcp.NewTool("browser_content",
+		mcp.NewTool(
+			"browser_content",
 			mcp.WithDescription("Get the text content of the current page or a specific element."),
 			mcp.WithString("selector", mcp.Description("CSS selector (optional, defaults to full page)")),
 		),
@@ -1253,7 +1275,8 @@ func registerTools(s *server.MCPServer) {
 
 	// repo_index_build - Build repo graph index
 	s.AddTool(
-		mcp.NewTool("repo_index_build",
+		mcp.NewTool(
+			"repo_index_build",
 			mcp.WithDescription("Build the repo graph index for a workspace."),
 			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
 			mcp.WithArray("go_pattern", mcp.Description("Go package patterns to index (default: ./...)"), mcp.WithStringItems()),
@@ -1278,7 +1301,8 @@ func registerTools(s *server.MCPServer) {
 
 	// repo_index_enrich_summaries - Attach existing summaries to repo graph nodes
 	s.AddTool(
-		mcp.NewTool("repo_index_enrich_summaries",
+		mcp.NewTool(
+			"repo_index_enrich_summaries",
 			mcp.WithDescription("Attach stored file and symbol summaries to an existing repo graph index."),
 			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
 			mcp.WithBoolean("dry_run", mcp.Description("Report summary updates without writing to the index (default: false)")),
@@ -1288,7 +1312,8 @@ func registerTools(s *server.MCPServer) {
 
 	// repo_index_status - Index status
 	s.AddTool(
-		mcp.NewTool("repo_index_status",
+		mcp.NewTool(
+			"repo_index_status",
 			mcp.WithDescription("Show repo graph index status."),
 			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
 		),
@@ -1297,7 +1322,8 @@ func registerTools(s *server.MCPServer) {
 
 	// repo_index_search - Search nodes
 	s.AddTool(
-		mcp.NewTool("repo_index_search",
+		mcp.NewTool(
+			"repo_index_search",
 			mcp.WithDescription("Search repo index nodes by text."),
 			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
 			mcp.WithString("query", mcp.Required(), mcp.Description("FTS query string")),
@@ -1308,7 +1334,8 @@ func registerTools(s *server.MCPServer) {
 
 	// repo_index_expand - Expand graph
 	s.AddTool(
-		mcp.NewTool("repo_index_expand",
+		mcp.NewTool(
+			"repo_index_expand",
 			mcp.WithDescription("Expand the graph from seed nodes."),
 			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
 			mcp.WithArray("seed", mcp.Required(), mcp.Description("Seed node IDs (repeatable)"), mcp.WithStringItems()),
@@ -1323,7 +1350,8 @@ func registerTools(s *server.MCPServer) {
 
 	// repo_index_open - Open node
 	s.AddTool(
-		mcp.NewTool("repo_index_open",
+		mcp.NewTool(
+			"repo_index_open",
 			mcp.WithDescription("Open a node by ID."),
 			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
 			mcp.WithString("id", mcp.Required(), mcp.Description("Node ID")),
@@ -1333,7 +1361,8 @@ func registerTools(s *server.MCPServer) {
 
 	// repo_index_ask - Ask questions using repo index
 	s.AddTool(
-		mcp.NewTool("repo_index_ask",
+		mcp.NewTool(
+			"repo_index_ask",
 			mcp.WithDescription("Ask a question using the repo index."),
 			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
 			mcp.WithString("question", mcp.Required(), mcp.Description("Question to ask")),
@@ -1350,7 +1379,8 @@ func registerTools(s *server.MCPServer) {
 
 	// html_select - Query HTML elements
 	s.AddTool(
-		mcp.NewTool("html_select",
+		mcp.NewTool(
+			"html_select",
 			mcp.WithDescription("Query HTML elements using CSS selectors. Returns matched element info without modifying the file."),
 			mcp.WithString("path", mcp.Required(), mcp.Description("HTML file path")),
 			mcp.WithString("selector", mcp.Required(), mcp.Description("CSS selector (e.g., '#header', '.nav-item', 'div.content > p')")),
@@ -1360,7 +1390,8 @@ func registerTools(s *server.MCPServer) {
 
 	// html_insert - Insert HTML content
 	s.AddTool(
-		mcp.NewTool("html_insert",
+		mcp.NewTool(
+			"html_insert",
 			mcp.WithDescription("Insert HTML content relative to matched elements."),
 			mcp.WithString("path", mcp.Required(), mcp.Description("HTML file path")),
 			mcp.WithString("selector", mcp.Required(), mcp.Description("CSS selector for target elements")),
@@ -1373,7 +1404,8 @@ func registerTools(s *server.MCPServer) {
 
 	// html_replace - Replace HTML content
 	s.AddTool(
-		mcp.NewTool("html_replace",
+		mcp.NewTool(
+			"html_replace",
 			mcp.WithDescription("Replace matched elements or their inner content."),
 			mcp.WithString("path", mcp.Required(), mcp.Description("HTML file path")),
 			mcp.WithString("selector", mcp.Required(), mcp.Description("CSS selector for elements to replace")),
@@ -1386,7 +1418,8 @@ func registerTools(s *server.MCPServer) {
 
 	// html_delete - Delete HTML elements
 	s.AddTool(
-		mcp.NewTool("html_delete",
+		mcp.NewTool(
+			"html_delete",
 			mcp.WithDescription("Delete matched elements from the DOM."),
 			mcp.WithString("path", mcp.Required(), mcp.Description("HTML file path")),
 			mcp.WithString("selector", mcp.Required(), mcp.Description("CSS selector for elements to delete")),
@@ -1397,7 +1430,8 @@ func registerTools(s *server.MCPServer) {
 
 	// html_set_attr - Update HTML attributes
 	s.AddTool(
-		mcp.NewTool("html_set_attr",
+		mcp.NewTool(
+			"html_set_attr",
 			mcp.WithDescription("Set or remove attributes on matched elements. Use empty string to remove an attribute."),
 			mcp.WithString("path", mcp.Required(), mcp.Description("HTML file path")),
 			mcp.WithString("selector", mcp.Required(), mcp.Description("CSS selector for target elements")),
@@ -1413,7 +1447,8 @@ func registerOptimizedRetrievalTools(s *server.MCPServer) {
 	registerMCPPipeTool(s)
 
 	s.AddTool(
-		mcp.NewTool("repo_index_build",
+		mcp.NewTool(
+			"repo_index_build",
 			mcp.WithDescription("Build or refresh the repo graph index."),
 			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
 			mcp.WithArray("go_pattern", mcp.Description("Go package patterns to index (default: ./...)"), mcp.WithStringItems()),
@@ -1437,7 +1472,8 @@ func registerOptimizedRetrievalTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("repo_index_enrich_summaries",
+		mcp.NewTool(
+			"repo_index_enrich_summaries",
 			mcp.WithDescription("Attach stored file and symbol summaries to an existing repo graph index."),
 			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
 			mcp.WithBoolean("dry_run", mcp.Description("Report summary updates without writing to the index (default: false)")),
@@ -1446,7 +1482,8 @@ func registerOptimizedRetrievalTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("repo_index_status",
+		mcp.NewTool(
+			"repo_index_status",
 			mcp.WithDescription("Show repo graph index status."),
 			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
 		),
@@ -1454,7 +1491,8 @@ func registerOptimizedRetrievalTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("structured_shell",
+		mcp.NewTool(
+			"structured_shell",
 			mcp.WithDescription("Structured shell router for supported read-only repo inspection commands. This is not an arbitrary shell executor."),
 			mcp.WithString("command", mcp.Description("Shell command string to route, for example `git log --stat -5` or `rg -n 'spawn' internal/agent | head -n 10`")),
 			mcp.WithArray("argv", mcp.Description("Optional argv form instead of command string"), mcp.WithStringItems()),
@@ -1467,7 +1505,8 @@ func registerOptimizedRetrievalTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("context_show",
+		mcp.NewTool(
+			"context_show",
 			mcp.WithDescription("Show current context-plane workspace state."),
 			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
 		),
@@ -1475,7 +1514,8 @@ func registerOptimizedRetrievalTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("repo_index_search",
+		mcp.NewTool(
+			"repo_index_search",
 			mcp.WithDescription("Search the repo index with compact preview-first output."),
 			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
 			mcp.WithString("query", mcp.Required(), mcp.Description("FTS query string")),
@@ -1486,7 +1526,8 @@ func registerOptimizedRetrievalTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("repo_index_expand",
+		mcp.NewTool(
+			"repo_index_expand",
 			mcp.WithDescription("Expand the repo index graph from seed nodes with compact preview-first output."),
 			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
 			mcp.WithArray("seed", mcp.Required(), mcp.Description("Seed node IDs (repeatable)"), mcp.WithStringItems()),
@@ -1501,7 +1542,8 @@ func registerOptimizedRetrievalTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("repo_index_dag_grep",
+		mcp.NewTool(
+			"repo_index_dag_grep",
 			mcp.WithDescription("Search and expand the repo index into a compact explanation subgraph with preview-first output."),
 			mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
 			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
@@ -1543,7 +1585,8 @@ func registerFocusedGroupTools(s *server.MCPServer, groups []string) {
 
 func registerMobileTools(s *server.MCPServer) {
 	s.AddTool(
-		mcp.NewTool("mobile_expo",
+		mcp.NewTool(
+			"mobile_expo",
 			mcp.WithDescription("Expo/React Native mobile debugging and dev-menu surface for iOS and Android simulators/devices."),
 			mcp.WithString("operation", mcp.Required(), mcp.Description("Operation to perform: debug_status, debug_snapshot, shake, reload, deep_link, dev_menu, toggle_inspector, toggle_performance, toggle_remote_debug, build, update, build_status, logs")),
 			mcp.WithString("device_id", mcp.Description("Device ID (UDID for iOS, serial for Android). Auto-detects if omitted.")),
@@ -1562,7 +1605,8 @@ func registerMobileTools(s *server.MCPServer) {
 
 func registerRoomTools(s *server.MCPServer) {
 	s.AddTool(
-		mcp.NewTool("room",
+		mcp.NewTool(
+			"room",
 			mcp.WithDescription("Command-backed durable room coordination tool. Actions: create, list, show, status, inbox, send, ack, resolve, clear, join, leave, subscribe, relay, coordinator_set."),
 			mcp.WithString("action", mcp.Required(), mcp.Description("Room action to run")),
 			mcp.WithString("workspace", mcp.Description("Workspace root override (default: .)")),
@@ -1609,7 +1653,8 @@ func registerRoomTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("room_pulse",
+		mcp.NewTool(
+			"room_pulse",
 			mcp.WithDescription("Read-only room-wide epic coordinator pulse. Summarizes all epics in one room using existing epic resume/health/next/checkpoint helpers."),
 			mcp.WithString("workspace", mcp.Description("Workspace root override (default: .)")),
 			mcp.WithString("room_id", mcp.Required(), mcp.Description("Room id")),
@@ -1621,7 +1666,8 @@ func registerRoomTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("room_task",
+		mcp.NewTool(
+			"room_task",
 			mcp.WithDescription("Command-backed room task management. Actions: add, list, assign, reassign, claim, touch, block, reclaim, unblock, abandon, complete."),
 			mcp.WithString("action", mcp.Required(), mcp.Description("Room task action to run")),
 			mcp.WithString("workspace", mcp.Description("Workspace root override (default: .)")),
@@ -1644,7 +1690,8 @@ func registerRoomTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("room_interview",
+		mcp.NewTool(
+			"room_interview",
 			mcp.WithDescription("Command-backed durable room interview protocol. Actions: start, ask, answer, verify, next, show."),
 			mcp.WithString("action", mcp.Required(), mcp.Description("Interview action to run")),
 			mcp.WithString("workspace", mcp.Description("Workspace root override (default: .)")),
@@ -1673,7 +1720,8 @@ func registerRoomTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("room_agile",
+		mcp.NewTool(
+			"room_agile",
 			mcp.WithDescription("Command-backed agile room protocol. Actions: epic_start, epic_import_factory, epic_ask, epic_answer, epic_finalize, epic_close, epic_shape, epic_checkpoint, epic_show, epic_resume, epic_health, epic_grade, epic_next, milestone_start, milestone_contract, milestone_criteria, milestone_review, milestone_summary, milestone_show, story_propose, story_accept, story_add, story_state, story_validate, story_show, log_append, log_show, retro_add, retro_show, contextwiki_promote, workpack_show, workpack_sync."),
 			mcp.WithString("action", mcp.Required(), mcp.Description("Agile room action to run")),
 			mcp.WithString("workspace", mcp.Description("Workspace root override (default: .)")),
@@ -1737,7 +1785,8 @@ func registerRoomTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("room_remind",
+		mcp.NewTool(
+			"room_remind",
 			mcp.WithDescription("Command-backed durable room follow-up scheduler. Actions: add, list, cancel."),
 			mcp.WithString("action", mcp.Required(), mcp.Description("Reminder action to run")),
 			mcp.WithString("workspace", mcp.Description("Workspace root override (default: .)")),
@@ -1759,7 +1808,8 @@ func registerRoomTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("agent_room",
+		mcp.NewTool(
+			"agent_room",
 			mcp.WithDescription("Command-backed agent control-room tool. Actions: info, policy."),
 			mcp.WithString("action", mcp.Required(), mcp.Description("Agent room action to run")),
 			mcp.WithString("agent_ref", mcp.Description("Agent reference for info/policy")),
@@ -1774,7 +1824,8 @@ func registerRoomTools(s *server.MCPServer) {
 
 func registerMuxTools(s *server.MCPServer) {
 	s.AddTool(
-		mcp.NewTool("mux",
+		mcp.NewTool(
+			"mux",
 			mcp.WithDescription("Command-backed tmux/zellij collaboration tool. Actions: list, read, send, submit, send_parent, observe, doctor, create."),
 			mcp.WithString("action", mcp.Required(), mcp.Description("Mux action to run")),
 			mcp.WithString("backend", mcp.Description("Mux backend (tmux|zellij|auto)")),
@@ -2454,21 +2505,24 @@ func registerFoxctlTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("context_show",
+		mcp.NewTool(
+			"context_show",
 			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
 		),
 		handleContextShow,
 	)
 
 	s.AddTool(
-		mcp.NewTool("context_report",
+		mcp.NewTool(
+			"context_report",
 			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
 		),
 		handleContextReport,
 	)
 
 	s.AddTool(
-		mcp.NewTool("context_retrieve",
+		mcp.NewTool(
+			"context_retrieve",
 			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
 			mcp.WithString("vault_path", mcp.Required(), mcp.Description("Vault path")),
 			mcp.WithString("query", mcp.Required(), mcp.Description("Retrieval query")),
@@ -2478,14 +2532,16 @@ func registerFoxctlTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("context_next",
+		mcp.NewTool(
+			"context_next",
 			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
 		),
 		handleContextNext,
 	)
 
 	s.AddTool(
-		mcp.NewTool("context_next_proposal_merge",
+		mcp.NewTool(
+			"context_next_proposal_merge",
 			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
 			mcp.WithString("vault_path", mcp.Description("Optional vault path for health refresh before selection")),
 			mcp.WithNumber("limit", mcp.Description("Maintenance-task scan limit (default: 50)")),
@@ -2495,7 +2551,8 @@ func registerFoxctlTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("context_dispatch",
+		mcp.NewTool(
+			"context_dispatch",
 			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
 			mcp.WithString("task_id", mcp.Description("Explicit task ID (optional)")),
 		),
@@ -2503,7 +2560,8 @@ func registerFoxctlTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("context_contradictions",
+		mcp.NewTool(
+			"context_contradictions",
 			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
 			mcp.WithString("vault_path", mcp.Required(), mcp.Description("Vault path")),
 			mcp.WithNumber("limit", mcp.Description("Maximum findings")),
@@ -2512,7 +2570,8 @@ func registerFoxctlTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("context_handoffs",
+		mcp.NewTool(
+			"context_handoffs",
 			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
 			mcp.WithString("path", mcp.Description("Specific handoff path or filename (optional)")),
 			mcp.WithNumber("limit", mcp.Description("Maximum handoffs to list (default: 20)")),
@@ -2521,7 +2580,8 @@ func registerFoxctlTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("context_observations",
+		mcp.NewTool(
+			"context_observations",
 			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
 			mcp.WithNumber("limit", mcp.Description("Maximum observations to list (default: 20)")),
 		),
@@ -2529,7 +2589,8 @@ func registerFoxctlTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("context_tensions",
+		mcp.NewTool(
+			"context_tensions",
 			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
 			mcp.WithNumber("limit", mcp.Description("Maximum tensions to list (default: 20)")),
 		),
@@ -2537,7 +2598,8 @@ func registerFoxctlTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("context_proposals",
+		mcp.NewTool(
+			"context_proposals",
 			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
 			mcp.WithString("id", mcp.Description("Specific proposal ID (optional)")),
 			mcp.WithNumber("limit", mcp.Description("Maximum proposals to list (default: 20)")),
@@ -2546,7 +2608,8 @@ func registerFoxctlTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("context_proposal_apply",
+		mcp.NewTool(
+			"context_proposal_apply",
 			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
 			mcp.WithString("id", mcp.Required(), mcp.Description("Proposal ID")),
 		),
@@ -2554,7 +2617,8 @@ func registerFoxctlTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("context_proposal_reject",
+		mcp.NewTool(
+			"context_proposal_reject",
 			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
 			mcp.WithString("id", mcp.Required(), mcp.Description("Proposal ID")),
 		),
@@ -2562,7 +2626,8 @@ func registerFoxctlTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("context_proposal_release_merge",
+		mcp.NewTool(
+			"context_proposal_release_merge",
 			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
 			mcp.WithString("id", mcp.Required(), mcp.Description("Proposal ID")),
 		),
@@ -2570,7 +2635,8 @@ func registerFoxctlTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("context_proposal_merge",
+		mcp.NewTool(
+			"context_proposal_merge",
 			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
 			mcp.WithString("id", mcp.Required(), mcp.Description("Proposal ID")),
 			mcp.WithString("vault_name", mcp.Description("Vault name")),
@@ -2583,7 +2649,8 @@ func registerFoxctlTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("context_rethink",
+		mcp.NewTool(
+			"context_rethink",
 			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
 			mcp.WithString("vault_path", mcp.Description("Vault path for health-derived maintenance tasks")),
 			mcp.WithNumber("limit", mcp.Description("Maximum maintenance tasks to emit (default: 20)")),
@@ -2592,7 +2659,8 @@ func registerFoxctlTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("context_promote",
+		mcp.NewTool(
+			"context_promote",
 			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
 			mcp.WithString("source", mcp.Description("Promotion source: handoff or observation")),
 			mcp.WithString("path", mcp.Description("Handoff path or filename when source=handoff")),
@@ -2604,7 +2672,8 @@ func registerFoxctlTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("context_merge_promotion",
+		mcp.NewTool(
+			"context_merge_promotion",
 			mcp.WithString("workspace", mcp.Description("Workspace path (optional; defaults to current workspace context)")),
 			mcp.WithString("vault_name", mcp.Description("Vault name")),
 			mcp.WithString("vault_path", mcp.Required(), mcp.Description("Vault path")),
@@ -2616,7 +2685,8 @@ func registerFoxctlTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("obsidian_read",
+		mcp.NewTool(
+			"obsidian_read",
 			mcp.WithString("vault_name", mcp.Description("Vault name")),
 			mcp.WithString("vault_path", mcp.Description("Vault path")),
 			mcp.WithString("path", mcp.Required(), mcp.Description("Note path")),
@@ -2625,7 +2695,8 @@ func registerFoxctlTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("obsidian_search",
+		mcp.NewTool(
+			"obsidian_search",
 			mcp.WithString("vault_name", mcp.Description("Vault name")),
 			mcp.WithString("vault_path", mcp.Description("Vault path")),
 			mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
@@ -2636,7 +2707,8 @@ func registerFoxctlTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("obsidian_related",
+		mcp.NewTool(
+			"obsidian_related",
 			mcp.WithString("vault_path", mcp.Required(), mcp.Description("Vault path")),
 			mcp.WithString("path", mcp.Required(), mcp.Description("Note path")),
 			mcp.WithNumber("limit", mcp.Description("Maximum result count")),
@@ -2645,7 +2717,8 @@ func registerFoxctlTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("obsidian_create_note",
+		mcp.NewTool(
+			"obsidian_create_note",
 			mcp.WithString("vault_name", mcp.Description("Vault name")),
 			mcp.WithString("vault_path", mcp.Description("Vault path")),
 			mcp.WithString("path", mcp.Required(), mcp.Description("Note path")),
@@ -2659,7 +2732,8 @@ func registerFoxctlTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("obsidian_append_under_heading",
+		mcp.NewTool(
+			"obsidian_append_under_heading",
 			mcp.WithString("vault_name", mcp.Description("Vault name")),
 			mcp.WithString("vault_path", mcp.Description("Vault path")),
 			mcp.WithString("path", mcp.Required(), mcp.Description("Note path")),
@@ -2670,7 +2744,8 @@ func registerFoxctlTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("obsidian_capture_session",
+		mcp.NewTool(
+			"obsidian_capture_session",
 			mcp.WithString("vault_name", mcp.Description("Vault name")),
 			mcp.WithString("vault_path", mcp.Description("Vault path")),
 			mcp.WithString("slug", mcp.Description("Session note slug")),
@@ -2680,7 +2755,8 @@ func registerFoxctlTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("obsidian_promote_to_evergreen",
+		mcp.NewTool(
+			"obsidian_promote_to_evergreen",
 			mcp.WithString("vault_name", mcp.Description("Vault name")),
 			mcp.WithString("vault_path", mcp.Description("Vault path")),
 			mcp.WithString("slug", mcp.Description("Draft slug")),
@@ -2690,7 +2766,8 @@ func registerFoxctlTools(s *server.MCPServer) {
 	)
 
 	s.AddTool(
-		mcp.NewTool("obsidian_merge_reviewed_draft",
+		mcp.NewTool(
+			"obsidian_merge_reviewed_draft",
 			mcp.WithString("vault_name", mcp.Description("Vault name")),
 			mcp.WithString("vault_path", mcp.Required(), mcp.Description("Vault path")),
 			mcp.WithString("draft_path", mcp.Required(), mcp.Description("Local reviewed draft path")),

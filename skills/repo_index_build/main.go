@@ -93,7 +93,8 @@ func buildRepoIndexArgs(workspaceRoot string, in Input) []string {
 		}
 	}
 
-	args = append(args,
+	args = append(
+		args,
 		fmt.Sprintf("--go=%t", boolDefault(in.IncludeGo, true)),
 		fmt.Sprintf("--python=%t", in.IncludePython),
 		fmt.Sprintf("--rust=%t", in.IncludeRust),

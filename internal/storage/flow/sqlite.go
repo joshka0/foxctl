@@ -419,7 +419,8 @@ func (s *sqlStore) ListEdgesByFlow(ctx context.Context, flowID string) ([]flow.F
 		err := rows.Scan(
 			&e.ID, &e.FlowID, &e.FromNodeID, &e.ToNodeID,
 			&transform, &e.TransformConfig, &trigger, &e.TriggerConfig,
-			&e.Condition, &retryPolicyStr)
+			&e.Condition, &retryPolicyStr,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("flow: scan edge: %w", err)
 		}
@@ -445,7 +446,8 @@ func scanEdge(row *sql.Row) (flow.FlowEdge, error) {
 	err := row.Scan(
 		&e.ID, &e.FlowID, &e.FromNodeID, &e.ToNodeID,
 		&transform, &e.TransformConfig, &trigger, &e.TriggerConfig,
-		&e.Condition, &retryPolicyStr)
+		&e.Condition, &retryPolicyStr,
+	)
 	if err != nil {
 		if isNoRows(err) {
 			return flow.FlowEdge{}, flow.ErrNotFound

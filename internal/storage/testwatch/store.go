@@ -135,7 +135,8 @@ func (s *sqlStore) Upsert(ctx context.Context, ts TestStatus) error {
 		finishedAt = sql.NullString{String: timeutil.FormatRFC3339Nano(*ts.FinishedAt), Valid: true}
 	}
 
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(
+		ctx, `
 	INSERT INTO test_status (workspace_id, watcher_id, status, command, started_at, finished_at, summary, failures_json, raw_tail)
 	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	ON CONFLICT (workspace_id, watcher_id) DO UPDATE SET

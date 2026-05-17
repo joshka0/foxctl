@@ -1462,7 +1462,8 @@ func verifierRepairCandidateSnapshot(output engine.EngineOutput) string {
 	var b strings.Builder
 	for _, id := range ids {
 		candidate := candidates[id]
-		fmt.Fprintf(&b, "- candidate_id=%s status=%s answer_hash=%s answer=%s\n",
+		fmt.Fprintf(
+			&b, "- candidate_id=%s status=%s answer_hash=%s answer=%s\n",
 			id,
 			firstNonEmptyString(strings.TrimSpace(candidate.Status), "unknown"),
 			strings.TrimSpace(candidate.AnswerHash),

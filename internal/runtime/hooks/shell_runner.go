@@ -134,7 +134,8 @@ func buildHookEnv(input Input) []string {
 	env := os.Environ()
 
 	// Add standard hook environment variables
-	env = append(env,
+	env = append(
+		env,
 		"FOXCTL_HOOK_EVENT="+string(input.Event),
 	)
 

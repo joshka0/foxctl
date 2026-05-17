@@ -631,7 +631,8 @@ func (b *Builder) emitSemanticArtifactSearchEvent(
 			"ESEMANTIC_RETRIEVAL",
 			strings.TrimSpace(errText),
 			true,
-			duration))
+			duration,
+		))
 		return
 	}
 	emitEventAsync(ctx, event.Success(duration))
@@ -918,7 +919,8 @@ func (b *Builder) resolveEpisodeLayer(
 			"EEPISODE_LAYER",
 			strings.TrimSpace(err.Error()),
 			true,
-			0))
+			0,
+		))
 		return nil, "", 0, 0
 	}
 	if len(episodes) == 0 {

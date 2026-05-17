@@ -121,7 +121,8 @@ func (b *braidNodeHelperBudget) remainingSubTimeout(totalBudget time.Duration) t
 // formatDeadlineExhausted produces a structured feedback string for a skipped
 // repair attempt.
 func formatDeadlineExhausted(nodeID string, budget *braidNodeHelperBudget) string {
-	return fmt.Sprintf("%s: node=%s cumulative_ms=%d attempts=%d",
+	return fmt.Sprintf(
+		"%s: node=%s cumulative_ms=%d attempts=%d",
 		braidDeadlineExhaustedPrefix, nodeID,
 		budget.CumulativeDuration.Milliseconds(),
 		budget.Attempts,

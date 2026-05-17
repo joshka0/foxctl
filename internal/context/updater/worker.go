@@ -94,7 +94,8 @@ func (w *Worker) Start(ctx context.Context) error {
 	w.running = true
 	w.mu.Unlock()
 
-	w.logger.Info("starting context updater worker",
+	w.logger.Info(
+		"starting context updater worker",
 		"poll_interval", w.config.PollInterval,
 		"turn_window", w.config.TurnWindowSize,
 		"provider", w.analyzer.Provider(),
@@ -182,7 +183,8 @@ func (w *Worker) tick(ctx context.Context) {
 	// Process each session
 	for _, sessionID := range sessions {
 		if err := w.processSession(ctx, sessionID); err != nil {
-			w.logger.Debug("failed to process session",
+			w.logger.Debug(
+				"failed to process session",
 				"session_id", sessionID,
 				"error", err,
 			)
@@ -303,7 +305,8 @@ func (w *Worker) processSession(ctx context.Context, sessionID string) error {
 
 	// Filter and inject context
 	for _, candidate := range candidates {
-		w.logger.Debug("evaluating candidate",
+		w.logger.Debug(
+			"evaluating candidate",
 			"session_id", sessionID,
 			"candidate_id", candidate.ID,
 			"type", candidate.Type,
@@ -316,7 +319,8 @@ func (w *Worker) processSession(ctx context.Context, sessionID string) error {
 
 		// Check if recently injected
 		if w.memory.WasRecentlyInjected(candidate.ID, candidate.Content, sessionID) {
-			w.logger.Debug("candidate recently injected, skipping",
+			w.logger.Debug(
+				"candidate recently injected, skipping",
 				"session_id", sessionID,
 				"candidate_id", candidate.ID,
 			)
@@ -326,7 +330,8 @@ func (w *Worker) processSession(ctx context.Context, sessionID string) error {
 		// Inject
 		reason := buildInjectionReason(candidate, analysis)
 		if err := w.injector.Inject(ctx, sessionID, workspace, candidate, reason); err != nil {
-			w.logger.Warn("injection failed",
+			w.logger.Warn(
+				"injection failed",
 				"session_id", sessionID,
 				"candidate_id", candidate.ID,
 				"error", err,
@@ -342,7 +347,8 @@ func (w *Worker) processSession(ctx context.Context, sessionID string) error {
 		w.metrics.InjectionCount++
 		w.mu.Unlock()
 
-		w.logger.Info("injected context",
+		w.logger.Info(
+			"injected context",
 			"session_id", sessionID,
 			"candidate_id", candidate.ID,
 			"type", candidate.Type,

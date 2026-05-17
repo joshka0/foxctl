@@ -20,7 +20,8 @@ func TestSnapshotStreamViewerFollowEngaged(t *testing.T) {
 		lines[i] = fmt.Sprintf("Stream line %d: some content here", i)
 	}
 
-	sv, mt := renderStreamViewer(lines, 50, 8,
+	sv, mt := renderStreamViewer(
+		lines, 50, 8,
 		WithSVFocused(true),
 	)
 
@@ -64,7 +65,8 @@ func TestSnapshotStreamViewerScrolledUp(t *testing.T) {
 		lines[i] = fmt.Sprintf("Original line %d", i)
 	}
 
-	sv := NewStreamViewer(lines, 50, 8,
+	sv := NewStreamViewer(
+		lines, 50, 8,
 		WithSVFocused(true),
 	)
 

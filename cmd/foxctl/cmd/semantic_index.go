@@ -430,7 +430,8 @@ func runSemanticIndexStats(cmd *cobra.Command, workspace string) error {
 		"workspace_id": workspaceID,
 		"stats":        stats,
 	}
-	env := protocol.OK("semantic_index.queue_stats", data,
+	env := protocol.OK(
+		"semantic_index.queue_stats", data,
 		protocol.WithSource("cli"),
 		protocol.WithWorkspace(absWorkspace),
 		protocol.WithDuration(time.Since(start).Milliseconds()),
@@ -555,7 +556,8 @@ func runSemanticIndexDrain(cmd *cobra.Command, workspace, model, providerName st
 	if lastError != "" {
 		data["last_error"] = lastError
 	}
-	env := protocol.OK("semantic_index.drain", data,
+	env := protocol.OK(
+		"semantic_index.drain", data,
 		protocol.WithSource("cli"),
 		protocol.WithWorkspace(absWorkspace),
 		protocol.WithDuration(time.Since(start).Milliseconds()),
@@ -921,7 +923,8 @@ func writeSemanticEnqueueResult(cmd *cobra.Command, sourceCommand string, result
 		"files_skipped":  filesSkipped,
 		"job_ids":        result.JobIDs,
 	}
-	env := protocol.OK("semantic_index.enqueue", data,
+	env := protocol.OK(
+		"semantic_index.enqueue", data,
 		protocol.WithSource("cli"),
 		protocol.WithWorkspace(workspace),
 		protocol.WithDuration(time.Since(start).Milliseconds()),

@@ -121,7 +121,8 @@ func (s *Store) Apply(ctx context.Context, evt v2events.Event) error {
 }
 
 func (s *Store) upsertRunState(ctx context.Context, evt v2events.Event, status string) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(
+		ctx, `
 		INSERT INTO v2_run_state (
 			run_id, status, last_event_id, last_stream_version, command, request_id, actor_id, updated_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -150,7 +151,8 @@ func (s *Store) upsertRunState(ctx context.Context, evt v2events.Event, status s
 }
 
 func (s *Store) upsertAgentState(ctx context.Context, agentID string, evt v2events.Event, state string) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(
+		ctx, `
 		INSERT INTO v2_agent_state (
 			agent_id, state, last_event_id, last_stream_version, updated_at
 		) VALUES ($1, $2, $3, $4, $5)

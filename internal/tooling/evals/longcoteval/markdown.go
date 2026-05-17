@@ -27,7 +27,8 @@ func RenderMarkdown(result RunResult) string {
 	conditions := append([]ConditionSummary(nil), result.Summary.Conditions...)
 	sort.SliceStable(conditions, func(i, j int) bool { return conditions[i].ConditionID < conditions[j].ConditionID })
 	for _, item := range conditions {
-		fmt.Fprintf(&b, "| `%s` | %d | %d | %d | %d | %d | %.0f | %.4f | %.0f |\n",
+		fmt.Fprintf(
+			&b, "| `%s` | %d | %d | %d | %d | %d | %.0f | %.4f | %.0f |\n",
 			item.ConditionID,
 			item.Attempts,
 			item.VerifiedAttempts,
@@ -56,7 +57,8 @@ func RenderMarkdown(result RunResult) string {
 				item.ChildSummariesRewritten == 0 {
 				continue
 			}
-			fmt.Fprintf(&b, "| `%s` | %d | %d/%d | %d | %d | %d/%d | %d | %d | %.0f | %.0f |\n",
+			fmt.Fprintf(
+				&b, "| `%s` | %d | %d/%d | %d | %d | %d/%d | %d | %d | %.0f | %.0f |\n",
 				item.ConditionID,
 				item.ReviewAttempts,
 				item.ReviewRecursiveUsed,
@@ -84,7 +86,8 @@ func RenderMarkdown(result RunResult) string {
 			return left < right
 		})
 		for _, item := range comparisons {
-			fmt.Fprintf(&b, "| `%s` | `%s` | %d | %d | %d | %d | %d | %.0f | %.4f | %.0f |\n",
+			fmt.Fprintf(
+				&b, "| `%s` | `%s` | %d | %d | %d | %d | %d | %.0f | %.4f | %.0f |\n",
 				item.Baseline,
 				item.Candidate,
 				item.Pairs,

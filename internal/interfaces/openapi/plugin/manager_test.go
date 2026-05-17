@@ -27,7 +27,8 @@ func TestManagerInvokeAuthSuccess(t *testing.T) {
 	buildPluginBinary(t, tmp, "auth-hmac")
 
 	cfg := config.Config{Home: tmp}
-	mgr := NewManager(cfg,
+	mgr := NewManager(
+		cfg,
 		WithSearchPaths([]string{tmp}),
 		WithHandshakeTimeout(testHandshakeTimeout),
 		WithRuntimeLimits(RuntimeLimits{WallTimeout: 5 * time.Second}),
@@ -65,7 +66,8 @@ func TestManagerInvokeAuthPluginError(t *testing.T) {
 	buildPluginBinary(t, tmp, "auth-hmac")
 
 	cfg := config.Config{Home: tmp}
-	mgr := NewManager(cfg,
+	mgr := NewManager(
+		cfg,
 		WithSearchPaths([]string{tmp}),
 		WithHandshakeTimeout(testHandshakeTimeout),
 		WithRuntimeLimits(RuntimeLimits{WallTimeout: 5 * time.Second}),
@@ -131,7 +133,8 @@ func TestManagerInvokePagination(t *testing.T) {
 	buildPluginBinary(t, tmp, "paging-custom")
 
 	cfg := config.Config{Home: tmp}
-	mgr := NewManager(cfg,
+	mgr := NewManager(
+		cfg,
 		WithSearchPaths([]string{tmp}),
 		WithHandshakeTimeout(testHandshakeTimeout),
 		WithRuntimeLimits(RuntimeLimits{WallTimeout: 5 * time.Second}),

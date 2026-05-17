@@ -51,7 +51,8 @@ func migrateDedupe(ctx context.Context, db *sql.DB) error {
 // IsProcessed checks if a message has already been processed.
 func (s *SQLiteDedupeStore) IsProcessed(ctx context.Context, agentID, messageID string) (bool, error) {
 	var count int
-	err := s.db.QueryRowContext(ctx,
+	err := s.db.QueryRowContext(
+		ctx,
 		`SELECT COUNT(*) FROM daemon_dedupe WHERE agent_id = $1 AND message_id = $2`,
 		agentID, messageID,
 	).Scan(&count)
@@ -63,7 +64,8 @@ func (s *SQLiteDedupeStore) IsProcessed(ctx context.Context, agentID, messageID 
 
 // MarkProcessed marks a message as processed.
 func (s *SQLiteDedupeStore) MarkProcessed(ctx context.Context, agentID, messageID string) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.db.ExecContext(
+		ctx,
 		`INSERT INTO daemon_dedupe (agent_id, message_id, processed_at) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
 		agentID, messageID, time.Now().Unix(),
 	)
@@ -76,7 +78,8 @@ func (s *SQLiteDedupeStore) MarkProcessed(ctx context.Context, agentID, messageI
 // Cleanup removes dedupe records older than the given duration.
 func (s *SQLiteDedupeStore) Cleanup(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().Add(-olderThan).Unix()
-	result, err := s.db.ExecContext(ctx,
+	result, err := s.db.ExecContext(
+		ctx,
 		`DELETE FROM daemon_dedupe WHERE processed_at < $1`,
 		cutoff,
 	)

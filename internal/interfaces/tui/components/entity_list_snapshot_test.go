@@ -19,7 +19,8 @@ func TestSnapshotEntityListFocused(t *testing.T) {
 		{ID: "a5", Label: "agent-mno33333", SubLabel: "overseer"},
 	}
 
-	mt := renderEntityList(items, 50, 10,
+	mt := renderEntityList(
+		items, 50, 10,
 		WithSelectedIndex(2),
 		WithFocused(true),
 	)
@@ -51,7 +52,8 @@ func TestSnapshotEntityListUnfocused(t *testing.T) {
 		{ID: "a5", Label: "agent-mno33333", SubLabel: "overseer"},
 	}
 
-	mt := renderEntityList(items, 50, 10,
+	mt := renderEntityList(
+		items, 50, 10,
 		WithSelectedIndex(2),
 		WithFocused(false),
 	)
@@ -73,7 +75,8 @@ func TestSnapshotEntityListUnfocused(t *testing.T) {
 
 // TestSnapshotEntityListEmpty captures an empty EntityList snapshot.
 func TestSnapshotEntityListEmpty(t *testing.T) {
-	mt := renderEntityList(nil, 50, 10,
+	mt := renderEntityList(
+		nil, 50, 10,
 		WithFocused(true),
 		WithEmptyMessage("No agents running."),
 	)
@@ -103,12 +106,14 @@ func TestFocusedVsUnfocusedDistinguishable(t *testing.T) {
 		{ID: "a3", Label: "agent-ghi11111", SubLabel: "planner"},
 	}
 
-	mtFocused := renderEntityList(items, 50, 5,
+	mtFocused := renderEntityList(
+		items, 50, 5,
 		WithSelectedIndex(1),
 		WithFocused(true),
 	)
 
-	mtUnfocused := renderEntityList(items, 50, 5,
+	mtUnfocused := renderEntityList(
+		items, 50, 5,
 		WithSelectedIndex(1),
 		WithFocused(false),
 	)

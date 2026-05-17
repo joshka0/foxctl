@@ -36,7 +36,9 @@ func (w *wrappedDB) Exec(q string, args ...any) (sql.Result, error) { return w.d
 func (w *wrappedDB) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
 	return w.db.ExecContext(ctx, q, args...)
 }
+
 func (w *wrappedDB) Query(q string, args ...any) (*sql.Rows, error) { return w.db.Query(q, args...) }
+
 func (w *wrappedDB) QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
 	return w.db.QueryContext(ctx, q, args...)
 }

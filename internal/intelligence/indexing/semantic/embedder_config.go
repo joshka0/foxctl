@@ -42,7 +42,8 @@ func NewEmbedderFromConfig(scope EmbeddingScope, cfg config.Config, opts ...Embe
 	if strings.TrimSpace(model) != "" {
 		configOpts = append(configOpts, WithModelOverride(model))
 	}
-	configOpts = append(configOpts,
+	configOpts = append(
+		configOpts,
 		WithProvider(strings.TrimSpace(cfg.Embedding.Provider)),
 		WithAPIKey(strings.TrimSpace(cfg.Embedding.APIKey)),
 		WithBaseURL(strings.TrimSpace(cfg.Embedding.BaseURL)),

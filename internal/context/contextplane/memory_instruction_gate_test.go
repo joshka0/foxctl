@@ -25,7 +25,8 @@ func TestValidateMemoryRecordForInstructionRequiresProjectionGateBeyondGenericSu
 	if err := evidence.ValidateRenderSurface(instructionEvidenceMetaForMemoryRecord(record), evidence.RenderSurfaceInstruction); err != nil {
 		t.Fatalf("generic ValidateRenderSurface() error = %v", err)
 	}
-	assertMemoryInstructionGateReason(t,
+	assertMemoryInstructionGateReason(
+		t,
 		ValidateMemoryRecordForInstruction(record, evidence.RenderSurfaceInstruction, now),
 		MemoryInstructionGateInactiveLifecycle,
 	)
@@ -41,7 +42,8 @@ func TestValidateMemoryRecordForInstructionRejectsInvalidSurfaces(t *testing.T) 
 		evidence.RenderSurface("not-a-surface"),
 	} {
 		t.Run(string(surface), func(t *testing.T) {
-			assertMemoryInstructionGateReason(t,
+			assertMemoryInstructionGateReason(
+				t,
 				ValidateMemoryRecordForInstruction(validInstructionMemoryRecord(), surface, now),
 				MemoryInstructionGateInvalidInstructionSurface,
 			)
@@ -98,7 +100,8 @@ func TestValidateMemoryRecordForInstructionRejectsNonTemporalEligibilityFailures
 		t.Run(tt.name, func(t *testing.T) {
 			record := validInstructionMemoryRecord()
 			tt.mutate(&record)
-			assertMemoryInstructionGateReason(t,
+			assertMemoryInstructionGateReason(
+				t,
 				ValidateMemoryRecordForInstruction(record, evidence.RenderSurfaceInstruction, now),
 				tt.want,
 			)
@@ -270,7 +273,8 @@ func TestValidateMemoryRecordForInstructionTemporalGate(t *testing.T) {
 }
 
 func TestValidateMemoryRecordForInstructionRejectsZeroNow(t *testing.T) {
-	assertMemoryInstructionGateReason(t,
+	assertMemoryInstructionGateReason(
+		t,
 		ValidateMemoryRecordForInstruction(validInstructionMemoryRecord(), evidence.RenderSurfaceInstruction, time.Time{}),
 		MemoryInstructionGateZeroNow,
 	)

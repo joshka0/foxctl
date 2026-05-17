@@ -104,7 +104,8 @@ type Stats struct {
 
 // main is the skill entry point for code/smart_read.
 func main() {
-	skillmain.Main(command, skillmain.Chain(run,
+	skillmain.Main(command, skillmain.Chain(
+		run,
 		skillmain.WithTimeout[Input](DefaultTimeout),
 		skillmain.WithRecover[Input](),
 	))

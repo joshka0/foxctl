@@ -306,6 +306,108 @@ func TestRoomDetailHandler_GetAndPostMessages(t *testing.T) {
 	}
 }
 
+func TestRoomDetailHandler_RoomAgileReadEndpoint(t *testing.T) {
+	cfg := orchestrationTestConfig(t.TempDir())
+	listHandler := RoomsListHandler(cfg, zerolog.Nop())
+	h := RoomDetailHandler(cfg, zerolog.Nop(), nil)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"id":"alpha",
+		"title":"Alpha Room",
+		"members":[{"actor_id":"human-a","role":"coordinator"}]
+	}`))
+	createRR := httptest.NewRecorder()
+	listHandler.ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
+	}
+
+	store, err := blackboard.OpenBoardStore(context.Background(), cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open board store: %v", err)
+	}
+	defer store.Close()
+
+	epic := agent.BoardMessage{
+		WorkspaceID: "ws1",
+		Stream:      agent.RoomStreamName("alpha"),
+		Sender:      "human-a",
+		Recipient:   agent.BroadcastRecipient,
+		Kind:        agent.BoardMessageKindEpic,
+		Subject:     "Epic: Pi integration",
+		Body:        "Goal: Make Pi understand room-agile state",
+	}
+	if err := store.SendMessage(context.Background(), &epic); err != nil {
+		t.Fatalf("send epic: %v", err)
+	}
+	finalize := agent.BoardMessage{
+		WorkspaceID:      "ws1",
+		Stream:           agent.RoomStreamName("alpha"),
+		Sender:           "human-a",
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindEpicFinalize,
+		RelatedMessageID: epic.ID,
+		Subject:          "Epic Finalized: Pi integration",
+		Body:             "Summary: ready for milestones",
+	}
+	if err := store.SendMessage(context.Background(), &finalize); err != nil {
+		t.Fatalf("send finalize: %v", err)
+	}
+	milestone := agent.BoardMessage{
+		WorkspaceID:      "ws1",
+		Stream:           agent.RoomStreamName("alpha"),
+		Sender:           "human-a",
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindMilestone,
+		RelatedMessageID: epic.ID,
+		Subject:          "Milestone: Backend API",
+		Body:             "EpicID: " + epic.ID + "\nObjective: expose read model",
+	}
+	if err := store.SendMessage(context.Background(), &milestone); err != nil {
+		t.Fatalf("send milestone: %v", err)
+	}
+	story := agent.BoardMessage{
+		WorkspaceID:      "ws1",
+		Stream:           agent.RoomStreamName("alpha"),
+		Sender:           "human-a",
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindStory,
+		RelatedMessageID: milestone.ID,
+		Subject:          "Story: Add endpoint",
+		Body:             "Expose agile reads",
+	}
+	if err := store.SendMessage(context.Background(), &story); err != nil {
+		t.Fatalf("send story: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/agile", strings.NewReader(fmt.Sprintf(`{
+		"workspace":"ws1",
+		"action":"epic_next",
+		"epic_id":"%s"
+	}`, epic.ID)))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	body := decodeResponseBody(t, rr)
+	result := body["result"].(map[string]any)
+	data := result["data"].(map[string]any)
+	status := data["status"].(map[string]any)
+	if got := int(status["milestone_count"].(float64)); got != 1 {
+		t.Fatalf("milestone_count=%d want 1", got)
+	}
+	if got := int(status["story_count"].(float64)); got != 1 {
+		t.Fatalf("story_count=%d want 1", got)
+	}
+	next := data["next"].([]any)
+	first := next[0].(map[string]any)
+	if got := first["action"]; got != "start_story" {
+		t.Fatalf("next action=%v want start_story", got)
+	}
+}
+
 func TestRoomDetailHandler_PostMessagesRequiresActiveLoop(t *testing.T) {
 	cfg := orchestrationTestConfig(t.TempDir())
 	listHandler := RoomsListHandler(cfg, zerolog.Nop())
@@ -2551,5 +2653,439 @@ func TestRoomWorkspaceIDPreservesOpaqueIDs(t *testing.T) {
 
 	if got := roomWorkspaceID(req); got != "ws1" {
 		t.Fatalf("roomWorkspaceID(id)=%q want ws1", got)
+	}
+}
+
+// setupRoomAgileTest is a test helper that creates a room, epic, finalized epic,
+// milestone, and story. It returns the handler, config, and the IDs of the
+// created entities.
+func setupRoomAgileTest(t *testing.T) (handler http.Handler, cfg config.Config, epicID string, milestoneID string, storyID string) {
+	t.Helper()
+	cfg = orchestrationTestConfig(t.TempDir())
+	listHandler := RoomsListHandler(cfg, zerolog.Nop())
+	handler = RoomDetailHandler(cfg, zerolog.Nop(), nil)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"id":"alpha",
+		"title":"Alpha Room",
+		"members":[{"actor_id":"human-a","role":"coordinator"}]
+	}`))
+	createRR := httptest.NewRecorder()
+	listHandler.ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
+	}
+
+	store, err := blackboard.OpenBoardStore(context.Background(), cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open board store: %v", err)
+	}
+	defer store.Close()
+
+	epic := agent.BoardMessage{
+		WorkspaceID: "ws1",
+		Stream:      agent.RoomStreamName("alpha"),
+		Sender:      "human-a",
+		Recipient:   agent.BroadcastRecipient,
+		Kind:        agent.BoardMessageKindEpic,
+		Subject:     "Epic: Test",
+		Body:        "Goal: test",
+	}
+	if err := store.SendMessage(context.Background(), &epic); err != nil {
+		t.Fatalf("send epic: %v", err)
+	}
+	final := agent.BoardMessage{
+		WorkspaceID:      "ws1",
+		Stream:           agent.RoomStreamName("alpha"),
+		Sender:           "human-a",
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindEpicFinalize,
+		RelatedMessageID: epic.ID,
+		Subject:          "Epic Finalized: Test",
+		Body:             "Summary: ready",
+	}
+	if err := store.SendMessage(context.Background(), &final); err != nil {
+		t.Fatalf("send finalize: %v", err)
+	}
+	mile := agent.BoardMessage{
+		WorkspaceID:      "ws1",
+		Stream:           agent.RoomStreamName("alpha"),
+		Sender:           "human-a",
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindMilestone,
+		RelatedMessageID: epic.ID,
+		Subject:          "Milestone: Backend",
+		Body:             "EpicID: " + epic.ID + "\nObjective: test",
+	}
+	if err := store.SendMessage(context.Background(), &mile); err != nil {
+		t.Fatalf("send milestone: %v", err)
+	}
+	story := agent.BoardMessage{
+		WorkspaceID:      "ws1",
+		Stream:           agent.RoomStreamName("alpha"),
+		Sender:           "human-a",
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindStory,
+		RelatedMessageID: mile.ID,
+		Subject:          "Story: Add endpoint",
+		Body:             "Expose reads",
+	}
+	if err := store.SendMessage(context.Background(), &story); err != nil {
+		t.Fatalf("send story: %v", err)
+	}
+
+	return handler, cfg, epic.ID, mile.ID, story.ID
+}
+
+func TestRoomDetailHandler_RoomAgileStoryState(t *testing.T) {
+	h, _, _, _, storyID := setupRoomAgileTest(t)
+
+	// Test: transition to in_progress
+	req := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/agile", strings.NewReader(fmt.Sprintf(`{
+		"workspace":"ws1",
+		"action":"story_state",
+		"story_id":"%s",
+		"state":"in_progress",
+		"actor":"human-a"
+	}`, storyID)))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("story_state in_progress status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	body := decodeResponseBody(t, rr)
+	result := body["result"].(map[string]any)
+	data := result["data"].(map[string]any)
+	message := data["message"].(map[string]any)
+	if got := message["kind"]; got != "story_state" {
+		t.Fatalf("message.kind=%v want story_state", got)
+	}
+	storyView := data["story"].(map[string]any)
+	if got := storyView["status"]; got != "in_progress" {
+		t.Fatalf("story.status=%v want in_progress", got)
+	}
+	if got := storyView["previous"]; got != "accepted" {
+		t.Fatalf("story.previous=%v want accepted", got)
+	}
+
+	// Test: transition to in_review
+	req2 := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/agile", strings.NewReader(fmt.Sprintf(`{
+		"workspace":"ws1",
+		"action":"story_state",
+		"story_id":"%s",
+		"state":"in_review",
+		"actor":"human-a"
+	}`, storyID)))
+	rr2 := httptest.NewRecorder()
+	h.ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("story_state in_review status=%d body=%s", rr2.Code, rr2.Body.String())
+	}
+	body2 := decodeResponseBody(t, rr2)
+	result2 := body2["result"].(map[string]any)
+	data2 := result2["data"].(map[string]any)
+	story2 := data2["story"].(map[string]any)
+	if got := story2["status"]; got != "in_review" {
+		t.Fatalf("story.status=%v want in_review", got)
+	}
+	if got := story2["previous"]; got != "in_progress" {
+		t.Fatalf("story.previous=%v want in_progress", got)
+	}
+
+	// Test: invalid state returns 400
+	reqBad := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/agile", strings.NewReader(fmt.Sprintf(`{
+		"workspace":"ws1",
+		"action":"story_state",
+		"story_id":"%s",
+		"state":"unknown"
+	}`, storyID)))
+	rrBad := httptest.NewRecorder()
+	h.ServeHTTP(rrBad, reqBad)
+	if rrBad.Code != http.StatusBadRequest {
+		t.Fatalf("invalid state status=%d body=%s", rrBad.Code, rrBad.Body.String())
+	}
+
+	// Test: missing story_id returns 400
+	reqNoID := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/agile", strings.NewReader(`{
+		"workspace":"ws1",
+		"action":"story_state",
+		"state":"in_progress"
+	}`))
+	rrNoID := httptest.NewRecorder()
+	h.ServeHTTP(rrNoID, reqNoID)
+	if rrNoID.Code != http.StatusBadRequest {
+		t.Fatalf("missing story_id status=%d body=%s", rrNoID.Code, rrNoID.Body.String())
+	}
+
+	// Test: nonexistent story_id returns 404
+	reqNoStory := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/agile", strings.NewReader(`{
+		"workspace":"ws1",
+		"action":"story_state",
+		"story_id":"nonexistent",
+		"state":"in_progress"
+	}`))
+	rrNoStory := httptest.NewRecorder()
+	h.ServeHTTP(rrNoStory, reqNoStory)
+	if rrNoStory.Code != http.StatusNotFound {
+		t.Fatalf("nonexistent story status=%d body=%s", rrNoStory.Code, rrNoStory.Body.String())
+	}
+}
+
+func TestRoomDetailHandler_RoomAgileStoryValidate(t *testing.T) {
+	h, cfg, _, _, storyID := setupRoomAgileTest(t)
+
+	// Move story to in_review first.
+	stateReq := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/agile", strings.NewReader(fmt.Sprintf(`{
+		"workspace":"ws1",
+		"action":"story_state",
+		"story_id":"%s",
+		"state":"in_review",
+		"actor":"human-a"
+	}`, storyID)))
+	stateRR := httptest.NewRecorder()
+	h.ServeHTTP(stateRR, stateReq)
+	if stateRR.Code != http.StatusOK {
+		t.Fatalf("story_state status=%d body=%s", stateRR.Code, stateRR.Body.String())
+	}
+
+	// Test: validate with full fields
+	req := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/agile", strings.NewReader(fmt.Sprintf(`{
+		"workspace":"ws1",
+		"action":"story_validate",
+		"story_id":"%s",
+		"verdict":"pass",
+		"validator_type":"human",
+		"command":"make test",
+		"artifact":"sha256:abc",
+		"notes":"All tests pass",
+		"actor":"human-a"
+	}`, storyID)))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("story_validate status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	body := decodeResponseBody(t, rr)
+	result := body["result"].(map[string]any)
+	data := result["data"].(map[string]any)
+	message := data["message"].(map[string]any)
+	if got := message["kind"]; got != "story_validation" {
+		t.Fatalf("message.kind=%v want story_validation", got)
+	}
+	if got := message["subject"]; got != "Story Validation: pass" {
+		t.Fatalf("message.subject=%v want Story Validation: pass", got)
+	}
+	msgBody := message["body"].(string)
+	if !strings.Contains(msgBody, "Verdict: pass") {
+		t.Fatalf("message.body=%q want Verdict: pass", msgBody)
+	}
+	if !strings.Contains(msgBody, "ValidatorType: human") {
+		t.Fatalf("message.body=%q want ValidatorType: human", msgBody)
+	}
+	if !strings.Contains(msgBody, "Command: make test") {
+		t.Fatalf("message.body=%q want Command: make test", msgBody)
+	}
+	if !strings.Contains(msgBody, "Artifact: sha256:abc") {
+		t.Fatalf("message.body=%q want Artifact: sha256:abc", msgBody)
+	}
+	if !strings.Contains(msgBody, "Notes: All tests pass") {
+		t.Fatalf("message.body=%q want Notes: All tests pass", msgBody)
+	}
+	if got := data["story_id"]; got != storyID {
+		t.Fatalf("story_id=%v want %s", got, storyID)
+	}
+
+	// Verify the validation is visible via story_show
+	_ = cfg // used implicitly by the handler
+	showReq := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/agile", strings.NewReader(fmt.Sprintf(`{
+		"workspace":"ws1",
+		"action":"story_show",
+		"story_id":"%s"
+	}`, storyID)))
+	showRR := httptest.NewRecorder()
+	h.ServeHTTP(showRR, showReq)
+	if showRR.Code != http.StatusOK {
+		t.Fatalf("story_show status=%d body=%s", showRR.Code, showRR.Body.String())
+	}
+	showBody := decodeResponseBody(t, showRR)
+	showResult := showBody["result"].(map[string]any)
+	showData := showResult["data"].(map[string]any)
+	showStory := showData["story"].(map[string]any)
+	if got := showStory["status"]; got != "in_review" {
+		t.Fatalf("story.status after validate=%v want in_review (validation does not change state)", got)
+	}
+
+	// Test: missing verdict returns 400
+	reqNoVerdict := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/agile", strings.NewReader(fmt.Sprintf(`{
+		"workspace":"ws1",
+		"action":"story_validate",
+		"story_id":"%s",
+		"validator_type":"human"
+	}`, storyID)))
+	rrNoVerdict := httptest.NewRecorder()
+	h.ServeHTTP(rrNoVerdict, reqNoVerdict)
+	if rrNoVerdict.Code != http.StatusBadRequest {
+		t.Fatalf("missing verdict status=%d body=%s", rrNoVerdict.Code, rrNoVerdict.Body.String())
+	}
+
+	// Test: missing validator_type returns 400
+	reqNoVal := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/agile", strings.NewReader(fmt.Sprintf(`{
+		"workspace":"ws1",
+		"action":"story_validate",
+		"story_id":"%s",
+		"verdict":"pass"
+	}`, storyID)))
+	rrNoVal := httptest.NewRecorder()
+	h.ServeHTTP(rrNoVal, reqNoVal)
+	if rrNoVal.Code != http.StatusBadRequest {
+		t.Fatalf("missing validator_type status=%d body=%s", rrNoVal.Code, rrNoVal.Body.String())
+	}
+}
+
+func TestRoomDetailHandler_RoomAgileStoryPropose(t *testing.T) {
+	h, _, _, milestoneID, _ := setupRoomAgileTest(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/agile", strings.NewReader(fmt.Sprintf(`{
+		"workspace":"ws1",
+		"action":"story_propose",
+		"milestone_id":"%s",
+		"title":"New story",
+		"goal":"Do the thing",
+		"notes":"Optional context",
+		"actor":"human-a"
+	}`, milestoneID)))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("story_propose status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	body := decodeResponseBody(t, rr)
+	result := body["result"].(map[string]any)
+	data := result["data"].(map[string]any)
+	message := data["message"].(map[string]any)
+	if got := message["kind"]; got != "story_proposal" {
+		t.Fatalf("message.kind=%v want story_proposal", got)
+	}
+	if got := message["subject"]; got != "Story Proposal: New story" {
+		t.Fatalf("message.subject=%v want Story Proposal: New story", got)
+	}
+	if got := message["related_message_id"]; got != milestoneID {
+		t.Fatalf("message.related_message_id=%v want %s", got, milestoneID)
+	}
+	msgBody := message["body"].(string)
+	if !strings.Contains(msgBody, "Title: New story") {
+		t.Fatalf("message.body=%q want Title: New story", msgBody)
+	}
+	if !strings.Contains(msgBody, "Goal: Do the thing") {
+		t.Fatalf("message.body=%q want Goal: Do the thing", msgBody)
+	}
+	if !strings.Contains(msgBody, "Notes: Optional context") {
+		t.Fatalf("message.body=%q want Notes: Optional context", msgBody)
+	}
+
+	// Test: missing milestone_id returns 400
+	reqNoMS := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/agile", strings.NewReader(`{
+		"workspace":"ws1",
+		"action":"story_propose",
+		"title":"Missing milestone"
+	}`))
+	rrNoMS := httptest.NewRecorder()
+	h.ServeHTTP(rrNoMS, reqNoMS)
+	if rrNoMS.Code != http.StatusBadRequest {
+		t.Fatalf("missing milestone_id status=%d body=%s", rrNoMS.Code, rrNoMS.Body.String())
+	}
+
+	// Test: missing title returns 400
+	reqNoTitle := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/agile", strings.NewReader(fmt.Sprintf(`{
+		"workspace":"ws1",
+		"action":"story_propose",
+		"milestone_id":"%s"
+	}`, milestoneID)))
+	rrNoTitle := httptest.NewRecorder()
+	h.ServeHTTP(rrNoTitle, reqNoTitle)
+	if rrNoTitle.Code != http.StatusBadRequest {
+		t.Fatalf("missing title status=%d body=%s", rrNoTitle.Code, rrNoTitle.Body.String())
+	}
+}
+
+func TestRoomDetailHandler_RoomAgileStoryAccept(t *testing.T) {
+	h, cfg, _, milestoneID, _ := setupRoomAgileTest(t)
+
+	// Create a proposal via direct store.SendMessage
+	store, err := blackboard.OpenBoardStore(context.Background(), cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open board store: %v", err)
+	}
+	defer store.Close()
+
+	proposal := &agent.BoardMessage{
+		WorkspaceID:      "ws1",
+		Stream:           agent.RoomStreamName("alpha"),
+		Sender:           "human-a",
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindStoryProposal,
+		RelatedMessageID: milestoneID,
+		Subject:          "Story Proposal: Proposed feature",
+		Body:             "Title: Proposed feature\nGoal: Implement it",
+		Status:           agent.BoardMessageStatusUnread,
+		Priority:         agent.DefaultPriority,
+		CreatedAt:        time.Now().UTC(),
+	}
+	if err := store.SendMessage(context.Background(), proposal); err != nil {
+		t.Fatalf("send proposal: %v", err)
+	}
+
+	// Accept the proposal
+	req := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/agile", strings.NewReader(fmt.Sprintf(`{
+		"workspace":"ws1",
+		"action":"story_accept",
+		"proposal_id":"%s",
+		"actor":"human-a"
+	}`, proposal.ID)))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("story_accept status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	body := decodeResponseBody(t, rr)
+	result := body["result"].(map[string]any)
+	data := result["data"].(map[string]any)
+	message := data["message"].(map[string]any)
+	if got := message["kind"]; got != "story" {
+		t.Fatalf("message.kind=%v want story", got)
+	}
+	if got := message["subject"]; got != "Story: Proposed feature" {
+		t.Fatalf("message.subject=%v want Story: Proposed feature", got)
+	}
+	// The accepted story should point to the milestone (from proposal.related_message_id)
+	if got := message["related_message_id"]; got != milestoneID {
+		t.Fatalf("message.related_message_id=%v want %s (milestone)", got, milestoneID)
+	}
+	if got := data["proposal_id"]; got != proposal.ID {
+		t.Fatalf("proposal_id=%v want %s", got, proposal.ID)
+	}
+
+	// Test: missing proposal_id returns 400
+	reqNoID := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/agile", strings.NewReader(`{
+		"workspace":"ws1",
+		"action":"story_accept"
+	}`))
+	rrNoID := httptest.NewRecorder()
+	h.ServeHTTP(rrNoID, reqNoID)
+	if rrNoID.Code != http.StatusBadRequest {
+		t.Fatalf("missing proposal_id status=%d body=%s", rrNoID.Code, rrNoID.Body.String())
+	}
+
+	// Test: nonexistent proposal_id returns 404
+	reqNoProposal := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/agile", strings.NewReader(`{
+		"workspace":"ws1",
+		"action":"story_accept",
+		"proposal_id":"nonexistent"
+	}`))
+	rrNoProposal := httptest.NewRecorder()
+	h.ServeHTTP(rrNoProposal, reqNoProposal)
+	if rrNoProposal.Code != http.StatusNotFound {
+		t.Fatalf("nonexistent proposal status=%d body=%s", rrNoProposal.Code, rrNoProposal.Body.String())
 	}
 }

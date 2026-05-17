@@ -103,7 +103,8 @@ type recordCollection struct {
 }
 
 func main() {
-	skillmain.Main(command, skillmain.Chain(run,
+	skillmain.Main(command, skillmain.Chain(
+		run,
 		skillmain.WithRecover[Input](),
 	))
 }

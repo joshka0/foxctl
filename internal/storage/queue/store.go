@@ -225,7 +225,8 @@ func (s *Store) EnqueueBatch(ctx context.Context, reqs []EnqueueRequest) (*Enque
 		}
 
 		id := ulid.Make().String()
-		res, err := stmt.ExecContext(ctx,
+		res, err := stmt.ExecContext(
+			ctx,
 			id, req.GroupID, req.Payload, req.DedupeKey, priority, maxAttempts, nowStr, nowStr,
 		)
 		if err != nil {

@@ -107,7 +107,8 @@ type recordCandidate struct {
 
 // main is the skill entry point for memory/query with canonical record access.
 func main() {
-	skillmain.Main("memory/query", skillmain.Chain(run,
+	skillmain.Main("memory/query", skillmain.Chain(
+		run,
 		skillmain.WithTimeout[Input](DefaultTimeout),
 		skillmain.WithRecover[Input](),
 	))

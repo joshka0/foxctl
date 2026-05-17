@@ -77,17 +77,20 @@ func main() {
 	var el *components.EntityList
 	switch mode {
 	case "focused":
-		el = components.NewEntityList(items, 50, 10,
+		el = components.NewEntityList(
+			items, 50, 10,
 			components.WithSelectedIndex(2),
 			components.WithFocused(true),
 		)
 	case "unfocused":
-		el = components.NewEntityList(items, 50, 10,
+		el = components.NewEntityList(
+			items, 50, 10,
 			components.WithSelectedIndex(2),
 			components.WithFocused(false),
 		)
 	case "empty":
-		el = components.NewEntityList(nil, 50, 10,
+		el = components.NewEntityList(
+			nil, 50, 10,
 			components.WithFocused(true),
 			components.WithEmptyMessage("No agents running."),
 		)

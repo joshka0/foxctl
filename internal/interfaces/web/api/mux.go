@@ -13,6 +13,7 @@ import (
 	"github.com/joshka0/foxctl/internal/domain/agent"
 	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/runtime/terminal/agentpane"
+	"github.com/joshka0/foxctl/internal/runtime/terminal/herdrbridge"
 	"github.com/joshka0/foxctl/internal/runtime/terminal/tmuxbridge"
 )
 
@@ -37,6 +38,10 @@ type muxPaneResponse struct {
 
 var newMuxTMUXClient = func() *tmuxbridge.Client {
 	return tmuxbridge.New()
+}
+
+var newMuxHerdrClient = func(session, socketPath string) *herdrbridge.Client {
+	return herdrbridge.NewWithOptions(herdrbridge.Options{Session: session, SocketPath: socketPath})
 }
 
 func MuxReadHandler(_ config.Config, log zerolog.Logger) http.HandlerFunc {
@@ -73,8 +78,41 @@ func MuxReadHandler(_ config.Config, log zerolog.Logger) http.HandlerFunc {
 				"backend": "tmux",
 				"capture": capture,
 			})
+		case "herdr":
+			session := strings.TrimSpace(r.URL.Query().Get("session"))
+			socketPath := strings.TrimSpace(r.URL.Query().Get("socket"))
+			source := strings.TrimSpace(r.URL.Query().Get("source"))
+			if source == "" {
+				source = herdrbridge.ReadSourceRecent
+			}
+			format := strings.TrimSpace(r.URL.Query().Get("format"))
+			if format == "" {
+				format = herdrbridge.ReadFormatText
+			}
+			stripANSI := true
+			if raw := strings.TrimSpace(r.URL.Query().Get("strip_ansi")); raw != "" {
+				stripANSI = raw != "false" && raw != "0"
+			}
+			client := newMuxHerdrClient(session, socketPath)
+			capture, err := client.Read(r.Context(), target, herdrbridge.ReadOptions{
+				Source:       source,
+				Lines:        lines,
+				Format:       format,
+				StripANSI:    stripANSI,
+				StripANSISet: true,
+			})
+			if err != nil {
+				log.Error().Err(err).Str("target", target).Msg("failed to read herdr pane")
+				httpError(w, http.StatusInternalServerError, "failed to read herdr pane")
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"backend":     "herdr",
+				"socket_path": client.SocketPath(),
+				"capture":     capture,
+			})
 		default:
-			httpError(w, http.StatusBadRequest, "mux read currently supports backend=tmux only")
+			httpError(w, http.StatusBadRequest, "mux read supports backend=tmux or backend=herdr")
 		}
 	}
 }
@@ -154,10 +192,67 @@ func MuxPanesHandler(_ config.Config, log zerolog.Logger) http.HandlerFunc {
 				"count":   len(resp),
 				"panes":   resp,
 			})
+		case "herdr":
+			session := strings.TrimSpace(r.URL.Query().Get("session"))
+			socketPath := strings.TrimSpace(r.URL.Query().Get("socket"))
+			workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
+			client := newMuxHerdrClient(session, socketPath)
+			panes, err := client.List(r.Context(), herdrbridge.ListOptions{WorkspaceID: workspaceID})
+			if err != nil {
+				log.Error().Err(err).Msg("failed to list herdr panes")
+				httpError(w, http.StatusInternalServerError, "failed to list herdr panes")
+				return
+			}
+			resp := make([]muxPaneResponse, 0, len(panes))
+			for _, pane := range panes {
+				resp = append(resp, herdrMuxPaneResponse(pane, herdrSessionLabel(session)))
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"backend":     "herdr",
+				"socket_path": client.SocketPath(),
+				"count":       len(resp),
+				"panes":       resp,
+			})
 		default:
 			httpError(w, http.StatusBadRequest, "unsupported backend")
 		}
 	}
+}
+
+func herdrMuxPaneResponse(pane herdrbridge.Pane, session string) muxPaneResponse {
+	label := strings.TrimSpace(pane.Label)
+	participantID := label
+	if participantID == "" {
+		participantID = strings.TrimSpace(pane.PaneID)
+	}
+	display := strings.TrimSpace(pane.Agent)
+	if status := strings.TrimSpace(pane.CustomStatus); status != "" {
+		display = strings.TrimSpace(display + " " + status)
+	}
+	return muxPaneResponse{
+		Backend:        "herdr",
+		ID:             pane.PaneID,
+		Session:        session,
+		SessionPane:    pane.PaneID,
+		PaneName:       label,
+		Label:          label,
+		ParticipantID:  participantID,
+		Provider:       pane.Agent,
+		CurrentCommand: pane.Agent,
+		DisplayCommand: display,
+		State:          pane.AgentStatus,
+		Active:         pane.Focused,
+	}
+}
+
+func herdrSessionLabel(session string) string {
+	if session = strings.TrimSpace(session); session != "" {
+		return session
+	}
+	if session = strings.TrimSpace(os.Getenv("HERDR_SESSION")); session != "" {
+		return session
+	}
+	return "default"
 }
 
 func scanZellijPaneSockets(session string) []muxPaneResponse {

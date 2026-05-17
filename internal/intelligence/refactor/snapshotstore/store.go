@@ -74,7 +74,8 @@ func (s *Store) Put(ctx context.Context, record Record) error {
 	if record.IncludeTests {
 		includeTests = 1
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(
+		ctx, `
 INSERT INTO refactor_snapshot (
     snapshot_id, workspace, repo_root, path, language, include_tests, mode,
     git_head_sha, index_head_sha, artifact_digest, file_count, symbol_count, created_at

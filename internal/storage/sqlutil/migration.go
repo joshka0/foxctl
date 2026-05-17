@@ -126,7 +126,8 @@ func (m *Migrator) applyMigration(ctx context.Context, migration Migration) erro
 		if _, err := tx.ExecContext(ctx, migration.Up); err != nil {
 			return fmt.Errorf("sqlutil: apply migration %d %q: %w", migration.Version, migration.Name, err)
 		}
-		_, err := tx.ExecContext(ctx,
+		_, err := tx.ExecContext(
+			ctx,
 			`INSERT INTO schema_migrations(version, name, applied_at) VALUES($1, $2, $3) ON CONFLICT DO NOTHING`,
 			migration.Version,
 			migration.Name,

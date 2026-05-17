@@ -23,20 +23,23 @@ func LocateSessionJSONL(workspacePath, sessionID string) string {
 
 	// Try workspace-specific path first if provided
 	if workspacePath != "" {
-		patterns = append(patterns,
+		patterns = append(
+			patterns,
 			filepath.Join(workspacePath, ".claude", "sessions", sessionID+".jsonl"),
 		)
 
 		// Try workspace hash location
 		hash := sha256.Sum256([]byte(workspacePath))
 		workspaceHash := fmt.Sprintf("%x", hash)[:16]
-		patterns = append(patterns,
+		patterns = append(
+			patterns,
 			filepath.Join(homeDir, ".claude", "projects", workspaceHash, sessionID+".jsonl"),
 		)
 	}
 
 	// Then try global Claude locations with glob
-	patterns = append(patterns,
+	patterns = append(
+		patterns,
 		filepath.Join(homeDir, ".claude", "projects", "*", "sessions", sessionID+".jsonl"),
 		filepath.Join(homeDir, ".claude", "projects", "*", sessionID+".jsonl"),
 	)
@@ -67,14 +70,16 @@ func LocateAllSessionJSONLs(workspacePath string) []struct {
 
 	// Try workspace-specific location
 	if workspacePath != "" {
-		patterns = append(patterns,
+		patterns = append(
+			patterns,
 			filepath.Join(workspacePath, ".claude", "sessions", "*.jsonl"),
 		)
 
 		// Try workspace hash location
 		hash := sha256.Sum256([]byte(workspacePath))
 		workspaceHash := fmt.Sprintf("%x", hash)[:16]
-		patterns = append(patterns,
+		patterns = append(
+			patterns,
 			filepath.Join(homeDir, ".claude", "projects", workspaceHash, "*.jsonl"),
 		)
 	}

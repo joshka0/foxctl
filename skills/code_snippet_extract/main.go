@@ -91,7 +91,8 @@ func newSkillError(code, message, hint string, opts ...skillerr.Option) *skiller
 }
 
 func main() {
-	skillmain.Main(Command, skillmain.Chain(run,
+	skillmain.Main(Command, skillmain.Chain(
+		run,
 		skillmain.WithRecover[Input](),
 	))
 }

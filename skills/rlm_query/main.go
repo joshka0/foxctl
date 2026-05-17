@@ -77,7 +77,8 @@ type Output struct {
 type rlmRunner func(ctx context.Context, dir, bin string, env []string, args ...string) executil.CmdResult
 
 func main() {
-	skillmain.Main(Command, skillmain.Chain(run,
+	skillmain.Main(Command, skillmain.Chain(
+		run,
 		skillmain.WithTimeout[Input](90*time.Second),
 		skillmain.WithRecover[Input](),
 	))
@@ -120,17 +121,20 @@ func executeRLMQuery(ctx context.Context, rcWorkspace string, in Input, runner r
 	rlmEnv, logs, decodeErr := extractRLMEnvelope(result.Stdout)
 	if decodeErr != nil {
 		if result.Err != nil {
-			return nil, skillerr.WrapRuntime("run rlm query", result.Err,
+			return nil, skillerr.WrapRuntime(
+				"run rlm query", result.Err,
 				skillerr.WithData("stderr", previewBytes(result.Stderr, 1000)),
 				skillerr.WithData("stdout", previewBytes(result.Stdout, 1000)),
 			)
 		}
-		return nil, skillerr.WrapParse("decode rlm envelope", decodeErr,
+		return nil, skillerr.WrapParse(
+			"decode rlm envelope", decodeErr,
 			skillerr.WithData("stdout", previewBytes(result.Stdout, 1000)),
 		)
 	}
 	if rlmEnv.Status == envelope.StatusError {
-		return nil, skillerr.Runtime("rlm query failed",
+		return nil, skillerr.Runtime(
+			"rlm query failed",
 			skillerr.WithData("code", rlmEnv.Error.Code),
 			skillerr.WithData("message", rlmEnv.Error.Message),
 			skillerr.WithData("stderr", previewBytes(result.Stderr, 1000)),
@@ -220,7 +224,8 @@ func buildRLMArgs(workspaceRoot string, in Input) []string {
 		fmt.Sprintf("--require-tool-use=%t", *in.RequireToolUse),
 	}
 	if in.Executor == "llm" {
-		args = append(args,
+		args = append(
+			args,
 			"--llm-provider", in.LLMProvider,
 			"--llm-model", in.LLMModel,
 			"--llm-timeout", in.LLMTimeout,

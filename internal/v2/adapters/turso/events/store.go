@@ -162,7 +162,8 @@ func appendNormalized(ctx context.Context, tx *sql.Tx, event v2events.Event, cre
 		)
 	}
 
-	_, err := tx.ExecContext(ctx, `
+	_, err := tx.ExecContext(
+		ctx, `
 		INSERT INTO v2_events (
 			id, stream_id, stream_type, stream_version, sequence, event_type, occurred_at,
 			correlation_id, causation_id, actor_id, request_id, command, payload, created_at
@@ -316,7 +317,8 @@ func (s *Store) DeleteOrchestrationIssueHistory(ctx context.Context, workspaceID
 		}
 	}
 
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.db.QueryContext(
+		ctx, `
 		SELECT id, payload
 		FROM v2_events
 		WHERE command IN ($1, $2)

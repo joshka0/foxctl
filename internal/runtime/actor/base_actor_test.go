@@ -52,7 +52,8 @@ func TestBaseActor_StartStopHooks(t *testing.T) {
 	stopCalled := false
 
 	cfg := DefaultConfig("test-ns")
-	actor := NewBaseActor(cfg,
+	actor := NewBaseActor(
+		cfg,
 		WithOnStart(func(ctx context.Context) error {
 			startCalled = true
 			return nil
@@ -83,7 +84,8 @@ func TestBaseActor_StartStopHooks(t *testing.T) {
 func TestBaseActor_StartHookError(t *testing.T) {
 	expectedErr := errors.New("start failed")
 	cfg := DefaultConfig("test-ns")
-	actor := NewBaseActor(cfg,
+	actor := NewBaseActor(
+		cfg,
 		WithOnStart(func(ctx context.Context) error {
 			return expectedErr
 		}),
@@ -148,7 +150,8 @@ func TestBaseActor_HandlerWithReply(t *testing.T) {
 	cfg := DefaultConfig("test-ns")
 
 	var sentReply *Message
-	actor := NewBaseActor(cfg,
+	actor := NewBaseActor(
+		cfg,
 		WithReplySender(func(ctx context.Context, msg *Message) error {
 			sentReply = msg
 			return nil
@@ -198,7 +201,8 @@ func TestBaseActor_OnError(t *testing.T) {
 	}
 
 	// Custom error handler
-	actor = NewBaseActor(cfg,
+	actor = NewBaseActor(
+		cfg,
 		WithOnError(func(ctx context.Context, err error) Directive {
 			return DirectiveRestart
 		}),
@@ -214,7 +218,8 @@ func TestBaseActor_OnTimeout(t *testing.T) {
 	cfg := DefaultConfig("test-ns")
 
 	timeoutHandled := false
-	actor := NewBaseActor(cfg,
+	actor := NewBaseActor(
+		cfg,
 		WithOnTimeout(func(ctx context.Context, event TimerEvent) error {
 			timeoutHandled = true
 			if event.Name != "test-timer" {

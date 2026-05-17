@@ -419,7 +419,8 @@ func (s *Store) UpsertRoomReminder(ctx context.Context, reminder RoomReminder) (
 	if reminder.LastSentAt != nil && !reminder.LastSentAt.IsZero() {
 		lastSent = reminder.LastSentAt.UnixMilli()
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(
+		ctx, `
 		INSERT INTO room_reminders (
 			id, workspace_id, room_id, root_message_id, task_id, story_id, milestone_id, sender, recipient, subject, body,
 			ack_required, reply_expected, interrupt, passive, interval_ms, max_iterations, sent_count,
@@ -613,7 +614,8 @@ func (s *Store) UpsertRoomLoop(ctx context.Context, loop RoomLoop) (RoomLoop, er
 	if err != nil {
 		return RoomLoop{}, fmt.Errorf("coordination: encode coordinator pulse state: %w", err)
 	}
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(
+		ctx, `
 		INSERT INTO room_loops (
 			workspace_id, room_id, enabled, managed_by, last_tick_at_ms,
 			delivery_lease_name, delivery_owner_id, delivery_cursor_message_id, delivery_cursor_at_ms,

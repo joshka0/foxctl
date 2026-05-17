@@ -159,7 +159,8 @@ type RankingProvider interface {
 
 // main is the skill entry point for code/llm_search.
 func main() {
-	skillmain.Main(Command, skillmain.Chain(run,
+	skillmain.Main(Command, skillmain.Chain(
+		run,
 		skillmain.WithDynamicTimeout[Input](func(in Input) time.Duration {
 			if in.Limits.Timeout > 0 {
 				return in.Limits.Timeout

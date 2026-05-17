@@ -138,7 +138,8 @@ func BootDaemon(t testing.TB, opts SeedOpts) *DaemonFixture {
 	//    daemon doesn't get killed when our parent context expires. We manage the
 	//    daemon lifecycle ourselves via killDaemon in cleanup.
 	cmd := exec.Command(binPath, "web", "serve", "-p", "0")
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(
+		os.Environ(),
 		"FOXCTL_STORAGE_ROOT="+storageRoot,
 		"FOXCTL_LOG_LEVEL=warn",
 		"FOXCTL_LOGGING_OUTPUT=stderr",

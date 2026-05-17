@@ -137,7 +137,8 @@ type metricsOut struct {
 
 // main is the skill entry point for verification/cove_verify.
 func main() {
-	skillmain.Main(command, skillmain.Chain(run,
+	skillmain.Main(command, skillmain.Chain(
+		run,
 		skillmain.WithRecover[input](),
 	))
 }

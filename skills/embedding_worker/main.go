@@ -119,7 +119,8 @@ type QueueSnapshot struct {
 
 // main is the skill entry point for embedding/worker.
 func main() {
-	skillmain.Main(command, skillmain.Chain(run,
+	skillmain.Main(command, skillmain.Chain(
+		run,
 		skillmain.WithRecover[Input](),
 	))
 }

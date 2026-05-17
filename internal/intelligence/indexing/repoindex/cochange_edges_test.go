@@ -190,7 +190,8 @@ func writeRepoFile(t *testing.T, root, rel, body string) {
 func commitRepoGitAt(t *testing.T, root string, at time.Time, message string) {
 	t.Helper()
 	cmd := exec.Command("git", "-C", root, "-c", "user.name=Foxctl Test", "-c", "user.email=foxctl@example.invalid", "commit", "-m", message)
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(
+		os.Environ(),
 		"GIT_AUTHOR_DATE="+at.Format(time.RFC3339),
 		"GIT_COMMITTER_DATE="+at.Format(time.RFC3339),
 	)

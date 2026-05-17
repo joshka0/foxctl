@@ -78,12 +78,14 @@ func main() {
 	switch mode {
 	case "follow":
 		// Follow-tail engaged: viewer at bottom, showing last lines.
-		sv = components.NewStreamViewer(lines, svWidth, svHeight,
+		sv = components.NewStreamViewer(
+			lines, svWidth, svHeight,
 			components.WithSVFocused(true),
 		)
 	case "scrolled":
 		// Follow-tail disengaged: user has scrolled up.
-		sv = components.NewStreamViewer(lines, svWidth, svHeight,
+		sv = components.NewStreamViewer(
+			lines, svWidth, svHeight,
 			components.WithSVFocused(true),
 		)
 		// Scroll up to disengage follow.

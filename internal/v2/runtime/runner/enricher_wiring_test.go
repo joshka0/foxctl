@@ -63,7 +63,8 @@ func TestPipeline_EventBusPublishFailure_DoesNotFailTurn(t *testing.T) {
 	if eventErrors.Load() == 0 {
 		t.Fatal("expected non-fatal event bus publish errors to be observed")
 	}
-	assertEventTypes(t, store.Events(),
+	assertEventTypes(
+		t, store.Events(),
 		coreevents.EventRunStarted,
 		coreevents.EventTurnRecorded,
 		coreevents.EventRunCompleted,

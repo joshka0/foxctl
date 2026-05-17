@@ -40,7 +40,8 @@ func newTestMemoryWithLLM(t *testing.T, llmResponse string, convID string, start
 		Model:    "test-model",
 	})
 
-	mem, err := NewConversationMemory(db,
+	mem, err := NewConversationMemory(
+		db,
 		WithSummarizer(summarizer),
 		WithEpisodeSummaryRunner(runner),
 	)

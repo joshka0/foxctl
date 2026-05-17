@@ -26,7 +26,8 @@ func TestDrawerOpen(t *testing.T) {
 	t.Parallel()
 
 	content := []string{"Line 1", "Line 2", "Line 3"}
-	d, mt := renderDrawer("Evidence", content, 30, 10,
+	d, mt := renderDrawer(
+		"Evidence", content, 30, 10,
 		WithDrawerOpen(true),
 		WithDrawerFocused(true),
 	)
@@ -59,7 +60,8 @@ func TestDrawerClosedRendersNothing(t *testing.T) {
 	t.Parallel()
 
 	content := []string{"Line 1", "Line 2"}
-	d, mt := renderDrawer("Evidence", content, 30, 10,
+	d, mt := renderDrawer(
+		"Evidence", content, 30, 10,
 		WithDrawerOpen(false),
 	)
 
@@ -84,7 +86,8 @@ func TestDrawerCloseViaESC(t *testing.T) {
 
 	var closeCount int
 	content := []string{"Line 1"}
-	d := NewDrawer("Evidence", content, 30, 10,
+	d := NewDrawer(
+		"Evidence", content, 30, 10,
 		WithDrawerOpen(true),
 		WithDrawerFocused(true),
 		WithDrawerOnClose(func() { closeCount++ }),
@@ -108,7 +111,8 @@ func TestDrawerESCIgnoredWhenClosed(t *testing.T) {
 
 	var closeCount int
 	content := []string{"Line 1"}
-	d := NewDrawer("Evidence", content, 30, 10,
+	d := NewDrawer(
+		"Evidence", content, 30, 10,
 		WithDrawerOpen(false),
 		WithDrawerOnClose(func() { closeCount++ }),
 	)
@@ -129,7 +133,8 @@ func TestDrawerFocusTrapTab(t *testing.T) {
 	t.Parallel()
 
 	content := []string{"Line 1", "Line 2", "Line 3"}
-	d := NewDrawer("Evidence", content, 30, 10,
+	d := NewDrawer(
+		"Evidence", content, 30, 10,
 		WithDrawerOpen(true),
 		WithDrawerFocused(true),
 	)
@@ -153,7 +158,8 @@ func TestDrawerFocusTrapShiftTab(t *testing.T) {
 	t.Parallel()
 
 	content := []string{"Line 1"}
-	d := NewDrawer("Evidence", content, 30, 10,
+	d := NewDrawer(
+		"Evidence", content, 30, 10,
 		WithDrawerOpen(true),
 		WithDrawerFocused(true),
 	)
@@ -169,7 +175,8 @@ func TestDrawerKeysIgnoredWhenNotFocused(t *testing.T) {
 	t.Parallel()
 
 	content := []string{"Line 1"}
-	d := NewDrawer("Evidence", content, 30, 10,
+	d := NewDrawer(
+		"Evidence", content, 30, 10,
 		WithDrawerOpen(true),
 		WithDrawerFocused(false),
 	)
@@ -193,7 +200,8 @@ func TestDrawerFocusRestoreOnClose(t *testing.T) {
 
 	content := []string{"Line 1"}
 	var restoredRef string
-	d := NewDrawer("Evidence", content, 30, 10,
+	d := NewDrawer(
+		"Evidence", content, 30, 10,
 		WithDrawerOpen(true),
 		WithDrawerFocused(true),
 		WithDrawerPreviouslyFocused("entity-list"),
@@ -215,7 +223,8 @@ func TestDrawerFocusRestoreNotCalledWhenAlreadyClosed(t *testing.T) {
 
 	content := []string{"Line 1"}
 	var restoreCount int
-	d := NewDrawer("Evidence", content, 30, 10,
+	d := NewDrawer(
+		"Evidence", content, 30, 10,
 		WithDrawerOpen(false),
 		WithDrawerPreviouslyFocused("entity-list"),
 		WithDrawerOnRestoreFocus(func(ref string) {
@@ -238,7 +247,8 @@ func TestDrawerDoubleCloseSafe(t *testing.T) {
 
 	var closeCount int
 	content := []string{"Line 1"}
-	d := NewDrawer("Evidence", content, 30, 10,
+	d := NewDrawer(
+		"Evidence", content, 30, 10,
 		WithDrawerOpen(true),
 		WithDrawerFocused(true),
 		WithDrawerOnClose(func() { closeCount++ }),
@@ -265,7 +275,8 @@ func TestDrawerDoubleCloseViaESCSafe(t *testing.T) {
 
 	var closeCount int
 	content := []string{"Line 1"}
-	d := NewDrawer("Evidence", content, 30, 10,
+	d := NewDrawer(
+		"Evidence", content, 30, 10,
 		WithDrawerOpen(true),
 		WithDrawerFocused(true),
 		WithDrawerOnClose(func() { closeCount++ }),
@@ -297,7 +308,8 @@ func TestDrawerScrollContent(t *testing.T) {
 		"Line 1", "Line 2", "Line 3", "Line 4", "Line 5",
 		"Line 6", "Line 7", "Line 8", "Line 9", "Line 10",
 	}
-	d := NewDrawer("Evidence", content, 30, 6,
+	d := NewDrawer(
+		"Evidence", content, 30, 6,
 		WithDrawerOpen(true),
 		WithDrawerFocused(true),
 	)
@@ -326,7 +338,8 @@ func TestDrawerPageDownPageUp(t *testing.T) {
 	for i := range content {
 		content[i] = "Line"
 	}
-	d := NewDrawer("Evidence", content, 30, 6,
+	d := NewDrawer(
+		"Evidence", content, 30, 6,
 		WithDrawerOpen(true),
 		WithDrawerFocused(true),
 	)
@@ -352,7 +365,8 @@ func TestDrawerHomeEnd(t *testing.T) {
 	for i := range content {
 		content[i] = "Line"
 	}
-	d := NewDrawer("Evidence", content, 30, 6,
+	d := NewDrawer(
+		"Evidence", content, 30, 6,
 		WithDrawerOpen(true),
 		WithDrawerFocused(true),
 	)
@@ -376,7 +390,8 @@ func TestDrawerFocusIndicatorWhenOpen(t *testing.T) {
 	t.Parallel()
 
 	content := []string{"Line 1", "Line 2"}
-	_, mt := renderDrawer("Evidence", content, 30, 10,
+	_, mt := renderDrawer(
+		"Evidence", content, 30, 10,
 		WithDrawerOpen(true),
 		WithDrawerFocused(true),
 	)
@@ -399,7 +414,8 @@ func TestDrawerNoFocusIndicatorWhenUnfocused(t *testing.T) {
 	t.Parallel()
 
 	content := []string{"Line 1", "Line 2"}
-	_, mt := renderDrawer("Evidence", content, 30, 10,
+	_, mt := renderDrawer(
+		"Evidence", content, 30, 10,
 		WithDrawerOpen(true),
 		WithDrawerFocused(false),
 	)
@@ -437,7 +453,8 @@ func TestDrawerOpenMethodIdempotent(t *testing.T) {
 
 	var closeCount int
 	content := []string{"Line 1"}
-	d := NewDrawer("Evidence", content, 30, 10,
+	d := NewDrawer(
+		"Evidence", content, 30, 10,
 		WithDrawerOnClose(func() { closeCount++ }),
 	)
 
@@ -484,7 +501,8 @@ func TestDrawerCloseHintRendered(t *testing.T) {
 	t.Parallel()
 
 	content := []string{"Line 1"}
-	_, mt := renderDrawer("Evidence", content, 40, 10,
+	_, mt := renderDrawer(
+		"Evidence", content, 40, 10,
 		WithDrawerOpen(true),
 		WithDrawerFocused(true),
 	)
@@ -501,7 +519,8 @@ func TestDrawerCloseHintRendered(t *testing.T) {
 func TestDrawerEmptyContent(t *testing.T) {
 	t.Parallel()
 
-	d, mt := renderDrawer("Evidence", nil, 30, 10,
+	d, mt := renderDrawer(
+		"Evidence", nil, 30, 10,
 		WithDrawerOpen(true),
 		WithDrawerFocused(true),
 	)
@@ -521,7 +540,8 @@ func TestDrawerScrollClamped(t *testing.T) {
 	t.Parallel()
 
 	content := []string{"Only one line"}
-	d := NewDrawer("Evidence", content, 30, 10,
+	d := NewDrawer(
+		"Evidence", content, 30, 10,
 		WithDrawerOpen(true),
 		WithDrawerFocused(true),
 	)

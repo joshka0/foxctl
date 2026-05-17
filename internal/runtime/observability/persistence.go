@@ -204,7 +204,8 @@ func (s *EventStore) Insert(ctx context.Context, event *Event) error {
 		retriable = &v
 	}
 
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(
+		ctx, `
 		INSERT OR REPLACE INTO foxcular_events (
 			span_id, trace_id, parent_id, ts, service, version, component,
 			operation, command, subtype, session_id, agent_id, workspace_id, job_id,

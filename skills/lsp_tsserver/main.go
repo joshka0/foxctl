@@ -85,7 +85,8 @@ type LSPClient struct {
 
 // main is the skill entry point for lsp/tsserver with comprehensive TypeScript/JavaScript language server capabilities.
 func main() {
-	skillmain.Main(command, skillmain.Chain(run,
+	skillmain.Main(command, skillmain.Chain(
+		run,
 		skillmain.WithDynamicTimeout[input](func(in input) time.Duration {
 			if in.Timeout > 0 {
 				return time.Duration(in.Timeout) * time.Second

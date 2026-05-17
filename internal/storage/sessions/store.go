@@ -209,7 +209,8 @@ func (s *Store) Save(ctx context.Context, session Session) (Session, error) {
 		parentSessionID = session.ParentSessionID
 	}
 
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(
+		ctx, `
 INSERT INTO sessions (
 	id, workspace_id, workspace_path, project_name, git_branch, claude_version,
 	started_at, ended_at, summary, accomplished, decisions, gotchas,
@@ -1100,7 +1101,8 @@ func (s *Store) SaveTurn(ctx context.Context, turn SessionTurn) (SessionTurn, er
 		hasError = 1
 	}
 
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(
+		ctx, `
 INSERT INTO session_turns (
 	id, session_id, turn_index, role, content_preview, content_cas_digest, tool_calls, files_touched,
 	has_error, error_type, error_message, resolution, tokens_used, timestamp, created_at
@@ -1186,7 +1188,8 @@ ON CONFLICT(id) DO UPDATE SET
 			hasError = 1
 		}
 
-		_, err = stmt.ExecContext(ctx,
+		_, err = stmt.ExecContext(
+			ctx,
 			turn.ID, turn.SessionID, turn.TurnIndex, turn.Role, turn.ContentPreview,
 			toolCallsJSON, filesTouchedJSON, hasError, turn.ErrorType, turn.ErrorMessage,
 			turn.Resolution, turn.TokensUsed, sqlutil.FormatTimestamp(turn.Timestamp),
@@ -1317,7 +1320,8 @@ func (s *Store) SaveChunk(ctx context.Context, chunk SessionChunk) (SessionChunk
 		return SessionChunk{}, fmt.Errorf("sessions: format files_touched: %w", err)
 	}
 
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(
+		ctx, `
 INSERT INTO session_chunks (
 	id, session_id, chunk_index, chunk_type, content_hash, content_preview,
 	byte_offset, byte_length, tools_used, files_touched, has_error, error_type,
@@ -1415,7 +1419,8 @@ ON CONFLICT(id) DO UPDATE SET
 		toolsUsedJSON, _ := sqlutil.FormatJSON(chunk.ToolsUsed)
 		filesTouchedJSON, _ := sqlutil.FormatJSON(chunk.FilesTouched)
 
-		_, err := stmt.ExecContext(ctx,
+		_, err := stmt.ExecContext(
+			ctx,
 			chunk.ID, chunk.SessionID, chunk.ChunkIndex, chunk.ChunkType, chunk.ContentHash,
 			chunk.ContentPreview, chunk.ByteOffset, chunk.ByteLength, toolsUsedJSON, filesTouchedJSON,
 			boolToInt(chunk.HasError), chunk.ErrorType, chunk.ContextWindowIndex, chunk.Embedding, chunk.EmbeddingModel,
@@ -1602,7 +1607,8 @@ func (s *Store) SaveChunkSummary(ctx context.Context, summary SessionChunkSummar
 		return SessionChunkSummary{}, fmt.Errorf("sessions: format errors: %w", err)
 	}
 
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(
+		ctx, `
 INSERT INTO session_chunk_summaries (
 	id, session_id, window_index, trigger, chunk_indices, chunk_index_min, chunk_index_max, tools, files, errors,
 	summary, summary_model, created_at, updated_at
@@ -1695,7 +1701,8 @@ ON CONFLICT(id) DO UPDATE SET
 		filesJSON, _ := sqlutil.FormatJSON(summary.Files)
 		errorsJSON, _ := sqlutil.FormatJSON(summary.Errors)
 
-		_, err := stmt.ExecContext(ctx,
+		_, err := stmt.ExecContext(
+			ctx,
 			summary.ID, summary.SessionID, summary.WindowIndex, summary.Trigger, chunkIndicesJSON,
 			summary.ChunkIndexMin, summary.ChunkIndexMax, toolsJSON, filesJSON, errorsJSON,
 			summary.Summary, summary.SummaryModel,
@@ -1789,7 +1796,8 @@ func (s *Store) SaveContextWindow(ctx context.Context, window ContextWindow) (Co
 		return ContextWindow{}, err
 	}
 
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(
+		ctx, `
 INSERT INTO session_context_windows (
 	id, session_id, window_index, started_at, ended_at, pre_compact_tokens,
 	trigger, chunk_start, chunk_end, message_count, summary, embedding, embedding_model, created_at
@@ -1884,7 +1892,8 @@ ON CONFLICT(session_id, window_index) DO UPDATE SET
 			window.CreatedAt = now
 		}
 
-		_, err := stmt.ExecContext(ctx,
+		_, err := stmt.ExecContext(
+			ctx,
 			window.ID, window.SessionID, window.WindowIndex,
 			sqlutil.FormatTimestamp(window.StartedAt), sqlutil.FormatTimestamp(window.EndedAt),
 			window.PreCompactTokens, window.Trigger, window.ChunkStart, window.ChunkEnd,

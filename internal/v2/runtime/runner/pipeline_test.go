@@ -90,7 +90,8 @@ func TestPipeline_HappyPath_OrderedExecution(t *testing.T) {
 	}
 
 	eventsList := store.Events()
-	assertEventTypes(t, eventsList,
+	assertEventTypes(
+		t, eventsList,
 		events.EventRunStarted,
 		events.EventToolInvoked,
 		events.EventToolResponded,
@@ -383,7 +384,8 @@ func TestPipeline_TursoEventStore_SecondTurnSameRunContinuesStreamCursor(t *test
 			t.Fatalf("event[%d].sequence=%d want %d", i, evt.Sequence, want)
 		}
 	}
-	assertEventTypes(t, stream,
+	assertEventTypes(
+		t, stream,
 		events.EventRunStarted,
 		events.EventTurnRecorded,
 		events.EventRunCompleted,
@@ -1058,7 +1060,8 @@ func TestPipeline_ModelResponseWithoutToolsRespectsDoneFlag(t *testing.T) {
 	if out.Iterations != 2 {
 		t.Fatalf("Iterations=%d want 2", out.Iterations)
 	}
-	assertEventTypes(t, store.Events(),
+	assertEventTypes(
+		t, store.Events(),
 		events.EventRunStarted,
 		events.EventTurnRecorded,
 		events.EventRunCompleted,
@@ -1116,7 +1119,8 @@ func TestPipeline_StageFailure_NonFatalContinues(t *testing.T) {
 		t.Fatalf("StageFailures[0].Stage=%q want %q", out.StageFailures[0].Stage, runner.StageApplyPreHooks)
 	}
 
-	assertEventTypes(t, store.Events(),
+	assertEventTypes(
+		t, store.Events(),
 		events.EventRunStarted,
 		events.EventStageFailed,
 		events.EventTurnRecorded,
@@ -1169,7 +1173,8 @@ func TestPipeline_ToolExecutorError_StopsBeforePersist(t *testing.T) {
 		t.Fatalf("error kind=%q want %q", verr.Kind, v2errors.ErrToolFailed)
 	}
 
-	assertEventTypes(t, store.Events(),
+	assertEventTypes(
+		t, store.Events(),
 		events.EventRunStarted,
 		events.EventToolInvoked,
 		events.EventToolResponded,
@@ -1219,7 +1224,8 @@ func TestPipeline_PostHookFailure_StopsBeforePersist(t *testing.T) {
 		t.Fatalf("error kind=%q want %q", verr.Kind, v2errors.ErrStageFailed)
 	}
 
-	assertEventTypes(t, store.Events(),
+	assertEventTypes(
+		t, store.Events(),
 		events.EventRunStarted,
 		events.EventRunFailed,
 	)

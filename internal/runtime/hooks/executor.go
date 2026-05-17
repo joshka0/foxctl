@@ -102,7 +102,8 @@ func (e *DefaultExecutor) Execute(ctx context.Context, actions []Action, input I
 	var injectedContext string
 
 	for i, action := range actions {
-		e.logger.Debug("executing action",
+		e.logger.Debug(
+			"executing action",
 			"index", i,
 			"type", action.Type,
 			"session_id", input.SessionID,
@@ -140,7 +141,8 @@ func (e *DefaultExecutor) Execute(ctx context.Context, actions []Action, input I
 		}
 
 		if err != nil {
-			e.logger.Warn("action execution failed",
+			e.logger.Warn(
+				"action execution failed",
 				"type", action.Type,
 				"error", err,
 			)
@@ -164,7 +166,8 @@ func (e *DefaultExecutor) executeRunSkill(ctx context.Context, action Action, in
 		return fmt.Errorf("run_skill: skill name required")
 	}
 
-	e.logger.Debug("running skill",
+	e.logger.Debug(
+		"running skill",
 		"skill", action.Skill,
 		"session_id", input.SessionID,
 	)
@@ -174,7 +177,8 @@ func (e *DefaultExecutor) executeRunSkill(ctx context.Context, action Action, in
 		return fmt.Errorf("run_skill %s: %w", action.Skill, err)
 	}
 
-	e.logger.Debug("skill completed",
+	e.logger.Debug(
+		"skill completed",
 		"skill", action.Skill,
 		"result_len", len(result),
 	)
@@ -224,7 +228,8 @@ func (e *DefaultExecutor) executeEnqueueContext(ctx context.Context, action Acti
 		return fmt.Errorf("enqueue_context: %w", err)
 	}
 
-	e.logger.Debug("enqueued context",
+	e.logger.Debug(
+		"enqueued context",
 		"entry_id", entry.ID,
 		"source", source,
 		"session_id", input.SessionID,
@@ -272,7 +277,8 @@ func (e *DefaultExecutor) executeSendMailbox(ctx context.Context, action Action,
 		return fmt.Errorf("send_mailbox: %w", err)
 	}
 
-	e.logger.Debug("sent mailbox message",
+	e.logger.Debug(
+		"sent mailbox message",
 		"message_id", msg.ID,
 		"to_ns", action.ToNS,
 		"type", msgType,
@@ -307,7 +313,8 @@ func (e *DefaultExecutor) executeBBPost(ctx context.Context, action Action, inpu
 		return fmt.Errorf("bb_post: %w", err)
 	}
 
-	e.logger.Debug("posted to blackboard",
+	e.logger.Debug(
+		"posted to blackboard",
 		"message_id", msg.ID,
 		"topic", action.Topic,
 	)
@@ -332,7 +339,8 @@ func (e *DefaultExecutor) executeBBClaim(ctx context.Context, action Action, inp
 		return fmt.Errorf("bb_claim: %w", err)
 	}
 
-	e.logger.Debug("claimed blackboard record",
+	e.logger.Debug(
+		"claimed blackboard record",
 		"record_id", action.RecordID,
 		"topic", action.Topic,
 	)

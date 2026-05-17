@@ -318,7 +318,8 @@ func (l *Loader) parse(ctx context.Context, data []byte, source, digest string, 
 			return nil, fmt.Errorf("invalid OpenAPI spec: %w", err)
 		}
 	} else {
-		if err := doc.Validate(ctx,
+		if err := doc.Validate(
+			ctx,
 			openapi3.DisableSchemaDefaultsValidation(),
 			openapi3.DisableExamplesValidation(),
 		); err != nil {

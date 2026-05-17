@@ -609,6 +609,8 @@ func handleRoomSubresourceRoute(w http.ResponseWriter, r *http.Request, cfg conf
 		handleRoomGetOnly(w, r, func() { handleRoomStatusGet(w, r, cfg, log, roomID) })
 	case "inbox":
 		handleRoomGetOnly(w, r, func() { handleRoomInboxGet(w, r, cfg, log, roomID) })
+	case "agile":
+		handleRoomAgileRoute(w, r, cfg, log, roomID)
 	case "tasks":
 		handleRoomTasksRoute(w, r, cfg, log, events, roomID, parts)
 	case "loop":

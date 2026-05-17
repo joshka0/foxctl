@@ -67,7 +67,8 @@ func initGitRepoForCoChangeAPI(t *testing.T, workspace string) {
 	runGit := func(args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", append([]string{"-C", workspace}, args...)...)
-		cmd.Env = append(os.Environ(),
+		cmd.Env = append(
+			os.Environ(),
 			"GIT_AUTHOR_NAME=Test User",
 			"GIT_AUTHOR_EMAIL=test@example.com",
 			"GIT_COMMITTER_NAME=Test User",

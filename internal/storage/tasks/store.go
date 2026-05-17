@@ -1009,7 +1009,8 @@ func scanTask(row *sql.Row) (Task, error) {
 		&childrenJSON, &dependsOnJSON, &t.Status, &createdAtStr, &completedAtStr, &assignedActorID, &assignedAtStr, &ownerActorID, &claimedAtStr, &heartbeatAtStr, &blockedReason, &blockedAtStr,
 		&notes, &gotchas, &lastReviewStatus, &lastReviewAt, &lastReviewID,
 		&planFile, &planSection, &sessionID, &pagerank, &epicID, &milestoneID,
-		&atomicDescription, &entitiesJSON, &keywordsJSON)
+		&atomicDescription, &entitiesJSON, &keywordsJSON,
+	)
 	if err != nil {
 		if dbutil.IsNoRows(err) {
 			return Task{}, err
@@ -1327,7 +1328,8 @@ func scanTaskRow(rows *sql.Rows) (Task, error) {
 		&childrenJSON, &dependsOnJSON, &t.Status, &createdAtStr, &completedAtStr, &assignedActorID, &assignedAtStr, &ownerActorID, &claimedAtStr, &heartbeatAtStr, &blockedReason, &blockedAtStr,
 		&notes, &gotchas, &lastReviewStatus, &lastReviewAt, &lastReviewID,
 		&planFile, &planSection, &sessionID, &pagerank, &epicID, &milestoneID,
-		&atomicDescription, &entitiesJSON, &keywordsJSON)
+		&atomicDescription, &entitiesJSON, &keywordsJSON,
+	)
 	if err != nil {
 		return Task{}, fmt.Errorf("tasks: scan row: %w", err)
 	}

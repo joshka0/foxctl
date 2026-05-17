@@ -143,7 +143,8 @@ const (
 )
 
 func main() {
-	skillmain.Main(commandName, skillmain.Chain(run,
+	skillmain.Main(commandName, skillmain.Chain(
+		run,
 		skillmain.WithTimeout[Input](5*time.Minute),
 		skillmain.WithRecover[Input](),
 	))
@@ -242,7 +243,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 }
 
 func extractWithFallback(ctx context.Context, rc *skillmain.RunContext, providers []LLMProvider, transcriptPath string, userMaxTokens int) (*LLMResponse, string, error) {
-	r, err := skillmain.TryProviders(rc, skillmain.BreakerLLMProvider, ctx, providers,
+	r, err := skillmain.TryProviders(
+		rc, skillmain.BreakerLLMProvider, ctx, providers,
 		func(ctx context.Context, p LLMProvider) (llmResult, error) {
 			tokens := p.MaxTokens
 			if userMaxTokens > 0 && userMaxTokens < tokens {
@@ -277,7 +279,8 @@ func extractFromContent(ctx context.Context, rc *skillmain.RunContext, providers
 		content = content[len(content)-maxChars:] // Keep most recent
 	}
 
-	r, err := skillmain.TryProviders(rc, skillmain.BreakerLLMProvider, ctx, providers,
+	r, err := skillmain.TryProviders(
+		rc, skillmain.BreakerLLMProvider, ctx, providers,
 		func(ctx context.Context, p LLMProvider) (llmResult, error) {
 			var resp *LLMResponse
 			var e error

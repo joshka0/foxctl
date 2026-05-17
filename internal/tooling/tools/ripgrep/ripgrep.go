@@ -206,7 +206,8 @@ func buildArgs(opts SearchOpts, jsonOutput bool) []string {
 		args = append(args, "--json")
 	}
 
-	args = append(args,
+	args = append(
+		args,
 		"--no-heading",
 		"--line-number",
 		"--no-messages",

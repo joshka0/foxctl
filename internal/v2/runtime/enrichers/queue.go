@@ -26,7 +26,8 @@ func (j Job) Key() string {
 	if turnID == "" {
 		turnID = strings.TrimSpace(j.Turn.ID)
 	}
-	return fmt.Sprintf("%s|%s|%s",
+	return fmt.Sprintf(
+		"%s|%s|%s",
 		turnID,
 		strings.TrimSpace(j.ArtifactType),
 		strings.TrimSpace(j.ArtifactVersion),

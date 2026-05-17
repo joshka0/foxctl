@@ -389,7 +389,8 @@ func TestErrorWithData(t *testing.T) {
 }
 
 func TestMultipleOptions(t *testing.T) {
-	env := OK("cmd", nil,
+	env := OK(
+		"cmd", nil,
 		WithMetaMutator(func(m *Meta) {
 			m.Source = "source1"
 		}),

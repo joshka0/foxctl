@@ -162,7 +162,8 @@ func TestDetailPaneBodyScroll(t *testing.T) {
 	}
 
 	// Use a small height that forces scrolling (header takes 1-2 rows, so body is tiny).
-	dp := NewDetailPane("agent-abc123", StatusOK, sections, 40, 5,
+	dp := NewDetailPane(
+		"agent-abc123", StatusOK, sections, 40, 5,
 		WithHasEntity(true),
 		WithDPFocused(true),
 	)
@@ -197,7 +198,8 @@ func TestDetailPaneScrollKeysWhenContentFits(t *testing.T) {
 		{Title: "Info", Lines: []string{"one line"}},
 	}
 
-	dp := NewDetailPane("agent-abc123", StatusOK, sections, 40, 20,
+	dp := NewDetailPane(
+		"agent-abc123", StatusOK, sections, 40, 20,
 		WithHasEntity(true),
 		WithDPFocused(true),
 	)
@@ -222,7 +224,8 @@ func TestDetailPanePageDownPageUp(t *testing.T) {
 		{Title: "Details", Lines: lines},
 	}
 
-	dp := NewDetailPane("agent-abc123", StatusOK, sections, 40, 8,
+	dp := NewDetailPane(
+		"agent-abc123", StatusOK, sections, 40, 8,
 		WithHasEntity(true),
 		WithDPFocused(true),
 	)
@@ -252,7 +255,8 @@ func TestDetailPaneHomeEnd(t *testing.T) {
 		{Title: "Details", Lines: lines},
 	}
 
-	dp := NewDetailPane("agent-abc123", StatusOK, sections, 40, 8,
+	dp := NewDetailPane(
+		"agent-abc123", StatusOK, sections, 40, 8,
 		WithHasEntity(true),
 		WithDPFocused(true),
 	)
@@ -281,7 +285,8 @@ func TestDetailPaneHomeEndViKeys(t *testing.T) {
 		{Title: "Details", Lines: lines},
 	}
 
-	dp := NewDetailPane("agent-abc123", StatusOK, sections, 40, 8,
+	dp := NewDetailPane(
+		"agent-abc123", StatusOK, sections, 40, 8,
 		WithHasEntity(true),
 		WithDPFocused(true),
 	)
@@ -313,7 +318,8 @@ func TestDetailPaneScrollIndicator(t *testing.T) {
 		{Title: "Details", Lines: lines},
 	}
 
-	mt := renderDetailPaneEntity("agent-abc123", StatusOK, sections, 40, 8,
+	mt := renderDetailPaneEntity(
+		"agent-abc123", StatusOK, sections, 40, 8,
 		WithDPFocused(true),
 		WithScrollOffset(5),
 	)
@@ -354,7 +360,8 @@ func TestDetailPaneScrollIndicator(t *testing.T) {
 
 func TestDetailPaneEmptyNoEntity(t *testing.T) {
 	t.Parallel()
-	mt := renderDetailPane("agent-abc123", StatusNone, nil, 40, 10,
+	mt := renderDetailPane(
+		"agent-abc123", StatusNone, nil, 40, 10,
 		WithHasEntity(false),
 	)
 
@@ -395,7 +402,8 @@ func TestDetailPaneFocusIndicator(t *testing.T) {
 	}
 
 	// Render with focus.
-	mt := renderDetailPaneEntity("agent-abc123", StatusOK, sections, 40, 10,
+	mt := renderDetailPaneEntity(
+		"agent-abc123", StatusOK, sections, 40, 10,
 		WithDPFocused(true),
 	)
 
@@ -425,7 +433,8 @@ func TestDetailPaneUnfocusedNoBorderFocus(t *testing.T) {
 	}
 
 	// Render without focus.
-	mt := renderDetailPaneEntity("agent-abc123", StatusOK, sections, 40, 10,
+	mt := renderDetailPaneEntity(
+		"agent-abc123", StatusOK, sections, 40, 10,
 		WithDPFocused(false),
 	)
 
@@ -447,12 +456,14 @@ func TestDetailPaneFocusIndicatorNotFontWeightOnly(t *testing.T) {
 	}
 
 	// Focused.
-	mtF := renderDetailPaneEntity("agent-abc123", StatusOK, sections, 40, 10,
+	mtF := renderDetailPaneEntity(
+		"agent-abc123", StatusOK, sections, 40, 10,
 		WithDPFocused(true),
 	)
 
 	// Find a cell that differs from the unfocused version.
-	mtU := renderDetailPaneEntity("agent-abc123", StatusOK, sections, 40, 10,
+	mtU := renderDetailPaneEntity(
+		"agent-abc123", StatusOK, sections, 40, 10,
 		WithDPFocused(false),
 	)
 
@@ -484,7 +495,8 @@ func TestDetailPaneUnfocusedIgnoresKeys(t *testing.T) {
 	sections := []Section{
 		{Title: "Info", Lines: make([]string, 20)},
 	}
-	dp := NewDetailPane("agent-abc123", StatusOK, sections, 40, 8,
+	dp := NewDetailPane(
+		"agent-abc123", StatusOK, sections, 40, 8,
 		WithHasEntity(true),
 		WithDPFocused(false),
 	)
@@ -519,7 +531,8 @@ func TestDetailPaneScrollOffsetClamped(t *testing.T) {
 		{Title: "Info", Lines: make([]string, 30)},
 	}
 
-	dp := NewDetailPane("agent-abc123", StatusOK, sections, 40, 8,
+	dp := NewDetailPane(
+		"agent-abc123", StatusOK, sections, 40, 8,
 		WithHasEntity(true),
 		WithDPFocused(true),
 		WithScrollOffset(9999), // way past max
@@ -538,7 +551,8 @@ func TestDetailPaneNegativeScrollOffsetClamped(t *testing.T) {
 		{Title: "Info", Lines: make([]string, 30)},
 	}
 
-	dp := NewDetailPane("agent-abc123", StatusOK, sections, 40, 8,
+	dp := NewDetailPane(
+		"agent-abc123", StatusOK, sections, 40, 8,
 		WithHasEntity(true),
 		WithDPFocused(true),
 		WithScrollOffset(-5),

@@ -255,7 +255,8 @@ func collectElixirDuplicateRecoveryGroups(root *sitter.Node, content []byte) []e
 		groups[candidate.Fingerprint] = newElixirLineGroup(candidate.Fingerprint, candidate.Lines, *candidate)
 	})
 
-	return sortedElixirLineGroups(groups,
+	return sortedElixirLineGroups(
+		groups,
 		func(group *elixirDuplicateRecoveryGroup, lines []int) { group.Lines = lines },
 		func(group *elixirDuplicateRecoveryGroup) []int { return group.Lines },
 		func(group *elixirDuplicateRecoveryGroup) string { return group.Fingerprint },
@@ -285,7 +286,8 @@ func collectElixirRepeatedGuardGroups(root *sitter.Node, content []byte) []elixi
 		}
 	})
 
-	return sortedElixirLineGroups(groups,
+	return sortedElixirLineGroups(
+		groups,
 		func(group *elixirRepeatedGuardGroup, lines []int) { group.Lines = lines },
 		func(group *elixirRepeatedGuardGroup) []int { return group.Lines },
 		func(group *elixirRepeatedGuardGroup) string { return group.Fingerprint },

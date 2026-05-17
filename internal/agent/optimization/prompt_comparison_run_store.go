@@ -109,7 +109,8 @@ func (s *sqlPromptComparisonRunStore) Save(ctx context.Context, run PromptCompar
 		run.CreatedAt = timeutil.NowUTC()
 	}
 
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(
+		ctx, `
 INSERT INTO prompt_comparisons (
 	id, workspace_id, artifact_digest, provider, base_url, question, context,
 	model_count, variant_count, success_count, failure_count, created_at

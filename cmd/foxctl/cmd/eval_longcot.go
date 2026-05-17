@@ -2368,12 +2368,14 @@ func longCoTLambdaReplSolvePhases(sandbox rlmruntime.SandboxKind) []rlmruntime.R
 	}
 	if rlmruntime.NormalizeSandboxKind(sandbox) == rlmruntime.SandboxKindYaegi {
 		replToolName = rlmruntime.GoREPLToolName
-		verifyCodeContract = append(verifyCodeContract,
+		verifyCodeContract = append(
+			verifyCodeContract,
 			"Use Go REPL statements such as fmt.Println(\"solution = ...\").",
 			"Do not include package declarations or import blocks.",
 		)
 	} else {
-		verifyCodeContract = append(verifyCodeContract,
+		verifyCodeContract = append(
+			verifyCodeContract,
 			"Use Python statements such as print('solution = ...').",
 			"If a small local package is essential and import fails, verify with a standard-library fallback or raise AssertionError.",
 		)
@@ -3511,7 +3513,8 @@ func longCoTChildExtractPhases() []rlmruntime.REPLRunnerPhase {
 func longCoTChildVerifyPhases(generalHelper bool) []rlmruntime.REPLRunnerPhase {
 	_ = generalHelper
 	phases := make([]rlmruntime.REPLRunnerPhase, 0, 3)
-	phases = append(phases,
+	phases = append(
+		phases,
 		rlmruntime.REPLRunnerPhase{
 			Name: "child_verify_scratch",
 			Prompt: strings.Join([]string{
@@ -3597,7 +3600,8 @@ func longCoTChildCycleSolvePhases(sandbox rlmruntime.SandboxKind, generalHelper 
 			FilterOutputMaxTokens: 512,
 		},
 	}
-	phases = append(phases,
+	phases = append(
+		phases,
 		rlmruntime.REPLRunnerPhase{
 			Name: "child_cycle_witness",
 			Prompt: strings.Join([]string{
@@ -3657,12 +3661,14 @@ func longCoTChildSolvePhases(sandbox rlmruntime.SandboxKind, generalHelper bool)
 	}
 	if rlmruntime.NormalizeSandboxKind(sandbox) == rlmruntime.SandboxKindYaegi {
 		replToolName = rlmruntime.GoREPLToolName
-		replCodeContract = append(replCodeContract,
+		replCodeContract = append(
+			replCodeContract,
 			"Use Go REPL statements such as facts := map[string]any{\"status\":\"started\"} and fmt.Println(facts).",
 			"Do not include package declarations or import blocks.",
 		)
 	} else {
-		replCodeContract = append(replCodeContract,
+		replCodeContract = append(
+			replCodeContract,
 			"Use Python statements such as facts = {'status': 'started'} and print(facts).",
 			"If you cannot compute the node, print a compact mathematical blocker instead of returning comments.",
 		)
@@ -3677,12 +3683,14 @@ func longCoTChildSolvePhases(sandbox rlmruntime.SandboxKind, generalHelper bool)
 			AutoExecuteRequiredTool: true,
 		},
 	}
-	phases = append(phases,
+	phases = append(
+		phases,
 		rlmruntime.REPLRunnerPhase{
 			Name: "child_scratch",
 			Prompt: strings.Join(append([]string{
 				"Scratch computation phase.",
-			}, append(replCodeContract,
+			}, append(
+				replCodeContract,
 				"Do not call python_repl or go_repl yourself. Do not include prose or a final answer.",
 				"Do not produce the final child summary in this phase.",
 			)...), "\n"),

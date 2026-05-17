@@ -507,7 +507,8 @@ func RenderMarkdown(result RunResult) string {
 	b.WriteString("## Summary\n\n")
 	b.WriteString("| Score | Precision | Recall | Kind Acc | Fallback | Forbidden | Persist Range |\n")
 	b.WriteString("| ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n")
-	b.WriteString(fmt.Sprintf("| %.2f | %.2f | %.2f | %.2f | %.2f | %.2f | %.2f |\n\n",
+	b.WriteString(fmt.Sprintf(
+		"| %.2f | %.2f | %.2f | %.2f | %.2f | %.2f | %.2f |\n\n",
 		result.Summary.MeanScore,
 		result.Summary.MeanPrecision,
 		result.Summary.MeanRecall,

@@ -578,7 +578,8 @@ func summarizeRepoMotif(motif RepoMotif) string {
 	if len(related) == 0 {
 		return fmt.Sprintf("%s motif rooted at %s", motif.MotifType, motif.AnchorPath)
 	}
-	return fmt.Sprintf("%s motif linking %s with %s via %s",
+	return fmt.Sprintf(
+		"%s motif linking %s with %s via %s",
 		motif.MotifType,
 		motif.AnchorPath,
 		strings.Join(related, ", "),

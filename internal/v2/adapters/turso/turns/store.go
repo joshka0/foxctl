@@ -227,7 +227,8 @@ func (s *Store) SaveTurn(ctx context.Context, turn run.TurnRecord) error {
 	}
 
 	return sqlutil.WithTransaction(ctx, s.db, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `
+		_, err := tx.ExecContext(
+			ctx, `
 			INSERT INTO v2_turns (
 				id, session_id, turn_index, trace_id, root_span_id, correlation_id, causation_id,
 				request_id, actor_id, command, prompt, final_output_id, final_output_role,
@@ -290,7 +291,8 @@ func (s *Store) SaveTurn(ctx context.Context, turn run.TurnRecord) error {
 			iter.Message.Role = strings.TrimSpace(iter.Message.Role)
 			iter.Message.Text = strings.TrimSpace(iter.Message.Text)
 
-			_, err := tx.ExecContext(ctx, `
+			_, err := tx.ExecContext(
+				ctx, `
 				INSERT INTO v2_turn_iterations (
 					turn_id, iteration_index, trace_id, span_id, parent_span_id,
 					message_id, message_role, message_text, created_at
@@ -329,7 +331,8 @@ func (s *Store) SaveTurn(ctx context.Context, turn run.TurnRecord) error {
 				call.ResultRef.Text = strings.TrimSpace(call.ResultRef.Text)
 
 				argsJSON := normalizeJSON(call.ArgsJSON, "{}")
-				_, err := tx.ExecContext(ctx, `
+				_, err := tx.ExecContext(
+					ctx, `
 					INSERT INTO v2_turn_tool_calls (
 						turn_id, iteration_index, call_id, trace_id, span_id, parent_span_id,
 						name, args_json, status, result_ref_id, result_ref_kind, result_ref_text, created_at
@@ -623,7 +626,8 @@ func (s *Store) SaveEpisode(ctx context.Context, episode run.EpisodeRecord) erro
 		return fmt.Errorf("format episode anchor refs: %w", err)
 	}
 
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(
+		ctx, `
 		INSERT INTO v2_episodes (
 			id, session_id, episode_version, boundary_key,
 			start_turn_id, end_turn_id, start_turn_index, end_turn_index,
@@ -1961,7 +1965,8 @@ func (s *Store) insertArtifactWithoutVector(ctx context.Context, artifact Artifa
 	if err != nil {
 		return fmt.Errorf("format embedding json: %w", err)
 	}
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(
+		ctx, `
 		INSERT INTO v2_turn_artifacts (
 			turn_id, artifact_type, artifact_version, ref, summary,
 			content_json, metadata_json, embedding, embedding_json, embedding_model, created_at, updated_at
@@ -2025,7 +2030,8 @@ func (s *Store) insertArtifactWithVector(ctx context.Context, artifact Artifact)
 			updated_at = excluded.updated_at
 	`, vectorStr)
 
-	_, err = s.db.ExecContext(ctx, query,
+	_, err = s.db.ExecContext(
+		ctx, query,
 		artifact.TurnID,
 		artifact.ArtifactType,
 		artifact.ArtifactVersion,
