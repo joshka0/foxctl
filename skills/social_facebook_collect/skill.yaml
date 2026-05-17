@@ -1,0 +1,81 @@
+apiVersion: foxctl/v1
+kind: Skill
+metadata:
+  name: social/facebook_collect
+  version: 0.1.0
+  description: "Collect Facebook Page research data through Meta Graph API"
+  tags: ["social", "facebook", "meta", "research"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: social/facebook_collect
+  parameters:
+    - name: operation
+      type: string
+      required: true
+      description: "Operation: page_info, page_posts, post_comments"
+    - name: page_id
+      type: string
+      required: false
+      description: "Facebook Page ID"
+    - name: post_id
+      type: string
+      required: false
+      description: "Facebook Graph post ID"
+    - name: limit
+      type: integer
+      required: false
+      default: 25
+      description: "Result limit, capped by provider endpoint"
+    - name: after
+      type: string
+      required: false
+      description: "Graph API after cursor"
+    - name: since
+      type: string
+      required: false
+      description: "Graph API since parameter"
+    - name: until
+      type: string
+      required: false
+      description: "Graph API until parameter"
+    - name: api_version
+      type: string
+      required: false
+      default: v25.0
+      description: "Meta Graph API version"
+    - name: dry_run
+      type: boolean
+      required: false
+      default: false
+      description: "Emit planned request and cost/rate metadata without network or secrets"
+    - name: include_raw
+      type: boolean
+      required: false
+      default: false
+      description: "Include raw provider JSON in output"
+  help:
+    short: "Collect Facebook Page metadata, posts, and comments."
+    long: |
+      Uses Meta Graph API directly. Set META_ACCESS_TOKEN, META_PAGE_ACCESS_TOKEN,
+      or META_USER_ACCESS_TOKEN for live calls. Public Page content is permission and app-review gated.
+returns:
+  - name: items
+    type: array
+    description: "Normalized social items"
+  - name: pagination
+    type: object
+    description: "Graph API cursor"
+  - name: rate_limit
+    type: object
+    description: "Observed Graph API usage headers"
+capabilities:
+  network: "egress"
+  filesystem:
+    - type: workdir
+  pure: false

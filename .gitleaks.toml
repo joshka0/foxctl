@@ -1,0 +1,45 @@
+title = "foxctl gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Intentional redaction and guard test fixtures"
+paths = [
+  '''foxcular/example_test\.go''',
+  '''foxcular/persist/example_test\.go''',
+  '''foxcular/persist/ndjson_test\.go''',
+  '''foxcular/sampling_redact_test\.go''',
+  '''internal/actor/memory/redactor_test\.go''',
+  '''internal/codecontext/guard/guard_test\.go''',
+  '''internal/observability/redact_test\.go''',
+  '''internal/secrets/redact\.go''',
+  '''internal/secrets/redact_test\.go''',
+  '''internal/intelligence/codecontext/guard/guard_test\.go''',
+  '''internal/platform/secrets/redact\.go''',
+  '''internal/platform/secrets/redact_test\.go''',
+  '''internal/runtime/actor/memory/redactor_test\.go''',
+  '''internal/runtime/observability/redact_test\.go''',
+]
+
+[[allowlists]]
+description = "Specification and local-development placeholder examples"
+paths = [
+  '''docs/spec/openapi_skill\.md''',
+  '''deploy/kubernetes/overlays/local/secrets\.yaml''',
+  '''deploy/kubernetes/overlays/public-gui-local/gateway-secrets-patch\.yaml''',
+]
+
+[[allowlists]]
+description = "Vendored browser terminal bundle"
+paths = [
+  '''internal/gateway/static/xterm\.js''',
+  '''internal/interfaces/gateway/static/xterm\.js''',
+]
+
+[[allowlists]]
+description = "Historical rotated example key and review note"
+paths = [
+  '''test/integration/run_dspy_test\.sh''',
+  '''prcomments\.txt''',
+]

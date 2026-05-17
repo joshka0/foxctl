@@ -1,0 +1,169 @@
+apiVersion: foxctl/v1
+kind: Skill
+metadata:
+  name: launch/praze_pipeline
+  version: 0.3.0
+  description: "Generate a Codex-agent room-ready Praze launch pipeline wired to the social research skills"
+  tags: ["launch", "praze", "room", "social", "research"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: launch/praze_pipeline
+  parameters:
+    - name: run_id
+      type: string
+      required: false
+      default: "2026-05-praze-launch"
+      description: "Run identifier used under runs/<run_id>"
+    - name: output_dir
+      type: string
+      required: false
+      default: "praze-launch"
+      description: "Workspace-relative folder for generated pipeline files when write=true"
+    - name: write
+      type: boolean
+      required: false
+      default: false
+      description: "Write the generated room pack files to output_dir"
+    - name: research_mode
+      type: string
+      required: false
+      default: "dry_run"
+      description: "Research call mode: dry_run or live"
+    - name: limit
+      type: integer
+      required: false
+      default: 10
+      description: "Default per-call research result limit, capped at 50"
+    - name: prototype
+      type: boolean
+      required: false
+      default: false
+      description: "Include a mocked end-to-end launch pipeline run that proves the agent flow without API keys"
+    - name: mock_data
+      type: boolean
+      required: false
+      default: false
+      description: "Use mocked social research signals in prototype mode"
+    - name: include_file_contents
+      type: boolean
+      required: false
+      default: false
+      description: "Include generated file contents inline in the skill output"
+    - name: agent_provider
+      type: string
+      required: false
+      default: "codex"
+      description: "Agent CLI/provider to provision in live room panes, usually codex"
+    - name: provision
+      type: boolean
+      required: false
+      default: false
+      description: "Emit room create commands that provision one live agent pane per room member"
+    - name: mux_backend
+      type: string
+      required: false
+      default: "auto"
+      description: "Provisioning backend for live agent panes: auto, tmux, or zellij"
+    - name: mux_session
+      type: string
+      required: false
+      default: "<run_id>-agents"
+      description: "Mux session used when provision=true"
+    - name: herdr_relay
+      type: boolean
+      required: false
+      default: false
+      description: "Emit Herdr room relay commands for existing Herdr-bound participants"
+    - name: herdr_session
+      type: string
+      required: false
+      default: "<run_id>"
+      description: "Herdr session namespace used when herdr_relay=true"
+    - name: pi_operator
+      type: boolean
+      required: false
+      default: false
+      description: "Emit Pi operator commands and expected Pi tools"
+  help:
+    short: "Generate a Praze launch room pack with social API callbook."
+    long: |
+      Generates a room-based adversarial Praze launch pipeline.
+
+      The output includes:
+        - five room specs
+        - agent prompt files
+        - artifact skeletons
+        - message contract and rubric
+        - Codex-agent execution plan with directed debate routes and room loop commands
+        - exact social research calls for social/x_collect, social/reddit_collect,
+          social/youtube_collect, social/facebook_collect, and social/instagram_collect
+
+      Examples:
+        foxctl run launch/praze_pipeline --input '{"include_file_contents":true}'
+        foxctl run launch/praze_pipeline --input '{"write":true,"output_dir":"praze-launch","research_mode":"dry_run"}'
+        foxctl run launch/praze_pipeline --input '{"prototype":true,"mock_data":true,"write":true}'
+        foxctl run launch/praze_pipeline --input '{"provision":true,"agent_provider":"codex","mux_backend":"zellij","herdr_relay":true,"pi_operator":true}'
+        foxctl run launch/praze_pipeline --input '{"research_mode":"live","limit":25}'
+    workflows:
+      - id: preview
+        description: "Preview the generated room pack."
+        example_input:
+          include_file_contents: true
+      - id: write-pack
+        description: "Write room pack files under praze-launch."
+        example_input:
+          write: true
+          output_dir: "praze-launch"
+          research_mode: "dry_run"
+      - id: prototype
+        description: "Generate a mocked end-to-end launch pipeline run without API keys."
+        example_input:
+          prototype: true
+          mock_data: true
+          include_file_contents: true
+      - id: codex-room-provision
+        description: "Generate live Codex room provisioning commands plus optional Herdr relay and Pi operator notes."
+        example_input:
+          provision: true
+          agent_provider: "codex"
+          mux_backend: "zellij"
+          herdr_relay: true
+          pi_operator: true
+      - id: live-callbook
+        description: "Generate callbook commands with dry_run disabled after credentials are configured."
+        example_input:
+          research_mode: "live"
+          limit: 25
+returns:
+  - name: rooms
+    type: array
+    description: "Room specs with modes, agents, outputs, and exit criteria"
+  - name: agents
+    type: array
+    description: "Agent specs and prompt file paths"
+  - name: social_skill_calls
+    type: array
+    description: "Concrete social skill invocations mapped to research agents"
+  - name: execution_plan
+    type: object
+    description: "Codex-agent room creation, assignment, debate routing, loop, Herdr relay, and Pi operator plan"
+  - name: files
+    type: array
+    description: "Generated files and summaries"
+  - name: prototype
+    type: object
+    description: "Mocked end-to-end run metadata when prototype=true"
+  - name: room_commands
+    type: array
+    description: "Suggested foxctl room create/task/send/loop/relay commands"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false
