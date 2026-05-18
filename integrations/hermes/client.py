@@ -122,6 +122,192 @@ class FoxctlClient:
     def context_overview(self, limit: int = 8) -> Dict:
         return self._get("/api/context/overview", self._query(limit=limit))
 
+    # -- ContextWiki CLI-backed commands -----------------------------------
+
+    def _cli(self, *args: str, timeout: int = 15) -> Dict:
+        """Run a foxctl CLI command and parse the JSON envelope."""
+        import subprocess as _sp
+
+        cli_paths = ["/home/dev/repos/foxctl/bin/foxctl", "foxctl"]
+        for cli in cli_paths:
+            try:
+                result = _sp.run(
+                    [cli, *args],
+                    capture_output=True, text=True, timeout=timeout,
+                )
+                if result.returncode != 0:
+                    # Try to parse error from stdout
+                    for line in result.stdout.strip().splitlines():
+                        try:
+                            d = json.loads(line)
+                            if d.get("error"):
+                                return d
+                        except json.JSONDecodeError:
+                            pass
+                    raise FoxctlError(1, result.stderr[:200] or "CLI failed", {})
+                # Parse last JSON line from stdout
+                for line in reversed(result.stdout.strip().splitlines()):
+                    try:
+                        d = json.loads(line)
+                        if isinstance(d, dict):
+                            return d
+                    except json.JSONDecodeError:
+                        continue
+                return {"ok": True, "raw": result.stdout}
+            except FileNotFoundError:
+                continue
+            except _sp.TimeoutExpired:
+                raise FoxctlError(408, f"CLI timed out after {timeout}s", {})
+        raise FoxctlError(404, "foxctl binary not found", {})
+
+    def context_show(self) -> Dict:
+        """Show the current ContextWiki top-of-mind bundle."""
+        resp = self._cli("context", "show", "--workspace", self.cfg.workspace)
+        return resp.get("data", resp)
+
+    def context_report(self) -> Dict:
+        """Build a synthesized ContextWiki current-state report."""
+        resp = self._cli("context", "report", "--workspace", self.cfg.workspace)
+        return resp.get("data", resp)
+
+    def context_observations(self, limit: int = 50) -> Dict:
+        """List recorded ContextWiki observations."""
+        resp = self._cli("context", "observations", "--workspace", self.cfg.workspace)
+        return resp.get("data", resp)
+
+    def context_tensions(self, limit: int = 50) -> Dict:
+        """List recorded ContextWiki tensions."""
+        resp = self._cli("context", "tensions", "--workspace", self.cfg.workspace)
+        return resp.get("data", resp)
+
+    def context_handoffs(self, limit: int = 20) -> Dict:
+        """List recorded ContextWiki handoffs."""
+        resp = self._cli("context", "handoffs", "--workspace", self.cfg.workspace)
+        return resp.get("data", resp)
+
+    def context_observe(
+        self,
+        statement: str,
+        confidence: float = 0.7,
+        project: Optional[str] = None,
+        area: Optional[str] = None,
+        evidence_refs: Optional[List[str]] = None,
+    ) -> Dict:
+        """Record an observation into the ContextWiki control plane."""
+        args = [
+            "observe", "--workspace", self.cfg.workspace,
+            "--statement", statement,
+            "--confidence", str(confidence),
+        ]
+        if project:
+            args.extend(["--project", project])
+        if area:
+            args.extend(["--area", area])
+        for ref in (evidence_refs or []):
+            args.extend(["--evidence-ref", ref])
+        resp = self._cli(*args)
+        return resp.get("data", resp)
+
+    def context_tension(
+        self,
+        statement: str,
+        kind: str = "contradiction",
+        impact: str = "medium",
+        status: str = "open",
+        related_refs: Optional[List[str]] = None,
+    ) -> Dict:
+        """Record a tension into the ContextWiki control plane."""
+        args = [
+            "tension", "--workspace", self.cfg.workspace,
+            "--statement", statement,
+            "--kind", kind,
+            "--impact", impact,
+            "--status", status,
+        ]
+        for ref in (related_refs or []):
+            args.extend(["--related-ref", ref])
+        resp = self._cli(*args)
+        return resp.get("data", resp)
+
+    def context_capture(
+        self,
+        summary: str,
+        task_id: Optional[str] = None,
+        phase: str = "work",
+        outcome: str = "partial",
+        observations: Optional[List[str]] = None,
+        tensions: Optional[List[str]] = None,
+        next_actions: Optional[List[str]] = None,
+        file_touched: Optional[List[str]] = None,
+        evidence_refs: Optional[List[str]] = None,
+    ) -> Dict:
+        """Capture a structured handoff into the ContextWiki control plane.
+
+        Handoffs are the primary way agents communicate work continuity.
+        They record: what was done, what was observed, what's next.
+        """
+        args = [
+            "capture", "--workspace", self.cfg.workspace,
+            "--summary", summary,
+            "--phase", phase,
+            "--outcome", outcome,
+        ]
+        if task_id:
+            args.extend(["--task-id", task_id])
+        for o in (observations or []):
+            args.extend(["--observation", o])
+        for t in (tensions or []):
+            args.extend(["--tension", t])
+        for n in (next_actions or []):
+            args.extend(["--next-action", n])
+        for f in (file_touched or []):
+            args.extend(["--file-touched", f])
+        for r in (evidence_refs or []):
+            args.extend(["--evidence-ref", r])
+        resp = self._cli(*args)
+        return resp.get("data", resp)
+
+    def context_infer(
+        self,
+        summary: str,
+        apply: bool = False,
+        project: Optional[str] = None,
+        area: Optional[str] = None,
+        evidence_refs: Optional[List[str]] = None,
+    ) -> Dict:
+        """Infer ContextWiki observations and tensions from a summary.
+
+        Analyzes the summary text and extracts structured observations
+        and tensions. Use dry-run (apply=False) to preview, then apply.
+        """
+        args = [
+            "context", "infer", "--workspace", self.cfg.workspace,
+            "--summary", summary,
+        ]
+        if apply:
+            args.append("--apply")
+        if project:
+            args.extend(["--project", project])
+        if area:
+            args.extend(["--area", area])
+        for r in (evidence_refs or []):
+            args.extend(["--evidence-ref", r])
+        resp = self._cli(*args)
+        return resp.get("data", resp)
+
+    def context_dispatch(self, task_id: Optional[str] = None) -> Dict:
+        """Build a bounded task packet for the next or selected task."""
+        args = ["context", "dispatch", "--workspace", self.cfg.workspace]
+        if task_id:
+            args.extend(["--task-id", task_id])
+        resp = self._cli(*args)
+        return resp.get("data", resp)
+
+    def context_next(self) -> Dict:
+        """Select the next ContextWiki task candidate."""
+        resp = self._cli("context", "next", "--workspace", self.cfg.workspace)
+        return resp.get("data", resp)
+
     # -- memory search ------------------------------------------------------
 
     def memory_search(self, query: str, limit: int = 5, include_content: bool = True) -> Dict:

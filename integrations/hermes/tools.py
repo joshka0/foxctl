@@ -126,13 +126,14 @@ def register_tools(ctx, client: FoxctlClient, cfg: FoxctlConfig) -> None:
     # -- Context ------------------------------------------------------------
 
     ctx.register_tool(
-        name="foxctl_context",
+        name="foxctl_context_overview",
         toolset=TOOLSET,
         schema={
-            "name": "foxctl_context",
+            "name": "foxctl_context_overview",
             "description": (
-                "Gather foxctl workspace context: health, rooms, tasks, and active jobs. "
-                "Use this to understand the current foxctl state before acting."
+                "Get the ContextWiki overview: proposals, evidence imports, promotion jobs, "
+                "and next merge tasks. Higher-level than context_show — focuses on "
+                "the knowledge promotion pipeline rather than current work state."
             ),
             "parameters": {
                 "type": "object",
@@ -848,4 +849,348 @@ def register_tools(ctx, client: FoxctlClient, cfg: FoxctlConfig) -> None:
         check_fn=check_foxctl_available,
     )
 
-    logger.info("Registered %d foxctl tools", 32)
+    # ===================================================================
+    # ContextWiki Integration — observations, tensions, handoffs, retrieve
+    # ===================================================================
+
+    ctx.register_tool(
+        name="foxctl_context_show",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_context_show",
+            "description": (
+                "Show the current ContextWiki top-of-mind bundle for the workspace. "
+                "Returns the workspace orientation: objective, phase, active tasks, "
+                "hard constraints, next actions, observations, tensions, and handoffs. "
+                "Use this at the START of a session to understand current workspace state."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.context_show()),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_context_report",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_context_report",
+            "description": (
+                "Build a synthesized ContextWiki current-state report. "
+                "Combines top-of-mind state with recommended actions. "
+                "Use for a broader workspace health check."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.context_report()),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_context_observe",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_context_observe",
+            "description": (
+                "Record an observation into the ContextWiki control plane. "
+                "Observations capture repeatable system learnings — things that "
+                "are true about the codebase, architecture, or process. "
+                "They accumulate over time with confidence scores. "
+                "Use when you discover something worth remembering."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "statement": {
+                        "type": "string",
+                        "description": "The observation statement (factual, repeatable)",
+                    },
+                    "confidence": {
+                        "type": "number",
+                        "description": "Confidence from 0.0 to 1.0 (default 0.7)",
+                        "default": 0.7,
+                    },
+                    "project": {
+                        "type": "string",
+                        "description": "Project name",
+                    },
+                    "area": {
+                        "type": "string",
+                        "description": "Subsystem or area (e.g. 'memory', 'auth', 'api')",
+                    },
+                    "evidence_refs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Evidence references (file paths, URLs, task IDs)",
+                    },
+                },
+                "required": ["statement"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.context_observe(
+            statement=args["statement"],
+            confidence=args.get("confidence", 0.7),
+            project=args.get("project"),
+            area=args.get("area"),
+            evidence_refs=args.get("evidence_refs"),
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_context_tension",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_context_tension",
+            "description": (
+                "Record a tension into the ContextWiki control plane. "
+                "Tensions capture contradictions, drag sources, and areas of "
+                "friction that slow down work. They track kind (performance, "
+                "contradiction, complexity, etc.) and impact level. "
+                "Use when you identify something that should be fixed."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "statement": {
+                        "type": "string",
+                        "description": "The tension statement",
+                    },
+                    "kind": {
+                        "type": "string",
+                        "description": "Tension kind: contradiction, performance, complexity, dependency, usability",
+                        "default": "contradiction",
+                    },
+                    "impact": {
+                        "type": "string",
+                        "description": "Impact level: low, medium, high",
+                        "default": "medium",
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "Status: open, investigating, resolved",
+                        "default": "open",
+                    },
+                    "related_refs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Related references",
+                    },
+                },
+                "required": ["statement"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.context_tension(
+            statement=args["statement"],
+            kind=args.get("kind", "contradiction"),
+            impact=args.get("impact", "medium"),
+            status=args.get("status", "open"),
+            related_refs=args.get("related_refs"),
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_context_capture",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_context_capture",
+            "description": (
+                "Capture a structured handoff into the ContextWiki control plane. "
+                "Handoffs are the primary way agents communicate work continuity "
+                "across sessions. Record: what was done (summary), what was "
+                "observed, what tensions exist, and what should happen next. "
+                "Call this when finishing a work phase or ending a session."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {
+                        "type": "string",
+                        "description": "Compact handoff summary of what was accomplished",
+                    },
+                    "task_id": {
+                        "type": "string",
+                        "description": "Task identifier",
+                    },
+                    "phase": {
+                        "type": "string",
+                        "description": "Phase name (research, implementation, review, etc.)",
+                        "default": "work",
+                    },
+                    "outcome": {
+                        "type": "string",
+                        "description": "Outcome: partial, complete, blocked",
+                        "default": "partial",
+                    },
+                    "observations": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Observations made during this work phase",
+                    },
+                    "tensions": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Tensions encountered during this work phase",
+                    },
+                    "next_actions": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Recommended next actions for whoever picks up this work",
+                    },
+                    "file_touched": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Files touched during this work phase",
+                    },
+                    "evidence_refs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Evidence references",
+                    },
+                },
+                "required": ["summary"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.context_capture(
+            summary=args["summary"],
+            task_id=args.get("task_id"),
+            phase=args.get("phase", "work"),
+            outcome=args.get("outcome", "partial"),
+            observations=args.get("observations"),
+            tensions=args.get("tensions"),
+            next_actions=args.get("next_actions"),
+            file_touched=args.get("file_touched"),
+            evidence_refs=args.get("evidence_refs"),
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_context_infer",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_context_infer",
+            "description": (
+                "Infer ContextWiki observations and tensions from a summary text. "
+                "Analyzes the summary and extracts structured observations and "
+                "tensions automatically. Use to batch-extract knowledge from "
+                "session summaries or research notes."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {
+                        "type": "string",
+                        "description": "Compact summary text to analyze for observations/tensions",
+                    },
+                    "apply": {
+                        "type": "boolean",
+                        "description": "Persist the inferred items (default false = dry run)",
+                        "default": False,
+                    },
+                    "project": {
+                        "type": "string",
+                        "description": "Project name override",
+                    },
+                    "area": {
+                        "type": "string",
+                        "description": "Area name override",
+                    },
+                },
+                "required": ["summary"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.context_infer(
+            summary=args["summary"],
+            apply=args.get("apply", False),
+            project=args.get("project"),
+            area=args.get("area"),
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_context_handoffs",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_context_handoffs",
+            "description": (
+                "List recorded ContextWiki handoffs — structured work continuity "
+                "records from previous sessions. Each handoff captures what was "
+                "done, what was observed, and what should happen next."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max handoffs to return (default 10)",
+                        "default": 10,
+                    },
+                },
+                "required": [],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.context_handoffs(
+            limit=args.get("limit", 10),
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_context_dispatch",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_context_dispatch",
+            "description": (
+                "Build a bounded ContextWiki task packet for the next task. "
+                "Returns a work packet with task details, context, and ready-to-go "
+                "instructions. Use to find the next thing to work on."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {
+                        "type": "string",
+                        "description": "Explicit task ID (defaults to context next)",
+                    },
+                },
+                "required": [],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.context_dispatch(
+            task_id=args.get("task_id"),
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_context_next",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_context_next",
+            "description": (
+                "Select the next ContextWiki task candidate from the workspace. "
+                "Returns the recommended next task based on current workspace state, "
+                "priorities, and open loops."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.context_next()),
+        check_fn=check_foxctl_available,
+    )
+
+    logger.info("Registered %d foxctl tools", 42)
