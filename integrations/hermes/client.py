@@ -309,6 +309,111 @@ class FoxctlClient:
         resp = self._cli("context", "next", "--workspace", self.cfg.workspace)
         return resp.get("data", resp)
 
+    # -- Obsidian Vault / Knowledge Plane ----------------------------
+
+    def vault_search(self, query: str, vault_path: Optional[str] = None, limit: int = 20) -> Dict:
+        """Search the Obsidian vault index for matching notes."""
+        args = [
+            "obsidian", "index", "search",
+            "--query", query,
+            "--limit", str(limit),
+        ]
+        vp = vault_path or self.cfg.vault_path
+        if vp:
+            args.extend(["--vault-path", vp])
+        resp = self._cli(*args)
+        return resp.get("data", resp)
+
+    def vault_stats(self, vault_path: Optional[str] = None) -> Dict:
+        """Get vault index stats (notes, headings, links, chunks)."""
+        args = ["obsidian", "index", "stats"]
+        vp = vault_path or self.cfg.vault_path
+        if vp:
+            args.extend(["--vault-path", vp])
+        resp = self._cli(*args)
+        return resp.get("data", resp)
+
+    def vault_index_build(self, vault_path: Optional[str] = None) -> Dict:
+        """Rebuild the local Obsidian vault index."""
+        args = ["obsidian", "index", "build"]
+        vp = vault_path or self.cfg.vault_path
+        if vp:
+            args.extend(["--vault-path", vp])
+        resp = self._cli(*args)
+        return resp.get("data", resp)
+
+    def vault_promote(
+        self,
+        slug: str,
+        content: str,
+        vault_path: Optional[str] = None,
+    ) -> Dict:
+        """Create an inbox-first evergreen promotion draft in the vault.
+
+        This is the primary way Hermes writes to the knowledge plane.
+        Drafts land in inbox/drafted-from-foxctl/ for review.
+        """
+        args = [
+            "obsidian", "promote-evergreen",
+            "--slug", slug,
+            "--content", content,
+        ]
+        vp = vault_path or self.cfg.vault_path
+        if vp:
+            args.extend(["--vault-path", vp])
+        resp = self._cli(*args)
+        return resp.get("data", resp)
+
+    def vault_append(
+        self,
+        path: str,
+        heading: str,
+        content: str,
+        vault_path: Optional[str] = None,
+    ) -> Dict:
+        """Append content under a specific heading in a vault note."""
+        args = [
+            "obsidian", "append-under-heading",
+            "--path", path,
+            "--heading", heading,
+            "--content", content,
+        ]
+        vp = vault_path or self.cfg.vault_path
+        if vp:
+            args.extend(["--vault-path", vp])
+        resp = self._cli(*args)
+        return resp.get("data", resp)
+
+    def vault_bridge(
+        self,
+        vault_path: Optional[str] = None,
+        docs_root: Optional[str] = None,
+    ) -> Dict:
+        """Reconcile repo docs with vault notes (bridge)."""
+        args = [
+            "obsidian", "bridge", "reconcile",
+            "--workspace", self.cfg.workspace,
+        ]
+        vp = vault_path or self.cfg.vault_path
+        if vp:
+            args.extend(["--vault-path", vp])
+        if docs_root:
+            args.extend(["--docs-root", docs_root])
+        resp = self._cli(*args, timeout=30)
+        return resp.get("data", resp)
+
+    def vault_graph_build(self, vault_path: Optional[str] = None) -> Dict:
+        """Generate a repo graph draft bundle in the vault inbox."""
+        args = [
+            "obsidian", "graph", "build",
+            "--workspace", self.cfg.workspace,
+        ]
+        vp = vault_path or self.cfg.vault_path
+        if vp:
+            args.extend(["--vault-path", vp])
+        resp = self._cli(*args, timeout=30)
+        return resp.get("data", resp)
+
     # -- memory search ------------------------------------------------------
 
     def memory_search(self, query: str, limit: int = 5, include_content: bool = True) -> Dict:
