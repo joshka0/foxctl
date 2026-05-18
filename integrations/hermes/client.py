@@ -74,10 +74,23 @@ class FoxctlClient:
         return self._request("POST", path, body)
 
     def _skill(self, skill_name: str, **kwargs) -> Dict:
-        """Call a foxctl skill by name with workspace auto-injected."""
-        body = {"workspace": self.cfg.workspace, **{k: v for k, v in kwargs.items() if v is not None}}
-        resp = self._post(f"/api/skills/{skill_name}", body)
-        return self._unwrap_skill(resp)
+        """Call a foxctl skill by name with workspace auto-injected.
+
+        Uses /api/skills/run which works for all skills (not just
+        those with openapi enabled in their manifest).
+        """
+        body = {
+            "skill": skill_name,
+            "input": {"workspace": self.cfg.workspace, **{k: v for k, v in kwargs.items() if v is not None}},
+        }
+        resp = self._post("/api/skills/run", body)
+        # /api/skills/run wraps differently: {ok, output: {data, status, ...}}
+        if resp.get("ok"):
+            output = resp.get("output", {})
+            if isinstance(output, dict) and "data" in output:
+                return output["data"]
+            return output
+        return resp
 
     def _put(self, path: str, body: Optional[Dict] = None) -> Dict:
         return self._request("PUT", path, body)
