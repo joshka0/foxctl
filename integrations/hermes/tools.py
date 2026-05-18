@@ -1666,4 +1666,498 @@ def register_tools(ctx, client: FoxctlClient, cfg: FoxctlConfig) -> None:
         check_fn=check_foxctl_available,
     )
 
-    logger.info("Registered %d foxctl tools", 60)
+    # ===================================================================
+    # Flow DAG — foxctl flow orchestration
+    # ===================================================================
+
+    ctx.register_tool(
+        name="foxctl_flow_create",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_flow_create",
+            "description": (
+                "Create a new foxctl flow — a named directed graph of envelope-producing "
+                "nodes (agents, skills, PTYs, HTTP calls) connected by typed edges "
+                "with optional transforms. Flows are the n8n-like orchestration layer "
+                "for multi-agent coordination. After creating, add nodes with "
+                "foxctl_flow_add_node and edges with foxctl_flow_add_edge, then "
+                "foxctl_flow_start to execute."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Flow name (e.g. 'code-review-pipeline', 'research-analysis')",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Human-readable flow description",
+                    },
+                },
+                "required": ["name"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.flow_create(
+            name=args["name"],
+            description=args.get("description", ""),
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_flow_show",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_flow_show",
+            "description": (
+                "Show flow detail: all nodes (with kind/config), edges (with transforms), "
+                "and current state. Use to inspect a flow before starting or to "
+                "debug execution issues."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "flow_id": {
+                        "type": "string",
+                        "description": "Flow ID or name",
+                    },
+                },
+                "required": ["flow_id"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.flow_show(flow_id=args["flow_id"])),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_flow_list",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_flow_list",
+            "description": "List all flows in the workspace with their state and node/edge counts.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.flow_list()),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_flow_add_node",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_flow_add_node",
+            "description": (
+                "Add an execution node to a flow. Node kinds:\n"
+                "- agent: Spawn a foxctl agent (role/prompt/exec_mode) — key for multi-agent DAGs\n"
+                "- skill: Execute a foxctl skill (fs/find, code/symbols, etc.)\n"
+                "- pty: Run a PTY session (terminal command)\n"
+                "- http: Make an HTTP request (webhooks, APIs)\n"
+                "- transform: Pure data transform (no external execution)\n"
+                "- playwright: Browser automation\n"
+                "- image: Image generation/capture"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "flow_id": {
+                        "type": "string",
+                        "description": "Flow ID or name",
+                    },
+                    "kind": {
+                        "type": "string",
+                        "enum": ["skill", "pty", "http", "playwright", "image", "transform", "agent"],
+                        "description": "Node execution strategy",
+                    },
+                    "label": {
+                        "type": "string",
+                        "description": "Human-readable node label (also used as reference in edges)",
+                    },
+                    "config": {
+                        "type": "object",
+                        "description": (
+                            "Node config. For agent: {role, prompt, exec_mode, max_auto_turns, "
+                            "input_mode, output_mode, skills_allow}. "
+                            "For skill: {skill, extra_args}. "
+                            "For pty: {cmd, cwd, adapter}. "
+                            "For http: {url, method, headers}."
+                        ),
+                    },
+                },
+                "required": ["flow_id", "kind", "label", "config"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.flow_add_node(
+            flow_id=args["flow_id"],
+            kind=args["kind"],
+            label=args["label"],
+            config=args["config"],
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_flow_add_edge",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_flow_add_edge",
+            "description": (
+                "Connect two nodes in a flow with a typed edge. The edge routes "
+                "envelope data from the source node to the target node, optionally "
+                "applying a transform. Transforms:\n"
+                "- passthrough: No transformation (default)\n"
+                "- regex_extract: Extract matched groups from string output\n"
+                "- template: Apply Go template to reshape data\n"
+                "- jq_filter: JQ-style filter expression\n"
+                "- split_lines: Split string into array of lines\n"
+                "- map_fields: Rename/select fields from object\n"
+                "- file_write: Write upstream data to a file"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "flow_id": {
+                        "type": "string",
+                        "description": "Flow ID or name",
+                    },
+                    "from_node": {
+                        "type": "string",
+                        "description": "Source node ID or label",
+                    },
+                    "to_node": {
+                        "type": "string",
+                        "description": "Target node ID or label",
+                    },
+                    "transform": {
+                        "type": "string",
+                        "enum": ["passthrough", "regex_extract", "template", "jq_filter", "split_lines", "map_fields", "file_write"],
+                        "description": "Transform applied to data flowing through this edge",
+                        "default": "passthrough",
+                    },
+                    "transform_config": {
+                        "type": "string",
+                        "description": "JSON config for the transform (e.g. regex pattern, template string)",
+                    },
+                    "trigger": {
+                        "type": "string",
+                        "enum": ["output_ready", "screen_match", "exit", "manual"],
+                        "description": "When the edge fires",
+                        "default": "output_ready",
+                    },
+                    "condition": {
+                        "type": "string",
+                        "description": "Condition expression for conditional edge firing",
+                    },
+                },
+                "required": ["flow_id", "from_node", "to_node"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.flow_add_edge(
+            flow_id=args["flow_id"],
+            from_node=args["from_node"],
+            to_node=args["to_node"],
+            transform=args.get("transform", "passthrough"),
+            transform_config=args.get("transform_config", ""),
+            trigger=args.get("trigger", "output_ready"),
+            condition=args.get("condition", ""),
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_flow_start",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_flow_start",
+            "description": (
+                "Start executing a flow. The engine topological-sorts the nodes, "
+                "identifies source nodes (no incoming edges), and begins execution. "
+                "Each node's output is routed through edges to downstream nodes. "
+                "Use foxctl_flow_status to monitor progress and foxctl_flow_logs for output."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "flow_id": {
+                        "type": "string",
+                        "description": "Flow ID or name to start",
+                    },
+                },
+                "required": ["flow_id"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.flow_start(flow_id=args["flow_id"])),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_flow_status",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_flow_status",
+            "description": (
+                "Get runtime status of a flow: state (running/paused/stopped/errored), "
+                "per-node execution state, edge delivery counts, and run metadata."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "flow_id": {
+                        "type": "string",
+                        "description": "Flow ID or name",
+                    },
+                },
+                "required": ["flow_id"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.flow_status(flow_id=args["flow_id"])),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_flow_logs",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_flow_logs",
+            "description": (
+                "Get execution logs for a flow run. Shows envelope output from "
+                "each node. Optionally filter by node label."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "flow_id": {
+                        "type": "string",
+                        "description": "Flow ID or name",
+                    },
+                    "node": {
+                        "type": "string",
+                        "description": "Filter logs by node ID or label",
+                    },
+                },
+                "required": ["flow_id"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.flow_logs(
+            flow_id=args["flow_id"],
+            node=args.get("node", ""),
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_flow_stop",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_flow_stop",
+            "description": "Stop a running flow. All node execution is terminated.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "flow_id": {
+                        "type": "string",
+                        "description": "Flow ID or name",
+                    },
+                },
+                "required": ["flow_id"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.flow_stop(flow_id=args["flow_id"])),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_flow_output",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_flow_output",
+            "description": (
+                "Push structured output to a running flow node. Used when an agent "
+                "needs to inject data into a flow — for example, providing human "
+                "input or external data to a waiting node."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "flow_id": {
+                        "type": "string",
+                        "description": "Flow ID or name",
+                    },
+                    "node": {
+                        "type": "string",
+                        "description": "Node ID or label to push output to",
+                    },
+                    "data": {
+                        "type": "object",
+                        "description": "JSON data to push to the node",
+                    },
+                },
+                "required": ["flow_id", "node", "data"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.flow_output(
+            flow_id=args["flow_id"],
+            node=args["node"],
+            data=args["data"],
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_flow_build_pipeline",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_flow_build_pipeline",
+            "description": (
+                "Build a linear agent pipeline from stage definitions. Creates a flow, "
+                "adds nodes for each stage, and connects them sequentially with "
+                "passthrough edges. This is the fastest way to create a multi-agent "
+                "workflow — just define the stages and it builds the DAG.\n\n"
+                "Example stages:\n"
+                '[{"kind": "agent", "label": "researcher", "config": {"role": "researcher", "prompt": "Research the topic", "exec_mode": "autonomous"}},'
+                '[{"kind": "agent", "label": "coder", "config": {"role": "coder", "prompt": "Implement based on research", "exec_mode": "autonomous"}},'
+                '[{"kind": "agent", "label": "reviewer", "config": {"role": "reviewer", "prompt": "Review the implementation", "exec_mode": "autonomous"}}]'
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Pipeline name",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Pipeline description",
+                    },
+                    "stages": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "kind": {
+                                    "type": "string",
+                                    "description": "Node kind (agent, skill, pty, http, transform)",
+                                },
+                                "label": {
+                                    "type": "string",
+                                    "description": "Stage label",
+                                },
+                                "config": {
+                                    "type": "object",
+                                    "description": "Node config (varies by kind)",
+                                },
+                                "transform": {
+                                    "type": "string",
+                                    "description": "Edge transform to next stage (default: passthrough)",
+                                },
+                                "transform_config": {
+                                    "type": "string",
+                                    "description": "Transform config JSON",
+                                },
+                            },
+                            "required": ["kind", "label", "config"],
+                        },
+                        "description": "Ordered list of pipeline stages",
+                    },
+                },
+                "required": ["name", "stages"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.flow_build_pipeline(
+            name=args["name"],
+            description=args.get("description", ""),
+            stages=args["stages"],
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_flow_build_fan_out",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_flow_build_fan_out",
+            "description": (
+                "Build a fan-out flow: one source node broadcasts to multiple parallel "
+                "sink nodes. Use for parallel agent workflows — e.g., one researcher "
+                "feeds multiple specialist agents simultaneously.\n\n"
+                "Example: source={agent: analyst} → sinks=[{agent: go-coder}, {agent: python-coder}, {agent: rust-coder}]"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Flow name",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Flow description",
+                    },
+                    "source": {
+                        "type": "object",
+                        "properties": {
+                            "kind": {"type": "string"},
+                            "label": {"type": "string"},
+                            "config": {"type": "object"},
+                        },
+                        "required": ["kind", "label", "config"],
+                        "description": "Source node definition",
+                    },
+                    "sinks": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "kind": {"type": "string"},
+                                "label": {"type": "string"},
+                                "config": {"type": "object"},
+                                "transform": {"type": "string"},
+                                "transform_config": {"type": "string"},
+                            },
+                            "required": ["kind", "label", "config"],
+                        },
+                        "description": "Sink node definitions (receive output from source)",
+                    },
+                    "transform": {
+                        "type": "string",
+                        "description": "Default transform for all edges (default: passthrough)",
+                    },
+                },
+                "required": ["name", "source", "sinks"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.flow_build_fan_out(
+            name=args["name"],
+            description=args.get("description", ""),
+            source=args["source"],
+            sinks=args["sinks"],
+            transform=args.get("transform", "passthrough"),
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_flow_delete",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_flow_delete",
+            "description": "Delete a flow and all its nodes, edges, and run history.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "flow_id": {
+                        "type": "string",
+                        "description": "Flow ID or name",
+                    },
+                },
+                "required": ["flow_id"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.flow_delete(flow_id=args["flow_id"])),
+        check_fn=check_foxctl_available,
+    )
+
+    logger.info("Registered %d foxctl tools", 70)

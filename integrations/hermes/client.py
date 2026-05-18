@@ -584,6 +584,239 @@ class FoxctlClient:
                     pipe_msgs.append(msg)
         return {"pipe_messages": pipe_msgs, "count": len(pipe_msgs)}
 
+    # -- Flow DAG ----------------------------------------------------------
+
+    def flow_create(
+        self,
+        name: str,
+        description: str = "",
+    ) -> Dict:
+        """Create a new flow graph."""
+        cmd = ["flow", "create", "--name", name, "--workspace", self.cfg.workspace]
+        if description:
+            cmd += ["--description", description]
+        return self._cli(*cmd)
+
+    def flow_show(self, flow_id: str) -> Dict:
+        """Show flow detail including nodes and edges."""
+        return self._cli("flow", "show", flow_id, "--workspace", self.cfg.workspace)
+
+    def flow_list(self) -> Dict:
+        """List all flows in the workspace."""
+        return self._cli("flow", "list", "--workspace", self.cfg.workspace)
+
+    def flow_delete(self, flow_id: str) -> Dict:
+        """Delete a flow."""
+        return self._cli("flow", "delete", flow_id, "--workspace", self.cfg.workspace)
+
+    def flow_add_node(
+        self,
+        flow_id: str,
+        kind: str,
+        label: str,
+        config: Dict,
+        position: Optional[Dict] = None,
+    ) -> Dict:
+        """Add a node to a flow. kind is one of: skill, pty, http, playwright, image, transform, agent."""
+        cmd = [
+            "flow", "add-node", flow_id,
+            "--kind", kind,
+            "--label", label,
+            "--config", json.dumps(config),
+            "--workspace", self.cfg.workspace,
+        ]
+        if position:
+            cmd += ["--position", json.dumps(position)]
+        return self._cli(*cmd)
+
+    def flow_add_edge(
+        self,
+        flow_id: str,
+        from_node: str,
+        to_node: str,
+        transform: str = "passthrough",
+        transform_config: str = "",
+        trigger: str = "output_ready",
+        condition: str = "",
+        retry: str = "",
+    ) -> Dict:
+        """Add an edge between two nodes in a flow."""
+        cmd = [
+            "flow", "add-edge", flow_id,
+            "--from", from_node,
+            "--to", to_node,
+            "--transform", transform,
+            "--trigger", trigger,
+            "--workspace", self.cfg.workspace,
+        ]
+        if transform_config:
+            cmd += ["--transform-config", transform_config]
+        if condition:
+            cmd += ["--condition", condition]
+        if retry:
+            cmd += ["--retry", retry]
+        return self._cli(*cmd)
+
+    def flow_remove_node(self, flow_id: str, node_id: str) -> Dict:
+        """Remove a node from a flow."""
+        return self._cli("flow", "remove-node", flow_id, node_id, "--workspace", self.cfg.workspace)
+
+    def flow_remove_edge(self, flow_id: str, edge_id: str) -> Dict:
+        """Remove an edge from a flow."""
+        return self._cli("flow", "remove-edge", flow_id, edge_id, "--workspace", self.cfg.workspace)
+
+    def flow_start(self, flow_id: str) -> Dict:
+        """Start executing a flow."""
+        return self._cli("flow", "start", flow_id, "--workspace", self.cfg.workspace, timeout=30)
+
+    def flow_stop(self, flow_id: str) -> Dict:
+        """Stop a running flow."""
+        return self._cli("flow", "stop", flow_id, "--workspace", self.cfg.workspace)
+
+    def flow_pause(self, flow_id: str) -> Dict:
+        """Pause a running flow."""
+        return self._cli("flow", "pause", flow_id, "--workspace", self.cfg.workspace)
+
+    def flow_status(self, flow_id: str) -> Dict:
+        """Get runtime status of a flow."""
+        return self._cli("flow", "status", flow_id, "--workspace", self.cfg.workspace)
+
+    def flow_logs(
+        self,
+        flow_id: str,
+        run_id: str = "",
+        node: str = "",
+    ) -> Dict:
+        """Get execution logs for a flow run."""
+        cmd = ["flow", "logs"]
+        if run_id:
+            cmd.append(run_id)
+        else:
+            # Get latest run from status
+            status = self.flow_status(flow_id)
+            run_data = status.get("data", {}).get("run", {})
+            rid = run_data.get("id", "")
+            if rid:
+                cmd.append(rid)
+            else:
+                cmd.append(flow_id)  # fallback
+        cmd += ["--workspace", self.cfg.workspace]
+        if node:
+            cmd += ["--node", node]
+        return self._cli(*cmd, timeout=30)
+
+    def flow_output(
+        self,
+        flow_id: str,
+        node: str,
+        data: Dict,
+    ) -> Dict:
+        """Push structured output to a running flow node."""
+        return self._cli(
+            "flow", "output",
+            "--node", node,
+            "--data", json.dumps(data),
+            "--workspace", self.cfg.workspace,
+            flow_id,
+            timeout=15,
+        )
+
+    # -- Flow Templates -----------------------------------------------------
+
+    def flow_build_pipeline(
+        self,
+        name: str,
+        description: str,
+        stages: List[Dict],
+    ) -> Dict:
+        """Build a linear agent pipeline flow from stage definitions.
+
+        Each stage dict has: kind, label, config.
+        Stages are connected sequentially with passthrough edges.
+        Returns the created flow with all nodes and edges.
+        """
+        # Create flow
+        flow = self.flow_create(name, description)
+        flow_data = flow.get("data", {})
+        flow_id = flow_data.get("id", flow_data.get("name", ""))
+        if not flow_id:
+            return flow
+
+        nodes = []
+        # Add nodes
+        for i, stage in enumerate(stages):
+            node = self.flow_add_node(
+                flow_id,
+                kind=stage["kind"],
+                label=stage["label"],
+                config=stage["config"],
+                position={"x": float(i * 200), "y": 0},
+            )
+            node_data = node.get("data", {})
+            node_id = node_data.get("id", node_data.get("label", ""))
+            nodes.append(node_id)
+
+        # Add sequential edges
+        for i in range(len(nodes) - 1):
+            self.flow_add_edge(
+                flow_id,
+                from_node=nodes[i],
+                to_node=nodes[i + 1],
+                transform=stages[i + 1].get("transform", "passthrough"),
+                transform_config=stages[i + 1].get("transform_config", ""),
+            )
+
+        return self.flow_show(flow_id)
+
+    def flow_build_fan_out(
+        self,
+        name: str,
+        description: str,
+        source: Dict,
+        sinks: List[Dict],
+        transform: str = "passthrough",
+    ) -> Dict:
+        """Build a fan-out flow: one source broadcasts to multiple parallel sinks.
+
+        source: {kind, label, config}
+        sinks: [{kind, label, config, transform?, transform_config?}]
+        """
+        flow = self.flow_create(name, description)
+        flow_data = flow.get("data", {})
+        flow_id = flow_data.get("id", flow_data.get("name", ""))
+        if not flow_id:
+            return flow
+
+        # Add source node
+        src_node = self.flow_add_node(
+            flow_id,
+            kind=source["kind"],
+            label=source["label"],
+            config=source["config"],
+            position={"x": 0, "y": 0},
+        )
+        src_id = src_node.get("data", {}).get("id", source["label"])
+
+        # Add sink nodes and edges from source
+        for i, sink in enumerate(sinks):
+            sink_node = self.flow_add_node(
+                flow_id,
+                kind=sink["kind"],
+                label=sink["label"],
+                config=sink["config"],
+                position={"x": 300, "y": float(i * 150)},
+            )
+            sink_id = sink_node.get("data", {}).get("id", sink["label"])
+            self.flow_add_edge(
+                flow_id,
+                from_node=src_id,
+                to_node=sink_id,
+                transform=sink.get("transform", transform),
+                transform_config=sink.get("transform_config", ""),
+            )
+
+        return self.flow_show(flow_id)
+
     # -- memory search ------------------------------------------------------
 
     def memory_search(self, query: str, limit: int = 5, include_content: bool = True) -> Dict:

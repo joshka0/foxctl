@@ -1,33 +1,101 @@
 # Foxctl Plugin for Hermes Agent
 
-Deep integration between foxctl's intelligence layer and hermes-agent, providing 26 tools spanning repo index search, code analysis, room-agile lifecycle, memory, and filesystem access.
+Deep integration between foxctl's intelligence, coordination, and flow orchestration layers and hermes-agent, providing 70 tools spanning 10 categories.
 
 ## Tool Categories
+
+### Flow Orchestration (multi-agent DAG workflows)
+
+| Tool | Description |
+|---|---|
+| `foxctl_flow_create` | Create a new flow graph |
+| `foxctl_flow_show` | Show flow detail: nodes, edges, state |
+| `foxctl_flow_list` | List all flows in the workspace |
+| `foxctl_flow_add_node` | Add an execution node (agent, skill, PTY, HTTP, transform) |
+| `foxctl_flow_add_edge` | Connect nodes with typed edges and transforms |
+| `foxctl_flow_start` | Start executing a flow |
+| `foxctl_flow_status` | Get runtime status of a running flow |
+| `foxctl_flow_logs` | Get execution logs for a flow run |
+| `foxctl_flow_stop` | Stop a running flow |
+| `foxctl_flow_output` | Push structured output to a running flow node |
+| `foxctl_flow_build_pipeline` | Build a linear agent pipeline from stage definitions |
+| `foxctl_flow_build_fan_out` | Build a fan-out: one source broadcasts to parallel sinks |
+| `foxctl_flow_delete` | Delete a flow and all its data |
+
+### Multi-Agent Coordination
+
+| Tool | Description |
+|---|---|
+| `foxctl_agent_list` | List agents in the room |
+| `foxctl_room_task_list` | List room tasks with optional status filter |
+| `foxctl_room_task_add` | Create a new task in the room |
+| `foxctl_room_task_claim` | Claim a pending task |
+| `foxctl_room_task_complete` | Mark a task as completed |
+| `foxctl_room_task_block` | Block a task with a reason |
+| `foxctl_room_task_abandon` | Abandon a claimed task |
+| `foxctl_room_status` | Get room delivery/member status |
+| `foxctl_publish_context` | Broadcast agent state to the room |
+
+### Pipe Protocol (agent-to-agent data flow)
+
+| Tool | Description |
+|---|---|
+| `foxctl_pipe_emit` | Emit structured data through a named pipe to other agents |
+| `foxctl_pipe_receive` | Consume pipe messages from the room inbox |
+
+### ContextWiki (control + knowledge planes)
+
+| Tool | Description |
+|---|---|
+| `foxctl_context_show` | Read the top-of-mind context bundle |
+| `foxctl_context_report` | Generate a structured context report |
+| `foxctl_context_observe` | Record an observation to the control plane |
+| `foxctl_context_tension` | Record a tension (architectural concern) |
+| `foxctl_context_capture` | Capture a handoff note for session continuity |
+| `foxctl_context_infer` | Infer context from recent activity |
+| `foxctl_context_handoffs` | List recorded handoff notes |
+| `foxctl_context_dispatch` | Get context-aware task dispatch |
+| `foxctl_context_next` | Get recommended next action |
+| `foxctl_context_observations` | List all observations |
+| `foxctl_context_tensions` | List all tensions |
+| `foxctl_context_overview` | Get full context plane overview |
+
+### Vault / Knowledge Plane
+
+| Tool | Description |
+|---|---|
+| `foxctl_vault_search` | Search the Obsidian vault for notes |
+| `foxctl_vault_stats` | Get vault statistics |
+| `foxctl_vault_promote` | Promote a draft note to evergreen |
+| `foxctl_vault_append` | Append content to a vault note |
+| `foxctl_vault_bridge` | Bridge a foxctl doc to vault |
+| `foxctl_vault_graph` | Get vault link graph |
+| `foxctl_vault_index_build` | Rebuild the vault search index |
 
 ### Intelligence Layer (deep code understanding)
 
 | Tool | Description |
 |---|---|
-| `foxctl_repo_search` | Search the repo index for symbols, files, packages by natural-language query |
+| `foxctl_repo_search` | Search the repo index for symbols, files, packages |
 | `foxctl_repo_dag` | Get an explanation dependency DAG for a code concept |
-| `foxctl_repo_expand` | Expand the repo index graph from seed nodes to discover neighbors |
+| `foxctl_repo_expand` | Expand the repo index graph from seed nodes |
 | `foxctl_repo_open` | Open a repo index node by ID for full metadata |
-| `foxctl_code_grep` | Search code patterns and return surrounding function/class blocks |
-| `foxctl_semantic_search` | Unified semantic search across symbols, sessions, memory, codemaps |
-| `foxctl_code_symbols` | Extract symbols (functions, types, interfaces) from a file |
+| `foxctl_code_grep` | Search code patterns with function/class block expansion |
+| `foxctl_semantic_search` | Unified semantic search across symbols, sessions, memory |
+| `foxctl_code_symbols` | Extract symbols from a file |
 | `foxctl_text_grep` | Fast regex search across the workspace |
 | `foxctl_fs_read` | Read file contents through CAS-backed storage |
 | `foxctl_fs_find` | Find files by name, path, or glob pattern |
 | `foxctl_codemap_list` | List available codemaps |
-| `foxctl_codemap_get` | Get a codemap by ID with full content |
+| `foxctl_codemap_get` | Get a codemap by ID |
 
-### Memory & Session Layer (cross-agent knowledge)
+### Memory & Session Layer
 
 | Tool | Description |
 |---|---|
 | `foxctl_memory_search` | Search foxctl's vector-indexed knowledge base |
+| `foxctl_memory_put` | Store a knowledge record (CLI → Turso) |
 | `foxctl_session_recall` | Recall context from past sessions |
-| `foxctl_context` | Gather workspace overview (rooms, tasks, health) |
 
 ### Room Communication
 
@@ -75,93 +143,128 @@ plugins:
     - foxctl
 
 foxctl:
-  url: "http://localhost:8090"        # foxctl daemon URL
-  workspace: "."                      # workspace path
-  room: "alpha"                       # room ID to bind to
-  actor: "actor:hermes:local"         # actor identity
-  auto_bind: false                    # auto-register as room participant on session start
-  memory_context: true                # include foxctl memory in context
-  epic_context: true                  # include epic state in context
+  url: "http://localhost:8090"
+  workspace: "."
+  room: "alpha"
+  actor: "actor:hermes:local"
+  vault_path: ".foxctl/templates/obsidian-vault"
+  auto_bind: false
+  memory_context: true
+  epic_context: true
 ```
 
 Environment variable overrides: `FOXCTL_URL`, `FOXCTL_WORKSPACE`, `FOXCTL_ROOM`, `FOXCTL_EPIC_ID`, `FOXCTL_ACTOR`, `FOXCTL_SESSION`, `FOXCTL_AUTO_BIND`.
-
-## Usage Patterns
-
-### Code exploration
-```
-You: how does the room agile story lifecycle work?
-Hermes: [calls foxctl_repo_search "room agile story lifecycle"]
-        [calls foxctl_code_grep "storyState" mode=ripgrep]
-        Found: StoryState in internal/domain/agent/board.go, transitions in cmd/room.go...
-```
-
-### Cross-agent memory
-```
-You: search foxctl memory for the auth module design
-Hermes: [calls foxctl_memory_search query="auth module design"]
-        Found 3 records: auth-architecture (knowledge), ...
-```
-
-### Room-agile workflow
-```
-You: check the room inbox
-Hermes: [calls foxctl_room_inbox]
-        [calls foxctl_epic_next]
-        Next action: start story "Add read-only agile endpoint"
-        Want me to start it?
-
-You: yes
-Hermes: [calls foxctl_story_start story_id=01KRS5AXG5...]
-        Story started. I'll pick up the implementation now.
-```
-
-### Deep code understanding
-```
-You: what does the TursoStore vector search implementation look like?
-Hermes: [calls foxctl_repo_search "vector search turso"]
-        [calls foxctl_code_grep "SearchChunks" path="internal/storage/sessions"]
-        Found TursoStore.SearchChunks in turso_store.go:1183-1245...
-        [calls foxctl_fs_read "internal/storage/sessions/turso_store.go"]
-```
 
 ## Architecture
 
 ```
 hermes agent
-  └── plugin: foxctl
-       ├── tools.py      → 26 registered tools (4 categories)
-       ├── client.py     → HTTP client with skill envelope unwrapping
-       ├── config.py     → reads from config.yaml + env
+  └── plugin: foxctl (70 tools, 10 categories)
+       ├── tools.py      → tool registrations + schemas
+       ├── client.py     → HTTP + CLI client with envelope unwrapping
+       ├── config.py     → config.yaml + env var reading
        └── __init__.py   → plugin entry + lifecycle hooks
 
 foxctl daemon (localhost:8090)
-  └── Skill API (/api/skills/*)
-       ├── repo/index_search, repo/index_dag_grep, repo/index_expand
-       ├── code/context_grep, code/semantic_search, code/symbols
-       ├── text/grep, fs/read, fs/find
-       ├── codemap/list, codemap/get
-       ├── memory/query, session/recall
-       └── REST API
-            ├── /api/rooms/{id}/messages, inbox, agile
-            └── /api/health, /api/context/overview
+  ├── Skill API (/api/skills/run) — 150 skills
+  ├── REST API (/api/rooms, /api/context, /api/companion)
+  └── Flow Engine (DAG executor)
+       ├── NodeAgent   — spawns foxctl agents, captures output
+       ├── NodeSkill   — executes foxctl skill subprocesses
+       ├── NodePTY     — foxprox terminal sessions
+       ├── NodeHTTP    — outbound HTTP requests
+       ├── NodeTransform — pure data transforms
+       └── Edges       — typed pipes with transforms:
+             passthrough, regex_extract, template,
+             jq_filter, split_lines, map_fields, file_write
+
+foxprox broker
+  ├── Room router — message fan-out to participants
+  ├── Talkback rules — terminal output → room message routing
+  └── Foxprox spawner — CLI agent lifecycle (droid, claude)
 
 herdr (terminal multiplexer)
   └── room loop relay → pane delivery
 ```
 
-## Deep Intelligence Integration
+### Coordination Stack
 
-The plugin exposes foxctl's full intelligence layer to hermes through 62 foxctl skills mapped to 12 dedicated intelligence tools:
+```
+Layer 5: Flow DAG        — multi-agent orchestration (n8n-like)
+           ┌──────────┐  output_ready  ┌──────────┐
+           │ analyzer │ ──────────────► │ coder    │
+           │ (agent)  │                 │ (agent)  │
+           └──────────┘                 └──────────┘
+               │
+               │ fan-out
+          ┌────┼────┐
+          ▼    ▼    ▼
+       go    py   rust
+       (agent)(agent)(agent)
 
-- **RepoIndex** — 33,714 nodes with 150,818 edges covering symbols, files, packages. Semantic search with Qwen3-Embedding-8B vectors. Graph traversal for dependency analysis.
-- **Code Search** — Multi-mode (ripgrep/AST/line) with function/class block expansion. Smart search combines repo index + ripgrep + semantic ranking.
-- **Memory** — Named records with vector embeddings, BM25 fallback. Cross-agent knowledge base.
-- **Codemaps** — Semantic code relationship maps generated by AI agents.
-- **Session Recall** — Past conversation search with embedding similarity.
+Layer 4: Pipe Protocol   — structured agent→agent data flow
+Layer 3: Room Tasks      — claim/complete/block work items
+Layer 2: Room Messages   — durable inbox + relay to terminals
+Layer 1: Room Relay      — herdr terminal delivery to panes
+```
 
-All skill responses are unwrapped from the foxctl skill envelope (`output.data`) automatically by the client's `_unwrap_skill()` method, so hermes receives clean data without needing to understand the CAS/artifact system.
+## Usage Patterns
+
+### Multi-agent pipeline
+
+```
+You: build a code review pipeline — analyze, implement, review
+
+Hermes: [calls foxctl_flow_build_pipeline with 3 agent stages]
+        Created flow "code-review-pipeline" (3 nodes, 2 edges)
+        analyzer → implementer → reviewer
+        [calls foxctl_flow_start]
+        Flow started. Analyzer is running...
+
+        [calls foxctl_flow_status]
+        analyzer: completed (12s)
+        implementer: running...
+        reviewer: idle
+
+        [calls foxctl_flow_logs node=reviewer]
+        Review complete. 3 issues found, 2 fixed.
+```
+
+### Fan-out parallel work
+
+```
+You: have 3 agents implement in parallel — Go, Python, Rust
+
+Hermes: [calls foxctl_flow_build_fan_out]
+        source: analyst → sinks: [go-coder, python-coder, rust-coder]
+        [calls foxctl_flow_start]
+        Analyst running... output will fan out to all 3 coders.
+```
+
+### Agent coordination via room tasks
+
+```
+You: assign the embedding optimization task to hermes
+
+Hermes: [calls foxctl_room_task_list status=pending]
+        Found task: "optimize embedding worker batch size"
+        [calls foxctl_room_task_claim task_id=...]
+        Task claimed. Starting implementation...
+        [implements the change]
+        [calls foxctl_room_task_complete task_id=... notes="Batch size increased from 20 to 50"]
+```
+
+### Code exploration
+
+```
+You: how does the flow engine execute agent nodes?
+
+Hermes: [calls foxctl_repo_search "flow engine agent executor"]
+        [calls foxctl_code_grep "AgentExecutor" path="internal/runtime/flow"]
+        Found AgentExecutor in executors.go:218 — spawns agents via
+        AgentSpawner interface, supports prompt/ask input modes...
+```
 
 ## Zero Dependencies
 
-The plugin uses only Python stdlib (`urllib`, `json`, `os`, `logging`) for maximum portability — no requests, no httpx, no external packages needed.
+The plugin uses only Python stdlib (`urllib`, `json`, `os`, `subprocess`, `logging`) for maximum portability — no requests, no httpx, no external packages.
