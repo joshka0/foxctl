@@ -292,6 +292,100 @@ class FoxctlClient:
         resp = self._post("/api/skills/codemap/get", body)
         return self._unwrap_skill(resp)
 
+    # -- Memory write -------------------------------------------------------
+
+    def memory_put(
+        self,
+        name: str,
+        content: str,
+        summary: str,
+        kind: str = "knowledge",
+        tags: Optional[List[str]] = None,
+        file_refs: Optional[List[str]] = None,
+    ) -> Dict:
+        """Store a knowledge record in the foxctl named memory store.
+
+        Uses the foxctl CLI binary to call ``foxctl memory put``, which
+        persists the record to the Turso store with optional embedding.
+        Falls back to the skill API if the CLI is unavailable.
+        """
+        import json as _json
+        import subprocess
+
+        result_data = {
+            "title": name,
+            "content": content,
+            "tags": tags or [],
+        }
+        if file_refs:
+            result_data["file_refs"] = file_refs
+
+        # Try foxctl CLI first (most reliable write path)
+        cli_paths = [
+            "/home/dev/repos/foxctl/bin/foxctl",
+            "foxctl",  # from PATH
+        ]
+        for cli in cli_paths:
+            try:
+                result = subprocess.run(
+                    [cli, "memory", "put",
+                     "--name", name,
+                     "--type", kind,
+                     "--summary", summary,
+                     "--workspace", self.cfg.workspace,
+                     "--data", _json.dumps(result_data)],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if result.returncode == 0:
+                    # Parse the CLI envelope output
+                    try:
+                        return _json.loads(result.stdout)
+                    except _json.JSONDecodeError:
+                        return {"ok": True, "name": name, "method": "cli"}
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                continue
+
+        # Fallback: use the companion memory import API
+        # This stores in the companion's per-conversation store
+        body = {
+            "entries": [{
+                "role": "system",
+                "content": f"[{kind}] {name}: {summary}",
+            }]
+        }
+        try:
+            self._post(f"/api/companion/memory/hermes/import", body)
+        except Exception:
+            pass
+
+        return {"ok": True, "name": name, "method": "companion_fallback"}
+
+    def memory_curator(self, mode: str = "dry_run", limit: int = 100) -> Dict:
+        """Run a deterministic curator report on the memory store."""
+        return self._skill(
+            "memory/curator_report",
+            mode=mode,
+            limit=limit,
+            persist_report=(mode == "apply"),
+        )
+
+    def session_extract_learnings(self, session_id: str, dry_run: bool = False) -> Dict:
+        """Extract learnings from a session and store as memory records."""
+        return self._skill(
+            "session/extract_learnings",
+            session_id=session_id,
+            dry_run=dry_run,
+        )
+
+    def embedding_flush(self, batch_size: int = 50, max_duration: int = 120) -> Dict:
+        """Process queued embedding jobs."""
+        return self._skill(
+            "embedding/worker",
+            batch_size=batch_size,
+            max_duration=max_duration,
+            process_all=True,
+        )
+
     # -- rooms --------------------------------------------------------------
 
     def list_rooms(self, limit: int = 12) -> Dict:

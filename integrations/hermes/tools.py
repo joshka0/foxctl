@@ -705,4 +705,147 @@ def register_tools(ctx, client: FoxctlClient, cfg: FoxctlConfig) -> None:
         check_fn=check_foxctl_available,
     )
 
+    # ===================================================================
+    # Memory Write Layer — store, promote, curate
+    # ===================================================================
+
+    ctx.register_tool(
+        name="foxctl_memory_put",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_memory_put",
+            "description": (
+                "Store a knowledge record in foxctl's memory store. "
+                "Use this to persist learnings, decisions, architectural notes, "
+                "gotchas, or any cross-agent knowledge that should be searchable "
+                "by other agents (Pi, future Hermes sessions, etc.)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Unique memory name (e.g. 'auth-architecture', 'gotcha-turso-conn-pool')",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Full content of the memory record",
+                    },
+                    "summary": {
+                        "type": "string",
+                        "description": "Short summary (used for search/BM25 ranking)",
+                    },
+                    "kind": {
+                        "type": "string",
+                        "description": "Memory kind: knowledge, decision, gotcha, preference, pattern",
+                        "default": "knowledge",
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Tags for categorization",
+                    },
+                    "file_refs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Related file paths",
+                    },
+                },
+                "required": ["name", "content", "summary"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.memory_put(
+            name=args["name"],
+            content=args["content"],
+            summary=args["summary"],
+            kind=args.get("kind", "knowledge"),
+            tags=args.get("tags", []),
+            file_refs=args.get("file_refs", []),
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_memory_curator",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_memory_curator",
+            "description": (
+                "Run a deterministic curator report on the memory store. "
+                "Identifies stale, duplicate, or low-quality records. "
+                "Use dry_run mode to preview changes before applying."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "description": "dry_run (preview) or apply (mutate)",
+                        "default": "dry_run",
+                        "enum": ["dry_run", "apply"],
+                    },
+                    "limit": {"type": "integer", "description": "Max records to examine (default 100)", "default": 100},
+                },
+                "required": [],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.memory_curator(
+            mode=args.get("mode", "dry_run"),
+            limit=args.get("limit", 100),
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_session_extract_learnings",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_session_extract_learnings",
+            "description": (
+                "Extract actionable learnings (gotchas, decisions, preferences, "
+                "anti-patterns) from a session and store them as memory records. "
+                "Call this at the end of a session to persist knowledge."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "Session ID to extract from"},
+                    "dry_run": {"type": "boolean", "description": "Preview only, don't persist (default false)", "default": False},
+                },
+                "required": ["session_id"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.session_extract_learnings(
+            session_id=args["session_id"],
+            dry_run=args.get("dry_run", False),
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_embedding_flush",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_embedding_flush",
+            "description": (
+                "Process queued embedding jobs. Call this periodically to "
+                "ensure newly indexed symbols and memories get their "
+                "vector embeddings generated for semantic search."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "batch_size": {"type": "integer", "description": "Jobs per batch (default 50)", "default": 50},
+                    "max_duration": {"type": "integer", "description": "Max seconds (default 120)", "default": 120},
+                },
+                "required": [],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.embedding_flush(
+            batch_size=args.get("batch_size", 50),
+            max_duration=args.get("max_duration", 120),
+        )),
+        check_fn=check_foxctl_available,
+    )
+
     logger.info("Registered %d foxctl tools", 32)
