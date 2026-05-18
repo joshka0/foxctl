@@ -1,0 +1,88 @@
+apiVersion: foxctl/v1
+kind: Skill
+metadata:
+  name: social/x_collect
+  version: 0.1.0
+  description: "Collect X/Twitter research data through the official X API v2"
+  tags: ["social", "x", "twitter", "research"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: social/x_collect
+  parameters:
+    - name: operation
+      type: string
+      required: true
+      description: "Operation: recent_search, posts_lookup, user_lookup, user_posts, post_counts"
+    - name: query
+      type: string
+      required: false
+      description: "X API query for search/count operations"
+    - name: ids
+      type: array
+      required: false
+      description: "Post IDs for posts_lookup"
+    - name: id
+      type: string
+      required: false
+      description: "Single post ID for posts_lookup"
+    - name: username
+      type: string
+      required: false
+      description: "Username for user_lookup"
+    - name: user_id
+      type: string
+      required: false
+      description: "User ID for user_lookup or user_posts"
+    - name: limit
+      type: integer
+      required: false
+      default: 10
+      description: "Result limit, capped by provider endpoint"
+    - name: page_token
+      type: string
+      required: false
+      description: "Provider pagination token"
+    - name: since
+      type: string
+      required: false
+      description: "Provider start_time"
+    - name: until
+      type: string
+      required: false
+      description: "Provider end_time"
+    - name: dry_run
+      type: boolean
+      required: false
+      default: false
+      description: "Emit planned request and cost/rate metadata without network or secrets"
+    - name: include_raw
+      type: boolean
+      required: false
+      default: false
+      description: "Include raw provider JSON in output"
+  help:
+    short: "Collect X API v2 posts, users, counts, and timelines."
+    long: |
+      Uses X API v2 directly. Set X_BEARER_TOKEN or TWITTER_BEARER_TOKEN for live calls.
+      X pricing is pay-per-use and endpoint-specific; this skill reports cost metadata without hard-coding prices.
+returns:
+  - name: items
+    type: array
+    description: "Normalized social items"
+  - name: pagination
+    type: object
+    description: "Provider pagination cursor"
+  - name: rate_limit
+    type: object
+    description: "Observed provider rate-limit headers"
+capabilities:
+  network: "egress"
+  filesystem:
+    - type: workdir
+  pure: false

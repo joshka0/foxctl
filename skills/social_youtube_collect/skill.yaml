@@ -1,0 +1,105 @@
+apiVersion: foxctl/v1
+kind: Skill
+metadata:
+  name: social/youtube_collect
+  version: 0.1.0
+  description: "Collect YouTube research data through the official YouTube Data API v3"
+  tags: ["social", "youtube", "research", "video"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: social/youtube_collect
+  parameters:
+    - name: operation
+      type: string
+      required: true
+      description: "Operation: search, videos, channel, playlist_items, comments"
+    - name: query
+      type: string
+      required: false
+      description: "Search query"
+    - name: ids
+      type: array
+      required: false
+      description: "Video IDs for videos"
+    - name: video_id
+      type: string
+      required: false
+      description: "Video ID for videos or comments"
+    - name: channel_id
+      type: string
+      required: false
+      description: "Channel ID"
+    - name: handle
+      type: string
+      required: false
+      description: "Channel handle for channel lookup"
+    - name: username
+      type: string
+      required: false
+      description: "Legacy channel username"
+    - name: playlist_id
+      type: string
+      required: false
+      description: "Playlist ID"
+    - name: type
+      type: string
+      required: false
+      default: video
+      description: "Search type such as video, channel, playlist"
+    - name: sort
+      type: string
+      required: false
+      description: "YouTube order parameter for search"
+    - name: limit
+      type: integer
+      required: false
+      default: 10
+      description: "Result limit, capped by provider endpoint"
+    - name: page_token
+      type: string
+      required: false
+      description: "YouTube pageToken"
+    - name: since
+      type: string
+      required: false
+      description: "publishedAfter for search"
+    - name: until
+      type: string
+      required: false
+      description: "publishedBefore for search"
+    - name: dry_run
+      type: boolean
+      required: false
+      default: false
+      description: "Emit planned request and quota metadata without network or secrets"
+    - name: include_raw
+      type: boolean
+      required: false
+      default: false
+      description: "Include raw provider JSON in output"
+  help:
+    short: "Collect YouTube search, video, channel, playlist, and comment data."
+    long: |
+      Uses YouTube Data API v3 directly. Set YOUTUBE_API_KEY for live calls.
+      search costs 100 quota units per page; most metadata/comment list calls cost 1.
+returns:
+  - name: items
+    type: array
+    description: "Normalized social items"
+  - name: pagination
+    type: object
+    description: "YouTube page token"
+  - name: cost
+    type: object
+    description: "Estimated YouTube quota units"
+capabilities:
+  network: "egress"
+  filesystem:
+    - type: workdir
+  pure: false

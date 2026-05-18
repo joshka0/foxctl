@@ -1,0 +1,88 @@
+apiVersion: foxctl/v1
+kind: Skill
+metadata:
+  name: social/reddit_collect
+  version: 0.1.0
+  description: "Collect Reddit research data through the official Reddit Data API"
+  tags: ["social", "reddit", "research"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: social/reddit_collect
+  parameters:
+    - name: operation
+      type: string
+      required: true
+      description: "Operation: subreddit_listing, subreddit_search, post_comments, user_submitted, user_comments, subreddit_about"
+    - name: subreddit
+      type: string
+      required: false
+      description: "Subreddit without r/ prefix"
+    - name: query
+      type: string
+      required: false
+      description: "Search query"
+    - name: post_id
+      type: string
+      required: false
+      description: "Reddit post/article ID without t3_ prefix"
+    - name: username
+      type: string
+      required: false
+      description: "Username without u/ prefix"
+    - name: sort
+      type: string
+      required: false
+      description: "Sort such as hot, new, top, relevance, confidence"
+    - name: time_filter
+      type: string
+      required: false
+      description: "Reddit t filter such as day, week, month, year, all"
+    - name: limit
+      type: integer
+      required: false
+      default: 25
+      description: "Listing limit, capped at 100"
+    - name: after
+      type: string
+      required: false
+      description: "Listing after cursor"
+    - name: before
+      type: string
+      required: false
+      description: "Listing before cursor"
+    - name: dry_run
+      type: boolean
+      required: false
+      default: false
+      description: "Emit planned request and cost/rate metadata without network or secrets"
+    - name: include_raw
+      type: boolean
+      required: false
+      default: false
+      description: "Include raw provider JSON in output"
+  help:
+    short: "Collect Reddit listings, search results, comments, and user activity."
+    long: |
+      Uses Reddit OAuth API directly. Set REDDIT_USER_AGENT and either REDDIT_ACCESS_TOKEN
+      or REDDIT_CLIENT_ID plus REDDIT_CLIENT_SECRET for live calls.
+returns:
+  - name: items
+    type: array
+    description: "Normalized social items"
+  - name: pagination
+    type: object
+    description: "Reddit listing cursor"
+  - name: rate_limit
+    type: object
+    description: "Observed Reddit rate-limit headers"
+capabilities:
+  network: "egress"
+  filesystem:
+    - type: workdir
+  pure: false
