@@ -129,23 +129,14 @@ class FoxctlClient:
         import subprocess as _sp
 
         cli_paths = ["/home/dev/repos/foxctl/bin/foxctl", "foxctl"]
+        last_err = None
         for cli in cli_paths:
             try:
                 result = _sp.run(
                     [cli, *args],
                     capture_output=True, text=True, timeout=timeout,
                 )
-                if result.returncode != 0:
-                    # Try to parse error from stdout
-                    for line in result.stdout.strip().splitlines():
-                        try:
-                            d = json.loads(line)
-                            if d.get("error"):
-                                return d
-                        except json.JSONDecodeError:
-                            pass
-                    raise FoxctlError(1, result.stderr[:200] or "CLI failed", {})
-                # Parse last JSON line from stdout
+                # Parse last JSON line from stdout (even on non-zero exit)
                 for line in reversed(result.stdout.strip().splitlines()):
                     try:
                         d = json.loads(line)
@@ -153,8 +144,18 @@ class FoxctlClient:
                             return d
                     except json.JSONDecodeError:
                         continue
-                return {"ok": True, "raw": result.stdout}
+                # If no JSON on stdout but we have stderr, check for known benign errors
+                stderr_text = (result.stderr or "").strip()
+                if result.returncode != 0 and stderr_text:
+                    # Some commands return useful info on stderr (e.g. "no eligible task found")
+                    if "no eligible task" in stderr_text or "no such file" in stderr_text.lower():
+                        return {"ok": True, "data": {"message": stderr_text, "found": False}}
+                    raise FoxctlError(result.returncode, stderr_text[:200], {})
+                if result.stdout.strip():
+                    return {"ok": True, "raw": result.stdout}
+                return {"ok": True, "data": {}}
             except FileNotFoundError:
+                last_err = FileNotFoundError
                 continue
             except _sp.TimeoutExpired:
                 raise FoxctlError(408, f"CLI timed out after {timeout}s", {})
