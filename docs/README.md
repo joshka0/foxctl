@@ -6,6 +6,7 @@ This is the canonical map for docs in this repository.
 
 - [AGENTS.md](../AGENTS.md) - Contributor + AI assistant operating rules.
 - [README.md](../README.md) - Product overview and quick start.
+- [CONTEXT.md](../CONTEXT.md) - Short root domain vocabulary for foxctl agents and operators.
 - [docs/start/README.md](start/README.md) - Fast orientation for common workflows.
 - [docs/glossary.md](glossary.md) - Foxctl-specific terminology for agents and contributors.
 - [docs/architecture/package-topology.md](architecture/package-topology.md) - Read this first before introducing a new `internal/*` root or placing new code under `internal/v2/*`.

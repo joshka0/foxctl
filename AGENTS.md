@@ -19,6 +19,7 @@ contributors
 | Resource                                           | Purpose                                          |
 | -------------------------------------------------- | ------------------------------------------------ |
 | [README.md](README.md)                             | Overview, quick start                            |
+| [CONTEXT.md](CONTEXT.md)                           | Short root domain vocabulary for foxctl agents and operators |
 | [docs/README.md](docs/README.md)                   | Canonical documentation map                      |
 | [docs/glossary.md](docs/glossary.md)               | Foxctl terminology and naming rules              |
 | [docs/DOC_LIFECYCLE.md](docs/DOC_LIFECYCLE.md)     | Documentation lifecycle policy                   |
@@ -83,7 +84,7 @@ contributors
 15. **Task continuity split** — use `foxctl context task-history-summary` for Codex/agents/scripts *(structured summary + artifact pointer)* and `configs/hooks/task-continuity-summary.sh` for hook injection *(prompt-ready wrapper output)*
 16. **Never use keyword heuristics** — do not route, classify, promote, or suppress behavior using ad hoc substring/keyword matching; these heuristics are brittle. Prefer explicit schemas, typed signals, scored features, tests, or learned policies.
 17. **`internal/*` placement rule** — before adding a new `internal/*` package or extending `internal/v2/*`, read [docs/architecture/package-topology.md](docs/architecture/package-topology.md) and place the work by family model, not by local preference
-18. **Terminology** — use [docs/glossary.md](docs/glossary.md) for foxctl-specific language. Use ContextWiki for the workspace knowledge layer and reserve ContextWiki for legacy references only.
+18. **Terminology** — use [CONTEXT.md](CONTEXT.md) for short root domain vocabulary and [docs/glossary.md](docs/glossary.md) for broader foxctl-specific language. Use ContextWiki for the workspace knowledge layer; reserve generic memory/context language for legacy references only.
 
 ## Run Command Choice
 

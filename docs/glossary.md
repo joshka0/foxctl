@@ -64,6 +64,49 @@ instructions, and command output. Prefer these names in new docs.
 | Task continuity | The workflow for summarizing task history and carrying it into future agent sessions. |
 | Context engine | The typed evidence substrate that stores evidence packs, retrieval episodes, feedback, impact edges, and stale markers. |
 
+## Broad And Deferred Vocabulary
+
+These terms are useful in foxctl conversations, but most should stay qualified
+or feature-local instead of becoming root terms in `CONTEXT.md`.
+
+| Term | Guidance |
+|---|---|
+| Workspace | The project boundary foxctl operates on. This is root domain language because many rooms, sessions, jobs, artifacts, indexes, and ContextWiki records are workspace-scoped. |
+| Finding | A review result or risk statement, usually backed by evidence. Prefer this in review reports instead of vague "issue" when the output is evaluative. |
+| Report | A delivered summary artifact. Qualify it by purpose, such as review report, readiness report, research report, or launch report. |
+| Worktree | A Git worktree or checkout used for isolated work. It is operational Git vocabulary, not a room, session, or workspace by itself. |
+| Pipeline | Overloaded across room-agile planning, YAML workflows, launch flows, and runner stages. Qualify the layer until foxctl settles a root model. |
+| Workflow | Overloaded across YAML workflow specs, room-agile process, operator procedure, and general process language. Qualify the layer. |
+| Orchestration | Broad planning/runtime language. Prefer sharper terms such as Room, Room Agile, Agent, Skill, Runtime, Provisioning, Relay, or Transport when possible. |
+| Decision | Potential durable choice record. Deferred as root terminology until foxctl defines whether decisions are first-class records. |
+| Approval | Permission to proceed, accept, merge, deliver, or close. Deferred as root terminology until the authority model is clearer. |
+| Gate | A control point or readiness boundary. Use only when a specific spec or workflow defines the gate. |
+| Profile | A structured configuration or identity document in specs such as agent profiles or overseer profiles. Keep spec-local unless it becomes cross-cutting. |
+| Provider | Configuration/backend selection language. Use Integration for external services in root language; use provider when discussing interchangeable backends. |
+| Index | Overloaded across repo graphs, semantic/vector stores, vault indexes, ContextWiki refresh, and external search APIs. Qualify by layer and purpose. |
+| Search | Overloaded across web, semantic, repo, vault, and external API search. Qualify source, layer, and contract. |
+| State | Too broad as a root term. Qualify by owner: room state, story state, session lifecycle, event history, artifact content. |
+| Status | Attribute, not a root term. Qualify by owner: job status, envelope status, participant status, story status. |
+| Run | Overloaded between `foxctl run`, Go `Run(ctx)`, and ordinary execution language. Use Command, Job, or implementation lifecycle wording. |
+| Protocol | A specific kind of contract. Use Contract in general root language; use protocol only for a named low-level or spec-defined contract. |
+| Surface | Broad prose. Prefer Viewer, Console, Integration, Adapter, or Transport when one of those fits. |
+| Bridge | Broad prose and common implementation naming. Prefer Adapter for translation, Relay for moving room messages/events, and Transport for the mechanism. |
+| Log | Diagnostic or implementation output. Prefer Event for structured lifecycle facts and Transcript for interaction content. |
+| Memory | Legacy or prose unless a subsystem doc defines it. Prefer ContextWiki, Context system, Context engine, or Transcript. |
+| Knowledge | Broad prose. Prefer ContextWiki for the knowledge layer, Evidence for support, Artifact for durable output, and Transcript for interaction records. |
+| Observation | ContextWiki-specific or prose. Prefer Evidence when supporting a claim and Event when recording something that happened. |
+| Research | Workflow/activity language. Qualify it as a research skill, research role, research artifact, or research report. |
+| Analyst | Role label, not a root object. Use analyst role or a specific role name inside a room, skill, or agent prompt. |
+| Collector | Skill- or retrieval-specific language. Defer unless it becomes a cross-cutting foxctl concept. |
+| Platform | Usually product or integration language. Prefer Integration for external services unless discussing product platform architecture. |
+| Query | Request/search language. Qualify by target: repo query, search query, API query, database query, or room query. |
+| Corpus | Retrieval/dataset language. Keep in retrieval, benchmark, or research docs. |
+| Outlier | Analysis-specific language. Keep in research/marketing skill docs. |
+| Sentiment | Analysis-specific language. Keep in social/research skill docs. |
+| Trend | Analysis-specific language. Keep in social/research skill docs. |
+| Influence | Analysis-specific language. Keep in social/research skill docs. |
+| Competitor | Market/research language. Keep in research, launch, or product docs. |
+
 ## Quality And Refactoring
 
 | Term | Meaning |
