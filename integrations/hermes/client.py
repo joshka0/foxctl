@@ -28,6 +28,16 @@ class FoxctlClient:
 
     # -- internal helpers ---------------------------------------------------
 
+    @staticmethod
+    def _unwrap_skill(resp: Dict) -> Dict:
+        """Unwrap a foxctl skill envelope (ok/output/data) into the inner data."""
+        if "output" in resp and isinstance(resp["output"], dict):
+            inner = resp["output"]
+            if "data" in inner and isinstance(inner["data"], dict):
+                return inner["data"]
+            return inner
+        return resp
+
     def _request(self, method: str, path: str, body: Optional[Dict] = None) -> Dict:
         url = f"{self.base_url}{path}"
         data = json.dumps(body).encode() if body else None
@@ -62,6 +72,12 @@ class FoxctlClient:
 
     def _post(self, path: str, body: Optional[Dict] = None) -> Dict:
         return self._request("POST", path, body)
+
+    def _skill(self, skill_name: str, **kwargs) -> Dict:
+        """Call a foxctl skill by name with workspace auto-injected."""
+        body = {"workspace": self.cfg.workspace, **{k: v for k, v in kwargs.items() if v is not None}}
+        resp = self._post(f"/api/skills/{skill_name}", body)
+        return self._unwrap_skill(resp)
 
     def _put(self, path: str, body: Optional[Dict] = None) -> Dict:
         return self._request("PUT", path, body)
@@ -102,7 +118,8 @@ class FoxctlClient:
             "limit": limit,
             "include_content": include_content,
         }
-        return self._post("/api/memory/query", body)
+        resp = self._post("/api/skills/memory/query", body)
+        return self._unwrap_skill(resp)
 
     # -- session recall -----------------------------------------------------
 
@@ -112,7 +129,168 @@ class FoxctlClient:
             "query": query,
             "limit": limit,
         }
-        return self._post("/api/session/recall", body)
+        resp = self._post("/api/skills/session/recall", body)
+        return self._unwrap_skill(resp)
+
+    # -- repo index ---------------------------------------------------------
+
+    def repo_index_search(self, query: str, limit: int = 10) -> Dict:
+        """Search the repo index for matching symbol/file nodes."""
+        body = {"workspace": self.cfg.workspace, "query": query, "limit": limit}
+        resp = self._post("/api/skills/repo/index_search", body)
+        return self._unwrap_skill(resp)
+
+    def repo_index_dag(self, query: str, depth: int = 2, budget: int = 50) -> Dict:
+        """Search repo index and return an explanation DAG graph."""
+        body = {
+            "workspace": self.cfg.workspace,
+            "query": query,
+            "depth": depth,
+            "budget": budget,
+        }
+        resp = self._post("/api/skills/repo/index_dag_grep", body)
+        return self._unwrap_skill(resp)
+
+    def repo_index_expand(self, seeds: List[str], depth: int = 1, budget: int = 30) -> Dict:
+        """Expand repo index graph edges from seed node IDs."""
+        body = {
+            "workspace": self.cfg.workspace,
+            "seeds": seeds,
+            "depth": depth,
+            "budget": budget,
+        }
+        resp = self._post("/api/skills/repo/index_expand", body)
+        return self._unwrap_skill(resp)
+
+    def repo_index_open(self, node_id: str) -> Dict:
+        """Open one repo-index node by ID with full metadata."""
+        body = {"workspace": self.cfg.workspace, "id": node_id}
+        resp = self._post("/api/skills/repo/index_open", body)
+        return self._unwrap_skill(resp)
+
+    # -- code search --------------------------------------------------------
+
+    def code_context_grep(
+        self,
+        pattern: str,
+        mode: str = "ripgrep",
+        language: Optional[str] = None,
+        path: Optional[str] = None,
+        max_blocks: int = 10,
+    ) -> Dict:
+        """Search code patterns and return surrounding function/class blocks."""
+        body: Dict[str, Any] = {
+            "workspace": self.cfg.workspace,
+            "pattern": pattern,
+            "mode": mode,
+            "max_blocks": max_blocks,
+        }
+        if language:
+            body["language"] = language
+        if path:
+            body["path"] = path
+        resp = self._post("/api/skills/code/context_grep", body)
+        return self._unwrap_skill(resp)
+
+    def code_semantic_search(self, query: str, limit: int = 10) -> Dict:
+        """Unified semantic search across symbols, sessions, memory, codemaps."""
+        body = {
+            "workspace": self.cfg.workspace,
+            "query": query,
+            "limit": limit,
+        }
+        resp = self._post("/api/skills/code/semantic_search", body)
+        return self._unwrap_skill(resp)
+
+    def code_smart_search(self, query: str, limit: int = 10, max_snippets: int = 5) -> Dict:
+        """Smart code search with auto-generated candidates from indexes."""
+        body = {
+            "workspace": self.cfg.workspace,
+            "query": query,
+            "limit": limit,
+            "max_snippets": max_snippets,
+        }
+        resp = self._post("/api/skills/code/smart_search", body)
+        return self._unwrap_skill(resp)
+
+    def code_symbols(self, path: str) -> Dict:
+        """Extract code symbols from a file."""
+        body = {"workspace": self.cfg.workspace, "path": path}
+        resp = self._post("/api/skills/code/symbols", body)
+        return self._unwrap_skill(resp)
+
+    # -- text search --------------------------------------------------------
+
+    def text_grep(
+        self,
+        pattern: str,
+        include: Optional[List[str]] = None,
+        exclude: Optional[List[str]] = None,
+        path: Optional[str] = None,
+        max_matches: int = 50,
+        ci: bool = False,
+    ) -> Dict:
+        """Regex search across the workspace."""
+        body: Dict[str, Any] = {
+            "workspace": self.cfg.workspace,
+            "pattern": pattern,
+            "max_matches": max_matches,
+            "ci": ci,
+        }
+        if include:
+            body["include"] = include
+        if exclude:
+            body["exclude"] = exclude
+        if path:
+            body["path"] = path
+        resp = self._post("/api/skills/text/grep", body)
+        return self._unwrap_skill(resp)
+
+    # -- filesystem ---------------------------------------------------------
+
+    def fs_read(self, path: str, max_bytes: int = 50000) -> Dict:
+        """Read file contents through CAS-backed preview."""
+        body = {
+            "workspace": self.cfg.workspace,
+            "path": path,
+            "max_bytes": max_bytes,
+        }
+        resp = self._post("/api/skills/fs/read", body)
+        return self._unwrap_skill(resp)
+
+    def fs_find(
+        self,
+        query: Optional[str] = None,
+        pattern: Optional[str] = None,
+        path: str = ".",
+        max_results: int = 20,
+    ) -> Dict:
+        """Find files by name/path query or glob pattern."""
+        body: Dict[str, Any] = {
+            "workspace": self.cfg.workspace,
+            "path": path,
+            "max_results": max_results,
+        }
+        if query:
+            body["query"] = query
+        if pattern:
+            body["pattern"] = pattern
+        resp = self._post("/api/skills/fs/find", body)
+        return self._unwrap_skill(resp)
+
+    # -- codemaps -----------------------------------------------------------
+
+    def codemap_list(self, limit: int = 10) -> Dict:
+        """List available codemaps."""
+        body = {"workspace": self.cfg.workspace, "limit": limit}
+        resp = self._post("/api/skills/codemap/list", body)
+        return self._unwrap_skill(resp)
+
+    def codemap_get(self, codemap_id: str) -> Dict:
+        """Get codemap details by ID."""
+        body = {"workspace": self.cfg.workspace, "id": codemap_id}
+        resp = self._post("/api/skills/codemap/get", body)
+        return self._unwrap_skill(resp)
 
     # -- rooms --------------------------------------------------------------
 
