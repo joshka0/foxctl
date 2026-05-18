@@ -414,6 +414,124 @@ class FoxctlClient:
         resp = self._cli(*args, timeout=30)
         return resp.get("data", resp)
 
+    # -- Multi-Agent Coordination -----------------------------------------
+
+    def agent_list(self) -> Dict:
+        """List all registered agents."""
+        return self._get("/api/agents")
+
+    def agent_info(self, agent_id: str) -> Dict:
+        """Get info about a specific agent."""
+        return self._get(f"/api/agents/{agent_id}")
+
+    def room_task_list(self, room_id: Optional[str] = None, status: str = "") -> Dict:
+        """List tasks associated with a room."""
+        rid = room_id or self.cfg.room
+        params = {"workspace_id": self.cfg.workspace}
+        if status:
+            params["status"] = status
+        return self._get(f"/api/rooms/{rid}/tasks", params)
+
+    def room_task_add(
+        self,
+        title: str,
+        description: str = "",
+        room_id: Optional[str] = None,
+        scope: str = "",
+        depends_on: Optional[List[str]] = None,
+    ) -> Dict:
+        """Create a task associated with a room."""
+        rid = room_id or self.cfg.room
+        args = [
+            "room", "task", "add", rid,
+            "--title", title,
+            "--workspace", self.cfg.workspace,
+            "--sender", self.cfg.actor,
+        ]
+        if description:
+            args.extend(["--description", description])
+        if scope:
+            args.extend(["--scope", scope])
+        for dep in (depends_on or []):
+            args.extend(["--depends-on", dep])
+        resp = self._cli(*args)
+        return resp.get("data", resp)
+
+    def room_task_claim(self, task_id: str, room_id: Optional[str] = None) -> Dict:
+        """Claim a room task for this agent."""
+        rid = room_id or self.cfg.room
+        resp = self._cli(
+            "room", "task", "claim", rid,
+            "--id", task_id,
+            "--workspace", self.cfg.workspace,
+        )
+        return resp.get("data", resp)
+
+    def room_task_complete(self, task_id: str, room_id: Optional[str] = None, notes: str = "") -> Dict:
+        """Complete a room task and broadcast to room."""
+        rid = room_id or self.cfg.room
+        args = [
+            "room", "task", "complete", rid,
+            "--id", task_id,
+            "--workspace", self.cfg.workspace,
+        ]
+        if notes:
+            args.extend(["--notes", notes])
+        resp = self._cli(*args)
+        return resp.get("data", resp)
+
+    def room_task_block(self, task_id: str, reason: str = "", room_id: Optional[str] = None) -> Dict:
+        """Mark a claimed task as blocked."""
+        rid = room_id or self.cfg.room
+        args = [
+            "room", "task", "block", rid,
+            "--id", task_id,
+            "--workspace", self.cfg.workspace,
+        ]
+        if reason:
+            args.extend(["--reason", reason])
+        resp = self._cli(*args)
+        return resp.get("data", resp)
+
+    def room_task_abandon(self, task_id: str, room_id: Optional[str] = None) -> Dict:
+        """Release a claimed task back to pending."""
+        rid = room_id or self.cfg.room
+        resp = self._cli(
+            "room", "task", "abandon", rid,
+            "--id", task_id,
+            "--workspace", self.cfg.workspace,
+        )
+        return resp.get("data", resp)
+
+    def room_status(self, room_id: Optional[str] = None) -> Dict:
+        """Get room status including participants, backlog, and task pulse."""
+        rid = room_id or self.cfg.room
+        return self._get(f"/api/rooms/{rid}/status", {"workspace_id": self.cfg.workspace})
+
+    def room_task_assign(self, task_id: str, recipient: str, room_id: Optional[str] = None) -> Dict:
+        """Assign a room task to a participant (coordinator only)."""
+        rid = room_id or self.cfg.room
+        resp = self._cli(
+            "room", "task", "assign", rid,
+            "--id", task_id,
+            "--workspace", self.cfg.workspace,
+        )
+        return resp.get("data", resp)
+
+    def publish_agent_context(self, context: str, room_id: Optional[str] = None) -> Dict:
+        """Publish agent context to the room for other agents to read.
+
+        Uses room message with a structured subject so other agents
+        can discover and consume the context.
+        """
+        rid = room_id or self.cfg.room
+        return self._post(f"/api/rooms/{rid}/messages", {
+            "workspace_id": self.cfg.workspace,
+            "sender": self.cfg.actor,
+            "subject": "agent-context-broadcast",
+            "body": context,
+        })
+
     # -- memory search ------------------------------------------------------
 
     def memory_search(self, query: str, limit: int = 5, include_content: bool = True) -> Dict:

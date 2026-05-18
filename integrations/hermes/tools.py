@@ -1378,4 +1378,221 @@ def register_tools(ctx, client: FoxctlClient, cfg: FoxctlConfig) -> None:
         check_fn=check_foxctl_available,
     )
 
-    logger.info("Registered %d foxctl tools", 49)
+    # ===================================================================
+    # Multi-Agent Coordination — tasks, agents, context broadcasting
+    # ===================================================================
+
+    ctx.register_tool(
+        name="foxctl_agent_list",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_agent_list",
+            "description": (
+                "List all registered foxctl agents. Returns agent IDs, names, roles, "
+                "states, and execution modes. Use to discover other agents in the workspace."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.agent_list()),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_room_task_list",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_room_task_list",
+            "description": (
+                "List tasks associated with the room. Shows task IDs, titles, statuses, "
+                "assignees, and dependencies. Use to find available work or track progress."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "description": "Filter by status: pending, in_progress, blocked, completed, failed",
+                    },
+                },
+                "required": [],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.room_task_list(status=args.get("status", ""))),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_room_task_add",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_room_task_add",
+            "description": (
+                "Create a task in the room and announce it to all participants. "
+                "Use to break work into trackable units that agents can claim."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Task title"},
+                    "description": {"type": "string", "description": "Task description"},
+                    "scope": {"type": "string", "description": "Scope path (e.g. 'src/memory/')"},
+                    "depends_on": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Task IDs this task depends on",
+                    },
+                },
+                "required": ["title"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.room_task_add(
+            title=args["title"],
+            description=args.get("description", ""),
+            scope=args.get("scope", ""),
+            depends_on=args.get("depends_on"),
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_room_task_claim",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_room_task_claim",
+            "description": (
+                "Claim a pending room task for yourself. Moves the task to in-progress "
+                "and signals other agents that it's taken."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string", "description": "Task ID to claim"},
+                },
+                "required": ["task_id"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.room_task_claim(task_id=args["task_id"])),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_room_task_complete",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_room_task_complete",
+            "description": (
+                "Complete a room task and broadcast the completion to all participants. "
+                "Use when you've finished work on a claimed task."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string", "description": "Task ID to complete"},
+                    "notes": {"type": "string", "description": "Completion notes (what was done, gotchas)"},
+                },
+                "required": ["task_id"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.room_task_complete(
+            task_id=args["task_id"],
+            notes=args.get("notes", ""),
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_room_task_block",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_room_task_block",
+            "description": (
+                "Mark a claimed task as blocked. Signals that you can't proceed "
+                "and need help or a dependency resolved."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string", "description": "Task ID to block"},
+                    "reason": {"type": "string", "description": "Why the task is blocked"},
+                },
+                "required": ["task_id"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.room_task_block(
+            task_id=args["task_id"],
+            reason=args.get("reason", ""),
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_room_task_abandon",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_room_task_abandon",
+            "description": (
+                "Release a claimed task back to pending. Other agents can then claim it. "
+                "Use when you can't complete a task and want someone else to pick it up."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string", "description": "Task ID to abandon"},
+                },
+                "required": ["task_id"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.room_task_abandon(task_id=args["task_id"])),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_room_status",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_room_status",
+            "description": (
+                "Get the room status: participants, their roles, task pulse, "
+                "backlog summary, and action-required counts. Use to understand "
+                "the current coordination state of the room."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.room_status()),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_publish_context",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_publish_context",
+            "description": (
+                "Publish your current context to the room for other agents to read. "
+                "Include what you're working on, what you've learned, and what you need. "
+                "Other agents can read this through room messages."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "context": {
+                        "type": "string",
+                        "description": "Structured context to broadcast (markdown): current task, findings, blockers, needs",
+                    },
+                },
+                "required": ["context"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.publish_agent_context(context=args["context"])),
+        check_fn=check_foxctl_available,
+    )
+
+    logger.info("Registered %d foxctl tools", 58)
