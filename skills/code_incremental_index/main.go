@@ -10,6 +10,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"go/parser"
 	"go/token"
@@ -146,6 +147,27 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		})
 	}
 
+	// Compute content hash for unchanged-file skip.
+	contentHash := fmt.Sprintf("%x", sha256.Sum256(content))
+
+	// Open memory store early to check content hash (uses Storage.Root for persistent data)
+	store, err := memory.OpenWithConfig(ctx, rc.Config)
+	if err != nil {
+		return skillerr.WrapIO("open memory store", err)
+	}
+	defer func() { errs.Ignore(store.Close(), "close memory store") }()
+
+	// Skip if content hash unchanged since last index.
+	if !in.Embed && contentUnchanged(ctx, store, in.WorkspaceID, relPath, contentHash) {
+		return emit(rc, output{
+			File:       relPath,
+			Language:   lang,
+			Skipped:    true,
+			SkipReason: "content unchanged",
+			DurationMS: time.Since(start).Milliseconds(),
+		})
+	}
+
 	// Extract symbols if enabled
 	var symbols []symbol.Symbol
 	if *in.Symbols {
@@ -158,17 +180,15 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		}
 	}
 
-	// Open memory store (uses Storage.Root for persistent data)
-	store, err := memory.OpenWithConfig(ctx, rc.Config)
-	if err != nil {
-		return skillerr.WrapIO("open memory store", err)
-	}
-	defer func() { errs.Ignore(store.Close(), "close memory store") }()
-
 	// Upsert symbols and delete stale ones
 	updated, deleted, err := upsertSymbols(ctx, store, in.WorkspaceID, relPath, lang, rc.SessionID, symbols)
 	if err != nil {
 		return skillerr.WrapIO("upsert symbols", err)
+	}
+
+	// Persist content hash for future unchanged-file skip
+	if updated > 0 || deleted > 0 {
+		storeContentHash(ctx, store, in.WorkspaceID, relPath, contentHash)
 	}
 
 	// Queue embeddings for updated symbols
@@ -616,6 +636,33 @@ func inferEndLine(lines []string, startIdx int) int {
 
 	// Return end of file if no closing found
 	return len(lines)
+}
+
+// contentUnchanged checks if the file's content hash matches the previously indexed hash.
+// This allows skipping unchanged files entirely during live indexing.
+func contentUnchanged(ctx context.Context, store storage.MemoryStore, workspaceID, filePath, contentHash string) bool {
+	if contentHash == "" {
+		return false
+	}
+	hashName := fmt.Sprintf("_idx_hash://%s/%s", workspaceID, filePath)
+	entry, err := store.Get(ctx, hashName, workspaceID)
+	if err != nil {
+		return false
+	}
+	// The hash is stored in the Summary field
+	return entry.Summary == contentHash
+}
+
+// storeContentHash persists the content hash for future unchanged-file detection.
+func storeContentHash(ctx context.Context, store storage.MemoryStore, workspaceID, filePath, contentHash string) {
+	hashName := fmt.Sprintf("_idx_hash://%s/%s", workspaceID, filePath)
+	entry := storage.NamedEntry{
+		Name:      hashName,
+		Type:      "index_hash",
+		Workspace: workspaceID,
+		Summary:   contentHash,
+	}
+	_, _ = store.Save(ctx, entry)
 }
 
 // emit outputs the result envelope with indexing statistics and timing information for skill completion.

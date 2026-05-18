@@ -1,0 +1,26 @@
+name: foxctl
+version: 0.1.0
+description: "Foxctl room-agile integration: memory search, room messaging, epic tracking, story lifecycle."
+author: joshka0
+kind: standalone
+provides_tools:
+  - foxctl_memory_search
+  - foxctl_session_recall
+  - foxctl_context
+  - foxctl_room_send
+  - foxctl_room_inbox
+  - foxctl_room_messages
+  - foxctl_room_message_ack
+  - foxctl_epic_show
+  - foxctl_epic_resume
+  - foxctl_epic_health
+  - foxctl_epic_next
+  - foxctl_milestone_show
+  - foxctl_story_show
+  - foxctl_story_start
+  - foxctl_story_review
+  - foxctl_story_validate
+  - foxctl_health
+provides_hooks:
+  - on_session_start
+  - on_session_end

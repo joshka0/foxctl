@@ -249,6 +249,34 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		}
 	}()
 
+	// Pre-flight: check that at least one embedding provider is reachable.
+	// This prevents claiming and failing the entire batch when the embedding
+	// server is down (e.g., local GPU server not started).
+	if !in.DryRun {
+		embedder, _, probeErr := getSymbolEmbedder()
+		if probeErr != nil {
+			return skillout.Emit(rc, command, Output{
+				Status:    "error",
+				LastError: fmt.Sprintf("embedding provider setup failed: %v", probeErr),
+				Message:   fmt.Sprintf("Embedding provider setup failed: %v. Ensure the embedding server is running and FOXCTL_EMBEDDING_BASE_URL is set correctly.", probeErr),
+			})
+		}
+		// Probe the embedding endpoint with a tiny request to verify connectivity.
+		if embedder != nil {
+			probeCtx, probeCancel := context.WithTimeout(ctx, 5*time.Second)
+			_, probeErr = embedder.Embed(probeCtx, "health check")
+			probeCancel()
+			if probeErr != nil {
+				return skillout.Emit(rc, command, Output{
+					Status:    "error",
+					LastError: fmt.Sprintf("embedding provider unreachable: %v", probeErr),
+					Remaining: -1, // signal that we didn't check the queue
+					Message:   fmt.Sprintf("Embedding provider probe failed: %v. The embedding server at %s may not be running. Set FOXCTL_EMBEDDING_BASE_URL correctly or start the embedding server.", probeErr, rc.Config.Embedding.BaseURL),
+				})
+			}
+		}
+	}
+
 	embeddingDBPath := filepath.Join(rc.Config.Paths.Cache, "embedding_queue.db")
 	workspaceID := strings.TrimSpace(in.WorkspaceID)
 	kind, err := normalizeTaskKind(in.Kind)
