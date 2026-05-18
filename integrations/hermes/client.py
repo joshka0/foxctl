@@ -532,6 +532,58 @@ class FoxctlClient:
             "body": context,
         })
 
+    # -- Pipe Protocol ----------------------------------------------------
+
+    def pipe_emit(
+        self,
+        pipe_id: str,
+        payload: str,
+        target_agents: Optional[List[str]] = None,
+        room_id: Optional[str] = None,
+    ) -> Dict:
+        """Emit a structured pipe message to the room.
+
+        Writes a pipe-formatted room message that other agents can
+        consume via pipe_receive or talkback rules. The message has
+        subject 'pipe:<pipe_id>' and structured JSON body.
+        """
+        rid = room_id or self.cfg.room
+        body = {
+            "pipe_id": pipe_id,
+            "source": self.cfg.actor,
+            "targets": target_agents or ["*"],
+            "payload": payload,
+        }
+        return self._post(f"/api/rooms/{rid}/messages", {
+            "workspace_id": self.cfg.workspace,
+            "sender": self.cfg.actor,
+            "subject": f"pipe:{pipe_id}",
+            "body": json.dumps(body),
+        })
+
+    def pipe_receive(
+        self,
+        pipe_id: str = "",
+        room_id: Optional[str] = None,
+        limit: int = 10,
+    ) -> Dict:
+        """Receive pipe messages from the room inbox.
+
+        Reads pending room messages matching 'pipe:<pipe_id>' subject.
+        If pipe_id is empty, returns all pipe messages.
+        """
+        rid = room_id or self.cfg.room
+        resp = self.room_inbox(room_id=rid, only="pending", limit=limit)
+        # Filter for pipe messages
+        messages = resp.get("messages", resp.get("data", {}).get("messages", []))
+        pipe_msgs = []
+        for msg in messages:
+            subject = msg.get("subject", "")
+            if subject.startswith("pipe:"):
+                if not pipe_id or subject == f"pipe:{pipe_id}":
+                    pipe_msgs.append(msg)
+        return {"pipe_messages": pipe_msgs, "count": len(pipe_msgs)}
+
     # -- memory search ------------------------------------------------------
 
     def memory_search(self, query: str, limit: int = 5, include_content: bool = True) -> Dict:

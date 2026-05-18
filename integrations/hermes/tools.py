@@ -1595,4 +1595,75 @@ def register_tools(ctx, client: FoxctlClient, cfg: FoxctlConfig) -> None:
         check_fn=check_foxctl_available,
     )
 
-    logger.info("Registered %d foxctl tools", 58)
+    # ===================================================================
+    # Pipe Protocol — structured agent-to-agent data flow
+    # ===================================================================
+
+    ctx.register_tool(
+        name="foxctl_pipe_emit",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_pipe_emit",
+            "description": (
+                "Emit a structured pipe message to the room for other agents to consume. "
+                "Pipe messages are room messages with subject 'pipe:<pipe_id>' and JSON body. "
+                "Other agents receive them through room relay delivery and can "
+                "consume them with foxctl_pipe_receive. "
+                "This is the n8n-like primitive: one agent's output becomes another's input."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pipe_id": {
+                        "type": "string",
+                        "description": "Pipe identifier (e.g. 'code-review', 'test-results', 'architecture-analysis')",
+                    },
+                    "payload": {
+                        "type": "string",
+                        "description": "JSON payload to send through the pipe",
+                    },
+                    "target_agents": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Target agent IDs (e.g. ['actor:pi:local']). Default: broadcast to all.",
+                    },
+                },
+                "required": ["pipe_id", "payload"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.pipe_emit(
+            pipe_id=args["pipe_id"],
+            payload=args["payload"],
+            target_agents=args.get("target_agents"),
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_pipe_receive",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_pipe_receive",
+            "description": (
+                "Receive pipe messages from the room inbox. Returns pending messages "
+                "matching 'pipe:<pipe_id>' subject. Use to consume structured data "
+                "emitted by other agents through foxctl_pipe_emit."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pipe_id": {
+                        "type": "string",
+                        "description": "Pipe ID to filter for (empty = all pipe messages)",
+                    },
+                },
+                "required": [],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.pipe_receive(
+            pipe_id=args.get("pipe_id", ""),
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    logger.info("Registered %d foxctl tools", 60)
