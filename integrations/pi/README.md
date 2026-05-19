@@ -179,6 +179,43 @@ Supported actions:
 - `foxctl_control_inspect` — Inspect one control proposal (`/api/context/control-proposals/{id}`)
 - `foxctl_control_decide` — Append typed coordinator decisions (`/api/context/control-proposals/{id}/decisions`)
 
+### ContextWiki
+- `foxctl_context_show` — Show top-of-mind bundle (objective, phase, active tasks, constraints, next actions, observations, tensions, handoffs)
+- `foxctl_context_overview` — Get overview: proposals, evidence imports, promotion jobs, next merge tasks
+- `foxctl_context_report` — Synthesized workspace health report with recommended actions
+- `foxctl_context_next` — Select the next recommended task candidate based on current state and priorities
+- `foxctl_context_capture` — Capture a structured handoff (summary, phase, outcome, observations, tensions, next actions)
+- `foxctl_context_dispatch` — Build a bounded task packet for the next task (includes context and ready-to-go instructions)
+- `foxctl_context_handoffs` — List recorded handoffs from previous sessions
+- `foxctl_context_observe` — Record a repeatable observation (factual, confidence-scored, accumulates over time)
+- `foxctl_context_tension` — Record a tension (contradiction, performance, complexity, dependency, usability)
+- `foxctl_context_infer` — Auto-extract observations and tensions from a summary text (dry_run or apply)
+
+### Vault
+- `foxctl_vault_search` — Search the Obsidian vault index for matching notes (ranked hits with snippet)
+- `foxctl_vault_promote` — Create an evergreen promotion draft in the vault inbox (primary write path to knowledge plane)
+- `foxctl_vault_append` — Append content under a heading in an existing vault note
+- `foxctl_vault_bridge` — Reconcile repo docs with vault notes, generate bridge drafts
+- `foxctl_vault_graph` — Generate structured vault notes from the repo index graph
+- `foxctl_vault_index_build` — Rebuild the local Obsidian vault index
+- `foxctl_vault_stats` — Get vault index statistics (notes, headings, links, chunks, embeddings)
+
+### Memory Write
+- `foxctl_memory_put` — Store a knowledge record (learnings, decisions, gotchas, preferences, patterns)
+- `foxctl_memory_curator` — Run curator report to identify stale, duplicate, or low-quality records
+
+### Code Analysis
+- `foxctl_code_symbols` — Extract code symbols (functions, types, interfaces, methods) from a file
+
+### Embedding
+- `foxctl_embedding_flush` — Process queued embedding jobs for semantic search indexing
+
+### Room Context
+- `foxctl_publish_context` — Publish current context to the room for other agents to read
+
+### Session Learnings
+- `foxctl_session_extract_learnings` — Extract actionable learnings from a session and store as memory records
+
 ### Mux (tmux/zellij)
 - `foxctl_mux_list` — List panes
 - `foxctl_mux_read` — Read pane output
@@ -246,6 +283,10 @@ Supported actions:
 | `/foxctl-board` | Show board |
 | `/foxctl-stats` | Show stats |
 | `/foxctl-context` | Show context plane |
+| `/context-show` | Show ContextWiki top-of-mind bundle |
+| `/context-report` | Show synthesized workspace health report |
+| `/context-next` | Show recommended next ContextWiki task |
+| `/context-handoffs` | Show recent ContextWiki handoffs |
 | `/foxctl-mcp` | Show MCP status |
 | `/foxctl-workspaces` | List workspaces |
 
