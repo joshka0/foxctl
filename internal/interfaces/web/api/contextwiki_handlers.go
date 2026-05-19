@@ -128,15 +128,15 @@ func ContextNextHandler(cfg config.Config, _ zerolog.Logger) http.HandlerFunc {
 // ── Context Capture (handoff) ───────────────────────────────────────────
 
 type contextCaptureRequest struct {
-	Workspace   string   `json:"workspace,omitempty"`
-	TaskID      string   `json:"task_id,omitempty"`
-	Phase       string   `json:"phase,omitempty"`
-	Outcome     string   `json:"outcome,omitempty"`
-	Summary     string   `json:"summary"`
+	Workspace    string   `json:"workspace,omitempty"`
+	TaskID       string   `json:"task_id,omitempty"`
+	Phase        string   `json:"phase,omitempty"`
+	Outcome      string   `json:"outcome,omitempty"`
+	Summary      string   `json:"summary"`
 	Observations []string `json:"observations,omitempty"`
-	Tensions    []string `json:"tensions,omitempty"`
-	NextActions []string `json:"next_actions,omitempty"`
-	FileTouched []string `json:"file_touched,omitempty"`
+	Tensions     []string `json:"tensions,omitempty"`
+	NextActions  []string `json:"next_actions,omitempty"`
+	FileTouched  []string `json:"file_touched,omitempty"`
 	EvidenceRefs []string `json:"evidence_refs,omitempty"`
 }
 
@@ -164,16 +164,16 @@ func ContextCaptureHandler(_ config.Config, _ zerolog.Logger) http.HandlerFunc {
 			return
 		}
 		handoff := contextplane.Handoff{
-			TaskID:      strings.TrimSpace(req.TaskID),
-			Phase:       strings.TrimSpace(req.Phase),
-			Outcome:     strings.TrimSpace(req.Outcome),
-			Summary:     strings.TrimSpace(req.Summary),
+			TaskID:       strings.TrimSpace(req.TaskID),
+			Phase:        strings.TrimSpace(req.Phase),
+			Outcome:      strings.TrimSpace(req.Outcome),
+			Summary:      strings.TrimSpace(req.Summary),
 			Observations: req.Observations,
-			Tensions:    req.Tensions,
-			NextActions: req.NextActions,
-			FileRefs:    stringsToEvidenceRefs(req.FileTouched),
+			Tensions:     req.Tensions,
+			NextActions:  req.NextActions,
+			FileRefs:     stringsToEvidenceRefs(req.FileTouched),
 			EvidenceRefs: stringsToEvidenceRefs(req.EvidenceRefs),
-			CreatedAt:   time.Now().UTC(),
+			CreatedAt:    time.Now().UTC(),
 		}
 		store := contextplane.NewWorkspaceStore(wp)
 		path, err := store.SaveHandoff(handoff)
@@ -398,12 +398,12 @@ func ContextTensionHandler(_ config.Config, _ zerolog.Logger) http.HandlerFunc {
 // ── Context Infer ───────────────────────────────────────────────────────
 
 type contextInferRequest struct {
-	Workspace     string   `json:"workspace,omitempty"`
-	Summary       string   `json:"summary"`
-	Project       string   `json:"project,omitempty"`
-	Area          string   `json:"area,omitempty"`
-	EvidenceRefs  []string `json:"evidence_refs,omitempty"`
-	Apply         bool     `json:"apply,omitempty"`
+	Workspace    string   `json:"workspace,omitempty"`
+	Summary      string   `json:"summary"`
+	Project      string   `json:"project,omitempty"`
+	Area         string   `json:"area,omitempty"`
+	EvidenceRefs []string `json:"evidence_refs,omitempty"`
+	Apply        bool     `json:"apply,omitempty"`
 }
 
 func ContextInferHandler(_ config.Config, _ zerolog.Logger) http.HandlerFunc {
@@ -764,15 +764,15 @@ func VaultStatsHandler(cfg config.Config, _ zerolog.Logger) http.HandlerFunc {
 // This HTTP endpoint provides a simplified write path that records a memory proposal.
 
 type memoryPutRequest struct {
-	Workspace   string   `json:"workspace,omitempty"`
-	Name        string   `json:"name"`
-	Content     string   `json:"content"`
-	Summary     string   `json:"summary"`
-	Kind        string   `json:"kind,omitempty"`
-	Tags        []string `json:"tags,omitempty"`
-	FileRefs    []string `json:"file_refs,omitempty"`
+	Workspace    string   `json:"workspace,omitempty"`
+	Name         string   `json:"name"`
+	Content      string   `json:"content"`
+	Summary      string   `json:"summary"`
+	Kind         string   `json:"kind,omitempty"`
+	Tags         []string `json:"tags,omitempty"`
+	FileRefs     []string `json:"file_refs,omitempty"`
 	EvidenceRefs []string `json:"evidence_refs,omitempty"`
-	SourceRefs  []string `json:"source_refs,omitempty"`
+	SourceRefs   []string `json:"source_refs,omitempty"`
 }
 
 func MemoryPutHandler(_ config.Config, _ zerolog.Logger) http.HandlerFunc {
@@ -970,4 +970,3 @@ func stringsToEvidenceRefs(refs []string) []contextengine.EvidenceRef {
 	}
 	return result
 }
-
