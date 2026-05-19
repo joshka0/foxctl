@@ -34,6 +34,14 @@ import type {
   OrchestrationRefreshResult,
   OrchestrationSeedCardInput,
   OrchestrationSeedCardsResult,
+  Flow,
+  FlowNode,
+  FlowNodeKind,
+  FlowEdge,
+  FlowTransformKind,
+  FlowTriggerKind,
+  FlowStatusResponse,
+  FlowRunLog,
 } from "./types";
 
 const API_BASE = "/api";
@@ -2513,4 +2521,157 @@ export async function getSessionMessages(
   return request(
     `/sessions/${sessionId}/messages${queryStr ? `?${queryStr}` : ""}`,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Flow / Canvas API
+// ---------------------------------------------------------------------------
+
+export async function listFlows(workspaceId: string): Promise<{
+  flows: Flow[];
+  count: number;
+}> {
+  const query = new URLSearchParams();
+  query.set("workspace", workspaceId);
+  return request(`/flows?${query}`);
+}
+
+export async function createFlow(params: {
+  name: string;
+  workspace?: string;
+  description?: string;
+}): Promise<{ flow: Flow }> {
+  return request("/flows", {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+export async function getFlow(flowId: string): Promise<
+  Flow & { nodes: FlowNode[]; edges: FlowEdge[] }
+> {
+  return request(`/flows/${encodeURIComponent(flowId)}`);
+}
+
+export async function deleteFlow(flowId: string): Promise<{
+  deleted: boolean;
+  id: string;
+}> {
+  return request(`/flows/${encodeURIComponent(flowId)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function addFlowNode(
+  flowId: string,
+  params: {
+    kind: FlowNodeKind;
+    label: string;
+    config?: Record<string, unknown>;
+    position?: { x: number; y: number };
+  },
+): Promise<{ node: FlowNode }> {
+  return request(`/flows/${encodeURIComponent(flowId)}/nodes`, {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+export async function removeFlowNode(
+  flowId: string,
+  nodeId: string,
+): Promise<{ deleted: boolean; id: string }> {
+  return request(`/flows/${encodeURIComponent(flowId)}/nodes/${encodeURIComponent(nodeId)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function addFlowEdge(
+  flowId: string,
+  params: {
+    from_node_id: string;
+    to_node_id: string;
+    transform?: FlowTransformKind;
+    transform_config?: string;
+    trigger?: FlowTriggerKind;
+    trigger_config?: string;
+    condition?: string;
+  },
+): Promise<{ edge: FlowEdge }> {
+  return request(`/flows/${encodeURIComponent(flowId)}/edges`, {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+export async function removeFlowEdge(
+  flowId: string,
+  edgeId: string,
+): Promise<{ deleted: boolean; id: string }> {
+  return request(`/flows/${encodeURIComponent(flowId)}/edges/${encodeURIComponent(edgeId)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function startFlow(
+  flowId: string,
+  workspace?: string,
+): Promise<{ flow_id: string; run_id: string; state: string }> {
+  const query = new URLSearchParams();
+  if (workspace) query.set("workspace", workspace);
+  const suffix = query.size > 0 ? `?${query}` : "";
+  return request(`/flows/${encodeURIComponent(flowId)}/start${suffix}`, {
+    method: "POST",
+  });
+}
+
+export async function stopFlow(
+  flowId: string,
+  workspace?: string,
+): Promise<{ flow_id: string; state: string }> {
+  const query = new URLSearchParams();
+  if (workspace) query.set("workspace", workspace);
+  const suffix = query.size > 0 ? `?${query}` : "";
+  return request(`/flows/${encodeURIComponent(flowId)}/stop${suffix}`, {
+    method: "POST",
+  });
+}
+
+export async function pauseFlow(
+  flowId: string,
+  workspace?: string,
+): Promise<{ flow_id: string; state: string }> {
+  const query = new URLSearchParams();
+  if (workspace) query.set("workspace", workspace);
+  const suffix = query.size > 0 ? `?${query}` : "";
+  return request(`/flows/${encodeURIComponent(flowId)}/pause${suffix}`, {
+    method: "POST",
+  });
+}
+
+export async function getFlowStatus(
+  flowId: string,
+  workspace?: string,
+): Promise<FlowStatusResponse> {
+  const query = new URLSearchParams();
+  if (workspace) query.set("workspace", workspace);
+  const suffix = query.size > 0 ? `?${query}` : "";
+  return request(`/flows/${encodeURIComponent(flowId)}/status${suffix}`);
+}
+
+export async function getFlowRunLogs(
+  flowId: string,
+  runId: string,
+  params?: {
+    node_id?: string;
+    limit?: number;
+    offset?: number;
+  },
+): Promise<{ logs: FlowRunLog[]; count: number }> {
+  const query = new URLSearchParams();
+  if (params?.node_id) query.set("node_id", params.node_id);
+  if (params?.limit) query.set("limit", String(params.limit));
+  if (params?.offset) query.set("offset", String(params.offset));
+  const suffix = query.size > 0 ? `?${query}` : "";
+  return request(`/flows/${encodeURIComponent(flowId)}/runs/${encodeURIComponent(runId)}/logs${suffix}`);
 }
