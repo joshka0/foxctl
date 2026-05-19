@@ -17,8 +17,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/rs/zerolog"
-
 	foxproxclient "github.com/joshka/foxprox/foxprox/client"
 	foxproxd "github.com/joshka/foxprox/foxprox/daemon"
 	"github.com/joshka0/foxctl/internal/agent/optimization"
@@ -1460,7 +1458,7 @@ func (s *Service) startCuratorWorker(ctx context.Context) error {
 		return nil
 	}
 
-	worker := curator.NewWorker(cfg, memory.OpenWithConfig, zerolog.Logger{})
+	worker := curator.NewWorker(cfg, memory.OpenWithConfig)
 	s.curatorCtx, s.curatorCancel = context.WithCancel(ctx)
 
 	if err := worker.Start(s.curatorCtx); err != nil {

@@ -21,6 +21,7 @@ package curator
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -30,7 +31,6 @@ import (
 	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/storage"
 	"github.com/joshka0/foxctl/internal/storage/memory"
-	"github.com/rs/zerolog"
 )
 
 // ---------------------------------------------------------------------------
@@ -184,7 +184,6 @@ type ApplySummary struct {
 type Worker struct {
 	cfg   Config
 	memFn MemoryStoreOpener
-	log   zerolog.Logger
 
 	mu      sync.Mutex
 	running bool
@@ -201,11 +200,10 @@ type Worker struct {
 type MemoryStoreOpener func(ctx context.Context, cfg config.Config) (storage.MemoryStore, error)
 
 // NewWorker creates a curator worker with both loops.
-func NewWorker(cfg Config, memFn MemoryStoreOpener, log zerolog.Logger) *Worker {
+func NewWorker(cfg Config, memFn MemoryStoreOpener) *Worker {
 	return &Worker{
 		cfg:   cfg,
 		memFn: memFn,
-		log:   log,
 	}
 }
 
@@ -306,7 +304,7 @@ func (w *Worker) activeLoop(ctx context.Context) {
 func (w *Worker) runActive(ctx context.Context) {
 	report, err := w.execute(ctx, "active", false)
 	if err != nil {
-		w.log.Error().Err(err).Msg("curator [active]: run error")
+		slog.Error("curator [active]: run error", "error", err)
 		return
 	}
 	w.mu.Lock()
@@ -315,7 +313,7 @@ func (w *Worker) runActive(ctx context.Context) {
 	w.mu.Unlock()
 
 	if report.Summary.MemoryProposals > 0 || report.Summary.StaleHandoffs > 0 {
-		w.log.Info().Int("memory_proposals", report.Summary.MemoryProposals).Int("stale_handoffs", report.Summary.StaleHandoffs).Msg("curator [active]: cycle complete")
+		slog.Info("curator [active]: cycle complete", "memory_proposals", report.Summary.MemoryProposals, "stale_handoffs", report.Summary.StaleHandoffs)
 	}
 }
 
@@ -348,7 +346,7 @@ func (w *Worker) dreamLoop(ctx context.Context) {
 func (w *Worker) runDream(ctx context.Context) {
 	report, err := w.execute(ctx, "dream", true)
 	if err != nil {
-		w.log.Error().Err(err).Msg("curator [dream]: run error")
+		slog.Error("curator [dream]: run error", "error", err)
 		return
 	}
 	w.mu.Lock()
@@ -356,12 +354,11 @@ func (w *Worker) runDream(ctx context.Context) {
 	w.lastDreamRunAt = time.Now().UTC()
 	w.mu.Unlock()
 
-	w.log.Info().
-		Int("memory_records", report.Summary.MemoryRecords).
-		Int("duplicates", report.Memory.DuplicateClusters).
-		Int("overlaps", report.Memory.OverlapClusters).
-		Int("proposals", report.Summary.MemoryProposals).
-		Msg("curator [dream]: cycle complete")
+	slog.Info("curator [dream]: cycle complete",
+		"memory_records", report.Summary.MemoryRecords,
+		"duplicates", report.Memory.DuplicateClusters,
+		"overlaps", report.Memory.OverlapClusters,
+		"proposals", report.Summary.MemoryProposals)
 }
 
 // ---------------------------------------------------------------------------
@@ -380,7 +377,7 @@ func (w *Worker) execute(ctx context.Context, phase string, deep bool) (*Report,
 	if w.memFn != nil {
 		memStore, err := w.memFn(ctx, config.Config{})
 		if err != nil {
-			w.log.Error().Err(err).Str("phase", phase).Msg("curator: open memory store")
+			slog.Error("curator: open memory store", "error", err, "phase", phase)
 			report.Summary.Errors++
 		} else {
 			defer memStore.Close()
@@ -399,7 +396,7 @@ func (w *Worker) curateMemory(ctx context.Context, memStore storage.MemoryStore,
 
 	entries, err := memStore.List(ctx, "", 5000)
 	if err != nil {
-		w.log.Error().Err(err).Msg("curator: list memory")
+		slog.Error("curator: list memory", "error", err)
 		return report
 	}
 
@@ -463,7 +460,7 @@ func (w *Worker) applyMemoryProposals(ctx context.Context, memStore storage.Memo
 
 		_, err := memStore.UpdateLifecycle(ctx, sourceID, "", update)
 		if err != nil {
-			w.log.Error().Err(err).Str("action", string(p.Action)).Str("record", p.RecordID).Msg("curator: apply proposal")
+			slog.Error("curator: apply proposal", "error", err, "action", string(p.Action), "record", p.RecordID)
 			failed++
 		} else {
 			applied++
