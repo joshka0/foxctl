@@ -73,6 +73,9 @@ class FoxctlClient:
     def _post(self, path: str, body: Optional[Dict] = None) -> Dict:
         return self._request("POST", path, body)
 
+    def _patch(self, path: str, body: Optional[Dict] = None) -> Dict:
+        return self._request("PATCH", path, body)
+
     def _skill(self, skill_name: str, **kwargs) -> Dict:
         """Call a foxctl skill by name with workspace auto-injected.
 
@@ -1357,6 +1360,39 @@ class FoxctlClient:
             f"/api/rooms/{rid}/messages/{message_id}/ack",
             {"workspace_id": self.cfg.workspace, "actor_id": self.cfg.actor},
         )
+
+    # -- direct actor mailbox -----------------------------------------------
+
+    def mailbox_send(self, recipient: str, subject: str, body: str,
+                     kind: str = "info", priority: int = 3) -> Dict:
+        """Send a direct message to another agent's mailbox."""
+        return self._post("/api/mailbox", {
+            "workspace_id": self.cfg.workspace,
+            "sender": self.cfg.actor,
+            "recipient": recipient,
+            "subject": subject,
+            "body": body,
+            "kind": kind,
+            "priority": priority,
+        })
+
+    def mailbox_inbox(self, only_unread: bool = False, limit: int = 20) -> Dict:
+        """Read this agent's mailbox inbox."""
+        return self._get("/api/mailbox", self._query(
+            workspace_id=self.cfg.workspace,
+            actor_id=self.cfg.actor,
+            only_unread=str(only_unread).lower(),
+            limit=limit,
+        ))
+
+    def mailbox_ack(self, message_ids: list) -> Dict:
+        """Acknowledge mailbox messages."""
+        return self._patch("/api/mailbox", {
+            "workspace_id": self.cfg.workspace,
+            "actor_id": self.cfg.actor,
+            "action": "ack",
+            "message_ids": message_ids,
+        })
 
     # -- agile: epics -------------------------------------------------------
 

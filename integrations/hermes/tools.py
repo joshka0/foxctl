@@ -239,6 +239,81 @@ def register_tools(ctx, client: FoxctlClient, cfg: FoxctlConfig) -> None:
         check_fn=check_foxctl_available,
     )
 
+    # -- Direct actor mailbox -----------------------------------------------
+
+    ctx.register_tool(
+        name="foxctl_mailbox_send",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_mailbox_send",
+            "description": "Send a direct message to another agent's mailbox. Use this for 1:1 coordination like file conflicts, questions, or knowledge sharing.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "recipient": {"type": "string", "description": "Recipient actor ID (e.g. actor:hermes:local, actor:pi:local)"},
+                    "subject": {"type": "string", "description": "Message subject"},
+                    "body": {"type": "string", "description": "Message body"},
+                    "kind": {"type": "string", "description": "Message kind: info, alert, instruction, review_request (default: info)"},
+                    "priority": {"type": "integer", "description": "Priority 1-5, 1=highest (default: 3)"},
+                },
+                "required": ["recipient", "body"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.mailbox_send(
+            recipient=args["recipient"],
+            subject=args.get("subject", ""),
+            body=args["body"],
+            kind=args.get("kind", "info"),
+            priority=args.get("priority", 3),
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_mailbox_inbox",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_mailbox_inbox",
+            "description": "Read your mailbox inbox for direct messages from other agents and system notifications (e.g. file conflict alerts).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "only_unread": {"type": "boolean", "description": "Only show unread messages (default: false)"},
+                    "limit": {"type": "integer", "description": "Max messages to return (default: 20)"},
+                },
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.mailbox_inbox(
+            only_unread=args.get("only_unread", False),
+            limit=args.get("limit", 20),
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_mailbox_ack",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_mailbox_ack",
+            "description": "Acknowledge mailbox messages (mark as read).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Message IDs to acknowledge",
+                    },
+                },
+                "required": ["message_ids"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.mailbox_ack(
+            message_ids=args["message_ids"],
+        )),
+        check_fn=check_foxctl_available,
+    )
+
     # -- Epic reads ---------------------------------------------------------
 
     for action_name, desc in [
