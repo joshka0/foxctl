@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { listFlows, createFlow, deleteFlow } from '@/api/client'
 import { FlowCanvas } from './FlowCanvas'
-import { GitBranch, Plus, Trash2, Loader2 } from 'lucide-react'
+import { GitBranch, Plus, Trash2, Loader2, Link2 } from 'lucide-react'
 import type { Flow } from '@/api/types'
 
 export function FlowCanvasScreen() {
@@ -143,6 +143,12 @@ function FlowListItem({
         </div>
         <div className="text-[10px] text-muted-foreground font-mono mt-0.5">
           {flow.id.slice(0, 8)} · {flow.workspace}
+          {flow.room_id && (
+            <span className="ml-1.5 inline-flex items-center gap-0.5 text-[9px] text-primary/70">
+              <Link2 className="w-2.5 h-2.5" />
+              {flow.room_id.slice(0, 8)}
+            </span>
+          )}
         </div>
       </button>
       <Button
