@@ -1193,4 +1193,189 @@ def register_tools(ctx, client: FoxctlClient, cfg: FoxctlConfig) -> None:
         check_fn=check_foxctl_available,
     )
 
-    logger.info("Registered %d foxctl tools", 42)
+    # ===================================================================
+    # Obsidian Vault / Knowledge Plane
+    # ===================================================================
+
+    ctx.register_tool(
+        name="foxctl_vault_search",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_vault_search",
+            "description": (
+                "Search the Obsidian vault index for matching notes. "
+                "Returns ranked hits with title, path, type, status, trust level, and snippet. "
+                "Use to find existing knowledge about architecture, patterns, decisions."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"},
+                    "limit": {"type": "integer", "description": "Max results (default 20)", "default": 20},
+                },
+                "required": ["query"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.vault_search(
+            query=args["query"],
+            limit=args.get("limit", 20),
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_vault_stats",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_vault_stats",
+            "description": (
+                "Get Obsidian vault index statistics: notes, headings, links, "
+                "chunks, semantic embeddings. Use to check vault health."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.vault_stats()),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_vault_promote",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_vault_promote",
+            "description": (
+                "Create an evergreen promotion draft in the vault inbox. "
+                "This is the primary way to write to the knowledge plane — "
+                "draft notes that capture architectural decisions, patterns, "
+                "investigation findings, or methodology notes. "
+                "Drafts land in inbox/drafted-from-foxctl/ for review."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "slug": {
+                        "type": "string",
+                        "description": "URL-safe slug for the note (e.g. 'memory-search-architecture')",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Full markdown content of the note",
+                    },
+                },
+                "required": ["slug", "content"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.vault_promote(
+            slug=args["slug"],
+            content=args["content"],
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_vault_append",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_vault_append",
+            "description": (
+                "Append content under a specific heading in an existing vault note. "
+                "Use to add findings, patterns, or evidence to an established note."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Vault note path (e.g. 'inbox/drafted-from-foxctl/my-note.md')",
+                    },
+                    "heading": {
+                        "type": "string",
+                        "description": "Heading to append under",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Markdown content to append",
+                    },
+                },
+                "required": ["path", "heading", "content"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.vault_append(
+            path=args["path"],
+            heading=args["heading"],
+            content=args["content"],
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_vault_bridge",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_vault_bridge",
+            "description": (
+                "Reconcile repo docs with vault notes. Scans repo markdown docs/ "
+                "and compares with vault notes that have repo_docs backlinks. "
+                "Generates bridge drafts suggesting links between the two."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "docs_root": {
+                        "type": "string",
+                        "description": "Repo docs root (default: <workspace>/docs)",
+                    },
+                },
+                "required": [],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.vault_bridge(
+            docs_root=args.get("docs_root"),
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_vault_graph",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_vault_graph",
+            "description": (
+                "Generate a repo graph draft bundle in the vault inbox. "
+                "Creates structured vault notes from the repo index graph, "
+                "mapping packages, symbols, and relationships into the knowledge plane."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.vault_graph_build()),
+        check_fn=check_foxctl_available,
+    )
+
+    ctx.register_tool(
+        name="foxctl_vault_index_build",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_vault_index_build",
+            "description": (
+                "Rebuild the local Obsidian vault index. Call this after adding "
+                "new notes or when search results seem stale."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.vault_index_build()),
+        check_fn=check_foxctl_available,
+    )
+
+    logger.info("Registered %d foxctl tools", 49)

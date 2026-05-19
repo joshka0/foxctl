@@ -21,6 +21,7 @@ class FoxctlConfig:
     auto_bind: bool = False
     memory_context: bool = True
     epic_context: bool = True
+    vault_path: str = ""
 
     @classmethod
     def from_hermes_config(cls) -> "FoxctlConfig":
@@ -42,6 +43,7 @@ class FoxctlConfig:
                 cfg.auto_bind = foxctl_cfg.get("auto_bind", cfg.auto_bind)
                 cfg.memory_context = foxctl_cfg.get("memory_context", cfg.memory_context)
                 cfg.epic_context = foxctl_cfg.get("epic_context", cfg.epic_context)
+                cfg.vault_path = foxctl_cfg.get("vault_path", cfg.vault_path)
         except Exception:
             pass
 
