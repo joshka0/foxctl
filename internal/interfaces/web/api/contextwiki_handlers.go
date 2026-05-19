@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -667,10 +666,7 @@ func VaultGraphHandler(_ config.Config, _ zerolog.Logger) http.HandlerFunc {
 			httpError(w, http.StatusBadRequest, "vault_path is required")
 			return
 		}
-		wp := strings.TrimSpace(req.Workspace)
-		if wp == "" {
-			wp = strings.TrimSpace(GetCurrentWorkspace())
-		}
+		_ = strings.TrimSpace(req.Workspace) // workspace not used for graph build
 		writer := obsidian.NewWriter("", filepath.Base(vaultPath), obsidian.DefaultPolicy())
 		writer.VaultPath = vaultPath
 		opts := obsidian.RepoGraphBuildOptions{}
@@ -942,15 +938,6 @@ func workspaceCanonicalID(path string) string {
 }
 
 // parseLimitQueryParam parses a "limit" query parameter with a default.
-func parseLimitQueryParam(r *http.Request, def int) int {
-	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
-		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
-			return parsed
-		}
-	}
-	return def
-}
-
 // stringsToEvidenceRefs converts a slice of raw strings to EvidenceRef values.
 func stringsToEvidenceRefs(refs []string) []contextengine.EvidenceRef {
 	if len(refs) == 0 {

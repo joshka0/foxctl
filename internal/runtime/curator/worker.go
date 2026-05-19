@@ -30,6 +30,7 @@ import (
 	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/storage"
 	"github.com/joshka0/foxctl/internal/storage/memory"
+	"github.com/rs/zerolog"
 )
 
 // ---------------------------------------------------------------------------
@@ -104,14 +105,14 @@ func ConfigFromEnv(base Config) Config {
 		base.DryRun = strings.EqualFold(v, "true") || v == "1"
 	}
 	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_STALE_AFTER_DAYS")); v != "" {
-		if n, _ := fmt.Sscanf(v, "%d", &base.StaleAfterDays); n == 1 && base.StaleAfterDays > 0 {
-			// ok
-		}
+		var n int
+		n, _ = fmt.Sscanf(v, "%d", &base.StaleAfterDays)
+		_ = n // value consumed via pointer
 	}
 	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_ARCHIVE_AFTER_DAYS")); v != "" {
-		if n, _ := fmt.Sscanf(v, "%d", &base.ArchiveAfterDays); n == 1 && base.ArchiveAfterDays > 0 {
-			// ok
-		}
+		var n int
+		n, _ = fmt.Sscanf(v, "%d", &base.ArchiveAfterDays)
+		_ = n // value consumed via pointer
 	}
 	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_ACTIVE_ENABLED")); v != "" {
 		base.ActiveEnabled = strings.EqualFold(v, "true") || v == "1"
@@ -183,6 +184,7 @@ type ApplySummary struct {
 type Worker struct {
 	cfg   Config
 	memFn MemoryStoreOpener
+	log   zerolog.Logger
 
 	mu      sync.Mutex
 	running bool
@@ -199,10 +201,11 @@ type Worker struct {
 type MemoryStoreOpener func(ctx context.Context, cfg config.Config) (storage.MemoryStore, error)
 
 // NewWorker creates a curator worker with both loops.
-func NewWorker(cfg Config, memFn MemoryStoreOpener) *Worker {
+func NewWorker(cfg Config, memFn MemoryStoreOpener, log zerolog.Logger) *Worker {
 	return &Worker{
 		cfg:   cfg,
 		memFn: memFn,
+		log:   log,
 	}
 }
 
@@ -303,7 +306,7 @@ func (w *Worker) activeLoop(ctx context.Context) {
 func (w *Worker) runActive(ctx context.Context) {
 	report, err := w.execute(ctx, "active", false)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "curator [active]: run error: %v\n", err)
+		w.log.Error().Err(err).Msg("curator [active]: run error")
 		return
 	}
 	w.mu.Lock()
@@ -312,8 +315,7 @@ func (w *Worker) runActive(ctx context.Context) {
 	w.mu.Unlock()
 
 	if report.Summary.MemoryProposals > 0 || report.Summary.StaleHandoffs > 0 {
-		fmt.Fprintf(os.Stderr, "curator [active]: memory=%d proposals, handoffs=%d stale\n",
-			report.Summary.MemoryProposals, report.Summary.StaleHandoffs)
+		w.log.Info().Int("memory_proposals", report.Summary.MemoryProposals).Int("stale_handoffs", report.Summary.StaleHandoffs).Msg("curator [active]: cycle complete")
 	}
 }
 
@@ -346,7 +348,7 @@ func (w *Worker) dreamLoop(ctx context.Context) {
 func (w *Worker) runDream(ctx context.Context) {
 	report, err := w.execute(ctx, "dream", true)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "curator [dream]: run error: %v\n", err)
+		w.log.Error().Err(err).Msg("curator [dream]: run error")
 		return
 	}
 	w.mu.Lock()
@@ -354,11 +356,12 @@ func (w *Worker) runDream(ctx context.Context) {
 	w.lastDreamRunAt = time.Now().UTC()
 	w.mu.Unlock()
 
-	fmt.Fprintf(os.Stderr, "curator [dream]: memory=%d records, %d duplicates, %d overlaps, %d proposals\n",
-		report.Summary.MemoryRecords,
-		report.Memory.DuplicateClusters,
-		report.Memory.OverlapClusters,
-		report.Summary.MemoryProposals)
+	w.log.Info().
+		Int("memory_records", report.Summary.MemoryRecords).
+		Int("duplicates", report.Memory.DuplicateClusters).
+		Int("overlaps", report.Memory.OverlapClusters).
+		Int("proposals", report.Summary.MemoryProposals).
+		Msg("curator [dream]: cycle complete")
 }
 
 // ---------------------------------------------------------------------------
@@ -377,7 +380,7 @@ func (w *Worker) execute(ctx context.Context, phase string, deep bool) (*Report,
 	if w.memFn != nil {
 		memStore, err := w.memFn(ctx, config.Config{})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "curator [%s]: open memory store: %v\n", phase, err)
+			w.log.Error().Err(err).Str("phase", phase).Msg("curator: open memory store")
 			report.Summary.Errors++
 		} else {
 			defer memStore.Close()
@@ -396,7 +399,7 @@ func (w *Worker) curateMemory(ctx context.Context, memStore storage.MemoryStore,
 
 	entries, err := memStore.List(ctx, "", 5000)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "curator: list memory: %v\n", err)
+		w.log.Error().Err(err).Msg("curator: list memory")
 		return report
 	}
 
@@ -460,7 +463,7 @@ func (w *Worker) applyMemoryProposals(ctx context.Context, memStore storage.Memo
 
 		_, err := memStore.UpdateLifecycle(ctx, sourceID, "", update)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "curator: apply %s %s: %v\n", p.Action, p.RecordID, err)
+			w.log.Error().Err(err).Str("action", string(p.Action)).Str("record", p.RecordID).Msg("curator: apply proposal")
 			failed++
 		} else {
 			applied++

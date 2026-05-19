@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/rs/zerolog"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -1458,7 +1460,7 @@ func (s *Service) startCuratorWorker(ctx context.Context) error {
 		return nil
 	}
 
-	worker := curator.NewWorker(cfg, memory.OpenWithConfig)
+	worker := curator.NewWorker(cfg, memory.OpenWithConfig, zerolog.Logger{})
 	s.curatorCtx, s.curatorCancel = context.WithCancel(ctx)
 
 	if err := worker.Start(s.curatorCtx); err != nil {
@@ -1467,7 +1469,7 @@ func (s *Service) startCuratorWorker(ctx context.Context) error {
 	}
 
 	s.curatorWorker = worker
-	fmt.Fprintf(os.Stderr, "curator: started (active: %s, dream: %s)\n", cfg.ActiveInterval, cfg.DreamInterval)
+	slog.Info("curator: started", "active_interval", cfg.ActiveInterval.String(), "dream_interval", cfg.DreamInterval.String())
 	return nil
 }
 
