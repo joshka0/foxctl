@@ -35,6 +35,7 @@ import (
 	"github.com/joshka0/foxctl/internal/platform/lsp/gopls"
 	ws "github.com/joshka0/foxctl/internal/platform/workspace"
 	llmproviders "github.com/joshka0/foxctl/internal/providers/llm"
+	"github.com/joshka0/foxctl/internal/runtime/curator"
 	"github.com/joshka0/foxctl/internal/runtime/execution/runner"
 	"github.com/joshka0/foxctl/internal/runtime/flow"
 	"github.com/joshka0/foxctl/internal/runtime/hooks"
@@ -154,6 +155,11 @@ type Service struct {
 	// on first flow RPC that specifies a workspace different from the default.
 	wsEngines   map[string]*wsFlowEngine
 	wsEnginesMu sync.Mutex
+
+	// Curator worker (background context plane maintenance)
+	curatorWorker       *curator.Worker
+	curatorCtx          context.Context
+	curatorCancel       context.CancelFunc
 }
 
 // wsFlowEngine groups a per-workspace flow engine with its store and cleanup.
@@ -370,6 +376,12 @@ func (s *Service) startLeaderWorkers(ctx context.Context) error {
 			firstErr = err
 		}
 	}
+	if err := s.startCuratorWorker(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: curator worker failed to start: %v\n", err)
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
 
 	return firstErr
 }
@@ -381,6 +393,7 @@ func (s *Service) stopLeaderWorkers() {
 	s.stopAgentOrchestration()
 	s.stopContextWikiMaintenanceLoop()
 	s.stopFlowEngine()
+	s.stopCuratorWorker()
 }
 
 func (s *Service) stopLeaderLease(ctx context.Context) {
@@ -1389,6 +1402,84 @@ func firstNonEmptyString(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// startCuratorWorker initializes and starts the background curator worker.
+//
+// The curator runs deterministic lifecycle maintenance across memory records,
+// observations, tensions, and handoffs. Two modes:
+//   - "active" (default): frequent light checks (5m interval)
+//   - "dream": infrequent deep analysis (24-72h interval)
+//
+// Configured via config.yaml under `curator:` or env vars FOXCTL_CURATOR_*.
+func (s *Service) startCuratorWorker(ctx context.Context) error {
+	if s.curatorWorker != nil {
+		return nil
+	}
+
+	cfg := curator.DefaultConfig()
+
+	// Override from config.yaml if present
+	if raw := s.cfg.Curator.Mode; raw != "" {
+		cfg.Mode = curator.Mode(strings.ToLower(raw))
+	}
+	if raw := s.cfg.Curator.ActiveInterval; raw > 0 {
+		cfg.ActiveInterval = raw
+	}
+	if raw := s.cfg.Curator.DreamInterval; raw > 0 {
+		cfg.DreamInterval = raw
+	}
+	if raw := s.cfg.Curator.StaleAfterDays; raw > 0 {
+		cfg.StaleAfterDays = raw
+	}
+	if raw := s.cfg.Curator.ArchiveAfterDays; raw > 0 {
+		cfg.ArchiveAfterDays = raw
+	}
+	if raw := s.cfg.Curator.MinConfidence; raw > 0 {
+		cfg.MinConfidence = raw
+	}
+	if raw := s.cfg.Curator.HandoffStaleDays; raw > 0 {
+		cfg.HandoffStaleDays = raw
+	}
+	if s.cfg.Curator.Enabled != nil {
+		cfg.Enabled = *s.cfg.Curator.Enabled
+	}
+	if s.cfg.Curator.DryRun != nil {
+		cfg.DryRun = *s.cfg.Curator.DryRun
+	}
+
+	// Env var overrides
+	cfg = curator.ConfigFromEnv(cfg)
+
+	if !cfg.Enabled {
+		return nil
+	}
+
+	worker := curator.NewWorker(cfg, memory.OpenWithConfig)
+	s.curatorCtx, s.curatorCancel = context.WithCancel(ctx)
+
+	if err := worker.Start(s.curatorCtx); err != nil {
+		s.curatorCancel()
+		return fmt.Errorf("start curator worker: %w", err)
+	}
+
+	s.curatorWorker = worker
+	mode := string(cfg.Mode)
+	interval := cfg.Interval()
+	fmt.Fprintf(os.Stderr, "curator: started in %s mode (interval: %s)\n", mode, interval)
+	return nil
+}
+
+func (s *Service) stopCuratorWorker() {
+	if s.curatorWorker != nil {
+		s.curatorWorker.Stop()
+		s.curatorWorker = nil
+	}
+	if s.curatorCancel != nil {
+		s.curatorCancel()
+		s.curatorCancel = nil
+	}
+	s.curatorCtx = nil
 }
 
 // startFileSummaryWorker initializes and starts the background file summary worker.
