@@ -170,6 +170,7 @@ type Flow struct {
 	Workspace   string    `json:"workspace"`
 	State       FlowState `json:"state"`
 	Description string    `json:"description,omitempty"`
+	RoomID      string    `json:"room_id,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }

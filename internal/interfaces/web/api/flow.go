@@ -27,6 +27,13 @@ type flowCreateRequest struct {
 	Name        string `json:"name"`
 	Workspace   string `json:"workspace,omitempty"`
 	Description string `json:"description,omitempty"`
+	RoomID      string `json:"room_id,omitempty"`
+}
+
+type flowPatchRequest struct {
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	RoomID      string `json:"room_id,omitempty"`
 }
 
 type flowResponse struct {
@@ -35,6 +42,7 @@ type flowResponse struct {
 	Workspace   string    `json:"workspace"`
 	State       string    `json:"state"`
 	Description string    `json:"description,omitempty"`
+	RoomID      string    `json:"room_id,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -222,6 +230,9 @@ func FlowHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 			case http.MethodGet:
 				handleFlowShow(w, r, cfg, log, flowID)
 				return
+			case http.MethodPatch:
+				handleFlowPatch(w, r, cfg, log, flowID)
+				return
 			case http.MethodDelete:
 				handleFlowDelete(w, r, cfg, log, flowID)
 				return
@@ -303,6 +314,7 @@ func handleFlowCreate(w http.ResponseWriter, r *http.Request, cfg config.Config,
 		Workspace: workspace,
 		State:     flowmodel.FlowDraft,
 		Description: strings.TrimSpace(req.Description),
+		RoomID:    strings.TrimSpace(req.RoomID),
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -381,6 +393,54 @@ func handleFlowShow(w http.ResponseWriter, r *http.Request, cfg config.Config, l
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ---------------------------------------------------------------------------
+// Patch
+// ---------------------------------------------------------------------------
+
+func handleFlowPatch(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, flowID string) {
+	var req flowPatchRequest
+	if err := readJSON(w, r, &req); err != nil {
+		httpError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	store, err := openFlowStore(r.Context(), cfg)
+	if err != nil {
+		log.Error().Err(err).Msg("flow: open store")
+		httpError(w, http.StatusInternalServerError, "flow store unavailable")
+		return
+	}
+	defer store.Close()
+
+	fl, err := store.GetFlow(r.Context(), flowID)
+	if err != nil {
+		if errors.Is(err, flowmodel.ErrNotFound) {
+			httpError(w, http.StatusNotFound, "flow not found")
+			return
+		}
+		log.Error().Err(err).Msg("flow: get")
+		httpError(w, http.StatusInternalServerError, "failed to get flow")
+		return
+	}
+
+	if req.Name != "" {
+		fl.Name = strings.TrimSpace(req.Name)
+	}
+	if req.Description != "" {
+		fl.Description = strings.TrimSpace(req.Description)
+	}
+	fl.RoomID = strings.TrimSpace(req.RoomID) // allow clearing
+
+	updated, err := store.UpdateFlow(r.Context(), fl)
+	if err != nil {
+		log.Error().Err(err).Msg("flow: update")
+		httpError(w, http.StatusInternalServerError, "failed to update flow")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"flow": toFlowResponse(updated)})
 }
 
 // ---------------------------------------------------------------------------
@@ -768,6 +828,7 @@ func toFlowResponse(f flowmodel.Flow) flowResponse {
 		Workspace:   f.Workspace,
 		State:       string(f.State),
 		Description: f.Description,
+		RoomID:      f.RoomID,
 		CreatedAt:   f.CreatedAt,
 		UpdatedAt:   f.UpdatedAt,
 	}

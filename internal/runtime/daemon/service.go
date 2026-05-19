@@ -3154,6 +3154,13 @@ func (s *Service) startFlowEngine(ctx context.Context) error {
 				}
 				return ""
 			}
+			agentExec.GetRoomID = func(flowID string) string {
+				fl, err := store.GetFlow(context.Background(), flowID)
+				if err == nil {
+					return fl.RoomID
+				}
+				return ""
+			}
 		}
 	}
 
@@ -3271,6 +3278,13 @@ func (s *Service) resolveFlowEngine(ctx context.Context, workspace string) (*flo
 				status := eng.Status(flowID)
 				if status != nil {
 					return status.RunID
+				}
+				return ""
+			}
+			agentExec.GetRoomID = func(flowID string) string {
+				fl, err := store.GetFlow(context.Background(), flowID)
+				if err == nil {
+					return fl.RoomID
 				}
 				return ""
 			}

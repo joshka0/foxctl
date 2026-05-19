@@ -758,6 +758,7 @@ export interface Flow {
   workspace: string;
   state: FlowState;
   description?: string;
+  room_id?: string;
   created_at: string;
   updated_at: string;
 }

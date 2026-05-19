@@ -21,6 +21,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import {
   getFlow,
+  patchFlow,
   addFlowNode,
   removeFlowNode,
   addFlowEdge,
@@ -29,6 +30,8 @@ import {
   stopFlow,
   pauseFlow,
   getFlowStatus,
+  listRooms,
+  getRoomStatus,
 } from '@/api/client'
 import { FlowCanvasNode } from './FlowNodeComponents'
 import { FlowCanvasEdge } from './FlowEdgeComponents'
@@ -49,11 +52,15 @@ import {
   Image,
   Shuffle,
   PlayCircle,
+  Link2,
+  Unlink,
+  Users,
 } from 'lucide-react'
 import type {
   FlowNodeKind,
   FlowNode as FlowNodeType,
   FlowEdge as FlowEdgeType,
+  RoomStatus,
 } from '@/api/types'
 
 // ---------------------------------------------------------------------------
@@ -104,6 +111,7 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
   const [showPalette, setShowPalette] = useState(false)
+  const [showRoomPanel, setShowRoomPanel] = useState(false)
 
   // React Flow state
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<CanvasNodeData>>([])
@@ -114,6 +122,28 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
   const { data: flowData, isLoading } = useQuery({
     queryKey: ['flow', flowId],
     queryFn: () => getFlow(flowId),
+  })
+
+  const flowRoomId = (flowData as unknown as { room_id?: string })?.room_id
+
+  // Room list for linking
+  const { data: roomsData } = useQuery({
+    queryKey: ['rooms', '.'],
+    queryFn: () => listRooms({ workspace_id: '.' }),
+    enabled: mode === 'design',
+  })
+
+  // Room status when linked
+  const { data: roomStatus } = useQuery({
+    queryKey: ['room-status', flowRoomId],
+    queryFn: () => getRoomStatus(flowRoomId!, { workspace_id: '.' }),
+    enabled: !!flowRoomId,
+    refetchInterval: mode === 'runtime' ? 3000 : false,
+  })
+
+  const linkRoomMutation = useMutation({
+    mutationFn: (roomId: string) => patchFlow(flowId, { room_id: roomId }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['flow', flowId] }),
   })
 
   // Runtime status polling
@@ -362,6 +392,39 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
             </div>
           </Panel>
 
+          {/* Room Link Toolbar */}
+          {mode === 'design' && (
+            <Panel position="top-center" className="m-4">
+              <div className="flex items-center gap-2 bg-card/90 backdrop-blur-sm border rounded-lg shadow-sm px-3 py-2">
+                <Link2 className="w-3 h-3 text-muted-foreground" />
+                <span className="text-[10px] font-black uppercase tracking-tight text-muted-foreground">Room</span>
+                {flowRoomId ? (
+                  <>
+                    <Badge variant="outline" className="text-[9px] font-mono h-4 px-1.5 cursor-pointer" onClick={() => setShowRoomPanel(!showRoomPanel)}>
+                      {flowRoomId.slice(0, 8)}
+                    </Badge>
+                    <Button variant="ghost" size="xs" className="h-5 px-1 text-muted-foreground" onClick={() => linkRoomMutation.mutate('')}>
+                      <Unlink className="w-3 h-3" />
+                    </Button>
+                  </>
+                ) : (
+                  <select
+                    className="text-[10px] bg-background border rounded px-1.5 py-0.5 h-5 min-w-[120px]"
+                    value=""
+                    onChange={(e) => {
+                      if (e.target.value) linkRoomMutation.mutate(e.target.value)
+                    }}
+                  >
+                    <option value="">Link room…</option>
+                    {roomsData?.rooms?.map((r) => (
+                      <option key={r.id} value={r.id}>{r.title || r.id.slice(0, 8)}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            </Panel>
+          )}
+
           {/* Mode + Execution Toolbar */}
           <Panel position="top-right" className="m-4"
           >
@@ -495,15 +558,15 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
         </ReactFlow>
       </div>
 
-      {/* Right Property Panel */}
-      {(selectedNodeId || selectedEdgeId) && (
+      {/* Right Side Panel: Properties + Room */}
+      {(selectedNodeId || selectedEdgeId || (showRoomPanel && flowRoomId)) && (
         <aside className="w-64 border-l bg-muted/5 flex flex-col shrink-0"
         >
           <div className="px-4 py-3 border-b"
           >
             <h3 className="text-[10px] font-black uppercase tracking-widest text-muted-foreground"
             >
-              {selectedNodeId ? 'Node Properties' : 'Edge Properties'}
+              {selectedNodeId ? 'Node Properties' : selectedEdgeId ? 'Edge Properties' : 'Room'}
             </h3>
           </div>
           <ScrollArea className="flex-1"
@@ -521,6 +584,9 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
                 onRemove={() => removeEdgeMutation.mutate(selectedEdgeId)}
                 isPending={removeEdgeMutation.isPending}
               />
+            )}
+            {showRoomPanel && flowRoomId && roomStatus && (
+              <RoomPanel status={roomStatus} onClose={() => setShowRoomPanel(false)} />
             )}
           </ScrollArea>
         </aside>
@@ -711,5 +777,49 @@ function FlowStateBadge({ state }: { state: string }) {
     >
       {state}
     </Badge>
+  )
+}
+
+function RoomPanel({ status, onClose }: { status: RoomStatus; onClose: () => void }) {
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Users className="w-3 h-3 text-muted-foreground" />
+          <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Participants</span>
+        </div>
+        <button onClick={onClose} className="text-[10px] text-muted-foreground hover:text-foreground">✕</button>
+      </div>
+      <div className="space-y-2">
+        {status.participants.length === 0 && (
+          <div className="text-[10px] text-muted-foreground italic">No participants</div>
+        )}
+        {status.participants.map((p) => (
+          <div key={p.actor_id} className="flex items-center gap-2 p-1.5 rounded bg-muted/30">
+            <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center text-[8px] font-bold uppercase">
+              {p.actor_id.slice(0, 2)}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[10px] font-medium truncate">{p.actor_id}</div>
+              <div className="text-[9px] text-muted-foreground">{p.status} · {p.assigned_task_count} tasks</div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="pt-2 border-t space-y-2">
+        <div className="flex items-center justify-between text-[9px]">
+          <span className="text-muted-foreground">Pending</span>
+          <span className="font-medium">{status.task_pulse.pending}</span>
+        </div>
+        <div className="flex items-center justify-between text-[9px]">
+          <span className="text-muted-foreground">In Progress</span>
+          <span className="font-medium">{status.task_pulse.in_progress}</span>
+        </div>
+        <div className="flex items-center justify-between text-[9px]">
+          <span className="text-muted-foreground">Blocked</span>
+          <span className="font-medium">{status.task_pulse.blocked}</span>
+        </div>
+      </div>
+    </div>
   )
 }

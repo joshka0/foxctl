@@ -2562,6 +2562,20 @@ export async function deleteFlow(flowId: string): Promise<{
   });
 }
 
+export async function patchFlow(
+  flowId: string,
+  params: {
+    name?: string;
+    description?: string;
+    room_id?: string;
+  },
+): Promise<{ flow: Flow }> {
+  return request(`/flows/${encodeURIComponent(flowId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(params),
+  });
+}
+
 export async function addFlowNode(
   flowId: string,
   params: {

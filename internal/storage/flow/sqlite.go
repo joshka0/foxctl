@@ -54,6 +54,9 @@ func (s *sqlStore) Close() error {
 // ---------------------------------------------------------------------------
 
 func migrate(ctx context.Context, db *sql.DB) error {
+	// Add room_id column to existing flows tables (idempotent).
+	_, _ = db.ExecContext(ctx, `ALTER TABLE flows ADD COLUMN room_id TEXT NOT NULL DEFAULT ''`)
+
 	ddl := `
 CREATE TABLE IF NOT EXISTS flows (
     id          TEXT PRIMARY KEY,
@@ -61,6 +64,7 @@ CREATE TABLE IF NOT EXISTS flows (
     workspace   TEXT NOT NULL,
     state       TEXT NOT NULL DEFAULT 'draft',
     description TEXT NOT NULL DEFAULT '',
+    room_id     TEXT NOT NULL DEFAULT '',
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL,
     UNIQUE(name, workspace)
@@ -135,9 +139,9 @@ func isNoRows(err error) bool {
 
 func (s *sqlStore) CreateFlow(ctx context.Context, f flow.Flow) (flow.Flow, error) {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO flows (id, name, workspace, state, description, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		f.ID, f.Name, f.Workspace, string(f.State), f.Description,
+		INSERT INTO flows (id, name, workspace, state, description, room_id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		f.ID, f.Name, f.Workspace, string(f.State), f.Description, f.RoomID,
 		sqlutil.FormatTimestamp(f.CreatedAt), sqlutil.FormatTimestamp(f.UpdatedAt))
 	if err != nil {
 		return flow.Flow{}, fmt.Errorf("flow: create flow: %w", err)
@@ -147,21 +151,21 @@ func (s *sqlStore) CreateFlow(ctx context.Context, f flow.Flow) (flow.Flow, erro
 
 func (s *sqlStore) GetFlow(ctx context.Context, id string) (flow.Flow, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, name, workspace, state, description, created_at, updated_at
+		SELECT id, name, workspace, state, description, room_id, created_at, updated_at
 		FROM flows WHERE id = $1`, id)
 	return scanFlow(row)
 }
 
 func (s *sqlStore) GetFlowByName(ctx context.Context, workspace, name string) (flow.Flow, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, name, workspace, state, description, created_at, updated_at
+		SELECT id, name, workspace, state, description, room_id, created_at, updated_at
 		FROM flows WHERE name = $1 AND workspace = $2`, name, workspace)
 	return scanFlow(row)
 }
 
 func (s *sqlStore) ListFlows(ctx context.Context, workspace string) ([]flow.Flow, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, workspace, state, description, created_at, updated_at
+		SELECT id, name, workspace, state, description, room_id, created_at, updated_at
 		FROM flows WHERE workspace = $1
 		ORDER BY created_at DESC`, workspace)
 	if err != nil {
@@ -186,9 +190,9 @@ func (s *sqlStore) ListFlows(ctx context.Context, workspace string) ([]flow.Flow
 func (s *sqlStore) UpdateFlow(ctx context.Context, f flow.Flow) (flow.Flow, error) {
 	now := sqlutil.FormatTimestamp(time.Now().UTC())
 	res, err := s.db.ExecContext(ctx, `
-		UPDATE flows SET state = $1, description = $2, updated_at = $3
-		WHERE id = $4`,
-		string(f.State), f.Description, now, f.ID)
+		UPDATE flows SET state = $1, description = $2, room_id = $3, updated_at = $4
+		WHERE id = $5`,
+		string(f.State), f.Description, f.RoomID, now, f.ID)
 	if err != nil {
 		return flow.Flow{}, fmt.Errorf("flow: update flow: %w", err)
 	}
@@ -224,7 +228,7 @@ func scanFlow(row *sql.Row) (flow.Flow, error) {
 	var f flow.Flow
 	var state string
 	var created, updated string
-	err := row.Scan(&f.ID, &f.Name, &f.Workspace, &state, &f.Description, &created, &updated)
+	err := row.Scan(&f.ID, &f.Name, &f.Workspace, &state, &f.Description, &f.RoomID, &created, &updated)
 	if err != nil {
 		if isNoRows(err) {
 			return flow.Flow{}, flow.ErrNotFound
@@ -241,7 +245,7 @@ func scanFlowRow(rows *sql.Rows) (flow.Flow, error) {
 	var f flow.Flow
 	var state string
 	var created, updated string
-	err := rows.Scan(&f.ID, &f.Name, &f.Workspace, &state, &f.Description, &created, &updated)
+	err := rows.Scan(&f.ID, &f.Name, &f.Workspace, &state, &f.Description, &f.RoomID, &created, &updated)
 	if err != nil {
 		return flow.Flow{}, fmt.Errorf("flow: scan flow row: %w", err)
 	}

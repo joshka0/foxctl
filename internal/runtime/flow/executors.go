@@ -211,6 +211,8 @@ type AgentSpawnOptions struct {
 	// When "push", the foxprox spawner uses `droid exec --auto medium`
 	// instead of interactive `droid` to avoid permission dialogs.
 	OutputMode string
+	// RoomID, when set, binds the spawned agent to an existing foxprox room.
+	RoomID string
 }
 
 // AgentExecutor spawns a foxctl agent, waits for completion (or ask reply),
@@ -230,6 +232,10 @@ type AgentExecutor struct {
 	// into the agent's prompt so it knows where to push output via
 	// `foxctl flow output`. Returns empty string if the flow is not running.
 	GetRunID func(flowID string) string
+	// GetRoomID is an optional function that returns the room ID associated
+	// with a flow. When set, the agent spawner uses this room instead of
+	// creating a new one per run. Returns empty string if no room is linked.
+	GetRoomID func(flowID string) string
 }
 
 // Execute runs the agent node: parses config, spawns agent, waits for output.
@@ -270,6 +276,12 @@ func (e *AgentExecutor) Execute(ctx context.Context, node FlowNode, input any) (
 	workspace := cfg.Workspace
 	if workspace == "" {
 		workspace = e.Workspace
+	}
+
+	// Resolve room ID from flow binding.
+	roomID := ""
+	if e.GetRoomID != nil {
+		roomID = e.GetRoomID(node.FlowID)
 	}
 
 	// Build the spawn prompt based on input mode.
@@ -344,6 +356,7 @@ func (e *AgentExecutor) Execute(ctx context.Context, node FlowNode, input any) (
 		Workspace:     workspace,
 		CLICmd:        cfg.CLICmd,
 		OutputMode:    outputMode,
+		RoomID:        roomID,
 	}
 	spawnResult, err := e.Spawner.Spawn(spawnCtx, cfg.Role, prompt, spawnOpts)
 	duration := time.Since(start)
