@@ -4,8 +4,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,6 +38,12 @@ const (
 const (
 	// DefaultReservationTTL is the default TTL for auto-created reservations.
 	DefaultReservationTTL = 10 * time.Minute
+
+	// defaultRoomEnv is the env var for the coordination room.
+	defaultRoomEnv = "FOXCTL_ROOM"
+
+	// defaultRoom is the fallback room ID.
+	defaultRoom = "alpha"
 )
 
 // main is the skill entry point for hooks/file_guard.
@@ -113,8 +122,11 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	}
 
 	if len(conflicts) > 0 {
-		// There are conflicts
+		// There are conflicts — notify both agents via room messages
 		conflictMsg := formatConflicts(conflicts)
+
+		// Fire-and-forget room notifications so agents can coordinate
+		notifyConflict(ctx, rc, conflicts[0].Holder, actorID, relPath, conflicts[0].Reason, workspaceID)
 
 		if mode == ModeStrict {
 			return emitOutput(rc, hooks.Output{
@@ -238,6 +250,77 @@ func formatConflicts(conflicts []agent.ReservationConflict) string {
 
 	sb.WriteString("**Recommendation:** Review the other agent's purpose above. If your changes are compatible, coordinate with them. Otherwise, wait for their reservation to expire or ask them to release it.\n")
 	return sb.String()
+}
+
+// notifyConflict sends mailbox messages to both the holder and the would-be writer
+// so they can coordinate. Uses the daemon's POST /api/mailbox REST endpoint for
+// immediate delivery. Failures are logged but never block the hook.
+func notifyConflict(ctx context.Context, rc *skillmain.RunContext, holder, requester, filePath, reason, workspaceID string) {
+	// Build the mailbox payload for the holder
+	holderBody := fmt.Sprintf(
+		"File conflict: %s tried to write to `%s` which you have reserved.",
+		requester, filePath,
+	)
+	if reason != "" {
+		holderBody += fmt.Sprintf(" Your reservation reason: %s", reason)
+	}
+	holderBody += "\n\nCoordinate with them if needed, or release the file when you're done."
+
+	// Build the mailbox payload for the requester
+	requesterBody := fmt.Sprintf(
+		"File `%s` is reserved by %s.",
+		filePath, holder,
+	)
+	if reason != "" {
+		requesterBody += fmt.Sprintf(" They are working on: %s", reason)
+	}
+	requesterBody += "\n\nSend them a message to coordinate."
+
+	go sendMailbox(ctx, rc, workspaceID, "actor:system:file-guard", holder,
+		fmt.Sprintf("File conflict: %s", filepath.Base(filePath)), holderBody)
+	go sendMailbox(ctx, rc, workspaceID, "actor:system:file-guard", requester,
+		fmt.Sprintf("File locked: %s", filepath.Base(filePath)), requesterBody)
+}
+
+// sendMailbox posts a message to the daemon's mailbox API.
+func sendMailbox(ctx context.Context, rc *skillmain.RunContext, workspaceID, sender, recipient, subject, body string) {
+	payload := map[string]any{
+		"workspace_id": workspaceID,
+		"sender":       sender,
+		"recipient":    recipient,
+		"subject":      subject,
+		"body":         body,
+		"kind":         "alert",
+		"priority":     2,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		rc.Logger.Warn().Err(err).Msg("file_guard: marshal mailbox payload")
+		return
+	}
+
+	url := "http://localhost:" + os.Getenv("FOXCTL_PORT") + "/api/mailbox"
+	if os.Getenv("FOXCTL_PORT") == "" {
+		url = "http://localhost:8091/api/mailbox"
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
+	if err != nil {
+		rc.Logger.Warn().Err(err).Msg("file_guard: create mailbox request")
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		rc.Logger.Warn().Err(err).Msg("file_guard: send mailbox notification")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		rc.Logger.Warn().Int("status", resp.StatusCode).Msg("file_guard: mailbox send unexpected status")
+	}
 }
 
 // emitOutput writes the hook output to the skill output.
