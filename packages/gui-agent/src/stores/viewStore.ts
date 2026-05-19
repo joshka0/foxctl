@@ -10,6 +10,7 @@ export type ViewType =
   | 'artifacts'
   | 'events'
   | 'companion'
+  | 'canvas'
 
 const validViews: ViewType[] = [
   'runtime',
@@ -20,6 +21,7 @@ const validViews: ViewType[] = [
   'artifacts',
   'events',
   'companion',
+  'canvas',
 ]
 
 function normalizeView(raw: string): ViewType | null {

@@ -15,6 +15,7 @@ import {
   ChevronRight,
   Cpu,
   FileSearch,
+  GitBranch,
   Hash,
   Layers,
   LayoutGrid,
@@ -66,6 +67,12 @@ const PRIMARY_SURFACES: SidebarItem[] = [
     icon: <LayoutGrid className="h-4 w-4" />,
     label: 'Orchestration',
     tooltip: 'Manage issue flow, boards, and coordinated execution.',
+  },
+  {
+    id: 'canvas',
+    icon: <GitBranch className="h-4 w-4" />,
+    label: 'Canvas',
+    tooltip: 'Visual flow editor for wiring terminals, agents, and skills.',
   },
 ]
 

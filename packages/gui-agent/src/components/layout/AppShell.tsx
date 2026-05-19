@@ -50,6 +50,7 @@ export function AppShell({
     artifacts: 'Artifacts',
     events: 'Events',
     companion: 'Companion',
+    canvas: 'Flow Canvas',
   }
   const descriptions: Record<ViewType, string> = {
     runtime: 'Live agent operations, lifecycle state, and current work.',
@@ -60,12 +61,14 @@ export function AppShell({
     artifacts: 'Retrieved files, embeddings, and artifact search behavior.',
     events: 'Operational logs and diagnostics across the control plane.',
     companion: 'Conversation view for chatting with agents and reviewing context.',
+    canvas: 'Visual flow editor for wiring terminals, agents, and skills into directed graphs.',
   }
   const surfaceTier = useMemo(
     () =>
       activeView === 'turns' ||
       activeView === 'context' ||
-      activeView === 'artifacts'
+      activeView === 'artifacts' ||
+      activeView === 'canvas'
         ? 'Evidence'
         : 'Primary',
     [activeView],
