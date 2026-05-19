@@ -219,9 +219,10 @@ type FlowRun struct {
 
 // NodeOutput is the structured output from any flow node.
 type NodeOutput struct {
-	Envelope envelope.Envelope `json:"envelope"`
-	Duration time.Duration     `json:"duration"`
-	NodeID   string            `json:"node_id"`
+	Envelope  envelope.Envelope `json:"envelope"`
+	Duration  time.Duration     `json:"duration"`
+	NodeID    string            `json:"node_id"`
+	SessionID string            `json:"session_id,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

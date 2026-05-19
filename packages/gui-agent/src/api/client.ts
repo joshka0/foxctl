@@ -2673,6 +2673,26 @@ export async function getFlowStatus(
   return request(`/flows/${encodeURIComponent(flowId)}/status${suffix}`);
 }
 
+export interface FlowNodeTerminalResponse {
+  session_id: string;
+  rows: number;
+  cols: number;
+  lines: string[];
+  cursor: { row: number; col: number; visible: boolean };
+  alt_screen: boolean;
+}
+
+export async function getFlowNodeTerminal(
+  flowId: string,
+  nodeId: string,
+  workspace?: string,
+): Promise<FlowNodeTerminalResponse> {
+  const query = new URLSearchParams();
+  if (workspace) query.set("workspace", workspace);
+  const suffix = query.size > 0 ? `?${query}` : "";
+  return request(`/flows/${encodeURIComponent(flowId)}/nodes/${encodeURIComponent(nodeId)}/terminal${suffix}`);
+}
+
 export async function getFlowRunLogs(
   flowId: string,
   runId: string,

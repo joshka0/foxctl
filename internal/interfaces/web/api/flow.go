@@ -17,6 +17,9 @@ import (
 	flowmodel "github.com/joshka0/foxctl/internal/runtime/flow"
 	"github.com/joshka0/foxctl/internal/runtime/daemon"
 	flowstore "github.com/joshka0/foxctl/internal/storage/flow"
+
+	foxproxclient "github.com/joshka/foxprox/foxprox/client"
+	"github.com/joshka/foxprox/foxprox/transport/unixsocket"
 )
 
 // ---------------------------------------------------------------------------
@@ -181,6 +184,10 @@ func FlowHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 				}
 				if len(parts) == 3 && r.Method == http.MethodDelete {
 					handleFlowRemoveNode(w, r, cfg, log, flowID, parts[2])
+					return
+				}
+				if len(parts) == 4 && parts[3] == "terminal" && r.Method == http.MethodGet {
+					handleFlowNodeTerminal(w, r, cfg, log, flowID, parts[2])
 					return
 				}
 			case "edges":
@@ -761,6 +768,56 @@ func handleFlowStatus(w http.ResponseWriter, r *http.Request, cfg config.Config,
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ---------------------------------------------------------------------------
+// Node Terminal (foxprox screen snapshot)
+// ---------------------------------------------------------------------------
+
+func handleFlowNodeTerminal(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, flowID, nodeID string) {
+	workspace := r.URL.Query().Get("workspace")
+	if workspace == "" {
+		workspace = "."
+	}
+
+	// Get flow status from daemon to resolve the node's session ID.
+	client := daemon.NewClient()
+	status, err := client.FlowStatus(flowID, workspace)
+	if err != nil {
+		log.Error().Err(err).Str("flow_id", flowID).Str("node_id", nodeID).Msg("flow: terminal: status")
+		httpError(w, http.StatusInternalServerError, "failed to get flow status")
+		return
+	}
+
+	var sessionID string
+	for _, n := range status.Nodes {
+		if n.ID == nodeID {
+			sessionID = n.SessionID
+			break
+		}
+	}
+	if sessionID == "" {
+		httpError(w, http.StatusNotFound, "node has no active session")
+		return
+	}
+
+	// Fetch screen snapshot from foxprox.
+	fpClient := foxproxclient.ForSocket(unixsocket.DefaultSocketPath())
+	snap, err := fpClient.SessionScreen(r.Context(), sessionID)
+	if err != nil {
+		log.Error().Err(err).Str("session_id", sessionID).Msg("flow: terminal: session screen")
+		httpError(w, http.StatusInternalServerError, "failed to fetch terminal screen")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"session_id": sessionID,
+		"rows":       snap.Rows,
+		"cols":       snap.Cols,
+		"lines":      snap.Lines,
+		"cursor":     snap.Cursor,
+		"alt_screen": snap.AltScreen,
+	})
 }
 
 // ---------------------------------------------------------------------------

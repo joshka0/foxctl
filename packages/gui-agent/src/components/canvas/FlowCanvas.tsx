@@ -82,6 +82,8 @@ interface CanvasNodeData extends Record<string, unknown> {
   state?: string
   error?: string
   duration_ms?: number
+  session_id?: string
+  flow_id?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -169,6 +171,7 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
         label: n.label,
         kind: n.kind,
         config: n.config as Record<string, unknown>,
+        flow_id: flowId,
       },
     }))
 
@@ -202,6 +205,7 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
             state: nodeStatus.state,
             error: nodeStatus.error,
             duration_ms: nodeStatus.duration_ms,
+            session_id: nodeStatus.session_id,
           },
         }
       }),

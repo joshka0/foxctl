@@ -367,28 +367,32 @@ func (e *AgentExecutor) Execute(ctx context.Context, node FlowNode, input any) (
 			errMsg = fmt.Sprintf("agent spawn timed out: %v", err)
 		}
 		return NodeOutput{
-			Envelope: envelope.Error("flow/agent", "ESPAWN", errMsg, nil),
-			Duration: duration,
-			NodeID:   node.ID,
+			Envelope:  envelope.Error("flow/agent", "ESPAWN", errMsg, nil),
+			Duration:  duration,
+			NodeID:    node.ID,
+			SessionID: "",
 		}, nil
 	}
 
 	// Handle output capture based on output mode.
+	var out NodeOutput
 	switch outputMode {
 	case "ask":
-		return e.executeAskMode(spawnCtx, cfg, spawnResult, input, start, node, askTimeout)
+		out, err = e.executeAskMode(spawnCtx, cfg, spawnResult, input, start, node, askTimeout)
 	case "session_summary":
-		return e.executeSessionSummaryMode(spawnCtx, spawnResult, start, node)
+		out, err = e.executeSessionSummaryMode(spawnCtx, spawnResult, start, node)
 	case "push":
-		return e.executePushMode(spawnCtx, cfg, spawnResult, input, start, node)
+		out, err = e.executePushMode(spawnCtx, cfg, spawnResult, input, start, node)
 	default:
-		return NodeOutput{
+		out = NodeOutput{
 			Envelope: envelope.Error("flow/agent", "EARG",
 				fmt.Sprintf("invalid output_mode %q", outputMode), nil),
 			Duration: time.Since(start),
 			NodeID:   node.ID,
-		}, nil
+		}
 	}
+	out.SessionID = spawnResult.SessionID
+	return out, err
 }
 
 // executeAskMode handles the ask output mode: spawn agent, send ask, wait for reply.
@@ -558,6 +562,7 @@ func (e *AgentExecutor) executePushMode(
 			}, nil
 		}
 		// Agent pushed output successfully.
+		out.SessionID = spawnResult.SessionID
 		return out, nil
 	case <-ctx.Done():
 		// Context cancelled or timed out. Kill the agent.

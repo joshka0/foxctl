@@ -1,4 +1,4 @@
-import { memo } from 'react'
+import { memo, useEffect, useRef } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { cn } from '@/lib/utils'
 import {
@@ -14,6 +14,10 @@ import {
   XCircle,
   Pause,
 } from 'lucide-react'
+import { Terminal } from '@xterm/xterm'
+import '@xterm/xterm/css/xterm.css'
+import { useQuery } from '@tanstack/react-query'
+import { getFlowNodeTerminal } from '@/api/client'
 import type { FlowNodeKind } from '@/api/types'
 
 interface FlowNodeData extends Record<string, unknown> {
@@ -23,6 +27,8 @@ interface FlowNodeData extends Record<string, unknown> {
   state?: string // idle | running | completed | errored
   error?: string
   duration_ms?: number
+  session_id?: string
+  flow_id?: string
 }
 
 const kindIcons: Record<FlowNodeKind, React.ReactNode> = {
@@ -121,6 +127,9 @@ export const FlowCanvasNode = memo(function FlowCanvasNode(props: NodeProps) {
             {Object.keys(data.config).length > 2 && '…'}
           </div>
         )}
+        {kind === 'pty' && data.session_id && data.flow_id && (
+          <PtyTerminalEmbed flowId={data.flow_id} nodeId={props.id} sessionId={data.session_id} />
+        )}
       </div>
 
       {/* Output handle */}
@@ -132,3 +141,66 @@ export const FlowCanvasNode = memo(function FlowCanvasNode(props: NodeProps) {
     </div>
   )
 })
+
+function PtyTerminalEmbed({
+  flowId,
+  nodeId,
+  sessionId,
+}: {
+  flowId: string
+  nodeId: string
+  sessionId: string
+}) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const termRef = useRef<Terminal | null>(null)
+
+  const { data: screenData } = useQuery({
+    queryKey: ['flow-node-terminal', flowId, nodeId],
+    queryFn: () => getFlowNodeTerminal(flowId, nodeId, '.'),
+    refetchInterval: 1000,
+    enabled: !!sessionId,
+  })
+
+  useEffect(() => {
+    if (!containerRef.current || termRef.current) return
+
+    const term = new Terminal({
+      cols: 80,
+      rows: 12,
+      fontSize: 10,
+      fontFamily: 'monospace',
+      theme: {
+        background: '#0c0c0c',
+        foreground: '#e6e6e6',
+      },
+      disableStdin: true,
+      cursorBlink: false,
+      convertEol: true,
+    })
+
+    term.open(containerRef.current)
+    termRef.current = term
+
+    return () => {
+      term.dispose()
+      termRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!screenData || !termRef.current) return
+    const term = termRef.current
+    term.clear()
+    for (const line of screenData.lines) {
+      term.writeln(line)
+    }
+  }, [screenData])
+
+  return (
+    <div
+      ref={containerRef}
+      className="mt-1 rounded overflow-hidden border border-white/10"
+      style={{ width: 320, height: 160 }}
+    />
+  )
+}

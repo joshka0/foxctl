@@ -800,6 +800,7 @@ export interface FlowNodeExecState {
   state: string;
   error?: string;
   duration_ms?: number;
+  session_id?: string;
 }
 
 export interface FlowEdgeExecState {
