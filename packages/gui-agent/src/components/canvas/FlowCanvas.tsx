@@ -29,7 +29,6 @@ import {
   startFlow,
   stopFlow,
   pauseFlow,
-  getFlowStatus,
   listRooms,
   getRoomStatus,
 } from '@/api/client'
@@ -61,6 +60,7 @@ import type {
   FlowNode as FlowNodeType,
   FlowEdge as FlowEdgeType,
   RoomStatus,
+  FlowStatusResponse,
 } from '@/api/types'
 
 // ---------------------------------------------------------------------------
@@ -119,6 +119,7 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<CanvasNodeData>>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null)
+  const [statusData, setStatusData] = useState<FlowStatusResponse | null>(null)
 
   // Load flow data
   const { data: flowData, isLoading } = useQuery({
@@ -127,6 +128,29 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
   })
 
   const flowRoomId = (flowData as unknown as { room_id?: string })?.room_id
+
+  // SSE stream for flow status (replaces polling)
+  useEffect(() => {
+    if (mode !== 'runtime') {
+      setStatusData(null)
+      return
+    }
+    const es = new EventSource(`/api/flows/${encodeURIComponent(flowId)}/events?workspace=.`,)
+    es.onmessage = (ev) => {
+      try {
+        const parsed = JSON.parse(ev.data) as FlowStatusResponse
+        setStatusData(parsed)
+      } catch {
+        // ignore malformed events
+      }
+    }
+    es.onerror = () => {
+      // Connection error; browser auto-retries per SSE spec
+    }
+    return () => {
+      es.close()
+    }
+  }, [mode, flowId])
 
   // Room list for linking
   const { data: roomsData } = useQuery({
@@ -146,14 +170,6 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
   const linkRoomMutation = useMutation({
     mutationFn: (roomId: string) => patchFlow(flowId, { room_id: roomId }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['flow', flowId] }),
-  })
-
-  // Runtime status polling
-  const { data: statusData } = useQuery({
-    queryKey: ['flow-status', flowId],
-    queryFn: () => getFlowStatus(flowId, '.'),
-    refetchInterval: mode === 'runtime' ? 2000 : false,
-    enabled: mode === 'runtime',
   })
 
   // Convert API data to React Flow nodes/edges

@@ -223,6 +223,11 @@ func FlowHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 					handleFlowStatus(w, r, cfg, log, flowID)
 					return
 				}
+			case "events":
+				if len(parts) == 2 && r.Method == http.MethodGet {
+					handleFlowEvents(w, r, cfg, log, flowID)
+					return
+				}
 			case "runs":
 				if len(parts) == 4 && parts[2] != "" && parts[3] == "logs" && r.Method == http.MethodGet {
 					handleFlowRunLogs(w, r, cfg, log, flowID, parts[2])
@@ -724,6 +729,55 @@ func handleFlowPause(w http.ResponseWriter, r *http.Request, cfg config.Config, 
 		"flow_id": flowID,
 		"state":   string(flowmodel.FlowPaused),
 	})
+}
+
+func handleFlowEvents(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, flowID string) {
+	workspace := r.URL.Query().Get("workspace")
+	if workspace == "" {
+		workspace = "."
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		httpError(w, http.StatusInternalServerError, "streaming not supported")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	client := daemon.NewClient()
+	ticker := time.NewTicker(1000 * time.Millisecond)
+	defer ticker.Stop()
+
+	ctx := r.Context()
+	var lastJSON string
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			status, err := client.FlowStatus(flowID, workspace)
+			if err != nil {
+				continue
+			}
+			payload, err := json.Marshal(status)
+			if err != nil {
+				continue
+			}
+			jsonStr := string(payload)
+			if jsonStr == lastJSON {
+				continue
+			}
+			lastJSON = jsonStr
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", jsonStr)
+			flusher.Flush()
+		}
+	}
 }
 
 func handleFlowStatus(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, flowID string) {
