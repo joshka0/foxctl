@@ -134,11 +134,11 @@ func ConfigFromEnv(base Config) Config {
 
 // Report is the result of a single curator pass (either active or dream).
 type Report struct {
-	ID          string    `json:"id"`
-	Phase       string    `json:"phase"` // "active" or "dream"
-	GeneratedAt time.Time `json:"generated_at"`
-	Config      Config    `json:"config"`
-	Summary     Summary   `json:"summary"`
+	ID          string        `json:"id"`
+	Phase       string        `json:"phase"` // "active" or "dream"
+	GeneratedAt time.Time     `json:"generated_at"`
+	Config      Config        `json:"config"`
+	Summary     Summary       `json:"summary"`
 	Memory      *MemoryReport `json:"memory,omitempty"`
 }
 

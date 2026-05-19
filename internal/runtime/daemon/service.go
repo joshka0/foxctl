@@ -157,9 +157,9 @@ type Service struct {
 	wsEnginesMu sync.Mutex
 
 	// Curator worker (background context plane maintenance)
-	curatorWorker       *curator.Worker
-	curatorCtx          context.Context
-	curatorCancel       context.CancelFunc
+	curatorWorker *curator.Worker
+	curatorCtx    context.Context
+	curatorCancel context.CancelFunc
 }
 
 // wsFlowEngine groups a per-workspace flow engine with its store and cleanup.

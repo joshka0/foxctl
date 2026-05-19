@@ -230,17 +230,17 @@ type OAuthSettings struct {
 //
 // In config.yaml:
 //
-//   curator:
-//     enabled: true
-//     active_enabled: true       # 5m light sweep
-//     dream_enabled: true        # 24h deep analysis
-//     active_interval: 5m        # Go duration
-//     dream_interval: 24h        # Go duration (72h for weekly)
-//     stale_after_days: 30
-//     archive_after_days: 90
-//     min_confidence: 0.5
-//     handoff_stale_days: 30
-//     dry_run: false
+//	curator:
+//	  enabled: true
+//	  active_enabled: true       # 5m light sweep
+//	  dream_enabled: true        # 24h deep analysis
+//	  active_interval: 5m        # Go duration
+//	  dream_interval: 24h        # Go duration (72h for weekly)
+//	  stale_after_days: 30
+//	  archive_after_days: 90
+//	  min_confidence: 0.5
+//	  handoff_stale_days: 30
+//	  dry_run: false
 //
 // Env vars: FOXCTL_CURATOR_ACTIVE_INTERVAL, FOXCTL_CURATOR_DREAM_INTERVAL,
 // FOXCTL_CURATOR_ENABLED, FOXCTL_CURATOR_DRY_RUN, FOXCTL_CURATOR_STALE_AFTER_DAYS,
