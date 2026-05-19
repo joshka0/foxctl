@@ -1420,9 +1420,6 @@ func (s *Service) startCuratorWorker(ctx context.Context) error {
 	cfg := curator.DefaultConfig()
 
 	// Override from config.yaml if present
-	if raw := s.cfg.Curator.Mode; raw != "" {
-		cfg.Mode = curator.Mode(strings.ToLower(raw))
-	}
 	if raw := s.cfg.Curator.ActiveInterval; raw > 0 {
 		cfg.ActiveInterval = raw
 	}
@@ -1447,6 +1444,12 @@ func (s *Service) startCuratorWorker(ctx context.Context) error {
 	if s.cfg.Curator.DryRun != nil {
 		cfg.DryRun = *s.cfg.Curator.DryRun
 	}
+	if s.cfg.Curator.ActiveEnabled != nil {
+		cfg.ActiveEnabled = *s.cfg.Curator.ActiveEnabled
+	}
+	if s.cfg.Curator.DreamEnabled != nil {
+		cfg.DreamEnabled = *s.cfg.Curator.DreamEnabled
+	}
 
 	// Env var overrides
 	cfg = curator.ConfigFromEnv(cfg)
@@ -1464,9 +1467,7 @@ func (s *Service) startCuratorWorker(ctx context.Context) error {
 	}
 
 	s.curatorWorker = worker
-	mode := string(cfg.Mode)
-	interval := cfg.Interval()
-	fmt.Fprintf(os.Stderr, "curator: started in %s mode (interval: %s)\n", mode, interval)
+	fmt.Fprintf(os.Stderr, "curator: started (active: %s, dream: %s)\n", cfg.ActiveInterval, cfg.DreamInterval)
 	return nil
 }
 

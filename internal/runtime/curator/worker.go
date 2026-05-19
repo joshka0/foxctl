@@ -1,17 +1,21 @@
 // Package curator implements a background worker that periodically runs
-// deterministic curation across all foxctl context stores: memory lifecycle
-// transitions, observation cleanup, tension review, and handoff archival.
+// deterministic curation across all foxctl context stores.
 //
-// The worker is leader-gated (only the daemon leader runs it) and configurable
-// via config.yaml or environment variables. Two modes:
+// Two concurrent loops run inside a single worker:
 //
-//   - "active" mode: frequent runs (default 5m) for dev machines — keeps the
-//     context plane tidy during active development.
-//   - "dream" mode: infrequent runs (24–72h) for production/CI — performs
-//     heavier analysis like consolidation, dedup, and utility scoring.
+//   - "active" loop: frequent (default 5m) light checks — lifecycle transitions,
+//     stale detection, quick sweeps. Keeps the context plane tidy during
+//     active development.
+//   - "dream" loop: infrequent (default 24h) deep analysis — consolidation
+//     clusters, utility scoring, dedup, overlap detection. Like human sleep
+//     consolidating memories overnight.
+//
+// Both loops run simultaneously. Active handles the day-to-day hygiene;
+// dream handles the heavier periodic maintenance.
 //
 // The curator is deterministic: no LLM calls. It applies age, confidence,
-// count, and utility heuristics. LLM-assisted review is a future extension.
+// count, and utility heuristics. LLM-assisted review is a future extension
+// (dream mode could spawn a cheap aux-model pass for borderline cases).
 package curator
 
 import (
@@ -32,60 +36,42 @@ import (
 // Configuration
 // ---------------------------------------------------------------------------
 
-// Mode controls the curator's cadence and aggressiveness.
-type Mode string
-
-const (
-	// ModeActive runs frequently (default 5m) with light checks.
-	// Suitable for dev machines where context should stay tidy.
-	ModeActive Mode = "active"
-
-	// ModeDream runs infrequently (default 24h) with full analysis
-	// including consolidation clusters, utility scoring, and dedup.
-	// Suitable for production or long-running daemons.
-	ModeDream Mode = "dream"
-)
-
 // Config holds curator worker configuration.
 type Config struct {
-	// Mode controls cadence: "active" (frequent, light) or "dream" (infrequent, deep).
-	// Default: "active".
-	Mode Mode `yaml:"mode" json:"mode"`
-
-	// ActiveInterval is the tick interval in active mode. Default: 5m.
+	// ActiveInterval is the tick for the active (light) loop. Default: 5m.
 	ActiveInterval time.Duration `yaml:"active_interval" json:"active_interval"`
 
-	// DreamInterval is the tick interval in dream mode. Default: 24h.
+	// DreamInterval is the tick for the dream (deep) loop. Default: 24h.
 	DreamInterval time.Duration `yaml:"dream_interval" json:"dream_interval"`
 
-	// StaleAfterDays controls when active records with no uses are proposed stale.
-	// Default: 30.
+	// StaleAfterDays: active records with no uses older than this → stale. Default: 30.
 	StaleAfterDays int `yaml:"stale_after_days" json:"stale_after_days"`
 
-	// ArchiveAfterDays controls when stale records are proposed for archive.
-	// Default: 90.
+	// ArchiveAfterDays: stale records older than this → archive. Default: 90.
 	ArchiveAfterDays int `yaml:"archive_after_days" json:"archive_after_days"`
 
-	// MinConfidence controls the observation cleanup threshold.
-	// Observations below this are flagged for review. Default: 0.5.
+	// MinConfidence: observations below this → flagged for review. Default: 0.5.
 	MinConfidence float64 `yaml:"min_confidence" json:"min_confidence"`
 
-	// HandoffStaleDays controls when handoff files are flagged for archival.
-	// Default: 30.
+	// HandoffStaleDays: handoff files older than this → flag for archival. Default: 30.
 	HandoffStaleDays int `yaml:"handoff_stale_days" json:"handoff_stale_days"`
 
-	// Enabled controls whether the curator runs at all. Default: true.
+	// Enabled controls whether the curator runs. Default: true.
 	Enabled bool `yaml:"enabled" json:"enabled"`
 
-	// DryRun controls whether mutations are applied. Default: false (apply).
-	// Set true to only produce reports without mutating state.
+	// DryRun: true = report only, no mutations. Default: false.
 	DryRun bool `yaml:"dry_run" json:"dry_run"`
+
+	// ActiveEnabled controls whether the active loop runs. Default: true.
+	ActiveEnabled bool `yaml:"active_enabled" json:"active_enabled"`
+
+	// DreamEnabled controls whether the dream loop runs. Default: true.
+	DreamEnabled bool `yaml:"dream_enabled" json:"dream_enabled"`
 }
 
-// DefaultConfig returns sensible defaults.
+// DefaultConfig returns sensible defaults — both loops enabled.
 func DefaultConfig() Config {
 	return Config{
-		Mode:             ModeActive,
 		ActiveInterval:   5 * time.Minute,
 		DreamInterval:    24 * time.Hour,
 		StaleAfterDays:   30,
@@ -94,45 +80,20 @@ func DefaultConfig() Config {
 		HandoffStaleDays: 30,
 		Enabled:          true,
 		DryRun:           false,
+		ActiveEnabled:    true,
+		DreamEnabled:     true,
 	}
-}
-
-// Interval returns the tick duration for the current mode.
-func (c Config) Interval() time.Duration {
-	switch c.Mode {
-	case ModeDream:
-		if c.DreamInterval > 0 {
-			return c.DreamInterval
-		}
-		return 24 * time.Hour
-	default:
-		if c.ActiveInterval > 0 {
-			return c.ActiveInterval
-		}
-		return 5 * time.Minute
-	}
-}
-
-// IsDream reports whether the curator is in dream mode.
-func (c Config) IsDream() bool {
-	return c.Mode == ModeDream
 }
 
 // ConfigFromEnv builds a Config from environment variables.
-//   - FOXCTL_CURATOR_MODE: "active" or "dream"
-//   - FOXCTL_CURATOR_INTERVAL: Go duration (e.g. "5m", "24h", "72h")
-//   - FOXCTL_CURATOR_ENABLED: "true" or "false"
-//   - FOXCTL_CURATOR_DRY_RUN: "true" or "false"
-//   - FOXCTL_CURATOR_STALE_AFTER_DAYS: integer
-//   - FOXCTL_CURATOR_ARCHIVE_AFTER_DAYS: integer
 func ConfigFromEnv(base Config) Config {
-	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_MODE")); v != "" {
-		base.Mode = Mode(strings.ToLower(v))
-	}
-	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_INTERVAL")); v != "" {
+	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_ACTIVE_INTERVAL")); v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {
-			// Override both intervals with the explicit value
 			base.ActiveInterval = d
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_DREAM_INTERVAL")); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
 			base.DreamInterval = d
 		}
 	}
@@ -143,13 +104,25 @@ func ConfigFromEnv(base Config) Config {
 		base.DryRun = strings.EqualFold(v, "true") || v == "1"
 	}
 	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_STALE_AFTER_DAYS")); v != "" {
-		if n, err := fmt.Sscanf(v, "%d", &base.StaleAfterDays); err == nil && n == 1 && base.StaleAfterDays > 0 {
+		if n, _ := fmt.Sscanf(v, "%d", &base.StaleAfterDays); n == 1 && base.StaleAfterDays > 0 {
 			// ok
 		}
 	}
 	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_ARCHIVE_AFTER_DAYS")); v != "" {
-		if n, err := fmt.Sscanf(v, "%d", &base.ArchiveAfterDays); err == nil && n == 1 && base.ArchiveAfterDays > 0 {
+		if n, _ := fmt.Sscanf(v, "%d", &base.ArchiveAfterDays); n == 1 && base.ArchiveAfterDays > 0 {
 			// ok
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_ACTIVE_ENABLED")); v != "" {
+		base.ActiveEnabled = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_DREAM_ENABLED")); v != "" {
+		base.DreamEnabled = strings.EqualFold(v, "true") || v == "1"
+	}
+	// Legacy: FOXCTL_CURATOR_INTERVAL overrides both (backward compat)
+	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_INTERVAL")); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			base.ActiveInterval = d
 		}
 	}
 	return base
@@ -159,38 +132,38 @@ func ConfigFromEnv(base Config) Config {
 // Report types
 // ---------------------------------------------------------------------------
 
-// CuratorReport is the result of a single curator pass.
-type CuratorReport struct {
-	ID          string       `json:"id"`
-	Mode        Mode         `json:"mode"`
-	GeneratedAt time.Time    `json:"generated_at"`
-	Config      Config       `json:"config"`
-	Summary     CuratorSummary `json:"summary"`
-	Memory      *MemoryReport  `json:"memory,omitempty"`
+// Report is the result of a single curator pass (either active or dream).
+type Report struct {
+	ID          string    `json:"id"`
+	Phase       string    `json:"phase"` // "active" or "dream"
+	GeneratedAt time.Time `json:"generated_at"`
+	Config      Config    `json:"config"`
+	Summary     Summary   `json:"summary"`
+	Memory      *MemoryReport `json:"memory,omitempty"`
 }
 
-// CuratorSummary holds aggregate counts.
-type CuratorSummary struct {
-	MemoryRecords       int `json:"memory_records"`
-	MemoryProposals     int `json:"memory_proposals"`
-	Observations        int `json:"observations"`
+// Summary holds aggregate counts.
+type Summary struct {
+	MemoryRecords        int `json:"memory_records"`
+	MemoryProposals      int `json:"memory_proposals"`
+	Observations         int `json:"observations"`
 	ObservationProposals int `json:"observation_proposals"`
-	Tensions            int `json:"tensions"`
-	OpenTensions        int `json:"open_tensions"`
-	Handoffs            int `json:"handoffs"`
-	StaleHandoffs       int `json:"stale_handoffs"`
-	Errors              int `json:"errors"`
+	Tensions             int `json:"tensions"`
+	OpenTensions         int `json:"open_tensions"`
+	Handoffs             int `json:"handoffs"`
+	StaleHandoffs        int `json:"stale_handoffs"`
+	Errors               int `json:"errors"`
 }
 
 // MemoryReport wraps the memory curator's output.
 type MemoryReport struct {
-	TotalRecords      int                        `json:"total_records"`
-	DemotionProposals int                        `json:"demotion_proposals"`
-	ArchiveProposals  int                        `json:"archive_proposals"`
-	DuplicateClusters int                        `json:"duplicate_clusters"`
-	OverlapClusters   int                        `json:"overlap_clusters"`
-	Applied           int                        `json:"applied,omitempty"`
-	AppliedSummary    *ApplySummary              `json:"applied_summary,omitempty"`
+	TotalRecords      int           `json:"total_records"`
+	DemotionProposals int           `json:"demotion_proposals"`
+	ArchiveProposals  int           `json:"archive_proposals"`
+	DuplicateClusters int           `json:"duplicate_clusters"`
+	OverlapClusters   int           `json:"overlap_clusters"`
+	Applied           int           `json:"applied,omitempty"`
+	AppliedSummary    *ApplySummary `json:"applied_summary,omitempty"`
 }
 
 // ApplySummary is set when the curator runs in apply mode.
@@ -202,10 +175,11 @@ type ApplySummary struct {
 }
 
 // ---------------------------------------------------------------------------
-// Worker
+// Worker — runs both active and dream loops concurrently
 // ---------------------------------------------------------------------------
 
-// Worker runs the curator on a configurable ticker.
+// Worker runs two concurrent curator loops: active (light, frequent) and
+// dream (deep, infrequent). Both are leader-gated and configurable.
 type Worker struct {
 	cfg   Config
 	memFn MemoryStoreOpener
@@ -215,14 +189,16 @@ type Worker struct {
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
 
-	lastReport *CuratorReport
-	lastRunAt  time.Time
+	lastActiveReport *Report
+	lastDreamReport  *Report
+	lastActiveRunAt  time.Time
+	lastDreamRunAt   time.Time
 }
 
-// MemoryStoreOpener opens a memory store for a workspace.
+// MemoryStoreOpener opens a memory store.
 type MemoryStoreOpener func(ctx context.Context, cfg config.Config) (storage.MemoryStore, error)
 
-// NewWorker creates a curator worker.
+// NewWorker creates a curator worker with both loops.
 func NewWorker(cfg Config, memFn MemoryStoreOpener) *Worker {
 	return &Worker{
 		cfg:   cfg,
@@ -230,7 +206,7 @@ func NewWorker(cfg Config, memFn MemoryStoreOpener) *Worker {
 	}
 }
 
-// Start begins the curator loop. It runs one immediate pass, then ticks.
+// Start begins both curator loops.
 func (w *Worker) Start(ctx context.Context) error {
 	if !w.cfg.Enabled {
 		return nil
@@ -244,27 +220,29 @@ func (w *Worker) Start(ctx context.Context) error {
 	ctx, w.cancel = context.WithCancel(ctx)
 	w.mu.Unlock()
 
-	// Immediate first run
-	w.runOnce(ctx)
+	// Active loop: immediate first run, then tick at ActiveInterval
+	if w.cfg.ActiveEnabled {
+		w.wg.Add(1)
+		go func() {
+			defer w.wg.Done()
+			w.activeLoop(ctx)
+		}()
+	}
 
-	w.wg.Add(1)
-	go func() {
-		defer w.wg.Done()
-		ticker := time.NewTicker(w.cfg.Interval())
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				w.runOnce(ctx)
-			}
-		}
-	}()
+	// Dream loop: delay first run by 1 minute (let active run first),
+	// then tick at DreamInterval
+	if w.cfg.DreamEnabled {
+		w.wg.Add(1)
+		go func() {
+			defer w.wg.Done()
+			w.dreamLoop(ctx)
+		}()
+	}
+
 	return nil
 }
 
-// Stop terminates the curator loop.
+// Stop terminates both curator loops.
 func (w *Worker) Stop() {
 	w.mu.Lock()
 	if w.cancel != nil {
@@ -274,65 +252,136 @@ func (w *Worker) Stop() {
 	w.wg.Wait()
 }
 
-// LastReport returns the most recent curator report (nil if never run).
-func (w *Worker) LastReport() *CuratorReport {
+// LastActiveReport returns the most recent active-loop report.
+func (w *Worker) LastActiveReport() *Report {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.lastReport
+	return w.lastActiveReport
 }
 
-// LastRunAt returns the time of the most recent curator run.
-func (w *Worker) LastRunAt() time.Time {
+// LastDreamReport returns the most recent dream-loop report.
+func (w *Worker) LastDreamReport() *Report {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.lastRunAt
+	return w.lastDreamReport
 }
 
-// RunOnce executes a single curator pass. Useful for CLI invocations.
-func (w *Worker) RunOnce(ctx context.Context) (*CuratorReport, error) {
-	return w.execute(ctx)
+// LastActiveRunAt returns the time of the most recent active run.
+func (w *Worker) LastActiveRunAt() time.Time {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.lastActiveRunAt
+}
+
+// LastDreamRunAt returns the time of the most recent dream run.
+func (w *Worker) LastDreamRunAt() time.Time {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.lastDreamRunAt
 }
 
 // ---------------------------------------------------------------------------
-// Internal
+// Active loop — light, frequent checks
 // ---------------------------------------------------------------------------
 
-func (w *Worker) runOnce(ctx context.Context) {
-	report, err := w.execute(ctx)
+func (w *Worker) activeLoop(ctx context.Context) {
+	// Immediate first run
+	w.runActive(ctx)
+
+	ticker := time.NewTicker(w.cfg.ActiveInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			w.runActive(ctx)
+		}
+	}
+}
+
+func (w *Worker) runActive(ctx context.Context) {
+	report, err := w.execute(ctx, "active", false)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "curator: run error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "curator [active]: run error: %v\n", err)
 		return
 	}
 	w.mu.Lock()
-	w.lastReport = report
-	w.lastRunAt = time.Now().UTC()
+	w.lastActiveReport = report
+	w.lastActiveRunAt = time.Now().UTC()
 	w.mu.Unlock()
 
-	if report.Summary.MemoryProposals > 0 || report.Summary.ObservationProposals > 0 || report.Summary.OpenTensions > 0 || report.Summary.StaleHandoffs > 0 {
-		mode := string(report.Mode)
-		fmt.Fprintf(os.Stderr, "curator [%s]: memory=%d proposals, observations=%d proposals, tensions=%d open, handoffs=%d stale\n",
-			mode, report.Summary.MemoryProposals, report.Summary.ObservationProposals, report.Summary.OpenTensions, report.Summary.StaleHandoffs)
+	if report.Summary.MemoryProposals > 0 || report.Summary.StaleHandoffs > 0 {
+		fmt.Fprintf(os.Stderr, "curator [active]: memory=%d proposals, handoffs=%d stale\n",
+			report.Summary.MemoryProposals, report.Summary.StaleHandoffs)
 	}
 }
 
-func (w *Worker) execute(ctx context.Context) (*CuratorReport, error) {
+// ---------------------------------------------------------------------------
+// Dream loop — deep, infrequent analysis
+// ---------------------------------------------------------------------------
+
+func (w *Worker) dreamLoop(ctx context.Context) {
+	// Delay first run to let the active loop establish baseline
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(1 * time.Minute):
+	}
+
+	w.runDream(ctx)
+
+	ticker := time.NewTicker(w.cfg.DreamInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			w.runDream(ctx)
+		}
+	}
+}
+
+func (w *Worker) runDream(ctx context.Context) {
+	report, err := w.execute(ctx, "dream", true)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "curator [dream]: run error: %v\n", err)
+		return
+	}
+	w.mu.Lock()
+	w.lastDreamReport = report
+	w.lastDreamRunAt = time.Now().UTC()
+	w.mu.Unlock()
+
+	fmt.Fprintf(os.Stderr, "curator [dream]: memory=%d records, %d duplicates, %d overlaps, %d proposals\n",
+		report.Summary.MemoryRecords,
+		report.Memory.DuplicateClusters,
+		report.Memory.OverlapClusters,
+		report.Summary.MemoryProposals)
+}
+
+// ---------------------------------------------------------------------------
+// Shared execution
+// ---------------------------------------------------------------------------
+
+func (w *Worker) execute(ctx context.Context, phase string, deep bool) (*Report, error) {
 	now := time.Now().UTC()
-	report := &CuratorReport{
-		ID:          "curator-" + now.Format("20060102T150405Z"),
-		Mode:        w.cfg.Mode,
+	report := &Report{
+		ID:          "curator-" + phase + "-" + now.Format("20060102T150405Z"),
+		Phase:       phase,
 		GeneratedAt: now,
 		Config:      w.cfg,
 	}
 
-	// Memory curator
 	if w.memFn != nil {
 		memStore, err := w.memFn(ctx, config.Config{})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "curator: open memory store: %v\n", err)
+			fmt.Fprintf(os.Stderr, "curator [%s]: open memory store: %v\n", phase, err)
 			report.Summary.Errors++
 		} else {
 			defer memStore.Close()
-			memReport := w.curateMemory(ctx, memStore)
+			memReport := w.curateMemory(ctx, memStore, deep)
 			report.Memory = memReport
 			report.Summary.MemoryRecords = memReport.TotalRecords
 			report.Summary.MemoryProposals = memReport.DemotionProposals + memReport.ArchiveProposals
@@ -342,24 +391,21 @@ func (w *Worker) execute(ctx context.Context) (*CuratorReport, error) {
 	return report, nil
 }
 
-func (w *Worker) curateMemory(ctx context.Context, memStore storage.MemoryStore) *MemoryReport {
+func (w *Worker) curateMemory(ctx context.Context, memStore storage.MemoryStore, deep bool) *MemoryReport {
 	report := &MemoryReport{}
 
-	// List all records
 	entries, err := memStore.List(ctx, "", 5000)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "curator: list memory: %v\n", err)
 		return report
 	}
 
-	// Convert to records for the curator planner
 	var records []memorycore.Record
 	for _, e := range entries {
 		records = append(records, memorycore.RecordFromNamedEntry(e, memorycore.NamedEntryOptions{}))
 	}
 	report.TotalRecords = len(records)
 
-	// Plan the curator report (deterministic)
 	curatorCfg := memorycore.DefaultCuratorConfig(time.Now().UTC())
 	curatorCfg.StaleAfterDays = w.cfg.StaleAfterDays
 	curatorCfg.ArchiveAfterDays = w.cfg.ArchiveAfterDays
@@ -374,13 +420,11 @@ func (w *Worker) curateMemory(ctx context.Context, memStore storage.MemoryStore)
 			report.ArchiveProposals++
 		}
 	}
-	report.DuplicateClusters = plan.Summary.DuplicateClusters
-	report.OverlapClusters = plan.Summary.OverlapClusters
 
-	// In dream mode, also report consolidation and supersession
-	if w.cfg.IsDream() {
-		// Dream mode could trigger LLM review here in the future
-		// For now, just report the clusters
+	// Dream mode reports consolidation clusters
+	if deep {
+		report.DuplicateClusters = plan.Summary.DuplicateClusters
+		report.OverlapClusters = plan.Summary.OverlapClusters
 	}
 
 	// Apply if not dry-run

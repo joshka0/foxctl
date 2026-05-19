@@ -221,53 +221,61 @@ type OAuthSettings struct {
 
 // CuratorSettings configures the background context plane curator.
 //
-// The curator runs deterministic lifecycle maintenance across memory records,
-// observations, tensions, and handoffs. Two modes:
-//   - "active" (default): frequent light checks (5m interval) — keeps context tidy during dev
-//   - "dream": infrequent deep analysis (24-72h interval) — full consolidation + scoring
+// Two concurrent loops run inside the curator:
+//   - "active" loop: frequent (5m) light checks — lifecycle transitions, stale detection
+//   - "dream" loop: infrequent (24-72h) deep analysis — consolidation, dedup, scoring
+//
+// Both run simultaneously. Active keeps context tidy day-to-day;
+// dream does heavier periodic maintenance.
 //
 // In config.yaml:
 //
 //   curator:
 //     enabled: true
-//     mode: active          # "active" (5m) or "dream" (24h+)
-//     active_interval: 5m   # Go duration
-//     dream_interval: 24h   # Go duration (set to 72h for weekly cadence)
+//     active_enabled: true       # 5m light sweep
+//     dream_enabled: true        # 24h deep analysis
+//     active_interval: 5m        # Go duration
+//     dream_interval: 24h        # Go duration (72h for weekly)
 //     stale_after_days: 30
 //     archive_after_days: 90
 //     min_confidence: 0.5
 //     handoff_stale_days: 30
 //     dry_run: false
 //
-// Env vars: FOXCTL_CURATOR_MODE, FOXCTL_CURATOR_INTERVAL, FOXCTL_CURATOR_ENABLED,
-// FOXCTL_CURATOR_DRY_RUN, FOXCTL_CURATOR_STALE_AFTER_DAYS, FOXCTL_CURATOR_ARCHIVE_AFTER_DAYS.
+// Env vars: FOXCTL_CURATOR_ACTIVE_INTERVAL, FOXCTL_CURATOR_DREAM_INTERVAL,
+// FOXCTL_CURATOR_ENABLED, FOXCTL_CURATOR_DRY_RUN, FOXCTL_CURATOR_STALE_AFTER_DAYS,
+// FOXCTL_CURATOR_ARCHIVE_AFTER_DAYS, FOXCTL_CURATOR_ACTIVE_ENABLED,
+// FOXCTL_CURATOR_DREAM_ENABLED.
 type CuratorSettings struct {
-	// Mode controls cadence: "active" (frequent) or "dream" (infrequent).
-	Mode string `mapstructure:"mode" json:"mode"`
-
-	// ActiveInterval is the tick interval in active mode.
+	// ActiveInterval is the tick for the active (light) loop.
 	ActiveInterval time.Duration `mapstructure:"active_interval" json:"active_interval"`
 
-	// DreamInterval is the tick interval in dream mode.
+	// DreamInterval is the tick for the dream (deep) loop.
 	DreamInterval time.Duration `mapstructure:"dream_interval" json:"dream_interval"`
 
-	// StaleAfterDays controls when records with no uses are proposed stale.
+	// StaleAfterDays: records with no uses older than this → stale.
 	StaleAfterDays int `mapstructure:"stale_after_days" json:"stale_after_days"`
 
-	// ArchiveAfterDays controls when stale records are proposed for archive.
+	// ArchiveAfterDays: stale records older than this → archive.
 	ArchiveAfterDays int `mapstructure:"archive_after_days" json:"archive_after_days"`
 
-	// MinConfidence is the observation cleanup threshold.
+	// MinConfidence: observations below this → flagged for review.
 	MinConfidence float64 `mapstructure:"min_confidence" json:"min_confidence"`
 
-	// HandoffStaleDays controls when handoff files are flagged for archival.
+	// HandoffStaleDays: handoff files older than this → flag for archival.
 	HandoffStaleDays int `mapstructure:"handoff_stale_days" json:"handoff_stale_days"`
 
 	// Enabled controls whether the curator runs at all.
 	Enabled *bool `mapstructure:"enabled" json:"enabled"`
 
-	// DryRun controls whether mutations are applied (true = report only).
+	// DryRun: true = report only, no mutations.
 	DryRun *bool `mapstructure:"dry_run" json:"dry_run"`
+
+	// ActiveEnabled controls whether the active loop runs.
+	ActiveEnabled *bool `mapstructure:"active_enabled" json:"active_enabled"`
+
+	// DreamEnabled controls whether the dream loop runs.
+	DreamEnabled *bool `mapstructure:"dream_enabled" json:"dream_enabled"`
 }
 
 // MarshalJSON implements json.Marshaler to redact secret fields.
