@@ -70,6 +70,7 @@ type Config struct {
 	Telegram       TelegramSettings  `mapstructure:"telegram" json:"telegram"`
 	Teams          TeamsSettings     `mapstructure:"teams" json:"teams"`
 	OAuth          OAuthSettings     `mapstructure:"oauth" json:"oauth"`
+	Curator        CuratorSettings   `mapstructure:"curator" json:"curator"`
 }
 
 // DiscordSettings configure the Discord chat adapter.
@@ -216,6 +217,65 @@ type OAuthSettings struct {
 	// GitHub OAuth settings
 	GitHubClientID     string `mapstructure:"github_client_id" json:"github_client_id"`
 	GitHubClientSecret string `mapstructure:"github_client_secret" json:"github_client_secret"`
+}
+
+// CuratorSettings configures the background context plane curator.
+//
+// Two concurrent loops run inside the curator:
+//   - "active" loop: frequent (5m) light checks — lifecycle transitions, stale detection
+//   - "dream" loop: infrequent (24-72h) deep analysis — consolidation, dedup, scoring
+//
+// Both run simultaneously. Active keeps context tidy day-to-day;
+// dream does heavier periodic maintenance.
+//
+// In config.yaml:
+//
+//	curator:
+//	  enabled: true
+//	  active_enabled: true       # 5m light sweep
+//	  dream_enabled: true        # 24h deep analysis
+//	  active_interval: 5m        # Go duration
+//	  dream_interval: 24h        # Go duration (72h for weekly)
+//	  stale_after_days: 30
+//	  archive_after_days: 90
+//	  min_confidence: 0.5
+//	  handoff_stale_days: 30
+//	  dry_run: false
+//
+// Env vars: FOXCTL_CURATOR_ACTIVE_INTERVAL, FOXCTL_CURATOR_DREAM_INTERVAL,
+// FOXCTL_CURATOR_ENABLED, FOXCTL_CURATOR_DRY_RUN, FOXCTL_CURATOR_STALE_AFTER_DAYS,
+// FOXCTL_CURATOR_ARCHIVE_AFTER_DAYS, FOXCTL_CURATOR_ACTIVE_ENABLED,
+// FOXCTL_CURATOR_DREAM_ENABLED.
+type CuratorSettings struct {
+	// ActiveInterval is the tick for the active (light) loop.
+	ActiveInterval time.Duration `mapstructure:"active_interval" json:"active_interval"`
+
+	// DreamInterval is the tick for the dream (deep) loop.
+	DreamInterval time.Duration `mapstructure:"dream_interval" json:"dream_interval"`
+
+	// StaleAfterDays: records with no uses older than this → stale.
+	StaleAfterDays int `mapstructure:"stale_after_days" json:"stale_after_days"`
+
+	// ArchiveAfterDays: stale records older than this → archive.
+	ArchiveAfterDays int `mapstructure:"archive_after_days" json:"archive_after_days"`
+
+	// MinConfidence: observations below this → flagged for review.
+	MinConfidence float64 `mapstructure:"min_confidence" json:"min_confidence"`
+
+	// HandoffStaleDays: handoff files older than this → flag for archival.
+	HandoffStaleDays int `mapstructure:"handoff_stale_days" json:"handoff_stale_days"`
+
+	// Enabled controls whether the curator runs at all.
+	Enabled *bool `mapstructure:"enabled" json:"enabled"`
+
+	// DryRun: true = report only, no mutations.
+	DryRun *bool `mapstructure:"dry_run" json:"dry_run"`
+
+	// ActiveEnabled controls whether the active loop runs.
+	ActiveEnabled *bool `mapstructure:"active_enabled" json:"active_enabled"`
+
+	// DreamEnabled controls whether the dream loop runs.
+	DreamEnabled *bool `mapstructure:"dream_enabled" json:"dream_enabled"`
 }
 
 // MarshalJSON implements json.Marshaler to redact secret fields.

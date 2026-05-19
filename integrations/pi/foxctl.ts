@@ -316,6 +316,7 @@ type SkillFacadeOptions = {
 	input?: (params: any, pi: ExtensionAPI) => Record<string, unknown>;
 };
 
+
 function defineFoxctlSkillFacade(options: SkillFacadeOptions) {
 	return defineTool({
 		name: options.name,
@@ -2909,6 +2910,574 @@ const foxctlOpenapiTool = defineTool({
 });
 
 // ============================================================================
+// ContextWiki Tools
+// ============================================================================
+
+// --- Context Show ---
+
+const FoxctlContextShowParams = Type.Object({
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+});
+
+const foxctlContextShowTool = defineTool({
+	name: "foxctl_context_show",
+	label: "Foxctl Context Show",
+	description: "Show the current ContextWiki top-of-mind bundle for the workspace.",
+	parameters: FoxctlContextShowParams,
+	async execute(_toolCallId, params, signal) {
+		const pi = getPi();
+		const client = getClient(pi);
+		const result = await client.get<Record<string, unknown>>(
+			`/api/context/show${query({workspace: params.workspace || getWorkspace(pi)})}`,
+			signal,
+		);
+		return jsonToolResult(result);
+	},
+});
+
+// --- Context Overview ---
+
+const FoxctlContextOverviewParams = Type.Object({
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+	limit: Type.Optional(Type.Number({ description: "Max items per category", default: 8 })),
+});
+
+const foxctlContextOverviewTool = defineTool({
+	name: "foxctl_context_overview",
+	label: "Foxctl Context Overview",
+	description: "Get the ContextWiki overview: proposals, evidence imports, promotion jobs, and next merge tasks.",
+	parameters: FoxctlContextOverviewParams,
+	async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+		const pi = getPi();
+		const client = getClient(pi);
+		const result = await client.get<Record<string, unknown>>(
+			`/api/context/overview${query({ workspace: getWorkspace(pi), limit: params.limit ?? 8 })}`,
+			signal,
+		);
+		return {
+			content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+			details: result,
+		};
+	},
+});
+
+// --- Context Report ---
+
+const FoxctlContextReportParams = Type.Object({
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+});
+
+const foxctlContextReportTool = defineTool({
+	name: "foxctl_context_report",
+	label: "Foxctl Context Report",
+	description: "Build a synthesized ContextWiki current-state report.",
+	parameters: FoxctlContextReportParams,
+	async execute(_toolCallId, params, signal) {
+		const pi = getPi();
+		const client = getClient(pi);
+		const result = await client.get<Record<string, unknown>>(
+			`/api/context/report${query({workspace: params.workspace || getWorkspace(pi)})}`,
+			signal,
+		);
+		return jsonToolResult(result);
+	},
+});
+
+// --- Context Next ---
+
+const FoxctlContextNextParams = Type.Object({
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+});
+
+const foxctlContextNextTool = defineTool({
+	name: "foxctl_context_next",
+	label: "Foxctl Context Next",
+	description: "Select the next ContextWiki task candidate from the workspace.",
+	parameters: FoxctlContextNextParams,
+	async execute(_toolCallId, params, signal) {
+		const pi = getPi();
+		const client = getClient(pi);
+		const result = await client.get<Record<string, unknown>>(
+			`/api/context/next${query({workspace: params.workspace || getWorkspace(pi)})}`,
+			signal,
+		);
+		return jsonToolResult(result);
+	},
+});
+
+// --- Context Capture ---
+
+const FoxctlContextCaptureParams = Type.Object({
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+	summary: Type.String({ description: "Compact handoff summary of what was accomplished" }),
+	task_id: Type.Optional(Type.String({ description: "Task identifier" })),
+	phase: Type.Optional(Type.String({ description: "Phase name (research, implementation, review, etc.)", default: "work" })),
+	outcome: Type.Optional(StringEnum(["partial", "complete", "blocked"] as const, { default: "partial" })),
+	observations: Type.Optional(Type.Array(Type.String(), { description: "Observations made during this work phase" })),
+	tensions: Type.Optional(Type.Array(Type.String(), { description: "Tensions encountered during this work phase" })),
+	next_actions: Type.Optional(Type.Array(Type.String(), { description: "Recommended next actions for whoever picks up this work" })),
+	file_touched: Type.Optional(Type.Array(Type.String(), { description: "Files touched during this work phase" })),
+	evidence_refs: Type.Optional(Type.Array(Type.String(), { description: "Evidence references (file paths, URLs, task IDs)" })),
+});
+
+const foxctlContextCaptureTool = defineTool({
+	name: "foxctl_context_capture",
+	label: "Foxctl Context Capture",
+	description: "Capture a structured handoff into the ContextWiki control plane.",
+	parameters: FoxctlContextCaptureParams,
+	async execute(_toolCallId, params, signal) {
+		const pi = getPi();
+		const client = getClient(pi);
+		const result = await client.post<Record<string, unknown>>(
+			"/api/context/capture",
+			{ ...params, workspace: params.workspace || getWorkspace(pi) },
+			signal,
+		);
+		return jsonToolResult(result);
+	},
+});
+
+// --- Context Dispatch ---
+
+const FoxctlContextDispatchParams = Type.Object({
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+	task_id: Type.Optional(Type.String({ description: "Explicit task ID (defaults to context next)" })),
+});
+
+const foxctlContextDispatchTool = defineTool({
+	name: "foxctl_context_dispatch",
+	label: "Foxctl Context Dispatch",
+	description: "Build a bounded ContextWiki task packet for the next task.",
+	parameters: FoxctlContextDispatchParams,
+	async execute(_toolCallId, params, signal) {
+		const pi = getPi();
+		const client = getClient(pi);
+		const result = await client.get<Record<string, unknown>>(
+			`/api/context/dispatch${query({workspace: params.workspace || getWorkspace(pi), task_id: params.task_id})}`,
+			signal,
+		);
+		return jsonToolResult(result);
+	},
+});
+
+// --- Context Handoffs ---
+
+const FoxctlContextHandoffsParams = Type.Object({
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+	limit: Type.Optional(Type.Number({ description: "Max handoffs to return", default: 10 })),
+});
+
+const foxctlContextHandoffsTool = defineTool({
+	name: "foxctl_context_handoffs",
+	label: "Foxctl Context Handoffs",
+	description: "List recorded ContextWiki handoffs from previous sessions.",
+	parameters: FoxctlContextHandoffsParams,
+	async execute(_toolCallId, params, signal) {
+		const pi = getPi();
+		const client = getClient(pi);
+		const result = await client.get<Record<string, unknown>>(
+			`/api/context/handoffs${query({workspace: params.workspace || getWorkspace(pi), limit: params.limit ?? 10})}`,
+			signal,
+		);
+		return jsonToolResult(result);
+	},
+});
+
+// --- Context Observe ---
+
+const FoxctlContextObserveParams = Type.Object({
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+	statement: Type.String({ description: "The observation statement (factual, repeatable)" }),
+	area: Type.Optional(Type.String({ description: "Subsystem or area (e.g. memory, auth, api)" })),
+	project: Type.Optional(Type.String({ description: "Project name override" })),
+	confidence: Type.Optional(Type.Number({ description: "Confidence from 0.0 to 1.0", default: 0.7 })),
+	evidence_refs: Type.Optional(Type.Array(Type.String(), { description: "Evidence references (file paths, URLs, task IDs)" })),
+});
+
+const foxctlContextObserveTool = defineTool({
+	name: "foxctl_context_observe",
+	label: "Foxctl Context Observe",
+	description: "Record an observation into the ContextWiki control plane.",
+	parameters: FoxctlContextObserveParams,
+	async execute(_toolCallId, params, signal) {
+		const pi = getPi();
+		const client = getClient(pi);
+		const result = await client.post<Record<string, unknown>>(
+			"/api/context/observe",
+			{ ...params, workspace: params.workspace || getWorkspace(pi) },
+			signal,
+		);
+		return jsonToolResult(result);
+	},
+});
+
+// --- Context Tension ---
+
+const FoxctlContextTensionParams = Type.Object({
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+	statement: Type.String({ description: "The tension statement" }),
+	kind: Type.Optional(StringEnum(["contradiction", "performance", "complexity", "dependency", "usability"] as const, { default: "contradiction" })),
+	impact: Type.Optional(StringEnum(["low", "medium", "high"] as const, { default: "medium" })),
+	status: Type.Optional(StringEnum(["open", "investigating", "resolved"] as const, { default: "open" })),
+	related_refs: Type.Optional(Type.Array(Type.String(), { description: "Related references" })),
+});
+
+const foxctlContextTensionTool = defineTool({
+	name: "foxctl_context_tension",
+	label: "Foxctl Context Tension",
+	description: "Record a tension into the ContextWiki control plane.",
+	parameters: FoxctlContextTensionParams,
+	async execute(_toolCallId, params, signal) {
+		const pi = getPi();
+		const client = getClient(pi);
+		const result = await client.post<Record<string, unknown>>(
+			"/api/context/tension",
+			{ ...params, workspace: params.workspace || getWorkspace(pi) },
+			signal,
+		);
+		return jsonToolResult(result);
+	},
+});
+
+// --- Context Infer ---
+
+const FoxctlContextInferParams = Type.Object({
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+	summary: Type.String({ description: "Compact summary text to analyze for observations/tensions" }),
+	apply: Type.Optional(Type.Boolean({ description: "Persist the inferred items (default false = dry run)", default: false })),
+	project: Type.Optional(Type.String({ description: "Project name override" })),
+	area: Type.Optional(Type.String({ description: "Area name override" })),
+});
+
+const foxctlContextInferTool = defineTool({
+	name: "foxctl_context_infer",
+	label: "Foxctl Context Infer",
+	description: "Infer ContextWiki observations and tensions from a summary text.",
+	parameters: FoxctlContextInferParams,
+	async execute(_toolCallId, params, signal) {
+		const pi = getPi();
+		const client = getClient(pi);
+		const result = await client.post<Record<string, unknown>>(
+			"/api/context/infer",
+			{ ...params, workspace: params.workspace || getWorkspace(pi) },
+			signal,
+		);
+		return jsonToolResult(result);
+	},
+});
+
+// ============================================================================
+// Vault Tools
+// ============================================================================
+
+// --- Vault Search ---
+
+const FoxctlVaultSearchParams = Type.Object({
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+	query: Type.String({ description: "Search query" }),
+	limit: Type.Optional(Type.Number({ description: "Max results", default: 20 })),
+});
+
+const foxctlVaultSearchTool = defineTool({
+	name: "foxctl_vault_search",
+	label: "Foxctl Vault Search",
+	description: "Search the Obsidian vault index for matching notes.",
+	parameters: FoxctlVaultSearchParams,
+	async execute(_toolCallId, params, signal) {
+		const pi = getPi();
+		const client = getClient(pi);
+		const result = await client.get<Record<string, unknown>>(
+			`/api/vault/search${query({workspace: params.workspace || getWorkspace(pi), query: params.query, limit: params.limit ?? 20})}`,
+			signal,
+		);
+		return jsonToolResult(result);
+	},
+});
+
+// --- Vault Promote ---
+
+const FoxctlVaultPromoteParams = Type.Object({
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+	slug: Type.String({ description: "URL-safe slug for the note (e.g. 'memory-search-architecture')" }),
+	content: Type.String({ description: "Full markdown content of the note" }),
+});
+
+const foxctlVaultPromoteTool = defineTool({
+	name: "foxctl_vault_promote",
+	label: "Foxctl Vault Promote",
+	description: "Create an evergreen promotion draft in the vault inbox.",
+	parameters: FoxctlVaultPromoteParams,
+	async execute(_toolCallId, params, signal) {
+		const pi = getPi();
+		const client = getClient(pi);
+		const result = await client.post<Record<string, unknown>>(
+			"/api/vault/promote",
+			{ ...params, workspace: params.workspace || getWorkspace(pi) },
+			signal,
+		);
+		return jsonToolResult(result);
+	},
+});
+
+// --- Vault Append ---
+
+const FoxctlVaultAppendParams = Type.Object({
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+	path: Type.String({ description: "Vault note path (e.g. 'inbox/drafted-from-foxctl/my-note.md')" }),
+	heading: Type.String({ description: "Heading to append under" }),
+	content: Type.String({ description: "Markdown content to append" }),
+});
+
+const foxctlVaultAppendTool = defineTool({
+	name: "foxctl_vault_append",
+	label: "Foxctl Vault Append",
+	description: "Append content under a heading in an existing vault note.",
+	parameters: FoxctlVaultAppendParams,
+	async execute(_toolCallId, params, signal) {
+		const pi = getPi();
+		const client = getClient(pi);
+		const result = await client.post<Record<string, unknown>>(
+			"/api/vault/append",
+			{ ...params, workspace: params.workspace || getWorkspace(pi) },
+			signal,
+		);
+		return jsonToolResult(result);
+	},
+});
+
+// --- Vault Bridge ---
+
+const FoxctlVaultBridgeParams = Type.Object({
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+	docs_root: Type.Optional(Type.String({ description: "Repo docs root (default: <workspace>/docs)" })),
+});
+
+const foxctlVaultBridgeTool = defineTool({
+	name: "foxctl_vault_bridge",
+	label: "Foxctl Vault Bridge",
+	description: "Reconcile repo docs with vault notes.",
+	parameters: FoxctlVaultBridgeParams,
+	async execute(_toolCallId, params, signal) {
+		const pi = getPi();
+		const client = getClient(pi);
+		const result = await client.post<Record<string, unknown>>(
+			"/api/vault/bridge",
+			{ ...params, workspace: params.workspace || getWorkspace(pi) },
+			signal,
+		);
+		return jsonToolResult(result);
+	},
+});
+
+// --- Vault Graph ---
+
+const FoxctlVaultGraphParams = Type.Object({
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+});
+
+const foxctlVaultGraphTool = defineTool({
+	name: "foxctl_vault_graph",
+	label: "Foxctl Vault Graph",
+	description: "Generate structured vault notes from the repo index graph.",
+	parameters: FoxctlVaultGraphParams,
+	async execute(_toolCallId, params, signal) {
+		const pi = getPi();
+		const client = getClient(pi);
+		const result = await client.post<Record<string, unknown>>(
+			"/api/vault/graph",
+			{ ...params, workspace: params.workspace || getWorkspace(pi) },
+			signal,
+		);
+		return jsonToolResult(result);
+	},
+});
+
+// --- Vault Index Build ---
+
+const FoxctlVaultIndexBuildParams = Type.Object({
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+});
+
+const foxctlVaultIndexBuildTool = defineTool({
+	name: "foxctl_vault_index_build",
+	label: "Foxctl Vault Index Build",
+	description: "Rebuild the local Obsidian vault index.",
+	parameters: FoxctlVaultIndexBuildParams,
+	async execute(_toolCallId, params, signal) {
+		const pi = getPi();
+		const client = getClient(pi);
+		const result = await client.post<Record<string, unknown>>(
+			"/api/vault/index-build",
+			{ ...params, workspace: params.workspace || getWorkspace(pi) },
+			signal,
+		);
+		return jsonToolResult(result);
+	},
+});
+
+// --- Vault Stats ---
+
+const FoxctlVaultStatsParams = Type.Object({
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+});
+
+const foxctlVaultStatsTool = defineTool({
+	name: "foxctl_vault_stats",
+	label: "Foxctl Vault Stats",
+	description: "Get Obsidian vault index statistics.",
+	parameters: FoxctlVaultStatsParams,
+	async execute(_toolCallId, params, signal) {
+		const pi = getPi();
+		const client = getClient(pi);
+		const result = await client.get<Record<string, unknown>>(
+			`/api/vault/stats${query({workspace: params.workspace || getWorkspace(pi)})}`,
+			signal,
+		);
+		return jsonToolResult(result);
+	},
+});
+
+// ============================================================================
+// Memory Write Tools
+// ============================================================================
+
+// --- Memory Put ---
+
+const FoxctlMemoryPutParams = Type.Object({
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+	name: Type.String({ description: "Unique memory name (e.g. 'auth-architecture', 'gotcha-turso-conn-pool')" }),
+	content: Type.String({ description: "Full content of the memory record" }),
+	summary: Type.String({ description: "Short summary (used for search/BM25 ranking)" }),
+	kind: Type.Optional(StringEnum(["knowledge", "decision", "gotcha", "preference", "pattern"] as const, { default: "knowledge" })),
+	tags: Type.Optional(Type.Array(Type.String(), { description: "Tags for categorization" })),
+	file_refs: Type.Optional(Type.Array(Type.String(), { description: "Related file paths" })),
+});
+
+const foxctlMemoryPutTool = defineTool({
+	name: "foxctl_memory_put",
+	label: "Foxctl Memory Put",
+	description: "Store a knowledge record in foxctl's memory store.",
+	parameters: FoxctlMemoryPutParams,
+	async execute(_toolCallId, params, signal) {
+		const pi = getPi();
+		const client = getClient(pi);
+		const result = await client.post<Record<string, unknown>>(
+			"/api/memory/put",
+			{ ...params, workspace: params.workspace || getWorkspace(pi) },
+			signal,
+		);
+		return jsonToolResult(result);
+	},
+});
+
+// --- Memory Curator ---
+
+const FoxctlMemoryCuratorParams = Type.Object({
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+	mode: Type.Optional(StringEnum(["dry_run", "apply"] as const, { default: "dry_run" })),
+	limit: Type.Optional(Type.Number({ description: "Max records to examine", default: 100 })),
+});
+
+const foxctlMemoryCuratorTool = defineFoxctlSkillFacade({
+	name: "foxctl_memory_curator",
+	label: "Foxctl Memory Curator",
+	description: "Run a deterministic curator report on the memory store. Identifies stale, duplicate, or low-quality records. Use dry_run mode to preview changes before applying.",
+	skill: "memory_curator_report",
+	parameters: FoxctlMemoryCuratorParams,
+	input: (params, pi) => withWorkspace(pi, { ...params }),
+});
+
+// ============================================================================
+// Code Symbols
+// ============================================================================
+
+const FoxctlCodeSymbolsParams = Type.Object({
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+	path: Type.String({ description: "File path relative to workspace root" }),
+});
+
+const foxctlCodeSymbolsTool = defineFoxctlSkillFacade({
+	name: "foxctl_code_symbols",
+	label: "Foxctl Code Symbols",
+	description: "Extract code symbols (functions, types, interfaces, methods) from a file. Use to understand the API surface of a file before reading it.",
+	skill: "code_symbols",
+	parameters: FoxctlCodeSymbolsParams,
+	input: (params, pi) => withWorkspace(pi, { ...params }),
+});
+
+// ============================================================================
+// Embedding Flush
+// ============================================================================
+
+const FoxctlEmbeddingFlushParams = Type.Object({
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+	batch_size: Type.Optional(Type.Number({ description: "Jobs per batch", default: 50 })),
+	max_duration: Type.Optional(Type.Number({ description: "Max seconds", default: 120 })),
+});
+
+const foxctlEmbeddingFlushTool = defineTool({
+	name: "foxctl_embedding_flush",
+	label: "Foxctl Embedding Flush",
+	description: "Process queued embedding jobs for semantic search indexing.",
+	parameters: FoxctlEmbeddingFlushParams,
+	async execute(_toolCallId, params, signal) {
+		const pi = getPi();
+		const client = getClient(pi);
+		const result = await client.post<Record<string, unknown>>(
+			"/api/embedding/flush",
+			{ ...params, workspace: params.workspace || getWorkspace(pi) },
+			signal,
+		);
+		return jsonToolResult(result);
+	},
+});
+
+// ============================================================================
+// Publish Context
+// ============================================================================
+
+const FoxctlPublishContextParams = Type.Object({
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+	context: Type.String({ description: "Structured context to broadcast (markdown): current task, findings, blockers, needs" }),
+});
+
+const foxctlPublishContextTool = defineTool({
+	name: "foxctl_publish_context",
+	label: "Foxctl Publish Context",
+	description: "Publish current context to the room for other agents to read.",
+	parameters: FoxctlPublishContextParams,
+	async execute(_toolCallId, params, signal) {
+		const pi = getPi();
+		const client = getClient(pi);
+		const result = await client.post<Record<string, unknown>>(
+			"/api/context/publish",
+			{ ...params, workspace: params.workspace || getWorkspace(pi) },
+			signal,
+		);
+		return jsonToolResult(result);
+	},
+});
+
+// ============================================================================
+// Session Extract Learnings
+// ============================================================================
+
+const FoxctlSessionExtractLearningsParams = Type.Object({
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+	session_id: Type.String({ description: "Session ID to extract from" }),
+	dry_run: Type.Optional(Type.Boolean({ description: "Preview only, don't persist (default false)", default: false })),
+});
+
+const foxctlSessionExtractLearningsTool = defineFoxctlSkillFacade({
+	name: "foxctl_session_extract_learnings",
+	label: "Foxctl Session Extract Learnings",
+	description: "Extract actionable learnings (gotchas, decisions, preferences, anti-patterns) from a session and store them as memory records. Call this at the end of a session to persist knowledge.",
+	skill: "session_extract_learnings",
+	parameters: FoxctlSessionExtractLearningsParams,
+	input: (params, pi) => withWorkspace(pi, { ...params }),
+});
+
+// ============================================================================
 // Extension Factory
 // ============================================================================
 
@@ -3092,6 +3661,36 @@ export default function foxctlExtension(pi: ExtensionAPI) {
 		foxctlControlDecideTool,
 		gatherContextTool,
 		foxctlGatherContextTool,
+		// ContextWiki
+		foxctlContextShowTool,
+		foxctlContextOverviewTool,
+		foxctlContextReportTool,
+		foxctlContextNextTool,
+		foxctlContextCaptureTool,
+		foxctlContextDispatchTool,
+		foxctlContextHandoffsTool,
+		foxctlContextObserveTool,
+		foxctlContextTensionTool,
+		foxctlContextInferTool,
+		// Vault
+		foxctlVaultSearchTool,
+		foxctlVaultPromoteTool,
+		foxctlVaultAppendTool,
+		foxctlVaultBridgeTool,
+		foxctlVaultGraphTool,
+		foxctlVaultIndexBuildTool,
+		foxctlVaultStatsTool,
+		// Memory Write
+		foxctlMemoryPutTool,
+		foxctlMemoryCuratorTool,
+		// Code Symbols
+		foxctlCodeSymbolsTool,
+		// Embedding
+		foxctlEmbeddingFlushTool,
+		// Publish Context
+		foxctlPublishContextTool,
+		// Session Learnings
+		foxctlSessionExtractLearningsTool,
 		// Mux
 		foxctlMuxListTool,
 		foxctlMuxReadTool,
@@ -3159,6 +3758,29 @@ export default function foxctlExtension(pi: ExtensionAPI) {
 		"foxctl_control_inbox",
 		"foxctl_control_inspect",
 		"foxctl_control_decide",
+		"foxctl_context_show",
+		"foxctl_context_overview",
+		"foxctl_context_report",
+		"foxctl_context_next",
+		"foxctl_context_capture",
+		"foxctl_context_dispatch",
+		"foxctl_context_handoffs",
+		"foxctl_context_observe",
+		"foxctl_context_tension",
+		"foxctl_context_infer",
+		"foxctl_vault_search",
+		"foxctl_vault_promote",
+		"foxctl_vault_append",
+		"foxctl_vault_bridge",
+		"foxctl_vault_graph",
+		"foxctl_vault_index_build",
+		"foxctl_vault_stats",
+		"foxctl_memory_put",
+		"foxctl_memory_curator",
+		"foxctl_code_symbols",
+		"foxctl_embedding_flush",
+		"foxctl_publish_context",
+		"foxctl_session_extract_learnings",
 	];
 
 	const notifyGatherContext = async (ctx: Parameters<Parameters<typeof pi.registerCommand>[1]["handler"]>[1]) => {
@@ -3757,6 +4379,60 @@ export default function foxctlExtension(pi: ExtensionAPI) {
 		description: "Show foxctl context plane",
 		handler: async (_args, ctx) => {
 			await notifyGatherContext(ctx);
+		},
+	});
+
+	// --- ContextWiki slash commands ---
+
+	pi.registerCommand("context-show", {
+		description: "Show the current ContextWiki top-of-mind bundle",
+		handler: async (_args, ctx) => {
+			try {
+				const client = getClient(pi);
+				const result = await client.get<Record<string, unknown>>(`/api/context/show${query({ workspace: getWorkspace(pi) })}`);
+				ctx.ui.notify(JSON.stringify(result, null, 2), "info");
+			} catch (e) {
+				ctx.ui.notify(`context-show failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+			}
+		},
+	});
+
+	pi.registerCommand("context-report", {
+		description: "Show synthesized ContextWiki workspace health report",
+		handler: async (_args, ctx) => {
+			try {
+				const client = getClient(pi);
+				const result = await client.get<Record<string, unknown>>(`/api/context/report${query({ workspace: getWorkspace(pi) })}`);
+				ctx.ui.notify(JSON.stringify(result, null, 2), "info");
+			} catch (e) {
+				ctx.ui.notify(`context-report failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+			}
+		},
+	});
+
+	pi.registerCommand("context-next", {
+		description: "Show the recommended next ContextWiki task",
+		handler: async (_args, ctx) => {
+			try {
+				const client = getClient(pi);
+				const result = await client.get<Record<string, unknown>>(`/api/context/next${query({ workspace: getWorkspace(pi) })}`);
+				ctx.ui.notify(JSON.stringify(result, null, 2), "info");
+			} catch (e) {
+				ctx.ui.notify(`context-next failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+			}
+		},
+	});
+
+	pi.registerCommand("context-handoffs", {
+		description: "Show recent ContextWiki handoffs",
+		handler: async (_args, ctx) => {
+			try {
+				const client = getClient(pi);
+				const result = await client.get<Record<string, unknown>>(`/api/context/handoffs${query({ workspace: getWorkspace(pi), limit: 10 })}`);
+				ctx.ui.notify(JSON.stringify(result, null, 2), "info");
+			} catch (e) {
+				ctx.ui.notify(`context-handoffs failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+			}
 		},
 	});
 

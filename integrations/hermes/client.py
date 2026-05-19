@@ -73,6 +73,9 @@ class FoxctlClient:
     def _post(self, path: str, body: Optional[Dict] = None) -> Dict:
         return self._request("POST", path, body)
 
+    def _patch(self, path: str, body: Optional[Dict] = None) -> Dict:
+        return self._request("PATCH", path, body)
+
     def _skill(self, skill_name: str, **kwargs) -> Dict:
         """Call a foxctl skill by name with workspace auto-injected.
 
@@ -413,6 +416,591 @@ class FoxctlClient:
             args.extend(["--vault-path", vp])
         resp = self._cli(*args, timeout=30)
         return resp.get("data", resp)
+
+    # -- Multi-Agent Coordination -----------------------------------------
+
+    def agent_list(self) -> Dict:
+        """List all registered agents."""
+        return self._get("/api/agents")
+
+    def agent_info(self, agent_id: str) -> Dict:
+        """Get info about a specific agent."""
+        return self._get(f"/api/agents/{agent_id}")
+
+    def room_task_list(self, room_id: Optional[str] = None, status: str = "") -> Dict:
+        """List tasks associated with a room."""
+        rid = room_id or self.cfg.room
+        params = {"workspace_id": self.cfg.workspace}
+        if status:
+            params["status"] = status
+        return self._get(f"/api/rooms/{rid}/tasks", params)
+
+    def room_task_add(
+        self,
+        title: str,
+        description: str = "",
+        room_id: Optional[str] = None,
+        scope: str = "",
+        depends_on: Optional[List[str]] = None,
+    ) -> Dict:
+        """Create a task associated with a room."""
+        rid = room_id or self.cfg.room
+        args = [
+            "room", "task", "add", rid,
+            "--title", title,
+            "--workspace", self.cfg.workspace,
+            "--sender", self.cfg.actor,
+        ]
+        if description:
+            args.extend(["--description", description])
+        if scope:
+            args.extend(["--scope", scope])
+        for dep in (depends_on or []):
+            args.extend(["--depends-on", dep])
+        resp = self._cli(*args)
+        return resp.get("data", resp)
+
+    def room_task_claim(self, task_id: str, room_id: Optional[str] = None) -> Dict:
+        """Claim a room task for this agent."""
+        rid = room_id or self.cfg.room
+        resp = self._cli(
+            "room", "task", "claim", rid,
+            "--id", task_id,
+            "--workspace", self.cfg.workspace,
+        )
+        return resp.get("data", resp)
+
+    def room_task_complete(self, task_id: str, room_id: Optional[str] = None, notes: str = "") -> Dict:
+        """Complete a room task and broadcast to room."""
+        rid = room_id or self.cfg.room
+        args = [
+            "room", "task", "complete", rid,
+            "--id", task_id,
+            "--workspace", self.cfg.workspace,
+        ]
+        if notes:
+            args.extend(["--notes", notes])
+        resp = self._cli(*args)
+        return resp.get("data", resp)
+
+    def room_task_block(self, task_id: str, reason: str = "", room_id: Optional[str] = None) -> Dict:
+        """Mark a claimed task as blocked."""
+        rid = room_id or self.cfg.room
+        args = [
+            "room", "task", "block", rid,
+            "--id", task_id,
+            "--workspace", self.cfg.workspace,
+        ]
+        if reason:
+            args.extend(["--reason", reason])
+        resp = self._cli(*args)
+        return resp.get("data", resp)
+
+    def room_task_abandon(self, task_id: str, room_id: Optional[str] = None) -> Dict:
+        """Release a claimed task back to pending."""
+        rid = room_id or self.cfg.room
+        resp = self._cli(
+            "room", "task", "abandon", rid,
+            "--id", task_id,
+            "--workspace", self.cfg.workspace,
+        )
+        return resp.get("data", resp)
+
+    def room_status(self, room_id: Optional[str] = None) -> Dict:
+        """Get room status including participants, backlog, and task pulse."""
+        rid = room_id or self.cfg.room
+        return self._get(f"/api/rooms/{rid}/status", {"workspace_id": self.cfg.workspace})
+
+    def room_task_assign(self, task_id: str, recipient: str, room_id: Optional[str] = None) -> Dict:
+        """Assign a room task to a participant (coordinator only)."""
+        rid = room_id or self.cfg.room
+        resp = self._cli(
+            "room", "task", "assign", rid,
+            "--id", task_id,
+            "--workspace", self.cfg.workspace,
+        )
+        return resp.get("data", resp)
+
+    def publish_agent_context(self, context: str, room_id: Optional[str] = None) -> Dict:
+        """Publish agent context to the room for other agents to read.
+
+        Uses room message with a structured subject so other agents
+        can discover and consume the context.
+        """
+        rid = room_id or self.cfg.room
+        return self._post(f"/api/rooms/{rid}/messages", {
+            "workspace_id": self.cfg.workspace,
+            "sender": self.cfg.actor,
+            "subject": "agent-context-broadcast",
+            "body": context,
+        })
+
+    # -- Pipe Protocol ----------------------------------------------------
+
+    def pipe_emit(
+        self,
+        pipe_id: str,
+        payload: str,
+        target_agents: Optional[List[str]] = None,
+        room_id: Optional[str] = None,
+    ) -> Dict:
+        """Emit a structured pipe message to the room.
+
+        Writes a pipe-formatted room message that other agents can
+        consume via pipe_receive or talkback rules. The message has
+        subject 'pipe:<pipe_id>' and structured JSON body.
+        """
+        rid = room_id or self.cfg.room
+        body = {
+            "pipe_id": pipe_id,
+            "source": self.cfg.actor,
+            "targets": target_agents or ["*"],
+            "payload": payload,
+        }
+        return self._post(f"/api/rooms/{rid}/messages", {
+            "workspace_id": self.cfg.workspace,
+            "sender": self.cfg.actor,
+            "subject": f"pipe:{pipe_id}",
+            "body": json.dumps(body),
+        })
+
+    def pipe_receive(
+        self,
+        pipe_id: str = "",
+        room_id: Optional[str] = None,
+        limit: int = 10,
+    ) -> Dict:
+        """Receive pipe messages from the room inbox.
+
+        Reads pending room messages matching 'pipe:<pipe_id>' subject.
+        If pipe_id is empty, returns all pipe messages.
+        """
+        rid = room_id or self.cfg.room
+        resp = self.room_inbox(room_id=rid, only="pending", limit=limit)
+        # Filter for pipe messages
+        messages = resp.get("messages", resp.get("data", {}).get("messages", []))
+        pipe_msgs = []
+        for msg in messages:
+            subject = msg.get("subject", "")
+            if subject.startswith("pipe:"):
+                if not pipe_id or subject == f"pipe:{pipe_id}":
+                    pipe_msgs.append(msg)
+        return {"pipe_messages": pipe_msgs, "count": len(pipe_msgs)}
+
+    # -- Flow DAG ----------------------------------------------------------
+
+    def flow_create(
+        self,
+        name: str,
+        description: str = "",
+    ) -> Dict:
+        """Create a new flow graph."""
+        cmd = ["flow", "create", "--name", name, "--workspace", self.cfg.workspace]
+        if description:
+            cmd += ["--description", description]
+        return self._cli(*cmd)
+
+    def flow_show(self, flow_id: str) -> Dict:
+        """Show flow detail including nodes and edges."""
+        return self._cli("flow", "show", flow_id, "--workspace", self.cfg.workspace)
+
+    def flow_list(self) -> Dict:
+        """List all flows in the workspace."""
+        return self._cli("flow", "list", "--workspace", self.cfg.workspace)
+
+    def flow_delete(self, flow_id: str) -> Dict:
+        """Delete a flow."""
+        return self._cli("flow", "delete", flow_id, "--workspace", self.cfg.workspace)
+
+    def flow_add_node(
+        self,
+        flow_id: str,
+        kind: str,
+        label: str,
+        config: Dict,
+        position: Optional[Dict] = None,
+    ) -> Dict:
+        """Add a node to a flow. kind is one of: skill, pty, http, playwright, image, transform, agent."""
+        cmd = [
+            "flow", "add-node", flow_id,
+            "--kind", kind,
+            "--label", label,
+            "--config", json.dumps(config),
+            "--workspace", self.cfg.workspace,
+        ]
+        if position:
+            cmd += ["--position", json.dumps(position)]
+        return self._cli(*cmd)
+
+    def flow_add_edge(
+        self,
+        flow_id: str,
+        from_node: str,
+        to_node: str,
+        transform: str = "passthrough",
+        transform_config: str = "",
+        trigger: str = "output_ready",
+        condition: str = "",
+        retry: str = "",
+    ) -> Dict:
+        """Add an edge between two nodes in a flow."""
+        cmd = [
+            "flow", "add-edge", flow_id,
+            "--from", from_node,
+            "--to", to_node,
+            "--transform", transform,
+            "--trigger", trigger,
+            "--workspace", self.cfg.workspace,
+        ]
+        if transform_config:
+            cmd += ["--transform-config", transform_config]
+        if condition:
+            cmd += ["--condition", condition]
+        if retry:
+            cmd += ["--retry", retry]
+        return self._cli(*cmd)
+
+    def flow_remove_node(self, flow_id: str, node_id: str) -> Dict:
+        """Remove a node from a flow."""
+        return self._cli("flow", "remove-node", flow_id, node_id, "--workspace", self.cfg.workspace)
+
+    def flow_remove_edge(self, flow_id: str, edge_id: str) -> Dict:
+        """Remove an edge from a flow."""
+        return self._cli("flow", "remove-edge", flow_id, edge_id, "--workspace", self.cfg.workspace)
+
+    def flow_start(self, flow_id: str) -> Dict:
+        """Start executing a flow."""
+        return self._cli("flow", "start", flow_id, "--workspace", self.cfg.workspace, timeout=30)
+
+    def flow_stop(self, flow_id: str) -> Dict:
+        """Stop a running flow."""
+        return self._cli("flow", "stop", flow_id, "--workspace", self.cfg.workspace)
+
+    def flow_pause(self, flow_id: str) -> Dict:
+        """Pause a running flow."""
+        return self._cli("flow", "pause", flow_id, "--workspace", self.cfg.workspace)
+
+    def flow_status(self, flow_id: str) -> Dict:
+        """Get runtime status of a flow."""
+        return self._cli("flow", "status", flow_id, "--workspace", self.cfg.workspace)
+
+    def flow_logs(
+        self,
+        flow_id: str,
+        run_id: str = "",
+        node: str = "",
+    ) -> Dict:
+        """Get execution logs for a flow run."""
+        cmd = ["flow", "logs"]
+        if run_id:
+            cmd.append(run_id)
+        else:
+            # Get latest run from status
+            status = self.flow_status(flow_id)
+            run_data = status.get("data", {}).get("run", {})
+            rid = run_data.get("id", "")
+            if rid:
+                cmd.append(rid)
+            else:
+                cmd.append(flow_id)  # fallback
+        cmd += ["--workspace", self.cfg.workspace]
+        if node:
+            cmd += ["--node", node]
+        return self._cli(*cmd, timeout=30)
+
+    def flow_output(
+        self,
+        flow_id: str,
+        node: str,
+        data: Dict,
+    ) -> Dict:
+        """Push structured output to a running flow node."""
+        return self._cli(
+            "flow", "output",
+            "--node", node,
+            "--data", json.dumps(data),
+            "--workspace", self.cfg.workspace,
+            flow_id,
+            timeout=15,
+        )
+
+    # -- Flow Templates -----------------------------------------------------
+
+    def flow_build_pipeline(
+        self,
+        name: str,
+        description: str,
+        stages: List[Dict],
+    ) -> Dict:
+        """Build a linear agent pipeline flow from stage definitions.
+
+        Each stage dict has: kind, label, config.
+        Stages are connected sequentially with passthrough edges.
+        Returns the created flow with all nodes and edges.
+        """
+        # Create flow
+        flow = self.flow_create(name, description)
+        flow_data = flow.get("data", {})
+        flow_id = flow_data.get("id", flow_data.get("name", ""))
+        if not flow_id:
+            return flow
+
+        nodes = []
+        # Add nodes
+        for i, stage in enumerate(stages):
+            node = self.flow_add_node(
+                flow_id,
+                kind=stage["kind"],
+                label=stage["label"],
+                config=stage["config"],
+                position={"x": float(i * 200), "y": 0},
+            )
+            node_data = node.get("data", {})
+            node_id = node_data.get("id", node_data.get("label", ""))
+            nodes.append(node_id)
+
+        # Add sequential edges
+        for i in range(len(nodes) - 1):
+            self.flow_add_edge(
+                flow_id,
+                from_node=nodes[i],
+                to_node=nodes[i + 1],
+                transform=stages[i + 1].get("transform", "passthrough"),
+                transform_config=stages[i + 1].get("transform_config", ""),
+            )
+
+        return self.flow_show(flow_id)
+
+    def flow_build_fan_out(
+        self,
+        name: str,
+        description: str,
+        source: Dict,
+        sinks: List[Dict],
+        transform: str = "passthrough",
+    ) -> Dict:
+        """Build a fan-out flow: one source broadcasts to multiple parallel sinks.
+
+        source: {kind, label, config}
+        sinks: [{kind, label, config, transform?, transform_config?}]
+        """
+        flow = self.flow_create(name, description)
+        flow_data = flow.get("data", {})
+        flow_id = flow_data.get("id", flow_data.get("name", ""))
+        if not flow_id:
+            return flow
+
+        # Add source node
+        src_node = self.flow_add_node(
+            flow_id,
+            kind=source["kind"],
+            label=source["label"],
+            config=source["config"],
+            position={"x": 0, "y": 0},
+        )
+        src_id = src_node.get("data", {}).get("id", source["label"])
+
+        # Add sink nodes and edges from source
+        for i, sink in enumerate(sinks):
+            sink_node = self.flow_add_node(
+                flow_id,
+                kind=sink["kind"],
+                label=sink["label"],
+                config=sink["config"],
+                position={"x": 300, "y": float(i * 150)},
+            )
+            sink_id = sink_node.get("data", {}).get("id", sink["label"])
+            self.flow_add_edge(
+                flow_id,
+                from_node=src_id,
+                to_node=sink_id,
+                transform=sink.get("transform", transform),
+                transform_config=sink.get("transform_config", ""),
+            )
+
+        return self.flow_show(flow_id)
+
+    # -- Context Curator ---------------------------------------------------
+
+    def context_curator(self, mode: str = "dry_run", stale_after_days: int = 30) -> Dict:
+        """Run a unified context plane curator report.
+
+        Collects data from all context plane stores and produces a
+        deterministic report with proposals for cleanup:
+        - Memory: stale/low-utility records, duplicates, supersessions
+        - Observations: low-confidence, stale, or redundant entries
+        - Tensions: open tensions past stale threshold
+        - Handoffs: files older than stale threshold
+        - Vault: orphaned drafts, stale inbox items
+        """
+        import subprocess as _sp
+        import glob as _glob
+        import os as _os
+
+        proposals = []
+        summary = {
+            "memory_records": 0,
+            "observations": 0,
+            "tensions": 0,
+            "handoffs": 0,
+            "vault_drafts": 0,
+            "total_proposals": 0,
+        }
+
+        # 1. Memory curator (deterministic)
+        try:
+            mem_report = self._skill(
+                "memory/curator_report",
+                mode="dry_run",
+                limit=1000,
+                stale_after_days=stale_after_days,
+            )
+            report_data = mem_report.get("report", mem_report)
+            summary["memory_records"] = report_data.get("summary", {}).get("total_records", 0)
+            for p in report_data.get("proposals", []):
+                proposals.append({
+                    "source": "memory",
+                    "record_id": p.get("record_id", ""),
+                    "action": p.get("action", ""),
+                    "current_state": p.get("current_state", ""),
+                    "proposed_state": p.get("proposed_state", ""),
+                    "reasons": p.get("reasons", []),
+                    "utility_score": p.get("utility_score", 0),
+                })
+            for cluster in report_data.get("consolidation_clusters", []):
+                proposals.append({
+                    "source": "memory_consolidation",
+                    "kind": cluster.get("kind", ""),
+                    "record_ids": cluster.get("record_ids", []),
+                    "primary": cluster.get("primary_record_id", ""),
+                    "signals": cluster.get("signals", []),
+                    "action": "consolidate",
+                    "manual_review": cluster.get("manual_review", True),
+                })
+        except Exception as e:
+            proposals.append({"source": "memory", "action": "error", "reasons": [str(e)]})
+
+        # 2. Observations (from context plane)
+        try:
+            obs_resp = self._cli("context", "observations", "--workspace", self.cfg.workspace, "--limit", "100")
+            observations = obs_resp.get("data", {}).get("observations", [])
+            summary["observations"] = len(observations)
+            now_str = __import__("time").strftime("%Y-%m-%dT%H:%M:%S", __import__("time").gmtime())
+            for obs in observations:
+                reasons = []
+                if obs.get("confidence", 1) < 0.5:
+                    reasons.append(f"low confidence ({obs.get('confidence', 0):.2f})")
+                if obs.get("count", 0) == 1:
+                    last_seen = obs.get("last_seen", "")
+                    if last_seen:
+                        days_old = self._days_since(last_seen)
+                        if days_old > stale_after_days:
+                            reasons.append(f"seen only once, {days_old}d ago")
+                if reasons:
+                    proposals.append({
+                        "source": "observation",
+                        "record_id": obs.get("id", ""),
+                        "action": "review",
+                        "statement": obs.get("statement", "")[:100],
+                        "confidence": obs.get("confidence", 0),
+                        "count": obs.get("count", 0),
+                        "reasons": reasons,
+                    })
+        except Exception:
+            pass
+
+        # 3. Tensions (from context plane)
+        try:
+            tens_resp = self._cli("context", "tensions", "--workspace", self.cfg.workspace, "--limit", "100")
+            tensions = tens_resp.get("data", {}).get("tensions", [])
+            summary["tensions"] = len(tensions)
+            for t in tensions:
+                if t.get("status") == "open":
+                    reasons = []
+                    last_seen = t.get("last_seen", "")
+                    if last_seen:
+                        days_old = self._days_since(last_seen)
+                        if days_old > stale_after_days // 2:
+                            reasons.append(f"open tension {days_old}d old")
+                    if t.get("count", 0) > 3:
+                        reasons.append(f"recurring ({t['count']} occurrences)")
+                    if reasons:
+                        proposals.append({
+                            "source": "tension",
+                            "record_id": t.get("id", ""),
+                            "action": "address_or_close",
+                            "kind": t.get("kind", ""),
+                            "statement": t.get("statement", "")[:100],
+                            "status": t.get("status", ""),
+                            "count": t.get("count", 0),
+                            "reasons": reasons,
+                        })
+        except Exception:
+            pass
+
+        # 4. Handoffs (filesystem scan)
+        try:
+            handoff_dir = _os.path.join(self.cfg.workspace, ".foxctl", "runtime", "handoffs")
+            if _os.path.isdir(handoff_dir):
+                handoff_files = _glob.glob(_os.path.join(handoff_dir, "*.json"))
+                summary["handoffs"] = len(handoff_files)
+                for hf in handoff_files:
+                    mtime = _os.path.getmtime(hf)
+                    days_old = (__import__("time").time() - mtime) / 86400
+                    if days_old > stale_after_days:
+                        proposals.append({
+                            "source": "handoff",
+                            "record_id": _os.path.basename(hf),
+                            "action": "archive",
+                            "reasons": [f"handoff file {days_old:.0f}d old"],
+                        })
+        except Exception:
+            pass
+
+        # 5. Vault drafts (inbox items)
+        try:
+            if hasattr(self.cfg, 'vault_path') and self.cfg.vault_path:
+                inbox_dir = _os.path.join(self.cfg.workspace, self.cfg.vault_path, "inbox", "drafted-from-foxctl")
+                if _os.path.isdir(inbox_dir):
+                    draft_files = []
+                    for root, dirs, files in _os.walk(inbox_dir):
+                        for f in files:
+                            if f.endswith('.md'):
+                                draft_files.append(_os.path.join(root, f))
+                    summary["vault_drafts"] = len(draft_files)
+                    for df in draft_files:
+                        mtime = _os.path.getmtime(df)
+                        days_old = (__import__("time").time() - mtime) / 86400
+                        if days_old > stale_after_days:
+                            proposals.append({
+                                "source": "vault_draft",
+                                "record_id": _os.path.relpath(df, _os.path.join(self.cfg.workspace, self.cfg.vault_path)),
+                                "action": "promote_or_archive",
+                                "reasons": [f"inbox draft {days_old:.0f}d old"],
+                            })
+        except Exception:
+            pass
+
+        summary["total_proposals"] = len(proposals)
+        return {
+            "mode": mode,
+            "stale_after_days": stale_after_days,
+            "summary": summary,
+            "proposals": proposals,
+        }
+
+    @staticmethod
+    def _days_since(iso_timestamp: str) -> int:
+        """Days since an ISO timestamp."""
+        import time as _time
+        try:
+            # Parse ISO timestamp
+            ts = iso_timestamp[:19]  # trim to seconds
+            then = _time.mktime(_time.strptime(ts, "%Y-%m-%dT%H:%M:%S"))
+            now = _time.time()
+            return max(0, int((now - then) / 86400))
+        except (ValueError, TypeError):
+            return 0
 
     # -- memory search ------------------------------------------------------
 
@@ -772,6 +1360,39 @@ class FoxctlClient:
             f"/api/rooms/{rid}/messages/{message_id}/ack",
             {"workspace_id": self.cfg.workspace, "actor_id": self.cfg.actor},
         )
+
+    # -- direct actor mailbox -----------------------------------------------
+
+    def mailbox_send(self, recipient: str, subject: str, body: str,
+                     kind: str = "info", priority: int = 3) -> Dict:
+        """Send a direct message to another agent's mailbox."""
+        return self._post("/api/mailbox", {
+            "workspace_id": self.cfg.workspace,
+            "sender": self.cfg.actor,
+            "recipient": recipient,
+            "subject": subject,
+            "body": body,
+            "kind": kind,
+            "priority": priority,
+        })
+
+    def mailbox_inbox(self, only_unread: bool = False, limit: int = 20) -> Dict:
+        """Read this agent's mailbox inbox."""
+        return self._get("/api/mailbox", self._query(
+            workspace_id=self.cfg.workspace,
+            actor_id=self.cfg.actor,
+            only_unread=str(only_unread).lower(),
+            limit=limit,
+        ))
+
+    def mailbox_ack(self, message_ids: list) -> Dict:
+        """Acknowledge mailbox messages."""
+        return self._patch("/api/mailbox", {
+            "workspace_id": self.cfg.workspace,
+            "actor_id": self.cfg.actor,
+            "action": "ack",
+            "message_ids": message_ids,
+        })
 
     # -- agile: epics -------------------------------------------------------
 

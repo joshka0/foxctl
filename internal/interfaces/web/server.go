@@ -507,6 +507,33 @@ func (s *Server) Handler() http.Handler {
 		}
 	})
 
+	// --- ContextWiki API ---
+	apiMux.HandleFunc("/api/context/show", api.ContextShowHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/context/report", api.ContextReportHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/context/next", api.ContextNextHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/context/capture", api.ContextCaptureHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/context/dispatch", api.ContextDispatchHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/context/handoffs", api.ContextHandoffsHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/context/observe", api.ContextObserveHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/context/tension", api.ContextTensionHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/context/infer", api.ContextInferHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/context/publish", api.PublishContextHandler(s.cfg, s.log))
+
+	// --- Vault API ---
+	apiMux.HandleFunc("/api/vault/search", api.VaultSearchHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/vault/promote", api.VaultPromoteHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/vault/append", api.VaultAppendHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/vault/bridge", api.VaultBridgeHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/vault/graph", api.VaultGraphHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/vault/index-build", api.VaultIndexBuildHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/vault/stats", api.VaultStatsHandler(s.cfg, s.log))
+
+	// --- Memory API ---
+	apiMux.HandleFunc("/api/memory/put", api.MemoryPutHandler(s.cfg, s.log))
+
+	// --- Embedding API ---
+	apiMux.HandleFunc("/api/embedding/flush", api.EmbeddingFlushHandler(s.cfg, s.log))
+
 	// --- Codemaps (Phase 11) ---
 	apiMux.HandleFunc("/api/codemaps", api.CodemapsListHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/codemaps/", api.CodemapDetailHandler(s.cfg, s.log))
