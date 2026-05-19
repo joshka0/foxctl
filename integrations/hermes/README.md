@@ -1,6 +1,6 @@
 # Foxctl Plugin for Hermes Agent
 
-Deep integration between foxctl's intelligence, coordination, and flow orchestration layers and hermes-agent, providing 70 tools spanning 10 categories.
+Deep integration between foxctl's intelligence, coordination, and flow orchestration layers and hermes-agent, providing 71 tools spanning 11 categories.
 
 ## Tool Categories
 
@@ -120,6 +120,12 @@ Deep integration between foxctl's intelligence, coordination, and flow orchestra
 | `foxctl_story_review` | Move story to in_review |
 | `foxctl_story_validate` | Validate a story (pass/fail/waived) |
 
+### Context Curation
+
+| Tool | Description |
+|---|---|
+| `foxctl_context_curator` | Unified curator report: memory, observations, tensions, handoffs, vault drafts |
+
 ### System
 
 | Tool | Description |
@@ -159,7 +165,7 @@ Environment variable overrides: `FOXCTL_URL`, `FOXCTL_WORKSPACE`, `FOXCTL_ROOM`,
 
 ```
 hermes agent
-  └── plugin: foxctl (70 tools, 10 categories)
+  └── plugin: foxctl (71 tools, 11 categories)
        ├── tools.py      → tool registrations + schemas
        ├── client.py     → HTTP + CLI client with envelope unwrapping
        ├── config.py     → config.yaml + env var reading

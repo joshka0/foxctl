@@ -2160,4 +2160,45 @@ def register_tools(ctx, client: FoxctlClient, cfg: FoxctlConfig) -> None:
         check_fn=check_foxctl_available,
     )
 
-    logger.info("Registered %d foxctl tools", 70)
+    ctx.register_tool(
+        name="foxctl_context_curator",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_context_curator",
+            "description": (
+                "Run a unified context plane curator report. Scans all context stores "
+                "and produces deterministic proposals for cleanup:\n"
+                "- Memory: stale/low-utility records, duplicates, supersessions\n"
+                "- Observations: low-confidence, stale, or redundant entries\n"
+                "- Tensions: open tensions past stale threshold\n"
+                "- Handoffs: files older than stale threshold\n"
+                "- Vault: orphaned drafts, stale inbox items\n\n"
+                "Use this periodically to keep the context plane tidy. Proposals are "
+                "report-only (dry_run) — you decide what to act on."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["dry_run", "apply"],
+                        "description": "dry_run (report only, default) or apply (mutate where supported)",
+                        "default": "dry_run",
+                    },
+                    "stale_after_days": {
+                        "type": "integer",
+                        "description": "Days before items are considered stale (default: 30)",
+                        "default": 30,
+                    },
+                },
+                "required": [],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.context_curator(
+            mode=args.get("mode", "dry_run"),
+            stale_after_days=args.get("stale_after_days", 30),
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    logger.info("Registered %d foxctl tools", 71)

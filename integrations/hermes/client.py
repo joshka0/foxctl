@@ -817,6 +817,188 @@ class FoxctlClient:
 
         return self.flow_show(flow_id)
 
+    # -- Context Curator ---------------------------------------------------
+
+    def context_curator(self, mode: str = "dry_run", stale_after_days: int = 30) -> Dict:
+        """Run a unified context plane curator report.
+
+        Collects data from all context plane stores and produces a
+        deterministic report with proposals for cleanup:
+        - Memory: stale/low-utility records, duplicates, supersessions
+        - Observations: low-confidence, stale, or redundant entries
+        - Tensions: open tensions past stale threshold
+        - Handoffs: files older than stale threshold
+        - Vault: orphaned drafts, stale inbox items
+        """
+        import subprocess as _sp
+        import glob as _glob
+        import os as _os
+
+        proposals = []
+        summary = {
+            "memory_records": 0,
+            "observations": 0,
+            "tensions": 0,
+            "handoffs": 0,
+            "vault_drafts": 0,
+            "total_proposals": 0,
+        }
+
+        # 1. Memory curator (deterministic)
+        try:
+            mem_report = self._skill(
+                "memory/curator_report",
+                mode="dry_run",
+                limit=1000,
+                stale_after_days=stale_after_days,
+            )
+            report_data = mem_report.get("report", mem_report)
+            summary["memory_records"] = report_data.get("summary", {}).get("total_records", 0)
+            for p in report_data.get("proposals", []):
+                proposals.append({
+                    "source": "memory",
+                    "record_id": p.get("record_id", ""),
+                    "action": p.get("action", ""),
+                    "current_state": p.get("current_state", ""),
+                    "proposed_state": p.get("proposed_state", ""),
+                    "reasons": p.get("reasons", []),
+                    "utility_score": p.get("utility_score", 0),
+                })
+            for cluster in report_data.get("consolidation_clusters", []):
+                proposals.append({
+                    "source": "memory_consolidation",
+                    "kind": cluster.get("kind", ""),
+                    "record_ids": cluster.get("record_ids", []),
+                    "primary": cluster.get("primary_record_id", ""),
+                    "signals": cluster.get("signals", []),
+                    "action": "consolidate",
+                    "manual_review": cluster.get("manual_review", True),
+                })
+        except Exception as e:
+            proposals.append({"source": "memory", "action": "error", "reasons": [str(e)]})
+
+        # 2. Observations (from context plane)
+        try:
+            obs_resp = self._cli("context", "observations", "--workspace", self.cfg.workspace, "--limit", "100")
+            observations = obs_resp.get("data", {}).get("observations", [])
+            summary["observations"] = len(observations)
+            now_str = __import__("time").strftime("%Y-%m-%dT%H:%M:%S", __import__("time").gmtime())
+            for obs in observations:
+                reasons = []
+                if obs.get("confidence", 1) < 0.5:
+                    reasons.append(f"low confidence ({obs.get('confidence', 0):.2f})")
+                if obs.get("count", 0) == 1:
+                    last_seen = obs.get("last_seen", "")
+                    if last_seen:
+                        days_old = self._days_since(last_seen)
+                        if days_old > stale_after_days:
+                            reasons.append(f"seen only once, {days_old}d ago")
+                if reasons:
+                    proposals.append({
+                        "source": "observation",
+                        "record_id": obs.get("id", ""),
+                        "action": "review",
+                        "statement": obs.get("statement", "")[:100],
+                        "confidence": obs.get("confidence", 0),
+                        "count": obs.get("count", 0),
+                        "reasons": reasons,
+                    })
+        except Exception:
+            pass
+
+        # 3. Tensions (from context plane)
+        try:
+            tens_resp = self._cli("context", "tensions", "--workspace", self.cfg.workspace, "--limit", "100")
+            tensions = tens_resp.get("data", {}).get("tensions", [])
+            summary["tensions"] = len(tensions)
+            for t in tensions:
+                if t.get("status") == "open":
+                    reasons = []
+                    last_seen = t.get("last_seen", "")
+                    if last_seen:
+                        days_old = self._days_since(last_seen)
+                        if days_old > stale_after_days // 2:
+                            reasons.append(f"open tension {days_old}d old")
+                    if t.get("count", 0) > 3:
+                        reasons.append(f"recurring ({t['count']} occurrences)")
+                    if reasons:
+                        proposals.append({
+                            "source": "tension",
+                            "record_id": t.get("id", ""),
+                            "action": "address_or_close",
+                            "kind": t.get("kind", ""),
+                            "statement": t.get("statement", "")[:100],
+                            "status": t.get("status", ""),
+                            "count": t.get("count", 0),
+                            "reasons": reasons,
+                        })
+        except Exception:
+            pass
+
+        # 4. Handoffs (filesystem scan)
+        try:
+            handoff_dir = _os.path.join(self.cfg.workspace, ".foxctl", "runtime", "handoffs")
+            if _os.path.isdir(handoff_dir):
+                handoff_files = _glob.glob(_os.path.join(handoff_dir, "*.json"))
+                summary["handoffs"] = len(handoff_files)
+                for hf in handoff_files:
+                    mtime = _os.path.getmtime(hf)
+                    days_old = (__import__("time").time() - mtime) / 86400
+                    if days_old > stale_after_days:
+                        proposals.append({
+                            "source": "handoff",
+                            "record_id": _os.path.basename(hf),
+                            "action": "archive",
+                            "reasons": [f"handoff file {days_old:.0f}d old"],
+                        })
+        except Exception:
+            pass
+
+        # 5. Vault drafts (inbox items)
+        try:
+            if hasattr(self.cfg, 'vault_path') and self.cfg.vault_path:
+                inbox_dir = _os.path.join(self.cfg.workspace, self.cfg.vault_path, "inbox", "drafted-from-foxctl")
+                if _os.path.isdir(inbox_dir):
+                    draft_files = []
+                    for root, dirs, files in _os.walk(inbox_dir):
+                        for f in files:
+                            if f.endswith('.md'):
+                                draft_files.append(_os.path.join(root, f))
+                    summary["vault_drafts"] = len(draft_files)
+                    for df in draft_files:
+                        mtime = _os.path.getmtime(df)
+                        days_old = (__import__("time").time() - mtime) / 86400
+                        if days_old > stale_after_days:
+                            proposals.append({
+                                "source": "vault_draft",
+                                "record_id": _os.path.relpath(df, _os.path.join(self.cfg.workspace, self.cfg.vault_path)),
+                                "action": "promote_or_archive",
+                                "reasons": [f"inbox draft {days_old:.0f}d old"],
+                            })
+        except Exception:
+            pass
+
+        summary["total_proposals"] = len(proposals)
+        return {
+            "mode": mode,
+            "stale_after_days": stale_after_days,
+            "summary": summary,
+            "proposals": proposals,
+        }
+
+    @staticmethod
+    def _days_since(iso_timestamp: str) -> int:
+        """Days since an ISO timestamp."""
+        import time as _time
+        try:
+            # Parse ISO timestamp
+            ts = iso_timestamp[:19]  # trim to seconds
+            then = _time.mktime(_time.strptime(ts, "%Y-%m-%dT%H:%M:%S"))
+            now = _time.time()
+            return max(0, int((now - then) / 86400))
+        except (ValueError, TypeError):
+            return 0
+
     # -- memory search ------------------------------------------------------
 
     def memory_search(self, query: str, limit: int = 5, include_content: bool = True) -> Dict:
