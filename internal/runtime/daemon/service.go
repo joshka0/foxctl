@@ -13,11 +13,11 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-
-	"github.com/rs/zerolog"
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/rs/zerolog"
 
 	foxproxclient "github.com/joshka/foxprox/foxprox/client"
 	foxproxd "github.com/joshka/foxprox/foxprox/daemon"
