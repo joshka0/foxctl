@@ -757,7 +757,8 @@ func buildRoomCreateCommand(room roomSpec, members []roomMemberPlan, opts execut
 		"--description", room.Purpose,
 	}
 	if opts.Provision {
-		args = append(args,
+		args = append(
+			args,
 			"--provision",
 			"--agent", opts.AgentProvider,
 			"--mode", "auto",

@@ -14,8 +14,8 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/joshka0/foxctl/internal/platform/config"
-	flowmodel "github.com/joshka0/foxctl/internal/runtime/flow"
 	"github.com/joshka0/foxctl/internal/runtime/daemon"
+	flowmodel "github.com/joshka0/foxctl/internal/runtime/flow"
 	flowstore "github.com/joshka0/foxctl/internal/storage/flow"
 
 	foxproxclient "github.com/joshka/foxprox/foxprox/client"
@@ -57,11 +57,11 @@ type flowDetailResponse struct {
 }
 
 type flowNodeResponse struct {
-	ID       string           `json:"id"`
-	FlowID   string           `json:"flow_id"`
-	Kind     string           `json:"kind"`
-	Label    string           `json:"label"`
-	Config   json.RawMessage  `json:"config"`
+	ID       string              `json:"id"`
+	FlowID   string              `json:"flow_id"`
+	Kind     string              `json:"kind"`
+	Label    string              `json:"label"`
+	Config   json.RawMessage     `json:"config"`
 	Position *flowmodel.Position `json:"position,omitempty"`
 }
 
@@ -78,9 +78,9 @@ type flowEdgeResponse struct {
 }
 
 type flowNodeCreateRequest struct {
-	Kind     string          `json:"kind"`
-	Label    string          `json:"label"`
-	Config   json.RawMessage `json:"config,omitempty"`
+	Kind     string              `json:"kind"`
+	Label    string              `json:"label"`
+	Config   json.RawMessage     `json:"config,omitempty"`
 	Position *flowmodel.Position `json:"position,omitempty"`
 }
 
@@ -115,11 +115,11 @@ type flowStartResponse struct {
 }
 
 type flowStatusResponse struct {
-	FlowID    string                  `json:"flow_id"`
-	State     string                  `json:"state"`
-	RunID     string                  `json:"run_id,omitempty"`
-	Nodes     []flowmodel.NodeExecState `json:"nodes"`
-	Edges     []flowmodel.EdgeExecState `json:"edges"`
+	FlowID string                    `json:"flow_id"`
+	State  string                    `json:"state"`
+	RunID  string                    `json:"run_id,omitempty"`
+	Nodes  []flowmodel.NodeExecState `json:"nodes"`
+	Edges  []flowmodel.EdgeExecState `json:"edges"`
 }
 
 // ---------------------------------------------------------------------------
@@ -321,14 +321,14 @@ func handleFlowCreate(w http.ResponseWriter, r *http.Request, cfg config.Config,
 
 	now := time.Now().UTC()
 	fl := flowmodel.Flow{
-		ID:        ulid.Make().String(),
-		Name:      strings.TrimSpace(req.Name),
-		Workspace: workspace,
-		State:     flowmodel.FlowDraft,
+		ID:          ulid.Make().String(),
+		Name:        strings.TrimSpace(req.Name),
+		Workspace:   workspace,
+		State:       flowmodel.FlowDraft,
 		Description: strings.TrimSpace(req.Description),
-		RoomID:    strings.TrimSpace(req.RoomID),
-		CreatedAt: now,
-		UpdatedAt: now,
+		RoomID:      strings.TrimSpace(req.RoomID),
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 
 	if err := fl.Validate(); err != nil {
@@ -969,4 +969,3 @@ func toFlowEdgeResponse(e flowmodel.FlowEdge) flowEdgeResponse {
 		Condition:       e.Condition,
 	}
 }
-
