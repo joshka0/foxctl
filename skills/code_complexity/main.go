@@ -29,6 +29,7 @@ type Input struct {
 	Metric       string `json:"metric" validate:"omitempty,oneof=cyclomatic cognitive"`
 	Threshold    int    `json:"threshold" validate:"gte=0"`
 	Language     string `json:"language" validate:"omitempty,oneof=auto go python javascript typescript"`
+	Recursive    *bool  `json:"recursive,omitempty"`
 	IncludeTests bool   `json:"include_tests"`
 	MaxResults   int    `json:"max_results" validate:"gte=0"`
 }
@@ -77,22 +78,7 @@ func main() {
 // [[domain:code-complexity-analysis]]
 // [[doc:docs/general/skills.md#Running Skills]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
-	// Apply defaults
-	if in.AnalysisMode == "" {
-		in.AnalysisMode = "hotspots"
-	}
-	if in.Metric == "" {
-		in.Metric = "cyclomatic"
-	}
-	if in.Threshold <= 0 {
-		in.Threshold = 10
-	}
-	if in.Language == "" {
-		in.Language = "auto"
-	}
-	if in.MaxResults <= 0 {
-		in.MaxResults = 100
-	}
+	in = normalizeInput(in)
 
 	workspace, searchPath, err := skillmain.ResolvePath(rc, in.Path)
 	if err != nil {
@@ -163,6 +149,30 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	skillout.AddArtifact(data, previewResult.Artifact)
 
 	return skillout.Emit(rc, "code/complexity", data)
+}
+
+func normalizeInput(in Input) Input {
+	in.Path = strings.TrimSpace(in.Path)
+	in.AnalysisMode = strings.TrimSpace(in.AnalysisMode)
+	in.Metric = strings.TrimSpace(in.Metric)
+	in.Language = strings.TrimSpace(in.Language)
+
+	if in.AnalysisMode == "" {
+		in.AnalysisMode = "hotspots"
+	}
+	if in.Metric == "" {
+		in.Metric = "cyclomatic"
+	}
+	if in.Threshold <= 0 {
+		in.Threshold = 10
+	}
+	if in.Language == "" {
+		in.Language = "auto"
+	}
+	if in.MaxResults <= 0 {
+		in.MaxResults = 100
+	}
+	return in
 }
 
 // analyzeDirectory walks a directory and analyzes all supported source files.

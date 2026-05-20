@@ -2,7 +2,7 @@ SHELL := /bin/bash
 unexport GOROOT
 unexport GOBIN
 unexport GOTOOLDIR
-GO ?= go
+GO ?= $(shell if command -v go >/dev/null 2>&1; then command -v go; elif [ -x /usr/local/go/bin/go ]; then printf '%s\n' /usr/local/go/bin/go; else printf '%s\n' go; fi)
 GO_CMD := env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=0 $(GO)
 GO_CMD_CGO := env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=1 $(GO)
 GOCACHE_DIR := $(shell $(GO) env GOCACHE)
@@ -10,6 +10,17 @@ GOCACHE_DIR := $(shell $(GO) env GOCACHE)
 RACE_PKGS := $(shell $(GO_CMD_CGO) list ./...)
 RACE_SHARDS := core-cmd core-internal runtime context-tooling intelligence platform-interfaces storage v2 skills-a-g skills-h-o skills-p-x
 BINARY ?= foxctl
+FOXCTL_ERRORS_URL ?= http://127.0.0.1:18093/api/logs
+FOXCTL_ERROR_LIMIT ?= 20
+REFACTOR_SCOUT_PATH ?= ./internal
+REFACTOR_SCOUT_LANGUAGE ?= go
+REFACTOR_SCOUT_FOCUS ?= all
+REFACTOR_SCOUT_TARGET ?= all
+REFACTOR_SCOUT_VIEW ?= summary
+REFACTOR_SCOUT_RULE_SET ?= default
+REFACTOR_SCOUT_MIN_SCORE ?= 70
+REFACTOR_SCOUT_MAX_RESULTS ?= 8
+REFACTOR_SCOUT_INCLUDE_TESTS ?= false
 GOFUMPT ?= gofumpt
 GOLANGCI ?= golangci-lint
 GOLANGCI_FLAGS ?=
@@ -794,6 +805,48 @@ tidy:
 
 check-doc-links:
 	@bash scripts/check_doc_links.sh
+
+.PHONY: scout-errors refactor-scout-errors
+scout-errors: refactor-scout-errors
+
+refactor-scout-errors:
+	@set -u; \
+	errors_url="$(FOXCTL_ERRORS_URL)?errors_only=true&limit=$(FOXCTL_ERROR_LIMIT)"; \
+	echo "== Recent foxctl errors =="; \
+	if command -v curl >/dev/null 2>&1; then \
+		errors_json="$$(curl -fsS "$$errors_url" 2>/tmp/foxctl-errors-curl.log)" && { \
+			if command -v python3 >/dev/null 2>&1; then \
+				printf '%s\n' "$$errors_json" | python3 -m json.tool || printf '%s\n' "$$errors_json"; \
+			else \
+				printf '%s\n' "$$errors_json"; \
+			fi; \
+		} || { \
+			echo "Could not fetch $$errors_url"; \
+			if [ -s /tmp/foxctl-errors-curl.log ]; then cat /tmp/foxctl-errors-curl.log; fi; \
+		}; \
+	else \
+		echo "curl is required to fetch foxctl errors"; \
+	fi; \
+	echo; \
+	echo "== Refactor scout =="; \
+	echo "Building refactor scout skill..."; \
+	$(GO_CMD) build -trimpath -o skills/code_refactor_scout/code_refactor_scout ./skills/code_refactor_scout; \
+	if [ -x "./bin/$(BINARY)" ]; then \
+		if ! scout_json="$$(./bin/$(BINARY) refactor scout --path "$(REFACTOR_SCOUT_PATH)" --language "$(REFACTOR_SCOUT_LANGUAGE)" --focus "$(REFACTOR_SCOUT_FOCUS)" --target "$(REFACTOR_SCOUT_TARGET)" --view "$(REFACTOR_SCOUT_VIEW)" --rule-set "$(REFACTOR_SCOUT_RULE_SET)" --min-score "$(REFACTOR_SCOUT_MIN_SCORE)" --max-results "$(REFACTOR_SCOUT_MAX_RESULTS)" --include-tests="$(REFACTOR_SCOUT_INCLUDE_TESTS)" 2>&1)"; then \
+			printf '%s\n' "$$scout_json"; \
+			exit 1; \
+		fi; \
+	else \
+		if ! scout_json="$$( $(GO_CMD) run ./cmd/foxctl refactor scout --path "$(REFACTOR_SCOUT_PATH)" --language "$(REFACTOR_SCOUT_LANGUAGE)" --focus "$(REFACTOR_SCOUT_FOCUS)" --target "$(REFACTOR_SCOUT_TARGET)" --view "$(REFACTOR_SCOUT_VIEW)" --rule-set "$(REFACTOR_SCOUT_RULE_SET)" --min-score "$(REFACTOR_SCOUT_MIN_SCORE)" --max-results "$(REFACTOR_SCOUT_MAX_RESULTS)" --include-tests="$(REFACTOR_SCOUT_INCLUDE_TESTS)" 2>&1)"; then \
+			printf '%s\n' "$$scout_json"; \
+			exit 1; \
+		fi; \
+	fi; \
+	if command -v python3 >/dev/null 2>&1 && [ -f scripts/format_refactor_scout_summary.py ]; then \
+		printf '%s\n' "$$scout_json" | python3 scripts/format_refactor_scout_summary.py; \
+	else \
+		printf '%s\n' "$$scout_json"; \
+	fi
 
 check-large-files:
 	@large_file_base=""; \

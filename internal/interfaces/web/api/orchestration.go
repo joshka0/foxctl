@@ -511,6 +511,7 @@ func OrchestrationRefreshHandlerWithRuntime(cfg config.Config, log zerolog.Logge
 			})
 			return
 		}
+		req.RequestID = normalizePrefixedULID(req.RequestID, "req-refresh")
 		event := observability.NewEvent(opWebOrchestrationRefresh).
 			WithComponent(observability.ComponentWeb).
 			WithCommand(commandOrchestrationRefresh).
