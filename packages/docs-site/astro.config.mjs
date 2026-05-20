@@ -70,12 +70,14 @@ export default defineConfig({
             { slug: 'agents/lifecycle' },
             { slug: 'agents/orchestration' },
             { slug: 'collaboration/rooms' },
+            { slug: 'collaboration/multi-agent-coordination' },
           ],
         },
         {
           label: 'Integrations',
           items: [
             { slug: 'integrations/status' },
+            { slug: 'integrations/pi-and-hermes' },
             { slug: 'integrations/providers-and-mcp' },
             { slug: 'integrations/openapi-and-plugins' },
             { slug: 'integrations/chat-platforms' },
@@ -109,6 +111,7 @@ export default defineConfig({
             { slug: 'operations/troubleshooting' },
             { slug: 'operations/gotchas' },
             { slug: 'operations/observability' },
+            { slug: 'quality/refactor-scouts' },
             { slug: 'quality/ci-and-evals' },
             { slug: 'quality/benchmarks' },
             { slug: 'deployment/kubernetes' },

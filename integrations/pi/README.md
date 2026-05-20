@@ -306,6 +306,38 @@ The widget refreshes automatically after story lifecycle commands (`/story-start
 | `Ctrl+Shift+E` | Refresh the epic status widget |
 | `Ctrl+Shift+N` | Quick-select next story from active epic |
 
+## Multi-Agent Coordination
+
+When multiple agents work on the same codebase, foxctl provides several coordination mechanisms:
+
+### Direct Mailbox
+
+Send messages directly to other agents without rooms:
+
+```
+foxctl_mailbox_send(recipient="actor:hermes:local", body="The function you're refactoring is also called from cron/sync.go")
+foxctl_mailbox_inbox(only_unread=true)
+```
+
+### Write Conflict Detection
+
+The file guard hook (`hooks_file_guard`) auto-reserves files on write and notifies both agents when conflicts arise:
+
+1. Pi writes to `shared/utils.go` → file reserved automatically
+2. Hermes tries to write same file → gets alert, Pi gets notified
+3. Agents coordinate via mailbox messages
+
+### ContextWiki
+
+Share cross-cutting knowledge that isn't visible from code:
+
+- `foxctl_context_observe` — record factual observations
+- `foxctl_context_tension` — flag contradictions or risks
+- `foxctl_context_capture` — structured session handoffs
+- `foxctl_context_show` — read the current workspace context bundle
+
+See [docs/general/multi-agent-coordination.md](../../docs/general/multi-agent-coordination.md) for the full architecture.
+
 ## Requirements
 
 - [pi](https://github.com/badlogic/pi-mono) interactive mode

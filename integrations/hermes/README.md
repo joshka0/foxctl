@@ -274,3 +274,72 @@ Hermes: [calls foxctl_repo_search "flow engine agent executor"]
 ## Zero Dependencies
 
 The plugin uses only Python stdlib (`urllib`, `json`, `os`, `subprocess`, `logging`) for maximum portability — no requests, no httpx, no external packages.
+
+## Direct Agent Mailbox
+
+Agents can send direct messages to each other without going through rooms:
+
+```
+You: tell hermes that the auth middleware is also used in cron/sync.go
+
+Hermes: [calls foxctl_mailbox_send
+          recipient=actor:pi:local
+          subject="Cross-cutting concern: auth middleware"
+          body="The auth middleware you're refactoring is also called
+                from cron/sync.go without a context parameter.
+                You'll need to update that call site too."]
+        Message sent to Pi.
+```
+
+Reading inbox:
+
+```
+You: check your inbox
+
+Hermes: [calls foxctl_mailbox_inbox only_unread=true]
+        2 unread messages:
+        1. [ALERT] File locked: utils.go — reserved by actor:pi:local
+        2. [INFO] Design discussion — Pi wants input on write coordination
+        [calls foxctl_mailbox_ack message_ids=[...]]
+        Acknowledged.
+```
+
+## Write Conflict Notifications
+
+When two agents edit the same file, the file guard hook automatically notifies both:
+
+```
+# Pi is editing shared/utils.go (auto-reserved by file guard)
+# Hermes tries to write to the same file:
+
+Hermes: [attempts to write shared/utils.go]
+        ⚠ File conflict: shared/utils.go is reserved by actor:pi:local
+          They are working on: refactoring CreateUser() to accept context
+          Send them a message to coordinate.
+
+# Pi gets notified:
+  📬 File conflict: actor:hermes:local tried to write to shared/utils.go
+     which you have reserved. Coordinate if needed.
+```
+
+No upfront planning needed — coordination happens just-in-time.
+
+## ContextWiki Coordination
+
+Agents share cross-cutting knowledge through ContextWiki:
+
+```
+Hermes: [calls foxctl_context_observe
+          content="The retry logic in internal/storage/memory/store.go
+                    uses exponential backoff but doesn't respect
+                    context cancellation during sleep"]
+        Observation recorded.
+
+# Later, Pi reads the context:
+Pi:     [calls foxctl_context_show]
+        Observations:
+        - retry logic doesn't respect context cancellation (confidence: 0.9)
+        ...
+```
+
+See [docs/general/multi-agent-coordination.md](../../docs/general/multi-agent-coordination.md) for the full architecture overview.

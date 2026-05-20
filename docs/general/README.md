@@ -35,6 +35,7 @@ Core subsystem guides, API references, and operational documentation for `foxctl
 
 - [message-passing.md](message-passing.md) - Message-passing architecture and envelope contracts.
 - [message-passing-quickstart.md](message-passing-quickstart.md) - Quick start for message-passing patterns.
+- [multi-agent-coordination.md](multi-agent-coordination.md) - Multi-agent coordination: Pi + Hermes integration, intelligence/memory/coordination layers, write conflict detection, direct mailbox, flow orchestration.
 - [tmux-collaboration.md](tmux-collaboration.md) - tmux-based live collaboration, pane inspection, and ContextWiki promotion.
 - [room-runtime-adoption-pass.md](room-runtime-adoption-pass.md) - Room-runtime adoption matrix and remaining gaps.
 - [v1-specs.md](v1-specs.md) - Foundational v1 protocol specifications.
