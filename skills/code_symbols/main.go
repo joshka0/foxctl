@@ -27,6 +27,7 @@ type Input struct {
 	Path           string `json:"path"`
 	SymbolType     string `json:"symbol_type" validate:"omitempty,oneof=all function method struct interface type const var"`
 	Language       string `json:"language" validate:"omitempty,oneof=auto go python javascript typescript elixir"`
+	Lang           string `json:"lang,omitempty"`
 	IncludePrivate bool   `json:"include_private"`
 	IncludeDocs    bool   `json:"include_docs"`
 	MaxResults     int    `json:"max_results" validate:"gte=0"`
@@ -70,16 +71,7 @@ func main() {
 //
 // [[domain:code-symbol-extraction]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
-	// Apply defaults
-	if in.SymbolType == "" {
-		in.SymbolType = "all"
-	}
-	if in.Language == "" {
-		in.Language = "auto"
-	}
-	if in.MaxResults <= 0 {
-		in.MaxResults = 500
-	}
+	in = normalizeInput(in)
 
 	// Resolve workspace and search path
 	workspace, searchPath, err := skillmain.ResolvePath(rc, in.Path)
@@ -150,6 +142,26 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	skillout.AddArtifact(data, previewResult.Artifact)
 
 	return skillout.Emit(rc, "code/symbols", data)
+}
+
+func normalizeInput(in Input) Input {
+	in.Path = strings.TrimSpace(in.Path)
+	in.SymbolType = strings.TrimSpace(in.SymbolType)
+	in.Language = strings.TrimSpace(in.Language)
+	if in.Language == "" {
+		in.Language = strings.TrimSpace(in.Lang)
+	}
+
+	if in.SymbolType == "" {
+		in.SymbolType = "all"
+	}
+	if in.Language == "" {
+		in.Language = "auto"
+	}
+	if in.MaxResults <= 0 {
+		in.MaxResults = 500
+	}
+	return in
 }
 
 // extractFromDirectory walks a directory and extracts symbols from all supported files.

@@ -848,27 +848,31 @@ func TestOrchestrationCardActionHandler_RetryNowMovesBlockedCardToRetryQueue(t *
 	}
 }
 
-func TestOrchestrationRefreshHandler_RequiresRequestID(t *testing.T) {
-	t.Setenv("FOXCTL_DB_DRIVER", "")
-	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
-
+func TestOrchestrationRefreshHandler_GeneratesMissingRequestID(t *testing.T) {
 	cfg := orchestrationTestConfig(t.TempDir())
-	h := OrchestrationRefreshHandler(cfg, zerolog.Nop())
+	host := &fakeOrchestrationRuntimeHost{}
+	h := OrchestrationRefreshHandlerWithRuntime(cfg, zerolog.Nop(), host)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/orchestration/refresh", bytes.NewBufferString(`{"workspace_id":"ws-1"}`))
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusBadRequest {
+	if rr.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	body := decodeResponseBody(t, rr)
-	if body["status"] != "error" {
-		t.Fatalf("status field=%v want error", body["status"])
+	if host.refreshCalls != 1 {
+		t.Fatalf("refresh_calls=%d want 1", host.refreshCalls)
 	}
-	errObj, _ := body["error"].(map[string]any)
-	if strings.TrimSpace(fmt.Sprint(errObj["code"])) != "EARG" {
-		t.Fatalf("error.code=%v want EARG", errObj["code"])
+	if host.lastRefreshWorkspaceID != "ws-1" {
+		t.Fatalf("workspace_id=%q want ws-1", host.lastRefreshWorkspaceID)
+	}
+	if !strings.HasPrefix(host.lastRefreshRequestID, "req-refresh-") {
+		t.Fatalf("request_id=%q want req-refresh-*", host.lastRefreshRequestID)
+	}
+	body := decodeResponseBody(t, rr)
+	data, _ := body["data"].(map[string]any)
+	if got := strings.TrimSpace(fmt.Sprint(data["request_id"])); got != host.lastRefreshRequestID {
+		t.Fatalf("response request_id=%q want %q", got, host.lastRefreshRequestID)
 	}
 }
 

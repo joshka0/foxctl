@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Ensure Go toolchain is on PATH for gofumpt, golangci-lint, etc.
+for candidate in /usr/local/go/bin "$HOME/go/bin" "$HOME/.local/bin"; do
+    case ":${PATH}:" in
+        *"$candidate"*) ;;
+        *) export PATH="$candidate:$PATH" ;;
+    esac
+done
+
 repo_root="$(git rev-parse --show-toplevel)"
 exec "$repo_root/scripts/pre_commit_strict.sh"
