@@ -104,6 +104,35 @@ Use the right execution path before debugging a skill:
   wrapper from another install; run `./bin/foxctl ...` from this checkout or
   rebuild/reinstall the CLI.
 
+## Foxctl Error Inspection
+
+When the GUI shows foxctl errors, check the observability API first. The
+frontend "Recent errors" panel shows the newest five `status:"error"` entries
+from this stream.
+
+```bash
+curl -sS 'http://127.0.0.1:18093/api/logs?errors_only=true&limit=20'
+curl -sS 'http://127.0.0.1:18091/api/logs?errors_only=true&limit=20'
+```
+
+For the private Tailscale flow UI preview, `18093` is the local auth gateway and
+`18091` is the foxctl backend.
+
+For a quick combined snapshot of the same recent errors plus the local refactor
+scout, run:
+
+```bash
+make scout-errors
+make scout-errors REFACTOR_SCOUT_PATH=./internal/interfaces/web/api REFACTOR_SCOUT_LANGUAGE=go
+```
+
+If the API is empty or unreachable, check the systemd services:
+
+```bash
+sudo journalctl -u foxctl-flow-ui.service --no-pager -n 200
+sudo journalctl -u foxctl-flow-ui-gateway.service --no-pager -n 200
+```
+
 Input modes:
 
 - `--input '{"key":"value"}'` passes raw JSON.

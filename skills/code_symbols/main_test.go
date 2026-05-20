@@ -9,6 +9,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,6 +58,24 @@ func newTestRunContext(t *testing.T, stdout *bytes.Buffer, workspace string) *sk
 		Now:           time.Now,
 		InlineKB:      cfg.InlineOutputKB,
 		MaxPreview:    100,
+	}
+}
+
+func TestInputAcceptsLangAlias(t *testing.T) {
+	decoder := json.NewDecoder(strings.NewReader(`{"path":"main.go","lang":"go"}`))
+	decoder.DisallowUnknownFields()
+
+	var in Input
+	if err := decoder.Decode(&in); err != nil {
+		t.Fatalf("decode input: %v", err)
+	}
+
+	got := normalizeInput(in)
+	if got.Language != "go" {
+		t.Fatalf("language=%q want go", got.Language)
+	}
+	if got.SymbolType != "all" {
+		t.Fatalf("symbol_type=%q want all", got.SymbolType)
 	}
 }
 

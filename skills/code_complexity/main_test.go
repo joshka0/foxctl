@@ -9,6 +9,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,6 +58,27 @@ func newTestRunContext(t *testing.T, stdout *bytes.Buffer, workspace string) *sk
 		Now:           time.Now,
 		InlineKB:      cfg.InlineOutputKB,
 		MaxPreview:    100,
+	}
+}
+
+func TestInputAcceptsRecursiveCompatibilityField(t *testing.T) {
+	decoder := json.NewDecoder(strings.NewReader(`{"path":".","language":"go","recursive":true}`))
+	decoder.DisallowUnknownFields()
+
+	var in Input
+	if err := decoder.Decode(&in); err != nil {
+		t.Fatalf("decode input: %v", err)
+	}
+	if in.Recursive == nil || !*in.Recursive {
+		t.Fatalf("recursive=%v want true", in.Recursive)
+	}
+
+	got := normalizeInput(in)
+	if got.Language != "go" {
+		t.Fatalf("language=%q want go", got.Language)
+	}
+	if got.AnalysisMode != "hotspots" {
+		t.Fatalf("analysis_mode=%q want hotspots", got.AnalysisMode)
 	}
 }
 
