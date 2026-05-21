@@ -211,6 +211,8 @@ type AgentSpawnOptions struct {
 	// When "push", the foxprox spawner uses `droid exec --auto medium`
 	// instead of interactive `droid` to avoid permission dialogs.
 	OutputMode string
+	// RoomID, when set, binds the spawned agent to an existing foxprox room.
+	RoomID string
 }
 
 // AgentExecutor spawns a foxctl agent, waits for completion (or ask reply),
@@ -230,6 +232,10 @@ type AgentExecutor struct {
 	// into the agent's prompt so it knows where to push output via
 	// `foxctl flow output`. Returns empty string if the flow is not running.
 	GetRunID func(flowID string) string
+	// GetRoomID is an optional function that returns the room ID associated
+	// with a flow. When set, the agent spawner uses this room instead of
+	// creating a new one per run. Returns empty string if no room is linked.
+	GetRoomID func(flowID string) string
 }
 
 // Execute runs the agent node: parses config, spawns agent, waits for output.
@@ -270,6 +276,12 @@ func (e *AgentExecutor) Execute(ctx context.Context, node FlowNode, input any) (
 	workspace := cfg.Workspace
 	if workspace == "" {
 		workspace = e.Workspace
+	}
+
+	// Resolve room ID from flow binding.
+	roomID := ""
+	if e.GetRoomID != nil {
+		roomID = e.GetRoomID(node.FlowID)
 	}
 
 	// Build the spawn prompt based on input mode.
@@ -344,6 +356,7 @@ func (e *AgentExecutor) Execute(ctx context.Context, node FlowNode, input any) (
 		Workspace:     workspace,
 		CLICmd:        cfg.CLICmd,
 		OutputMode:    outputMode,
+		RoomID:        roomID,
 	}
 	spawnResult, err := e.Spawner.Spawn(spawnCtx, cfg.Role, prompt, spawnOpts)
 	duration := time.Since(start)
@@ -354,28 +367,32 @@ func (e *AgentExecutor) Execute(ctx context.Context, node FlowNode, input any) (
 			errMsg = fmt.Sprintf("agent spawn timed out: %v", err)
 		}
 		return NodeOutput{
-			Envelope: envelope.Error("flow/agent", "ESPAWN", errMsg, nil),
-			Duration: duration,
-			NodeID:   node.ID,
+			Envelope:  envelope.Error("flow/agent", "ESPAWN", errMsg, nil),
+			Duration:  duration,
+			NodeID:    node.ID,
+			SessionID: "",
 		}, nil
 	}
 
 	// Handle output capture based on output mode.
+	var out NodeOutput
 	switch outputMode {
 	case "ask":
-		return e.executeAskMode(spawnCtx, cfg, spawnResult, input, start, node, askTimeout)
+		out, err = e.executeAskMode(spawnCtx, cfg, spawnResult, input, start, node, askTimeout)
 	case "session_summary":
-		return e.executeSessionSummaryMode(spawnCtx, spawnResult, start, node)
+		out, err = e.executeSessionSummaryMode(spawnCtx, spawnResult, start, node)
 	case "push":
-		return e.executePushMode(spawnCtx, cfg, spawnResult, input, start, node)
+		out, err = e.executePushMode(spawnCtx, cfg, spawnResult, input, start, node)
 	default:
-		return NodeOutput{
+		out = NodeOutput{
 			Envelope: envelope.Error("flow/agent", "EARG",
 				fmt.Sprintf("invalid output_mode %q", outputMode), nil),
 			Duration: time.Since(start),
 			NodeID:   node.ID,
-		}, nil
+		}
 	}
+	out.SessionID = spawnResult.SessionID
+	return out, err
 }
 
 // executeAskMode handles the ask output mode: spawn agent, send ask, wait for reply.
@@ -545,6 +562,7 @@ func (e *AgentExecutor) executePushMode(
 			}, nil
 		}
 		// Agent pushed output successfully.
+		out.SessionID = spawnResult.SessionID
 		return out, nil
 	case <-ctx.Done():
 		// Context cancelled or timed out. Kill the agent.

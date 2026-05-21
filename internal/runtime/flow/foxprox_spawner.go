@@ -50,8 +50,8 @@ type FoxproxSpawnerConfig struct {
 	// FlowNodeID, when set, is injected into the agent's prompt.
 	FlowNodeID string
 
-	// RoomID, when set, reuses an existing room instead of creating a new one.
-	// When empty, Spawn creates a new room with a generated title.
+	// RoomID, when set, is the fallback room used when spawn opts don't
+	// provide one. Deprecated: prefer AgentSpawnOptions.RoomID.
 	RoomID string
 }
 
@@ -161,7 +161,11 @@ func (s *foxproxAgentSpawner) Spawn(ctx context.Context, role, prompt string, op
 	}
 
 	// Non-push mode: create or reuse a foxprox room for this agent.
-	roomID := s.config.RoomID
+	// Per-spawn opts take precedence over spawner config.
+	roomID := opts.RoomID
+	if roomID == "" {
+		roomID = s.config.RoomID
+	}
 	if roomID == "" {
 		roomTitle := fmt.Sprintf("flow-run-%s", s.config.FlowRunID)
 		if s.config.FlowRunID == "" {

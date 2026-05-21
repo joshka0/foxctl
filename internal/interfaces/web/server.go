@@ -461,6 +461,10 @@ func (s *Server) Handler() http.Handler {
 	apiMux.HandleFunc("/api/foxprox", api.FoxproxHandler())
 	apiMux.HandleFunc("/api/foxprox/", api.FoxproxHandler())
 
+	// --- Flow (Canvas backend) ---
+	apiMux.HandleFunc("/api/flows", api.FlowHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/flows/", api.FlowHandler(s.cfg, s.log))
+
 	// --- Stats & Insights (Phase 11) ---
 	apiMux.HandleFunc("/api/stats", api.StatsHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/insights", api.InsightsHandler(s.cfg, s.log))

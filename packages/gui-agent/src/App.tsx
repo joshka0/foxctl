@@ -42,6 +42,11 @@ const ArtifactsExplorer = lazy(() =>
     default: module.ArtifactsExplorer,
   })),
 )
+const FlowCanvasScreen = lazy(() =>
+  import('@/components/canvas').then((module) => ({
+    default: module.FlowCanvasScreen,
+  })),
+)
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -230,6 +235,8 @@ function MainContent({ view }: { view: ViewType }) {
       return <LogsViewer />
     case 'companion':
       return <ConversationsList />
+    case 'canvas':
+      return <FlowCanvasScreen />
     default:
       return <AgentList />
   }

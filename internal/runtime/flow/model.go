@@ -170,6 +170,7 @@ type Flow struct {
 	Workspace   string    `json:"workspace"`
 	State       FlowState `json:"state"`
 	Description string    `json:"description,omitempty"`
+	RoomID      string    `json:"room_id,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -218,9 +219,10 @@ type FlowRun struct {
 
 // NodeOutput is the structured output from any flow node.
 type NodeOutput struct {
-	Envelope envelope.Envelope `json:"envelope"`
-	Duration time.Duration     `json:"duration"`
-	NodeID   string            `json:"node_id"`
+	Envelope  envelope.Envelope `json:"envelope"`
+	Duration  time.Duration     `json:"duration"`
+	NodeID    string            `json:"node_id"`
+	SessionID string            `json:"session_id,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

@@ -51,12 +51,13 @@ type flowRun struct {
 
 // NodeExecState tracks the execution state of a single node.
 type NodeExecState struct {
-	ID       string   `json:"id"`
-	Label    string   `json:"label"`
-	Kind     NodeKind `json:"kind"`
-	State    string   `json:"state"` // idle, running, completed, errored
-	Error    string   `json:"error,omitempty"`
-	Duration int64    `json:"duration_ms,omitempty"`
+	ID        string   `json:"id"`
+	Label     string   `json:"label"`
+	Kind      NodeKind `json:"kind"`
+	State     string   `json:"state"` // idle, running, completed, errored
+	Error     string   `json:"error,omitempty"`
+	Duration  int64    `json:"duration_ms,omitempty"`
+	SessionID string   `json:"session_id,omitempty"`
 }
 
 // EdgeExecState tracks the delivery state of a single edge.
@@ -277,6 +278,7 @@ func (e *Engine) Start(ctx context.Context, flowID string) error {
 			if r, ok := e.runs[flowID]; ok {
 				if ns, ok := r.nodeStates[node.ID]; ok {
 					ns.Duration = result.Duration.Milliseconds()
+					ns.SessionID = result.SessionID
 					if result.Envelope.Status == envelope.StatusError {
 						ns.State = "errored"
 						ns.Error = result.Envelope.Error.Message
