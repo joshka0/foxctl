@@ -15,7 +15,7 @@ import (
 
 const (
 	benchDim      = 4096 // Qwen3-Embedding-8B production dims
-	benchNVecs    = 5000
+	benchNVecs    = 1000
 	benchK        = 20
 	benchBitWidth = 4
 )
@@ -83,14 +83,14 @@ func main() {
 	client, err := turbovec.Dial(socketPath)
 	if err != nil {
 		fmt.Printf("  SKIP: turbovecd not available at %s: %v\n", socketPath, err)
-		printSummary(bruteTime, jsonTime, 0, 0)
+		printSummary(bruteTime, jsonTime, 0, 0, 0, 0)
 		return
 	}
 	defer client.Close()
 
 	if err := client.Ping(); err != nil {
 		fmt.Printf("  SKIP: ping failed: %v\n", err)
-		printSummary(bruteTime, jsonTime, 0, 0)
+		printSummary(bruteTime, jsonTime, 0, 0, 0, 0)
 		return
 	}
 
@@ -102,10 +102,11 @@ func main() {
 	}
 	defer client.Drop(indexName)
 
-	// Add vectors in batches.
+	// Add vectors in batches, fall back to single adds.
 	fmt.Print("  Adding vectors... ")
 	addStart := time.Now()
 	batchSize := 500
+	added := 0
 	for batch := 0; batch < benchNVecs; batch += batchSize {
 		end := batch + batchSize
 		if end > benchNVecs {
@@ -119,12 +120,18 @@ func main() {
 			ids = append(ids, uint64(i))
 		}
 		if _, err := client.AddBatch(indexName, flat, benchDim, ids); err != nil {
-			fmt.Printf("FAIL: add batch %d: %v\n", batch, err)
-			return
+			// Fallback: add one at a time.
+			for i := batch; i < end; i++ {
+				if _, err := client.Add(indexName, uint64(i), vectors[i]); err != nil {
+					fmt.Printf("FAIL: add %d: %v\n", i, err)
+					return
+				}
+			}
 		}
+		added = end
 	}
 	addTime := time.Since(addStart)
-	fmt.Printf("done in %v (%.0f vecs/sec)\n", addTime, float64(benchNVecs)/addTime.Seconds())
+	fmt.Printf("done in %v (%.0f vecs/sec)\n", addTime, float64(added)/addTime.Seconds())
 
 	// Prepare caches.
 	_ = client.Prepare(indexName)
@@ -154,7 +161,7 @@ func main() {
 	}
 	fmt.Println()
 
-	// Recall comparison.
+	// Recall comparison for raw turbovec.
 	bruteSet := make(map[int]bool)
 	for _, h := range hits[:benchK] {
 		bruteSet[h.idx] = true
@@ -169,17 +176,81 @@ func main() {
 			overlap++
 		}
 	}
-	recall := float64(overlap) / float64(benchK)
-	fmt.Printf("  Recall@%d: %.2f (%d/%d overlap with brute-force)\n", benchK, recall, overlap, benchK)
+	rawRecall := float64(overlap) / float64(benchK)
+	fmt.Printf("  Recall@%d: %.2f (%d/%d overlap with brute-force)\n", benchK, rawRecall, overlap, benchK)
+
+	// --- Oversample + exact rerank ---
+	oversampleFactor := 3
+	oversampleK := uint32(benchK * oversampleFactor)
+	fmt.Printf("\n=== Oversample + Exact Rerank (3x oversample, k=%d → rerank to k=%d) ===\n", oversampleK, benchK)
+
+	fmt.Print("  Searching with oversampling... ")
+	_, _ = client.Search(indexName, query, oversampleK) // warm up
+	searchStartOS := time.Now()
+	var osHits []turbovec.SearchHit
+	for i := 0; i < runs; i++ {
+		osHits, err = client.Search(indexName, query, oversampleK)
+		if err != nil {
+			fmt.Printf("FAIL: oversampled search: %v\n", err)
+			return
+		}
+	}
+	osSearchTime := time.Since(searchStartOS) / time.Duration(runs)
+	fmt.Printf("done (avg of %d runs)\n", runs)
+	fmt.Printf("  Turbovec search (3x): %v\n", osSearchTime)
+
+	// Simulate exact rerank using the brute-force vectors.
+	rerankStart := time.Now()
+	type rerankEntry struct {
+		id    uint64
+		score float64
+	}
+	reranked := make([]rerankEntry, 0, len(osHits))
+	for _, h := range osHits {
+		idx := int(h.ID)
+		if idx >= 0 && idx < len(vectors) {
+			exactScore := cosineSim(query, vectors[idx])
+			reranked = append(reranked, rerankEntry{id: h.ID, score: exactScore})
+		}
+	}
+	sort.Slice(reranked, func(i, j int) bool { return reranked[i].score > reranked[j].score })
+	if len(reranked) > benchK {
+		reranked = reranked[:benchK]
+	}
+	rerankTime := time.Since(rerankStart)
+
+	totalRerankTime := osSearchTime + rerankTime
+	fmt.Printf("  Exact rerank:         %v\n", rerankTime)
+	fmt.Printf("  Total (search+rerank): %v\n", totalRerankTime)
+
+	// Recall after rerank.
+	rerankSet := make(map[int]bool)
+	for _, h := range reranked {
+		rerankSet[int(h.id)] = true
+	}
+	overlap2 := 0
+	for id := range bruteSet {
+		if rerankSet[id] {
+			overlap2++
+		}
+	}
+	rerankRecall := float64(overlap2) / float64(benchK)
+
+	fmt.Printf("  Top-5 (reranked): ")
+	for i := 0; i < 5 && i < len(reranked); i++ {
+		fmt.Printf("[%d:%.4f] ", reranked[i].id, reranked[i].score)
+	}
+	fmt.Println()
+	fmt.Printf("  Recall@%d (reranked): %.2f (%d/%d overlap with brute-force)\n", benchK, rerankRecall, overlap2, benchK)
 
 	// Compression estimate.
 	vecBytes := uint64(benchNVecs) * uint64(benchDim) * 4 // float32
 	compressedBytes := uint64(benchNVecs) * uint64(benchDim) * benchBitWidth / 8
-	fmt.Printf("  Memory: %d MB raw → %d MB compressed (%.1fx)\n",
+	fmt.Printf("\n  Memory: %d MB raw → %d MB compressed (%.1fx)\n",
 		vecBytes/1024/1024, compressedBytes/1024/1024,
 		float64(vecBytes)/float64(compressedBytes))
 
-	printSummary(bruteTime, jsonTime, searchTime, recall)
+	printSummary(bruteTime, jsonTime, searchTime, rawRecall, totalRerankTime, rerankRecall)
 
 	// Save the benchmark index.
 	if err := os.MkdirAll(filepath.Join(os.Getenv("HOME"), ".foxctl", "storage"), 0755); err == nil {
@@ -191,15 +262,16 @@ func main() {
 	}
 }
 
-func printSummary(bruteTime, jsonTime, tvTime time.Duration, recall float64) {
+func printSummary(bruteTime, jsonTime, tvTime time.Duration, rawRecall float64, rerankTotal time.Duration, rerankRecall float64) {
 	fmt.Println("\n=== Summary ===")
-	fmt.Printf("  Brute-force (raw):     %v\n", bruteTime)
-	fmt.Printf("  Brute-force (JSON):    %v\n", jsonTime)
+	fmt.Printf("  Brute-force (raw):        %v\n", bruteTime)
+	fmt.Printf("  Brute-force (JSON):       %v\n", jsonTime)
 	if tvTime > 0 {
-		fmt.Printf("  Turbovec sidecar:      %v\n", tvTime)
-		fmt.Printf("  Speedup vs raw:        %.1fx\n", float64(bruteTime)/float64(tvTime))
-		fmt.Printf("  Speedup vs JSON:       %.1fx\n", float64(jsonTime)/float64(tvTime))
-		fmt.Printf("  Recall@%d:             %.2f\n", benchK, recall)
+		fmt.Printf("  Turbovec raw:             %v  (recall@%d: %.2f)\n", tvTime, benchK, rawRecall)
+		fmt.Printf("  Turbovec + rerank (3x):   %v  (recall@%d: %.2f)\n", rerankTotal, benchK, rerankRecall)
+		fmt.Printf("  Speedup vs JSON (raw):    %.1fx\n", float64(jsonTime)/float64(tvTime))
+		fmt.Printf("  Speedup vs JSON (rerank): %.1fx\n", float64(jsonTime)/float64(rerankTotal))
+		fmt.Printf("  Recall improvement:       %.2f → %.2f\n", rawRecall, rerankRecall)
 	}
 }
 

@@ -3,6 +3,7 @@ package searchindex
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/joshka0/foxctl/internal/intelligence/turbovec"
@@ -25,6 +26,13 @@ type TurboVecConfig struct {
 
 	// BitWidth is the quantization bit width (2, 3, or 4). Default: 4.
 	BitWidth int
+
+	// OversampleFactor controls how many extra candidates are fetched from the
+	// approximate index before exact reranking. For example, with Limit=20 and
+	// OversampleFactor=3, turbovec returns 60 candidates which are then reranked
+	// using exact cosine similarity from SQLite, and only the top 20 are returned.
+	// Default: 3 when turbovec is enabled and this field is 0.
+	OversampleFactor int
 }
 
 // OpenWithTurboVec opens a SQL-backed search index and, when cfg.Enabled is
@@ -74,6 +82,11 @@ func WrapWithTurboVec(store Store, workspaceID string, dim int, cfg TurboVecConf
 		return store
 	}
 
+	// Default oversample factor when not explicitly set.
+	if cfg.OversampleFactor <= 0 {
+		cfg.OversampleFactor = 3
+	}
+
 	vec := turbovec.NewVectorIndex(workspaceID, dim, turbovec.IndexConfig{
 		SocketPath: cfg.SocketPath,
 		DataDir:    cfg.DataDir,
@@ -118,20 +131,47 @@ func (s *turbovecStore) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// VectorRecall uses the turbovec sidecar for fast vector search.
+// VectorRecall uses the turbovec sidecar for fast vector search, then reranks
+// the oversampled candidates using exact cosine similarity from the SQL store.
 // Falls back to the SQL brute-force path if the sidecar is unavailable.
 func (s *turbovecStore) VectorRecall(ctx context.Context, workspaceID string, embedding []float32, opts VectorRecallOptions) ([]SearchHit, error) {
 	workspaceID = workspace.CanonicalID(workspaceID)
 
-	// Try turbovec first.
-	results, err := s.vec.Search(embedding, opts.Limit)
-	if err == nil && len(results) > 0 {
-		// Turbovec returned results — fetch full documents from SQL.
+	if opts.Limit <= 0 {
+		opts.Limit = defaultSearchIndexLimit
+	}
+
+	// Oversample: request more candidates from the approximate index.
+	k := opts.Limit * s.cfg.OversampleFactor
+
+	// Try turbovec first. Use SearchFiltered when CandidateIDs is provided
+	// (BM25-then-vector pipeline); otherwise do a full index scan.
+	var (
+		results []turbovec.SearchResult
+		err     error
+	)
+	if opts.CandidateIDs != nil {
+		results, err = s.vec.SearchFiltered(embedding, k, opts.CandidateIDs)
+	} else {
+		results, err = s.vec.Search(embedding, k)
+	}
+	if err != nil || len(results) == 0 {
+		// Fall back to brute-force SQL.
+		return s.Store.VectorRecall(ctx, workspaceID, embedding, opts)
+	}
+
+	// Collect candidate doc IDs.
+	candidateIDs := make([]string, 0, len(results))
+	for _, r := range results {
+		candidateIDs = append(candidateIDs, r.DocID)
+	}
+
+	// Fetch exact embeddings for the candidate set from SQL.
+	exactEmbeddings, err := s.Store.GetEmbeddingsByIDs(ctx, candidateIDs)
+	if err != nil {
+		// Rerank failed — return approximate results as-is.
 		hits := make([]SearchHit, 0, len(results))
 		for _, r := range results {
-			// We need to fetch the full document from SQL.
-			// For now, construct a minimal hit with just the ID and score.
-			// The retrieval v2 engine will enrich these with full doc data.
 			hits = append(hits, SearchHit{
 				Doc: Document{
 					ID:          r.DocID,
@@ -140,11 +180,54 @@ func (s *turbovecStore) VectorRecall(ctx context.Context, workspaceID string, em
 				Score: r.Score,
 			})
 		}
+		if len(hits) > opts.Limit {
+			hits = hits[:opts.Limit]
+		}
 		return hits, nil
 	}
 
-	// Fall back to brute-force SQL.
-	return s.Store.VectorRecall(ctx, workspaceID, embedding, opts)
+	// Rerank with exact cosine similarity.
+	type scored struct {
+		docID string
+		score float64
+	}
+	reranked := make([]scored, 0, len(results))
+	for _, r := range results {
+		exactEmb, ok := exactEmbeddings[r.DocID]
+		if !ok {
+			continue // no embedding in SQL, skip
+		}
+		exactScore := cosineSimilarity(embedding, exactEmb)
+		if exactScore <= 0 {
+			continue
+		}
+		if opts.MinScore > 0 && exactScore < opts.MinScore {
+			continue
+		}
+		reranked = append(reranked, scored{docID: r.DocID, score: exactScore})
+	}
+
+	// Sort by exact score descending.
+	sort.Slice(reranked, func(i, j int) bool {
+		return reranked[i].score > reranked[j].score
+	})
+
+	// Take top opts.Limit.
+	if len(reranked) > opts.Limit {
+		reranked = reranked[:opts.Limit]
+	}
+
+	hits := make([]SearchHit, 0, len(reranked))
+	for _, r := range reranked {
+		hits = append(hits, SearchHit{
+			Doc: Document{
+				ID:          r.docID,
+				WorkspaceID: workspaceID,
+			},
+			Score: r.score,
+		})
+	}
+	return hits, nil
 }
 
 // Close saves the turbovec index and closes the SQL store.

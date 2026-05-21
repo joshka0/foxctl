@@ -1,6 +1,8 @@
 package searchindex
 
-import "context"
+import (
+	"context"
+)
 
 // RecallOptions configure lexical recall.
 type RecallOptions struct {
@@ -23,6 +25,11 @@ type VectorRecallOptions struct {
 	MinScore float64
 	// EmbeddingModel filters documents that were indexed with a different model.
 	EmbeddingModel string
+	// CandidateIDs restricts the vector search to this set of document IDs.
+	// When non-nil (even if empty), the turbovec-accelerated path uses
+	// SearchFiltered instead of a full index scan, enabling the
+	// BM25-then-vector pipeline where lexical hits are used as candidates.
+	CandidateIDs []string
 }
 
 // Store exposes recall and maintenance operations for retrieval documents.
@@ -59,4 +66,8 @@ type Store interface {
 
 	// VectorRecall returns raw scored matches based on embedding similarity.
 	VectorRecall(ctx context.Context, workspaceID string, embedding []float32, opts VectorRecallOptions) ([]SearchHit, error)
+
+	// GetEmbeddingsByIDs returns exact embeddings for the given document IDs.
+	// IDs without a stored embedding are silently omitted from the result map.
+	GetEmbeddingsByIDs(ctx context.Context, ids []string) (map[string][]float32, error)
 }

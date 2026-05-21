@@ -37,6 +37,7 @@ const (
 	cmdInfo           uint8 = 0x08
 	cmdDrop           uint8 = 0x09
 	cmdPrepare        uint8 = 0x0A
+	cmdAddBatch       uint8 = 0x0B
 )
 
 // Status bytes.
@@ -132,12 +133,12 @@ func (c *Client) AddBatch(name string, vectors []float32, dim uint32, ids []uint
 	for _, id := range ids {
 		payload = binary.LittleEndian.AppendUint64(payload, id)
 	}
-	resp, err := c.roundtrip(cmdAdd, payload)
+	resp, err := c.roundtrip(cmdAddBatch, payload)
 	if err != nil {
 		return 0, err
 	}
 	if len(resp) < 5 {
-		return 0, fmt.Errorf("turbovec: short ADD response (%d bytes)", len(resp))
+		return 0, fmt.Errorf("turbovec: short ADD_BATCH response (%d bytes)", len(resp))
 	}
 	return binary.LittleEndian.Uint32(resp[1:5]), nil
 }

@@ -453,6 +453,50 @@ WHERE workspace_id = $1 AND embedding_json IS NOT NULL AND embedding_json != ''`
 	return toSearchHits(results), nil
 }
 
+// GetEmbeddingsByIDs returns exact embeddings for the given document IDs.
+// IDs without a stored embedding are silently omitted.
+func (s *sqlStore) GetEmbeddingsByIDs(ctx context.Context, ids []string) (map[string][]float32, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	// Build parameterised placeholders: ($1, $2, ...)
+	args := make([]any, len(ids))
+	placeholders := make([]string, len(ids))
+	for i, id := range ids {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(
+		"SELECT id, embedding_json FROM search_documents WHERE id IN (%s) AND embedding_json IS NOT NULL AND embedding_json != ''",
+		strings.Join(placeholders, ", "),
+	)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("searchindex: get embeddings by ids: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string][]float32, len(ids))
+	for rows.Next() {
+		var id, embeddingJSON string
+		if err := rows.Scan(&id, &embeddingJSON); err != nil {
+			return nil, fmt.Errorf("searchindex: scan embedding: %w", err)
+		}
+		var emb []float32
+		if err := json.Unmarshal([]byte(embeddingJSON), &emb); err != nil {
+			continue // skip malformed
+		}
+		result[id] = emb
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("searchindex: get embeddings rows: %w", err)
+	}
+	return result, nil
+}
+
 type scoredHit struct {
 	Doc       Document
 	Score     float64
