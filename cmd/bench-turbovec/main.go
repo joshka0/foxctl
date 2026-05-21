@@ -100,7 +100,7 @@ func main() {
 		fmt.Printf("  FAIL: create: %v\n", err)
 		return
 	}
-	defer client.Drop(indexName)
+	defer func() { _ = client.Drop(indexName) }()
 
 	// Add vectors in batches, fall back to single adds.
 	fmt.Print("  Adding vectors... ")

@@ -175,7 +175,7 @@ func (s *turbovecStore) VectorRecall(ctx context.Context, workspaceID string, em
 	}
 
 	// Fetch exact embeddings for the candidate set from SQL.
-	exactEmbeddings, err := s.Store.GetEmbeddingsByIDs(ctx, candidateIDs)
+	exactEmbeddings, err := s.GetEmbeddingsByIDs(ctx, candidateIDs)
 	if err != nil {
 		// Rerank failed — return approximate results as-is.
 		hits := make([]SearchHit, 0, len(results))

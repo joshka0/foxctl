@@ -103,10 +103,6 @@ func (ts *TurbovecSearcher) search(ctx context.Context, query []float32, candida
 
 	// Translate hits back to string IDs and exact-rerank using cosine.
 	reverse := ts.reverseMaps[indexName]
-	type candidate struct {
-		id  string
-		vec []float32
-	}
 	// Build a quick lookup from string ID to embedding for reranking.
 	embedMap := make(map[string][]float32, len(candidates))
 	for _, c := range candidates {
