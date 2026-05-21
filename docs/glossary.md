@@ -43,6 +43,20 @@ instructions, and command output. Prefer these names in new docs.
 | File summary | A short cached summary attached to a source file for tree orientation and repoindex enrichment. |
 | Symbol summary | A short cached summary attached to a code symbol for graph search and navigation. |
 
+### Vector Search
+
+| Term | Meaning |
+|---|---|
+| Turbovec | The compressed vector search engine (TurboQuant algorithm) that accelerates semantic retrieval. |
+| Turbovec sidecar | The turbovecd Unix socket daemon that manages compressed vector indices. |
+| Vector recall | Embedding-based retrieval that returns documents by cosine similarity. |
+| Oversample + rerank | Two-stage retrieval where turbovec returns 3x candidates, then exact cosine reranking picks the top-k. |
+| Filtered vector search | Vector search restricted to a candidate doc ID set, enabling BM25-first → vector-rerank pipelines. |
+| Product quantization | The compression technique that reduces float32 vectors to 2–4 bits per coordinate. |
+| Bit width | The quantization resolution (2, 3, or 4 bits) controlling the compression/recall tradeoff. |
+| .tvim file | Persisted turbovec index file containing compressed codes and metadata. |
+| .idmap.json | Sidecar JSON file mapping foxctl string doc IDs to turbovec uint64 IDs. |
+
 ## Semantic Comments
 
 | Term | Meaning |
