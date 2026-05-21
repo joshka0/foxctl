@@ -198,6 +198,7 @@ events → evidence → claims → impact/staleness → projections → retrieva
 | **MemoryClaim** | Durable assertion with typed lifecycle transitions (Candidate → Current → NeedsRevalidation → Stale → Superseded/Rejected) |
 | **Impact Engine** | Computes downstream effects of changes, marks stale evidence, and resolves invalidation chains |
 | **Retrieval Lanes** | Five composable lane services (code, memory, context, task, mixed) returning `EvidencePack` with telemetry |
+| **Autonomous Memory Drafts** | Retrieval feedback can create Obsidian inbox memory drafts and prepared ContextWiki review proposals without canonical-note auto-merge |
 | **ExtractionPolicy** | Replaces keyword heuristics with typed interfaces for companion signal extraction |
 
 ### Design Invariants
@@ -277,6 +278,11 @@ foxprox/                     Foxprox agent terminal coordination (independent mo
 - Creating Codex MCP config and skill links
 - Linking Gemini skill packs
 - Starting the shared MCP daemon with `foxctl mcp serve --daemon --skills`
+
+For Pi/Hermes dogfooding, run
+`scripts/doctor-pi-hermes-integrations.sh --apply` from the checkout you want
+the providers to load. The doctor verifies the tool markers, lifecycle hooks,
+and automatic memory draft hook markers after linking.
 
 Currently supported providers: Claude Code, Codex, OpenCode, Gemini
 
@@ -364,6 +370,7 @@ Start with:
 Current high-signal docs:
 
 - [docs/architecture/context-architecture.md](docs/architecture/context-architecture.md) — Dual-plane context + Obsidian knowledge layer
+- [integrations/pi/README.md](integrations/pi/README.md) and [integrations/hermes/README.md](integrations/hermes/README.md) — Provider tools, hooks, and autonomous memory draft setup
 - [docs/architecture/jido-hybrid-runtime.md](docs/architecture/jido-hybrid-runtime.md) — Go-native vs Jido runtime
 - [docs/general/agent-daemon.md](docs/general/agent-daemon.md) — Agent daemon operations
 - [docs/guides/kubernetes.md](docs/guides/kubernetes.md) — Kubernetes deployment

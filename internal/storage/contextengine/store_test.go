@@ -1187,6 +1187,76 @@ func TestStore_RetrievalFeedbackCRUD(t *testing.T) {
 	}
 }
 
+func TestStore_ListRetrievalEpisodes(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	older := testEpisode("ep-old", "ws-1", "old query", contextengine.LaneCode)
+	older.CreatedAt = now().Add(-2 * time.Hour)
+	middle := testEpisode("ep-mid", "ws-1", "middle query", contextengine.LaneMemory)
+	middle.CreatedAt = now().Add(-time.Hour)
+	otherWorkspace := testEpisode("ep-other", "ws-2", "other query", contextengine.LaneContext)
+	otherWorkspace.CreatedAt = now()
+	mustRecordEpisode(t, s, ctx, older)
+	mustRecordEpisode(t, s, ctx, middle)
+	mustRecordEpisode(t, s, ctx, otherWorkspace)
+
+	got, err := s.ListRetrievalEpisodes(ctx, contextengine.RetrievalEpisodeFilter{
+		WorkspaceID: "ws-1",
+		Since:       now().Add(-90 * time.Minute),
+		Limit:       10,
+	})
+	if err != nil {
+		t.Fatalf("ListRetrievalEpisodes: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "ep-mid" {
+		t.Fatalf("expected ep-mid only, got %#v", got)
+	}
+}
+
+func TestStore_ListRetrievalFeedback(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	ep1 := testEpisode("ep-1", "ws-1", "test query", contextengine.LaneCode)
+	ep2 := testEpisode("ep-2", "ws-1", "test query", contextengine.LaneMemory)
+	mustRecordEpisode(t, s, ctx, ep1)
+	mustRecordEpisode(t, s, ctx, ep2)
+
+	old := testFeedback("fb-old", "ws-1", "ep-1", contextengine.RetrievalFeedbackKindAnswerAccepted)
+	old.CreatedAt = now().Add(-2 * time.Hour)
+	correction := testFeedback("fb-correction", "ws-1", "ep-1", contextengine.RetrievalFeedbackKindAnswerCorrected)
+	correction.CreatedAt = now().Add(-time.Hour)
+	miss := testFeedback("fb-miss", "ws-1", "ep-2", contextengine.RetrievalFeedbackKindRetrievalMissed)
+	miss.CreatedAt = now()
+	mustRecordFeedback(t, s, ctx, old)
+	mustRecordFeedback(t, s, ctx, correction)
+	mustRecordFeedback(t, s, ctx, miss)
+
+	got, err := s.ListRetrievalFeedback(ctx, contextengine.RetrievalFeedbackFilter{
+		WorkspaceID: "ws-1",
+		Kinds: []contextengine.RetrievalFeedbackKind{
+			contextengine.RetrievalFeedbackKindAnswerCorrected,
+			contextengine.RetrievalFeedbackKindRetrievalMissed,
+		},
+		Since: now().Add(-90 * time.Minute),
+		Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("ListRetrievalFeedback: %v", err)
+	}
+	if len(got) != 2 || got[0].ID != "fb-correction" || got[1].ID != "fb-miss" {
+		t.Fatalf("expected correction then miss, got %#v", got)
+	}
+
+	_, err = s.ListRetrievalFeedback(ctx, contextengine.RetrievalFeedbackFilter{
+		Kinds: []contextengine.RetrievalFeedbackKind{contextengine.RetrievalFeedbackKind("bogus")},
+	})
+	if err == nil {
+		t.Fatal("expected invalid feedback kind error")
+	}
+}
+
 // ========== Projection CRUD ==========
 
 func TestStore_ProjectionCRUD(t *testing.T) {

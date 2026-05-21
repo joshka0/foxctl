@@ -25,6 +25,8 @@ This is the canonical map for docs in this repository.
 - [docs/general/retrieval-evals.md](general/retrieval-evals.md) - Stable ContextWiki retrieval eval suites, wrapper commands, and current expected bands.
 - [docs/general/tmux-collaboration.md](general/tmux-collaboration.md) - tmux-based live collaboration setup, structured pane inspection, and ContextWiki promotion flow.
 - [docs/general/room-runtime-adoption-pass.md](general/room-runtime-adoption-pass.md) - Current adoption matrix for hardened room-runtime semantics and the remaining queued-draft dispatch gap.
+- [integrations/pi/README.md](../integrations/pi/README.md) - Pi provider integration, tools, context hooks, and autonomous memory draft flags.
+- [integrations/hermes/README.md](../integrations/hermes/README.md) - Hermes provider integration, lifecycle hooks, and autonomous memory draft config.
 - [configs/skills-pack/foxctl-room/SKILL.md](../configs/skills-pack/foxctl-room/SKILL.md) - Durable shared room coordination skill for room chat, relay, loop, and room tasks.
 - [docs/architecture/](architecture/) - Current runtime architecture docs.
 - [docs/architecture/context-architecture.md](architecture/context-architecture.md) - Workspace-local ContextWiki control plane and top-of-mind slice.

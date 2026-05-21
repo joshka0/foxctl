@@ -93,7 +93,7 @@ func (s *WorkspaceStore) ApplyMemoryProposal(ctx context.Context, id string) (*M
 		result = map[string]any{
 			"policy_path": policyPath,
 		}
-	case "external_evidence_import", "methodology_draft":
+	case "external_evidence_import", "methodology_draft", "memory_draft":
 		draftPath := firstNonEmpty(changeString(proposal.ProposedChange, "draft_path"))
 		targetPath := firstNonEmpty(changeString(proposal.ProposedChange, "suggested_target_note_path"))
 		heading := firstNonEmpty(changeString(proposal.ProposedChange, "suggested_target_heading"), "Review")
@@ -108,6 +108,10 @@ func (s *WorkspaceStore) ApplyMemoryProposal(ctx context.Context, id string) (*M
 		noteType := "evidence"
 		if proposal.Kind == PolicyKindMethodologyDraft {
 			noteType = "pattern"
+		}
+		if proposal.Kind == PolicyKindMemoryDraft {
+			sourceKind = "memory_draft"
+			noteType = "memory"
 		}
 		job, err := ensurePromotionJobRow(ctx, db, sourceRef, sourceKind, noteType, changeString(proposal.ProposedChange, "title"), draftPath)
 		if err != nil {
@@ -126,7 +130,7 @@ func (s *WorkspaceStore) ApplyMemoryProposal(ctx context.Context, id string) (*M
 
 	nextStatus := "applied"
 	nextApplyStatus := "applied"
-	if proposal.Kind == PolicyKindExternalImport || proposal.Kind == PolicyKindMethodologyDraft {
+	if proposal.Kind == PolicyKindExternalImport || proposal.Kind == PolicyKindMethodologyDraft || proposal.Kind == PolicyKindMemoryDraft {
 		nextStatus = "prepared"
 		nextApplyStatus = "review_prepared"
 	}
@@ -606,7 +610,7 @@ func buildStoredPreparedProposalWorkPacket(proposal *MemoryProposal) (ProposalWo
 		return ProposalWorkPacket{}, false
 	}
 	switch string(proposal.Kind) {
-	case "external_evidence_import", "methodology_draft":
+	case "external_evidence_import", "methodology_draft", "memory_draft":
 	default:
 		return ProposalWorkPacket{}, false
 	}

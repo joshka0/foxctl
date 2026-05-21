@@ -24,6 +24,18 @@ ln -sfn /Users/joshka/repos/personal/foxctl/integrations/pi/foxctl.ts \
 This keeps Pi reloads pointed at the same file that foxctl agents review,
 index, and commit.
 
+To verify or relink the currently installed Pi and Hermes integrations to this
+checkout, run:
+
+```bash
+scripts/doctor-pi-hermes-integrations.sh
+scripts/doctor-pi-hermes-integrations.sh --apply
+```
+
+The doctor checks that Pi has the ContextWiki, vault, memory curator, and
+automatic memory draft hook markers installed. Override the default Pi target
+with `PI_EXTENSION_PATH=/path/to/foxctl.ts`.
+
 ## Installation
 
 ### Option 1: Auto-discovery
@@ -54,6 +66,12 @@ pi --extension /path/to/foxctl.ts \
   --foxctl-gateway-url http://localhost:8765
 ```
 
+For SDK-backed memory blurring, install the local Pi SDK dependencies once:
+
+```bash
+pnpm --dir integrations/pi install
+```
+
 ## Configuration
 
 | Flag | Default | Description |
@@ -63,10 +81,29 @@ pi --extension /path/to/foxctl.ts \
 | `--foxctl-workspace` | `.` | Workspace root used by filesystem, code, repoindex, memory, room, and task tools |
 | `--foxctl-context` | `false` | Inject foxctl workspace/task/room context before each Pi agent turn |
 | `--foxctl-memory-context` | `true` | Include prompt-keyed `memory/query` and `session/recall` evidence in `--foxctl-context` hook injection |
+| `--foxctl-vault-path` | `""` | Optional Obsidian vault path for automatic memory draft writes |
+| `--foxctl-memory-drafts-auto` | `false` | Automatically create Obsidian inbox memory drafts from retrieval feedback in background hooks |
+| `--foxctl-memory-drafts-apply` | `true` | When automatic memory drafts are enabled, write inbox drafts instead of previewing only |
+| `--foxctl-memory-drafts-dry-run` | `false` | Force automatic memory drafts to preview mode |
+| `--foxctl-memory-drafts-interval-seconds` | `900` | Background memory draft interval |
+| `--foxctl-memory-drafts-lookback` | `24h` | Retrieval feedback lookback window for automatic memory drafts |
+| `--foxctl-memory-drafts-limit` | `20` | Maximum automatic memory drafts per pass |
+| `--foxctl-memory-drafts-blur-agent` | `false` | Blur automatic memory drafts through a real Pi-backed agent |
+| `--foxctl-memory-drafts-blur-backend` | `pi` | Blur backend; Pi is the primary path |
+| `--foxctl-memory-drafts-blur-pi-mode` | `sdk` | Pi runner mode (`sdk` or `cli`) |
+| `--foxctl-memory-drafts-blur-pi-sdk-bin` | `bun` | Executable used by the Pi SDK runner |
+| `--foxctl-memory-drafts-blur-pi-sdk-script` | `""` | Optional override for the Pi SDK memory blur runner script |
+| `--foxctl-memory-drafts-blur-pi-agent-dir` | `""` | Optional Pi agent directory for auth/models |
+| `--foxctl-memory-drafts-blur-pi-thinking` | `off` | Thinking level for the Pi SDK blur runner |
 | `--foxctl-epic` | `""` | Active room-agile epic id for epic commands |
 | `--foxctl-milestone` | `""` | Active room-agile milestone id for milestone commands |
 | `--foxctl-story` | `""` | Active room-agile story id for story commands |
 | `--foxctl-epic-context` | `true` | Inject active epic resume/health/next into `--foxctl-context` when `--foxctl-epic` is set |
+
+When `--foxctl-memory-drafts-auto` is enabled, Pi starts a background hook runner
+on session start and opportunistically checks before agent starts. It writes only
+Obsidian inbox drafts and prepared review proposals; canonical memory notes still
+require the ContextWiki review flow.
 
 ## Available Tools
 
@@ -190,6 +227,7 @@ Supported actions:
 - `foxctl_context_observe` — Record a repeatable observation (factual, confidence-scored, accumulates over time)
 - `foxctl_context_tension` — Record a tension (contradiction, performance, complexity, dependency, usability)
 - `foxctl_context_infer` — Auto-extract observations and tensions from a summary text (dry_run or apply)
+- `foxctl_context_memory_drafts` — Plan or write Obsidian inbox memory drafts from contextengine retrieval feedback
 
 ### Vault
 - `foxctl_vault_search` — Search the Obsidian vault index for matching notes (ranked hits with snippet)

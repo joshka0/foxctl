@@ -1418,6 +1418,9 @@ func (s *Service) startCuratorWorker(ctx context.Context) error {
 	}
 
 	cfg := curator.DefaultConfig()
+	cfg.RuntimeConfig = s.cfg
+	cfg.VaultPath = contextWikiMaintenanceVaultPath()
+	cfg.WorkspacePath = ws.Normalize(ws.Detect(strings.TrimSpace(s.opts.Workspace)))
 
 	// Override from config.yaml if present
 	if raw := s.cfg.Curator.ActiveInterval; raw > 0 {
@@ -1449,6 +1452,51 @@ func (s *Service) startCuratorWorker(ctx context.Context) error {
 	}
 	if s.cfg.Curator.DreamEnabled != nil {
 		cfg.DreamEnabled = *s.cfg.Curator.DreamEnabled
+	}
+	if s.cfg.Curator.MemoryDraftsEnabled != nil {
+		cfg.MemoryDraftsEnabled = *s.cfg.Curator.MemoryDraftsEnabled
+	}
+	if s.cfg.Curator.MemoryDraftsApplyDrafts != nil {
+		cfg.MemoryDraftsApplyDrafts = *s.cfg.Curator.MemoryDraftsApplyDrafts
+	}
+	if raw := s.cfg.Curator.MemoryDraftLookback; raw > 0 {
+		cfg.MemoryDraftLookback = raw
+	}
+	if raw := s.cfg.Curator.MemoryDraftLimit; raw > 0 {
+		cfg.MemoryDraftLimit = raw
+	}
+	if s.cfg.Curator.MemoryDraftBlurWithAgent != nil {
+		cfg.MemoryDraftBlurWithAgent = *s.cfg.Curator.MemoryDraftBlurWithAgent
+	}
+	if raw := strings.TrimSpace(s.cfg.Curator.MemoryDraftBlurAgent); raw != "" {
+		cfg.MemoryDraftBlurAgent = raw
+	}
+	if raw := strings.TrimSpace(s.cfg.Curator.MemoryDraftBlurAgentBin); raw != "" {
+		cfg.MemoryDraftBlurAgentBin = raw
+	}
+	if raw := strings.TrimSpace(s.cfg.Curator.MemoryDraftBlurAgentProvider); raw != "" {
+		cfg.MemoryDraftBlurAgentProvider = raw
+	}
+	if raw := strings.TrimSpace(s.cfg.Curator.MemoryDraftBlurAgentModel); raw != "" {
+		cfg.MemoryDraftBlurAgentModel = raw
+	}
+	if raw := strings.TrimSpace(s.cfg.Curator.MemoryDraftBlurFoxctlAgentID); raw != "" {
+		cfg.MemoryDraftBlurFoxctlAgentID = raw
+	}
+	if raw := strings.TrimSpace(s.cfg.Curator.MemoryDraftBlurPiMode); raw != "" {
+		cfg.MemoryDraftBlurPiMode = raw
+	}
+	if raw := strings.TrimSpace(s.cfg.Curator.MemoryDraftBlurPiSDKBin); raw != "" {
+		cfg.MemoryDraftBlurPiSDKBin = raw
+	}
+	if raw := strings.TrimSpace(s.cfg.Curator.MemoryDraftBlurPiSDKScript); raw != "" {
+		cfg.MemoryDraftBlurPiSDKScript = raw
+	}
+	if raw := strings.TrimSpace(s.cfg.Curator.MemoryDraftBlurPiAgentDir); raw != "" {
+		cfg.MemoryDraftBlurPiAgentDir = raw
+	}
+	if raw := strings.TrimSpace(s.cfg.Curator.MemoryDraftBlurPiThinking); raw != "" {
+		cfg.MemoryDraftBlurPiThinking = raw
 	}
 
 	// Env var overrides

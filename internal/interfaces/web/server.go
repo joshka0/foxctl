@@ -534,6 +534,7 @@ func (s *Server) Handler() http.Handler {
 
 	// --- Memory API ---
 	apiMux.HandleFunc("/api/memory/put", api.MemoryPutHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/context/memory-drafts", api.ContextMemoryDraftsHandler(s.cfg, s.log))
 
 	// --- Embedding API ---
 	apiMux.HandleFunc("/api/embedding/flush", api.EmbeddingFlushHandler(s.cfg, s.log))

@@ -38,6 +38,12 @@ type ImpactFilter = contextengine.ImpactFilter
 // ProjectionFilter is an alias for the domain-level filter type.
 type ProjectionFilter = contextengine.ProjectionFilter
 
+// RetrievalEpisodeFilter is an alias for the domain-level filter type.
+type RetrievalEpisodeFilter = contextengine.RetrievalEpisodeFilter
+
+// RetrievalFeedbackFilter is an alias for the domain-level filter type.
+type RetrievalFeedbackFilter = contextengine.RetrievalFeedbackFilter
+
 // Store defines the abstract persistence interface for the context engine.
 type Store interface {
 	// Close releases all resources. Safe to call multiple times.
@@ -80,10 +86,12 @@ type Store interface {
 	// Retrieval episodes (append-only).
 	RecordRetrievalEpisode(ctx context.Context, episode contextengine.RetrievalEpisode) (contextengine.RetrievalEpisode, error)
 	GetRetrievalEpisode(ctx context.Context, id string) (contextengine.RetrievalEpisode, error)
+	ListRetrievalEpisodes(ctx context.Context, filter RetrievalEpisodeFilter) ([]contextengine.RetrievalEpisode, error)
 
 	// Retrieval feedback (append-only).
 	RecordRetrievalFeedback(ctx context.Context, feedback contextengine.RetrievalFeedback) (contextengine.RetrievalFeedback, error)
 	GetRetrievalFeedback(ctx context.Context, id string) (contextengine.RetrievalFeedback, error)
+	ListRetrievalFeedback(ctx context.Context, filter RetrievalFeedbackFilter) ([]contextengine.RetrievalFeedback, error)
 
 	// Index verification (for testing).
 	ExplainQueryPlan(ctx context.Context, query string, args ...any) (string, error)
@@ -1030,15 +1038,27 @@ func (s *sqliteStore) GetRetrievalEpisode(ctx context.Context, id string) (conte
 			duration_ms, tokens_used, hit_count, sub_episode_ids, created_at
 		FROM retrieval_episodes WHERE id = ?`, id)
 
+	episode, err := scanRetrievalEpisode(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return contextengine.RetrievalEpisode{}, ErrNotFound
+		}
+		return contextengine.RetrievalEpisode{}, fmt.Errorf("contextengine: get episode: %w", err)
+	}
+	return episode, nil
+}
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanRetrievalEpisode(row rowScanner) (contextengine.RetrievalEpisode, error) {
 	var episode contextengine.RetrievalEpisode
 	var lane, subsJSON, createdAt string
 	if err := row.Scan(&episode.ID, &episode.WorkspaceID, &episode.Query, &lane,
 		&episode.PackID, &episode.DurationMs, &episode.TokensUsed, &episode.HitCount,
 		&subsJSON, &createdAt); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return contextengine.RetrievalEpisode{}, ErrNotFound
-		}
-		return contextengine.RetrievalEpisode{}, fmt.Errorf("contextengine: get episode: %w", err)
+		return contextengine.RetrievalEpisode{}, err
 	}
 	episode.Lane = contextengine.EvidenceLane(lane)
 	_ = json.Unmarshal([]byte(subsJSON), &episode.SubEpisodeIDs)
@@ -1047,6 +1067,44 @@ func (s *sqliteStore) GetRetrievalEpisode(ctx context.Context, id string) (conte
 		episode.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 	}
 	return episode, nil
+}
+
+func (s *sqliteStore) ListRetrievalEpisodes(ctx context.Context, filter RetrievalEpisodeFilter) ([]contextengine.RetrievalEpisode, error) {
+	query := `SELECT id, workspace_id, query, lane, pack_id,
+			duration_ms, tokens_used, hit_count, sub_episode_ids, created_at
+		FROM retrieval_episodes WHERE 1=1`
+	var args []any
+
+	if filter.WorkspaceID != "" {
+		query += " AND workspace_id = ?"
+		args = append(args, filter.WorkspaceID)
+	}
+	if !filter.Since.IsZero() {
+		query += " AND created_at >= ?"
+		args = append(args, filter.Since.UTC().Format(time.RFC3339Nano))
+	}
+
+	query += " ORDER BY created_at ASC, id ASC"
+	if filter.Limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, filter.Limit)
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("contextengine: list episodes: %w", err)
+	}
+	defer rows.Close()
+
+	var episodes []contextengine.RetrievalEpisode
+	for rows.Next() {
+		episode, err := scanRetrievalEpisode(rows)
+		if err != nil {
+			return nil, err
+		}
+		episodes = append(episodes, episode)
+	}
+	return episodes, rows.Err()
 }
 
 // --- Retrieval Feedback (append-only) ---
@@ -1086,15 +1144,23 @@ func (s *sqliteStore) GetRetrievalFeedback(ctx context.Context, id string) (cont
 			used_refs, gap_stmt, correction_stmt, created_at
 		FROM retrieval_feedback WHERE id = ?`, id)
 
+	feedback, err := scanRetrievalFeedback(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return contextengine.RetrievalFeedback{}, ErrNotFound
+		}
+		return contextengine.RetrievalFeedback{}, fmt.Errorf("contextengine: get feedback: %w", err)
+	}
+	return feedback, nil
+}
+
+func scanRetrievalFeedback(row rowScanner) (contextengine.RetrievalFeedback, error) {
 	var feedback contextengine.RetrievalFeedback
 	var kind, refsJSON, createdAt string
 	if err := row.Scan(&feedback.ID, &feedback.WorkspaceID, &feedback.EpisodeID,
 		&kind, &feedback.Query,
 		&refsJSON, &feedback.GapStmt, &feedback.CorrectionStmt, &createdAt); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return contextengine.RetrievalFeedback{}, ErrNotFound
-		}
-		return contextengine.RetrievalFeedback{}, fmt.Errorf("contextengine: get feedback: %w", err)
+		return contextengine.RetrievalFeedback{}, err
 	}
 	feedback.Kind = contextengine.RetrievalFeedbackKind(kind)
 	_ = json.Unmarshal([]byte(refsJSON), &feedback.UsedRefs)
@@ -1103,6 +1169,62 @@ func (s *sqliteStore) GetRetrievalFeedback(ctx context.Context, id string) (cont
 		feedback.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 	}
 	return feedback, nil
+}
+
+func (s *sqliteStore) ListRetrievalFeedback(ctx context.Context, filter RetrievalFeedbackFilter) ([]contextengine.RetrievalFeedback, error) {
+	query := `SELECT id, workspace_id, episode_id, kind, query,
+			used_refs, gap_stmt, correction_stmt, created_at
+		FROM retrieval_feedback WHERE 1=1`
+	var args []any
+
+	if filter.WorkspaceID != "" {
+		query += " AND workspace_id = ?"
+		args = append(args, filter.WorkspaceID)
+	}
+	if filter.EpisodeID != "" {
+		query += " AND episode_id = ?"
+		args = append(args, filter.EpisodeID)
+	}
+	if !filter.Since.IsZero() {
+		query += " AND created_at >= ?"
+		args = append(args, filter.Since.UTC().Format(time.RFC3339Nano))
+	}
+	if len(filter.Kinds) > 0 {
+		query += " AND kind IN ("
+		for i, kind := range filter.Kinds {
+			if !kind.IsValid() {
+				return nil, fmt.Errorf("contextengine: list feedback: unknown kind %q", kind)
+			}
+			if i > 0 {
+				query += ", "
+			}
+			query += "?"
+			args = append(args, string(kind))
+		}
+		query += ")"
+	}
+
+	query += " ORDER BY created_at ASC, id ASC"
+	if filter.Limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, filter.Limit)
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("contextengine: list feedback: %w", err)
+	}
+	defer rows.Close()
+
+	var out []contextengine.RetrievalFeedback
+	for rows.Next() {
+		feedback, err := scanRetrievalFeedback(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, feedback)
+	}
+	return out, rows.Err()
 }
 
 // --- ExplainQueryPlan (testing utility) ---

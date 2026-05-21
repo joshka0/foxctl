@@ -245,7 +245,20 @@ type OAuthSettings struct {
 // Env vars: FOXCTL_CURATOR_ACTIVE_INTERVAL, FOXCTL_CURATOR_DREAM_INTERVAL,
 // FOXCTL_CURATOR_ENABLED, FOXCTL_CURATOR_DRY_RUN, FOXCTL_CURATOR_STALE_AFTER_DAYS,
 // FOXCTL_CURATOR_ARCHIVE_AFTER_DAYS, FOXCTL_CURATOR_ACTIVE_ENABLED,
-// FOXCTL_CURATOR_DREAM_ENABLED.
+// FOXCTL_CURATOR_DREAM_ENABLED, FOXCTL_CURATOR_MEMORY_DRAFTS_ENABLED,
+// FOXCTL_CURATOR_MEMORY_DRAFTS_APPLY_DRAFTS,
+// FOXCTL_CURATOR_MEMORY_DRAFT_LOOKBACK, FOXCTL_CURATOR_MEMORY_DRAFT_LIMIT,
+// FOXCTL_CURATOR_MEMORY_DRAFT_BLUR_WITH_AGENT,
+// FOXCTL_CURATOR_MEMORY_DRAFT_BLUR_AGENT,
+// FOXCTL_CURATOR_MEMORY_DRAFT_BLUR_AGENT_BIN,
+// FOXCTL_CURATOR_MEMORY_DRAFT_BLUR_AGENT_PROVIDER,
+// FOXCTL_CURATOR_MEMORY_DRAFT_BLUR_AGENT_MODEL,
+// FOXCTL_CURATOR_MEMORY_DRAFT_BLUR_FOXCTL_AGENT_ID,
+// FOXCTL_CURATOR_MEMORY_DRAFT_BLUR_PI_MODE,
+// FOXCTL_CURATOR_MEMORY_DRAFT_BLUR_PI_SDK_BIN,
+// FOXCTL_CURATOR_MEMORY_DRAFT_BLUR_PI_SDK_SCRIPT,
+// FOXCTL_CURATOR_MEMORY_DRAFT_BLUR_PI_AGENT_DIR,
+// FOXCTL_CURATOR_MEMORY_DRAFT_BLUR_PI_THINKING.
 type CuratorSettings struct {
 	// ActiveInterval is the tick for the active (light) loop.
 	ActiveInterval time.Duration `mapstructure:"active_interval" json:"active_interval"`
@@ -276,6 +289,51 @@ type CuratorSettings struct {
 
 	// DreamEnabled controls whether the dream loop runs.
 	DreamEnabled *bool `mapstructure:"dream_enabled" json:"dream_enabled"`
+
+	// MemoryDraftsEnabled controls autonomous retrieval-feedback memory draft planning.
+	MemoryDraftsEnabled *bool `mapstructure:"memory_drafts_enabled" json:"memory_drafts_enabled"`
+
+	// MemoryDraftsApplyDrafts writes planned drafts to the Obsidian inbox.
+	MemoryDraftsApplyDrafts *bool `mapstructure:"memory_drafts_apply_drafts" json:"memory_drafts_apply_drafts"`
+
+	// MemoryDraftLookback bounds the retrieval feedback scan.
+	MemoryDraftLookback time.Duration `mapstructure:"memory_draft_lookback" json:"memory_draft_lookback"`
+
+	// MemoryDraftLimit bounds planned drafts per dream cycle.
+	MemoryDraftLimit int `mapstructure:"memory_draft_limit" json:"memory_draft_limit"`
+
+	// MemoryDraftBlurWithAgent runs a real configured agent over planned memory drafts.
+	MemoryDraftBlurWithAgent *bool `mapstructure:"memory_draft_blur_with_agent" json:"memory_draft_blur_with_agent"`
+
+	// MemoryDraftBlurAgent selects the blur backend: pi, hermes, claude, or foxctl.
+	MemoryDraftBlurAgent string `mapstructure:"memory_draft_blur_agent" json:"memory_draft_blur_agent"`
+
+	// MemoryDraftBlurAgentBin overrides the selected backend executable.
+	MemoryDraftBlurAgentBin string `mapstructure:"memory_draft_blur_agent_bin" json:"memory_draft_blur_agent_bin"`
+
+	// MemoryDraftBlurAgentProvider overrides provider selection for backends that support it.
+	MemoryDraftBlurAgentProvider string `mapstructure:"memory_draft_blur_agent_provider" json:"memory_draft_blur_agent_provider"`
+
+	// MemoryDraftBlurAgentModel overrides model selection for backends that support it.
+	MemoryDraftBlurAgentModel string `mapstructure:"memory_draft_blur_agent_model" json:"memory_draft_blur_agent_model"`
+
+	// MemoryDraftBlurFoxctlAgentID selects the existing foxctl agent for the foxctl backend.
+	MemoryDraftBlurFoxctlAgentID string `mapstructure:"memory_draft_blur_foxctl_agent_id" json:"memory_draft_blur_foxctl_agent_id"`
+
+	// MemoryDraftBlurPiMode selects the Pi runner mode: sdk or cli.
+	MemoryDraftBlurPiMode string `mapstructure:"memory_draft_blur_pi_mode" json:"memory_draft_blur_pi_mode"`
+
+	// MemoryDraftBlurPiSDKBin selects the executable used for the Pi SDK runner.
+	MemoryDraftBlurPiSDKBin string `mapstructure:"memory_draft_blur_pi_sdk_bin" json:"memory_draft_blur_pi_sdk_bin"`
+
+	// MemoryDraftBlurPiSDKScript overrides the Pi SDK memory blur runner script.
+	MemoryDraftBlurPiSDKScript string `mapstructure:"memory_draft_blur_pi_sdk_script" json:"memory_draft_blur_pi_sdk_script"`
+
+	// MemoryDraftBlurPiAgentDir selects the Pi agent directory for auth and models.
+	MemoryDraftBlurPiAgentDir string `mapstructure:"memory_draft_blur_pi_agent_dir" json:"memory_draft_blur_pi_agent_dir"`
+
+	// MemoryDraftBlurPiThinking selects the Pi SDK thinking level.
+	MemoryDraftBlurPiThinking string `mapstructure:"memory_draft_blur_pi_thinking" json:"memory_draft_blur_pi_thinking"`
 }
 
 // MarshalJSON implements json.Marshaler to redact secret fields.

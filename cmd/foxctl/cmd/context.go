@@ -36,6 +36,7 @@ func newContextCommand() *cobra.Command {
 		newContextFamilyHistorySummaryCommand(),
 		newContextCoChangeCommand(),
 		newContextMotifsCommand(),
+		newContextMechanismsCommand(),
 		newContextNextCommand(),
 		newContextNextProposalMergeCommand(),
 		newContextDispatchCommand(),

@@ -149,7 +149,8 @@ var scoringRowRe = regexp.MustCompile(
 // judgeNoteRe extracts the per-idea "main strength" from the final checklist.
 // Supports EN (Idea) and FR (Idée) headers, and ✓ ✔ ☑ prefixes.
 var judgeNoteRe = regexp.MustCompile(
-	`[✓✔☑]\s*(?:Id[eé]e|Idea)\s*#?(\d+)\s*[—\-–]+\s*Score\s*([\d.,]+)\s*[—\-–]+\s*(.*)`)
+	`[✓✔☑]\s*(?:Id[eé]e|Idea)\s*#?(\d+)\s*[—\-–]+\s*Score\s*([\d.,]+)\s*[—\-–]+\s*(.*)`,
+)
 
 // ParseScoringTable extracts AxisScores from the judge-response markdown table.
 // Returns an empty (non-nil) slice if the table is missing or malformed.

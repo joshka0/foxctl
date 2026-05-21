@@ -989,6 +989,42 @@ class FoxctlClient:
             "proposals": proposals,
         }
 
+    def context_memory_drafts(
+        self,
+        apply_drafts: bool = False,
+        dry_run: bool = True,
+        lookback: str = "24h",
+        limit: int = 20,
+        vault_path: Optional[str] = None,
+        blur_with_agent: bool = False,
+        blur_agent: str = "hermes",
+        blur_agent_bin: Optional[str] = None,
+        blur_agent_provider: Optional[str] = None,
+        blur_agent_model: Optional[str] = None,
+        foxctl_agent_id: Optional[str] = None,
+    ) -> Dict:
+        """Plan or write Obsidian inbox memory drafts from retrieval feedback."""
+        body = {
+            "workspace": self.cfg.workspace,
+            "vault_path": vault_path or self.cfg.vault_path,
+            "apply_drafts": apply_drafts,
+            "dry_run": dry_run,
+            "lookback": lookback,
+            "limit": limit,
+        }
+        if blur_with_agent:
+            body["blur_with_agent"] = True
+            body["blur_agent"] = blur_agent or "hermes"
+            if blur_agent_bin:
+                body["blur_agent_bin"] = blur_agent_bin
+            if blur_agent_provider:
+                body["blur_agent_provider"] = blur_agent_provider
+            if blur_agent_model:
+                body["blur_agent_model"] = blur_agent_model
+            if foxctl_agent_id:
+                body["foxctl_agent_id"] = foxctl_agent_id
+        return self._post("/api/context/memory-drafts", body)
+
     @staticmethod
     def _days_since(iso_timestamp: str) -> int:
         """Days since an ISO timestamp."""

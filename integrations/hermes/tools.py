@@ -2276,4 +2276,86 @@ def register_tools(ctx, client: FoxctlClient, cfg: FoxctlConfig) -> None:
         check_fn=check_foxctl_available,
     )
 
-    logger.info("Registered %d foxctl tools", 71)
+    ctx.register_tool(
+        name="foxctl_context_memory_drafts",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_context_memory_drafts",
+            "description": (
+                "Plan or write Obsidian inbox memory drafts from typed contextengine "
+                "retrieval feedback. Canonical note merges remain review-gated."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "apply_drafts": {
+                        "type": "boolean",
+                        "description": "Write planned inbox drafts and prepared review proposals",
+                        "default": False,
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "Prevent draft writes even when apply_drafts is true",
+                        "default": True,
+                    },
+                    "lookback": {
+                        "type": "string",
+                        "description": "Retrieval feedback lookback window, e.g. 24h",
+                        "default": "24h",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum memory drafts to plan",
+                        "default": 20,
+                    },
+                    "vault_path": {
+                        "type": "string",
+                        "description": "Optional Obsidian vault path override",
+                    },
+                    "blur_with_agent": {
+                        "type": "boolean",
+                        "description": "Ask a configured real agent to blur each planned draft",
+                        "default": False,
+                    },
+                    "blur_agent": {
+                        "type": "string",
+                        "description": "Blur backend: pi, hermes, claude, foxctl, or command",
+                        "default": "hermes",
+                    },
+                    "blur_agent_bin": {
+                        "type": "string",
+                        "description": "Executable override for the selected blur backend",
+                    },
+                    "blur_agent_provider": {
+                        "type": "string",
+                        "description": "Provider override for Pi or Hermes blur backends",
+                    },
+                    "blur_agent_model": {
+                        "type": "string",
+                        "description": "Model override for Pi, Hermes, or Claude blur backends",
+                    },
+                    "foxctl_agent_id": {
+                        "type": "string",
+                        "description": "Existing foxctl agent id for the foxctl blur backend",
+                    },
+                },
+                "required": [],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.context_memory_drafts(
+            apply_drafts=args.get("apply_drafts", False),
+            dry_run=args.get("dry_run", True),
+            lookback=args.get("lookback", "24h"),
+            limit=args.get("limit", 20),
+            vault_path=args.get("vault_path"),
+            blur_with_agent=args.get("blur_with_agent", False),
+            blur_agent=args.get("blur_agent", "hermes"),
+            blur_agent_bin=args.get("blur_agent_bin"),
+            blur_agent_provider=args.get("blur_agent_provider"),
+            blur_agent_model=args.get("blur_agent_model"),
+            foxctl_agent_id=args.get("foxctl_agent_id"),
+        )),
+        check_fn=check_foxctl_available,
+    )
+
+    logger.info("Registered %d foxctl tools", 72)
