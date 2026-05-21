@@ -77,6 +77,8 @@ type turbovecStore struct {
 
 // WrapWithTurboVec wraps a Store with turbovec-accelerated VectorRecall.
 // If cfg.Enabled is false, returns the underlying store unchanged.
+// If the sidecar socket is not reachable, logs a warning and falls back
+// to the underlying store so foxctl works fine without turbovecd.
 func WrapWithTurboVec(store Store, workspaceID string, dim int, cfg TurboVecConfig) Store {
 	if !cfg.Enabled {
 		return store
@@ -92,6 +94,12 @@ func WrapWithTurboVec(store Store, workspaceID string, dim int, cfg TurboVecConf
 		DataDir:    cfg.DataDir,
 		BitWidth:   cfg.BitWidth,
 	})
+
+	// Probe the sidecar — if not running, warn and fall back gracefully.
+	if !turbovec.IsAvailable() {
+		fmt.Printf("turbovec: sidecar not reachable at %s, falling back to brute-force search\n", cfg.SocketPath)
+		return store
+	}
 
 	return &turbovecStore{
 		Store: store,

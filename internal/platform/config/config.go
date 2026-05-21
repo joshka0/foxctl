@@ -907,7 +907,7 @@ func applyDefaults(v *viper.Viper, defaultHome string) {
 	v.SetDefault("database.vector.enabled", true)
 	v.SetDefault("database.vector.dimensions", dbdriver.DefaultVectorDimensions)
 	// Turbovec sidecar defaults
-	v.SetDefault("turbovec.enabled", false)
+	v.SetDefault("turbovec.enabled", true)
 	v.SetDefault("turbovec.bit_width", 4)
 	// CAS policy defaults - store always on, expose off by default (hooks/tools)
 	v.SetDefault("cas.store", true)
