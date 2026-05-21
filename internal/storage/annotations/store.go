@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/joshka0/foxctl/internal/intelligence/turbovec"
 	errs "github.com/joshka0/foxctl/internal/platform/errors"
 	"github.com/joshka0/foxctl/internal/platform/timeutil"
 	"github.com/joshka0/foxctl/internal/storage"
@@ -29,6 +31,10 @@ type Store struct {
 	db    *sql.DB
 	path  string
 	close func() error
+
+	// searcher is lazily initialized on first vector search.
+	searcher     vector.VectorSearcher
+	searcherOnce sync.Once
 }
 
 // Connection pool defaults.
@@ -281,6 +287,15 @@ func (s *Store) SearchSimilar(ctx context.Context, embedding []float32, limit in
 	return s.SearchSimilarFiltered(ctx, embedding, AnnotationSearchOptions{Limit: limit})
 }
 
+// getSearcher lazily initializes the vector searcher on first call.
+func (s *Store) getSearcher(dim int) vector.VectorSearcher {
+	s.searcherOnce.Do(func() {
+		socketPath := turbovec.DefaultSocketPath()
+		s.searcher = vector.NewSearcher("annotations", socketPath, dim)
+	})
+	return s.searcher
+}
+
 // SearchSimilarFiltered returns top-N annotations by cosine similarity with optional prefilters.
 func (s *Store) SearchSimilarFiltered(ctx context.Context, embedding []float32, opts AnnotationSearchOptions) ([]ScoredAnnotation, error) {
 	limit := opts.Limit
@@ -322,7 +337,12 @@ func (s *Store) SearchSimilarFiltered(ctx context.Context, embedding []float32, 
 		return nil, err
 	}
 
-	scored := make([]ScoredAnnotation, 0, len(anns))
+	// Build candidate list for the vector searcher.
+	type annCandidate struct {
+		ann       *TurnAnnotation
+		embedding []float32
+	}
+	var validAnns []annCandidate
 	for _, ann := range anns {
 		if len(ann.Embedding) == 0 {
 			continue
@@ -331,15 +351,44 @@ func (s *Store) SearchSimilarFiltered(ctx context.Context, embedding []float32, 
 		if len(candidateEmbedding) == 0 || len(candidateEmbedding) != len(embedding) {
 			continue
 		}
-		scored = append(scored, ScoredAnnotation{TurnAnnotation: ann, Similarity: vector.Cosine(embedding, candidateEmbedding)})
+		validAnns = append(validAnns, annCandidate{ann: ann, embedding: candidateEmbedding})
 	}
 
-	sort.Slice(scored, func(i, j int) bool {
-		return scored[i].Similarity > scored[j].Similarity
-	})
+	idEmbeds := make([]vector.IDEmbedding, len(validAnns))
+	for i, c := range validAnns {
+		idEmbeds[i] = vector.IDEmbedding{ID: c.ann.ID, Embedding: c.embedding}
+	}
 
-	if len(scored) > limit {
-		scored = scored[:limit]
+	// Use the vector searcher for cosine similarity ranking.
+	searcher := s.getSearcher(len(embedding))
+	scoredIDs, searchErr := searcher.Search(ctx, embedding, idEmbeds, limit)
+	if searchErr != nil {
+		// Fallback to inline cosine if searcher fails.
+		scoredIDs = nil
+		for _, c := range validAnns {
+			sim := vector.Cosine(embedding, c.embedding)
+			scoredIDs = append(scoredIDs, vector.ScoredID{ID: c.ann.ID, Score: sim})
+		}
+		sort.Slice(scoredIDs, func(i, j int) bool {
+			return scoredIDs[i].Score > scoredIDs[j].Score
+		})
+		if len(scoredIDs) > limit {
+			scoredIDs = scoredIDs[:limit]
+		}
+	}
+
+	// Build lookup map for annotations by ID.
+	annMap := make(map[string]*TurnAnnotation, len(validAnns))
+	for _, c := range validAnns {
+		annMap[c.ann.ID] = c.ann
+	}
+
+	// Map scored results back to ScoredAnnotation.
+	scored := make([]ScoredAnnotation, 0, len(scoredIDs))
+	for _, s := range scoredIDs {
+		if ann, ok := annMap[s.ID]; ok {
+			scored = append(scored, ScoredAnnotation{TurnAnnotation: ann, Similarity: s.Score})
+		}
 	}
 
 	return scored, nil

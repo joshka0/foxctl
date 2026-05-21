@@ -8,16 +8,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+	"github.com/joshka0/foxctl/internal/intelligence/turbovec"
 	"github.com/joshka0/foxctl/internal/platform/timeutil"
 	"github.com/joshka0/foxctl/internal/storage/dbutil"
+	"github.com/joshka0/foxctl/internal/storage/vector"
 	obsidiantool "github.com/joshka0/foxctl/internal/tooling/tools/obsidian"
 	"github.com/oklog/ulid/v2"
 )
@@ -149,6 +151,10 @@ type sqlStore struct {
 	close   func() error
 	dbPath  string
 	vaultID string
+
+	// searcher is lazily initialized on first vector search.
+	searcher     vector.VectorSearcher
+	searcherOnce sync.Once
 }
 
 func Open(ctx context.Context, storageRoot, vaultRoot string) (Store, error) {
@@ -944,6 +950,8 @@ func (s *sqlStore) SearchNotesSemantic(ctx context.Context, query string, provid
 			return nil, fmt.Errorf("obsidianindex: embed query: %w", err)
 		}
 	}
+
+	// --- Note-level candidates ---
 	rows, err := s.db.QueryContext(ctx, `
 SELECT n.path, n.title, COALESCE(n.type,''), COALESCE(n.project,''), COALESCE(n.status,''), COALESCE(n.trust,''), COALESCE(n.primary_anchor_path,''), COALESCE(n.anchor_roles_json,''),
        COALESCE((SELECT c.text FROM obsidian_chunks c WHERE c.note_id = n.id ORDER BY length(c.text) ASC LIMIT 1), ''),
@@ -959,7 +967,12 @@ ORDER BY n.path ASC
 		return nil, fmt.Errorf("obsidianindex: semantic note query: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	hitByPath := map[string]SearchHit{}
+
+	type noteCandidate struct {
+		hit       SearchHit
+		embedding []float32
+	}
+	var noteCandidates []noteCandidate
 	for rows.Next() {
 		var hit SearchHit
 		var repoPathsCSV, anchorPathsCSV, anchorRolesJSON, symbolsCSV, embeddingJSON string
@@ -970,17 +983,18 @@ ORDER BY n.path ASC
 		if err := json.Unmarshal([]byte(embeddingJSON), &embedding); err != nil {
 			return nil, fmt.Errorf("obsidianindex: decode semantic embedding: %w", err)
 		}
-		hit.Score = int(cosineSimilarity(queryEmbedding, embedding) * 1000)
 		hit.Snippet = compactSnippet(hit.Snippet)
 		hit.RepoPaths = splitCSV(repoPathsCSV)
 		hit.AnchorPaths = splitCSV(anchorPathsCSV)
 		hit.AnchorRoles = decodeAnchorRolesJSON(anchorRolesJSON)
 		hit.Symbols = splitCSV(symbolsCSV)
-		hitByPath[hit.Path] = hit
+		noteCandidates = append(noteCandidates, noteCandidate{hit: hit, embedding: embedding})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+
+	// --- Chunk-level candidates ---
 	chunkRows, err := s.db.QueryContext(ctx, `
 SELECT path, chunk_index, heading, text, embedding_json
 FROM obsidian_chunk_embeddings
@@ -991,6 +1005,13 @@ ORDER BY path ASC, chunk_index ASC
 		return nil, fmt.Errorf("obsidianindex: semantic chunk query: %w", err)
 	}
 	defer func() { _ = chunkRows.Close() }()
+
+	type chunkCandidate struct {
+		path      string
+		text      string
+		embedding []float32
+	}
+	var chunkCandidates []chunkCandidate
 	for chunkRows.Next() {
 		var path string
 		var chunkIndex int
@@ -1003,17 +1024,109 @@ ORDER BY path ASC, chunk_index ASC
 		if err := json.Unmarshal([]byte(embeddingJSON), &embedding); err != nil {
 			return nil, fmt.Errorf("obsidianindex: decode semantic chunk embedding: %w", err)
 		}
-		score := int(cosineSimilarity(queryEmbedding, embedding) * 1000)
-		hit := hitByPath[path]
-		if score > hit.Score {
-			hit.Score = score
-			hit.Snippet = compactSnippet(text)
-			hitByPath[path] = hit
-		}
+		chunkCandidates = append(chunkCandidates, chunkCandidate{path: path, text: text, embedding: embedding})
 	}
 	if err := chunkRows.Err(); err != nil {
 		return nil, err
 	}
+
+	// --- Build combined candidate list for the vector searcher ---
+	// Use a unique key for each candidate: note paths as-is, chunk paths suffixed with ":chunk:N".
+	totalCandidates := len(noteCandidates) + len(chunkCandidates)
+	idEmbeds := make([]vector.IDEmbedding, 0, totalCandidates)
+	for _, nc := range noteCandidates {
+		idEmbeds = append(idEmbeds, vector.IDEmbedding{ID: "note:" + nc.hit.Path, Embedding: nc.embedding})
+	}
+	for i, cc := range chunkCandidates {
+		idEmbeds = append(idEmbeds, vector.IDEmbedding{
+			ID:        fmt.Sprintf("chunk:%s:%d", cc.path, i),
+			Embedding: cc.embedding,
+		})
+	}
+
+	// Use the vector searcher for cosine similarity ranking.
+	// Request more candidates since we need to merge per-path.
+	fetchLimit := limit * 2
+	if fetchLimit < 50 {
+		fetchLimit = 50
+	}
+	searcher := s.getSearcher(len(queryEmbedding))
+	scoredIDs, searchErr := searcher.Search(ctx, queryEmbedding, idEmbeds, fetchLimit)
+	if searchErr != nil {
+		// Fallback to inline cosine if searcher fails.
+		scoredIDs = nil
+		for _, ie := range idEmbeds {
+			sim := vector.Cosine(queryEmbedding, ie.Embedding)
+			scoredIDs = append(scoredIDs, vector.ScoredID{ID: ie.ID, Score: sim})
+		}
+		sort.Slice(scoredIDs, func(i, j int) bool {
+			return scoredIDs[i].Score > scoredIDs[j].Score
+		})
+		if len(scoredIDs) > fetchLimit {
+			scoredIDs = scoredIDs[:fetchLimit]
+		}
+	}
+
+	// Build lookup maps for note candidates by path.
+	noteMap := make(map[string]SearchHit, len(noteCandidates))
+	for _, nc := range noteCandidates {
+		noteMap[nc.hit.Path] = nc.hit
+	}
+	// Build lookup for chunk candidates.
+	chunkMap := make(map[string]chunkCandidate, len(chunkCandidates))
+	for i, cc := range chunkCandidates {
+		key := fmt.Sprintf("chunk:%s:%d", cc.path, i)
+		chunkMap[key] = cc
+	}
+
+	// Merge scored results into per-path hits (best score wins).
+	hitByPath := map[string]SearchHit{}
+	for _, s := range scoredIDs {
+		var path string
+		var score int
+		if strings.HasPrefix(s.ID, "note:") {
+			path = strings.TrimPrefix(s.ID, "note:")
+			score = int(s.Score * 1000)
+			if hit, exists := hitByPath[path]; !exists || score > hit.Score {
+				hit.Score = score
+				// Fill in metadata from noteMap if not already present.
+				if nh, ok := noteMap[path]; ok && hit.Title == "" {
+					hit = nh
+					hit.Score = score
+				}
+				hitByPath[path] = hit
+			}
+		} else if strings.HasPrefix(s.ID, "chunk:") {
+			cc, ok := chunkMap[s.ID]
+			if !ok {
+				continue
+			}
+			path = cc.path
+			score = int(s.Score * 1000)
+			if hit, exists := hitByPath[path]; !exists || score > hit.Score {
+				hit.Score = score
+				hit.Snippet = compactSnippet(cc.text)
+				// Fill in metadata from noteMap if not already present.
+				if nh, ok := noteMap[path]; ok && hit.Title == "" {
+					hit.Path = nh.Path
+					hit.Title = nh.Title
+					hit.Type = nh.Type
+					hit.Project = nh.Project
+					hit.Status = nh.Status
+					hit.Trust = nh.Trust
+					hit.PrimaryAnchorPath = nh.PrimaryAnchorPath
+					hit.AnchorRoles = nh.AnchorRoles
+					hit.RepoPaths = nh.RepoPaths
+					hit.AnchorPaths = nh.AnchorPaths
+					hit.Symbols = nh.Symbols
+				} else if !exists {
+					hit.Path = path
+				}
+				hitByPath[path] = hit
+			}
+		}
+	}
+
 	hits := make([]SearchHit, 0, len(hitByPath))
 	for _, hit := range hitByPath {
 		hits = append(hits, hit)
@@ -1028,6 +1141,15 @@ ORDER BY path ASC, chunk_index ASC
 		hits = hits[:limit]
 	}
 	return hits, nil
+}
+
+// getSearcher lazily initializes the vector searcher on first call.
+func (s *sqlStore) getSearcher(dim int) vector.VectorSearcher {
+	s.searcherOnce.Do(func() {
+		socketPath := turbovec.DefaultSocketPath()
+		s.searcher = vector.NewSearcher("obsidian", socketPath, dim)
+	})
+	return s.searcher
 }
 
 func (s *sqlStore) Stats(ctx context.Context) (Stats, error) {
@@ -1645,24 +1767,6 @@ func isObsidianBusyErr(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "database is locked") || strings.Contains(msg, "sqlite_busy")
-}
-
-func cosineSimilarity(a, b []float32) float64 {
-	if len(a) == 0 || len(a) != len(b) {
-		return 0
-	}
-	var dot, normA, normB float64
-	for i := range a {
-		af := float64(a[i])
-		bf := float64(b[i])
-		dot += af * bf
-		normA += af * af
-		normB += bf * bf
-	}
-	if normA == 0 || normB == 0 {
-		return 0
-	}
-	return dot / (math.Sqrt(normA) * math.Sqrt(normB))
 }
 
 func (s *sqlStore) validateEmbeddingMetadata(ctx context.Context, provider semantic.EmbeddingProvider) error {
