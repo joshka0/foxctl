@@ -27,6 +27,31 @@ type TurboVecConfig struct {
 	BitWidth int
 }
 
+// OpenWithTurboVec opens a SQL-backed search index and, when cfg.Enabled is
+// true, wraps it with the turbovec-accelerated VectorRecall path. The caller
+// must supply a non-empty workspaceID and the embedding dimensionality (dim)
+// for the workspace so the turbovec index can be initialised correctly.
+func OpenWithTurboVec(ctx context.Context, root, workspaceID string, dim int, cfg TurboVecConfig) (Store, error) {
+	store, err := Open(ctx, root)
+	if err != nil {
+		return nil, err
+	}
+	return WrapWithTurboVec(store, workspaceID, dim, cfg), nil
+}
+
+// OpenEphemeralWithTurboVec creates an isolated search index under a temporary
+// root and, when cfg.Enabled is true, wraps it with the turbovec accelerator.
+// It returns the store and a cleanup function that closes the store and removes
+// the temporary directory.
+func OpenEphemeralWithTurboVec(ctx context.Context, baseRoot, workspaceID string, dim int, cfg TurboVecConfig) (Store, func() error, error) {
+	store, cleanup, err := OpenEphemeral(ctx, baseRoot)
+	if err != nil {
+		return nil, nil, err
+	}
+	wrapped := WrapWithTurboVec(store, workspaceID, dim, cfg)
+	return wrapped, cleanup, nil
+}
+
 // turbovecStore wraps a sqlStore and accelerates VectorRecall via the
 // turbovec sidecar. All other operations (LexicalRecall, ExactRecall, Upsert,
 // etc.) delegate to the underlying sqlStore.

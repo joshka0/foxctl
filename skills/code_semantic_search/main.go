@@ -1398,7 +1398,12 @@ func searchSymbolsWithRetrieval(
 		return direct, nil, nil
 	}
 
-	indexStore, cleanupIndex, err := searchindex.OpenEphemeral(ctx, cfg.Storage.Root)
+	indexStore, cleanupIndex, err := searchindex.OpenEphemeralWithTurboVec(ctx, cfg.Storage.Root, workspaceID, cfg.Database.Vector.Dimensions, searchindex.TurboVecConfig{
+		Enabled:    cfg.Turbovec.Enabled,
+		SocketPath: cfg.Turbovec.SocketPath,
+		DataDir:    cfg.Storage.Root,
+		BitWidth:   cfg.Turbovec.BitWidth,
+	})
 	if err != nil {
 		return nil, nil, skillerr.WrapIO("open ephemeral search index", err)
 	}
