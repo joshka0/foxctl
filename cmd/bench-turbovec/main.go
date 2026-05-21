@@ -253,7 +253,7 @@ func main() {
 	printSummary(bruteTime, jsonTime, searchTime, rawRecall, totalRerankTime, rerankRecall)
 
 	// Save the benchmark index.
-	if err := os.MkdirAll(filepath.Join(os.Getenv("HOME"), ".foxctl", "storage"), 0755); err == nil {
+	if err := os.MkdirAll(filepath.Join(os.Getenv("HOME"), ".foxctl", "storage"), 0o755); err == nil {
 		savePath := filepath.Join(os.Getenv("HOME"), ".foxctl", "storage", "benchmark.tvim")
 		if err := client.Save(indexName, savePath); err == nil {
 			fi, _ := os.Stat(savePath)
