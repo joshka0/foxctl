@@ -52,6 +52,7 @@ bun run unused:frontend
 ```
 
 `check:frontend` includes `bun run --cwd packages/foxterm typecheck`.
+`unused:frontend` also runs the targeted frontend dead-export report.
 
 Runs view shortcuts:
 

@@ -34,9 +34,8 @@ Remaining areas from the results doc after the completed slices:
     dead `@foxctl/data` orchestration exports.
   - Completed: added a real report-only dead-export/dependency graph pass with
     `bun run dead:frontend`.
-  - Follow-up only: decide whether the broad `@foxctl/data/client` helper
-    surface is intentional package API or should be hard-cut to active UI
-    callers.
+  - Completed: hard-cut the broad `@foxctl/data/client` helper surface to
+    active UI callers.
 - Structural consolidation:
   - Completed: consolidate duplicated skill `inline_mode` parsing.
   - Completed: consolidate repeated repo-index skill workspace resolution
@@ -230,8 +229,8 @@ Done when:
   the obsolete `APIResponse<T>` type was deleted.
 - Unused-code tooling is documented and wired so future cleanup can be repeated
   with `bun run unused:frontend`.
-- Remaining scope: decide the intended `@foxctl/data/client` exported endpoint
-  surface before further shared-client export deletion.
+- Remaining scope: re-run a completion audit after the next main-branch sync to
+  verify no residual cleanup item is still unproven.
 - Verification passes:
   - `bun run --cwd packages/gui-agent build`
   - `bun run --cwd packages/foxterm typecheck`

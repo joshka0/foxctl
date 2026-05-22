@@ -1,8 +1,4 @@
-// @foxctl/data - Shared data layer for foxctl UIs
+// @foxctl/data - shared data contracts for foxctl UIs.
 
-// Re-export all types
 export * from "./types";
 export * from "./orchestration";
-
-// Re-export all client functions
-export * from "./client";

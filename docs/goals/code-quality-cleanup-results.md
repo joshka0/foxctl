@@ -92,9 +92,7 @@ merge, rebase or merge current `main` and rerun the full verification set.
   and GitLab runs the gate in a Bun-based `typescript-frontend` job.
 - Frontend exported-symbol checks now have a repo-local dependency graph pass:
   `bun run dead:frontend`. It uses the TypeScript compiler API over active
-  frontend packages, reports targeted externally unused exports, and stays
-  report-only by default while the shared `@foxctl/data/client` public surface
-  is being calibrated.
+  frontend packages and reports targeted externally unused exports.
 - Existing `gui-agent` ESLint React hook findings were cleaned up, and
   `bun run --cwd packages/gui-agent lint` now participates in
   `bun run check:frontend`.
@@ -107,7 +105,10 @@ merge, rebase or merge current `main` and rerun the full verification set.
   were removed.
 - Companion live demo binaries moved to `examples/manual-smoke/companion/*`
   behind the `manualsmoke` build tag.
-- `@foxctl/data/client` now uses canonical agent spawn/ask and mailbox routes.
+- `@foxctl/data/client` was hard-cut to the active orchestration board UI
+  workflow. The root `@foxctl/data` entrypoint no longer re-exports client
+  helpers; callers use `@foxctl/data/client` explicitly for the narrow
+  orchestration board API.
 - Room status now emits canonical `actionable_backlog`; the GUI client no
   longer translates legacy `action_required` payloads.
 - foxterm now imports shared room DTOs directly from `@foxctl/data/types`.
@@ -148,6 +149,9 @@ merge, rebase or merge current `main` and rerun the full verification set.
   exported, the internal orchestration board shape guards are package-private,
   and the unused `APIResponse<T>` type was deleted in favor of canonical
   `ApiEnvelope<T>`.
+- The broad unused `@foxctl/data/client` endpoint helper surface was deleted
+  after active caller and dead-export graph evidence showed only orchestration
+  board helpers were imported by current UIs.
 
 ### Honesty Fixes
 
@@ -206,12 +210,11 @@ Verification has been run slice-by-slice, including:
 - Completed: added a broader report-only dead-export/dependency graph pass for
   active frontend packages with `bun run dead:frontend`, and wired it into
   `bun run unused:frontend`.
-- Follow-up: decide whether the current broad `@foxctl/data/client` endpoint
-  helper surface is intentional package API or should be hard-cut to only
-  active UI callers.
+- Completed: hard-cut the current broad `@foxctl/data/client` endpoint helper
+  surface to only active UI callers.
 - `bun run unused:frontend` is now the repeatable compiler/linter gate for
-  unused frontend imports, locals, parameters, and report-only targeted export
-  graph findings. The export pass does not replace caller search before deletion.
+  unused frontend imports, locals, parameters, and targeted export graph
+  findings. The export pass does not replace caller search before deletion.
 
 ### Structural Consolidation
 
@@ -254,7 +257,6 @@ Verification has been run slice-by-slice, including:
 
 ## Recommended Next Slices
 
-1. Decide and document the intended `@foxctl/data/client` package API: keep it
-   as a broad operator/API client surface, or hard-cut it to active UI callers
-   and delete the externally unused endpoint helper exports reported by
-   `bun run dead:frontend`.
+1. Re-run a completion audit against this goal file and the MR after the next
+   main-branch sync to decide whether any residual cleanup item is still
+   unproven.
