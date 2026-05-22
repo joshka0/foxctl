@@ -2,9 +2,12 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+
+	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 )
 
 func TestNewRegistry(t *testing.T) {
@@ -49,6 +52,10 @@ func TestReadFile(t *testing.T) {
 		if result.IsError {
 			t.Fatalf("readFile() returned error: %v", result.Content)
 		}
+		payload := callToolPayload(t, result)
+		if payload["content"] != content {
+			t.Fatalf("content=%q want %q", payload["content"], content)
+		}
 	})
 
 	t.Run("read with line range", func(t *testing.T) {
@@ -62,6 +69,13 @@ func TestReadFile(t *testing.T) {
 		}
 		if result.IsError {
 			t.Fatalf("readFile() returned error: %v", result.Content)
+		}
+		payload := callToolPayload(t, result)
+		if payload["content"] != "line2\nline3\nline4" {
+			t.Fatalf("content=%q", payload["content"])
+		}
+		if payload["start_line"] != float64(2) || payload["end_line"] != float64(4) {
+			t.Fatalf("range=%v:%v", payload["start_line"], payload["end_line"])
 		}
 	})
 
@@ -84,6 +98,19 @@ func TestReadFile(t *testing.T) {
 		}
 		if !result.IsError {
 			t.Error("expected error for nonexistent file")
+		}
+	})
+
+	t.Run("invalid line type", func(t *testing.T) {
+		result, err := r.readFile(ctx, map[string]any{
+			"path":       "test.txt",
+			"start_line": "2",
+		})
+		if err != nil {
+			t.Fatalf("readFile() error = %v", err)
+		}
+		if !result.IsError {
+			t.Error("expected error for invalid start_line")
 		}
 	})
 }
@@ -177,4 +204,21 @@ func TestHelperFunctions(t *testing.T) {
 			t.Errorf("expected 1 content, got %d", len(result.Content))
 		}
 	})
+}
+
+func callToolPayload(t *testing.T, result *models.CallToolResult) map[string]any {
+	t.Helper()
+
+	if len(result.Content) != 1 {
+		t.Fatalf("content count=%d", len(result.Content))
+	}
+	text, ok := result.Content[0].(models.TextContent)
+	if !ok {
+		t.Fatalf("content type=%T", result.Content[0])
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(text.Text), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	return payload
 }

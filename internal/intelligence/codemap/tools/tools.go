@@ -158,13 +158,16 @@ func (r *Registry) registerReadFile() error {
 
 // readFile implements the read_file tool.
 func (r *Registry) readFile(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
-	path, ok := args["path"].(string)
-	if !ok || path == "" {
+	input, err := decodeToolArgs[readFileArgs](args)
+	if err != nil {
+		return errorResult(fmt.Sprintf("invalid read_file arguments: %v", err)), nil
+	}
+	if input.Path == "" {
 		return errorResult("path is required"), nil
 	}
 
 	// Resolve path relative to workspace
-	fullPath := filepath.Join(r.workspace, path)
+	fullPath := filepath.Join(r.workspace, input.Path)
 
 	// Evaluate symlinks to prevent path traversal via symlinks
 	resolvedPath, err := filepath.EvalSymlinks(fullPath)
@@ -199,11 +202,11 @@ func (r *Registry) readFile(ctx context.Context, args map[string]any) (*models.C
 	startLine := 1
 	endLine := len(lines)
 
-	if sl, ok := args["start_line"].(float64); ok && sl > 0 {
-		startLine = int(sl)
+	if input.StartLine > 0 {
+		startLine = input.StartLine
 	}
-	if el, ok := args["end_line"].(float64); ok && el > 0 {
-		endLine = int(el)
+	if input.EndLine > 0 {
+		endLine = input.EndLine
 	}
 
 	// Clamp to valid range
@@ -221,12 +224,18 @@ func (r *Registry) readFile(ctx context.Context, args map[string]any) (*models.C
 	selectedLines := lines[startLine-1 : endLine]
 
 	return successResult(map[string]any{
-		"path":        path,
+		"path":        input.Path,
 		"content":     strings.Join(selectedLines, "\n"),
 		"start_line":  startLine,
 		"end_line":    endLine,
 		"total_lines": len(lines),
 	}), nil
+}
+
+type readFileArgs struct {
+	Path      string `json:"path"`
+	StartLine int    `json:"start_line,omitempty"`
+	EndLine   int    `json:"end_line,omitempty"`
 }
 
 // registerSearchPattern registers the search_pattern tool.
@@ -603,6 +612,18 @@ func (r *Registry) runSkill(ctx context.Context, skillName string, input map[str
 }
 
 // Helper functions
+
+func decodeToolArgs[T any](args map[string]any) (T, error) {
+	var out T
+	raw, err := json.Marshal(args)
+	if err != nil {
+		return out, err
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return out, err
+	}
+	return out, nil
+}
 
 func successResult(data map[string]any) *models.CallToolResult {
 	content, _ := json.Marshal(data)
