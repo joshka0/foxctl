@@ -57,6 +57,33 @@ by cleanup value and implementation risk.
 
 ## Type And Contract Consolidation
 
+- [ ] Remove compatibility layers discovered after DTO consolidation.
+  - Audit source: read-only local DAG/grep pass plus three explorer subagent
+    audits on frontend DTOs, backend/API compatibility, and repo-wide legacy
+    shims.
+  - Frontend targets: delete the `gui-agent` `@/api/types` DTO alias facade,
+    migrate shared DTO imports to `@foxctl/data/types`, and move only UI-local
+    view models/helpers into local GUI modules.
+  - Client targets: align `@foxctl/data/client` to canonical backend routes,
+    remove unsupported aliases such as `/api/agents/{id}/message`,
+    `/api/mailbox/send`, and `/api/mailbox/{id}/ack`, and avoid duplicate
+    `gui-agent` copies of shared data-client functions.
+  - Progress: `@foxctl/data/client` now uses canonical agent spawn/ask and
+    mailbox send/status routes; unsupported agent-message and mailbox alias
+    helpers were removed.
+  - Backend targets: make room status/inbox emit canonical DTOs directly,
+    consolidate duplicated `AgentResponse` conversion, and replace map-shaped
+    daemon fallback responses with typed response structs.
+  - Room transport targets: choose `delivery_binding` plus explicit transport
+    fields as canonical, then remove or isolate legacy `backend/session/pane_id`
+    compatibility.
+  - Other targets: remove foxterm DTO pass-through aliases, delete deprecated
+    console `tool_model` / `response_model` shims, make Hermes memory fallback
+    failures honest, and decide whether v2 Turso `OpenDBCompatWithCloser` is
+    transitional debt or should move to `dbdriver.DB`.
+  - Tests: data typecheck, gui-agent build, foxterm typecheck, affected Go
+    package tests, and docs link check when this tracker changes.
+
 - [x] Consolidate frontend API DTOs into `@foxctl/data`.
   - Scope: `packages/data`, `packages/gui-agent`, `packages/foxterm`.
   - Problem: `gui-agent` keeps local copies of envelopes, orchestration,

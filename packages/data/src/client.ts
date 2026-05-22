@@ -14,7 +14,16 @@ import type {
   TaskStats,
   JobStats,
   InsightsData,
+  AgentAskRequest,
+  AgentAskResponse,
+  AgentPatchRequest,
+  AgentSpawnRequest,
+  AgentSpawnResponse,
   MailboxMessage,
+  MailboxSendRequest,
+  MailboxSendResponse,
+  MailboxStatusUpdateRequest,
+  MailboxStatusUpdateResponse,
   Reservation,
   BlackboardRecord,
   SQLiteDatabase,
@@ -314,14 +323,26 @@ export async function getInsights(): Promise<InsightsData> {
 
 // Mailbox
 export async function getMailbox(params?: {
-  actor?: string;
+  actor_id?: string;
+  all?: boolean;
   limit?: number;
-  workspace?: string;
+  only_unread?: boolean;
+  only_unsurfaced?: boolean;
+  stream?: string;
+  task_id?: string;
+  workspace_id?: string;
 }): Promise<{ messages: MailboxMessage[] }> {
   const searchParams = new URLSearchParams();
-  if (params?.actor) searchParams.set("actor", params.actor);
+  if (params?.actor_id) searchParams.set("actor_id", params.actor_id);
+  if (params?.all) searchParams.set("all", "true");
   if (params?.limit) searchParams.set("limit", String(params.limit));
-  if (params?.workspace) searchParams.set("workspace_id", params.workspace);
+  if (params?.only_unread) searchParams.set("only_unread", "true");
+  if (params?.only_unsurfaced) {
+    searchParams.set("only_unsurfaced", "true");
+  }
+  if (params?.stream) searchParams.set("stream", params.stream);
+  if (params?.task_id) searchParams.set("task_id", params.task_id);
+  if (params?.workspace_id) searchParams.set("workspace_id", params.workspace_id);
   const query = searchParams.toString();
   return request(`/api/mailbox${query ? `?${query}` : ""}`);
 }
@@ -787,35 +808,10 @@ export async function getAgent(id: string): Promise<{ agent: Agent }> {
   return request(`/api/agents/${encodeURIComponent(id)}`);
 }
 
-// Spawn a new agent
-export interface SpawnAgentParams {
-  workspace_id?: string;
-  role?: string;
-  parent_id?: string;
-  prompt?: string;
-  skills_allow?: string[];
-  llm_provider?: string;
-  llm_model?: string;
-  name?: string;
-  slug?: string;
-  exec_mode?: string;
-  think_interval?: number;
-  max_iterations?: number;
-  max_context_tokens?: number;
-  max_auto_turns?: number;
-  memory_scope?: "agent" | "session";
-  memory_retention?: "companion" | "durable" | "task" | "ephemeral";
-  room_id?: string;
-  room_role?: string;
-}
-
-export async function spawnAgent(params: SpawnAgentParams): Promise<{
-  session_id: string;
-  actor_id: string;
-  status: string;
-  name?: string;
-}> {
-  return request("/api/agents", {
+export async function spawnAgent(
+  params: AgentSpawnRequest,
+): Promise<AgentSpawnResponse> {
+  return request("/api/agents/spawn", {
     method: "POST",
     body: JSON.stringify(params),
   });
@@ -918,37 +914,21 @@ export async function stopAgent(id: string): Promise<{
   });
 }
 
-// Update agent state
-export async function updateAgentState(
+export async function patchAgent(
   id: string,
-  state: AgentState,
-): Promise<{
-  updated: boolean;
-  agent_id: string;
-  state: string;
-}> {
+  params: AgentPatchRequest,
+): Promise<{ agent: Agent }> {
   return request(`/api/agents/${encodeURIComponent(id)}`, {
     method: "PATCH",
-    body: JSON.stringify({ state }),
+    body: JSON.stringify(params),
   });
 }
 
-// Send a message to a specific agent
-export async function sendAgentMessage(
+export async function askAgent(
   agentId: string,
-  params: {
-    subject: string;
-    body?: string;
-    kind?: string;
-    priority?: number;
-    sender?: string;
-  },
-): Promise<{
-  message_id: string;
-  recipient: string;
-  status: string;
-}> {
-  return request(`/api/agents/${encodeURIComponent(agentId)}/message`, {
+  params: AgentAskRequest,
+): Promise<AgentAskResponse> {
+  return request(`/api/agents/${encodeURIComponent(agentId)}/ask`, {
     method: "POST",
     body: JSON.stringify(params),
   });
@@ -958,41 +938,21 @@ export async function sendAgentMessage(
 // Mailbox Messaging
 // ============================================================================
 
-// Send a message via mailbox
-export interface SendMailboxMessageParams {
-  recipient: string;
-  subject: string;
-  body?: string;
-  kind?: string;
-  priority?: number;
-  sender?: string;
-  ack_required?: boolean;
-  headers?: Record<string, string>;
-}
-
 export async function sendMailboxMessage(
-  params: SendMailboxMessageParams,
-): Promise<{
-  message_id: string;
-  status: string;
-}> {
-  return request("/api/mailbox/send", {
+  params: MailboxSendRequest,
+): Promise<MailboxSendResponse> {
+  return request("/api/mailbox", {
     method: "POST",
     body: JSON.stringify(params),
   });
 }
 
-// Acknowledge a mailbox message (mark as read/handled)
-export async function acknowledgeMessage(
-  messageId: string,
-  actorId?: string,
-): Promise<{
-  acknowledged: boolean;
-  message_id: string;
-}> {
-  return request(`/api/mailbox/${encodeURIComponent(messageId)}/ack`, {
-    method: "POST",
-    body: JSON.stringify({ actor_id: actorId }),
+export async function updateMailboxStatus(
+  params: MailboxStatusUpdateRequest,
+): Promise<MailboxStatusUpdateResponse> {
+  return request("/api/mailbox", {
+    method: "PATCH",
+    body: JSON.stringify(params),
   });
 }
 

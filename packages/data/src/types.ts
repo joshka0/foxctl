@@ -177,6 +177,39 @@ export interface MailboxMessage {
 
 export interface RoomMessage extends MailboxMessage {}
 
+export interface MailboxSendRequest {
+  workspace_id: string;
+  related_message_id?: string;
+  sender: string;
+  recipient: string;
+  subject: string;
+  body: string;
+  kind?: string;
+  priority?: number;
+  ack_required?: boolean;
+  task_id?: string;
+  stream?: string;
+}
+
+export interface MailboxSendResponse {
+  id: string;
+  status: string;
+  message?: string;
+}
+
+export interface MailboxStatusUpdateRequest {
+  workspace_id: string;
+  actor_id?: string;
+  action: "read" | "surfaced" | "ack";
+  message_ids: string[];
+}
+
+export interface MailboxStatusUpdateResponse {
+  action: string;
+  updated: number;
+  status: string;
+}
+
 export interface Reservation {
   id: string;
   path: string;
@@ -710,6 +743,17 @@ export interface AgentPatchRequest {
   conversation_id?: string;
   memory_scope?: AgentMemoryScope;
   memory_retention?: AgentMemoryRetention;
+}
+
+export interface AgentAskRequest {
+  message: string;
+  response_schema?: Record<string, unknown>;
+  response_keys?: string[];
+}
+
+export interface AgentAskResponse {
+  reply: string;
+  conversation_id: string;
 }
 
 export interface AgentSession {
