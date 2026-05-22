@@ -37,7 +37,8 @@ Remaining areas from the results doc after the completed slices:
     caller evidence proves they are dead.
 - Structural consolidation:
   - Completed: consolidate duplicated skill `inline_mode` parsing.
-  - Consolidate repeated skill workspace resolution helpers.
+  - Completed: consolidate repeated repo-index skill workspace resolution
+    helpers.
   - Consolidate OpenAPI plugin stdio/envelope harness code.
   - Consolidate chat adapter command parsing and SSE activity decoding.
   - Extract shared Jido/goruntime orchestration reconciliation helpers.
@@ -220,8 +221,8 @@ frameworks.
 
 Done when:
 
-- Skill inline output/workspace resolution helpers are consolidated only where
-  the same rule is duplicated.
+- Completed: duplicated skill `inline_mode` parsing and repo-index workspace
+  resolution helpers are consolidated only where the same rule is duplicated.
 - OpenAPI plugin stdio/envelope harness code has a clear shared seam if there
   are two or more real Adapters.
 - Chat adapter command parsing and SSE activity decoding share canonical logic

@@ -2,13 +2,12 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/workspaceutil"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
 	"github.com/joshka0/foxctl/internal/intelligence/repoquery"
 	"github.com/joshka0/foxctl/internal/platform/errors"
@@ -30,7 +29,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		return skillerr.Arg("id is required")
 	}
 
-	workspaceRoot, err := resolveWorkspace(rc.Workspace, in.Workspace)
+	workspaceRoot, err := workspaceutil.ResolvePath(rc.Workspace, in.Workspace)
 	if err != nil {
 		return skillerr.WrapIO("resolve workspace", err)
 	}
@@ -57,18 +56,4 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		"anchor":    result.Anchor,
 		"workspace": workspaceRoot,
 	})
-}
-
-func resolveWorkspace(base, override string) (string, error) {
-	workspace := strings.TrimSpace(override)
-	if workspace == "" {
-		workspace = base
-	}
-	if workspace == "" {
-		return "", fmt.Errorf("workspace is required")
-	}
-	if !filepath.IsAbs(workspace) && base != "" {
-		workspace = filepath.Join(base, workspace)
-	}
-	return filepath.Abs(workspace)
 }

@@ -3,13 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/workspaceutil"
 	"github.com/joshka0/foxctl/internal/protocol"
 )
 
@@ -40,7 +40,7 @@ func main() {
 }
 
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
-	workspaceRoot, err := resolveWorkspace(rc.Workspace, in.Workspace)
+	workspaceRoot, err := workspaceutil.ResolvePathWithFallback(rc.Workspace, in.Workspace, ".")
 	if err != nil {
 		return skillerr.WrapIO("resolve workspace", err)
 	}
@@ -63,20 +63,6 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		return skillerr.WrapRuntime("repo index build", fmt.Errorf("%w: %s", result.Err, strings.TrimSpace(string(result.Stderr))))
 	}
 	return skillerr.WrapRuntime("repo index build", fmt.Errorf("foxctl index repo build produced no envelope"))
-}
-
-func resolveWorkspace(base, override string) (string, error) {
-	workspace := strings.TrimSpace(override)
-	if workspace == "" {
-		workspace = base
-	}
-	if workspace == "" {
-		workspace = "."
-	}
-	if !filepath.IsAbs(workspace) && base != "" {
-		workspace = filepath.Join(base, workspace)
-	}
-	return filepath.Abs(workspace)
 }
 
 func buildRepoIndexArgs(workspaceRoot string, in Input) []string {
