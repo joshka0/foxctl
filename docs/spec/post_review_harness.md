@@ -372,7 +372,7 @@ Define explicit behavior:
 
 - Config‑only rollback:
 
-  - Set `indexing.post_review.enabled=false` to stop emitting events and jobs.
+  - Set `indexing.post_review.enabled=false` to stop event production and inline dispatch.
   - Existing events remain stored but are ignored.
 
 - Code rollback:

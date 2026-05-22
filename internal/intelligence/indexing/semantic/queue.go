@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedqueue"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/fileio"
 	"github.com/joshka0/foxctl/internal/platform/fsutil"
 	"github.com/joshka0/foxctl/internal/storage/queue"
 )
@@ -264,26 +264,11 @@ func (p FileQueuePayload) JobArgs() JobArgs {
 }
 
 func prepareFileQueueInput(workspace string, file JobFileInput) (JobFileInput, error) {
-	path := filepath.Clean(file.Path)
-	if filepath.IsAbs(path) || strings.HasPrefix(path, "..") {
-		return JobFileInput{}, fmt.Errorf("invalid file path %q", file.Path)
-	}
-	fullPath := filepath.Join(workspace, path)
-	info, err := os.Stat(fullPath)
-	if err != nil {
-		return JobFileInput{}, fmt.Errorf("stat %s: %w", file.Path, err)
-	}
-	if !info.Mode().IsRegular() {
-		return JobFileInput{}, fmt.Errorf("%s is not a regular file", file.Path)
-	}
-	if info.Size() > maxReadFileSize {
-		return JobFileInput{}, fmt.Errorf("%s exceeds max read size %d", file.Path, maxReadFileSize)
-	}
-	content, err := os.ReadFile(fullPath)
+	content, err := fileio.ReadLimited(workspace, file.Path, maxReadFileSize)
 	if err != nil {
 		return JobFileInput{}, fmt.Errorf("read %s: %w", file.Path, err)
 	}
-	file.SizeBytes = info.Size()
+	file.SizeBytes = int64(len(content))
 	file.Digest = computeDigest(content)
 	if strings.TrimSpace(file.Language) == "" {
 		file.Language = fsutil.DetectLanguage(file.Path)

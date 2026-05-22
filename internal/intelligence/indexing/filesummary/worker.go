@@ -3,12 +3,14 @@ package filesummary
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/fileio"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
 	"github.com/joshka0/foxctl/internal/runtime/observability"
@@ -459,11 +461,9 @@ func (w *Worker) scanWorkspace(ctx context.Context) ([]string, error) {
 }
 
 func (w *Worker) buildInput(relPath string) (symbol.FileSummaryInput, error) {
-	fullPath := filepath.Join(w.workspace, relPath)
-
-	content, err := os.ReadFile(fullPath)
+	content, err := fileio.ReadLimited(w.workspace, relPath, fileio.DefaultReadLimit)
 	if err != nil {
-		return symbol.FileSummaryInput{}, err
+		return symbol.FileSummaryInput{}, fmt.Errorf("read file: %w", err)
 	}
 
 	// Extract basic info with symbols hash for cache invalidation
