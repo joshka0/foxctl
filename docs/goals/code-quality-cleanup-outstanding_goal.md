@@ -36,7 +36,8 @@ Remaining areas from the results doc after the completed slices:
   - Delete or replace remaining unused GUI API wrappers and utility exports when
     caller evidence proves they are dead.
 - Structural consolidation:
-  - Consolidate skill inline output and workspace resolution helpers.
+  - Completed: consolidate duplicated skill `inline_mode` parsing.
+  - Consolidate repeated skill workspace resolution helpers.
   - Consolidate OpenAPI plugin stdio/envelope harness code.
   - Consolidate chat adapter command parsing and SSE activity decoding.
   - Extract shared Jido/goruntime orchestration reconciliation helpers.

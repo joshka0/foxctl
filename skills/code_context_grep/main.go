@@ -19,6 +19,7 @@ import (
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/codeblocks"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/inlineutil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/pathutil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/rgutil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
@@ -36,13 +37,13 @@ const (
 	ModeLine    Mode = "line"    // Line range expansion
 )
 
-type InlineMode string
+type InlineMode = inlineutil.Mode
 
 const (
-	InlineModeAuto         InlineMode = "auto"
-	InlineModeFull         InlineMode = "full"
-	InlineModePreview      InlineMode = "preview"
-	InlineModeArtifactOnly InlineMode = "artifact_only"
+	InlineModeAuto         = inlineutil.ModeAuto
+	InlineModeFull         = inlineutil.ModeFull
+	InlineModePreview      = inlineutil.ModePreview
+	InlineModeArtifactOnly = inlineutil.ModeArtifactOnly
 )
 
 const maxASTGrepLineBytes = 4 * 1024 * 1024
@@ -243,21 +244,13 @@ func parsePatternMode(value string) (string, bool, error) {
 }
 
 func parseInlineMode(value string) (InlineMode, error) {
-	switch InlineMode(strings.ToLower(strings.TrimSpace(value))) {
-	case "", InlineModeAuto:
-		return InlineModeAuto, nil
-	case InlineModeFull:
-		return InlineModeFull, nil
-	case InlineModePreview:
-		return InlineModePreview, nil
-	case InlineModeArtifactOnly:
-		return InlineModeArtifactOnly, nil
-	default:
-		return InlineModeAuto, skillerr.Arg(
-			"inline_mode must be one of: auto, full, preview, artifact_only",
-			skillerr.WithHint("Use inline_mode:\"preview\" to force compact inline blocks, or artifact_only to rely on the CAS artifact."),
-		)
+	if mode, ok := inlineutil.Parse(value); ok {
+		return mode, nil
 	}
+	return InlineModeAuto, skillerr.Arg(
+		"inline_mode must be one of: "+inlineutil.ValidModes,
+		skillerr.WithHint("Use inline_mode:\"preview\" to force compact inline blocks, or artifact_only to rely on the CAS artifact."),
+	)
 }
 
 func hintForRipgrepError(err error) string {

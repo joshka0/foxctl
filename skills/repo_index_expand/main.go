@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/inlineutil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
@@ -42,13 +43,13 @@ type Output struct {
 	Artifact         string                 `json:"artifact,omitempty"`
 }
 
-type InlineMode string
+type InlineMode = inlineutil.Mode
 
 const (
-	InlineModeAuto         InlineMode = "auto"
-	InlineModeFull         InlineMode = "full"
-	InlineModePreview      InlineMode = "preview"
-	InlineModeArtifactOnly InlineMode = "artifact_only"
+	InlineModeAuto         = inlineutil.ModeAuto
+	InlineModeFull         = inlineutil.ModeFull
+	InlineModePreview      = inlineutil.ModePreview
+	InlineModeArtifactOnly = inlineutil.ModeArtifactOnly
 )
 
 const (
@@ -114,18 +115,10 @@ func resolveWorkspace(base, override string) (string, error) {
 }
 
 func parseInlineMode(value string) (InlineMode, error) {
-	switch InlineMode(strings.ToLower(strings.TrimSpace(value))) {
-	case "", InlineModeAuto:
-		return InlineModeAuto, nil
-	case InlineModeFull:
-		return InlineModeFull, nil
-	case InlineModePreview:
-		return InlineModePreview, nil
-	case InlineModeArtifactOnly:
-		return InlineModeArtifactOnly, nil
-	default:
-		return InlineModeAuto, skillerr.Arg("inline_mode must be one of: auto, full, preview, artifact_only")
+	if mode, ok := inlineutil.Parse(value); ok {
+		return mode, nil
 	}
+	return InlineModeAuto, skillerr.Arg("inline_mode must be one of: " + inlineutil.ValidModes)
 }
 
 func estimateExpandOutputSize(out Output) int {

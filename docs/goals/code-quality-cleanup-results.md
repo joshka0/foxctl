@@ -182,8 +182,12 @@ Verification has been run slice-by-slice, including:
 
 ### Structural Consolidation
 
-- Consolidate skill inline output and workspace resolution helpers across
-  repo-index/search/codemap skills.
+- Completed: consolidated duplicated `inline_mode` parsing across code,
+  repo-index, and codemap skills into
+  `internal/adapters/skillslib/inlineutil`. Each skill still owns its specific
+  preview/artifact output shape.
+- Consolidate skill workspace resolution helpers across repo-index/search/
+  codemap skills.
 - Consolidate OpenAPI plugin stdio/envelope harness code.
 - Consolidate chat adapter command parsing and SSE activity decoding across
   Teams, Telegram, and Discord adapters.
@@ -203,5 +207,5 @@ Verification has been run slice-by-slice, including:
 
 ## Recommended Next Slices
 
-1. Continue structural consolidation follow-ups, starting with one repeated
-   helper family that has clear caller evidence.
+1. Consolidate repeated repo-index skill workspace resolution helpers behind a
+   small skill input helper.
