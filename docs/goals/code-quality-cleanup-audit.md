@@ -76,7 +76,7 @@ by cleanup value and implementation risk.
   - Target: use aliases to the central `searchquery` types unless a stable
     facade is genuinely needed.
 
-- [ ] Consolidate OpenAI-compatible SSE stream DTOs.
+- [x] Consolidate OpenAI-compatible SSE stream DTOs.
   - Scope: console app and runtime engine streaming chunks.
   - Target: move chunk/delta/tool-call stream wire structs to a neutral provider
     compatibility package.

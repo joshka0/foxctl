@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/joshka0/foxctl/internal/providers/llmcompat"
 )
 
 // StreamConfig configures streaming behavior.
@@ -28,31 +30,10 @@ type StreamConfig struct {
 }
 
 // StreamDelta represents a streaming chunk from the LLM.
-type StreamDelta struct {
-	// ContentDelta is the new text content.
-	ContentDelta string
-
-	// ToolCallDelta is a partial tool call update.
-	ToolCallDelta *ToolCallStreamDelta
-
-	// FinishReason indicates why streaming stopped.
-	FinishReason string
-}
+type StreamDelta = llmcompat.StreamDelta
 
 // ToolCallStreamDelta represents a streaming tool call update.
-type ToolCallStreamDelta struct {
-	// Index is the tool call index.
-	Index int
-
-	// ID is the tool call ID (only in first chunk).
-	ID string
-
-	// Name is the function name (only in first chunk).
-	Name string
-
-	// ArgumentsDelta is the incremental arguments JSON.
-	ArgumentsDelta string
-}
+type ToolCallStreamDelta = llmcompat.ToolCallDelta
 
 // RunStreaming executes with streaming output.
 //
@@ -365,7 +346,7 @@ func (e *LLMChatEngine) parseSSEStream(reader io.Reader, streamCfg StreamConfig)
 			}
 
 			// Parse chunk
-			var chunk oaiStreamChunk
+			var chunk llmcompat.ChatCompletionStreamChunk
 			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 				continue
 			}
@@ -457,36 +438,4 @@ type toolCallBuilder struct {
 	id        string
 	name      string
 	arguments strings.Builder
-}
-
-// oaiStreamChunk is a streaming response chunk.
-type oaiStreamChunk struct {
-	ID      string `json:"id"`
-	Choices []struct {
-		Index        int      `json:"index"`
-		Delta        oaiDelta `json:"delta"`
-		FinishReason string   `json:"finish_reason"`
-	} `json:"choices"`
-	Usage *struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-	} `json:"usage,omitempty"`
-}
-
-// oaiDelta is the delta content in a streaming chunk.
-type oaiDelta struct {
-	Role      string             `json:"role,omitempty"`
-	Content   string             `json:"content,omitempty"`
-	ToolCalls []oaiToolCallDelta `json:"tool_calls,omitempty"`
-}
-
-// oaiToolCallDelta is a tool call delta in streaming.
-type oaiToolCallDelta struct {
-	Index    int    `json:"index"`
-	ID       string `json:"id,omitempty"`
-	Type     string `json:"type,omitempty"`
-	Function struct {
-		Name      string `json:"name,omitempty"`
-		Arguments string `json:"arguments,omitempty"`
-	} `json:"function,omitempty"`
 }
