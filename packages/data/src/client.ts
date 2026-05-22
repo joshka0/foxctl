@@ -78,12 +78,17 @@ import {
 } from "./orchestration";
 
 // Get API base URL - works in both Vite (browser) and Bun environments
+interface ViteImportMeta {
+  env?: {
+    VITE_API_URL?: string;
+  };
+}
+
 function getApiBase(): string {
   // Vite environment (browser bundled with Vite)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const meta = import.meta as any;
+  const meta = import.meta as ViteImportMeta;
   if (typeof meta !== "undefined" && meta.env?.VITE_API_URL) {
-    return meta.env.VITE_API_URL as string;
+    return meta.env.VITE_API_URL;
   }
   // Bun/Node environment
   if (typeof process !== "undefined" && process.env?.FOXCTL_API_URL) {

@@ -58,6 +58,9 @@ merge, rebase or merge current `main` and rerun the full verification set.
   `OrchestrationBoardPayload` union for inline board vs CAS artifact payloads.
 - Frontend event stream boundaries now use typed SSE guards for room messages,
   room timeline events, agent chat stream events, and flow status events.
+- Residual `LogsViewer` event metadata casts were replaced by explicit
+  activity-log conversion helpers, and `@foxctl/data/client` now reads
+  `import.meta.env` through a typed Vite metadata contract instead of `any`.
 - Query-plan wrapper structs were replaced by a shared search query contract.
 - OpenAI-compatible SSE stream DTOs moved into a neutral provider
   compatibility package.
@@ -141,9 +144,9 @@ Verification has been run slice-by-slice, including:
 
 ### Weak Types
 
-- Remove residual frontend weak casts that were outside the typed SSE slice,
-  starting with `LogsViewer` event metadata and the `import.meta` environment
-  cast in `@foxctl/data/client`.
+- No current high-priority weak frontend cast remains from the tracked audit
+  slice. Continue treating new external event/API boundaries as unknown input
+  with explicit guards.
 
 ### Hidden Fallbacks
 
@@ -177,5 +180,4 @@ Verification has been run slice-by-slice, including:
 1. Type the remaining room-control fixed response wrappers.
 2. Reduce duplicate `gui-agent` API client functions where `@foxctl/data/client`
    is already the canonical implementation.
-3. Remove residual frontend weak casts that are not true external boundaries.
-4. Add reliable unused-code tooling and frontend verification docs.
+3. Add reliable unused-code tooling and frontend verification docs.

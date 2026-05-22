@@ -34,10 +34,6 @@ Remaining areas from the results doc after the completed slices:
   - Decide whether the internal pane transport update path should move to a
     binding helper.
   - Migrate or isolate older non-v2 `OpenDBCompat*` callers.
-- Weak types:
-  - Remove residual frontend weak casts outside true unknown boundaries,
-    starting with `LogsViewer` event metadata and the `import.meta` environment
-    cast in `@foxctl/data/client`.
 - Dead frontend code:
   - Delete or replace remaining unused GUI API wrappers and utility exports when
     caller evidence proves they are dead.
@@ -228,7 +224,7 @@ Done when:
   any broad architecture move.
 - Verification passes for each affected package.
 
-### 9. Residual Typed Wrappers And Weak Casts
+### 9. Residual Typed Wrappers And Weak Casts (Weak Casts Complete)
 
 Clean up remaining fixed response maps and frontend casts that were outside the
 completed DTO/SSE slices.
@@ -237,8 +233,6 @@ Done when:
 
 - Room-control fixed response wrappers use named DTOs where the JSON shape is
   fixed.
-- Residual frontend casts in `LogsViewer` and `@foxctl/data/client` are either
-  replaced with explicit contracts or documented as true external boundaries.
 - Verification passes for each affected package.
 
 ## Verification

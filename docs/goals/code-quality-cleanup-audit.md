@@ -145,7 +145,7 @@ by cleanup value and implementation risk.
   - Target: explicit `FlowDetail`, typed timeline event input, `SSEEnvelope<T>`,
     and stream event guards.
 
-- [ ] Remove residual frontend weak casts outside the typed stream boundary.
+- [x] Remove residual frontend weak casts outside the typed stream boundary.
   - Scope: `packages/gui-agent/src/components/actions/LogsViewer.tsx` and
     `packages/data/src/client.ts`.
   - Target: replace implementation casts with explicit local metadata/env
