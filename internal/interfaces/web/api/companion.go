@@ -48,6 +48,17 @@ type companionProviderAvailability struct {
 	Models     []companionProviderModel `json:"models,omitempty"`
 }
 
+type CompanionPersonalityDimensionPatchRequest struct {
+	Name  string  `json:"name"`
+	Value float64 `json:"value"`
+}
+
+type CompanionPersonalityDimensionPatchResponse struct {
+	Success bool    `json:"success"`
+	Name    string  `json:"name"`
+	Value   float64 `json:"value"`
+}
+
 func renderTopOfMindPrompt(top contextplane.TopOfMind) string {
 	lines := make([]string, 0, 8)
 	if objective := strings.TrimSpace(top.Objective); objective != "" {
@@ -1549,11 +1560,7 @@ func CompanionPersonalityDimensionPatchHandler(cfg config.Config, log zerolog.Lo
 		}
 		conversationID := parts[0]
 
-		// Parse request body
-		var req struct {
-			Name  string  `json:"name"`
-			Value float64 `json:"value"`
-		}
+		var req CompanionPersonalityDimensionPatchRequest
 		if err := readJSON(w, r, &req); err != nil {
 			httpError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
@@ -1584,10 +1591,10 @@ func CompanionPersonalityDimensionPatchHandler(cfg config.Config, log zerolog.Lo
 			return
 		}
 
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"success": true,
-			"name":    req.Name,
-			"value":   req.Value,
+		writeJSON(w, http.StatusOK, CompanionPersonalityDimensionPatchResponse{
+			Success: true,
+			Name:    req.Name,
+			Value:   req.Value,
 		})
 	}
 }
