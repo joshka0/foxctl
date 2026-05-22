@@ -42,6 +42,44 @@ func TestCompileSchema_RejectsMalformedProperty(t *testing.T) {
 	}
 }
 
+func TestCompileSchema_RejectsNonObjectSchema(t *testing.T) {
+	t.Parallel()
+
+	_, err := compileSchema(json.RawMessage(`{
+		"type":"array",
+		"properties":{"path":{"type":"string"}}
+	}`))
+	if err == nil {
+		t.Fatal("compileSchema() expected error for non-object schema")
+	}
+}
+
+func TestSchemaObjectBuildsTypedSchema(t *testing.T) {
+	t.Parallel()
+
+	raw := schemaObject(
+		req("path", JSONSchemaTypeString, "Path to read"),
+		prop("max_bytes", JSONSchemaTypeInteger, "Maximum bytes"),
+	)
+
+	var schema JSONSchema
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatalf("unmarshal schemaObject output: %v", err)
+	}
+	if schema.Type != JSONSchemaTypeObject {
+		t.Fatalf("schema type=%q want %q", schema.Type, JSONSchemaTypeObject)
+	}
+	if got := schema.Properties["path"].Type; got != JSONSchemaTypeString {
+		t.Fatalf("path type=%q want %q", got, JSONSchemaTypeString)
+	}
+	if got := schema.Properties["max_bytes"].Type; got != JSONSchemaTypeInteger {
+		t.Fatalf("max_bytes type=%q want %q", got, JSONSchemaTypeInteger)
+	}
+	if len(schema.Required) != 1 || schema.Required[0] != "path" {
+		t.Fatalf("required=%v want [path]", schema.Required)
+	}
+}
+
 func TestValidateArgs_UnknownTypeRejected(t *testing.T) {
 	t.Parallel()
 

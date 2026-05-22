@@ -101,7 +101,7 @@ by cleanup value and implementation risk.
 - [x] Replace Go path extraction map blobs with typed input structs.
   - Scope: `internal/platform/pathutil` and hook pathutil tests.
 
-- [ ] Replace v2 tool schema `map[string]any` parsing with typed JSON-schema
+- [x] Replace v2 tool schema `map[string]any` parsing with typed JSON-schema
   subset structs.
   - Scope: `internal/v2/runtime/tools`.
 
