@@ -354,37 +354,51 @@ func (r *Registry) registerGetSymbols() error {
 
 // getSymbols implements the get_symbols tool.
 func (r *Registry) getSymbols(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
-	path, ok := args["path"].(string)
-	if !ok || path == "" {
+	input, err := decodeToolArgs[getSymbolsArgs](args)
+	if err != nil {
+		return errorResult(fmt.Sprintf("invalid get_symbols arguments: %v", err)), nil
+	}
+	if input.Path == "" {
 		return errorResult("path is required"), nil
 	}
 
 	// Build input for code/symbols skill
-	input := map[string]any{
-		"path":            filepath.Join(r.workspace, path),
-		"symbol_type":     "all",
-		"include_private": false,
-		"include_docs":    true,
-		"max_results":     200,
-	}
-
-	if st, ok := args["symbol_type"].(string); ok && st != "" {
-		input["symbol_type"] = st
-	}
-	if ip, ok := args["include_private"].(bool); ok {
-		input["include_private"] = ip
-	}
-	if id, ok := args["include_docs"].(bool); ok {
-		input["include_docs"] = id
-	}
+	skillInput := input.skillInput(r.workspace)
 
 	// Execute skill
-	result, err := r.runSkill(ctx, "code/symbols", input)
+	result, err := r.runSkill(ctx, "code/symbols", skillInput)
 	if err != nil {
 		return errorResult(fmt.Sprintf("get symbols failed: %v", err)), nil
 	}
 
 	return successResult(result), nil
+}
+
+type getSymbolsArgs struct {
+	Path           string `json:"path"`
+	SymbolType     string `json:"symbol_type,omitempty"`
+	IncludePrivate *bool  `json:"include_private,omitempty"`
+	IncludeDocs    *bool  `json:"include_docs,omitempty"`
+}
+
+func (a getSymbolsArgs) skillInput(workspace string) map[string]any {
+	input := map[string]any{
+		"path":            filepath.Join(workspace, a.Path),
+		"symbol_type":     "all",
+		"include_private": false,
+		"include_docs":    true,
+		"max_results":     200,
+	}
+	if a.SymbolType != "" {
+		input["symbol_type"] = a.SymbolType
+	}
+	if a.IncludePrivate != nil {
+		input["include_private"] = *a.IncludePrivate
+	}
+	if a.IncludeDocs != nil {
+		input["include_docs"] = *a.IncludeDocs
+	}
+	return input
 }
 
 // registerGetGraphNeighbors registers the get_graph_neighbors tool.

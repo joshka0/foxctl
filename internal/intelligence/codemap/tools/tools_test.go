@@ -172,6 +172,67 @@ func TestSearchPatternArgs(t *testing.T) {
 	})
 }
 
+func TestGetSymbolsArgs(t *testing.T) {
+	t.Run("builds default skill input", func(t *testing.T) {
+		input := getSymbolsArgs{Path: "internal/runtime"}.skillInput("/workspace")
+
+		if input["path"] != filepath.Join("/workspace", "internal/runtime") {
+			t.Fatalf("path=%v", input["path"])
+		}
+		if input["symbol_type"] != "all" {
+			t.Fatalf("symbol_type=%v", input["symbol_type"])
+		}
+		if input["include_private"] != false {
+			t.Fatalf("include_private=%v", input["include_private"])
+		}
+		if input["include_docs"] != true {
+			t.Fatalf("include_docs=%v", input["include_docs"])
+		}
+		if input["max_results"] != 200 {
+			t.Fatalf("max_results=%v", input["max_results"])
+		}
+	})
+
+	t.Run("applies optional overrides", func(t *testing.T) {
+		includePrivate := true
+		includeDocs := false
+		input := getSymbolsArgs{
+			Path:           "internal/runtime",
+			SymbolType:     "function",
+			IncludePrivate: &includePrivate,
+			IncludeDocs:    &includeDocs,
+		}.skillInput("/workspace")
+
+		if input["symbol_type"] != "function" {
+			t.Fatalf("symbol_type=%v", input["symbol_type"])
+		}
+		if input["include_private"] != true {
+			t.Fatalf("include_private=%v", input["include_private"])
+		}
+		if input["include_docs"] != false {
+			t.Fatalf("include_docs=%v", input["include_docs"])
+		}
+	})
+
+	t.Run("rejects invalid argument type before skill execution", func(t *testing.T) {
+		r, err := NewRegistry(WithWorkspace(t.TempDir()))
+		if err != nil {
+			t.Fatalf("NewRegistry() error = %v", err)
+		}
+
+		result, err := r.getSymbols(context.Background(), map[string]any{
+			"path":            "internal/runtime",
+			"include_private": "true",
+		})
+		if err != nil {
+			t.Fatalf("getSymbols() error = %v", err)
+		}
+		if !result.IsError {
+			t.Fatal("expected invalid argument error")
+		}
+	})
+}
+
 func TestFinishCodemap(t *testing.T) {
 	tmpDir := t.TempDir()
 

@@ -112,8 +112,8 @@ by cleanup value and implementation risk.
 
 - [ ] Convert codemap tool handler args one handler at a time.
   - Scope: `internal/intelligence/codemap/tools`.
-  - Progress: `read_file` and `search_pattern` now decode through typed args;
-    remaining handlers still use map assertions.
+  - Progress: `read_file`, `search_pattern`, and `get_symbols` now decode
+    through typed args; remaining handlers still use map assertions.
 
 ## Defensive Programming And Hidden Fallbacks
 
