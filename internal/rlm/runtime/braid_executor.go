@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -493,11 +494,16 @@ func runBraidNodeHelperFirst(
 			defer cancel()
 		}
 	}
-	summary, ok := runBraidNodeHelper(helperCtx, phaseName, node, rootPrompt, dependencySummaries, repairFeedback, "helper_policy="+policy, toolExec, output)
+	summary, ok, helperErr := runBraidNodeHelper(helperCtx, phaseName, node, rootPrompt, dependencySummaries, repairFeedback, "helper_policy="+policy, toolExec, output)
 	duration := time.Since(start)
 	if budget != nil {
 		budget.CumulativeDuration += duration
 		budget.Attempts++
+	}
+	if helperErr != nil {
+		message := fmt.Sprintf("stage=split duration_ms=%d: %s", duration.Milliseconds(), helperErr.Error())
+		recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_failed", message)
+		return summary, true, fmt.Errorf("rlm repl runner phase %q: braid node %q helper-first failed: %w", phaseName, node.ID, helperErr)
 	}
 	if !ok {
 		stage := extractBraidHelperFailedStage(summary)
@@ -917,7 +923,11 @@ func recoverBraidNodeWithHelper(
 			return "status: blocked\nanswer:\nchecks: " + err.Error(), true
 		}
 	}
-	return runBraidNodeHelper(ctx, phaseName, node, rootPrompt, dependencySummaries, repairFeedback, failedSummary, toolExec, output)
+	summary, ok, err := runBraidNodeHelper(ctx, phaseName, node, rootPrompt, dependencySummaries, repairFeedback, failedSummary, toolExec, output)
+	if err != nil {
+		return "", false
+	}
+	return summary, ok
 }
 
 func runBraidNodeHelper(
@@ -930,12 +940,12 @@ func runBraidNodeHelper(
 	triggerSummary string,
 	toolExec *replToolExecutor,
 	output *engine.EngineOutput,
-) (string, bool) {
+) (string, bool, error) {
 	if toolExec == nil || toolExec.helperFactory == nil || output == nil {
-		return "", false
+		return "", false, nil
 	}
 	if !braidNodeHelperSupported(node) {
-		return "", false
+		return "", false, nil
 	}
 	handoff := BuildBraidNodeHandoff(node, rootPrompt, dependencySummaries, repairFeedback)
 	prompt := RenderBraidHelperHandoffPrompt(handoff)
@@ -994,7 +1004,7 @@ func runBraidNodeHelper(
 	}
 	args, err := json.Marshal(argsMap)
 	if err != nil {
-		return "", false
+		return "", false, nil
 	}
 	callID := fmt.Sprintf("auto_%s_%s_%s", sanitizeToolCallIDPart(phaseName), sanitizeToolCallIDPart(node.ID), sanitizeToolCallIDPart(EphemeralHelperSolveToolName))
 	rawArgs := json.RawMessage(args)
@@ -1021,12 +1031,12 @@ func runBraidNodeHelper(
 	// Preflight: reject oversized input packets before spending LLM tokens.
 	if err := helperPreflightCheck(input, handoff); err != nil {
 		// Attempt to split the oversized input into smaller sub-items.
-		if splitResult, ok := attemptSplitHelperExecution(ctx, phaseName, node, input, handoff, instructions, toolExec, output); ok {
-			return splitResult, true
+		if splitResult, ok, splitErr := attemptSplitHelperExecution(ctx, phaseName, node, input, handoff, instructions, toolExec, output); ok {
+			return splitResult, true, splitErr
 		}
 		preflightMsg := fmt.Sprintf("stage=preflight: %s", err.Error())
 		recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_failed", preflightMsg)
-		return "status: blocked\nanswer:\nchecks: " + preflightMsg, true
+		return "status: blocked\nanswer:\nchecks: " + preflightMsg, true, nil
 	}
 	var result string
 	var execErr error
@@ -1044,28 +1054,28 @@ func runBraidNodeHelper(
 	output.ToolCalls = append(output.ToolCalls, toolCall)
 	output.ToolResults = append(output.ToolResults, toolResult)
 	if execErr != nil {
-		return "", false
+		return "", false, nil
 	}
 	if node.Kind == "verify" {
 		if summary, ok := helperVerifyFailureSummaryFromToolResult(result); ok {
-			return summary, true
+			return summary, true, nil
 		}
 	}
 	answer, helperCert := helperAnswerAndCertificationFromToolResult(node, result)
 	if strings.TrimSpace(answer) == "" {
 		if summary, ok := helperFailureSummaryFromToolResult(node, result); ok {
-			return summary, true
+			return summary, true, nil
 		}
-		return "", false
+		return "", false, nil
 	}
 	if isBraidSolveKind(node.Kind) {
 		if ok, detail, applicable := verifyStackMoveCandidateFromInput(answer, argsMap["input"]); applicable && !ok {
-			return formatBraidHelperNodeSummary(node, "pass: false first_failure: "+detail), true
+			return formatBraidHelperNodeSummary(node, "pass: false first_failure: "+detail), true, nil
 		} else if applicable && ok {
 			helperCert = runtimeCertificationForNode(node, "finite_state_transition/stack_relocation_v1")
 		}
 	}
-	return formatBraidHelperNodeSummaryCertified(node, answer, helperCert), true
+	return formatBraidHelperNodeSummaryCertified(node, answer, helperCert), true, nil
 }
 
 func enrichBraidHelperInputWithStructuredTargets(input map[string]any, _ string) map[string]any {
@@ -2848,8 +2858,9 @@ func helperPreflightCheck(input map[string]any, handoff BraidNodeHandoff) error 
 
 // attemptSplitHelperExecution tries to decompose an oversized helper input
 // into smaller sub-items and execute them sequentially, then merge the results.
-// Returns the merged summary and true if the split succeeded, or ("", false)
-// if the input cannot be meaningfully split.
+// Returns the merged summary and true if split execution was attempted. If a
+// split attempt fails, the returned summary is a blocked node summary and the
+// error must be recorded or surfaced by the caller.
 func attemptSplitHelperExecution(
 	ctx context.Context,
 	phaseName string,
@@ -2859,9 +2870,9 @@ func attemptSplitHelperExecution(
 	instructions string,
 	toolExec *replToolExecutor,
 	output *engine.EngineOutput,
-) (string, bool) {
+) (string, bool, error) {
 	if toolExec == nil || toolExec.helperFactory == nil {
-		return "", false
+		return "", false, nil
 	}
 	// Build a synthetic work item to analyze for splitting.
 	splitItem := generalsolver.WorkItem{
@@ -2872,13 +2883,13 @@ func attemptSplitHelperExecution(
 	}
 	plan := generalsolver.AnalyzeForSplit(splitItem)
 	if plan.Strategy == generalsolver.SplitStrategyNone {
-		return "", false
+		return "", false, nil
 	}
 
 	// Extract query-able chunks from the input.
 	chunks := generalsolver.ExtractQueryableChunks(input)
 	if len(chunks) < 2 {
-		return "", false
+		return "", false, nil
 	}
 	if len(chunks) > generalsolver.SplitMaxSubItems {
 		chunks = chunks[:generalsolver.SplitMaxSubItems]
@@ -2963,13 +2974,15 @@ func attemptSplitHelperExecution(
 		subAnswers = append(subAnswers, answer)
 	}
 	if len(failures) > 0 {
-		return fmt.Sprintf("status: blocked summary: split execution failed for %d/%d chunks answer: checks: %s", len(failures), len(chunks), strings.Join(failures, "; ")), true
+		failureText := fmt.Sprintf("split execution failed for %d/%d chunks: %s", len(failures), len(chunks), strings.Join(failures, "; "))
+		recordBraidNodeEvent(toolExec, phaseName, 0, node, "split_failed", failureText)
+		return "status: blocked summary: " + failureText + " answer: checks: " + strings.Join(failures, "; "), true, errors.New(failureText)
 	}
 
 	// Merge sub-answers into a combined result.
 	merged := fmt.Sprintf("status: completed summary: split-solved %d chunks answer: %s checks: ephemeral_helper_solve ran split execution over %d sub-items.",
 		len(subAnswers), strings.Join(subAnswers, "; "), len(chunks))
-	return merged, true
+	return merged, true, nil
 }
 
 func formatBraidHelperNodeSummary(node BraidNode, answer string) string {
@@ -6985,8 +6998,7 @@ func applyGraphLevelSplits(state *generalsolver.SolverState, graph *BraidGraph) 
 			continue
 		}
 		if _, err := generalsolver.SplitWorkItem(state, id); err != nil {
-			// Log but don't block — the original item stays unsplit.
-			_ = err
+			recordSolverFailure(state, id, "graph_level_split", err.Error())
 		}
 	}
 }

@@ -133,7 +133,7 @@ by cleanup value and implementation risk.
   - Target: return explicit errors for empty provider content and malformed
     refiner contracts.
 
-- [ ] Record or return solver split failures.
+- [x] Record or return solver split failures.
   - Scope: RLM braid executor split path.
 
 - [x] Require canonical symbol memory identity for new embedding jobs.
@@ -154,7 +154,7 @@ by cleanup value and implementation risk.
   - Tests: gui-agent build/test and foxterm typecheck after dependencies are
     installed.
 
-- [ ] Remove deprecated `skillslib/runner`.
+- [x] Remove deprecated `skillslib/runner`.
   - Scope: test-only imports from old skill runner helpers.
   - Target: move tests to `skillmain` / `skilltest`, then delete the package.
 
