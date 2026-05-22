@@ -41,14 +41,3 @@ func TestDecodeToolPathInputToleratesMixedArrays(t *testing.T) {
 		t.Fatalf("ExtractPathsFromInput() = %#v, want %#v", got, want)
 	}
 }
-
-func TestExtractPathFromMapKeepsCompatibilityWrapper(t *testing.T) {
-	input := map[string]any{
-		"path":  "/from-map.go",
-		"files": []any{"/other.go"},
-	}
-
-	if got := ExtractPathFromMap(input); got != "/from-map.go" {
-		t.Fatalf("ExtractPathFromMap() = %q, want /from-map.go", got)
-	}
-}

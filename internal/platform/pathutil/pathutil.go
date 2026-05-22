@@ -54,19 +54,6 @@ func ExtractPath(toolInput json.RawMessage) string {
 	return ExtractPathFromInput(input)
 }
 
-// ExtractPathFromMap extracts the file path from a map.
-// Useful when the input is already parsed.
-func ExtractPathFromMap(input map[string]any) string {
-	if len(input) == 0 {
-		return ""
-	}
-	raw, err := json.Marshal(input)
-	if err != nil {
-		return ""
-	}
-	return ExtractPath(raw)
-}
-
 // ExtractPathFromInput extracts the first path from a typed path input.
 func ExtractPathFromInput(input ToolPathInput) string {
 	for _, key := range PathFields {

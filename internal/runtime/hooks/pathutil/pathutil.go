@@ -9,19 +9,31 @@ import (
 // PathFields are the field names to check for file paths, in order of preference.
 var PathFields = platformpath.PathFields
 
+type ToolPathInput = platformpath.ToolPathInput
+
+// DecodeToolPathInput decodes a tool payload into the typed path input model.
+func DecodeToolPathInput(toolInput json.RawMessage) (ToolPathInput, bool) {
+	return platformpath.DecodeToolPathInput(toolInput)
+}
+
 // ExtractPath extracts the file path from tool input JSON.
 func ExtractPath(toolInput json.RawMessage) string {
 	return platformpath.ExtractPath(toolInput)
 }
 
-// ExtractPathFromMap extracts the file path from a map.
-func ExtractPathFromMap(input map[string]any) string {
-	return platformpath.ExtractPathFromMap(input)
+// ExtractPathFromInput extracts the first path from a typed path input.
+func ExtractPathFromInput(input ToolPathInput) string {
+	return platformpath.ExtractPathFromInput(input)
 }
 
 // ExtractPaths extracts all file paths from tool input JSON.
 func ExtractPaths(toolInput json.RawMessage) []string {
 	return platformpath.ExtractPaths(toolInput)
+}
+
+// ExtractPathsFromInput extracts all paths from a typed path input.
+func ExtractPathsFromInput(input ToolPathInput) []string {
+	return platformpath.ExtractPathsFromInput(input)
 }
 
 // NormalizePath normalizes a file path relative to workspace.
