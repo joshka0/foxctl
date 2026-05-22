@@ -1,4 +1,4 @@
-import type { MuxPane } from '@/api/types'
+import type { MuxPane } from '@foxctl/data/types'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'

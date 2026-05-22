@@ -10,7 +10,7 @@ import { archiveRoom, listRooms, listWorkspaces, restoreRoom } from '@/api/clien
 import { useViewStore } from '@/stores/viewStore'
 import { cn, formatRelativeTime } from '@/lib/utils'
 import { ArchiveRestore, Hash, RefreshCw } from 'lucide-react'
-import type { Room } from '@/api/types'
+import type { Room } from '@foxctl/data/types'
 import { RoomControlCenter } from './RoomControlCenter'
 
 export function RoomsView() {

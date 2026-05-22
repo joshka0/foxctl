@@ -19,7 +19,7 @@ import type {
   Room,
   OrchestrationRuntimeTreeNode,
   OrchestrationSeedCardInput,
-} from '@/api/types'
+} from '@foxctl/data/types'
 import {
   ArrowRight,
   CheckCircle2,

@@ -9,7 +9,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import type { CompanionMemoryStats, PersistedSession } from "@/api/client";
-import type { Agent, CoChangeHit, Room } from "@/api/types";
+import type { Agent, CoChangeHit, Room } from '@foxctl/data/types';
 import {
   getAgentDisplayName,
   getAgentRepoDisplayName,

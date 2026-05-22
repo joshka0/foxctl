@@ -9,7 +9,7 @@ import {
   Webhook,
   AlertCircle,
 } from 'lucide-react'
-import type { ActivityEvent } from '@/api/types'
+import type { ActivityEvent } from '@/types/activity'
 
 /**
  * Renders the Activity feed UI showing connection status, event count, and a scrollable list of activity events.

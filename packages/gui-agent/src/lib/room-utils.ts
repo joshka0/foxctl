@@ -1,4 +1,4 @@
-import type { Room, RoomDeliveryBinding, RoomMember } from '@/api/types'
+import type { ParticipantState, Room, RoomDeliveryBinding, RoomMember } from '@foxctl/data/types'
 
 export function roomDisplayName(room: Room): string {
   const title = room.title?.trim()
@@ -101,4 +101,11 @@ export function roomMemberTransportEndpoint(member: RoomMember | null | undefine
 
 export function roomMemberTransportKind(member: RoomMember | null | undefined): string {
   return roomMemberDeliveryBinding(member)?.transport_kind?.trim() || member?.transport_kind?.trim() || ''
+}
+
+export function participantTransportKind(state?: ParticipantState): 'pane_socket' | 'mux_pane' | 'none' {
+  const endpoint = state?.transport_endpoint
+  if (!endpoint) return 'none'
+  if (endpoint.startsWith('/')) return 'pane_socket'
+  return 'mux_pane'
 }

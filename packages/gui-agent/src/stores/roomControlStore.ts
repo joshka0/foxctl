@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { RoomTask } from '@/api/types'
+import type { RoomTask } from '@foxctl/data/types'
 
 export type ObligationLane = 'ready to claim' | 'awaiting ack' | 'awaiting reply' | 'assigned' | 'blocked' | 'stale' | 'all'
 

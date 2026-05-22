@@ -12,7 +12,7 @@ import type {
   OrchestrationCard,
   OrchestrationCardAction,
   OrchestrationRuntimeTree,
-} from '@/api/types'
+} from '@foxctl/data/types'
 
 export const ORCHESTRATION_LANE_ORDER = [
   'Todo',

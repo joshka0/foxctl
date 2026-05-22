@@ -8,7 +8,7 @@ import {
   MessageBubble,
   TypingIndicator,
 } from "@/components/chat/MessageBubble";
-import type { Agent } from "@/api/types";
+import type { Agent } from '@foxctl/data/types';
 import type {
   ConsoleMessage,
   PersistedSession,

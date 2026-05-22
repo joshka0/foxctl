@@ -46,7 +46,7 @@ import { RoomChatView } from './RoomChatView'
 import { RoomPlanningView } from './RoomPlanningView'
 import { RoomTerminalView } from './RoomTerminalView'
 import { Hash, MessageSquare, ShieldAlert, Zap, X, RefreshCw, CheckCircle2, UserCircle, Users, Bell, Trash2, TerminalSquare } from 'lucide-react'
-import type { MailboxMessage, RoomMessageEvent } from '@/api/types'
+import type { MailboxMessage, RoomMessageEvent } from '@foxctl/data/types'
 
 interface AdminDispatchSummary {
   id: string

@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { HelpTooltip, Tooltip } from '@/components/ui/tooltip'
 import { listRooms, listWorkspaces } from '@/api/client'
-import type { Agent } from '@/api/types'
+import type { Agent } from '@foxctl/data/types'
 import {
   humanReadableWorkspacePath,
   isPathWorkspace,

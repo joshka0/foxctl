@@ -59,9 +59,11 @@ import type {
   FlowNodeKind,
   FlowNode as FlowNodeType,
   FlowEdge as FlowEdgeType,
-  RoomStatus,
   FlowStatusResponse,
-} from '@/api/types'
+} from '@/types/flow'
+import type {
+  RoomStatus,
+} from '@foxctl/data/types'
 
 // ---------------------------------------------------------------------------
 // Types

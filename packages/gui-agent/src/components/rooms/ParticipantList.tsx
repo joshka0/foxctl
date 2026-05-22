@@ -1,7 +1,8 @@
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { participantTransportKind, type RoomStatusParticipant } from '@/api/types'
+import type { RoomStatusParticipant } from '@foxctl/data/types'
+import { participantTransportKind } from '@/lib/room-utils'
 import { cn } from '@/lib/utils'
 import { Monitor, Cpu, Link2Off, Zap, Activity, Power, ShieldCheck, HelpCircle } from 'lucide-react'
 

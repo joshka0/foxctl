@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { CollapsibleSection } from "@/components/ui/collapsible-section";
 import { HelpTooltip, Tooltip } from "@/components/ui/tooltip";
 import { cn, formatRelativeTime } from "@/lib/utils";
-import type { Agent } from "@/api/types";
+import type { Agent } from '@foxctl/data/types';
 import type { PersistedSession } from "@/api/client";
 import {
   getAgentDisplayName,

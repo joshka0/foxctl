@@ -18,7 +18,7 @@ import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { useQuery } from '@tanstack/react-query'
 import { getFlowNodeTerminal } from '@/api/client'
-import type { FlowNodeKind } from '@/api/types'
+import type { FlowNodeKind } from '@/types/flow'
 
 interface FlowNodeData extends Record<string, unknown> {
   label: string

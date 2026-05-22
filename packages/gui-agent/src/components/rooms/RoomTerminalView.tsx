@@ -9,8 +9,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { addRoomReminder, cancelRoomReminder, listRoomReminders, readMuxPane } from '@/api/client'
-import { participantTransportKind } from '@/api/types'
-import type { MuxPane, RoomDeliveryBinding, RoomReminder, RoomSendMessageResult, RoomStatusParticipant } from '@/api/types'
+import type { MuxPane, RoomDeliveryBinding, RoomReminder, RoomSendMessageResult, RoomStatusParticipant } from '@foxctl/data/types'
+import { participantTransportKind } from '@/lib/room-utils'
 import { Monitor, RefreshCw, SendHorizonal, TerminalSquare } from 'lucide-react'
 
 interface RoomTerminalViewProps {

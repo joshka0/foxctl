@@ -14,7 +14,7 @@ import { useViewStore } from '@/stores/viewStore'
 import { EventTraceDrawer } from '@/components/v2/EventTraceDrawer'
 import { RefDrilldownPanel } from '@/components/v2/RefDrilldownPanel'
 import { cleanupLogs, getLogs } from '@/api/client'
-import type { ActivityEvent } from '@/api/types'
+import type { ActivityEvent } from '@/types/activity'
 import {
   RefreshCw,
   AlertCircle,

@@ -1,8 +1,5 @@
 import type {
   ApiEnvelope,
-  ContextWikiMemoryProposal,
-  ContextWikiOverview,
-  ContextWikiNextProposalMergeResult,
   AgentsListResponse,
   AgentRuntimeTree,
   AgentAskStreamCancelRequest,
@@ -13,7 +10,6 @@ import type {
   AgentSpawnResponse,
   AgentSpawnRequest,
   CoChangeHit,
-  MailboxListResponse,
   MailboxMessage,
   BulkResolveRequest,
   Room,
@@ -27,10 +23,7 @@ import type {
   MuxPaneCapture,
   RoomSendMessageResult,
   RoomReminder,
-  BlackboardListResponse,
-  LogsListResponse,
   AgentSession,
-  PresenceBundle,
   OrchestrationBoard,
   OrchestrationBoardArtifactRef,
   OrchestrationBoardCardRuntimeResult,
@@ -48,7 +41,18 @@ import type {
   OrchestrationRestoreCardsResult,
   OrchestrationSeedCardsRequest,
   OrchestrationSeedCardsResult,
+  BlackboardRecord,
+} from "@foxctl/data/types";
+import type { LogsListResponse } from "@/types/activity";
+import type { PresenceBundle } from "@/types/companion";
+import type {
+  ContextWikiMemoryProposal,
+  ContextWikiNextProposalMergeResult,
+  ContextWikiOverview,
+} from "@/types/contextwiki";
+import type {
   Flow,
+  FlowDetail,
   FlowNode,
   FlowNodeKind,
   FlowEdge,
@@ -56,10 +60,18 @@ import type {
   FlowTriggerKind,
   FlowStatusResponse,
   FlowRunLog,
-} from "./types";
+} from "@/types/flow";
 
 const API_BASE = "/api";
 const IS_DEV = import.meta.env.DEV;
+
+interface MailboxListResponse {
+  messages: MailboxMessage[];
+}
+
+interface BlackboardListResponse {
+  records: BlackboardRecord[];
+}
 
 const DEV_AUTH_SESSION: AuthSessionResponse = {
   session: {
@@ -2388,9 +2400,7 @@ export async function createFlow(params: {
   });
 }
 
-export async function getFlow(flowId: string): Promise<
-  Flow & { nodes: FlowNode[]; edges: FlowEdge[] }
-> {
+export async function getFlow(flowId: string): Promise<FlowDetail> {
   return request(`/flows/${encodeURIComponent(flowId)}`);
 }
 

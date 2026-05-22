@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils'
 import { listFlows, createFlow, deleteFlow } from '@/api/client'
 import { FlowCanvas } from './FlowCanvas'
 import { GitBranch, Plus, Trash2, Loader2, Link2 } from 'lucide-react'
-import type { Flow } from '@/api/types'
+import type { Flow } from '@/types/flow'
 
 export function FlowCanvasScreen() {
   const [selectedFlowId, setSelectedFlowId] = useState<string | null>(null)

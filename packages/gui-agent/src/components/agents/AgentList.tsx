@@ -22,8 +22,8 @@ import {
   startAgent,
   type SpawnAgentParams,
 } from "@/api/client";
-import type { Agent, AgentSpawnResponse, Room } from "@/api/types";
-import type { ActivityEvent } from "@/api/types";
+import type { Agent, AgentSpawnResponse, Room } from '@foxctl/data/types';
+import type { ActivityEvent } from '@/types/activity';
 import { useActivityStore } from "@/stores/activityStore";
 import { useActivityFocusStore } from "@/stores/activityFocusStore";
 import { useViewStore } from "@/stores/viewStore";

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Agent } from '@/api/types'
+import type { Agent } from '@foxctl/data/types'
 
 export type ViewType =
   | 'runtime'

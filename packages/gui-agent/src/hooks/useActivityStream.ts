@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { useActivityStore } from '../stores/activityStore'
-import type { ActivityEvent } from '../api/types'
+import type { ActivityEvent } from '@/types/activity'
 import { getLogs } from '../api/client'
 
 const SSE_URL = '/api/events'

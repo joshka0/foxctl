@@ -36,7 +36,7 @@ import {
   type PersonalityInfo,
   type PersistedSession,
 } from "@/api/client";
-import type { Agent } from "@/api/types";
+import type { Agent } from '@foxctl/data/types';
 import {
   PROVIDERS,
   mergeModelsForProvider,

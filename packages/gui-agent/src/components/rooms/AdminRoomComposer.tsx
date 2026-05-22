@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { SendHorizonal, ShieldAlert, ZapOff } from 'lucide-react'
-import type { RoomStatusParticipant } from '@/api/types'
+import type { RoomStatusParticipant } from '@foxctl/data/types'
 import { cn } from '@/lib/utils'
 
 interface AdminRoomComposerProps {

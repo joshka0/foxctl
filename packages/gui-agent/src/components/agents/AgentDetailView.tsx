@@ -54,7 +54,7 @@ import type {
   AgentChatStreamEvent,
   AgentRuntimeTreeNode,
   Room,
-} from "@/api/types";
+} from '@foxctl/data/types';
 import { useAgentOperations } from "@/hooks/useAgentOperations";
 import { useViewStore } from "@/stores/viewStore";
 import { cn, formatRelativeTime } from "@/lib/utils";

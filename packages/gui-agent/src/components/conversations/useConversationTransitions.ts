@@ -13,7 +13,7 @@ import {
   type PersistedSession,
   type PersonalityInfo,
 } from "@/api/client";
-import type { Agent } from "@/api/types";
+import type { Agent } from '@foxctl/data/types';
 import { getAgentDisplayName } from "@/lib/agent-utils";
 import { matchAgentToConversation } from "@/lib/conversation-utils";
 import type { Conversation } from "@/lib/conversation-list-models";
