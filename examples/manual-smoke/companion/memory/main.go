@@ -1,6 +1,11 @@
-// companion_memory_test demonstrates the v2 hybrid companion memory system.
+//go:build manualsmoke
+
+// Companion memory manual smoke demonstrates the v2 hybrid companion memory
+// system with temporary local storage.
 //
-// Run with: go run ./cmd/companion_memory_test/
+// Run with:
+//
+//	go run -tags manualsmoke ./examples/manual-smoke/companion/memory
 package main
 
 import (
@@ -18,13 +23,8 @@ import (
 	"github.com/joshka0/foxctl/internal/storage/memory"
 )
 
-// main demonstrates a runnable Companion conversation-memory temporal-decay demo.
-// It sets up a temporary SQLite database and filesystem-backed memory store, injects
-// sample yesterday and today turns, runs daily compression (L0 → L1) with a mock
-// summarizer, optionally enables vector embeddings from configuration, prints memory
-// statistics and contexts, exports the full memory state, and lists any stored
-// semantic memories. The program uses temporary files and directories that are
-// cleaned up on exit.
+// main runs a local temporal-decay smoke using temporary SQLite and memory
+// stores, then prints the resulting hybrid context and exported state.
 func main() {
 	ctx := context.Background()
 
@@ -36,7 +36,7 @@ func main() {
 	}
 
 	// Create temp DB
-	tmpDir, err := os.MkdirTemp("", "companion-memory-test-*")
+	tmpDir, err := os.MkdirTemp("", "companion-memory-smoke-*")
 	if err != nil {
 		fmt.Printf("Failed to create temp dir: %v\n", err)
 		os.Exit(1)
@@ -66,11 +66,11 @@ func main() {
 	}
 	defer memoryStore.Close()
 
-	// Create memory store with custom config for testing
+	// Keep the windows short so the smoke run exercises compression quickly.
 	cfg := companion.DefaultMemoryConfig()
-	cfg.VividWindowHours = 1 // 1 hour for testing
-	cfg.VividMaxTurns = 5    // Keep last 5 turns vivid
-	cfg.RecentWindowDays = 1 // 1 day for testing
+	cfg.VividWindowHours = 1
+	cfg.VividMaxTurns = 5
+	cfg.RecentWindowDays = 1
 
 	companionMemory, err := companion.NewConversationMemory(
 		db,
@@ -82,10 +82,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	convID := "test-conversation"
+	convID := "manual-smoke-conversation"
 
 	fmt.Println("╔═══════════════════════════════════════════════════════════════╗")
-	fmt.Println("║     Companion Memory Test - Temporal Decay Demo               ║")
+	fmt.Println("║     Companion Memory Manual Smoke - Temporal Decay Demo        ║")
 	fmt.Println("╚═══════════════════════════════════════════════════════════════╝")
 
 	// Simulate a conversation over time
@@ -238,7 +238,7 @@ func main() {
 		}
 	}
 
-	fmt.Println("\n✨ Memory test complete!")
+	fmt.Println("\n✨ Memory manual smoke complete!")
 	fmt.Println("\nArchitecture summary:")
 	fmt.Println("  • Turns: immutable conversation messages")
 	fmt.Println("  • Events: canonical hybrid event stream")

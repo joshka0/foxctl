@@ -164,9 +164,13 @@ by cleanup value and implementation risk.
     current CAS driver/path/S3 bucket variables.
   - Tests: `kubectl kustomize` or manifest snapshot plus config-load coverage.
 
-- [ ] Decide the fate of demo/test binaries under `cmd/companion_*_test`.
+- [x] Decide the fate of demo/test binaries under `cmd/companion_*_test`.
   - Target: delete them or move them behind explicit examples/manual-smoke
     boundaries and replace useful coverage with `_test.go` tests.
+  - Completed: moved the live companion chat, memory, and mailbox demos to
+    `examples/manual-smoke/companion/*` behind the `manualsmoke` build tag.
+    Deterministic companion behavior remains covered by
+    `internal/context/companion/*_test.go`.
 
 ## Structural Simplification Candidates
 

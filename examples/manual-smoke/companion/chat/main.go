@@ -1,5 +1,11 @@
-// companion_test is a simple tool to test the RLM companion service.
-// It simulates a conversation demonstrating context storage and retrieval.
+//go:build manualsmoke
+
+// Companion chat manual smoke exercises the RLM companion service with a live
+// model and temporary context storage.
+//
+// Run with:
+//
+//	go run -tags manualsmoke ./examples/manual-smoke/companion/chat
 package main
 
 import (
@@ -42,7 +48,7 @@ func main() {
 		With().Timestamp().Logger()
 
 	// Create temp directory for context store
-	tmpDir, err := os.MkdirTemp("", "companion-test-*")
+	tmpDir, err := os.MkdirTemp("", "companion-chat-smoke-*")
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to create temp dir")
 	}
@@ -68,10 +74,10 @@ func main() {
 		Logger:             log,
 	}, nil)
 
-	conversationID := "test-conv-" + time.Now().Format("20060102-150405")
+	conversationID := "manual-smoke-conv-" + time.Now().Format("20060102-150405")
 
 	fmt.Println("╔═══════════════════════════════════════════════════════════════╗")
-	fmt.Println("║           RLM Companion Test - Context Demo                    ║")
+	fmt.Println("║      RLM Companion Manual Smoke - Context Demo                 ║")
 	fmt.Println("╚═══════════════════════════════════════════════════════════════╝")
 	fmt.Printf("Conversation ID: %s\n", conversationID)
 	fmt.Printf("Provider: %s | Model: %s\n\n", provider, model)
@@ -190,5 +196,5 @@ func main() {
 		}
 	}
 
-	fmt.Println("\n✨ Test complete!")
+	fmt.Println("\n✨ Manual smoke complete!")
 }

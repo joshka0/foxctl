@@ -1,8 +1,12 @@
-// companion_mailbox_test demonstrates the mailbox-to-companion flow with memory.
+//go:build manualsmoke
+
+// Companion mailbox manual smoke demonstrates the mailbox-to-companion flow with memory.
 // It spawns a companion actor, sends messages via the mailbox, and shows responses.
 // Conversation turns are stored in memory and progressively decayed over time.
 //
-// Run with: go run ./cmd/companion_mailbox_test/
+// Run with:
+//
+//	go run -tags manualsmoke ./examples/manual-smoke/companion/mailbox
 package main
 
 import (
@@ -25,7 +29,8 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// main runs a self-contained demo of the companion mailbox flow: it loads configuration and API keys, initializes temporary storage (context store, board store, memory DB and store), creates a companion executor, spawns a philosopher companion, sends a series of mailbox messages to it, inspects board responses, performs a direct message, prints final context and memory statistics, demonstrates semantic search over named memories, stops all actors, and cleans up temporary resources.
+// main runs a self-contained mailbox smoke with temporary context, board, and
+// memory stores, then prints responses and memory statistics.
 func main() {
 	ctx := context.Background()
 
@@ -61,7 +66,7 @@ func main() {
 		With().Timestamp().Logger()
 
 	// Create temp directories
-	tmpDir, err := os.MkdirTemp("", "companion-mailbox-test-*")
+	tmpDir, err := os.MkdirTemp("", "companion-mailbox-smoke-*")
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to create temp dir")
 	}
@@ -134,7 +139,7 @@ func main() {
 	}
 
 	fmt.Println("╔═══════════════════════════════════════════════════════════════╗")
-	fmt.Println("║     Companion Mailbox Test - Long-lived Actor Demo            ║")
+	fmt.Println("║     Companion Mailbox Manual Smoke - Long-lived Actor Demo    ║")
 	fmt.Println("╚═══════════════════════════════════════════════════════════════╝")
 	fmt.Printf("Provider: %s | Model: %s\n\n", provider, model)
 
@@ -232,7 +237,7 @@ func main() {
 	}
 
 	// Test direct message (bypassing mailbox)
-	fmt.Println("\n─────────────────────── Direct Message Test ───────────────────────")
+	fmt.Println("\n─────────────────────── Direct Message Check ───────────────────────")
 	fmt.Println("📞 Calling companion directly (no mailbox)...")
 	directResp, err := executor.DirectMessage(ctx, "companion:philosopher", "Quick question: what's your favorite paradox?")
 	if err != nil {
@@ -279,7 +284,7 @@ func main() {
 	}
 
 	// Demonstrate semantic search on companion memories
-	fmt.Println("\n─────────────────────── Semantic Search Test ───────────────────────")
+	fmt.Println("\n─────────────────────── Semantic Search Check ───────────────────────")
 	fmt.Println("Checking named_memory store for companion entries...")
 
 	// List companion memories in the workspace
@@ -305,7 +310,7 @@ func main() {
 	// Stop the actor
 	_ = executor.StopAll(ctx)
 
-	fmt.Println("\n✨ Mailbox test complete!")
+	fmt.Println("\n✨ Mailbox manual smoke complete!")
 }
 
 func findMetadataSeparator(s string) int {
