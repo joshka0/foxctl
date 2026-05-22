@@ -75,6 +75,9 @@ by cleanup value and implementation risk.
     client no longer translates legacy `action_required` payloads.
   - Progress: foxterm now imports shared room DTOs from `@foxctl/data/types`
     directly instead of re-exporting local pass-through aliases.
+  - Progress: GUI console model requests now send canonical
+    `story_gather_model` / `story_dialogue_model` / `llm_model` fields, and
+    the deprecated `tool_model` / `response_model` shim was removed.
   - Backend targets: make room status/inbox emit canonical DTOs directly,
     consolidate duplicated `AgentResponse` conversion, and replace map-shaped
     daemon fallback responses with typed response structs.

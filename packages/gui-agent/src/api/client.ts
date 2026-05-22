@@ -1776,8 +1776,6 @@ export async function listConsoleSessions(workspace?: string): Promise<{
  * @param params.exec_mode - Optional exec mode default (persisted)
  * @param params.story_gather_model - Optional story gather model default (persisted)
  * @param params.story_dialogue_model - Optional story dialogue model default (persisted)
- * @param params.tool_model - Deprecated. When set, maps to `story_gather_model` and implies openrouter.
- * @param params.response_model - Deprecated. When set, maps to `llm_model` and `story_dialogue_model` and implies openrouter.
  * @returns The created `session`
  */
 export async function createConsoleSession(params: {
@@ -1790,10 +1788,7 @@ export async function createConsoleSession(params: {
   exec_mode?: "reactive" | "autonomous" | "proactive" | "tick" | "story";
   story_gather_model?: string;
   story_dialogue_model?: string;
-  // Deprecated/back-compat fields
   conversation_id?: string;
-  tool_model?: string;
-  response_model?: string;
 }): Promise<{ session: ConsoleSession }> {
   const body: Record<string, unknown> = {
     workspace: params.workspace,
@@ -1815,30 +1810,6 @@ export async function createConsoleSession(params: {
     body.story_gather_model = params.story_gather_model;
   if (params.story_dialogue_model !== undefined)
     body.story_dialogue_model = params.story_dialogue_model;
-
-  // Back-compat: 2-stage model fields. Console sessions currently support a single model;
-  // we map the "response model" to `llm_model` and default provider to openrouter.
-  const legacyToolModel =
-    typeof params.tool_model === "string" ? params.tool_model.trim() : "";
-  const legacyResponseModel =
-    typeof params.response_model === "string"
-      ? params.response_model.trim()
-      : "";
-  if (
-    params.llm_provider === undefined &&
-    (legacyToolModel || legacyResponseModel)
-  ) {
-    body.llm_provider = "openrouter";
-  }
-  if (params.llm_model === undefined && legacyResponseModel) {
-    body.llm_model = legacyResponseModel;
-  }
-  if (params.story_gather_model === undefined && legacyToolModel) {
-    body.story_gather_model = legacyToolModel;
-  }
-  if (params.story_dialogue_model === undefined && legacyResponseModel) {
-    body.story_dialogue_model = legacyResponseModel;
-  }
 
   return request("/console/sessions", {
     method: "POST",
@@ -1891,8 +1862,6 @@ export async function askConsoleSession(
   overrides?: {
     llm_provider?: string;
     llm_model?: string;
-    tool_model?: string;
-    response_model?: string;
   },
 ): Promise<{ ok: boolean; correlation_id: string }> {
   const body: Record<string, unknown> = {
@@ -1904,24 +1873,6 @@ export async function askConsoleSession(
     if (overrides.llm_provider !== undefined)
       body.llm_provider = overrides.llm_provider;
     if (overrides.llm_model !== undefined) body.llm_model = overrides.llm_model;
-
-    const legacyToolModel =
-      typeof overrides.tool_model === "string"
-        ? overrides.tool_model.trim()
-        : "";
-    const legacyResponseModel =
-      typeof overrides.response_model === "string"
-        ? overrides.response_model.trim()
-        : "";
-    if (
-      overrides.llm_provider === undefined &&
-      (legacyToolModel || legacyResponseModel)
-    ) {
-      body.llm_provider = "openrouter";
-    }
-    if (overrides.llm_model === undefined && legacyResponseModel) {
-      body.llm_model = legacyResponseModel;
-    }
   }
 
   return request(`/console/sessions/${sessionId}/ask`, {

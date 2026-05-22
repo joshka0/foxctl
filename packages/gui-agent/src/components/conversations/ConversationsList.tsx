@@ -65,6 +65,7 @@ import {
   filterConversationsBySearch,
   type Conversation,
 } from "@/lib/conversation-list-models";
+import { consoleAskModelParams } from "@/lib/conversation-session-utils";
 
 const API_BASE = "/api";
 
@@ -513,80 +514,6 @@ export function ConversationsList() {
     responseModel,
   });
 
-  /* legacy extraction complete
-    setSelectedConversationID(null);
-    setSelectedConversation(null);
-    setSelectedPersistedSession(null);
-    setLinkedAgent(agent);
-    beginConversationLoad({
-      preserveLinkedAgent: true,
-    });
-    // Keep a ref so the useEffect doesn't overwrite linkedAgent before DB catches up
-    pendingLinkedAgentRef.current = agent;
-
-    try {
-      // Create a new console session for this agent
-      const sessionData = await createConsoleSession({
-        workspace: agent.ns || "/",
-        profile: "companion",
-        system_prompt: `You are chatting in the context of an agent session.
-
-Agent Details:
-- Name: ${getAgentDisplayName(agent)}
-- Role: ${agent.role || "N/A"}
-- ID: ${agent.id}
-- Workspace: ${agent.ns || "/"}
-- Model: ${agent.llm_model || "default"}
-- State: ${agent.state}
-
-Help the user understand and interact with this agent's work.`,
-        tool_model: toolModel,
-        response_model: responseModel,
-      });
-      activateConsoleSession(sessionData);
-
-      // Create a placeholder conversation for the UI
-      const newConv: Conversation = {
-        id: sessionData.session.id,
-        title: `Chat with ${getAgentDisplayName(agent)}`,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        message_count: 0,
-      };
-      setSelectedConversation(newConv);
-      setSelectedConversationID(newConv.id);
-
-      // Link the conversation to the agent (conversation-side, supports many-to-one)
-      try {
-        await renameCompanionConversation(
-          sessionData.session.id,
-          `Chat with ${getAgentDisplayName(agent)}`,
-          agent.id,
-        );
-        // Refetch conversations so grouping updates immediately
-        await refetch();
-        // DB is now up-to-date; clear the pending ref
-        pendingLinkedAgentRef.current = null;
-      } catch (linkErr) {
-        console.error("Failed to link conversation to agent:", linkErr);
-      }
-
-      // Auto-expand the agent in the sidebar so the new chat is visible
-      setExpandedAgents((prev) => {
-        const next = new Set(prev);
-        next.add(agent.id);
-        return next;
-      });
-
-      // Reset agent selector
-      setSelectedAgentForNew("");
-    } catch (err) {
-      console.error("Failed to create new conversation with agent:", err);
-    } finally {
-      setIsLoadingMessages(false);
-    }
-  */
-
   const handleSSEMessage = useCallback(
     (payload: { type?: string; content?: string; metadata?: unknown }) => {
       switch (payload.type) {
@@ -993,8 +920,7 @@ Help the user understand and interact with this agent's work.`,
       } else if (sessionId) {
         // Use console session with SSE for new conversations only
         await askConsoleSession(sessionId, content, undefined, {
-          tool_model: toolModel,
-          response_model: responseModel,
+          ...consoleAskModelParams(toolModel, responseModel),
         });
       }
     } catch (err) {

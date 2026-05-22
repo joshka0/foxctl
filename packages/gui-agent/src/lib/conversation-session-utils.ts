@@ -4,6 +4,46 @@ import type {
   SessionMessage,
 } from "@/api/client";
 
+function trimModelID(model: string): string | undefined {
+  const trimmed = model.trim();
+  return trimmed === "" ? undefined : trimmed;
+}
+
+export function consoleSessionModelParams(
+  toolModel: string,
+  responseModel: string,
+): {
+  llm_provider?: string;
+  llm_model?: string;
+  story_gather_model?: string;
+  story_dialogue_model?: string;
+} {
+  const storyGatherModel = trimModelID(toolModel);
+  const storyDialogueModel = trimModelID(responseModel);
+  const hasModelSelection = Boolean(storyGatherModel || storyDialogueModel);
+  return {
+    llm_provider: hasModelSelection ? "openrouter" : undefined,
+    llm_model: storyDialogueModel,
+    story_gather_model: storyGatherModel,
+    story_dialogue_model: storyDialogueModel,
+  };
+}
+
+export function consoleAskModelParams(
+  toolModel: string,
+  responseModel: string,
+): {
+  llm_provider?: string;
+  llm_model?: string;
+} {
+  const storyGatherModel = trimModelID(toolModel);
+  const responseModelID = trimModelID(responseModel);
+  return {
+    llm_provider: storyGatherModel || responseModelID ? "openrouter" : undefined,
+    llm_model: responseModelID,
+  };
+}
+
 export function getSessionMessageContent(msg: SessionMessage): string {
   if (msg.summary) return msg.summary;
   if (msg.error) return `Error: ${msg.error}`;

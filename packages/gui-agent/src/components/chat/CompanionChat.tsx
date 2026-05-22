@@ -18,6 +18,10 @@ import {
 } from '@/api/client'
 import { Plus, History, Zap, Bot, MessageSquare, Folder, Copy, Check, ChevronDown, Clock, Cpu, Wrench } from 'lucide-react'
 import { COMPANION_TOOL_MODELS, COMPANION_RESPONSE_MODELS } from '@/components/agents/spawnFormConstants'
+import {
+  consoleAskModelParams,
+  consoleSessionModelParams,
+} from '@/lib/conversation-session-utils'
 
 const API_BASE = '/api'
 
@@ -103,8 +107,7 @@ export function CompanionChat() {
         const data = await createConsoleSession({
           workspace: window.location.pathname,
           profile: 'companion',
-          tool_model: toolModel,
-          response_model: responseModel,
+          ...consoleSessionModelParams(toolModel, responseModel),
         })
         const newSessionId = data.session.id
         setSessionId(newSessionId)
@@ -248,8 +251,7 @@ export function CompanionChat() {
 
     try {
       await askConsoleSession(sessionId, content, undefined, {
-        tool_model: toolModel,
-        response_model: responseModel,
+        ...consoleAskModelParams(toolModel, responseModel),
       })
       // Response will come via SSE
     } catch (err) {
@@ -279,8 +281,7 @@ export function CompanionChat() {
       const data = await createConsoleSession({
         workspace: window.location.pathname,
         profile: 'companion',
-        tool_model: toolModel,
-        response_model: responseModel,
+        ...consoleSessionModelParams(toolModel, responseModel),
       })
       const newSessionId = data.session.id
       setSessionId(newSessionId)
