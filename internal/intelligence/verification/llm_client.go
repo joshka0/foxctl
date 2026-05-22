@@ -164,7 +164,7 @@ func (c *OpenAIClient) Chat(ctx context.Context, systemPrompt, userPrompt string
 	if reasoning != "" {
 		return reasoning, nil
 	}
-	return "", nil
+	return "", fmt.Errorf("empty completion content")
 }
 
 func baseURLForProvider(provider string) string {

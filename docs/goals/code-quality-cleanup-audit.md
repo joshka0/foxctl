@@ -128,7 +128,7 @@ by cleanup value and implementation risk.
   - Target: catch expected exceptions only, accumulate errors, and return
     `ok:false` or raise when both CLI and HTTP paths fail.
 
-- [ ] Reject empty/malformed LLM verification output.
+- [x] Reject empty/malformed LLM verification output.
   - Scope: verification LLM client and CoVe refiner.
   - Target: return explicit errors for empty provider content and malformed
     refiner contracts.

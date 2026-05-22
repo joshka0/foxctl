@@ -208,7 +208,7 @@ func (c *CoVe) generateBaseline(ctx context.Context, req CoVeRequest) (string, e
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(result), nil
+	return requireLLMOutput("baseline generation", result)
 }
 
 func (c *CoVe) extractClaims(ctx context.Context, baseline string) ([]Claim, error) {
@@ -222,7 +222,10 @@ func (c *CoVe) extractClaims(ctx context.Context, baseline string) ([]Claim, err
 		return nil, err
 	}
 
-	claimsJSON := strings.TrimSpace(result)
+	claimsJSON, err := requireLLMOutput("claim extraction", result)
+	if err != nil {
+		return nil, err
+	}
 	return parseClaimsJSON(claimsJSON)
 }
 
@@ -237,7 +240,19 @@ func (c *CoVe) refine(ctx context.Context, question, baseline string, verificati
 	if err != nil {
 		return "", nil, err
 	}
+	result, err = requireLLMOutput("refinement", result)
+	if err != nil {
+		return "", nil, err
+	}
 	return parseRefinerOutput(result, mode)
+}
+
+func requireLLMOutput(stage, raw string) (string, error) {
+	output := strings.TrimSpace(raw)
+	if output == "" {
+		return "", fmt.Errorf("%s returned empty LLM output", stage)
+	}
+	return output, nil
 }
 
 func formatVerificationNotes(verification *BatchVerificationResult) string {
@@ -291,40 +306,59 @@ func parseCorrections(correctionsStr string) []Correction {
 }
 
 type refinerOutput struct {
-	FinalAnswer    string      `json:"final_answer"`
-	CorrectionsRaw interface{} `json:"corrections_made"`
+	FinalAnswer    string          `json:"final_answer"`
+	CorrectionsRaw json.RawMessage `json:"corrections_made"`
 }
 
 func parseRefinerOutput(raw string, mode CoVeMode) (string, []Correction, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return "", nil, nil
-	}
-	if mode == CoVeModeGate {
-		return raw, nil, nil
+		return "", nil, fmt.Errorf("refiner output is empty")
 	}
 
 	var parsed refinerOutput
-	if err := decodeJSONFragment(raw, &parsed); err == nil && strings.TrimSpace(parsed.FinalAnswer) != "" {
-		var corrections []Correction
-		switch v := parsed.CorrectionsRaw.(type) {
-		case string:
-			corrections = parseCorrections(v)
-		case []any:
-			lines := make([]string, 0, len(v))
-			for _, item := range v {
-				lines = append(lines, fmt.Sprintf("%v", item))
-			}
-			corrections = parseCorrections(strings.Join(lines, "\n"))
-		default:
-			if parsed.CorrectionsRaw != nil {
-				corrections = parseCorrections(fmt.Sprintf("%v", parsed.CorrectionsRaw))
-			}
-		}
-		return parsed.FinalAnswer, corrections, nil
+	if err := decodeJSONFragment(raw, &parsed); err != nil {
+		return "", nil, fmt.Errorf("refiner output must be a JSON object with final_answer and corrections_made: %w", err)
 	}
 
-	return raw, nil, nil
+	finalAnswer := strings.TrimSpace(parsed.FinalAnswer)
+	if finalAnswer == "" {
+		return "", nil, fmt.Errorf("refiner output missing non-empty final_answer")
+	}
+	if len(parsed.CorrectionsRaw) == 0 {
+		return "", nil, fmt.Errorf("refiner output missing corrections_made")
+	}
+
+	corrections, err := parseRefinerCorrections(parsed.CorrectionsRaw)
+	if err != nil {
+		return "", nil, err
+	}
+	if mode == CoVeModeGate {
+		return finalAnswer, nil, nil
+	}
+	return finalAnswer, corrections, nil
+}
+
+func parseRefinerCorrections(raw json.RawMessage) ([]Correction, error) {
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return nil, fmt.Errorf("refiner corrections_made is malformed: %w", err)
+	}
+
+	switch v := decoded.(type) {
+	case nil:
+		return nil, fmt.Errorf("refiner output corrections_made must not be null")
+	case string:
+		return parseCorrections(v), nil
+	case []any:
+		lines := make([]string, 0, len(v))
+		for _, item := range v {
+			lines = append(lines, fmt.Sprintf("%v", item))
+		}
+		return parseCorrections(strings.Join(lines, "\n")), nil
+	default:
+		return parseCorrections(fmt.Sprintf("%v", v)), nil
+	}
 }
 
 func decodeJSONFragment(raw string, dst any) error {
