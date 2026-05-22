@@ -11,6 +11,16 @@ import (
 	"github.com/joshka0/foxctl/internal/storage/dbdriver"
 )
 
+// StoreDB is the SQL capability set v2 Turso stores need at runtime.
+// It is intentionally narrower than dbdriver.DB so tests can still construct
+// stores over direct *sql.DB fixtures while production opens use dbdriver.DB.
+type StoreDB interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error)
+}
+
 // StoreOpenSpec describes the storage files and override prefix for a v2 store.
 type StoreOpenSpec struct {
 	Name             string
@@ -20,7 +30,7 @@ type StoreOpenSpec struct {
 }
 
 // OpenStoreDB opens a Turso-first local store DB and applies its migration.
-func OpenStoreDB(ctx context.Context, storageRoot string, spec StoreOpenSpec, migrate dbdriver.MigrationFunc) (*sql.DB, func() error, error) {
+func OpenStoreDB(ctx context.Context, storageRoot string, spec StoreOpenSpec, migrate dbdriver.MigrationFunc) (StoreDB, func() error, error) {
 	name := strings.TrimSpace(spec.Name)
 	if name == "" {
 		name = "v2 turso store"
@@ -46,11 +56,11 @@ func OpenStoreDB(ctx context.Context, storageRoot string, spec StoreOpenSpec, mi
 		cfg = dbdriver.NewConfigLoader(storageRoot).LoadConfig(envPrefix, overrideFilename)
 	}
 
-	db, closeFn, err := dbdriver.OpenDBCompatWithCloser(ctx, cfg, migrate)
+	db, err := dbdriver.OpenDB(ctx, cfg, migrate)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s open: %w", name, err)
 	}
-	return db, closeFn, nil
+	return db, db.Close, nil
 }
 
 func hasDriverOverride(envPrefix string) bool {

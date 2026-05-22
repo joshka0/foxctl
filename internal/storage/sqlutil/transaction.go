@@ -6,11 +6,17 @@ import (
 	"fmt"
 )
 
+// TransactionStarter is the minimal database capability needed to start a SQL
+// transaction. Both *sql.DB and the repository DB driver abstraction implement it.
+type TransactionStarter interface {
+	BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error)
+}
+
 // WithTransaction executes fn within a SQL transaction.
 //
 // If fn returns an error the transaction is rolled back and the error is
 // returned. Any panic inside fn will trigger a rollback before re-panicking.
-func WithTransaction(ctx context.Context, db *sql.DB, fn func(*sql.Tx) error) error {
+func WithTransaction(ctx context.Context, db TransactionStarter, fn func(*sql.Tx) error) error {
 	if db == nil {
 		return fmt.Errorf("sqlutil: db is nil")
 	}
@@ -52,7 +58,7 @@ func WithTransaction(ctx context.Context, db *sql.DB, fn func(*sql.Tx) error) er
 }
 
 // WithTx executes fn within a SQL transaction and returns its result.
-func WithTx[T any](ctx context.Context, db *sql.DB, fn func(*sql.Tx) (T, error)) (T, error) {
+func WithTx[T any](ctx context.Context, db TransactionStarter, fn func(*sql.Tx) (T, error)) (T, error) {
 	var zero T
 	var result T
 	err := WithTransaction(ctx, db, func(tx *sql.Tx) error {
