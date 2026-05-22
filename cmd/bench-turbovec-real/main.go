@@ -419,7 +419,7 @@ func getEmbedding(client *http.Client, text string) ([]float32, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		var buf bytes.Buffer
-		buf.ReadFrom(resp.Body)
+		_, _ = buf.ReadFrom(resp.Body)
 		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, buf.String())
 	}
 
