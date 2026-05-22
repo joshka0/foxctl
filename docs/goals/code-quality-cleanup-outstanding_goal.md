@@ -44,7 +44,10 @@ Remaining areas from the results doc after the completed slices:
   - Deferred: keep chat command parsing adapter-local until a shared text
     command contract is explicit; do not merge Discord typed slash-command
     option handling with Teams/Telegram free-text parsing.
-  - Extract shared Jido/goruntime orchestration reconciliation helpers.
+  - Completed: extract runtime-neutral Jido/goruntime reconciliation helpers
+    for append/project and retry delay.
+  - Deferred: keep payload builders and terminal event identity helpers
+    adapter-local until their contracts are intentionally aligned.
 - Tooling:
   - Completed: dependable unused-code and TypeScript frontend verification
     commands are wired locally and in GitLab CI:
@@ -233,8 +236,11 @@ Done when:
   with adapter-local error handling preserved.
 - Deferred: chat command parsing remains adapter-local unless a shared MVP text
   command contract is made explicit.
-- Jido/goruntime reconciliation helpers are extracted as pure helpers before
-  any broad architecture move.
+- Completed: Jido/goruntime append/project and retry delay helpers are
+  extracted into the runtime/orchestration Module before any broad architecture
+  move.
+- Deferred: payload builders and terminal event identity helpers remain
+  adapter-local because their current contracts differ.
 - Verification passes for each affected package.
 
 ### 9. Residual Typed Wrappers And Weak Casts (Complete)

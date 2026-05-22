@@ -7,6 +7,7 @@ import (
 	"time"
 
 	v2events "github.com/joshka0/foxctl/internal/v2/core/events"
+	v2runtimeorchestration "github.com/joshka0/foxctl/internal/v2/runtime/orchestration"
 )
 
 const (
@@ -15,15 +16,10 @@ const (
 	defaultEventIDPre = "evt"
 )
 
-// EventAppender persists canonical v2 events.
-type EventAppender interface {
-	Append(ctx context.Context, event v2events.Event) error
-}
-
-// ProjectionApplier materializes v2 run/agent projections.
-type ProjectionApplier interface {
-	Apply(ctx context.Context, evt v2events.Event) error
-}
+type (
+	EventAppender     = v2runtimeorchestration.EventAppender
+	ProjectionApplier = v2runtimeorchestration.EventProjector
+)
 
 // ReconcilerConfig configures event/projection reconciliation.
 type ReconcilerConfig struct {
@@ -115,7 +111,7 @@ func (r *Reconciler) RecordAskDispatched(ctx context.Context, messageID string, 
 		Payload:       payload,
 	}
 
-	if err := r.appendAndProject(ctx, evt); err != nil {
+	if err := v2runtimeorchestration.AppendAndProject(ctx, r.events, r.projections, evt); err != nil {
 		return v2events.Event{}, err
 	}
 	return evt, nil
@@ -168,22 +164,10 @@ func (r *Reconciler) ReconcileSignalCallback(ctx context.Context, cb SignalCallb
 		Payload:       payload,
 	}
 
-	if err := r.appendAndProject(ctx, evt); err != nil {
+	if err := v2runtimeorchestration.AppendAndProject(ctx, r.events, r.projections, evt); err != nil {
 		return v2events.Event{}, err
 	}
 	return evt, nil
-}
-
-func (r *Reconciler) appendAndProject(ctx context.Context, evt v2events.Event) error {
-	if err := r.events.Append(ctx, evt); err != nil {
-		return err
-	}
-	if r.projections != nil {
-		if err := r.projections.Apply(ctx, evt); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func askStreamID(askID string) string {

@@ -3,7 +3,6 @@ package orchestration
 import (
 	"context"
 	"fmt"
-	"math"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -188,7 +187,7 @@ func (s *Scheduler) enqueueRetry(candidate Candidate, attempt int, reason string
 	if attempt < 1 {
 		attempt = 1
 	}
-	delay := retryDelay(attempt, s.retryBaseDelay, s.retryMaxDelay)
+	delay := RetryDelay(attempt, s.retryBaseDelay, s.retryMaxDelay)
 	ok := s.retryQueue.Upsert(RetryEntry{
 		Candidate: candidate,
 		Attempt:   attempt,
@@ -199,25 +198,6 @@ func (s *Scheduler) enqueueRetry(candidate Candidate, attempt int, reason string
 		return fmt.Errorf("orchestration scheduler: retry queue full issue_id=%s", strings.TrimSpace(candidate.IssueID))
 	}
 	return nil
-}
-
-func retryDelay(attempt int, base, max time.Duration) time.Duration {
-	if attempt < 1 {
-		attempt = 1
-	}
-	if base <= 0 {
-		base = defaultRetryBaseDelay
-	}
-	if max <= 0 {
-		max = defaultRetryMaxDelay
-	}
-	// min(base * 2^(attempt-1), max)
-	power := math.Pow(2, float64(attempt-1))
-	delay := time.Duration(float64(base) * power)
-	if delay > max {
-		return max
-	}
-	return delay
 }
 
 func defaultSchedulerID() func() string {

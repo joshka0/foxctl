@@ -202,9 +202,12 @@ Verification has been run slice-by-slice, including:
   the adapter entry points are not the same contract. Do not consolidate
   Discord command handling with those text parsers; Discord receives typed
   platform slash-command options.
-- Extract shared Jido/goruntime orchestration reconciliation helpers, starting
-  with pure retry delay, append/project, payload builder, and terminal event
-  helpers.
+- Completed: extracted runtime-neutral Jido/goruntime reconciliation helpers
+  for append-then-project event writes and bounded exponential retry delay into
+  `internal/v2/runtime/orchestration`.
+- Deferred: dispatch payload builders and terminal event identity helpers stay
+  adapter-local for now. Jido and Go-runtime have similar code there, but their
+  request/stream IDs and payload details are not the same contract.
 
 ### Tooling
 
@@ -218,6 +221,6 @@ Verification has been run slice-by-slice, including:
 
 ## Recommended Next Slices
 
-1. Extract shared Jido/goruntime orchestration reconciliation helpers, starting
-   with pure retry delay, append/project, payload builder, and terminal event
-   helpers.
+1. Audit the remaining room transport compatibility layer and decide whether
+   the internal pane transport update path should move to an explicit binding
+   helper.
