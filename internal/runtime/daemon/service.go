@@ -42,7 +42,6 @@ import (
 	"github.com/joshka0/foxctl/internal/storage"
 	agentstore "github.com/joshka0/foxctl/internal/storage/agents"
 	"github.com/joshka0/foxctl/internal/storage/blackboard"
-	"github.com/joshka0/foxctl/internal/storage/cache"
 	"github.com/joshka0/foxctl/internal/storage/cas"
 	"github.com/joshka0/foxctl/internal/storage/contextbuffer"
 	"github.com/joshka0/foxctl/internal/storage/coordination"
@@ -77,9 +76,7 @@ type Service struct {
 	skillResolver *SkillResolver
 
 	// Shared resources
-	cacheStore *cache.Store
-	cacheMu    sync.RWMutex
-	dbPool     *sqliteutil.Pool
+	dbPool *sqliteutil.Pool
 
 	// Warm workspaces (gopls ready)
 	warmWorkspaces map[string]bool
@@ -535,14 +532,6 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	s.leaderWorkersMu.Lock()
 	s.stopLeaderWorkers()
 	s.leaderWorkersMu.Unlock()
-
-	// Close shared resources
-	s.cacheMu.Lock()
-	if s.cacheStore != nil {
-		s.cacheStore.Close()
-		s.cacheStore = nil
-	}
-	s.cacheMu.Unlock()
 
 	// Close connection pool
 	if s.dbPool != nil {
@@ -1025,28 +1014,6 @@ func (s *Service) writePIDFile() error {
 
 func (s *Service) removePIDFile() {
 	_ = os.Remove(PIDPath())
-}
-
-// getCacheStore returns the shared cache store, opening it if needed.
-// TODO: Used when handleRun implements full skill execution.
-func (s *Service) getCacheStore(ctx context.Context) (*cache.Store, error) { //nolint:unused // Will be used when skill execution is implemented
-	s.cacheMu.Lock()
-	defer s.cacheMu.Unlock()
-
-	if s.cacheStore != nil {
-		return s.cacheStore, nil
-	}
-
-	store, err := cache.Open(ctx, s.cfg.Paths.Cache, cache.Options{
-		AutoTTL: s.cfg.Memory.AutoCacheTTL,
-		CASPath: s.cfg.Paths.CAS,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	s.cacheStore = store
-	return store, nil
 }
 
 // Daemonize forks the current process to run in background.
