@@ -136,7 +136,7 @@ by cleanup value and implementation risk.
 - [ ] Record or return solver split failures.
   - Scope: RLM braid executor split path.
 
-- [ ] Require canonical symbol memory identity for new embedding jobs.
+- [x] Require canonical symbol memory identity for new embedding jobs.
   - Scope: embedding worker and embedding store.
   - Target: require `memory_name` or `package_id + symbol_key`; migrate or skip
     incomplete old queue rows explicitly.

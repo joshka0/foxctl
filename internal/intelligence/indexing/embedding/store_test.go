@@ -2,14 +2,35 @@ package embedding
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedqueue"
+	"github.com/joshka0/foxctl/internal/storage/queue"
 	"github.com/joshka0/foxctl/internal/storage/sqlutil"
 )
+
+const testSymbolPackageID = "go:testpkg"
+
+func testSymbolInput(filePath, name, content string) SymbolInput {
+	return SymbolInput{
+		SymbolID:   filePath + ":" + name,
+		FilePath:   filePath,
+		SymbolName: name,
+		Language:   "go",
+		PackageID:  testSymbolPackageID,
+		SymbolKey:  filePath + ":" + name,
+		Content:    content,
+	}
+}
+
+func testSymbolStorageID(filePath, name string) string {
+	return testSymbolPackageID + "::" + filePath + ":" + name
+}
 
 func TestStore_EnqueueAndClaim(t *testing.T) {
 	ctx := context.Background()
@@ -25,18 +46,8 @@ func TestStore_EnqueueAndClaim(t *testing.T) {
 	result, err := store.Enqueue(ctx, EnqueueRequest{
 		WorkspaceID: "test-ws",
 		Symbols: []SymbolInput{
-			{
-				SymbolID:   "main.go:Handler",
-				FilePath:   "main.go",
-				SymbolName: "Handler",
-				Content:    "func Handler(w http.ResponseWriter, r *http.Request) {}",
-			},
-			{
-				SymbolID:   "main.go:Server",
-				FilePath:   "main.go",
-				SymbolName: "Server",
-				Content:    "type Server struct { port int }",
-			},
+			testSymbolInput("main.go", "Handler", "func Handler(w http.ResponseWriter, r *http.Request) {}"),
+			testSymbolInput("main.go", "Server", "type Server struct { port int }"),
 		},
 		Priority: PriorityHigh,
 	})
@@ -81,12 +92,7 @@ func TestStore_ClaimNextInWorkspaceOnlyClaimsMatchingJobs(t *testing.T) {
 	for _, workspaceID := range []string{"workspace-a", "workspace-b"} {
 		_, err := store.Enqueue(ctx, EnqueueRequest{
 			WorkspaceID: workspaceID,
-			Symbols: []SymbolInput{{
-				SymbolID:   workspaceID + ":Handler",
-				FilePath:   "main.go",
-				SymbolName: "Handler",
-				Content:    "func Handler() {}",
-			}},
+			Symbols:     []SymbolInput{testSymbolInput("main.go", "Handler", "func Handler() {}")},
 		})
 		if err != nil {
 			t.Fatalf("enqueue %s: %v", workspaceID, err)
@@ -141,13 +147,8 @@ func TestStore_ClaimNextInWorkspaceKindSkipsOtherKinds(t *testing.T) {
 	}
 	if _, err := store.Enqueue(ctx, EnqueueRequest{
 		WorkspaceID: "workspace-a",
-		Symbols: []SymbolInput{{
-			SymbolID:   "main.go:Handler",
-			FilePath:   "main.go",
-			SymbolName: "Handler",
-			Content:    "func Handler() {}",
-		}},
-		Model: "model-a",
+		Symbols:     []SymbolInput{testSymbolInput("main.go", "Handler", "func Handler() {}")},
+		Model:       "model-a",
 	}); err != nil {
 		t.Fatalf("enqueue symbol: %v", err)
 	}
@@ -198,12 +199,7 @@ func TestStore_RequeueStaleRunningInWorkspaceOnlyRecoversMatchingJobs(t *testing
 	for _, workspaceID := range []string{"workspace-a", "workspace-b"} {
 		_, err := store.Enqueue(ctx, EnqueueRequest{
 			WorkspaceID: workspaceID,
-			Symbols: []SymbolInput{{
-				SymbolID:   workspaceID + ":Handler",
-				FilePath:   "main.go",
-				SymbolName: "Handler",
-				Content:    "func Handler() {}",
-			}},
+			Symbols:     []SymbolInput{testSymbolInput("main.go", "Handler", "func Handler() {}")},
 		})
 		if err != nil {
 			t.Fatalf("enqueue %s: %v", workspaceID, err)
@@ -267,12 +263,7 @@ func TestStore_RequeueStaleRunningInWorkspaceKindOnlyRecoversMatchingKind(t *tes
 	}
 	if _, err := store.Enqueue(ctx, EnqueueRequest{
 		WorkspaceID: "workspace-a",
-		Symbols: []SymbolInput{{
-			SymbolID:   "main.go:Handler",
-			FilePath:   "main.go",
-			SymbolName: "Handler",
-			Content:    "func Handler() {}",
-		}},
+		Symbols:     []SymbolInput{testSymbolInput("main.go", "Handler", "func Handler() {}")},
 	}); err != nil {
 		t.Fatalf("enqueue symbol: %v", err)
 	}
@@ -515,6 +506,197 @@ func TestStore_EnqueueSymbolDedupeDistinguishesPackages(t *testing.T) {
 	}
 }
 
+func TestStore_EnqueueSymbolRequiresCanonicalIdentity(t *testing.T) {
+	ctx := context.Background()
+	store, err := OpenStore(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to open store: %v", err)
+	}
+	defer store.Close()
+
+	_, err = store.Enqueue(ctx, EnqueueRequest{
+		WorkspaceID: "test-ws",
+		Symbols: []SymbolInput{{
+			SymbolID:   "main.go:Legacy",
+			FilePath:   "main.go",
+			SymbolName: "Legacy",
+			Content:    "func Legacy() {}",
+		}},
+	})
+	if err == nil {
+		t.Fatal("expected canonical identity error")
+	}
+	if !strings.Contains(err.Error(), "memory_name or package_id and symbol_key") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestStore_EnqueueSymbolDerivesIdentityFromCanonicalMemoryName(t *testing.T) {
+	ctx := context.Background()
+	store, err := OpenStore(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to open store: %v", err)
+	}
+	defer store.Close()
+
+	memoryName := "symbol://test-ws/go:testpkg::main.go:Handler"
+	result, err := store.Enqueue(ctx, EnqueueRequest{
+		WorkspaceID: "test-ws",
+		Symbols: []SymbolInput{{
+			FilePath:   "main.go",
+			SymbolName: "Handler",
+			MemoryName: memoryName,
+			Content:    "func Handler() {}",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("enqueue failed: %v", err)
+	}
+	if result.Queued != 1 {
+		t.Fatalf("queued=%d want 1", result.Queued)
+	}
+
+	job, err := store.ClaimNext(ctx)
+	if err != nil {
+		t.Fatalf("claim failed: %v", err)
+	}
+	if job.SymbolID != "go:testpkg::main.go:Handler" {
+		t.Fatalf("symbol_id=%q", job.SymbolID)
+	}
+	if job.PackageID != "go:testpkg" || job.SymbolKey != "main.go:Handler" || job.MemoryName != memoryName {
+		t.Fatalf("identity package/key/name=%q/%q/%q", job.PackageID, job.SymbolKey, job.MemoryName)
+	}
+}
+
+func TestStore_ClaimNextSkipsLegacySymbolJobWithoutCanonicalIdentity(t *testing.T) {
+	ctx := context.Background()
+	store, err := OpenStore(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to open store: %v", err)
+	}
+	defer store.Close()
+
+	payload, err := json.Marshal(embeddingPayload{
+		WorkspaceID:   "test-ws",
+		SymbolID:      "main.go:Legacy",
+		FilePath:      "main.go",
+		SymbolName:    "Legacy",
+		Content:       "func Legacy() {}",
+		ContentDigest: computeDigest("func Legacy() {}"),
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	enqueued, err := store.queue.Enqueue(ctx, queue.EnqueueRequest{
+		GroupID:     "test-ws",
+		Payload:     payload,
+		DedupeKey:   "legacy-incomplete",
+		MaxAttempts: 1,
+	})
+	if err != nil {
+		t.Fatalf("enqueue raw queue job: %v", err)
+	}
+	if enqueued.Queued != 1 {
+		t.Fatalf("queued=%d want 1", enqueued.Queued)
+	}
+
+	job, err := store.ClaimNext(ctx)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if job != nil {
+		t.Fatalf("job=%+v want nil after invalid legacy skip", job)
+	}
+
+	rawJob, err := store.queue.GetJob(ctx, enqueued.JobIDs[0])
+	if err != nil {
+		t.Fatalf("get raw job: %v", err)
+	}
+	if rawJob.State != queue.StateError {
+		t.Fatalf("legacy job state=%s want error", rawJob.State)
+	}
+	if !strings.Contains(rawJob.Error, "invalid symbol embedding identity") {
+		t.Fatalf("legacy job error=%q", rawJob.Error)
+	}
+}
+
+func TestMigrateLegacyJobsOnlyCopiesCanonicalSymbolIdentity(t *testing.T) {
+	ctx := context.Background()
+	store, err := OpenStore(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to open store: %v", err)
+	}
+	defer store.Close()
+
+	if _, err := store.db.ExecContext(ctx, `
+		CREATE TABLE embedding_jobs (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			symbol_id TEXT NOT NULL,
+			file_path TEXT NOT NULL,
+			symbol_name TEXT NOT NULL,
+			content TEXT NOT NULL,
+			content_digest TEXT NOT NULL,
+			state TEXT NOT NULL,
+			priority INTEGER NOT NULL,
+			attempts INTEGER NOT NULL,
+			max_attempts INTEGER NOT NULL,
+			error TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			scheduled_at TEXT,
+			completed_at TEXT
+		)
+	`); err != nil {
+		t.Fatalf("create legacy table: %v", err)
+	}
+
+	now := sqlutil.FormatTimestamp(time.Now().UTC())
+	for _, row := range []struct {
+		id       string
+		symbolID string
+		content  string
+	}{
+		{id: "bad", symbolID: "main.go:Legacy", content: "func Legacy() {}"},
+		{id: "good", symbolID: testSymbolStorageID("main.go", "Good"), content: "func Good() {}"},
+	} {
+		if _, err := store.db.ExecContext(ctx, `
+			INSERT INTO embedding_jobs
+				(id, workspace_id, symbol_id, file_path, symbol_name, content, content_digest,
+				 state, priority, attempts, max_attempts, error, created_at, updated_at,
+				 scheduled_at, completed_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', 50, 0, 3, NULL, ?, ?, NULL, NULL)
+		`, row.id, "test-ws", row.symbolID, "main.go", row.id, row.content, computeDigest(row.content), now, now); err != nil {
+			t.Fatalf("insert legacy row %s: %v", row.id, err)
+		}
+	}
+
+	if err := migrateLegacyJobs(ctx, store.db); err != nil {
+		t.Fatalf("migrate legacy jobs: %v", err)
+	}
+	stats, err := store.Stats(ctx)
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if stats.QueuedCount != 1 {
+		t.Fatalf("queued=%d want only canonical legacy row", stats.QueuedCount)
+	}
+
+	job, err := store.ClaimNext(ctx)
+	if err != nil {
+		t.Fatalf("claim migrated job: %v", err)
+	}
+	if job == nil {
+		t.Fatal("expected migrated canonical job")
+	}
+	if job.SymbolID != testSymbolStorageID("main.go", "Good") {
+		t.Fatalf("symbol_id=%q", job.SymbolID)
+	}
+	if job.MemoryName != "symbol://test-ws/"+testSymbolStorageID("main.go", "Good") {
+		t.Fatalf("memory_name=%q", job.MemoryName)
+	}
+}
+
 func TestStore_CompleteMemoryJobDoesNotCreateSymbolEmbedding(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -557,12 +739,7 @@ func TestStore_Deduplication(t *testing.T) {
 	}
 	defer store.Close()
 
-	symbol := SymbolInput{
-		SymbolID:   "main.go:Foo",
-		FilePath:   "main.go",
-		SymbolName: "Foo",
-		Content:    "func Foo() {}",
-	}
+	symbol := testSymbolInput("main.go", "Foo", "func Foo() {}")
 
 	// First enqueue
 	result1, err := store.Enqueue(ctx, EnqueueRequest{
@@ -605,12 +782,7 @@ func TestStore_CompleteAndGetEmbedding(t *testing.T) {
 	// Enqueue
 	result, err := store.Enqueue(ctx, EnqueueRequest{
 		WorkspaceID: "test-ws",
-		Symbols: []SymbolInput{{
-			SymbolID:   "main.go:Bar",
-			FilePath:   "main.go",
-			SymbolName: "Bar",
-			Content:    "func Bar() {}",
-		}},
+		Symbols:     []SymbolInput{testSymbolInput("main.go", "Bar", "func Bar() {}")},
 	})
 	if err != nil {
 		t.Fatalf("enqueue failed: %v", err)
@@ -639,7 +811,7 @@ func TestStore_CompleteAndGetEmbedding(t *testing.T) {
 	}
 
 	// Get embedding
-	embResult, err := store.GetEmbedding(ctx, "test-ws", "main.go:Bar")
+	embResult, err := store.GetEmbedding(ctx, "test-ws", testSymbolStorageID("main.go", "Bar"))
 	if err != nil {
 		t.Fatalf("get embedding failed: %v", err)
 	}
@@ -653,12 +825,7 @@ func TestStore_CompleteAndGetEmbedding(t *testing.T) {
 	// Verify deduplication works after embedding exists
 	result2, err := store.Enqueue(ctx, EnqueueRequest{
 		WorkspaceID: "test-ws",
-		Symbols: []SymbolInput{{
-			SymbolID:   "main.go:Bar",
-			FilePath:   "main.go",
-			SymbolName: "Bar",
-			Content:    "func Bar() {}", // Same content
-		}},
+		Symbols:     []SymbolInput{testSymbolInput("main.go", "Bar", "func Bar() {}")},
 		Deduplicate: true,
 	})
 	if err != nil {
@@ -689,12 +856,7 @@ func TestStore_GetContentDigest(t *testing.T) {
 		t.Fatalf("expected ok=false for missing symbol, got digest=%s model=%s", digest, model)
 	}
 
-	symbol := SymbolInput{
-		SymbolID:   "main.go:Digest",
-		FilePath:   "main.go",
-		SymbolName: "Digest",
-		Content:    "func Digest() {}",
-	}
+	symbol := testSymbolInput("main.go", "Digest", "func Digest() {}")
 
 	_, err = store.Enqueue(ctx, EnqueueRequest{
 		WorkspaceID: "test-ws",
@@ -714,7 +876,7 @@ func TestStore_GetContentDigest(t *testing.T) {
 		t.Fatalf("complete failed: %v", err)
 	}
 
-	digest, model, ok, err = store.GetContentDigest(ctx, "test-ws", "main.go:Digest")
+	digest, model, ok, err = store.GetContentDigest(ctx, "test-ws", testSymbolStorageID("main.go", "Digest"))
 	if err != nil {
 		t.Fatalf("get content digest failed: %v", err)
 	}
@@ -743,12 +905,7 @@ func TestStore_FailAndRetry(t *testing.T) {
 	// Enqueue
 	_, err = store.Enqueue(ctx, EnqueueRequest{
 		WorkspaceID: "test-ws",
-		Symbols: []SymbolInput{{
-			SymbolID:   "main.go:Baz",
-			FilePath:   "main.go",
-			SymbolName: "Baz",
-			Content:    "func Baz() {}",
-		}},
+		Symbols:     []SymbolInput{testSymbolInput("main.go", "Baz", "func Baz() {}")},
 	})
 	if err != nil {
 		t.Fatalf("enqueue failed: %v", err)
@@ -805,8 +962,8 @@ func TestStore_Stats(t *testing.T) {
 	_, err = store.Enqueue(ctx, EnqueueRequest{
 		WorkspaceID: "test-ws",
 		Symbols: []SymbolInput{
-			{SymbolID: "a.go:A", FilePath: "a.go", SymbolName: "A", Content: "func A() {}"},
-			{SymbolID: "b.go:B", FilePath: "b.go", SymbolName: "B", Content: "func B() {}"},
+			testSymbolInput("a.go", "A", "func A() {}"),
+			testSymbolInput("b.go", "B", "func B() {}"),
 		},
 	})
 	if err != nil {
@@ -835,9 +992,9 @@ func TestStore_GetEmbeddingsByFile(t *testing.T) {
 
 	// Create some embeddings
 	symbols := []SymbolInput{
-		{SymbolID: "main.go:A", FilePath: "main.go", SymbolName: "A", Content: "func A() {}"},
-		{SymbolID: "main.go:B", FilePath: "main.go", SymbolName: "B", Content: "func B() {}"},
-		{SymbolID: "other.go:C", FilePath: "other.go", SymbolName: "C", Content: "func C() {}"},
+		testSymbolInput("main.go", "A", "func A() {}"),
+		testSymbolInput("main.go", "B", "func B() {}"),
+		testSymbolInput("other.go", "C", "func C() {}"),
 	}
 
 	for _, sym := range symbols {
@@ -877,7 +1034,7 @@ func TestStore_Cleanup(t *testing.T) {
 	// Create and complete a job
 	_, err = store.Enqueue(ctx, EnqueueRequest{
 		WorkspaceID: "test-ws",
-		Symbols:     []SymbolInput{{SymbolID: "x.go:X", FilePath: "x.go", SymbolName: "X", Content: "func X() {}"}},
+		Symbols:     []SymbolInput{testSymbolInput("x.go", "X", "func X() {}")},
 	})
 	if err != nil {
 		t.Fatalf("enqueue failed: %v", err)
@@ -918,7 +1075,7 @@ func TestStore_CleanupInWorkspaceKindOnlyDeletesMatchingJobs(t *testing.T) {
 	}
 	if _, err := store.Enqueue(ctx, EnqueueRequest{
 		WorkspaceID: "test-ws",
-		Symbols:     []SymbolInput{{SymbolID: "x.go:X", FilePath: "x.go", SymbolName: "X", Content: "func X() {}"}},
+		Symbols:     []SymbolInput{testSymbolInput("x.go", "X", "func X() {}")},
 	}); err != nil {
 		t.Fatalf("enqueue symbol: %v", err)
 	}
@@ -966,7 +1123,7 @@ func TestStore_PurgeInWorkspaceKindOnlyDeletesMatchingJobs(t *testing.T) {
 	}
 	if _, err := store.Enqueue(ctx, EnqueueRequest{
 		WorkspaceID: "test-ws",
-		Symbols:     []SymbolInput{{SymbolID: "x.go:X", FilePath: "x.go", SymbolName: "X", Content: "func X() {}"}},
+		Symbols:     []SymbolInput{testSymbolInput("x.go", "X", "func X() {}")},
 	}); err != nil {
 		t.Fatalf("enqueue symbol: %v", err)
 	}

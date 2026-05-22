@@ -21,6 +21,33 @@ import (
 	"github.com/rs/zerolog"
 )
 
+func testSymbolInput(filePath, name, content string) SymbolInput {
+	return SymbolInput{
+		SymbolID:   filePath + ":" + name,
+		FilePath:   filePath,
+		SymbolName: name,
+		Language:   "go",
+		PackageID:  "go:testpkg",
+		SymbolKey:  filePath + ":" + name,
+		MemoryName: "symbol://test-ws/go:testpkg::" + filePath + ":" + name,
+		Content:    content,
+	}
+}
+
+func testEmbeddingSymbolInput(filePath, name, content string) embedding.SymbolInput {
+	input := testSymbolInput(filePath, name, content)
+	return embedding.SymbolInput{
+		SymbolID:   input.SymbolID,
+		FilePath:   input.FilePath,
+		SymbolName: input.SymbolName,
+		Language:   input.Language,
+		PackageID:  input.PackageID,
+		SymbolKey:  input.SymbolKey,
+		MemoryName: input.MemoryName,
+		Content:    input.Content,
+	}
+}
+
 func newTestRunContext(t *testing.T, stdout *bytes.Buffer, workspace string) *skillmain.RunContext {
 	t.Helper()
 	t.Setenv("FOXCTL_WORKSPACE", workspace)
@@ -70,14 +97,7 @@ func TestEnqueue(t *testing.T) {
 	in := Input{
 		Operation:   "enqueue",
 		WorkspaceID: "test-ws",
-		Symbols: []SymbolInput{
-			{
-				SymbolID:   "main.go:Handler",
-				FilePath:   "main.go",
-				SymbolName: "Handler",
-				Content:    "func Handler() {}",
-			},
-		},
+		Symbols:     []SymbolInput{testSymbolInput("main.go", "Handler", "func Handler() {}")},
 		Deduplicate: true,
 	}
 
@@ -218,12 +238,7 @@ func TestStatsKindFiltersQueue(t *testing.T) {
 	}
 	if _, err := store.Enqueue(context.Background(), embedding.EnqueueRequest{
 		WorkspaceID: "test-ws",
-		Symbols: []embedding.SymbolInput{{
-			SymbolID:   "main.go:Handler",
-			FilePath:   "main.go",
-			SymbolName: "Handler",
-			Content:    "func Handler() {}",
-		}},
+		Symbols:     []embedding.SymbolInput{testEmbeddingSymbolInput("main.go", "Handler", "func Handler() {}")},
 	}); err != nil {
 		t.Fatalf("enqueue symbol: %v", err)
 	}
@@ -345,7 +360,7 @@ func TestGetNotFound(t *testing.T) {
 	in := Input{
 		Operation:   "get",
 		WorkspaceID: "test-ws",
-		SymbolID:    "nonexistent.go:Foo",
+		SymbolID:    "go:testpkg::nonexistent.go:Foo",
 	}
 
 	err := run(context.Background(), rc, in)

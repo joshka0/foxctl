@@ -601,12 +601,12 @@ func TestSymbolMemoryEntryNameBuildsKeyedNameFromPackageIdentity(t *testing.T) {
 	assert.Equal(t, "symbol://test-ws/go:pkg/foo::func Handler", symbolMemoryEntryName(job))
 }
 
-func TestSymbolMemoryEntryNameFallsBackToLegacyLocator(t *testing.T) {
+func TestSymbolMemoryEntryNameRequiresCanonicalIdentity(t *testing.T) {
 	job := &embedding.EmbeddingJob{
 		WorkspaceID: "test-ws",
 		FilePath:    "legacy.go",
 		SymbolName:  "Handler",
 	}
 
-	assert.Equal(t, "symbol://test-ws/legacy.go:Handler", symbolMemoryEntryName(job))
+	assert.Empty(t, symbolMemoryEntryName(job))
 }
