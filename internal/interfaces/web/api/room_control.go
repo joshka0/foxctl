@@ -70,7 +70,7 @@ type roomStatusEntryResponse struct {
 	Preview   string                   `json:"preview,omitempty"`
 }
 
-type roomStatusActionRequiredResponse struct {
+type roomStatusActionableBacklogResponse struct {
 	ParticipantsWithPending int                       `json:"participants_with_pending"`
 	PendingAcks             int                       `json:"pending_acks"`
 	PendingReplies          int                       `json:"pending_replies"`
@@ -322,12 +322,12 @@ func handleRoomStatusGet(w http.ResponseWriter, r *http.Request, cfg config.Conf
 	taskPulse := apiBuildRoomTaskPulseSummary(tasks, now, staleAfter)
 	backlog := apiBuildRoomStatusBacklog(summary, messages)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"room":            convertRoomSummary(summary),
-		"participants":    apiBuildRoomStatusParticipants(summary, messages, tasks, staleAfter),
-		"task_pulse":      taskPulse,
-		"backlog":         backlog,
-		"action_required": apiBuildRoomStatusActionRequired(summary, messages, tasks, backlog, taskPulse, filters, staleAfter, now, verbose),
-		"loop":            apiConvertRoomLoop(loop),
+		"room":               convertRoomSummary(summary),
+		"participants":       apiBuildRoomStatusParticipants(summary, messages, tasks, staleAfter),
+		"task_pulse":         taskPulse,
+		"backlog":            backlog,
+		"actionable_backlog": apiBuildRoomStatusActionableBacklog(summary, messages, tasks, backlog, taskPulse, filters, staleAfter, now, verbose),
+		"loop":               apiConvertRoomLoop(loop),
 	})
 }
 
@@ -2288,8 +2288,8 @@ func apiBuildRoomStatusBacklog(room agent.RoomSummary, messages []agent.BoardMes
 	return backlog
 }
 
-func apiBuildRoomStatusActionRequired(room agent.RoomSummary, messages []agent.BoardMessage, tasks []taskstore.Task, backlog roomStatusBacklogResponse, taskPulse roomTaskPulseSummaryResponse, filters map[string]struct{}, staleAfter time.Duration, now time.Time, _ bool) roomStatusActionRequiredResponse {
-	return roomStatusActionRequiredResponse{
+func apiBuildRoomStatusActionableBacklog(room agent.RoomSummary, messages []agent.BoardMessage, tasks []taskstore.Task, backlog roomStatusBacklogResponse, taskPulse roomTaskPulseSummaryResponse, filters map[string]struct{}, staleAfter time.Duration, now time.Time, _ bool) roomStatusActionableBacklogResponse {
+	return roomStatusActionableBacklogResponse{
 		ParticipantsWithPending: apiRoomStatusFilteredCount(filters, "ack", "reply", backlog.ParticipantsWithPending),
 		PendingAcks:             apiRoomStatusFilteredCount(filters, "ack", "", backlog.PendingAcks),
 		PendingReplies:          apiRoomStatusFilteredCount(filters, "reply", "", backlog.PendingReplies),

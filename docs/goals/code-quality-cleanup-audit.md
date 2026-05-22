@@ -71,6 +71,8 @@ by cleanup value and implementation risk.
   - Progress: `@foxctl/data/client` now uses canonical agent spawn/ask and
     mailbox send/status routes; unsupported agent-message and mailbox alias
     helpers were removed.
+  - Progress: room status now emits canonical `actionable_backlog`; the GUI
+    client no longer translates legacy `action_required` payloads.
   - Backend targets: make room status/inbox emit canonical DTOs directly,
     consolidate duplicated `AgentResponse` conversion, and replace map-shaped
     daemon fallback responses with typed response structs.

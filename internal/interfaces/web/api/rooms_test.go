@@ -1518,7 +1518,7 @@ func TestRoomDetailHandler_GetStatusReturnsCoordinatorSummary(t *testing.T) {
 		t.Fatalf("status=%d body=%s", statusRR.Code, statusRR.Body.String())
 	}
 	body := decodeResponseBody(t, statusRR)
-	action, _ := body["action_required"].(map[string]any)
+	action, _ := body["actionable_backlog"].(map[string]any)
 	if got := int(action["pending_replies"].(float64)); got != 1 {
 		t.Fatalf("pending_replies=%d want 1", got)
 	}

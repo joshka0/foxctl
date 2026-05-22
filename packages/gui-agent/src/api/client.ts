@@ -1058,33 +1058,9 @@ export async function getRoomStatus(
   if (params.verbose) query.set("verbose", String(params.verbose));
   if (params.limit) query.set("limit", String(params.limit));
 
-  const response = await request<{
-    room: RoomStatus["room"];
-    coordinator_actor_id?: string;
-    participants: RoomStatus["participants"];
-    task_pulse: RoomStatus["task_pulse"];
-    actionable_backlog?: RoomStatus["actionable_backlog"];
-    action_required?: {
-      pending_acks?: number;
-      pending_replies?: number;
-      stale_tasks?: number;
-      blocked_tasks?: number;
-    };
-  }>(
+  return request<RoomStatus>(
     `/rooms/${encodeURIComponent(roomId)}/status?${query}`,
   );
-  return {
-    room: response.room,
-    coordinator_actor_id: response.coordinator_actor_id,
-    participants: response.participants,
-    task_pulse: response.task_pulse,
-    actionable_backlog: response.actionable_backlog ?? {
-      pending_acks: response.action_required?.pending_acks ?? 0,
-      pending_replies: response.action_required?.pending_replies ?? 0,
-      stale_tasks: response.action_required?.stale_tasks ?? 0,
-      blocked_tasks: response.action_required?.blocked_tasks ?? 0,
-    },
-  };
 }
 
 export async function getRoomInbox(

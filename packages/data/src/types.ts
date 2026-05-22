@@ -1106,13 +1106,28 @@ export interface RoomTaskPulseSummary {
   completed: number;
 }
 
+export interface RoomStatusTaskSignal {
+  id: string;
+  title: string;
+  status: string;
+  assigned_actor_id?: string;
+  owner_actor_id?: string;
+  blocked_reason?: string;
+  heartbeat_at?: string;
+  signals?: string[];
+}
+
 export interface RoomStatusBacklog {
   pending_acks: number;
   pending_replies: number;
   stale_tasks: number;
   blocked_tasks: number;
+  assigned_unclaimed?: number;
   participants_with_pending?: number;
   latest_by_participant?: RoomStatusEntry[];
+  filter?: string[];
+  top_entries?: RoomStatusEntry[];
+  top_tasks?: RoomStatusTaskSignal[];
 }
 
 export interface RoomStatus {
