@@ -40,7 +40,10 @@ Remaining areas from the results doc after the completed slices:
   - Completed: consolidate repeated repo-index skill workspace resolution
     helpers.
   - Completed: consolidate OpenAPI plugin stdio/envelope harness code.
-  - Consolidate chat adapter command parsing and SSE activity decoding.
+  - Completed: consolidate duplicated chat adapter SSE activity decoding.
+  - Deferred: keep chat command parsing adapter-local until a shared text
+    command contract is explicit; do not merge Discord typed slash-command
+    option handling with Teams/Telegram free-text parsing.
   - Extract shared Jido/goruntime orchestration reconciliation helpers.
 - Tooling:
   - Completed: dependable unused-code and TypeScript frontend verification
@@ -226,8 +229,10 @@ Done when:
 - Completed: OpenAPI plugin stdio/envelope harness code is consolidated
   without changing protocol validation behavior or hiding command-specific
   logic.
-- Chat adapter command parsing and SSE activity decoding share canonical logic
-  only when it improves Locality.
+- Completed: chat adapter SSE activity decoding shares one canonical helper,
+  with adapter-local error handling preserved.
+- Deferred: chat command parsing remains adapter-local unless a shared MVP text
+  command contract is made explicit.
 - Jido/goruntime reconciliation helpers are extracted as pure helpers before
   any broad architecture move.
 - Verification passes for each affected package.

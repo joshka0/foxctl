@@ -2,7 +2,6 @@ package teams
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -85,42 +84,15 @@ func (a *Adapter) startEventListener(ctx context.Context) {
 
 // processSSEMessage parses an SSE message and routes activity events.
 func (a *Adapter) processSSEMessage(raw []byte) {
-	const prefix = "data: "
-	data := raw
-	if len(data) > len(prefix) && string(data[:len(prefix)]) == prefix {
-		data = data[len(prefix):]
-	}
-	for len(data) > 0 && (data[len(data)-1] == '\n' || data[len(data)-1] == '\r') {
-		data = data[:len(data)-1]
-	}
-
-	var event sse.Event
-	if err := json.Unmarshal(data, &event); err != nil {
-		observability.Emit(a.ctx, observability.NewEvent("teams.sse_parse_failed").
-			WithComponent("teams").
-			WithData("stage", "event").
-			Error(err, 0))
-		return
-	}
-	if event.Type != "activity" {
-		return
-	}
-
-	dataBytes, err := json.Marshal(event.Data)
+	activity, ok, err := chatadapter.DecodeActivitySSEMessage(raw)
 	if err != nil {
 		observability.Emit(a.ctx, observability.NewEvent("teams.sse_parse_failed").
 			WithComponent("teams").
-			WithData("stage", "marshal_data").
+			WithData("stage", chatadapter.ActivitySSEDecodeStage(err)).
 			Error(err, 0))
 		return
 	}
-
-	var activity observability.ActivityEvent
-	if err := json.Unmarshal(dataBytes, &activity); err != nil {
-		observability.Emit(a.ctx, observability.NewEvent("teams.sse_parse_failed").
-			WithComponent("teams").
-			WithData("stage", "activity").
-			Error(err, 0))
+	if !ok {
 		return
 	}
 

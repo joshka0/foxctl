@@ -194,8 +194,14 @@ Verification has been run slice-by-slice, including:
   `internal/interfaces/openapi/plugin` helpers for handshake writing, request
   payload decoding, typed data decoding, and response envelope writing. The
   auth and pagination plugins still own their command-specific behavior.
-- Consolidate chat adapter command parsing and SSE activity decoding across
-  Teams, Telegram, and Discord adapters.
+- Completed: consolidated duplicated chat adapter SSE activity decoding into
+  `internal/interfaces/chatadapter.DecodeActivitySSEMessage`. Discord and
+  Telegram keep their silent-skip behavior for malformed events, while Teams
+  still emits `teams.sse_parse_failed` with the same parse-stage labels.
+- Deferred: Teams and Telegram text command option parsing is duplicated, but
+  the adapter entry points are not the same contract. Do not consolidate
+  Discord command handling with those text parsers; Discord receives typed
+  platform slash-command options.
 - Extract shared Jido/goruntime orchestration reconciliation helpers, starting
   with pure retry delay, append/project, payload builder, and terminal event
   helpers.
@@ -212,6 +218,6 @@ Verification has been run slice-by-slice, including:
 
 ## Recommended Next Slices
 
-1. Audit chat adapter command parsing and SSE activity decoding across Teams,
-   Telegram, and Discord adapters before deciding whether a shared module would
-   improve locality.
+1. Extract shared Jido/goruntime orchestration reconciliation helpers, starting
+   with pure retry delay, append/project, payload builder, and terminal event
+   helpers.
