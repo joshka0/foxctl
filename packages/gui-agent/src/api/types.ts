@@ -1,3 +1,25 @@
+import type {
+  BlackboardRecord as DataBlackboardRecord,
+  BulkResolveRequest as DataBulkResolveRequest,
+  LeadChangeEvent as DataLeadChangeEvent,
+  MailboxMessage as DataMailboxMessage,
+  MuxPane as DataMuxPane,
+  MuxPaneCapture as DataMuxPaneCapture,
+  ParticipantState as DataParticipantState,
+  Room as DataRoom,
+  RoomDeliveryBinding as DataRoomDeliveryBinding,
+  RoomInbox as DataRoomInbox,
+  RoomLiveRelayResult as DataRoomLiveRelayResult,
+  RoomLoop as DataRoomLoop,
+  RoomMember as DataRoomMember,
+  RoomMessageEvent as DataRoomMessageEvent,
+  RoomReminder as DataRoomReminder,
+  RoomSendMessageResult as DataRoomSendMessageResult,
+  RoomStatus as DataRoomStatus,
+  RoomStatusParticipant as DataRoomStatusParticipant,
+  RoomTask as DataRoomTask,
+} from "@foxctl/data/types";
+
 // Agent types
 export interface Agent {
   id: string;
@@ -89,79 +111,10 @@ export interface AgentChatStreamEvent {
   metadata?: Record<string, unknown>;
 }
 
-export interface RoomMessageEvent {
-  workspace_id: string;
-  room_id: string;
-  stream: string;
-  message_id?: string;
-  correlation_id?: string;
-  sender?: string;
-  recipient?: string;
-  subject?: string;
-  phase?:
-    | "sent"
-    | "agent_started"
-    | "agent_delta"
-    | "agent_tool_call"
-    | "agent_tool_result"
-    | "agent_completed"
-    | "agent_error"
-    | string;
-  agent_id?: string;
-  content?: string;
-  content_delta?: string;
-  tool_name?: string;
-  tool_call_id?: string;
-  tool_output?: string;
-  is_error?: boolean;
-  dispatched?: number;
-  skipped?: number;
-  error?: string;
-}
-
-export interface RoomLiveRelayResult {
-  backend: string;
-  delivered_count?: number;
-  failed_count?: number;
-  delivered_to?: string[];
-  failed_members?: string[];
-  skipped_members?: string[];
-  error?: string;
-}
-
-export interface RoomSendMessageResult {
-  id: string;
-  room_id: string;
-  stream: string;
-  status: string;
-  message?: string;
-  dispatched?: number;
-  skipped?: number;
-  delivery_owner?: string;
-  delivery_pending?: boolean;
-  live_relay?: RoomLiveRelayResult[];
-}
-
-export interface RoomReminder {
-  id: string;
-  workspace_id: string;
-  room_id: string;
-  root_message_id: string;
-  sender: string;
-  recipient: string;
-  subject: string;
-  body: string;
-  ack_required: boolean;
-  reply_expected: boolean;
-  interrupt: boolean;
-  interval: string;
-  max_iterations: number;
-  sent_count: number;
-  active: boolean;
-  last_sent_at?: string;
-  created_at?: string;
-  updated_at?: string;
-}
+export type RoomMessageEvent = DataRoomMessageEvent;
+export type RoomLiveRelayResult = DataRoomLiveRelayResult;
+export type RoomSendMessageResult = DataRoomSendMessageResult;
+export type RoomReminder = DataRoomReminder;
 
 export interface ActivityEventData extends Record<string, unknown> {
   refs?: string[];
@@ -217,71 +170,11 @@ export interface LogEntry {
   data?: Record<string, unknown>;
 }
 
-// Mailbox types
-export interface MailboxMessage {
-  id: string;
-  sender: string;
-  recipient: string;
-  subject: string;
-  body: string;
-  kind: string;
-  priority: number;
-  status: string;
-  ack_required?: boolean;
-  reply_expected?: boolean;
-  interrupt?: boolean;
-  related_message_id?: string;
-  created_at: string;
-  task_id?: string;
-  stream?: string;
-}
-
-export interface Room {
-  id: string;
-  workspace_id: string;
-  stream: string;
-  title: string;
-  description?: string;
-  dispatch_policy?:
-    | "all_subtree"
-    | "children_only"
-    | "lead_only"
-    | "selected"
-    | string;
-  dispatch_agent_ids?: string[];
-  created_at?: string;
-  updated_at?: string;
-  latest_subject?: string;
-  latest_preview?: string;
-  latest_sender?: string;
-  latest_message_at?: string;
-  message_count: number;
-  unread_count: number;
-  participants?: string[];
-  task_ids?: string[];
-  members?: RoomMember[];
-  archived_at?: string;
-}
-
-// ParticipantState mirrors the backend agent.ParticipantState type.
-// It captures four independent dimensions of a room participant's state.
-export interface ParticipantState {
-  actor_id: string;
-  /** "active" | "unbound" | "none" */
-  membership: "active" | "unbound" | "none";
-  /** Unix socket path (pane_socket) or mux address "tmux:session:%pane" / "zellij:session:pane" */
-  transport_endpoint?: string;
-  /** "available" | "unknown" | "unavailable" | "none" */
-  transport: "available" | "unknown" | "unavailable" | "none";
-  /** "live" | "unknown" | "stopped" | "none" */
-  runtime: "live" | "unknown" | "stopped" | "none";
-  /** "attached" | "detached" | "none" */
-  presentation: "attached" | "detached" | "none";
-  /** "tmux" | "zellij" | "" */
-  mux_backend?: string;
-  reason?: string;
-  can_trigger_turn: boolean;
-}
+// Shared room/mailbox DTOs live in @foxctl/data; this module re-exports them for
+// existing gui-agent imports while UI-only DTOs remain local below.
+export type MailboxMessage = DataMailboxMessage;
+export type Room = DataRoom;
+export type ParticipantState = DataParticipantState;
 
 /** Derives the transport kind from the endpoint string. */
 export function participantTransportKind(state?: ParticipantState): "pane_socket" | "mux_pane" | "none" {
@@ -291,181 +184,20 @@ export function participantTransportKind(state?: ParticipantState): "pane_socket
   return "mux_pane";
 }
 
-export interface RoomMember {
-  actor_id: string;
-  role?: string;
-  // Legacy mirrored fields; delivery_binding is the canonical source when present.
-  backend?: string;
-  session?: string;
-  pane_id?: string;
-  joined_at?: string;
-  last_active_at?: string;
-  status?: "online" | "idle" | "stale" | string;
-  session_id?: string;
-  unbound?: boolean;
-  transport_endpoint?: string;
-  transport_kind?: string;
-  delivery_binding?: RoomDeliveryBinding;
-}
-
-export interface RoomDeliveryBinding {
-  mux_backend?: string;
-  mux_session?: string;
-  mux_pane_id?: string;
-  transport_endpoint?: string;
-  transport_kind?: string;
-  submit_mode?: string;
-  health?: string;
-  fallback_policy?: string;
-}
-
-// RoomStatusParticipant is what room status returns — it extends basic membership
-// info with explicit transport state from the backend.
-export interface RoomStatusParticipant {
-  actor_id: string;
-  role?: string;
-  last_active_at?: string;
-  status: "active" | "idle" | "stale" | string;
-  assigned_task_count: number;
-  owned_task_count: number;
-  actionable_inbox_count: number;
-  transport: ParticipantState;
-}
-
-export interface RoomStatus {
-  room: Room;
-  coordinator_actor_id?: string;
-  participants: RoomStatusParticipant[];
-  task_pulse: {
-    pending: number;
-    in_progress: number;
-    blocked: number;
-    stale: number;
-    completed: number;
-  };
-  actionable_backlog: {
-    pending_acks: number;
-    pending_replies: number;
-    stale_tasks: number;
-    blocked_tasks: number;
-  };
-}
-
-export interface LeadChangeEvent {
-  room_id: string;
-  previous_lead: string;
-  new_lead: string;
-  note?: string;
-  changed_at: string;
-  changed_by: string;
-}
-
-export interface BulkResolveRequest {
-  workspace_id: string;
-  actor?: string;
-  filter?: {
-    kind?: string;
-    sender?: string;
-    subject_contains?: string;
-  };
-}
-
-export interface RoomInbox {
-  room_id: string;
-  entries: MailboxMessage[];
-  count: number;
-}
-
-export interface RoomTask {
-  id: string;
-  workspace_id: string;
-  room_id: string;
-  epic_id?: string;
-  milestone_id?: string;
-  title: string;
-  description?: string;
-  status: "pending" | "in_progress" | "blocked" | "completed" | "abandoned";
-  priority: number;
-  owner_actor_id?: string;
-  assigned_actor_id?: string;
-  claimed_at?: string;
-  heartbeat_at?: string;
-  blocked_at?: string;
-  blocked_reason?: string;
-  created_at: string;
-  completed_at?: string;
-  nudge_count: number;
-  last_nudged_at?: string;
-  stale?: boolean;
-  stale_duration_ms?: number;
-  reclaim_audit?: {
-    previous_owner: string;
-    reclaimed_by: string;
-    reclaimed_at: string;
-    reclaim_reason: string;
-    stale_duration_ms: number;
-  };
-  reassign_audit?: {
-    previous_assignee: string;
-    reassigned_by: string;
-    reassigned_at: string;
-    reassign_reason: string;
-  };
-}
-
-export interface RoomLoop {
-  enabled: boolean;
-  managed_by: string;
-  last_tick_at?: string;
-  pulse_interval: string;
-  reply_stale_after: string;
-  task_stale_after: string;
-  min_pulse_floor: string;
-  interrupt_attempt_limit: number;
-  reminder_backoff_cap: number;
-  coordinator_pulse_enabled: boolean;
-  coordinator_escalation_enabled: boolean;
-}
-
-export interface MuxPane {
-  backend: "tmux" | "zellij" | string;
-  id?: string;
-  session: string;
-  session_pane?: string;
-  pane_name?: string;
-  label?: string;
-  participant_id?: string;
-  provider?: string;
-  room_id?: string;
-  current_command?: string;
-  display_command?: string;
-  wrapped?: boolean;
-  socket_path?: string;
-  ready_path?: string;
-  state?: string;
-  active?: boolean;
-}
-
-export interface MuxPaneCapture {
-  target: string;
-  resolved_target: string;
-  lines_requested: number;
-  content: string;
-  lines?: string[];
-}
+export type RoomMember = DataRoomMember;
+export type RoomDeliveryBinding = DataRoomDeliveryBinding;
+export type RoomStatusParticipant = DataRoomStatusParticipant;
+export type RoomStatus = DataRoomStatus;
+export type LeadChangeEvent = DataLeadChangeEvent;
+export type BulkResolveRequest = DataBulkResolveRequest;
+export type RoomInbox = DataRoomInbox;
+export type RoomTask = DataRoomTask;
+export type RoomLoop = DataRoomLoop;
+export type MuxPane = DataMuxPane;
+export type MuxPaneCapture = DataMuxPaneCapture;
 
 // Blackboard types
-export interface BlackboardRecord {
-  id: string;
-  ns: string;
-  topic: string;
-  ts: number;
-  ttl_sec: number;
-  payload: string;
-  cas_ref?: string;
-  lease_by?: string;
-  lease_exp?: number;
-}
+export type BlackboardRecord = DataBlackboardRecord;
 
 // Companion presence bundle (multimodal metadata returned with assistant messages)
 export interface PresenceBundle {

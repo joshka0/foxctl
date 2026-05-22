@@ -2,6 +2,7 @@
 // Works in both browser (Vite) and Bun environments
 
 import type {
+  ApiEnvelope,
   JobSummary,
   JobDetail,
   JobActionResult,
@@ -92,15 +93,6 @@ export class APIError extends Error {
     this.name = "APIError";
     this.status = status;
   }
-}
-
-interface ApiEnvelope<T> {
-  version: number;
-  status: "ok" | "error" | "progress";
-  command: string;
-  data: T;
-  meta: { ts: string; [key: string]: unknown };
-  error: { code?: string; message?: string };
 }
 
 async function request<T>(

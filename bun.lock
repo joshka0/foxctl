@@ -54,6 +54,7 @@
       "name": "gui-agent",
       "version": "0.0.0",
       "dependencies": {
+        "@foxctl/data": "workspace:*",
         "@tanstack/react-query": "5.90.20",
         "@xterm/xterm": "5.5.0",
         "@xyflow/react": "12.10.2",

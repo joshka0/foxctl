@@ -38,6 +38,15 @@ export interface JobActionResult {
   job?: JobSummary;
 }
 
+export interface ApiEnvelope<T> {
+  version: number;
+  status: "ok" | "error" | "progress";
+  command: string;
+  data: T;
+  meta: { ts: string; [key: string]: unknown };
+  error: { code?: string; message?: string };
+}
+
 export type V2StreamType = "run" | "agent" | "turn";
 
 export interface V2RuntimeEvent {
@@ -158,8 +167,15 @@ export interface MailboxMessage {
   priority: number;
   status: string;
   ack_required?: boolean;
+  reply_expected?: boolean;
+  interrupt?: boolean;
+  related_message_id?: string;
   created_at: string;
+  task_id?: string;
+  stream?: string;
 }
+
+export interface RoomMessage extends MailboxMessage {}
 
 export interface Reservation {
   id: string;
@@ -176,6 +192,9 @@ export interface BlackboardRecord {
   ts: number;
   ttl_sec: number;
   payload: string;
+  cas_ref?: string;
+  lease_by?: string;
+  lease_exp?: number;
 }
 
 // Orchestration (v2 runtime board)
@@ -208,6 +227,7 @@ export interface OrchestrationCard {
   retry_due_at?: string;
   last_event_type?: string;
   last_event_at?: string;
+  archived_at?: string;
 }
 
 export interface OrchestrationLane {
@@ -614,7 +634,28 @@ export interface AgentMemoryCompressResult {
 export interface RoomMember {
   actor_id: string;
   role?: string;
+  backend?: string;
+  session?: string;
+  pane_id?: string;
   joined_at?: string;
+  last_active_at?: string;
+  status?: "online" | "idle" | "stale" | string;
+  session_id?: string;
+  unbound?: boolean;
+  transport_endpoint?: string;
+  transport_kind?: string;
+  delivery_binding?: RoomDeliveryBinding;
+}
+
+export interface RoomDeliveryBinding {
+  mux_backend?: string;
+  mux_session?: string;
+  mux_pane_id?: string;
+  transport_endpoint?: string;
+  transport_kind?: string;
+  submit_mode?: string;
+  health?: string;
+  fallback_policy?: string;
 }
 
 export interface Room {
@@ -641,11 +682,204 @@ export interface Room {
   participants?: string[];
   task_ids?: string[];
   members?: RoomMember[];
+  archived_at?: string;
 }
+
+export type ParticipantMembership = "active" | "unbound" | "none";
+export type TransportAvailability =
+  | "available"
+  | "unknown"
+  | "unavailable"
+  | "none";
+export type RuntimeAvailability = "live" | "unknown" | "stopped" | "none";
+export type PresentationAttachment = "attached" | "detached" | "none";
+
+export interface ParticipantState {
+  actor_id: string;
+  membership: ParticipantMembership;
+  transport_endpoint?: string;
+  transport: TransportAvailability;
+  runtime: RuntimeAvailability;
+  presentation: PresentationAttachment;
+  mux_backend?: string;
+  reason?: string;
+  can_trigger_turn: boolean;
+}
+
+export interface RoomMessageEvent {
+  workspace_id: string;
+  room_id: string;
+  stream: string;
+  message_id?: string;
+  correlation_id?: string;
+  sender?: string;
+  recipient?: string;
+  subject?: string;
+  phase?:
+    | "sent"
+    | "agent_started"
+    | "agent_delta"
+    | "agent_tool_call"
+    | "agent_tool_result"
+    | "agent_completed"
+    | "agent_error"
+    | string;
+  agent_id?: string;
+  content?: string;
+  content_delta?: string;
+  tool_name?: string;
+  tool_call_id?: string;
+  tool_output?: string;
+  is_error?: boolean;
+  dispatched?: number;
+  skipped?: number;
+  error?: string;
+}
+
+export interface RoomLiveRelayResult {
+  backend: string;
+  delivered_count?: number;
+  failed_count?: number;
+  delivered_to?: string[];
+  failed_members?: string[];
+  skipped_members?: string[];
+  error?: string;
+}
+
+export interface RoomSendMessageResult {
+  id: string;
+  room_id: string;
+  stream: string;
+  status: string;
+  message?: string;
+  dispatched?: number;
+  skipped?: number;
+  delivery_owner?: string;
+  delivery_pending?: boolean;
+  live_relay?: RoomLiveRelayResult[];
+}
+
+export interface RoomReminder {
+  id: string;
+  workspace_id: string;
+  room_id: string;
+  root_message_id: string;
+  task_id?: string;
+  story_id?: string;
+  milestone_id?: string;
+  sender: string;
+  recipient: string;
+  subject: string;
+  body: string;
+  ack_required: boolean;
+  reply_expected: boolean;
+  interrupt: boolean;
+  passive?: boolean;
+  interval: string;
+  max_iterations: number;
+  sent_count: number;
+  active: boolean;
+  last_sent_at?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface RoomStatusEntry {
+  id: string;
+  sender: string;
+  recipient: string;
+  subject: string;
+  priority: number;
+  status: string;
+  created_at: string;
+  category: string;
+  flags?: string[];
+  preview?: string;
+}
+
+export interface RoomStatusParticipant {
+  actor_id: string;
+  role?: string;
+  backend?: string;
+  session?: string;
+  pane_id?: string;
+  unbound?: boolean;
+  transport_endpoint?: string;
+  transport_kind?: string;
+  delivery_binding?: RoomDeliveryBinding;
+  transport_status?: string;
+  runtime_binding_status?: string;
+  last_active_at?: string;
+  status: "active" | "idle" | "stale" | string;
+  assigned_task_count: number;
+  owned_task_count: number;
+  actionable_inbox_count: number;
+  latest_actionable?: RoomStatusEntry;
+  transport?: ParticipantState;
+}
+
+export interface RoomTaskPulseSummary {
+  pending: number;
+  assigned_unclaimed?: number;
+  in_progress: number;
+  blocked: number;
+  stale: number;
+  completed: number;
+}
+
+export interface RoomStatusBacklog {
+  pending_acks: number;
+  pending_replies: number;
+  stale_tasks: number;
+  blocked_tasks: number;
+  participants_with_pending?: number;
+  latest_by_participant?: RoomStatusEntry[];
+}
+
+export interface RoomStatus {
+  room: Room;
+  coordinator_actor_id?: string;
+  participants: RoomStatusParticipant[];
+  task_pulse: RoomTaskPulseSummary;
+  actionable_backlog: RoomStatusBacklog;
+}
+
+export interface LeadChangeEvent {
+  room_id: string;
+  previous_lead: string;
+  new_lead: string;
+  note?: string;
+  changed_at: string;
+  changed_by: string;
+}
+
+export interface BulkResolveRequest {
+  workspace_id: string;
+  actor?: string;
+  filter?: {
+    kind?: string;
+    sender?: string;
+    subject_contains?: string;
+  };
+}
+
+export interface RoomInbox {
+  room_id: string;
+  entries: MailboxMessage[];
+  count: number;
+}
+
+export type RoomTaskStatus =
+  | "pending"
+  | "in_progress"
+  | "blocked"
+  | "completed"
+  | "abandoned";
 
 export interface RoomTask {
   id: string;
   workspace_id: string;
+  room_id: string;
   epic_id?: string;
   milestone_id?: string;
   title: string;
@@ -654,7 +888,8 @@ export interface RoomTask {
   parent_id?: string;
   children?: string[];
   depends_on?: string[];
-  status: string;
+  status: RoomTaskStatus;
+  priority: number;
   created_at: string;
   completed_at?: string;
   assigned_actor_id?: string;
@@ -666,6 +901,166 @@ export interface RoomTask {
   blocked_at?: string;
   notes?: string;
   gotchas?: string;
+  nudge_count: number;
+  last_nudged_at?: string;
+  stale?: boolean;
+  stale_duration_ms?: number;
+  reclaim_audit?: {
+    previous_owner: string;
+    reclaimed_by: string;
+    reclaimed_at: string;
+    reclaim_reason: string;
+    stale_duration_ms: number;
+  };
+  reassign_audit?: {
+    previous_assignee: string;
+    reassigned_by: string;
+    reassigned_at: string;
+    reassign_reason: string;
+  };
+}
+
+export interface RoomLoopDeliveryTrace {
+  workspace_id?: string;
+  room_id?: string;
+  message_id?: string;
+  task_id?: string;
+  recipient?: string;
+  delivery_lease_name?: string;
+  delivery_owner_id?: string;
+  relay_backend?: string;
+  chosen_actor_id?: string;
+  chosen_mux_backend?: string;
+  chosen_mux_session?: string;
+  chosen_mux_pane_id?: string;
+  chosen_transport_endpoint?: string;
+  chosen_transport_kind?: string;
+  chosen_submit_mode?: string;
+  fallback_attempted?: boolean;
+  outcome?: string;
+  delivered_count?: number;
+  failed_count?: number;
+  delivered_to?: string[];
+  failed_members?: string[];
+  cursor_before_message_id?: string;
+  cursor_after_message_id?: string;
+  cursor_advanced?: boolean;
+  observed_at?: string;
+}
+
+export interface RoomLoop {
+  enabled: boolean;
+  managed_by: string;
+  last_tick_at?: string;
+  delivery_lease_name?: string;
+  delivery_owner_id?: string;
+  delivery_cursor_message_id?: string;
+  delivery_cursor_at?: string;
+  pulse_interval: string;
+  task_followup_interval: string;
+  reply_stale_after: string;
+  task_stale_after: string;
+  min_pulse_floor: string;
+  interrupt_attempt_limit: number;
+  reminder_backoff_cap: number;
+  coordinator_pulse_enabled: boolean;
+  coordinator_escalation_enabled: boolean;
+  last_delivery_trace?: RoomLoopDeliveryTrace;
+}
+
+export interface RoomLoopResult {
+  room_id: string;
+  loop: RoomLoop;
+}
+
+export interface RoomLoopHealth {
+  status: string;
+  reason?: string;
+  last_tick_age?: string;
+}
+
+export interface RoomControlInbox {
+  actor_id: string;
+  count: number;
+  ack_required: number;
+  reply_expected: number;
+  latest_actionable?: RoomStatusEntry[];
+}
+
+export interface RoomControlMessage {
+  id: string;
+  task_id?: string;
+  related_message_id?: string;
+  sender: string;
+  recipient: string;
+  subject: string;
+  kind: string;
+  status: string;
+  ack_required?: boolean;
+  reply_expected?: boolean;
+  priority: number;
+  created_at: string;
+  preview?: string;
+}
+
+export interface RoomControlReminder extends RoomReminder {}
+
+export interface RoomLinkedOrchestrationCard {
+  issue_id: string;
+  issue_identifier?: string;
+  title?: string;
+  state: string;
+  lane?: string;
+  tracker_state?: string;
+  policy_status?: string;
+  last_outcome?: string;
+  eligibility?: string;
+  run_id?: string;
+  agent_id?: string;
+  linked_task_id?: string;
+}
+
+export interface RoomControlSnapshot {
+  room: Room;
+  participants: RoomStatusParticipant[];
+  loop: RoomLoop;
+  loop_health: RoomLoopHealth;
+  inbox: RoomControlInbox;
+  tasks: RoomTask[];
+  task_count: number;
+  reminders: RoomControlReminder[];
+  messages: RoomControlMessage[];
+  linked_orchestration_cards: RoomLinkedOrchestrationCard[];
+  task_card_link?: string;
+  task_filter?: string;
+  issue_filter?: string;
+}
+
+export interface MuxPane {
+  backend: "tmux" | "zellij" | string;
+  id?: string;
+  session: string;
+  session_pane?: string;
+  pane_name?: string;
+  label?: string;
+  participant_id?: string;
+  provider?: string;
+  room_id?: string;
+  current_command?: string;
+  display_command?: string;
+  wrapped?: boolean;
+  socket_path?: string;
+  ready_path?: string;
+  state?: string;
+  active?: boolean;
+}
+
+export interface MuxPaneCapture {
+  target: string;
+  resolved_target: string;
+  lines_requested: number;
+  content: string;
+  lines?: string[];
 }
 
 // Trajectory types (from trajectory.db)

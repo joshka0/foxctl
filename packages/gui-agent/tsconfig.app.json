@@ -19,7 +19,10 @@
     /* Path aliases */
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@foxctl/data": ["../data/src/index.ts"],
+      "@foxctl/data/client": ["../data/src/client.ts"],
+      "@foxctl/data/types": ["../data/src/types.ts"]
     },
 
     /* Linting */
