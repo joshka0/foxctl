@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"syscall"
 	"testing"
 	"time"
@@ -180,6 +181,30 @@ func TestServiceResolveLLMConfig_RespectsConfiguredProvider(t *testing.T) {
 	}
 	if model != "openrouter/custom" {
 		t.Fatalf("model=%q want openrouter/custom", model)
+	}
+}
+
+func TestServiceHandleWarmReturnsTypedResult(t *testing.T) {
+	workspace := t.TempDir()
+	svc := &Service{warmWorkspaces: make(map[string]bool)}
+
+	result, err := svc.handleWarm(json.RawMessage(`{"workspace":` + strconv.Quote(workspace) + `}`))
+	if err != nil {
+		t.Fatalf("handle warm: %v", err)
+	}
+	if result.Status != "warming" {
+		t.Fatalf("status=%q want warming", result.Status)
+	}
+	if result.Workspace != workspace {
+		t.Fatalf("workspace=%q want %q", result.Workspace, workspace)
+	}
+
+	svc.wg.Wait()
+	svc.warmMu.RLock()
+	warmed := svc.warmWorkspaces[workspace]
+	svc.warmMu.RUnlock()
+	if !warmed {
+		t.Fatalf("workspace %q was not marked warm", workspace)
 	}
 }
 

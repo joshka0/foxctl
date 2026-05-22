@@ -15,6 +15,7 @@ import (
 	"github.com/rs/zerolog"
 
 	agentdomain "github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/runtime/daemon"
 	"github.com/joshka0/foxctl/internal/storage/agents"
 	"github.com/joshka0/foxctl/internal/storage/blackboard"
 	v2jido "github.com/joshka0/foxctl/internal/v2/adapters/jido"
@@ -316,6 +317,135 @@ func TestAgentDaemonKillWithRuntime_UsesInjectedHostForGoRuntime(t *testing.T) {
 	}
 	if updated.State != agentdomain.StateStopped {
 		t.Fatalf("agent state=%q want %q", updated.State, agentdomain.StateStopped)
+	}
+}
+
+func TestAgentDaemonSessionsHandler_EmitsTypedFilteredResponse(t *testing.T) {
+	original := defaultAgentControl
+	mock := &mockAgentControl{
+		listResult: &daemon.AgentListResult{
+			Sessions: []daemon.AgentSessionInfo{
+				{
+					SessionID:  "session-agent-1",
+					ActorID:    "agent-daemon-1",
+					Role:       "coder",
+					Status:     "running",
+					StartedAt:  time.Date(2026, time.March, 6, 13, 0, 0, 0, time.UTC),
+					Iterations: 2,
+				},
+				{
+					SessionID: "session-other",
+					ActorID:   "agent-other",
+					Role:      "reviewer",
+					Status:    "running",
+				},
+			},
+		},
+	}
+	SetAgentControl(mock)
+	t.Cleanup(func() { defaultAgentControl = original })
+
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/agent-daemon-1/daemon/sessions", nil)
+	rr := httptest.NewRecorder()
+	AgentDetailHandler(orchestrationTestConfig(t.TempDir()), zerolog.Nop(), nil).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !mock.ensureRunningCalled {
+		t.Fatal("expected daemon ensure running")
+	}
+	if !mock.listCalled {
+		t.Fatal("expected daemon list")
+	}
+
+	body := decodeResponseBody(t, rr)
+	if got, ok := body["count"].(float64); !ok || got != 1 {
+		t.Fatalf("count=%v want 1", body["count"])
+	}
+	rawSessions, ok := body["sessions"].([]any)
+	if !ok || len(rawSessions) != 1 {
+		t.Fatalf("sessions=%v want one session", body["sessions"])
+	}
+	session, ok := rawSessions[0].(map[string]any)
+	if !ok {
+		t.Fatalf("session type=%T want object", rawSessions[0])
+	}
+	if got := strings.TrimSpace(fmt.Sprint(session["session_id"])); got != "session-agent-1" {
+		t.Fatalf("session_id=%q want session-agent-1", got)
+	}
+}
+
+func TestAgentDaemonKillHandler_EmitsTypedKillResponse(t *testing.T) {
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+
+	cfg := orchestrationTestConfig(t.TempDir())
+	store, err := agents.Open(context.Background(), cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open agents store: %v", err)
+	}
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil {
+			t.Fatalf("close agents store: %v", closeErr)
+		}
+	}()
+	if err := store.Create(context.Background(), agentdomain.Agent{
+		ID:          "agent-daemon-kill-1",
+		Namespace:   "ws-1",
+		Name:        "Kill Agent",
+		Role:        "coder",
+		SkillsAllow: []string{},
+		Policy:      agentdomain.Policy{},
+		ShareBB:     "scoped",
+		State:       agentdomain.StateRunning,
+		CreatedAt:   time.Date(2026, time.March, 6, 12, 0, 0, 0, time.UTC),
+		ExecMode:    agentdomain.ModeReactive,
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	original := defaultAgentControl
+	mock := &mockAgentControl{
+		isRunningResult: true,
+		listResult: &daemon.AgentListResult{
+			Sessions: []daemon.AgentSessionInfo{
+				{SessionID: "session-kill-1", ActorID: "agent-daemon-kill-1", Status: "running"},
+			},
+		},
+		killResult: &daemon.AgentKillResult{Status: "killed"},
+	}
+	SetAgentControl(mock)
+	t.Cleanup(func() { defaultAgentControl = original })
+
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/agent-daemon-kill-1/daemon/kill", nil)
+	rr := httptest.NewRecorder()
+	AgentDetailHandler(cfg, zerolog.Nop(), nil).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !mock.listCalled {
+		t.Fatal("expected daemon list")
+	}
+	if !mock.killCalled {
+		t.Fatal("expected daemon kill")
+	}
+	if mock.killSession != "session-kill-1" {
+		t.Fatalf("kill session=%q want session-kill-1", mock.killSession)
+	}
+
+	body := decodeResponseBody(t, rr)
+	if ok, _ := body["ok"].(bool); !ok {
+		t.Fatalf("ok=%v want true", body["ok"])
+	}
+	if got := strings.TrimSpace(fmt.Sprint(body["session_id"])); got != "session-kill-1" {
+		t.Fatalf("session_id=%q want session-kill-1", got)
+	}
+	if got := strings.TrimSpace(fmt.Sprint(body["status"])); got != "killed" {
+		t.Fatalf("status=%q want killed", got)
+	}
+	if got := strings.TrimSpace(fmt.Sprint(body["message"])); got != "agent session killed" {
+		t.Fatalf("message=%q want agent session killed", got)
 	}
 }
 

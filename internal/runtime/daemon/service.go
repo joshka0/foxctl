@@ -677,7 +677,7 @@ func (s *Service) handleConnection(ctx context.Context, conn net.Conn) {
 			resp.Result = result
 		}
 	case "shutdown":
-		resp.Result = map[string]any{"status": "shutting_down"}
+		resp.Result = ShutdownResult{Status: "shutting_down"}
 		s.writeResponse(conn, resp)
 		go func() {
 			time.Sleep(100 * time.Millisecond)
@@ -936,7 +936,16 @@ type WarmParams struct {
 	Workspace string `json:"workspace"`
 }
 
-func (s *Service) handleWarm(params json.RawMessage) (map[string]any, error) {
+type WarmResult struct {
+	Status    string `json:"status"`
+	Workspace string `json:"workspace"`
+}
+
+type ShutdownResult struct {
+	Status string `json:"status"`
+}
+
+func (s *Service) handleWarm(params json.RawMessage) (*WarmResult, error) {
 	var p WarmParams
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, fmt.Errorf("parse params: %w", err)
@@ -946,11 +955,12 @@ func (s *Service) handleWarm(params json.RawMessage) (map[string]any, error) {
 		return nil, errors.New("workspace is required")
 	}
 
+	s.wg.Add(1)
 	go s.warmWorkspace(p.Workspace)
 
-	return map[string]any{
-		"status":    "warming",
-		"workspace": p.Workspace,
+	return &WarmResult{
+		Status:    "warming",
+		Workspace: p.Workspace,
 	}, nil
 }
 
