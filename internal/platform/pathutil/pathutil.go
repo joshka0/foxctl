@@ -16,30 +16,62 @@ var PathFields = []string{
 	"current_path", // OC/alternative
 }
 
+// ToolPathInput captures the path-bearing fields supported by hook tool inputs.
+type ToolPathInput struct {
+	FilePath    string
+	Path        string
+	File        string
+	CurrentPath string
+	Edits       []ToolPathInput
+	Files       []string
+}
+
+// UnmarshalJSON accepts partially-typed hook payloads while keeping the
+// extracted path shape explicit inside the package.
+func (in *ToolPathInput) UnmarshalJSON(data []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+
+	in.FilePath = stringField(fields, "file_path")
+	in.Path = stringField(fields, "path")
+	in.File = stringField(fields, "file")
+	in.CurrentPath = stringField(fields, "current_path")
+	in.Edits = decodeEdits(fields["edits"])
+	in.Files = decodeFiles(fields["files"])
+	return nil
+}
+
 // ExtractPath extracts the file path from tool input JSON.
 // It tries PathFields in order and returns the first non-empty value.
 // Returns empty string if no path is found.
 func ExtractPath(toolInput json.RawMessage) string {
-	if len(toolInput) == 0 {
+	input, ok := DecodeToolPathInput(toolInput)
+	if !ok {
 		return ""
 	}
-
-	var input map[string]any
-	if err := json.Unmarshal(toolInput, &input); err != nil {
-		return ""
-	}
-
-	return ExtractPathFromMap(input)
+	return ExtractPathFromInput(input)
 }
 
 // ExtractPathFromMap extracts the file path from a map.
 // Useful when the input is already parsed.
 func ExtractPathFromMap(input map[string]any) string {
+	if len(input) == 0 {
+		return ""
+	}
+	raw, err := json.Marshal(input)
+	if err != nil {
+		return ""
+	}
+	return ExtractPath(raw)
+}
+
+// ExtractPathFromInput extracts the first path from a typed path input.
+func ExtractPathFromInput(input ToolPathInput) string {
 	for _, key := range PathFields {
-		if v, ok := input[key]; ok {
-			if s, ok := v.(string); ok && s != "" {
-				return s
-			}
+		if path := input.pathValue(key); path != "" {
+			return path
 		}
 	}
 	return ""
@@ -49,44 +81,112 @@ func ExtractPathFromMap(input map[string]any) string {
 // Some tools (like MultiEdit) may have multiple paths.
 // Returns nil if no paths are found.
 func ExtractPaths(toolInput json.RawMessage) []string {
-	if len(toolInput) == 0 {
+	input, ok := DecodeToolPathInput(toolInput)
+	if !ok {
 		return nil
 	}
+	return ExtractPathsFromInput(input)
+}
 
-	var input map[string]any
-	if err := json.Unmarshal(toolInput, &input); err != nil {
-		return nil
-	}
-
+// ExtractPathsFromInput extracts all paths from a typed path input.
+func ExtractPathsFromInput(input ToolPathInput) []string {
 	var paths []string
 
-	// Check for array of edits (MultiEdit pattern)
-	if edits, ok := input["edits"].([]any); ok {
-		for _, edit := range edits {
-			if editMap, ok := edit.(map[string]any); ok {
-				if p := ExtractPathFromMap(editMap); p != "" {
-					paths = append(paths, p)
-				}
-			}
+	for _, edit := range input.Edits {
+		if p := ExtractPathFromInput(edit); p != "" {
+			paths = append(paths, p)
 		}
 	}
 
-	// Check for array of files
-	if files, ok := input["files"].([]any); ok {
-		for _, file := range files {
-			if s, ok := file.(string); ok && s != "" {
-				paths = append(paths, s)
-			}
+	for _, file := range input.Files {
+		if file != "" {
+			paths = append(paths, file)
 		}
 	}
 
-	// Check single path fields
-	if p := ExtractPathFromMap(input); p != "" {
+	if p := ExtractPathFromInput(input); p != "" {
 		paths = append(paths, p)
 	}
 
-	// Deduplicate
 	return uniquePaths(paths)
+}
+
+// DecodeToolPathInput decodes a tool payload into the typed path input model.
+func DecodeToolPathInput(toolInput json.RawMessage) (ToolPathInput, bool) {
+	if len(toolInput) == 0 {
+		return ToolPathInput{}, false
+	}
+
+	var input ToolPathInput
+	if err := json.Unmarshal(toolInput, &input); err != nil {
+		return ToolPathInput{}, false
+	}
+	return input, true
+}
+
+func (in ToolPathInput) pathValue(key string) string {
+	switch key {
+	case "file_path":
+		return in.FilePath
+	case "path":
+		return in.Path
+	case "file":
+		return in.File
+	case "current_path":
+		return in.CurrentPath
+	default:
+		return ""
+	}
+}
+
+func stringField(fields map[string]json.RawMessage, key string) string {
+	raw, ok := fields[key]
+	if !ok {
+		return ""
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return ""
+	}
+	return value
+}
+
+func decodeEdits(raw json.RawMessage) []ToolPathInput {
+	if len(raw) == 0 {
+		return nil
+	}
+	var entries []json.RawMessage
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil
+	}
+	edits := make([]ToolPathInput, 0, len(entries))
+	for _, entry := range entries {
+		var edit ToolPathInput
+		if err := json.Unmarshal(entry, &edit); err == nil {
+			if ExtractPathFromInput(edit) != "" || len(edit.Edits) > 0 || len(edit.Files) > 0 {
+				edits = append(edits, edit)
+			}
+		}
+	}
+	return edits
+}
+
+func decodeFiles(raw json.RawMessage) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var entries []json.RawMessage
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil
+	}
+	files := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		var file string
+		if err := json.Unmarshal(entry, &file); err == nil && file != "" {
+			files = append(files, file)
+		}
+	}
+	return files
 }
 
 // uniquePaths removes duplicate paths while preserving order.
