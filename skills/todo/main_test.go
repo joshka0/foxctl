@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	runner "github.com/joshka0/foxctl/internal/adapters/skillslib/runner"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/domain/envelope"
 	"github.com/joshka0/foxctl/internal/platform/config"
@@ -475,7 +474,7 @@ func TestTodoComplete_WithReviewGate_RejectsWhenNotReadyForReview(t *testing.T) 
 type todoTestEnv struct {
 	ctx         context.Context
 	workspaceID string
-	rc          *runner.RunnerContext
+	rc          *skillmain.RunContext
 }
 
 func newTodoTestEnv(t *testing.T) *todoTestEnv {
@@ -601,7 +600,7 @@ func taskID(t *testing.T, data map[string]any) string {
 	return id
 }
 
-func newTestRunnerContext(t *testing.T, tmp string) *runner.RunnerContext {
+func newTestRunnerContext(t *testing.T, tmp string) *skillmain.RunContext {
 	t.Helper()
 	cfg := config.Config{
 		Home:           tmp,
@@ -616,7 +615,7 @@ func newTestRunnerContext(t *testing.T, tmp string) *runner.RunnerContext {
 			Root: filepath.Join(tmp, "storage"),
 		},
 	}
-	rc, err := runner.NewRunnerContext(cfg, &bytes.Buffer{})
+	rc, err := skillmain.BuildRunContext(cfg, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}

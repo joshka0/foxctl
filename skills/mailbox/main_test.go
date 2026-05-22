@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	runner "github.com/joshka0/foxctl/internal/adapters/skillslib/runner"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/domain/agent"
 	"github.com/joshka0/foxctl/internal/domain/envelope"
 	"github.com/joshka0/foxctl/internal/platform/config"
@@ -132,7 +132,7 @@ func TestMailboxSend_TeamHasNoMembers(t *testing.T) {
 type mailboxTestEnv struct {
 	ctx         context.Context
 	workspaceID string
-	rc          *runner.RunnerContext
+	rc          *skillmain.RunContext
 }
 
 func newMailboxTestEnv(t *testing.T) *mailboxTestEnv {
@@ -211,7 +211,7 @@ func (env *mailboxTestEnv) inboxMessages(t *testing.T, actorID string) []agent.B
 	return msgs
 }
 
-func newTestRunnerContext(t *testing.T, tmp string) *runner.RunnerContext {
+func newTestRunnerContext(t *testing.T, tmp string) *skillmain.RunContext {
 	t.Helper()
 	cfg := config.Config{
 		Home:           tmp,
@@ -226,14 +226,14 @@ func newTestRunnerContext(t *testing.T, tmp string) *runner.RunnerContext {
 			Root: filepath.Join(tmp, "storage"),
 		},
 	}
-	rc, err := runner.NewRunnerContext(cfg, &bytes.Buffer{})
+	rc, err := skillmain.BuildRunContext(cfg, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
 	return rc
 }
 
-func runSkill(ctx context.Context, t *testing.T, rc *runner.RunnerContext, in input) *bytes.Buffer {
+func runSkill(ctx context.Context, t *testing.T, rc *skillmain.RunContext, in input) *bytes.Buffer {
 	t.Helper()
 	buf := &bytes.Buffer{}
 	rc.Stdout = buf

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	runner "github.com/joshka0/foxctl/internal/adapters/skillslib/runner"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/platform/config"
 )
 
@@ -148,7 +148,7 @@ func TestFsFindWithExtensionFilter(t *testing.T) {
 	}
 }
 
-func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, _ string) *runner.RunnerContext {
+func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, _ string) *skillmain.RunContext {
 	t.Helper()
 	state := t.TempDir()
 	cfg := config.Config{
@@ -161,7 +161,7 @@ func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, _ string) *runner.
 			Cache: filepath.Join(state, "cache"),
 		},
 	}
-	rc, err := runner.NewRunnerContext(cfg, stdout)
+	rc, err := skillmain.BuildRunContext(cfg, stdout)
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}

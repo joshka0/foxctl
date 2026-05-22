@@ -14,7 +14,7 @@ import (
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/codeedit"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/diffutil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/pathutil"
-	runner "github.com/joshka0/foxctl/internal/adapters/skillslib/runner"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skilltest"
 	"github.com/joshka0/foxctl/internal/platform/config"
 	errs "github.com/joshka0/foxctl/internal/platform/errors"
@@ -185,7 +185,7 @@ func TestParseInputInvalidJSON(t *testing.T) {
 	}
 }
 
-func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.RunnerContext {
+func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) *skillmain.RunContext {
 	t.Helper()
 	t.Setenv("FOXCTL_WORKSPACE", workspace)
 	state := t.TempDir()
@@ -199,7 +199,7 @@ func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) 
 			Cache: filepath.Join(state, "cache"),
 		},
 	}
-	rc, err := runner.NewRunnerContext(cfg, stdout)
+	rc, err := skillmain.BuildRunContext(cfg, stdout)
 	if err != nil {
 		t.Fatalf("new runner context: %v", err)
 	}

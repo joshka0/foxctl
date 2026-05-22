@@ -5,14 +5,14 @@ import (
 	"context"
 	"testing"
 
-	runner "github.com/joshka0/foxctl/internal/adapters/skillslib/runner"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/platform/config"
 )
 
 func TestRunHttpOpenApi(t *testing.T) {
 	stdout := &bytes.Buffer{}
 	cfg := config.Config{}
-	rc, err := runner.NewRunnerContext(cfg, stdout)
+	rc, err := skillmain.BuildRunContext(cfg, stdout)
 	if err != nil {
 		t.Fatal(err)
 	}

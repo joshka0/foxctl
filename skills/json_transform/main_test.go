@@ -7,12 +7,12 @@ import (
 	"reflect"
 	"testing"
 
-	runner "github.com/joshka0/foxctl/internal/adapters/skillslib/runner"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/platform/config"
 	errs "github.com/joshka0/foxctl/internal/platform/errors"
 )
 
-func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer) *runner.RunnerContext {
+func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer) *skillmain.RunContext {
 	t.Helper()
 	state := t.TempDir()
 	cfg := config.Config{
@@ -25,7 +25,7 @@ func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer) *runner.RunnerCont
 			Cache: filepath.Join(state, "cache"),
 		},
 	}
-	rc, err := runner.NewRunnerContext(cfg, stdout)
+	rc, err := skillmain.BuildRunContext(cfg, stdout)
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
