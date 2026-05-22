@@ -30,11 +30,6 @@ interface RoomTerminalViewProps {
   }) => Promise<RoomSendMessageResult>
   onRebind: (params: {
     actorId: string
-    backend?: string
-    session?: string
-    pane_id?: string
-    transport_endpoint?: string
-    transport_kind?: string
     delivery_binding?: RoomDeliveryBinding
   }) => Promise<void>
   sending?: boolean
@@ -642,11 +637,6 @@ export function RoomTerminalView({ roomId, workspaceId, panes, participants, sen
                   try {
                     await onRebind({
                       actorId: bindActor,
-                      backend: selectedPane.backend,
-                      session: selectedPane.session,
-                      pane_id: selectedPane.id,
-                      transport_endpoint: selectedPane.socket_path || participant?.transport?.transport_endpoint,
-                      transport_kind: selectedPane.socket_path ? 'pane_socket' : participantTransportKind(participant?.transport),
                       delivery_binding: {
                         mux_backend: selectedPane.backend,
                         mux_session: selectedPane.session,

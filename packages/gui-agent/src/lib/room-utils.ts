@@ -63,44 +63,27 @@ export function resolveRoomWorkspacePath(
 }
 
 export function roomMemberDeliveryBinding(member: RoomMember | null | undefined): RoomDeliveryBinding | undefined {
-  if (!member) return undefined
-  if (member.delivery_binding) return member.delivery_binding
-  if (
-    !member.backend &&
-    !member.session &&
-    !member.pane_id &&
-    !member.transport_endpoint &&
-    !member.transport_kind
-  ) {
-    return undefined
-  }
-  return {
-    mux_backend: member.backend,
-    mux_session: member.session,
-    mux_pane_id: member.pane_id,
-    transport_endpoint: member.transport_endpoint,
-    transport_kind: member.transport_kind,
-  }
+  return member?.delivery_binding
 }
 
 export function roomMemberMuxBackend(member: RoomMember | null | undefined): string {
-  return roomMemberDeliveryBinding(member)?.mux_backend?.trim() || member?.backend?.trim() || ''
+  return roomMemberDeliveryBinding(member)?.mux_backend?.trim() || ''
 }
 
 export function roomMemberMuxSession(member: RoomMember | null | undefined): string {
-  return roomMemberDeliveryBinding(member)?.mux_session?.trim() || member?.session?.trim() || ''
+  return roomMemberDeliveryBinding(member)?.mux_session?.trim() || ''
 }
 
 export function roomMemberMuxPaneID(member: RoomMember | null | undefined): string {
-  return roomMemberDeliveryBinding(member)?.mux_pane_id?.trim() || member?.pane_id?.trim() || ''
+  return roomMemberDeliveryBinding(member)?.mux_pane_id?.trim() || ''
 }
 
 export function roomMemberTransportEndpoint(member: RoomMember | null | undefined): string {
-  return roomMemberDeliveryBinding(member)?.transport_endpoint?.trim() || member?.transport_endpoint?.trim() || ''
+  return roomMemberDeliveryBinding(member)?.transport_endpoint?.trim() || ''
 }
 
 export function roomMemberTransportKind(member: RoomMember | null | undefined): string {
-  return roomMemberDeliveryBinding(member)?.transport_kind?.trim() || member?.transport_kind?.trim() || ''
+  return roomMemberDeliveryBinding(member)?.transport_kind?.trim() || ''
 }
 
 export function participantTransportKind(state?: ParticipantState): 'pane_socket' | 'mux_pane' | 'none' {

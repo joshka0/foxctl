@@ -370,11 +370,6 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
   const terminalRebindMutation = useMutation({
     mutationFn: (params: {
       actorId: string
-      backend?: string
-      session?: string
-      pane_id?: string
-      transport_endpoint?: string
-      transport_kind?: string
       delivery_binding?: {
         mux_backend?: string
         mux_session?: string
@@ -388,11 +383,6 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
     }) =>
       updateRoomMemberBinding(roomId, params.actorId, {
         workspace_id: workspaceId,
-        backend: params.backend,
-        session: params.session,
-        pane_id: params.pane_id,
-        transport_endpoint: params.transport_endpoint,
-        transport_kind: params.transport_kind,
         delivery_binding: params.delivery_binding,
       }),
     onSuccess: () => {

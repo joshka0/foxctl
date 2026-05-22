@@ -1074,13 +1074,7 @@ export interface RoomStatusEntry {
 export interface RoomStatusParticipant {
   actor_id: string;
   role?: string;
-  backend?: string;
-  session?: string;
-  pane_id?: string;
   unbound?: boolean;
-  transport_endpoint?: string;
-  transport_kind?: string;
-  delivery_binding?: RoomDeliveryBinding;
   transport_status?: string;
   runtime_binding_status?: string;
   last_active_at?: string;

@@ -5716,11 +5716,15 @@ function roomParticipantTone(participant: RoomStatusParticipant): string {
 function participantOpsSummary(participant: RoomStatusParticipant): string {
   const membership = participant.unbound ? "unbound" : "member";
   const transport =
-    participant.transport_status || participant.transport_kind || "no transport";
+    participant.transport_status ||
+    participant.transport?.transport ||
+    "no transport";
   const runtime = participant.runtime_binding_status || "runtime unknown";
-  const view = participant.backend
-    ? `${participant.backend}${
-        participant.pane_id ? `:${participant.pane_id}` : ""
+  const view = participant.transport?.mux_backend
+    ? `${participant.transport.mux_backend}${
+        participant.transport.transport_endpoint
+          ? `:${participant.transport.transport_endpoint}`
+          : ""
       }`
     : "no viewer";
   return [

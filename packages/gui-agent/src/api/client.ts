@@ -941,24 +941,14 @@ export async function updateRoomMemberBinding(
   actorId: string,
   params: {
     workspace_id: string;
-    backend?: string;
-    session?: string;
-    pane_id?: string;
     unbound?: boolean;
-    transport_endpoint?: string;
-    transport_kind?: string;
     delivery_binding?: RoomMember["delivery_binding"];
   },
 ): Promise<{ member?: RoomMember }> {
   return request(`/rooms/${encodeURIComponent(roomId)}/members/${encodeURIComponent(actorId)}/binding?workspace_id=${encodeURIComponent(params.workspace_id)}`, {
     method: "PUT",
     body: JSON.stringify({
-      backend: params.backend,
-      session: params.session,
-      pane_id: params.pane_id,
       unbound: params.unbound,
-      transport_endpoint: params.transport_endpoint,
-      transport_kind: params.transport_kind,
       delivery_binding: params.delivery_binding,
     }),
   });
