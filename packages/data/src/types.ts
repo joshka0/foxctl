@@ -601,12 +601,6 @@ export interface CASReadResult {
   prev_page?: number;
 }
 
-// API Response types
-export interface APIResponse<T> {
-  data: T;
-  error?: string;
-}
-
 // Agent types (from agents.db)
 export type AgentState =
   | "starting"

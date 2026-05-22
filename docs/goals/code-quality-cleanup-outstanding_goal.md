@@ -32,9 +32,11 @@ Remaining areas from the results doc after the completed slices:
 - Dead frontend code:
   - Completed current zero-caller deletion pass for GUI API wrappers and tiny
     dead `@foxctl/data` orchestration exports.
-  - Follow-up only: add a real dead-export/dependency graph pass before
-    deleting active-looking shared-client exports that TypeScript's unused
-    checks cannot prove dead.
+  - Completed: added a real report-only dead-export/dependency graph pass with
+    `bun run dead:frontend`.
+  - Follow-up only: decide whether the broad `@foxctl/data/client` helper
+    surface is intentional package API or should be hard-cut to active UI
+    callers.
 - Structural consolidation:
   - Completed: consolidate duplicated skill `inline_mode` parsing.
   - Completed: consolidate repeated repo-index skill workspace resolution
@@ -220,14 +222,21 @@ Done when:
   console-session settings/session/message, persisted-session get, health, and
   flow status/log calls. Tiny dead `@foxctl/data` orchestration exports were
   also removed.
+- Completed in current slices: `bun run dead:frontend` now provides a
+  TypeScript-graph report over active frontend packages without new
+  dependencies; `bun run unused:frontend` runs it after compiler/linter gates.
+- Completed in current slices: unused GUI-local API response/helper types were
+  made package-private, internal orchestration board guards were unexported, and
+  the obsolete `APIResponse<T>` type was deleted.
 - Unused-code tooling is documented and wired so future cleanup can be repeated
   with `bun run unused:frontend`.
-- Remaining scope: add a project-level dead-export/dependency graph pass before
-  further shared-client export deletion.
+- Remaining scope: decide the intended `@foxctl/data/client` exported endpoint
+  surface before further shared-client export deletion.
 - Verification passes:
   - `bun run --cwd packages/gui-agent build`
   - `bun run --cwd packages/foxterm typecheck`
-  - documented unused-code command(s)
+  - `bun run dead:frontend`
+  - `bun run unused:frontend`
 
 ### 8. Structural Consolidation Follow-Ups
 

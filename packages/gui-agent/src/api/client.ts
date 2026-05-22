@@ -64,7 +64,7 @@ const DEV_AUTH_SESSION: AuthSessionResponse = {
   },
 };
 
-export class APIUnauthorizedError extends Error {
+class APIUnauthorizedError extends Error {
   readonly status = 401;
 
   constructor(message = "Authentication required") {
@@ -518,7 +518,7 @@ export async function startAgent(
   });
 }
 
-export type PatchAgentParams = AgentPatchRequest;
+type PatchAgentParams = AgentPatchRequest;
 
 /**
  * Update properties of an existing agent.
@@ -1093,7 +1093,7 @@ export async function cleanupLogs(params: {
 }
 
 // Skills
-export interface SkillParameter {
+interface SkillParameter {
   name: string;
   type: string;
   required: boolean;
@@ -1102,7 +1102,7 @@ export interface SkillParameter {
   default?: unknown;
 }
 
-export interface Skill {
+interface Skill {
   name: string;
   version: string;
   description: string;
@@ -1112,12 +1112,12 @@ export interface Skill {
   returns: SkillParameter[];
 }
 
-export interface SkillsListResponse {
+interface SkillsListResponse {
   skills: Skill[];
   count: number;
 }
 
-export interface SkillRunResponse {
+interface SkillRunResponse {
   ok: boolean;
   skill: string;
   output?: unknown;
@@ -1147,7 +1147,7 @@ export async function runSkill(
   });
 }
 
-export interface WorkspaceInfo {
+interface WorkspaceInfo {
   path: string;
   name: string;
   session_count: number;
@@ -1492,7 +1492,7 @@ export interface ProviderAvailability {
   models?: { id: string; name: string }[];
 }
 
-export interface ProvidersResponse {
+interface ProvidersResponse {
   ok: boolean;
   providers: ProviderAvailability[];
   default_provider: string;
@@ -1558,7 +1558,7 @@ export async function getCompanionCoChange(params: {
 // Companion Chat
 
 // Detailed tool call information from companion chat
-export interface ToolCallDetail {
+interface ToolCallDetail {
   id: string;
   name: string;
   arguments?: unknown;
@@ -1566,13 +1566,13 @@ export interface ToolCallDetail {
 }
 
 // Context injected by hooks during tool execution
-export interface InjectedContextDetail {
+interface InjectedContextDetail {
   tool_call_id: string;
   source?: string;
   content: string;
 }
 
-export interface CompanionChatResponse {
+interface CompanionChatResponse {
   response: string;
   conversation_id: string;
   memory_context?: string;
@@ -1760,7 +1760,7 @@ export async function compressCompanionConversation(
 }
 
 // Personality dimensions (0.0 to 1.0 scale)
-export interface PersonalityDimension {
+interface PersonalityDimension {
   name: string;
   description: string;
   value: number;
@@ -1769,7 +1769,7 @@ export interface PersonalityDimension {
 }
 
 // Full personality profile
-export interface PersonalityProfile {
+interface PersonalityProfile {
   dimensions: PersonalityDimension[];
   learned_traits: string[];
   interests: string[];
@@ -2051,7 +2051,7 @@ export async function pauseFlow(
   });
 }
 
-export interface FlowNodeTerminalResponse {
+interface FlowNodeTerminalResponse {
   session_id: string;
   rows: number;
   cols: number;

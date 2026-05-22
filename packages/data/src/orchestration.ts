@@ -18,7 +18,7 @@ export function parseOrchestrationBoardPayload(data: unknown): OrchestrationBoar
   throw new Error("orchestration board response missing board or artifact payload");
 }
 
-export function isOrchestrationBoard(data: unknown): data is OrchestrationBoard {
+function isOrchestrationBoard(data: unknown): data is OrchestrationBoard {
   const record = asRecord(data);
   if (!record) return false;
   if (typeof record.generated_at !== "string") return false;
@@ -27,7 +27,7 @@ export function isOrchestrationBoard(data: unknown): data is OrchestrationBoard 
   return record.lanes.every(isOrchestrationLane);
 }
 
-export function isOrchestrationBoardArtifactRef(data: unknown): data is OrchestrationBoardArtifactRef {
+function isOrchestrationBoardArtifactRef(data: unknown): data is OrchestrationBoardArtifactRef {
   const record = asRecord(data);
   if (!record) return false;
   return typeof record.artifact === "string" && typeof record.summary === "string";

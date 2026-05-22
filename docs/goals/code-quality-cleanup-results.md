@@ -90,6 +90,11 @@ merge, rebase or merge current `main` and rerun the full verification set.
   `bun run unused:frontend`. The shared data, gui-agent, foxterm, and GUI auth
   gateway TypeScript configs enforce unused locals/parameters where applicable,
   and GitLab runs the gate in a Bun-based `typescript-frontend` job.
+- Frontend exported-symbol checks now have a repo-local dependency graph pass:
+  `bun run dead:frontend`. It uses the TypeScript compiler API over active
+  frontend packages, reports targeted externally unused exports, and stays
+  report-only by default while the shared `@foxctl/data/client` public surface
+  is being calibrated.
 - Existing `gui-agent` ESLint React hook findings were cleaned up, and
   `bun run --cwd packages/gui-agent lint` now participates in
   `bun run check:frontend`.
@@ -138,6 +143,11 @@ merge, rebase or merge current `main` and rerun the full verification set.
   `dispatchOrchestrationIssue`, `OrchestrationDispatchResult`, and the unused
   `isOrchestrationBoardPayloadBoard` /
   `isOrchestrationBoardPayloadArtifact` predicates.
+- Dead frontend export surface was tightened further: unused GUI-local response
+  and helper types in `packages/gui-agent/src/api/client.ts` are no longer
+  exported, the internal orchestration board shape guards are package-private,
+  and the unused `APIResponse<T>` type was deleted in favor of canonical
+  `ApiEnvelope<T>`.
 
 ### Honesty Fixes
 
@@ -164,6 +174,7 @@ Verification has been run slice-by-slice, including:
 - `bun run --cwd packages/foxterm typecheck`
 - `bun run check:frontend`
 - `bun run unused:frontend`
+- `bun run dead:frontend`
 - `make check-doc-links`
 - `git diff --check`
 - commit-hook static analysis, `gofumpt`, `golangci-lint`, large-file guard,
@@ -192,12 +203,15 @@ Verification has been run slice-by-slice, including:
 
 - Completed: deleted the confirmed zero-caller GUI API wrappers and tiny dead
   `@foxctl/data` orchestration exports found by the current audit.
-- Follow-up: add a broader dead-export/dependency graph pass before deleting
-  active-looking wrappers from shared clients. `bun run unused:frontend` catches
-  unused locals/imports, but exported API wrappers still need caller evidence.
+- Completed: added a broader report-only dead-export/dependency graph pass for
+  active frontend packages with `bun run dead:frontend`, and wired it into
+  `bun run unused:frontend`.
+- Follow-up: decide whether the current broad `@foxctl/data/client` endpoint
+  helper surface is intentional package API or should be hard-cut to only
+  active UI callers.
 - `bun run unused:frontend` is now the repeatable compiler/linter gate for
-  unused frontend imports, locals, and parameters. It does not replace caller
-  search or a future dead-export dependency graph pass.
+  unused frontend imports, locals, parameters, and report-only targeted export
+  graph findings. The export pass does not replace caller search before deletion.
 
 ### Structural Consolidation
 
@@ -235,11 +249,12 @@ Verification has been run slice-by-slice, including:
   `bun run unused:frontend`.
 - Completed: `bun run --cwd packages/gui-agent lint` is clean and included in
   `bun run check:frontend`.
-- Follow-up: add a project-level dead-export/dependency graph pass only after
-  the current compiler and linter gates are consistently clean.
+- Completed: project-level frontend dead-export report command
+  `bun run dead:frontend` is wired without adding dependencies.
 
 ## Recommended Next Slices
 
-1. Add a project-level dead-export/dependency graph pass for frontend packages,
-   then use it to audit shared-client exports that compiler/linter unused checks
-   cannot prove dead.
+1. Decide and document the intended `@foxctl/data/client` package API: keep it
+   as a broad operator/API client surface, or hard-cut it to active UI callers
+   and delete the externally unused endpoint helper exports reported by
+   `bun run dead:frontend`.
