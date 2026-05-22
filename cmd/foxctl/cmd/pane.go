@@ -114,7 +114,7 @@ func paneChildEnv(participantID, roomID string) []string {
 	return env
 }
 
-// registerParticipantTransport persists the pane socket transport endpoint on
+// registerParticipantTransport persists the pane socket delivery binding on
 // the room member row. Errors are logged to stderr but do not block pane serve
 // startup -- transport registration is best-effort to avoid blocking the child PTY.
 func registerParticipantTransport(cmd *cobra.Command, workspace, roomID, participantID, socketPath string) error {
@@ -137,22 +137,30 @@ func registerParticipantTransport(cmd *cobra.Command, workspace, roomID, partici
 		return err
 	}
 
-	// Existing members should take the surgical transport update path so burst
-	// pane startups do not clobber peer transport fields with a full member-list
+	// Existing members use the surgical binding update path so burst pane
+	// startups do not clobber peer transport fields with a full member-list
 	// replace.
-	if err := store.UpdateRoomMemberTransport(cmd.Context(), absWorkspace, roomID, participantID, socketPath, agent.PaneSocketTransportKind); err == nil {
-		return nil
-	} else if !errors.Is(err, blackboard.ErrRoomMemberNotFound) {
-		fmt.Fprintf(cmd.ErrOrStderr(), "pane transport registration: update member transport: %v\n", err)
-		return err
+	if existing, ok := roomMemberForTransportRegistration(summary, participantID); ok {
+		existing.DeliveryBinding = mergeRoomDeliveryBinding(existing.DeliveryBinding, &agent.RoomDeliveryBinding{
+			TransportEndpoint: socketPath,
+			TransportKind:     agent.PaneSocketTransportKind,
+		})
+		if err := store.UpdateRoomMemberBinding(cmd.Context(), absWorkspace, roomID, existing); err == nil {
+			return nil
+		} else if !errors.Is(err, blackboard.ErrRoomMemberNotFound) {
+			fmt.Fprintf(cmd.ErrOrStderr(), "pane transport registration: update member binding: %v\n", err)
+			return err
+		}
 	}
 
 	// Missing members still need a create path so detached pane serve can act as
 	// a first-class registration flow on its own.
 	member := agent.RoomMember{
-		ActorID:           participantID,
-		TransportEndpoint: socketPath,
-		TransportKind:     agent.PaneSocketTransportKind,
+		ActorID: participantID,
+		DeliveryBinding: &agent.RoomDeliveryBinding{
+			TransportEndpoint: socketPath,
+			TransportKind:     agent.PaneSocketTransportKind,
+		},
 	}
 
 	updatedMembers := mergeRoomMembers(summary.Members, member)
@@ -163,4 +171,18 @@ func registerParticipantTransport(cmd *cobra.Command, workspace, roomID, partici
 		return err
 	}
 	return nil
+}
+
+func roomMemberForTransportRegistration(summary agent.RoomSummary, participantID string) (agent.RoomMember, bool) {
+	participantID = strings.TrimSpace(participantID)
+	if participantID == "" {
+		return agent.RoomMember{}, false
+	}
+	for _, member := range summary.Members {
+		member = normalizeRoomMember(member)
+		if sameRoomParticipant(member.ActorID, participantID) {
+			return member, true
+		}
+	}
+	return agent.RoomMember{}, false
 }

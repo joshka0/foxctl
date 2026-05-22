@@ -97,6 +97,21 @@ func TestRegisterParticipantTransportUpdatesExistingMember(t *testing.T) {
 			if m.Backend != "tmux" {
 				t.Errorf("Backend=%q want tmux (preserved)", m.Backend)
 			}
+			if m.Session != "collab" {
+				t.Errorf("Session=%q want collab (preserved)", m.Session)
+			}
+			if m.PaneID != "%42" {
+				t.Errorf("PaneID=%q want %%42 (preserved)", m.PaneID)
+			}
+			if m.DeliveryBinding.MuxBackend != "tmux" {
+				t.Errorf("DeliveryBinding.MuxBackend=%q want tmux", m.DeliveryBinding.MuxBackend)
+			}
+			if m.DeliveryBinding.MuxSession != "collab" {
+				t.Errorf("DeliveryBinding.MuxSession=%q want collab", m.DeliveryBinding.MuxSession)
+			}
+			if m.DeliveryBinding.MuxPaneID != "%42" {
+				t.Errorf("DeliveryBinding.MuxPaneID=%q want %%42", m.DeliveryBinding.MuxPaneID)
+			}
 		}
 	}
 	if !found {

@@ -27,8 +27,6 @@ tests that only preserve accidental implementation detail.
 Remaining areas from the results doc after the completed slices:
 
 - Compatibility layers:
-  - Decide whether the internal pane transport update path should move to a
-    binding helper.
   - Migrate or isolate older non-v2 `OpenDBCompat*` callers.
   - Keep similar GUI/data-client wrapper names separate unless the shared client
     owns the same route, params, response shape, and auth semantics.
@@ -174,6 +172,8 @@ Done when:
 
 - `delivery_binding` plus explicit transport fields are the canonical contract,
   or a documented exception explains why not.
+- Internal pane transport registration uses the canonical binding update helper;
+  the legacy transport-only storage helper is deleted.
 - Legacy `backend/session/pane_id` handling is deleted when caller evidence
   proves it is dead, or isolated at one boundary if still needed.
 - GUI/foxterm callers use the canonical contract.

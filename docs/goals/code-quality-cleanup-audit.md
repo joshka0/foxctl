@@ -98,12 +98,14 @@ by cleanup value and implementation risk.
   - Progress: room member/status responses no longer emit legacy top-level
     transport mirrors, and the legacy HTTP
     `/api/rooms/{room}/members/{actor}/transport` route was removed.
+  - Progress: pane transport registration now updates the canonical
+    `delivery_binding` through `UpdateRoomMemberBinding`, and the old
+    transport-only storage helper was deleted.
   - Progress: v2 Turso stores now depend on a narrow `StoreDB` capability and
     v2 openers use `dbdriver.OpenDB`; older non-v2 `OpenDBCompat*` callers are
     intentionally left for a separate storage-lane migration.
-  - Other targets: decide whether the internal pane transport update path
-    should move to a binding helper, and migrate or isolate older legacy
-    storage compatibility callers. Remaining GUI/data-client functions with
+  - Other targets: migrate or isolate older legacy storage compatibility
+    callers. Remaining GUI/data-client functions with
     similar names currently diverge by route, params, response shape, or GUI
     auth behavior and should not be mechanically redirected.
   - Tests: data typecheck, gui-agent build, foxterm typecheck, affected Go

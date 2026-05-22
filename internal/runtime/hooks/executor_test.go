@@ -149,10 +149,6 @@ func (m *MockBoardStore) ReplaceRoomMembers(ctx context.Context, workspaceID, ro
 	return members, nil
 }
 
-func (m *MockBoardStore) UpdateRoomMemberTransport(_ context.Context, _, _, _, _, _ string) error {
-	return nil
-}
-
 func (m *MockBoardStore) UpdateRoomMemberBinding(_ context.Context, _, _ string, _ agent.RoomMember) error {
 	return nil
 }

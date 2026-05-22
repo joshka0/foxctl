@@ -110,6 +110,11 @@ merge, rebase or merge current `main` and rerun the full verification set.
   `transport`/status fields.
 - The legacy HTTP `PUT /api/rooms/{room}/members/{actor}/transport` route was
   removed after GUI and foxterm moved to the canonical member binding route.
+- Pane transport registration now uses the canonical surgical
+  `UpdateRoomMemberBinding` path, preserving existing mux presentation fields
+  while updating the pane-socket delivery binding. The narrower
+  `UpdateRoomMemberTransport` storage helper and its implementation-detail
+  tests were deleted.
 - Room transport docs and skill-pack guidance were refreshed so future agents
   do not rebuild against deleted legacy response fields.
 - Dead foxterm `getRun` / `RunDetail` API exports were removed after caller
@@ -153,8 +158,6 @@ Verification has been run slice-by-slice, including:
 
 ### Compatibility Layers
 
-- Decide whether the internal `UpdateRoomMemberTransport` pane registration
-  path should move to an explicit binding update helper.
 - Migrate or isolate older non-v2 `OpenDBCompat*` callers in the legacy storage
   lane without widening the v2 Turso cleanup.
 - Similar remaining GUI/data-client wrapper names currently differ by route,
@@ -221,6 +224,5 @@ Verification has been run slice-by-slice, including:
 
 ## Recommended Next Slices
 
-1. Audit the remaining room transport compatibility layer and decide whether
-   the internal pane transport update path should move to an explicit binding
-   helper.
+1. Migrate or isolate older non-v2 `OpenDBCompat*` callers in the legacy
+   storage lane without widening the v2 Turso cleanup.
