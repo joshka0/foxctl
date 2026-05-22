@@ -2,6 +2,7 @@ package searchindex
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -45,6 +46,15 @@ type EnvelopeSection struct {
 	Text string `json:"text"`
 }
 
+type SemanticEnvelopeMetadata struct {
+	Digest               string            `json:"digest"`
+	ProviderVersion      string            `json:"provider_version"`
+	IncludeCoChangeText  bool              `json:"include_cochange_text"`
+	CoChangeMetadataOnly bool              `json:"cochange_metadata_only"`
+	TextSections         []EnvelopeSection `json:"text_sections,omitempty"`
+	Metadata             map[string]any    `json:"metadata,omitempty"`
+}
+
 // [[protocol:semantic-envelope-retrieval-evidence]]
 // [[doc:docs/plans/features/semantic-code-anchors.md#Remaining Work]]
 // [[test:internal/intelligence/searchindex/build_code_test.go#TestBuildCodeDocumentsAppliesSemanticEnvelopeProvider]]
@@ -58,17 +68,13 @@ func applySemanticEnvelope(doc Document, bits SemanticEnvelopeBits, opts BuildCo
 		doc.Metadata = map[string]any{}
 	}
 	digest := buildSemanticEnvelopeDigest(bits, opts.IncludeCoChangeNeighborsInEnvelope)
-	envelope := map[string]any{
-		"digest":                 digest,
-		"provider_version":       bits.ProviderVersion,
-		"include_cochange_text":  opts.IncludeCoChangeNeighborsInEnvelope,
-		"cochange_metadata_only": !opts.IncludeCoChangeNeighborsInEnvelope,
-	}
-	if len(bits.TextSections) > 0 {
-		envelope["text_sections"] = bits.TextSections
-	}
-	if len(bits.Metadata) > 0 {
-		envelope["metadata"] = bits.Metadata
+	envelope := SemanticEnvelopeMetadata{
+		Digest:               digest,
+		ProviderVersion:      bits.ProviderVersion,
+		IncludeCoChangeText:  opts.IncludeCoChangeNeighborsInEnvelope,
+		CoChangeMetadataOnly: !opts.IncludeCoChangeNeighborsInEnvelope,
+		TextSections:         bits.TextSections,
+		Metadata:             bits.Metadata,
 	}
 	doc.Metadata[metadataKeySemanticEnvelope] = envelope
 	if len(bits.CoChangeNeighbors) > 0 {
@@ -158,45 +164,44 @@ func envelopeTextSectionsFromMetadata(metadata map[string]any) []EnvelopeSection
 	if !ok {
 		return nil
 	}
-	envelope, ok := raw.(map[string]any)
+	envelope, ok := semanticEnvelopeMetadataFromValue(raw)
 	if !ok {
 		return nil
 	}
-	return envelopeSectionsFromValue(envelope["text_sections"])
-}
-
-func envelopeSectionsFromValue(raw any) []EnvelopeSection {
-	switch values := raw.(type) {
-	case []EnvelopeSection:
-		return normalizeEnvelopeSections(values)
-	case []any:
-		sections := make([]EnvelopeSection, 0, len(values))
-		for _, value := range values {
-			switch section := value.(type) {
-			case EnvelopeSection:
-				sections = append(sections, section)
-			case map[string]any:
-				sections = append(sections, EnvelopeSection{
-					Name: fmt.Sprint(section["name"]),
-					Text: fmt.Sprint(section["text"]),
-				})
-			}
-		}
-		return normalizeEnvelopeSections(sections)
-	default:
-		return nil
-	}
+	return normalizeEnvelopeSections(envelope.TextSections)
 }
 
 func coChangeTextFromMetadata(metadata map[string]any) string {
 	if len(metadata) == 0 {
 		return ""
 	}
-	envelope, ok := metadata[metadataKeySemanticEnvelope].(map[string]any)
-	if !ok || envelope["include_cochange_text"] != true {
+	envelope, ok := semanticEnvelopeMetadataFromValue(metadata[metadataKeySemanticEnvelope])
+	if !ok || !envelope.IncludeCoChangeText {
 		return ""
 	}
 	return strings.Join(stringsFromMetadataValue(metadata[metadataKeyCoChangeNeighbors]), ", ")
+}
+
+func semanticEnvelopeMetadataFromValue(raw any) (SemanticEnvelopeMetadata, bool) {
+	switch value := raw.(type) {
+	case SemanticEnvelopeMetadata:
+		return value, true
+	case *SemanticEnvelopeMetadata:
+		if value == nil {
+			return SemanticEnvelopeMetadata{}, false
+		}
+		return *value, true
+	default:
+		body, err := json.Marshal(raw)
+		if err != nil {
+			return SemanticEnvelopeMetadata{}, false
+		}
+		var envelope SemanticEnvelopeMetadata
+		if err := json.Unmarshal(body, &envelope); err != nil {
+			return SemanticEnvelopeMetadata{}, false
+		}
+		return envelope, true
+	}
 }
 
 func stringsFromMetadataValue(raw any) []string {
