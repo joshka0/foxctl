@@ -436,7 +436,8 @@ Operationally:
 - use the room-scoped SSE stream for room views instead of subscribing to the global `/api/events` feed and filtering `room.message` client-side
 - treat `delivery_binding` as canonical when resolving mux backend, session, pane id, transport endpoint, submit mode, health, or fallback policy
 - treat `last_delivery_trace` as the first place to inspect when someone asks “why did this message route here” or “did fallback happen”
-- the older top-level member fields (`backend`, `session`, `pane_id`, `transport_endpoint`, `transport_kind`) are compatibility mirrors and should not be the source of truth for new client work
+- room member API responses no longer emit older top-level transport fields (`backend`, `session`, `pane_id`, `transport_endpoint`, `transport_kind`)
+- update member transport through `/members/{actor-id}/binding` with `delivery_binding`; the older `/members/{actor-id}/transport` route has been removed
 - use `bash tests/regression/run.sh` as the default room-runtime verification bundle before reaching for ad hoc command mixes
 - if the symptom is "the message is visible in the pane but looks unsent," run `FOXCTL_INTEGRATION_TMUX=1 go test -tags=integration ./cmd/foxctl/cmd -run 'TestIntegrationRelayRoomMessageTmuxConsumesInputRealTmux' -count=1 -v` to verify the relay path is consumed by the target terminal process rather than left as drafted pane input
 

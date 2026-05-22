@@ -235,7 +235,7 @@ Deliverables:
 
 Key seams to reuse:
 
-1. frontend contract shapes from [`packages/gui-agent/src/api/types.ts`](../../../packages/gui-agent/src/api/types.ts)
+1. shared frontend contract shapes from [`packages/data/src/types.ts`](../../../packages/data/src/types.ts)
 2. request/envelope handling patterns from [`packages/gui-agent/src/api/client.ts`](../../../packages/gui-agent/src/api/client.ts)
 
 Definition of done:

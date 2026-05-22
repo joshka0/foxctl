@@ -29,7 +29,7 @@ If the room is explicitly running the agile epic/milestone/story workflow, also 
 - The room timeline is canonical. Pane scrollback is not.
 - Participant transport and mux presentation are different things. A pane label or mux session is not proof of live delivery.
 - Room-scoped clients should prefer `GET /api/rooms/{room-id}/events?workspace_id=...` over the global `/api/events` feed for room timeline updates.
-- Room member `delivery_binding` is the canonical transport/routing record. The mirrored top-level member transport fields are compatibility-only and should not be treated as new source-of-truth state.
+- Room member `delivery_binding` is the canonical transport/routing record. Older top-level member transport fields are not emitted in room member API responses.
 - Reply-required work is chain-aware:
   a later message only satisfies an earlier request when it is from the intended recipient and belongs to the same room message chain.
 - Room status and loop surfaces expose a durable `last_delivery_trace`:

@@ -21,7 +21,7 @@ This skill is not the room source of truth.
 - `foxctl room` is canonical coordination and delivery.
 - participant transport is canonical execution.
 - room-scoped clients should consume `GET /api/rooms/{room-id}/events?workspace_id=...` for room timeline updates; the global `/api/events` feed is broader transport, not the room-specific contract.
-- `delivery_binding` is the canonical room member routing record; mux metadata is a viewer/presentation layer and older top-level member transport fields are only mirrors.
+- `delivery_binding` is the canonical room member routing record; mux metadata is a viewer/presentation layer and older top-level member transport fields are not emitted in room member API responses.
 - `last_delivery_trace` is the canonical explanation surface for the last delivery decision:
   when debugging “why did this message route here,” prefer room status / loop status over PTY guesswork.
 - `tmux`, `zellij`, GUI PTY previews, and future xterm viewers are presentation attachments only.

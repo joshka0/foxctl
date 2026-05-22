@@ -21,7 +21,7 @@ This skill is the participant-side companion to:
 - Participant transport is canonical delivery.
 - `tmux`, `zellij`, GUI PTY previews, and xterm/webterm are presentation only.
 - room-aware clients should consume `GET /api/rooms/{room-id}/events?workspace_id=...` for room timeline updates rather than watching the global `/api/events` feed.
-- when you inspect room member records, treat `delivery_binding` as canonical and treat the older top-level transport fields as compatibility mirrors.
+- when you inspect room member API records, treat `delivery_binding` as canonical; older top-level transport fields are not emitted in room member API responses.
 - when you create room tasks, do not guess the lane from prose:
   - plain `room task add` defaults to the newest open epic's quiet `Chores` milestone when one exists
   - use `room task add --milestone-id <milestone-id>` when the work belongs to a specific active milestone

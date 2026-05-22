@@ -220,7 +220,7 @@ Consequence:
 Relevant files:
 
 - [`packages/gui-agent/src/api/client.ts`](../../packages/gui-agent/src/api/client.ts)
-- [`packages/gui-agent/src/api/types.ts`](../../packages/gui-agent/src/api/types.ts)
+- [`packages/data/src/types.ts`](../../packages/data/src/types.ts)
 - [`internal/interfaces/web/server.go`](../../internal/interfaces/web/server.go)
 
 Symptoms:
@@ -490,7 +490,7 @@ Scope:
 Likely files:
 
 - [`packages/gui-agent/src/api/client.ts`](../../packages/gui-agent/src/api/client.ts)
-- [`packages/gui-agent/src/api/types.ts`](../../packages/gui-agent/src/api/types.ts)
+- [`packages/data/src/types.ts`](../../packages/data/src/types.ts)
 - [`packages/gui-agent/src/stores/*`](../../packages/gui-agent/src/stores)
 
 Acceptance:
