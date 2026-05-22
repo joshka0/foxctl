@@ -73,6 +73,8 @@ by cleanup value and implementation risk.
     helpers were removed.
   - Progress: room status now emits canonical `actionable_backlog`; the GUI
     client no longer translates legacy `action_required` payloads.
+  - Progress: foxterm now imports shared room DTOs from `@foxctl/data/types`
+    directly instead of re-exporting local pass-through aliases.
   - Backend targets: make room status/inbox emit canonical DTOs directly,
     consolidate duplicated `AgentResponse` conversion, and replace map-shaped
     daemon fallback responses with typed response structs.

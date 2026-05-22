@@ -19,16 +19,6 @@ import type {
   V2StreamType,
 } from "@foxctl/data/types";
 
-export type {
-  RoomControlSnapshot,
-  RoomLoop,
-  RoomMessage,
-  RoomSendMessageResult,
-  RoomStatusParticipant,
-} from "@foxctl/data/types";
-
-export type SendRoomMessageResult = RoomSendMessageResult;
-
 const DEFAULT_API_BASE = "http://127.0.0.1:8090";
 const DEFAULT_WORKSPACE_ID = ".";
 const DEFAULT_ACTOR_ID = "dev-local-user";
@@ -506,7 +496,7 @@ export async function getRoomMessages(params: {
 
 export async function sendRoomMessage(
   input: SendRoomMessageInput,
-): Promise<SendRoomMessageResult> {
+): Promise<RoomSendMessageResult> {
   const roomId = input.roomId.trim();
   const body = input.body.trim();
   if (roomId === "") {
@@ -533,7 +523,7 @@ export async function sendRoomMessage(
   if (input.dispatchAgentIds && input.dispatchAgentIds.length > 0) {
     payload.dispatch_agent_ids = input.dispatchAgentIds;
   }
-  return requestJSON<SendRoomMessageResult>(
+  return requestJSON<RoomSendMessageResult>(
     `/api/rooms/${encodeURIComponent(roomId)}/messages`,
     {
       method: "POST",
