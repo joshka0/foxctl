@@ -35,6 +35,71 @@ type SkillResponse struct {
 	JSONSchema  map[string]any    `json:"json_schema,omitempty"`
 }
 
+type SkillsListResponse struct {
+	Skills []SkillResponse `json:"skills"`
+	Count  int             `json:"count"`
+}
+
+type SkillRunRequest struct {
+	Skill string         `json:"skill"`
+	Input map[string]any `json:"input"`
+}
+
+type SkillRunResponse struct {
+	OK         bool            `json:"ok"`
+	Skill      string          `json:"skill"`
+	Output     json.RawMessage `json:"output"`
+	Error      string          `json:"error"`
+	DurationMS int64           `json:"duration_ms"`
+}
+
+type SkillManifestResponse struct {
+	Name         string             `json:"name"`
+	Version      string             `json:"version"`
+	Description  string             `json:"description"`
+	Tags         []string           `json:"tags"`
+	Command      string             `json:"command"`
+	Parameters   []skill.Parameter  `json:"parameters"`
+	Returns      []skill.Parameter  `json:"returns"`
+	Help         *skill.Help        `json:"help"`
+	Capabilities skill.Capabilities `json:"capabilities"`
+	JSONSchema   map[string]any     `json:"json_schema"`
+}
+
+type MCPStatusResponse struct {
+	Daemon   MCPDaemonStatus    `json:"daemon"`
+	Backends []MCPBackendStatus `json:"backends"`
+}
+
+type MCPDaemonStatus struct {
+	Running   bool           `json:"running"`
+	PID       int            `json:"pid"`
+	Addr      string         `json:"addr"`
+	PIDFile   string         `json:"pid_file"`
+	HealthURL string         `json:"health_url"`
+	Health    map[string]any `json:"health"`
+	Error     string         `json:"error"`
+}
+
+type MCPBackendStatus struct {
+	Name       string `json:"name"`
+	Configured bool   `json:"configured"`
+}
+
+type MCPToolsResponse struct {
+	Tools  []MCPToolInventory `json:"tools"`
+	Count  int                `json:"count"`
+	Source string             `json:"source"`
+}
+
+type MCPToolInventory struct {
+	Name        string         `json:"name"`
+	DisplayName string         `json:"display_name"`
+	Description string         `json:"description"`
+	Source      string         `json:"source"`
+	Schema      map[string]any `json:"schema"`
+}
+
 // SkillsListHandler returns a handler for GET /api/skills.
 // Lists all registered skills with their schemas.
 func SkillsListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
@@ -69,9 +134,9 @@ func SkillsListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 			skills = append(skills, resp)
 		}
 
-		writeJSON(w, http.StatusOK, map[string]any{
-			"skills": skills,
-			"count":  len(skills),
+		writeJSON(w, http.StatusOK, SkillsListResponse{
+			Skills: skills,
+			Count:  len(skills),
 		})
 	}
 }
@@ -96,10 +161,7 @@ func SkillsRunHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 			return
 		}
 
-		var req struct {
-			Skill string         `json:"skill"`
-			Input map[string]any `json:"input"`
-		}
+		var req SkillRunRequest
 		if err := readJSON(w, r, &req); err != nil {
 			httpError(w, http.StatusBadRequest, "invalid json")
 			return
@@ -138,12 +200,12 @@ func SkillsRunHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 				Error(nil, duration))
 		}
 
-		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":          result.Success,
-			"skill":       req.Skill,
-			"output":      result.Output,
-			"error":       result.Error,
-			"duration_ms": result.Duration.Milliseconds(),
+		writeJSON(w, http.StatusOK, SkillRunResponse{
+			OK:         result.Success,
+			Skill:      req.Skill,
+			Output:     result.Output,
+			Error:      result.Error,
+			DurationMS: result.Duration.Milliseconds(),
 		})
 	}
 }
@@ -255,17 +317,17 @@ func SkillDetailHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc 
 		for _, m := range manifests {
 			if m.Metadata.Name == skillName {
 				// Return full manifest as JSON
-				resp := map[string]any{
-					"name":         m.Metadata.Name,
-					"version":      m.Metadata.Version,
-					"description":  m.Metadata.Description,
-					"tags":         m.Metadata.Tags,
-					"command":      m.Signature.Command,
-					"parameters":   m.Signature.Parameters,
-					"returns":      m.Signature.Returns,
-					"help":         m.Signature.Help,
-					"capabilities": m.Capabilities,
-					"json_schema":  buildJSONSchema(m),
+				resp := SkillManifestResponse{
+					Name:         m.Metadata.Name,
+					Version:      m.Metadata.Version,
+					Description:  m.Metadata.Description,
+					Tags:         m.Metadata.Tags,
+					Command:      m.Signature.Command,
+					Parameters:   m.Signature.Parameters,
+					Returns:      m.Signature.Returns,
+					Help:         m.Signature.Help,
+					Capabilities: m.Capabilities,
+					JSONSchema:   buildJSONSchema(m),
 				}
 				writeJSON(w, http.StatusOK, resp)
 				return
@@ -310,20 +372,20 @@ func MCPStatusHandler(cfg config.Config, _ zerolog.Logger) http.HandlerFunc {
 			}
 		}
 
-		writeJSON(w, http.StatusOK, map[string]any{
-			"daemon": map[string]any{
-				"running":    running,
-				"pid":        pid,
-				"addr":       addr,
-				"pid_file":   pidFile,
-				"health_url": healthURL,
-				"health":     health,
-				"error":      healthErr,
+		writeJSON(w, http.StatusOK, MCPStatusResponse{
+			Daemon: MCPDaemonStatus{
+				Running:   running,
+				PID:       pid,
+				Addr:      addr,
+				PIDFile:   pidFile,
+				HealthURL: healthURL,
+				Health:    health,
+				Error:     healthErr,
 			},
-			"backends": []map[string]any{
-				{"name": "tavily", "configured": strings.TrimSpace(cfg.Search.TavilyAPIKey) != ""},
-				{"name": "exa", "configured": strings.TrimSpace(cfg.Search.ExaAPIKey) != ""},
-				{"name": "perplexity", "configured": strings.TrimSpace(cfg.Search.PerplexityAPIKey) != ""},
+			Backends: []MCPBackendStatus{
+				{Name: "tavily", Configured: strings.TrimSpace(cfg.Search.TavilyAPIKey) != ""},
+				{Name: "exa", Configured: strings.TrimSpace(cfg.Search.ExaAPIKey) != ""},
+				{Name: "perplexity", Configured: strings.TrimSpace(cfg.Search.PerplexityAPIKey) != ""},
 			},
 		})
 	}
@@ -344,21 +406,21 @@ func MCPToolsHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 			return
 		}
 
-		tools := make([]map[string]any, 0, len(manifests))
+		tools := make([]MCPToolInventory, 0, len(manifests))
 		for _, m := range manifests {
-			tools = append(tools, map[string]any{
-				"name":         m.Signature.Command,
-				"display_name": m.Metadata.Name,
-				"description":  m.Metadata.Description,
-				"source":       "skill",
-				"schema":       buildJSONSchema(m),
+			tools = append(tools, MCPToolInventory{
+				Name:        m.Signature.Command,
+				DisplayName: m.Metadata.Name,
+				Description: m.Metadata.Description,
+				Source:      "skill",
+				Schema:      buildJSONSchema(m),
 			})
 		}
 
-		writeJSON(w, http.StatusOK, map[string]any{
-			"tools":  tools,
-			"count":  len(tools),
-			"source": "skills",
+		writeJSON(w, http.StatusOK, MCPToolsResponse{
+			Tools:  tools,
+			Count:  len(tools),
+			Source: "skills",
 		})
 	}
 }
