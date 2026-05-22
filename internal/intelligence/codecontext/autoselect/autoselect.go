@@ -60,7 +60,12 @@ func Select(ctx context.Context, cfg sysconfig.Config, opts Options) (*Result, e
 		return nil, fmt.Errorf("max files must be > 0")
 	}
 
-	indexStore, cleanup, err := searchindex.OpenEphemeral(ctx, cfg.Storage.Root)
+	indexStore, cleanup, err := searchindex.OpenEphemeralWithTurboVec(ctx, cfg.Storage.Root, workspaceID, cfg.Database.Vector.Dimensions, searchindex.TurboVecConfig{
+		Enabled:    cfg.Turbovec.Enabled,
+		SocketPath: cfg.Turbovec.SocketPath,
+		DataDir:    cfg.Storage.Root,
+		BitWidth:   cfg.Turbovec.BitWidth,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("open ephemeral search index: %w", err)
 	}

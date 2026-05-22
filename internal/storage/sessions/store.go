@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/joshka0/foxctl/internal/intelligence/turbovec"
 	"github.com/joshka0/foxctl/internal/platform/config"
 	errs "github.com/joshka0/foxctl/internal/platform/errors"
 	"github.com/joshka0/foxctl/internal/platform/timeutil"
@@ -86,6 +88,10 @@ type Store struct {
 	db    *sql.DB
 	path  string
 	close func() error
+
+	// searcher is lazily initialized on first vector search.
+	searcher     vector.VectorSearcher
+	searcherOnce sync.Once
 }
 
 // Connection pool defaults
@@ -517,6 +523,15 @@ func (s *Store) SetEmbedding(ctx context.Context, id string, embedding []byte, m
 	return nil
 }
 
+// getSearcher lazily initializes the vector searcher on first call.
+func (s *Store) getSearcher(dim int) vector.VectorSearcher {
+	s.searcherOnce.Do(func() {
+		socketPath := turbovec.DefaultSocketPath()
+		s.searcher = vector.NewSearcher("sessions", socketPath, dim)
+	})
+	return s.searcher
+}
+
 // SearchSimilar finds sessions similar to the given embedding using cosine similarity.
 func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedding []float32, limit int) ([]storage.SimilarSession, error) {
 	if limit <= 0 {
@@ -582,7 +597,12 @@ func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedd
 		errs.Ignore(rows.Close(), "close sessions search similar rows")
 	}()
 
-	var results []storage.SimilarSession
+	// Scan sessions and collect candidates with their embeddings.
+	type sessionCandidate struct {
+		session   storage.Session
+		embedding []float32
+	}
+	var candidates []sessionCandidate
 
 	for rows.Next() {
 		session, err := scanSession(rows)
@@ -599,27 +619,52 @@ func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedd
 			continue
 		}
 
-		// Compute cosine similarity
-		similarity := vector.Cosine(queryEmbedding, sessionEmb)
-
-		results = append(results, storage.SimilarSession{
-			Session:    session,
-			Similarity: similarity,
-		})
+		candidates = append(candidates, sessionCandidate{session: session, embedding: sessionEmb})
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("sessions: rows error: %w", err)
 	}
 
-	// Sort by similarity descending
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Similarity > results[j].Similarity
-	})
+	// Build candidate list for the vector searcher.
+	idEmbeds := make([]vector.IDEmbedding, len(candidates))
+	for i, c := range candidates {
+		idEmbeds[i] = vector.IDEmbedding{ID: c.session.ID, Embedding: c.embedding}
+	}
 
-	// Limit results
-	if len(results) > limit {
-		results = results[:limit]
+	// Use the vector searcher for cosine similarity ranking.
+	searcher := s.getSearcher(len(queryEmbedding))
+	scored, err := searcher.Search(ctx, queryEmbedding, idEmbeds, limit)
+	if err != nil {
+		// Fallback to inline cosine if searcher fails.
+		scored = nil
+		for _, c := range candidates {
+			similarity := vector.Cosine(queryEmbedding, c.embedding)
+			scored = append(scored, vector.ScoredID{ID: c.session.ID, Score: similarity})
+		}
+		sort.Slice(scored, func(i, j int) bool {
+			return scored[i].Score > scored[j].Score
+		})
+		if len(scored) > limit {
+			scored = scored[:limit]
+		}
+	}
+
+	// Build lookup map for sessions by ID.
+	sessionMap := make(map[string]storage.Session, len(candidates))
+	for _, c := range candidates {
+		sessionMap[c.session.ID] = c.session
+	}
+
+	// Map scored results back to SimilarSession.
+	results := make([]storage.SimilarSession, 0, len(scored))
+	for _, s := range scored {
+		if session, ok := sessionMap[s.ID]; ok {
+			results = append(results, storage.SimilarSession{
+				Session:    session,
+				Similarity: s.Score,
+			})
+		}
 	}
 
 	return results, nil
@@ -1529,8 +1574,12 @@ JOIN sessions s ON s.id = sc.session_id`)
 		return nil, err
 	}
 
-	// Calculate similarities and sort
-	var scored []ScoredChunk
+	// Build candidate list for the vector searcher.
+	type chunkCandidate struct {
+		chunk     storage.SessionChunk
+		embedding []float32
+	}
+	var validChunks []chunkCandidate
 	for _, chunk := range chunks {
 		if len(chunk.Embedding) == 0 {
 			continue
@@ -1542,16 +1591,44 @@ JOIN sessions s ON s.id = sc.session_id`)
 		if len(chunkEmb) != len(embedding) {
 			continue
 		}
-		sim := vector.Cosine(embedding, chunkEmb)
-		scored = append(scored, ScoredChunk{Chunk: chunk, Similarity: sim})
+		validChunks = append(validChunks, chunkCandidate{chunk: chunk, embedding: chunkEmb})
 	}
 
-	sort.Slice(scored, func(i, j int) bool {
-		return scored[i].Similarity > scored[j].Similarity
-	})
+	idEmbeds := make([]vector.IDEmbedding, len(validChunks))
+	for i, c := range validChunks {
+		idEmbeds[i] = vector.IDEmbedding{ID: c.chunk.ID, Embedding: c.embedding}
+	}
 
-	if len(scored) > limit {
-		scored = scored[:limit]
+	// Use the vector searcher for cosine similarity ranking.
+	searcher := s.getSearcher(len(embedding))
+	scoredIDs, searchErr := searcher.Search(ctx, embedding, idEmbeds, limit)
+	if searchErr != nil {
+		// Fallback to inline cosine if searcher fails.
+		scoredIDs = nil
+		for _, c := range validChunks {
+			sim := vector.Cosine(embedding, c.embedding)
+			scoredIDs = append(scoredIDs, vector.ScoredID{ID: c.chunk.ID, Score: sim})
+		}
+		sort.Slice(scoredIDs, func(i, j int) bool {
+			return scoredIDs[i].Score > scoredIDs[j].Score
+		})
+		if len(scoredIDs) > limit {
+			scoredIDs = scoredIDs[:limit]
+		}
+	}
+
+	// Build lookup map for chunks by ID.
+	chunkMap := make(map[string]storage.SessionChunk, len(validChunks))
+	for _, c := range validChunks {
+		chunkMap[c.chunk.ID] = c.chunk
+	}
+
+	// Map scored results back to ScoredChunk.
+	scored := make([]ScoredChunk, 0, len(scoredIDs))
+	for _, s := range scoredIDs {
+		if chunk, ok := chunkMap[s.ID]; ok {
+			scored = append(scored, ScoredChunk{Chunk: chunk, Similarity: s.Score})
+		}
 	}
 
 	return scored, nil

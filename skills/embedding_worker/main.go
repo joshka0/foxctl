@@ -18,6 +18,7 @@ import (
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedding"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedqueue"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+	"github.com/joshka0/foxctl/internal/intelligence/turbovec"
 	"github.com/joshka0/foxctl/internal/storage"
 	"github.com/joshka0/foxctl/internal/storage/annotations"
 	"github.com/joshka0/foxctl/internal/storage/sessions"
@@ -87,6 +88,10 @@ type Input struct {
 	// ProcessAnnotationQueue processes jobs from the annotation embedding queue
 	// (populated by session/annotate with queue_embedding=true).
 	ProcessAnnotationQueue bool `json:"process_annotation_queue,omitempty"`
+
+	// TurbovecEnabled pushes embeddings to the turbovec sidecar after store.Complete.
+	// Errors are logged but do not fail the job — turbovec is best-effort.
+	TurbovecEnabled bool `json:"turbovec_enabled,omitempty"`
 }
 
 // Output is the skill output for embedding/worker operations.
@@ -246,6 +251,36 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	defer func() {
 		if memoryStore != nil {
 			_ = memoryStore.Close()
+		}
+	}()
+
+	// Lazy turbovec index — opened once when first needed, reused for all
+	// subsequent symbol jobs.  The VectorIndex manages its own connection and
+	// ID map.  We use a package-level nil check under a mutex so that the
+	// client is only created once regardless of parallelism.
+	var turbovecIndex *turbovec.VectorIndex
+	var turbovecMu sync.Mutex
+	openTurbovecIndex := func(workspaceID string, dim int) (*turbovec.VectorIndex, error) {
+		turbovecMu.Lock()
+		defer turbovecMu.Unlock()
+		if turbovecIndex != nil {
+			return turbovecIndex, nil
+		}
+		socketPath := os.Getenv("FOXCTL_TURBOVEC_SOCKET")
+		index := turbovec.NewVectorIndex(workspaceID, dim, turbovec.IndexConfig{
+			SocketPath: socketPath,
+		})
+		turbovecIndex = index
+		log.Info().
+			Str("workspace_id", workspaceID).
+			Int("dim", dim).
+			Str("socket_path", socketPath).
+			Msg("turbovec index initialized (lazy)")
+		return turbovecIndex, nil
+	}
+	defer func() {
+		if turbovecIndex != nil {
+			_ = turbovecIndex.Close()
 		}
 	}()
 
@@ -442,6 +477,34 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 					} else if err := ms.UpdateEmbedding(ctx, entryName, workspaceID, embed); err != nil {
 						log.Warn().Err(err).Str("job_id", job.ID).Str("symbol_id", job.SymbolID).Msg("failed to update symbol embedding")
 						result.SyncTargets = append(result.SyncTargets, embeddingSyncTarget{WorkspaceID: workspaceID, SymbolID: job.SymbolID})
+					}
+					memoryJobMu.Unlock()
+				}
+			}
+			// Turbovec live update: push the embedding to the turbovec sidecar
+			// so that vector search is immediately available. Best-effort;
+			// errors are logged but never fail the job.
+			if in.TurbovecEnabled && len(embed) > 0 {
+				tvWorkspaceID := strings.TrimSpace(job.WorkspaceID)
+				tvSymbolID := strings.TrimSpace(job.SymbolID)
+				if tvWorkspaceID == "" || tvSymbolID == "" {
+					log.Warn().
+						Str("job_id", job.ID).
+						Str("symbol_id", job.SymbolID).
+						Msg("skipping turbovec sync due to missing workspace/symbol identity")
+				} else {
+					memoryJobMu.Lock()
+					tvIndex, tvErr := openTurbovecIndex(tvWorkspaceID, len(embed))
+					if tvErr != nil {
+						log.Warn().Err(tvErr).Str("job_id", job.ID).Str("symbol_id", tvSymbolID).
+							Msg("turbovec index init failed")
+					} else if tvErr := tvIndex.AddVector(tvSymbolID, embed); tvErr != nil {
+						log.Warn().Err(tvErr).Str("job_id", job.ID).Str("symbol_id", tvSymbolID).
+							Msg("turbovec AddVector failed (best-effort, not failing job)")
+					} else {
+						log.Info().Str("job_id", job.ID).Str("symbol_id", tvSymbolID).
+							Int("dim", len(embed)).
+							Msg("turbovec: vector pushed")
 					}
 					memoryJobMu.Unlock()
 				}
