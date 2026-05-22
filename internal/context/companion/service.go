@@ -31,7 +31,8 @@ const (
 	// EngineTypeLLMChat uses LLMChatEngine for OpenAI-compatible execution.
 	EngineTypeLLMChat EngineType = "llmchat"
 
-	// EngineTypeEino uses EinoEngineAdapter for graph-based tool execution.
+	// EngineTypeEino uses the experimental EinoEngineAdapter for graph-based tool execution.
+	// It is accepted only when FOXCTL_ENGINE_BACKEND=eino is set.
 	EngineTypeEino EngineType = "eino"
 )
 
@@ -103,8 +104,10 @@ type ServiceConfig struct {
 	// - story: Two-stage gather + dialogue pipeline with structured outputs
 	ExecMode agent.ExecutionMode
 
-	// EngineType selects the execution engine (llmchat only).
+	// EngineType selects the execution engine.
+	// Eino is experimental and requires FOXCTL_ENGINE_BACKEND=eino.
 	// - llmchat: Uses LLMChatEngine for OpenAI-compatible streaming
+	// - eino: Uses the experimental Eino adapter without streaming support
 	EngineType EngineType
 
 	// MemoryDB is the database for conversation memory (optional).
@@ -337,7 +340,8 @@ type ChatRequest struct {
 	// Use "story" for gather + dialogue with structured outputs.
 	ExecMode agent.ExecutionMode `json:"exec_mode,omitempty"`
 
-	// EngineType overrides the service default engine type (llmchat only).
+	// EngineType overrides the service default engine type.
+	// Eino is experimental and requires FOXCTL_ENGINE_BACKEND=eino.
 	EngineType EngineType `json:"engine_type,omitempty"`
 
 	// StoryGatherModel overrides ServiceConfig.StoryGatherModel for story mode (optional).
@@ -360,6 +364,40 @@ type ChatRequest struct {
 
 	// ResponseKeys is an optional ordered list of expected top-level JSON keys.
 	ResponseKeys []string `json:"response_keys,omitempty"`
+}
+
+func (s *Service) resolveCompanionEngineType(req ChatRequest) (EngineType, error) {
+	return resolveCompanionEngineType(s.config.EngineType, req.EngineType, einoadapter.IsEinoEnabled())
+}
+
+func resolveCompanionEngineType(configured, requested EngineType, einoEnabled bool) (EngineType, error) {
+	engineType := configured
+	if requested != "" {
+		engineType = requested
+	}
+	if engineType == "" {
+		if einoEnabled {
+			return EngineTypeEino, nil
+		}
+		return EngineTypeLLMChat, nil
+	}
+
+	switch engineType {
+	case EngineTypeLLMChat:
+		return EngineTypeLLMChat, nil
+	case EngineTypeEino:
+		if !einoEnabled {
+			return "", fmt.Errorf("engine_type %q is experimental and requires %s=eino", EngineTypeEino, einoadapter.EnvEngineBackend)
+		}
+		return EngineTypeEino, nil
+	default:
+		return "", fmt.Errorf("unsupported engine_type %q (only %q is generally supported; %q requires %s=eino)",
+			engineType, EngineTypeLLMChat, EngineTypeEino, einoadapter.EnvEngineBackend)
+	}
+}
+
+func companionEngineSupportsStreaming(engineType EngineType) bool {
+	return engineType == EngineTypeLLMChat
 }
 
 type memoryPromptMetadata struct {
@@ -614,7 +652,7 @@ type TokenUsage struct {
 //
 //	Purpose: Execute a companion chat turn and return structured response
 //	Flow: validate request → resolve exec mode/engine → build prompt → run engine → store turns → generate presence
-//	Related: chatWithLLMChat, chatWithStoryLoop, storeConversationTurns
+//	Related: chatWithCompanionEngine, chatWithStoryLoop, storeConversationTurns
 //	Keywords: companion_chat, conversation_id, exec_mode, engine_type, presence, tools_used
 //
 // [[protocol:companion-chat-turn]]
@@ -644,15 +682,12 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 		execMode = agent.ModeReactive
 	}
 
-	engineType := s.config.EngineType
-	if req.EngineType != "" {
-		engineType = req.EngineType
-	}
-	if engineType == "" {
-		engineType = EngineTypeLLMChat
-	}
-	if engineType != EngineTypeLLMChat && engineType != EngineTypeEino {
-		return nil, fmt.Errorf("unsupported engine_type %q (only %q and %q are supported)", engineType, EngineTypeLLMChat, EngineTypeEino)
+	engineType := EngineTypeLLMChat
+	if execMode != agent.ModeStory {
+		engineType, err = s.resolveCompanionEngineType(req)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	s.logger.Debug().
@@ -700,7 +735,7 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 	if execMode == agent.ModeStory {
 		resp, err = s.chatWithStoryLoop(ctx, req, frame, rlmExecutor, systemPrompt, promptMeta, start)
 	} else {
-		resp, err = s.chatWithLLMChat(ctx, req, frame, rlmExecutor, systemPrompt, promptMeta, start, nil)
+		resp, err = s.chatWithCompanionEngine(ctx, req, frame, rlmExecutor, systemPrompt, promptMeta, start, engineType, nil)
 	}
 
 	if err != nil {
@@ -745,18 +780,15 @@ func (s *Service) ChatStreaming(ctx context.Context, req ChatRequest, callbacks 
 		execMode = agent.ModeReactive
 	}
 
-	engineType := s.config.EngineType
-	if req.EngineType != "" {
-		engineType = req.EngineType
-	}
-	if engineType == "" {
-		engineType = EngineTypeLLMChat
-	}
-	if engineType != EngineTypeLLMChat && engineType != EngineTypeEino {
-		return nil, fmt.Errorf("unsupported engine_type %q (only %q and %q are supported)", engineType, EngineTypeLLMChat, EngineTypeEino)
-	}
 	if execMode == agent.ModeStory {
 		return s.Chat(ctx, req)
+	}
+	engineType, err := s.resolveCompanionEngineType(req)
+	if err != nil {
+		return nil, err
+	}
+	if !companionEngineSupportsStreaming(engineType) {
+		return nil, fmt.Errorf("engine_type %q does not support companion streaming yet; use non-streaming chat", engineType)
 	}
 
 	rlmExecutor := engine.NewRLMToolExecutor(s.contextStore, req.ConversationID)
@@ -784,7 +816,7 @@ func (s *Service) ChatStreaming(ctx context.Context, req ChatRequest, callbacks 
 		systemPrompt = s.addAutonomousInstructions(systemPrompt, execMode)
 	}
 
-	resp, err := s.chatWithLLMChat(ctx, req, frame, rlmExecutor, systemPrompt, promptMeta, start, &callbacks)
+	resp, err := s.chatWithCompanionEngine(ctx, req, frame, rlmExecutor, systemPrompt, promptMeta, start, engineType, &callbacks)
 	if err != nil {
 		return nil, err
 	}
@@ -799,21 +831,21 @@ func (s *Service) ChatStreaming(ctx context.Context, req ChatRequest, callbacks 
 	return resp, nil
 }
 
-// chatWithLLMChat executes using the LLMChatEngine.
+// chatWithCompanionEngine executes using the resolved companion engine.
 // The systemPrompt parameter is the full system prompt for this turn.
 //
 // Index:
 //
-//	Purpose: Execute the LLMChatEngine path for a companion chat turn
+//	Purpose: Execute the resolved engine path for a companion chat turn
 //	Flow: build engine config → set hook/tool context → run engine → assemble response/tool details
 //	Related: engine.NewLLMChatEngine, engine.LLMChatEngine.Run, buildTooling
-//	Keywords: llmchat, provider, model, tool_calls, conversation_id, tools_used
+//	Keywords: companion_engine, llmchat, eino, provider, model, tool_calls, conversation_id, tools_used
 //
-// [[protocol:llmchat-engine-path]]
+// [[protocol:companion-engine-path]]
 // [[domain:companion-engine-execution]]
-func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, frame conversationContextFrame, rlmExecutor *engine.RLMToolExecutor, systemPrompt string, promptMeta memoryPromptMetadata, start time.Time, stream *ChatStreamCallbacks) (*ChatResponse, error) {
+func (s *Service) chatWithCompanionEngine(ctx context.Context, req ChatRequest, frame conversationContextFrame, rlmExecutor *engine.RLMToolExecutor, systemPrompt string, promptMeta memoryPromptMetadata, start time.Time, engineType EngineType, stream *ChatStreamCallbacks) (*ChatResponse, error) {
 	systemPrompt, controllerPlan, controllerTokens, subcallResult := s.prepareCompanionSystemPrompt(ctx, req, frame, systemPrompt)
-	eng, input, toolExecutor, toolDefs, usesRLM, engineCfg, err := s.buildCompanionExecutionEngine(ctx, req, frame, rlmExecutor, systemPrompt, promptMeta, controllerPlan)
+	eng, input, toolExecutor, toolDefs, usesRLM, engineCfg, err := s.buildCompanionExecutionEngine(ctx, req, frame, rlmExecutor, systemPrompt, promptMeta, controllerPlan, engineType)
 	if err != nil {
 		return nil, err
 	}
@@ -944,7 +976,7 @@ func (s *Service) maybeRunCompanionSubcall(ctx context.Context, req ChatRequest,
 	return subcallResult
 }
 
-func (s *Service) buildCompanionExecutionEngine(ctx context.Context, req ChatRequest, frame conversationContextFrame, rlmExecutor *engine.RLMToolExecutor, systemPrompt string, promptMeta memoryPromptMetadata, controllerPlan continuityControllerPlan) (engine.AgentEngine, engine.EngineInput, engine.ToolExecutor, []engine.ToolDef, bool, engine.LLMChatConfig, error) {
+func (s *Service) buildCompanionExecutionEngine(ctx context.Context, req ChatRequest, frame conversationContextFrame, rlmExecutor *engine.RLMToolExecutor, systemPrompt string, promptMeta memoryPromptMetadata, controllerPlan continuityControllerPlan, engineType EngineType) (engine.AgentEngine, engine.EngineInput, engine.ToolExecutor, []engine.ToolDef, bool, engine.LLMChatConfig, error) {
 	engineCfg := s.newCompanionLLMChatConfig(req, frame, promptMeta)
 	toolExecutor, toolDefs, usesRLM := s.buildTooling(rlmExecutor)
 	if controllerPlan.Source == "visible_history" || controllerPlan.Source == "subcall" {
@@ -962,7 +994,7 @@ func (s *Service) buildCompanionExecutionEngine(ctx context.Context, req ChatReq
 	s.configureCompanionLLMEngine(llmEngine, req, toolExecutor, toolDefs, rlmExecutor, usesRLM)
 
 	eng := engine.AgentEngine(llmEngine)
-	if einoadapter.IsEinoEnabled() {
+	if engineType == EngineTypeEino {
 		einoEngine, err := einoadapter.ProvisionFromLLMConfig(llmEngine.Config(), toolExecutor, toolDefs)
 		if err != nil {
 			return nil, engine.EngineInput{}, nil, nil, false, engine.LLMChatConfig{}, fmt.Errorf("eino companion provisioning failed: %w", err)

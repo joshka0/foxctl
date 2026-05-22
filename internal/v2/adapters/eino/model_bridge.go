@@ -15,7 +15,7 @@ import (
 
 // oaiModelBridge implements model.BaseChatModel against an OpenAI-compatible endpoint.
 // It is used only when FOXCTL_ENGINE_BACKEND=eino to provision the Eino ChatModelAgent.
-// Tool-call support is out of scope for the spike; only plain Generate is wired.
+// Tool-call support is out of scope for the experimental bridge; only plain Generate is wired.
 type oaiModelBridge struct {
 	apiKey  string
 	baseURL string
@@ -112,9 +112,9 @@ func (b *oaiModelBridge) Generate(ctx context.Context, input []*schema.Message, 
 	}, nil
 }
 
-// Stream is not implemented for the spike — callers should use Generate.
+// Stream is not implemented for the experimental bridge; callers should use Generate.
 func (b *oaiModelBridge) Stream(ctx context.Context, input []*schema.Message, _ ...model.Option) (*schema.StreamReader[*schema.Message], error) {
-	return nil, fmt.Errorf("oaiModelBridge: Stream not implemented in spike (use Generate)")
+	return nil, fmt.Errorf("oaiModelBridge: Stream not implemented in experimental bridge (use Generate)")
 }
 
 func schemaRoleToOAI(r schema.RoleType) (string, error) {

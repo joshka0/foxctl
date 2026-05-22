@@ -198,7 +198,7 @@ by cleanup value and implementation risk.
   - Target: either implement real job enqueueing plus file propagation, or remove
     the jobs mode until it exists.
 
-- [ ] Clarify Eino adapter support level.
+- [x] Clarify Eino adapter support level.
   - Target: either make it a supported adapter with explicit stream/tool
     behavior, or isolate it as experimental and stop presenting spike behavior
     as a normal backend.
