@@ -7,15 +7,12 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	jobstore "github.com/joshka0/foxctl/internal/storage/jobs"
 )
 
 // ProgressEvent represents a single progress update in NDJSON format.
-type ProgressEvent struct {
-	Timestamp time.Time      `json:"ts"`
-	Message   string         `json:"message,omitempty"`
-	Percent   float64        `json:"percent,omitempty"`
-	Meta      map[string]any `json:"meta,omitempty"`
-}
+type ProgressEvent = jobstore.ProgressEvent
 
 type progressWriter struct {
 	file   *os.File

@@ -13,6 +13,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/joshka0/foxctl/internal/platform/config"
+	runtimejobs "github.com/joshka0/foxctl/internal/runtime/jobs"
 	"github.com/joshka0/foxctl/internal/storage/cas"
 	"github.com/joshka0/foxctl/internal/storage/jobs"
 )
@@ -125,7 +126,7 @@ func TestWorkerCJobsCancelHandler(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	store, err := jobs.Open(ctx, jobsRoot)
+	store, err := runtimejobs.OpenSkillStore(ctx, jobsRoot)
 	if err != nil {
 		t.Fatalf("open jobs store: %v", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -15,12 +16,13 @@ import (
 	errs "github.com/joshka0/foxctl/internal/platform/errors"
 	"github.com/joshka0/foxctl/internal/platform/logging"
 	"github.com/joshka0/foxctl/internal/storage"
-	"github.com/joshka0/foxctl/internal/storage/jobs/executor"
 	"github.com/joshka0/foxctl/internal/storage/jobs/fsutil"
 	"github.com/joshka0/foxctl/internal/storage/jobs/persist"
 	"github.com/joshka0/foxctl/internal/storage/jobs/types"
 	"github.com/oklog/ulid/v2"
 )
+
+var errSkillExecutorNotConfigured = errors.New("jobs: skill executor not configured")
 
 // Store composes persistence and execution primitives for job management.
 type Store struct {
@@ -40,8 +42,7 @@ func Open(ctx context.Context, root string) (store *Store, err error) {
 		return nil, err
 	}
 	defer errs.CloseOnErr(p, &err)
-	exec := executor.New(root, p, executor.WithLogger(logger))
-	jobStore := New(root, p, exec)
+	jobStore := New(root, p, nil)
 	if recovered, recErr := jobStore.RecoverStaleJobs(ctx, types.DefaultMaxJobAge); recErr != nil {
 		logger.Warn().Err(recErr).Msg("jobs: stale recovery failed")
 	} else if recovered > 0 {
@@ -159,7 +160,11 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 
 // RunSkill executes a skill binary, recording its output as a job.
 func (s *Store) RunSkill(ctx context.Context, manifest skill.Manifest, artifactPath string, input []byte) (Job, []byte, error) {
-	job, result, err := s.executor.RunSkill(ctx, manifest, artifactPath, input)
+	exec, err := s.skillExecutor()
+	if err != nil {
+		return Job{}, nil, err
+	}
+	job, result, err := exec.RunSkill(ctx, manifest, artifactPath, input)
 	if err != nil {
 		return job, result, err
 	}
@@ -172,12 +177,20 @@ func (s *Store) RunSkill(ctx context.Context, manifest skill.Manifest, artifactP
 
 // PrepareSkillJob enqueues a job without executing the skill.
 func (s *Store) PrepareSkillJob(ctx context.Context, name string, input []byte) (Job, error) {
-	job, _, err := s.executor.FindOrPrepareSkillJob(ctx, name, input, false)
+	exec, err := s.skillExecutor()
+	if err != nil {
+		return Job{}, err
+	}
+	job, _, err := exec.FindOrPrepareSkillJob(ctx, name, input, false)
 	return job, err
 }
 
 // ExecutePreparedSkill runs a previously prepared job.
 func (s *Store) ExecutePreparedSkill(ctx context.Context, jobID string, manifestPath string, artifactPath string) ([]byte, error) {
+	exec, err := s.skillExecutor()
+	if err != nil {
+		return nil, err
+	}
 	inputPath := filepath.Join(fsutil.JobDir(s.root, jobID), "input.json")
 	data, err := os.ReadFile(inputPath)
 	if err != nil {
@@ -187,7 +200,7 @@ func (s *Store) ExecutePreparedSkill(ctx context.Context, jobID string, manifest
 	if err != nil {
 		return nil, fmt.Errorf("jobs: load manifest: %w", err)
 	}
-	return s.executor.ExecutePrepared(ctx, jobID, manifest, artifactPath, data)
+	return exec.ExecutePrepared(ctx, jobID, manifest, artifactPath, data)
 }
 
 // SetWorkspace records the workspace path for a job so runners can enforce policy.
@@ -201,7 +214,11 @@ func (s *Store) SetWorkspace(_ context.Context, jobID, workspacePath string) err
 
 // FindOrPrepareSkillJob atomically finds a duplicate job or creates a new one.
 func (s *Store) FindOrPrepareSkillJob(ctx context.Context, name string, input []byte, dedupe bool) (Job, bool, error) {
-	job, isDup, err := s.executor.FindOrPrepareSkillJob(ctx, name, input, dedupe)
+	exec, err := s.skillExecutor()
+	if err != nil {
+		return Job{}, false, err
+	}
+	job, isDup, err := exec.FindOrPrepareSkillJob(ctx, name, input, dedupe)
 	return job, isDup, err
 }
 
@@ -299,6 +316,13 @@ func writeResult(path string, env envelope.Envelope) error {
 
 func newJobID() string {
 	return ulid.Make().String()
+}
+
+func (s *Store) skillExecutor() (SkillExecutor, error) {
+	if s == nil || s.executor == nil {
+		return nil, errSkillExecutorNotConfigured
+	}
+	return s.executor, nil
 }
 
 type progressFollower struct {

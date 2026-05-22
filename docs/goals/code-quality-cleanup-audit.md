@@ -48,7 +48,7 @@ by cleanup value and implementation risk.
     package; keep SSE/runtime adapters in runtime/interface layers.
   - Tests: affected storage/intelligence/context packages plus web SSE tests.
 
-- [ ] Remove `internal/storage/jobs/executor` runtime ownership.
+- [x] Remove `internal/storage/jobs/executor` runtime ownership.
   - Problem: a storage package imports runtime execution, runtime
     observability, and constructs runtime executors.
   - Target: keep storage jobs as persistence/types only; move executor wiring to
