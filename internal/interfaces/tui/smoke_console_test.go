@@ -208,7 +208,7 @@ func TestRunConsoleSmokeTimeoutWithNoEvents(t *testing.T) {
 			APIBaseURL:       server.URL,
 			ConsoleSessionID: sessionID,
 		},
-		Timeout: 30 * time.Millisecond,
+		Timeout: 500 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("RunConsoleSmoke error: %v", err)

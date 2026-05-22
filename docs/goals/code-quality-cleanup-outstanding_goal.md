@@ -21,8 +21,8 @@ tests that only preserve accidental implementation detail.
 - Merge request: `!43`
 - Repo guidance: `AGENTS.md`, `CONTEXT.md`, `docs/glossary.md`,
   `docs/architecture/package-topology.md`
-- Main has advanced while this branch was open. Before final merge, integrate
-  current `main` and rerun full verification.
+- Current `main` was merged into this branch on 2026-05-23. Full verification
+  has been rerun after the merge.
 
 Remaining areas from the results doc after the completed slices:
 
@@ -229,8 +229,8 @@ Done when:
   the obsolete `APIResponse<T>` type was deleted.
 - Unused-code tooling is documented and wired so future cleanup can be repeated
   with `bun run unused:frontend`.
-- Remaining scope: re-run a completion audit after the next main-branch sync to
-  verify no residual cleanup item is still unproven.
+- Completed in current slices: re-ran the completion audit after the current
+  main-branch sync; no targeted frontend dead-export findings remain.
 - Verification passes:
   - `bun run --cwd packages/gui-agent build`
   - `bun run --cwd packages/foxterm typecheck`

@@ -209,6 +209,9 @@ func TestBootDaemon_CleansUpTempDir(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping daemon boot test in -short mode")
 	}
+	if testfixture.FoxctlBinary() == "" {
+		t.Skip("foxctl binary not available in this test environment")
+	}
 
 	var capturedRoot string
 
@@ -241,6 +244,9 @@ func TestBootDaemon_CleansUpTempDir(t *testing.T) {
 func TestBootDaemon_NoLeakedProcesses(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping daemon boot test in -short mode")
+	}
+	if testfixture.FoxctlBinary() == "" {
+		t.Skip("foxctl binary not available in this test environment")
 	}
 
 	var daemonPID int

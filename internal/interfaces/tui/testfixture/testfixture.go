@@ -124,6 +124,9 @@ func BootDaemon(t testing.TB, opts SeedOpts) *DaemonFixture {
 
 	// 1. Find the foxctl binary.
 	binPath := FoxctlBinary()
+	if strings.TrimSpace(binPath) == "" {
+		t.Skip("foxctl binary not available in this test environment")
+	}
 	if _, err := os.Stat(binPath); err != nil {
 		t.Fatalf("foxctl binary not found at %q: %v", binPath, err)
 	}

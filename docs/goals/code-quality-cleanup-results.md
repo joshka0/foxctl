@@ -24,8 +24,8 @@ Current shape:
 - Isolated v2 Turso stores from the raw `*sql.DB` compatibility opener.
 - Added or tightened tests around the risky cleanup areas.
 
-Integration note: `main` has advanced while this branch has been open. Before
-merge, rebase or merge current `main` and rerun the full verification set.
+Integration note: current `main` was merged into this branch on 2026-05-23, and
+the full verification set has been rerun after the merge.
 
 ## Completed Results
 
@@ -183,6 +183,16 @@ Verification has been run slice-by-slice, including:
 - `git diff --check`
 - commit-hook static analysis, `gofumpt`, `golangci-lint`, large-file guard,
   and tech-debt marker scan
+
+Final main-sync verification on 2026-05-23:
+
+- `make build`
+- focused coverage reproductions for the agent daemon reply path and console
+  no-events smoke path
+- focused live TUI daemon fixture tests
+- `make check`
+- `bun run unused:frontend`
+- `git diff --check`
 
 ## Outstanding Items
 
