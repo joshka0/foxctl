@@ -18,6 +18,8 @@ import (
 	"github.com/joshka0/foxctl/internal/context/contextplane"
 	"github.com/joshka0/foxctl/internal/domain/envelope"
 	"github.com/joshka0/foxctl/internal/platform/config"
+	ws "github.com/joshka0/foxctl/internal/platform/workspace"
+	contextstore "github.com/joshka0/foxctl/internal/storage/contextengine"
 )
 
 func TestContextNextProposalMergeHandlerAndRelease(t *testing.T) {
@@ -210,6 +212,113 @@ reviewed merge actions, and GUI control-plane integration.
 	if !ok || len(jobs) != 1 {
 		t.Fatalf("unexpected promotion_jobs=%v", data["promotion_jobs"])
 	}
+}
+
+func TestContextMemoryDraftsHandlerDefaultsToDryRunAndCanApply(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	vaultPath := t.TempDir()
+	storageRoot := t.TempDir()
+	cfg := config.Config{Storage: config.StorageSettings{Root: storageRoot}}
+	workspaceID := ws.CanonicalID(workspace)
+
+	ctxStore, err := contextstore.Open(ctx, storageRoot)
+	if err != nil {
+		t.Fatalf("open contextengine store: %v", err)
+	}
+	defer func() { _ = ctxStore.Close() }()
+
+	createdAt := time.Now().UTC()
+	if _, err := ctxStore.RecordRetrievalEpisode(ctx, contextengine.RetrievalEpisode{
+		ID:          "ep-api-memory-draft",
+		WorkspaceID: workspaceID,
+		Query:       "How should contextengine memories be promoted?",
+		Lane:        contextengine.LaneMemory,
+		HitCount:    2,
+		CreatedAt:   createdAt,
+	}); err != nil {
+		t.Fatalf("record episode: %v", err)
+	}
+	if _, err := ctxStore.RecordRetrievalFeedback(ctx, contextengine.RetrievalFeedback{
+		ID:             "fb-api-memory-draft",
+		WorkspaceID:    workspaceID,
+		EpisodeID:      "ep-api-memory-draft",
+		Kind:           contextengine.RetrievalFeedbackKindAnswerCorrected,
+		Query:          "How should contextengine memories be promoted?",
+		CorrectionStmt: "Autonomous memory drafts must stay in the Obsidian inbox until reviewed.",
+		UsedRefs: []contextengine.EvidenceRef{
+			{Type: contextengine.RefTypePath, Ref: "docs/architecture/context-architecture.md"},
+		},
+		CreatedAt: createdAt,
+	}); err != nil {
+		t.Fatalf("record feedback: %v", err)
+	}
+
+	handler := ContextMemoryDraftsHandler(cfg, zerolog.Nop())
+	dryReq := httptest.NewRequest(http.MethodPost, "/api/context/memory-drafts", strings.NewReader(`{
+		"workspace": "`+workspace+`",
+		"vault_path": "`+vaultPath+`",
+		"apply_drafts": true
+	}`))
+	dryRR := httptest.NewRecorder()
+	handler(dryRR, dryReq)
+	if dryRR.Code != http.StatusOK {
+		t.Fatalf("dry-run status=%d body=%s", dryRR.Code, dryRR.Body.String())
+	}
+	dryReport := decodeMemoryDraftReport(t, dryRR.Body.Bytes())
+	if dryReport["drafts_planned"] != float64(1) {
+		t.Fatalf("dry-run drafts_planned=%v", dryReport["drafts_planned"])
+	}
+	if dryReport["drafts_written"] != float64(0) {
+		t.Fatalf("dry-run should not write drafts, got %v", dryReport["drafts_written"])
+	}
+
+	applyReq := httptest.NewRequest(http.MethodPost, "/api/context/memory-drafts", strings.NewReader(`{
+		"workspace": "`+workspace+`",
+		"vault_path": "`+vaultPath+`",
+		"apply_drafts": true,
+		"dry_run": false
+	}`))
+	applyRR := httptest.NewRecorder()
+	handler(applyRR, applyReq)
+	if applyRR.Code != http.StatusOK {
+		t.Fatalf("apply status=%d body=%s", applyRR.Code, applyRR.Body.String())
+	}
+	applyReport := decodeMemoryDraftReport(t, applyRR.Body.Bytes())
+	if applyReport["drafts_written"] != float64(1) {
+		t.Fatalf("apply drafts_written=%v", applyReport["drafts_written"])
+	}
+	if applyReport["proposals_recorded"] != float64(1) {
+		t.Fatalf("apply proposals_recorded=%v", applyReport["proposals_recorded"])
+	}
+	paths, ok := applyReport["draft_paths"].([]any)
+	if !ok || len(paths) != 1 {
+		t.Fatalf("unexpected draft_paths=%v", applyReport["draft_paths"])
+	}
+	draftPath, ok := paths[0].(string)
+	if !ok || draftPath == "" {
+		t.Fatalf("unexpected draft_path=%v", paths[0])
+	}
+	if _, err := os.Stat(filepath.Join(vaultPath, filepath.FromSlash(draftPath))); err != nil {
+		t.Fatalf("expected draft file %q: %v", draftPath, err)
+	}
+}
+
+func decodeMemoryDraftReport(t *testing.T, body []byte) map[string]any {
+	t.Helper()
+	var env envelope.Envelope
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	data, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected data=%T", env.Data)
+	}
+	report, ok := data["report"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing report=%v", data["report"])
+	}
+	return report
 }
 
 func TestContextControlProposalsListFiltersDerivedStatus(t *testing.T) {

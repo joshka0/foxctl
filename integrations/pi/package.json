@@ -1,0 +1,18 @@
+{
+  "name": "@foxctl/pi-extension",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@earendil-works/pi-ai": "0.75.3",
+    "@earendil-works/pi-coding-agent": "0.75.3",
+    "@earendil-works/pi-tui": "0.75.3",
+    "typebox": "1.1.38"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  },
+  "scripts": {
+    "check": "tsc --noEmit --skipLibCheck --module NodeNext --moduleResolution NodeNext --target ES2022 foxctl.ts memory-blur-agent.ts",
+    "memory-blur": "bun run ./memory-blur-agent.ts"
+  }
+}

@@ -638,7 +638,7 @@ func empty(v any) bool {
 		return rv.Uint() == 0
 	case reflect.Float32, reflect.Float64:
 		return rv.Float() == 0
-	case reflect.Ptr, reflect.Interface:
+	case reflect.Pointer, reflect.Interface:
 		return rv.IsNil()
 	default:
 		return false
@@ -709,7 +709,7 @@ func getField(v any, path string) any {
 		rv := reflect.ValueOf(current)
 
 		// Handle pointer
-		if rv.Kind() == reflect.Ptr {
+		if rv.Kind() == reflect.Pointer {
 			if rv.IsNil() {
 				return nil
 			}

@@ -55,6 +55,16 @@ type RetrievalEpisode struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// RetrievalEpisodeFilter scopes retrieval episode listing.
+type RetrievalEpisodeFilter struct {
+	// WorkspaceID limits results to one workspace.
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	// Since returns rows created at or after this timestamp.
+	Since time.Time `json:"since,omitempty"`
+	// Limit caps returned rows. A zero limit means no explicit cap.
+	Limit int `json:"limit,omitempty"`
+}
+
 // Validate checks that the episode has required fields.
 func (e RetrievalEpisode) Validate() error {
 	if e.ID == "" {
@@ -97,6 +107,20 @@ type RetrievalFeedback struct {
 	CorrectionStmt string `json:"correction_stmt,omitempty"`
 	// CreatedAt is when the feedback was created.
 	CreatedAt time.Time `json:"created_at"`
+}
+
+// RetrievalFeedbackFilter scopes retrieval feedback listing.
+type RetrievalFeedbackFilter struct {
+	// WorkspaceID limits results to one workspace.
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	// EpisodeID limits results to one retrieval episode.
+	EpisodeID string `json:"episode_id,omitempty"`
+	// Kinds limits results to selected feedback kinds.
+	Kinds []RetrievalFeedbackKind `json:"kinds,omitempty"`
+	// Since returns rows created at or after this timestamp.
+	Since time.Time `json:"since,omitempty"`
+	// Limit caps returned rows. A zero limit means no explicit cap.
+	Limit int `json:"limit,omitempty"`
 }
 
 // Validate checks that the feedback has required fields.

@@ -13,6 +13,7 @@ import (
 	"github.com/joshka0/foxctl/internal/platform/timeutil"
 	ws "github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/storage/dbdriver"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
 	"github.com/joshka0/foxctl/internal/storage/sqliteutil"
 	"github.com/joshka0/foxctl/internal/storage/sqlutil"
 )
@@ -671,6 +672,34 @@ func (s *TursoStore) UpdateEmbedding(ctx context.Context, name, workspace string
 		return fmt.Errorf("memory: update embedding: %w", err)
 	}
 	return nil
+}
+
+// GetEmbedding retrieves the embedding vector for a named memory entry.
+// Returns nil when the entry exists but has no stored embedding.
+func (s *TursoStore) GetEmbedding(ctx context.Context, name, workspace string) ([]float32, error) {
+	workspace = ws.CanonicalID(workspace)
+	query := fmt.Sprintf(`
+		SELECT %s
+		FROM named_memory
+		WHERE name = ? AND workspace = ?
+	`, s.vh.ExtractVector("embedding"))
+
+	var embeddingStr sql.NullString
+	err := s.db.QueryRowContext(ctx, query, name, workspace).Scan(&embeddingStr)
+	if err != nil {
+		if dbutil.IsNoRows(err) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("memory: get embedding: %w", err)
+	}
+	if !embeddingStr.Valid || strings.TrimSpace(embeddingStr.String) == "" {
+		return nil, nil
+	}
+	embedding, err := dbdriver.ParseVector(embeddingStr.String)
+	if err != nil {
+		return nil, fmt.Errorf("memory: parse embedding: %w", err)
+	}
+	return []float32(embedding), nil
 }
 
 // SyncSymbolEmbeddings fills Turso named_memory.embedding from queued symbol embeddings.

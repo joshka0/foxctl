@@ -83,6 +83,9 @@ class FoxctlClient {
 // ============================================================================
 
 let activePi: ExtensionAPI | undefined;
+let memoryDraftsTimer: ReturnType<typeof setInterval> | undefined;
+let memoryDraftsInFlight = false;
+let memoryDraftsLastRunAt = 0;
 
 function getPi(): ExtensionAPI {
 	if (!activePi) throw new Error("foxctl extension API is not initialized");
@@ -167,6 +170,18 @@ function isFlagEnabled(pi: ExtensionAPI, name: string): boolean {
 	return value === true || value === "true" || value === "1" || value === "yes";
 }
 
+function getStringFlag(pi: ExtensionAPI, name: string, fallback = ""): string {
+	const value = pi.getFlag(name);
+	return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function getNumberFlag(pi: ExtensionAPI, name: string, fallback: number, min: number): number {
+	const value = pi.getFlag(name);
+	const parsed = typeof value === "number" ? value : Number.parseInt(String(value || ""), 10);
+	if (!Number.isFinite(parsed)) return fallback;
+	return Math.max(min, Math.floor(parsed));
+}
+
 function getWorkspace(pi: ExtensionAPI): string {
 	const value = pi.getFlag("foxctl-workspace");
 	return typeof value === "string" && value.trim() ? value.trim() : ".";
@@ -206,6 +221,80 @@ function getPiSession(pi: ExtensionAPI): string {
 function getTransportEndpoint(pi: ExtensionAPI): string {
 	const value = pi.getFlag("foxctl-transport-endpoint");
 	return typeof value === "string" ? value.trim() : "";
+}
+
+function memoryDraftsIntervalMs(pi: ExtensionAPI): number {
+	return getNumberFlag(pi, "foxctl-memory-drafts-interval-seconds", 900, 10) * 1000;
+}
+
+async function maybeRunAutomaticMemoryDrafts(pi: ExtensionAPI, signal?: AbortSignal, reason = "hook", force = false): Promise<void> {
+	if (!isFlagEnabled(pi, "foxctl-memory-drafts-auto")) return;
+	if (memoryDraftsInFlight) return;
+	const now = Date.now();
+	const interval = memoryDraftsIntervalMs(pi);
+	if (!force && memoryDraftsLastRunAt > 0 && now - memoryDraftsLastRunAt < interval) return;
+
+	memoryDraftsInFlight = true;
+	try {
+		const applyDrafts = isFlagEnabled(pi, "foxctl-memory-drafts-apply");
+		const dryRun = !applyDrafts || isFlagEnabled(pi, "foxctl-memory-drafts-dry-run");
+		const vaultPath = getStringFlag(pi, "foxctl-vault-path");
+		const body: Record<string, unknown> = {
+			workspace: getWorkspace(pi),
+			apply_drafts: applyDrafts,
+			dry_run: dryRun,
+			lookback: getStringFlag(pi, "foxctl-memory-drafts-lookback", "24h"),
+			limit: getNumberFlag(pi, "foxctl-memory-drafts-limit", 20, 1),
+			source: `pi:${reason}`,
+		};
+		if (vaultPath) body.vault_path = vaultPath;
+		if (isFlagEnabled(pi, "foxctl-memory-drafts-blur-agent")) {
+			body.blur_with_agent = true;
+			body.blur_agent = getStringFlag(pi, "foxctl-memory-drafts-blur-backend", "pi");
+			const agentBin = getStringFlag(pi, "foxctl-memory-drafts-blur-agent-bin");
+			const agentProvider = getStringFlag(pi, "foxctl-memory-drafts-blur-agent-provider");
+			const agentModel = getStringFlag(pi, "foxctl-memory-drafts-blur-agent-model");
+			const foxctlAgentID = getStringFlag(pi, "foxctl-memory-drafts-blur-foxctl-agent-id");
+			const piMode = getStringFlag(pi, "foxctl-memory-drafts-blur-pi-mode", "sdk");
+			const piSDKBin = getStringFlag(pi, "foxctl-memory-drafts-blur-pi-sdk-bin", "bun");
+			const piSDKScript = getStringFlag(pi, "foxctl-memory-drafts-blur-pi-sdk-script");
+			const piAgentDir = getStringFlag(pi, "foxctl-memory-drafts-blur-pi-agent-dir");
+			const piThinking = getStringFlag(pi, "foxctl-memory-drafts-blur-pi-thinking", "off");
+			if (agentBin) body.blur_agent_bin = agentBin;
+			if (agentProvider) body.blur_agent_provider = agentProvider;
+			if (agentModel) body.blur_agent_model = agentModel;
+			if (foxctlAgentID) body.foxctl_agent_id = foxctlAgentID;
+			if (piMode) body.pi_mode = piMode;
+			if (piSDKBin) body.pi_sdk_bin = piSDKBin;
+			if (piSDKScript) body.pi_sdk_script = piSDKScript;
+			if (piAgentDir) body.pi_agent_dir = piAgentDir;
+			if (piThinking) body.pi_thinking = piThinking;
+		}
+		const result = await getClient(pi).post<{ data?: { report?: Record<string, unknown> } }>(
+			"/api/context/memory-drafts",
+			body,
+			signal,
+		);
+		const report = result.data?.report || {};
+		console.info(
+			`foxctl memory drafts auto-run (${reason}): scanned=${String(report.feedback_scanned || 0)} planned=${String(report.drafts_planned || 0)} written=${String(report.drafts_written || 0)}`,
+		);
+		memoryDraftsLastRunAt = Date.now();
+	} catch (error) {
+		console.warn(`foxctl memory drafts auto-run failed (${reason}): ${error instanceof Error ? error.message : String(error)}`);
+	} finally {
+		memoryDraftsInFlight = false;
+	}
+}
+
+function startAutomaticMemoryDrafts(pi: ExtensionAPI, signal?: AbortSignal): void {
+	if (!isFlagEnabled(pi, "foxctl-memory-drafts-auto")) return;
+	void maybeRunAutomaticMemoryDrafts(pi, signal, "session_start", true);
+	if (memoryDraftsTimer !== undefined) return;
+	memoryDraftsTimer = setInterval(() => {
+		void maybeRunAutomaticMemoryDrafts(pi, undefined, "interval", true);
+	}, memoryDraftsIntervalMs(pi));
+	(memoryDraftsTimer as unknown as { unref?: () => void }).unref?.();
 }
 
 function commandToArgv(command: string): string[] {
@@ -3387,6 +3476,57 @@ const foxctlMemoryCuratorTool = defineFoxctlSkillFacade({
 	input: (params, pi) => withWorkspace(pi, { ...params }),
 });
 
+// --- Context Memory Drafts ---
+
+const FoxctlContextMemoryDraftsParams = Type.Object({
+	workspace: Type.Optional(Type.String({ description: "Workspace override; defaults to --foxctl-workspace" })),
+	vault_path: Type.Optional(Type.String({ description: "Obsidian vault path; defaults to daemon FOXCTL_CONTEXTWIKI_VAULT_PATH/FOXCTL_OBSIDIAN_VAULT_PATH" })),
+	apply_drafts: Type.Optional(Type.Boolean({ description: "Write planned inbox drafts and prepared review proposals", default: false })),
+	dry_run: Type.Optional(Type.Boolean({ description: "Prevent draft writes even when apply_drafts is true", default: true })),
+	lookback: Type.Optional(Type.String({ description: "Retrieval feedback lookback window, e.g. 24h", default: "24h" })),
+	limit: Type.Optional(Type.Number({ description: "Max memory drafts to plan", default: 20 })),
+	blur_with_agent: Type.Optional(Type.Boolean({ description: "Ask a configured real agent to blur each planned draft", default: false })),
+	blur_agent: Type.Optional(Type.String({ description: "Blur backend: pi, hermes, claude, foxctl, or command", default: "pi" })),
+	blur_agent_bin: Type.Optional(Type.String({ description: "Executable override for the selected blur backend" })),
+	blur_agent_provider: Type.Optional(Type.String({ description: "Provider override for Pi or Hermes blur backends" })),
+	blur_agent_model: Type.Optional(Type.String({ description: "Model override for Pi, Hermes, or Claude blur backends" })),
+	blur_agent_command: Type.Optional(Type.Array(Type.String(), { description: "Command argv for the command blur backend" })),
+	blur_agent_prompt_mode: Type.Optional(Type.String({ description: "Prompt delivery for command backend: stdin or arg", default: "stdin" })),
+	pi_mode: Type.Optional(Type.String({ description: "Pi runner mode: sdk or cli", default: "sdk" })),
+	pi_sdk_bin: Type.Optional(Type.String({ description: "Executable for the Pi SDK runner", default: "bun" })),
+	pi_sdk_script: Type.Optional(Type.String({ description: "Pi SDK memory blur runner script path" })),
+	pi_sdk_cwd: Type.Optional(Type.String({ description: "Working directory passed to Pi SDK session" })),
+	pi_agent_dir: Type.Optional(Type.String({ description: "Pi agent directory for auth and models" })),
+	pi_thinking: Type.Optional(Type.String({ description: "Pi SDK thinking level", default: "off" })),
+	foxctl_agent_id: Type.Optional(Type.String({ description: "Existing foxctl agent id for the foxctl blur backend" })),
+	foxctl_dispatcher: Type.Optional(Type.String({ description: "Optional foxctl agent ask dispatcher" })),
+	foxctl_conversation_id: Type.Optional(Type.String({ description: "Optional foxctl agent conversation id" })),
+	pi_no_extensions: Type.Optional(Type.Boolean({ description: "Disable Pi extension discovery for blur runs", default: true })),
+	hermes_ignore_rules: Type.Optional(Type.Boolean({ description: "Pass --ignore-rules to Hermes blur runs", default: true })),
+	hermes_ignore_user_config: Type.Optional(Type.Boolean({ description: "Pass --ignore-user-config to Hermes blur runs", default: false })),
+});
+
+const foxctlContextMemoryDraftsTool = defineTool({
+	name: "foxctl_context_memory_drafts",
+	label: "Foxctl Context Memory Drafts",
+	description: "Plan or write Obsidian inbox memory drafts from typed contextengine retrieval feedback. Canonical merges remain review-gated.",
+	parameters: FoxctlContextMemoryDraftsParams,
+	async execute(_toolCallId, params, signal) {
+		const pi = getPi();
+		const client = getClient(pi);
+		const result = await client.post<Record<string, unknown>>(
+			"/api/context/memory-drafts",
+			{
+				...params,
+				workspace: params.workspace || getWorkspace(pi),
+				dry_run: params.dry_run ?? true,
+			},
+			signal,
+		);
+		return jsonToolResult(result);
+	},
+});
+
 // ============================================================================
 // Code Symbols
 // ============================================================================
@@ -3562,6 +3702,96 @@ export default function foxctlExtension(pi: ExtensionAPI) {
 		type: "boolean",
 		default: true,
 	});
+	pi.registerFlag("foxctl-vault-path", {
+		description: "Optional Obsidian vault path for foxctl memory draft writes",
+		type: "string",
+		default: "",
+	});
+	pi.registerFlag("foxctl-memory-drafts-auto", {
+		description: "Automatically create Obsidian inbox memory drafts from retrieval feedback in background hooks",
+		type: "boolean",
+		default: false,
+	});
+	pi.registerFlag("foxctl-memory-drafts-apply", {
+		description: "When --foxctl-memory-drafts-auto is enabled, write inbox drafts instead of previewing only",
+		type: "boolean",
+		default: true,
+	});
+	pi.registerFlag("foxctl-memory-drafts-dry-run", {
+		description: "Force automatic memory drafts to preview mode even when apply is enabled",
+		type: "boolean",
+		default: false,
+	});
+	pi.registerFlag("foxctl-memory-drafts-interval-seconds", {
+		description: "Background memory draft interval in seconds",
+		type: "string",
+		default: "900",
+	});
+	pi.registerFlag("foxctl-memory-drafts-lookback", {
+		description: "Retrieval feedback lookback window for automatic memory drafts",
+		type: "string",
+		default: "24h",
+	});
+	pi.registerFlag("foxctl-memory-drafts-limit", {
+		description: "Maximum automatic memory drafts per pass",
+		type: "string",
+		default: "20",
+	});
+	pi.registerFlag("foxctl-memory-drafts-blur-agent", {
+		description: "Use a real agent to blur automatic memory drafts into structural schemas",
+		type: "boolean",
+		default: false,
+	});
+	pi.registerFlag("foxctl-memory-drafts-blur-backend", {
+		description: "Automatic memory draft blur backend: pi, hermes, claude, or foxctl",
+		type: "string",
+		default: "pi",
+	});
+	pi.registerFlag("foxctl-memory-drafts-blur-agent-bin", {
+		description: "Executable override for automatic memory draft blur backend",
+		type: "string",
+		default: "",
+	});
+	pi.registerFlag("foxctl-memory-drafts-blur-agent-provider", {
+		description: "Provider override for automatic memory draft blur backend",
+		type: "string",
+		default: "",
+	});
+	pi.registerFlag("foxctl-memory-drafts-blur-agent-model", {
+		description: "Model override for automatic memory draft blur backend",
+		type: "string",
+		default: "",
+	});
+	pi.registerFlag("foxctl-memory-drafts-blur-foxctl-agent-id", {
+		description: "Existing foxctl agent id for automatic memory draft blur backend",
+		type: "string",
+		default: "",
+	});
+	pi.registerFlag("foxctl-memory-drafts-blur-pi-mode", {
+		description: "Automatic memory draft Pi runner mode: sdk or cli",
+		type: "string",
+		default: "sdk",
+	});
+	pi.registerFlag("foxctl-memory-drafts-blur-pi-sdk-bin", {
+		description: "Executable for automatic memory draft Pi SDK runner",
+		type: "string",
+		default: "bun",
+	});
+	pi.registerFlag("foxctl-memory-drafts-blur-pi-sdk-script", {
+		description: "Pi SDK memory blur runner script path",
+		type: "string",
+		default: "",
+	});
+	pi.registerFlag("foxctl-memory-drafts-blur-pi-agent-dir", {
+		description: "Pi agent directory for automatic memory draft blur auth/models",
+		type: "string",
+		default: "",
+	});
+	pi.registerFlag("foxctl-memory-drafts-blur-pi-thinking", {
+		description: "Pi SDK thinking level for automatic memory draft blur",
+		type: "string",
+		default: "off",
+	});
 	pi.registerFlag("foxctl-epic-context", {
 		description: "Inject active room-agile epic resume/health/next into --foxctl-context when --foxctl-epic is set",
 		type: "boolean",
@@ -3683,6 +3913,7 @@ export default function foxctlExtension(pi: ExtensionAPI) {
 		// Memory Write
 		foxctlMemoryPutTool,
 		foxctlMemoryCuratorTool,
+		foxctlContextMemoryDraftsTool,
 		// Code Symbols
 		foxctlCodeSymbolsTool,
 		// Embedding
@@ -3777,6 +4008,7 @@ export default function foxctlExtension(pi: ExtensionAPI) {
 		"foxctl_vault_stats",
 		"foxctl_memory_put",
 		"foxctl_memory_curator",
+		"foxctl_context_memory_drafts",
 		"foxctl_code_symbols",
 		"foxctl_embedding_flush",
 		"foxctl_publish_context",
@@ -4478,6 +4710,7 @@ export default function foxctlExtension(pi: ExtensionAPI) {
 
 	// --- Event hooks ---
 	pi.on("session_start", async (_event, ctx) => {
+		startAutomaticMemoryDrafts(getPi(), ctx.signal);
 		const room = getRoom(getPi());
 		const client = getClient(getPi());
 		if (room && isFlagEnabled(getPi(), "foxctl-room-bind")) {
@@ -4542,6 +4775,7 @@ export default function foxctlExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
+		void maybeRunAutomaticMemoryDrafts(getPi(), ctx.signal, "before_agent_start");
 		if (!isFlagEnabled(getPi(), "foxctl-context")) return;
 		try {
 			const snapshot = await getFoxctlSnapshot(getPi(), ctx.signal, event.prompt);
