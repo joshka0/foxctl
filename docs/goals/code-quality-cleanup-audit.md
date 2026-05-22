@@ -202,8 +202,13 @@ by cleanup value and implementation risk.
   - Tests: staticcheck `U1000`, `go test ./internal/rlm/...`.
 
 - [ ] Delete or replace dead frontend slices.
-  - Scope: old `CompanionChat`, `chatStore`, unused activity feed, unused GUI
-    API wrappers, unused utility exports, foxterm `getRun` / `RunDetail`.
+  - Scope: remaining unused GUI API wrappers and unused utility exports.
+  - Progress: foxterm `getRun` / `RunDetail` were removed after caller search
+    found no references outside their definitions.
+  - Progress: GUI standalone `CompanionChat`, its private `chatStore`, its
+    barrel export, and the unused `ActivityFeed` component were removed after
+    local and independent worker audits found no callers. Activity stores and
+    activity types remain live.
   - Tests: gui-agent build/test and foxterm typecheck after dependencies are
     installed.
 

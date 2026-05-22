@@ -93,6 +93,12 @@ merge, rebase or merge current `main` and rerun the full verification set.
   removed after GUI and foxterm moved to the canonical member binding route.
 - Room transport docs and skill-pack guidance were refreshed so future agents
   do not rebuild against deleted legacy response fields.
+- Dead foxterm `getRun` / `RunDetail` API exports were removed after caller
+  search showed the UI uses `getRuns` plus `getRunTranscript`.
+- Dead GUI standalone `CompanionChat`, its private `chatStore`, its barrel
+  export, and the unused `ActivityFeed` component were removed. The activity
+  store, activity focus store, and activity types remain because they are live
+  in logs, sidebars, agent lists, and v2 explorer surfaces.
 
 ### Honesty Fixes
 
@@ -146,9 +152,8 @@ Verification has been run slice-by-slice, including:
 
 ### Dead Frontend Code
 
-- Delete or replace old `CompanionChat`, `chatStore`, unused activity feed,
-  unused GUI API wrappers, unused utility exports, foxterm `getRun`, and
-  foxterm `RunDetail` if they are confirmed unused.
+- Delete or replace remaining unused GUI API wrappers and unused utility exports
+  if they are confirmed unused.
 
 ### Structural Consolidation
 
@@ -169,10 +174,8 @@ Verification has been run slice-by-slice, including:
 
 ## Recommended Next Slices
 
-1. Delete confirmed dead frontend/foxterm code, starting with foxterm
-   `getRun`/`RunDetail` if caller evidence stays clean.
-2. Type the remaining room-control fixed response wrappers.
-3. Reduce duplicate `gui-agent` API client functions where `@foxctl/data/client`
+1. Type the remaining room-control fixed response wrappers.
+2. Reduce duplicate `gui-agent` API client functions where `@foxctl/data/client`
    is already the canonical implementation.
-4. Remove residual frontend weak casts that are not true external boundaries.
-5. Add reliable unused-code tooling and frontend verification docs.
+3. Remove residual frontend weak casts that are not true external boundaries.
+4. Add reliable unused-code tooling and frontend verification docs.

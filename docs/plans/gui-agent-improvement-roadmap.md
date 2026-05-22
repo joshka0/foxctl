@@ -135,11 +135,13 @@ The UI currently exposes multiple partially overlapping concepts:
 Relevant files:
 
 - [`packages/gui-agent/src/components/conversations/ConversationsList.tsx`](../../packages/gui-agent/src/components/conversations/ConversationsList.tsx)
-- [`packages/gui-agent/src/components/chat/CompanionChat.tsx`](../../packages/gui-agent/src/components/chat/CompanionChat.tsx)
 - [`packages/gui-agent/src/components/layout/SpawnAgentPanel.tsx`](../../packages/gui-agent/src/components/layout/SpawnAgentPanel.tsx)
 - [`packages/gui-agent/src/components/agents/AgentDetailView.tsx`](../../packages/gui-agent/src/components/agents/AgentDetailView.tsx)
-- [`packages/gui-agent/src/stores/chatStore.ts`](../../packages/gui-agent/src/stores/chatStore.ts)
 - [`packages/gui-agent/src/api/client.ts`](../../packages/gui-agent/src/api/client.ts)
+
+Note: the old standalone `CompanionChat` component and private `chatStore`
+were later deleted after caller evidence showed current conversation surfaces no
+longer used them.
 
 Specific problems:
 
@@ -240,7 +242,6 @@ Consequence:
 Relevant files:
 
 - [`packages/gui-agent/src/stores/viewStore.ts`](../../packages/gui-agent/src/stores/viewStore.ts)
-- [`packages/gui-agent/src/stores/chatStore.ts`](../../packages/gui-agent/src/stores/chatStore.ts)
 - [`packages/gui-agent/src/stores/activityStore.ts`](../../packages/gui-agent/src/stores/activityStore.ts)
 - [`packages/gui-agent/src/stores/eventProjectionStore.ts`](../../packages/gui-agent/src/stores/eventProjectionStore.ts)
 - [`packages/gui-agent/src/stores/orchestrationBoardStore.ts`](../../packages/gui-agent/src/stores/orchestrationBoardStore.ts)
@@ -369,10 +370,8 @@ Scope:
 Likely files:
 
 - [`packages/gui-agent/src/components/conversations/ConversationsList.tsx`](../../packages/gui-agent/src/components/conversations/ConversationsList.tsx)
-- [`packages/gui-agent/src/components/chat/CompanionChat.tsx`](../../packages/gui-agent/src/components/chat/CompanionChat.tsx)
 - [`packages/gui-agent/src/components/layout/SpawnAgentPanel.tsx`](../../packages/gui-agent/src/components/layout/SpawnAgentPanel.tsx)
 - [`packages/gui-agent/src/components/agents/AgentDetailView.tsx`](../../packages/gui-agent/src/components/agents/AgentDetailView.tsx)
-- [`packages/gui-agent/src/stores/chatStore.ts`](../../packages/gui-agent/src/stores/chatStore.ts)
 - [`packages/gui-agent/src/api/client.ts`](../../packages/gui-agent/src/api/client.ts)
 
 Acceptance:
