@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
-	"github.com/joshka0/foxctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/platform/observability"
 )
 
 // WorkerConfig configures the background worker.

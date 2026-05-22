@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/joshka0/foxctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/platform/observability"
 	"github.com/oklog/ulid/v2"
 )
 

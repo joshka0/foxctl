@@ -1,107 +1,94 @@
 package observability
 
-import (
-	"github.com/joshka0/foxcular"
-)
+import platformobs "github.com/joshka0/foxctl/internal/platform/observability"
 
 // Event is the canonical foxctl observability event.
-type Event = foxcular.Event
+type Event = platformobs.Event
 
 // Status represents the outcome of an operation.
-type Status = foxcular.Status
+type Status = platformobs.Status
 
 const (
 	// StatusOK indicates the operation completed successfully.
-	StatusOK = foxcular.StatusOK
+	StatusOK = platformobs.StatusOK
 	// StatusError indicates the operation failed.
-	StatusError = foxcular.StatusError
+	StatusError = platformobs.StatusError
 	// StatusCanceled indicates the operation was canceled (e.g., context canceled).
-	StatusCanceled = foxcular.StatusCanceled
+	StatusCanceled = platformobs.StatusCanceled
 )
 
 // Component constants for consistent tagging.
 const (
-	ComponentCLI   = "cli"
-	ComponentWeb   = "web"
-	ComponentHook  = "hook"
-	ComponentSkill = "skill"
-	ComponentJob   = "job"
-	ComponentAgent = "agent"
+	ComponentCLI   = platformobs.ComponentCLI
+	ComponentWeb   = platformobs.ComponentWeb
+	ComponentHook  = platformobs.ComponentHook
+	ComponentSkill = platformobs.ComponentSkill
+	ComponentJob   = platformobs.ComponentJob
+	ComponentAgent = platformobs.ComponentAgent
 	// ComponentContextBuilder identifies layered context assembly and retrieval operations.
-	ComponentContextBuilder = "contextbuilder"
+	ComponentContextBuilder = platformobs.ComponentContextBuilder
 )
 
 // Operation constants for common operations.
 const (
-	OpSkillRun     = "skill.run"
-	OpSkillCache   = "skill.cache"
-	OpHookExecute  = "hook.execute"
-	OpJobSubmit    = "job.submit"
-	OpJobComplete  = "job.complete"
-	OpHTTPRequest  = "http.request"
-	OpSessionStart = "session.start"
-	OpSessionEnd   = "session.end"
+	OpSkillRun     = platformobs.OpSkillRun
+	OpSkillCache   = platformobs.OpSkillCache
+	OpHookExecute  = platformobs.OpHookExecute
+	OpJobSubmit    = platformobs.OpJobSubmit
+	OpJobComplete  = platformobs.OpJobComplete
+	OpHTTPRequest  = platformobs.OpHTTPRequest
+	OpSessionStart = platformobs.OpSessionStart
+	OpSessionEnd   = platformobs.OpSessionEnd
 
 	// OpAgentSpawn is the operation name for agent spawn.
-	OpAgentSpawn     = "agent.spawn"
-	OpAgentWait      = "agent.wait"
-	OpAgentComplete  = "agent.complete"
-	OpAgentKill      = "agent.kill"
-	OpAgentIteration = "agent.iteration"
-	OpAgentTool      = "agent.tool"
+	OpAgentSpawn     = platformobs.OpAgentSpawn
+	OpAgentWait      = platformobs.OpAgentWait
+	OpAgentComplete  = platformobs.OpAgentComplete
+	OpAgentKill      = platformobs.OpAgentKill
+	OpAgentIteration = platformobs.OpAgentIteration
+	OpAgentTool      = platformobs.OpAgentTool
 
 	// OpContextSemanticArtifactSearch is emitted for optional semantic artifact retrieval.
-	OpContextSemanticArtifactSearch = "context.semantic_artifact_search"
+	OpContextSemanticArtifactSearch = platformobs.OpContextSemanticArtifactSearch
 	// OpContextLayeredBundle is emitted when layered context assembly completes with stable refs.
-	OpContextLayeredBundle = "context.layered_bundle"
+	OpContextLayeredBundle = platformobs.OpContextLayeredBundle
 
 	// OpMemoryQuery is emitted when canonical memory records are retrieved.
-	OpMemoryQuery = "memory.query"
+	OpMemoryQuery = platformobs.OpMemoryQuery
 	// OpMemoryCuratorReport is emitted when the memory curator plans or applies lifecycle actions.
-	OpMemoryCuratorReport = "memory.curator_report"
+	OpMemoryCuratorReport = platformobs.OpMemoryCuratorReport
 	// OpMemorySessionRestore is emitted when session restore selects memory records for context.
-	OpMemorySessionRestore = "memory.session_restore"
+	OpMemorySessionRestore = platformobs.OpMemorySessionRestore
 )
 
 // Canonical event data keys for foxctl metadata carried inside foxcular.Event.Data.
 const (
-	DataKeyService     = "service"
-	DataKeyVersion     = "version"
-	DataKeyComponent   = "component"
-	DataKeyCommand     = "command"
-	DataKeySubtype     = "subtype"
-	DataKeySessionID   = "session_id"
-	DataKeyAgentID     = "agent_id"
-	DataKeyWorkspaceID = "workspace_id"
-	DataKeyJobID       = "job_id"
-	DataKeyRetriable   = "retriable"
+	DataKeyService     = platformobs.DataKeyService
+	DataKeyVersion     = platformobs.DataKeyVersion
+	DataKeyComponent   = platformobs.DataKeyComponent
+	DataKeyCommand     = platformobs.DataKeyCommand
+	DataKeySubtype     = platformobs.DataKeySubtype
+	DataKeySessionID   = platformobs.DataKeySessionID
+	DataKeyAgentID     = platformobs.DataKeyAgentID
+	DataKeyWorkspaceID = platformobs.DataKeyWorkspaceID
+	DataKeyJobID       = platformobs.DataKeyJobID
+	DataKeyRetriable   = platformobs.DataKeyRetriable
 )
 
 // EventDataString reads a string metadata value from Event.Data.
 func EventDataString(event *Event, key string) string {
-	return eventDataString(event, key)
+	return platformobs.EventDataString(event, key)
 }
 
 // EventDataBoolPtr reads a boolean metadata value from Event.Data.
 func EventDataBoolPtr(event *Event, key string) *bool {
-	return eventDataBoolPtr(event, key)
+	return platformobs.EventDataBoolPtr(event, key)
 }
 
 func eventDataString(event *Event, key string) string {
-	if event == nil || event.Data == nil {
-		return ""
-	}
-	value, _ := event.Data[key].(string)
-	return value
+	return platformobs.EventDataString(event, key)
 }
 
 func eventDataBoolPtr(event *Event, key string) *bool {
-	if event == nil || event.Data == nil {
-		return nil
-	}
-	value, ok := event.Data[key].(bool)
-	if !ok {
-		return nil
-	}
-	return &value
+	return platformobs.EventDataBoolPtr(event, key)
 }

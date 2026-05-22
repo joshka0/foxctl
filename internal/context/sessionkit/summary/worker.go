@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/platform/observability"
 	llmproviders "github.com/joshka0/foxctl/internal/providers/llm"
-	"github.com/joshka0/foxctl/internal/runtime/observability"
 	"github.com/joshka0/foxctl/internal/storage"
 	"github.com/joshka0/foxctl/internal/storage/queue"
 	"github.com/joshka0/foxctl/internal/storage/sessions"

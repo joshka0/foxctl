@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/context/contextengine"
-	"github.com/joshka0/foxctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/platform/observability"
 )
 
 func TestConvertEvent(t *testing.T) {

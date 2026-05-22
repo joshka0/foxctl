@@ -40,7 +40,7 @@ by cleanup value and implementation risk.
     for invalid persisted JSON or timestamps.
   - Tests: corrupt-row fixtures and legacy empty-field fixtures.
 
-- [ ] Split runtime observability into a neutral contract package.
+- [x] Split runtime observability into a neutral contract package.
   - Scope: `internal/runtime/observability` imports from storage, intelligence,
     and context packages.
   - Problem: lower layers depend upward on runtime and an SSE bridge package.
@@ -49,8 +49,8 @@ by cleanup value and implementation risk.
   - Tests: affected storage/intelligence/context packages plus web SSE tests.
 
 - [ ] Remove `internal/storage/jobs/executor` runtime ownership.
-  - Problem: a storage package imports runtime execution and constructs runtime
-    executors.
+  - Problem: a storage package imports runtime execution, runtime
+    observability, and constructs runtime executors.
   - Target: keep storage jobs as persistence/types only; move executor wiring to
     a runtime job package.
   - Tests: jobs, runtime execution, and daemon job startup.
