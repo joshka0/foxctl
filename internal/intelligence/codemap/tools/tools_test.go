@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
+	"github.com/joshka0/foxctl/internal/storage/graph"
 )
 
 func TestNewRegistry(t *testing.T) {
@@ -226,6 +228,105 @@ func TestGetSymbolsArgs(t *testing.T) {
 		})
 		if err != nil {
 			t.Fatalf("getSymbols() error = %v", err)
+		}
+		if !result.IsError {
+			t.Fatal("expected invalid argument error")
+		}
+	})
+}
+
+func TestGetGraphNeighborsArgs(t *testing.T) {
+	t.Run("builds default options", func(t *testing.T) {
+		opts := getGraphNeighborsArgs{NodeID: "node-1"}.options()
+
+		if opts.Direction != "both" {
+			t.Fatalf("direction=%q", opts.Direction)
+		}
+		if len(opts.EdgeTypes) != 0 {
+			t.Fatalf("edge_types=%v", opts.EdgeTypes)
+		}
+	})
+
+	t.Run("applies option overrides", func(t *testing.T) {
+		opts := getGraphNeighborsArgs{
+			NodeID:    "node-1",
+			Direction: "out",
+			EdgeTypes: []string{"imports", "", "calls"},
+		}.options()
+
+		if opts.Direction != "out" {
+			t.Fatalf("direction=%q", opts.Direction)
+		}
+		want := []graph.EdgeType{"imports", "calls"}
+		if !reflect.DeepEqual(opts.EdgeTypes, want) {
+			t.Fatalf("edge_types=%v want %v", opts.EdgeTypes, want)
+		}
+	})
+
+	t.Run("rejects invalid edge type shape before graph lookup", func(t *testing.T) {
+		r, err := NewRegistry(WithWorkspace(t.TempDir()))
+		if err != nil {
+			t.Fatalf("NewRegistry() error = %v", err)
+		}
+
+		result, err := r.getGraphNeighbors(context.Background(), map[string]any{
+			"node_id":    "node-1",
+			"edge_types": []any{"imports", 42},
+		})
+		if err != nil {
+			t.Fatalf("getGraphNeighbors() error = %v", err)
+		}
+		if !result.IsError {
+			t.Fatal("expected invalid argument error")
+		}
+	})
+}
+
+func TestSemanticSearchArgs(t *testing.T) {
+	t.Run("builds default skill input", func(t *testing.T) {
+		input := semanticSearchArgs{Query: "agent memory"}.skillInput("/workspace")
+
+		if input["query"] != "agent memory" {
+			t.Fatalf("query=%v", input["query"])
+		}
+		if !reflect.DeepEqual(input["scope"], []string{"symbols"}) {
+			t.Fatalf("scope=%v", input["scope"])
+		}
+		if input["limit"] != 20 {
+			t.Fatalf("limit=%v", input["limit"])
+		}
+		if input["workspace"] != "/workspace" {
+			t.Fatalf("workspace=%v", input["workspace"])
+		}
+	})
+
+	t.Run("applies optional overrides", func(t *testing.T) {
+		input := semanticSearchArgs{
+			Query: "agent memory",
+			Scope: "sessions",
+			Limit: 5,
+		}.skillInput("/workspace")
+
+		if !reflect.DeepEqual(input["scope"], []string{"sessions"}) {
+			t.Fatalf("scope=%v", input["scope"])
+		}
+		if input["limit"] != 5 {
+			t.Fatalf("limit=%v", input["limit"])
+		}
+	})
+
+	t.Run("rejects invalid argument type before skill execution", func(t *testing.T) {
+		r, err := NewRegistry(WithWorkspace(t.TempDir()))
+		if err != nil {
+			t.Fatalf("NewRegistry() error = %v", err)
+		}
+
+		result, err := r.semanticSearch(context.Background(), map[string]any{
+			"query": "agent memory",
+			"limit": "5",
+		})
+		if err != nil {
+			t.Fatalf("semanticSearch() error = %v", err)
 		}
 		if !result.IsError {
 			t.Fatal("expected invalid argument error")

@@ -110,10 +110,11 @@ by cleanup value and implementation risk.
   - Target: `SemanticEnvelopeMetadata` with backward-compatible legacy map
     parsing.
 
-- [ ] Convert codemap tool handler args one handler at a time.
+- [x] Convert codemap tool handler args one handler at a time.
   - Scope: `internal/intelligence/codemap/tools`.
-  - Progress: `read_file`, `search_pattern`, and `get_symbols` now decode
-    through typed args; remaining handlers still use map assertions.
+  - Progress: codemap tool handlers now decode arguments through typed
+    per-tool args models; dynamic maps remain only for skill payload/result
+    envelopes.
 
 ## Defensive Programming And Hidden Fallbacks
 

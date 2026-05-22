@@ -431,33 +431,18 @@ func (r *Registry) registerGetGraphNeighbors() error {
 
 // getGraphNeighbors implements the get_graph_neighbors tool.
 func (r *Registry) getGraphNeighbors(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
+	input, err := decodeToolArgs[getGraphNeighborsArgs](args)
+	if err != nil {
+		return errorResult(fmt.Sprintf("invalid get_graph_neighbors arguments: %v", err)), nil
+	}
+	if input.NodeID == "" {
+		return errorResult("node_id is required"), nil
+	}
 	if r.graphStore == nil {
 		return errorResult("graph store not available"), nil
 	}
 
-	nodeID, ok := args["node_id"].(string)
-	if !ok || nodeID == "" {
-		return errorResult("node_id is required"), nil
-	}
-
-	direction := "both"
-	if d, ok := args["direction"].(string); ok && d != "" {
-		direction = d
-	}
-
-	var edgeTypes []graph.EdgeType
-	if et, ok := args["edge_types"].([]any); ok {
-		for _, e := range et {
-			if s, ok := e.(string); ok {
-				edgeTypes = append(edgeTypes, graph.EdgeType(s))
-			}
-		}
-	}
-
-	neighbors, err := r.graphStore.GetNeighbors(ctx, r.workspace, nodeID, graph.NeighborOptions{
-		Direction: direction,
-		EdgeTypes: edgeTypes,
-	})
+	neighbors, err := r.graphStore.GetNeighbors(ctx, r.workspace, input.NodeID, input.options())
 	if err != nil {
 		return errorResult(fmt.Sprintf("get neighbors failed: %v", err)), nil
 	}
@@ -467,7 +452,7 @@ func (r *Registry) getGraphNeighbors(ctx context.Context, args map[string]any) (
 	for _, n := range neighbors {
 		// Determine direction based on edge from/to IDs
 		dir := "out"
-		if n.Edge.ToID == nodeID {
+		if n.Edge.ToID == input.NodeID {
 			dir = "in"
 		}
 		results = append(results, map[string]any{
@@ -482,10 +467,33 @@ func (r *Registry) getGraphNeighbors(ctx context.Context, args map[string]any) (
 	}
 
 	return successResult(map[string]any{
-		"node_id":   nodeID,
+		"node_id":   input.NodeID,
 		"neighbors": results,
 		"count":     len(results),
 	}), nil
+}
+
+type getGraphNeighborsArgs struct {
+	NodeID    string   `json:"node_id"`
+	Direction string   `json:"direction,omitempty"`
+	EdgeTypes []string `json:"edge_types,omitempty"`
+}
+
+func (a getGraphNeighborsArgs) options() graph.NeighborOptions {
+	direction := a.Direction
+	if direction == "" {
+		direction = "both"
+	}
+	edgeTypes := make([]graph.EdgeType, 0, len(a.EdgeTypes))
+	for _, edgeType := range a.EdgeTypes {
+		if edgeType != "" {
+			edgeTypes = append(edgeTypes, graph.EdgeType(edgeType))
+		}
+	}
+	return graph.NeighborOptions{
+		Direction: direction,
+		EdgeTypes: edgeTypes,
+	}
 }
 
 // registerSemanticSearch registers the semantic_search tool.
@@ -518,33 +526,47 @@ func (r *Registry) registerSemanticSearch() error {
 
 // semanticSearch implements the semantic_search tool.
 func (r *Registry) semanticSearch(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
-	query, ok := args["query"].(string)
-	if !ok || query == "" {
+	input, err := decodeToolArgs[semanticSearchArgs](args)
+	if err != nil {
+		return errorResult(fmt.Sprintf("invalid semantic_search arguments: %v", err)), nil
+	}
+	if input.Query == "" {
 		return errorResult("query is required"), nil
 	}
 
 	// Build input for code/semantic_search skill
-	input := map[string]any{
-		"query":     query,
-		"scope":     []string{"symbols"},
-		"limit":     20,
-		"workspace": r.workspace,
-	}
-
-	if scope, ok := args["scope"].(string); ok && scope != "" {
-		input["scope"] = []string{scope}
-	}
-	if limit, ok := args["limit"].(float64); ok && limit > 0 {
-		input["limit"] = int(limit)
-	}
+	skillInput := input.skillInput(r.workspace)
 
 	// Execute skill
-	result, err := r.runSkill(ctx, "code/semantic_search", input)
+	result, err := r.runSkill(ctx, "code/semantic_search", skillInput)
 	if err != nil {
 		return errorResult(fmt.Sprintf("semantic search failed: %v", err)), nil
 	}
 
 	return successResult(result), nil
+}
+
+type semanticSearchArgs struct {
+	Query string `json:"query"`
+	Scope string `json:"scope,omitempty"`
+	Limit int    `json:"limit,omitempty"`
+}
+
+func (a semanticSearchArgs) skillInput(workspace string) map[string]any {
+	scope := []string{"symbols"}
+	if a.Scope != "" {
+		scope = []string{a.Scope}
+	}
+	limit := 20
+	if a.Limit > 0 {
+		limit = a.Limit
+	}
+	return map[string]any{
+		"query":     a.Query,
+		"scope":     scope,
+		"limit":     limit,
+		"workspace": workspace,
+	}
 }
 
 // registerFinishCodemap registers the finish_codemap tool.
@@ -569,14 +591,17 @@ func (r *Registry) registerFinishCodemap() error {
 
 // finishCodemap implements the finish_codemap tool.
 func (r *Registry) finishCodemap(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
-	codemapStr, ok := args["codemap"].(string)
-	if !ok || codemapStr == "" {
+	input, err := decodeToolArgs[finishCodemapArgs](args)
+	if err != nil {
+		return errorResult(fmt.Sprintf("invalid finish_codemap arguments: %v", err)), nil
+	}
+	if input.Codemap == "" {
 		return errorResult("codemap JSON string is required"), nil
 	}
 
 	// Validate it's valid JSON
 	var codemap map[string]any
-	if err := json.Unmarshal([]byte(codemapStr), &codemap); err != nil {
+	if err := json.Unmarshal([]byte(input.Codemap), &codemap); err != nil {
 		return errorResult(fmt.Sprintf("invalid codemap JSON: %v", err)), nil
 	}
 
@@ -603,6 +628,10 @@ func (r *Registry) finishCodemap(ctx context.Context, args map[string]any) (*mod
 		"message": "Codemap captured successfully",
 		"codemap": codemap,
 	}), nil
+}
+
+type finishCodemapArgs struct {
+	Codemap string `json:"codemap"`
 }
 
 // runSkill executes a skill and returns the parsed data.
