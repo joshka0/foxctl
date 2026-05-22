@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -19,12 +20,21 @@ type toolSchema struct {
 	propTypes map[string]string
 }
 
+type rawToolSchema struct {
+	Required   []string                  `json:"required"`
+	Properties map[string]schemaProperty `json:"properties"`
+}
+
+type schemaProperty struct {
+	Type string `json:"type"`
+}
+
 func compileSchema(raw json.RawMessage) (*toolSchema, error) {
 	if len(raw) == 0 {
 		return nil, nil
 	}
 
-	var schema map[string]any
+	var schema rawToolSchema
 	if err := json.Unmarshal(raw, &schema); err != nil {
 		return nil, fmt.Errorf("decode tool schema: %w", err)
 	}
@@ -34,31 +44,16 @@ func compileSchema(raw json.RawMessage) (*toolSchema, error) {
 		propTypes: map[string]string{},
 	}
 
-	if required, ok := schema["required"].([]any); ok {
-		for i, v := range required {
-			s, ok := v.(string)
-			if !ok {
-				return nil, fmt.Errorf("invalid required entry at index %d: %T", i, v)
-			}
-			s = strings.TrimSpace(s)
-			if s == "" {
-				return nil, fmt.Errorf("invalid required entry at index %d: empty string", i)
-			}
-			out.required = append(out.required, s)
+	for i, s := range schema.Required {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return nil, fmt.Errorf("invalid required entry at index %d: empty string", i)
 		}
+		out.required = append(out.required, s)
 	}
 
-	props, ok := schema["properties"].(map[string]any)
-	if !ok {
-		return out, nil
-	}
-	for name, value := range props {
-		propObj, ok := value.(map[string]any)
-		if !ok {
-			continue
-		}
-		propType, _ := propObj["type"].(string)
-		propType = strings.TrimSpace(strings.ToLower(propType))
+	for name, prop := range schema.Properties {
+		propType := strings.TrimSpace(strings.ToLower(prop.Type))
 		if propType == "" {
 			continue
 		}
@@ -76,7 +71,7 @@ func validateArgs(schema *toolSchema, args json.RawMessage) error {
 		args = json.RawMessage(`{}`)
 	}
 
-	var obj map[string]any
+	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(args, &obj); err != nil {
 		return fmt.Errorf("invalid args json: %w", err)
 	}
@@ -99,30 +94,47 @@ func validateArgs(schema *toolSchema, args json.RawMessage) error {
 	return nil
 }
 
-func matchesJSONType(v any, typ string) bool {
+func matchesJSONType(raw json.RawMessage, typ string) bool {
+	if isJSONNull(raw) {
+		return false
+	}
 	switch typ {
 	case "string":
-		_, ok := v.(string)
-		return ok
+		var s string
+		return json.Unmarshal(raw, &s) == nil
 	case "boolean":
-		_, ok := v.(bool)
-		return ok
+		var b bool
+		return json.Unmarshal(raw, &b) == nil
 	case "number":
-		_, ok := v.(float64)
-		return ok
+		var n json.Number
+		return decodeJSONNumber(raw, &n) == nil
 	case "integer":
-		f, ok := v.(float64)
-		if !ok {
+		var n json.Number
+		if err := decodeJSONNumber(raw, &n); err != nil {
+			return false
+		}
+		f, err := n.Float64()
+		if err != nil {
 			return false
 		}
 		return math.Trunc(f) == f
 	case "object":
-		_, ok := v.(map[string]any)
-		return ok
+		var obj map[string]json.RawMessage
+		return json.Unmarshal(raw, &obj) == nil && obj != nil
 	case "array":
-		_, ok := v.([]any)
-		return ok
+		var arr []json.RawMessage
+		return json.Unmarshal(raw, &arr) == nil && arr != nil
 	default:
 		return false
 	}
+}
+
+func decodeJSONNumber(raw json.RawMessage, dst *json.Number) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	return dec.Decode(dst)
+}
+
+func isJSONNull(raw json.RawMessage) bool {
+	return string(bytes.TrimSpace(raw)) == "null"
 }
