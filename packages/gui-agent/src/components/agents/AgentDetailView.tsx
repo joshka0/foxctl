@@ -55,6 +55,7 @@ import type {
   AgentRuntimeTreeNode,
   Room,
 } from '@foxctl/data/types';
+import { isAgentChatStreamEvent, parseSSEEnvelope } from "@/types/sse";
 import { useAgentOperations } from "@/hooks/useAgentOperations";
 import { useViewStore } from "@/stores/viewStore";
 import { cn, formatRelativeTime } from "@/lib/utils";
@@ -1106,24 +1107,12 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
     eventSourceRef.current = eventSource;
 
     eventSource.onmessage = (rawEvent) => {
-      let parsed: { type?: string; data?: unknown; ts?: string } | null = null;
-      try {
-        parsed = JSON.parse(rawEvent.data) as {
-          type?: string;
-          data?: unknown;
-          ts?: string;
-        };
-      } catch {
-        return;
-      }
-      if (!parsed || !isRecord(parsed.data)) {
-        return;
-      }
-      if (parsed.type !== "agent.chat") {
+      const parsed = parseSSEEnvelope(rawEvent.data);
+      if (parsed?.type !== "agent.chat" || !isAgentChatStreamEvent(parsed.data)) {
         return;
       }
 
-      const event = parsed.data as unknown as AgentChatStreamEvent;
+      const event = parsed.data;
       if (event.agent_id !== activeAgent.id) return;
       if (activeCorrelationID && event.correlation_id !== activeCorrelationID)
         return;

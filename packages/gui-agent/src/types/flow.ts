@@ -87,6 +87,17 @@ export interface FlowStatusResponse {
   edges: FlowEdgeExecState[];
 }
 
+export function isFlowStatusResponse(value: unknown): value is FlowStatusResponse {
+  const record = asRecord(value)
+  return (
+    !!record &&
+    typeof record.flow_id === "string" &&
+    typeof record.state === "string" &&
+    Array.isArray(record.nodes) &&
+    Array.isArray(record.edges)
+  )
+}
+
 export interface FlowRunLog {
   id: string;
   run_id: string;
@@ -94,4 +105,10 @@ export interface FlowRunLog {
   seq: number;
   envelope: Record<string, unknown>;
   created_at: string;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
 }

@@ -61,6 +61,7 @@ import type {
   FlowEdge as FlowEdgeType,
   FlowStatusResponse,
 } from '@/types/flow'
+import { isFlowStatusResponse } from '@/types/flow'
 import type {
   RoomStatus,
 } from '@foxctl/data/types'
@@ -129,7 +130,7 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
     queryFn: () => getFlow(flowId),
   })
 
-  const flowRoomId = (flowData as unknown as { room_id?: string })?.room_id
+  const flowRoomId = flowData?.room_id
 
   // SSE stream for flow status (replaces polling)
   useEffect(() => {
@@ -140,8 +141,10 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
     const es = new EventSource(`/api/flows/${encodeURIComponent(flowId)}/events?workspace=.`,)
     es.onmessage = (ev) => {
       try {
-        const parsed = JSON.parse(ev.data) as FlowStatusResponse
-        setStatusData(parsed)
+        const parsed: unknown = JSON.parse(ev.data)
+        if (isFlowStatusResponse(parsed)) {
+          setStatusData(parsed)
+        }
       } catch {
         // ignore malformed events
       }
@@ -178,8 +181,8 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
   useEffect(() => {
     if (!flowData) return
 
-    const apiNodes: FlowNodeType[] = (flowData as unknown as { nodes: FlowNodeType[] }).nodes ?? []
-    const apiEdges: FlowEdgeType[] = (flowData as unknown as { edges: FlowEdgeType[] }).edges ?? []
+    const apiNodes: FlowNodeType[] = flowData.nodes
+    const apiEdges: FlowEdgeType[] = flowData.edges
 
     const rfNodes: Node<CanvasNodeData>[] = apiNodes.map((n) => ({
       id: n.id,
@@ -409,7 +412,7 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
               <span className="text-xs font-bold truncate max-w-[160px]"
               >{flowName}
               </span>
-              <FlowStateBadge state={statusData?.state ?? (flowData as unknown as { state: string })?.state ?? 'draft'}
+              <FlowStateBadge state={statusData?.state ?? flowData?.state ?? 'draft'}
               />
             </div>
           </Panel>

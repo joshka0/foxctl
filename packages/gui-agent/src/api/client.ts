@@ -62,6 +62,7 @@ import type {
   FlowStatusResponse,
   FlowRunLog,
 } from "@/types/flow";
+import { isRoomMessageEvent, parseSSEEnvelope } from "@/types/sse";
 
 const API_BASE = "/api";
 const IS_DEV = import.meta.env.DEV;
@@ -113,16 +114,11 @@ export function subscribeToRoomEvents(
     `${API_BASE}/rooms/${encodeURIComponent(scopedRoomID)}/events?${query.toString()}`,
   );
   eventSource.onmessage = (rawEvent) => {
-    let parsed: { type?: string; data?: unknown } | null = null;
-    try {
-      parsed = JSON.parse(rawEvent.data) as { type?: string; data?: unknown };
-    } catch {
+    const parsed = parseSSEEnvelope(rawEvent.data);
+    if (parsed?.type !== "room.message" || !isRoomMessageEvent(parsed.data)) {
       return;
     }
-    if (parsed?.type !== "room.message" || !parsed.data || typeof parsed.data !== "object") {
-      return;
-    }
-    onEvent(parsed.data as RoomMessageEvent);
+    onEvent(parsed.data);
   };
   return () => {
     eventSource.close();
