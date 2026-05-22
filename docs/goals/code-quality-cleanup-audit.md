@@ -81,7 +81,7 @@ by cleanup value and implementation risk.
   - Target: move chunk/delta/tool-call stream wire structs to a neutral provider
     compatibility package.
 
-- [ ] Remove duplicated path/file read helpers in indexers.
+- [x] Remove duplicated path/file read helpers in indexers.
   - Scope: semantic and symbol indexers.
   - Target: shared `ReadLimited` helper with traversal, symlink, directory, and
     size-limit tests.
