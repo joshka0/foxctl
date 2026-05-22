@@ -1387,67 +1387,6 @@ func (a *ReadOnlyAdapter) repoIndexAnchorsToCodeHits(anchors []repoquery.Anchor,
 	return hits
 }
 
-//nolint:unused // Kept for the semantic_code source profile fallback path while default gather_context stays lexical/index-first.
-func (a *ReadOnlyAdapter) semanticCodeSearchHits(ctx context.Context, query string, limit int) ([]rankedCodeSearchHit, error) {
-	if strings.TrimSpace(a.workspaceRoot) == "" {
-		return nil, nil
-	}
-	if limit <= 0 {
-		limit = 8
-	}
-	args := mustJSON(map[string]any{"query": query, "limit": maxInt(limit*2, 12)})
-	out, err := a.semanticSearchCode(ctx, args)
-	if err != nil {
-		return nil, err
-	}
-	results, _ := out["results"].([]map[string]any)
-	hits := make([]rankedCodeSearchHit, 0, len(results))
-	for _, r := range results {
-		hit := contextengine.CodeSearchHit{
-			Path:     normalizeCodeSearchPath(stringValue(r["path"])),
-			Snippet:  stringValue(r["summary"]),
-			Symbol:   stringValue(r["name"]),
-			Language: languageFromPath(stringValue(r["path"])),
-		}
-		if sim, ok := r["similarity"].(float64); ok {
-			hit.Score = sim
-		}
-		if hit.Path == "" && hit.Symbol == "" {
-			continue
-		}
-		hits = append(hits, rankedCodeSearchHit{Hit: hit, Priority: 24})
-	}
-	for _, bundle := range decodeSemanticCandidateBundles(out["candidate_bundles"]) {
-		if bundle.PrimaryPath != "" {
-			hits = append(hits, rankedCodeSearchHit{
-				Priority: 23,
-				Hit: contextengine.CodeSearchHit{
-					Path:     bundle.PrimaryPath,
-					Snippet:  semanticBundleSnippet(bundle),
-					Score:    bundle.Score,
-					Language: languageFromPath(bundle.PrimaryPath),
-				},
-			})
-		}
-		for _, path := range bundle.RelatedPaths {
-			path = normalizeCodeSearchPath(path)
-			if path == "" {
-				continue
-			}
-			hits = append(hits, rankedCodeSearchHit{
-				Priority: 21,
-				Hit: contextengine.CodeSearchHit{
-					Path:     path,
-					Snippet:  semanticBundleSnippet(bundle),
-					Score:    bundle.Score * 0.95,
-					Language: languageFromPath(path),
-				},
-			})
-		}
-	}
-	return hits, nil
-}
-
 func (a *ReadOnlyAdapter) semanticFileIndexSearchHits(ctx context.Context, query string, requiredEvidence []string, limit int, options codeSearchRequestOptions) ([]rankedCodeSearchHit, error) {
 	query = strings.TrimSpace(query)
 	if query == "" || strings.TrimSpace(a.workspaceRoot) == "" {
@@ -1770,72 +1709,6 @@ func rankSemanticEmbeddingCacheEntries(entries []semanticEmbeddingCacheEntry, qu
 		out = out[:limit]
 	}
 	return out
-}
-
-//nolint:unused // Kept with semanticCodeSearchHits for opt-in semantic bundle decoding.
-type semanticCandidateBundleHit struct {
-	PrimaryPath  string
-	RelatedPaths []string
-	Symbols      []string
-	Score        float64
-	MatchReason  string
-}
-
-//nolint:unused // Kept with semanticCodeSearchHits for opt-in semantic bundle decoding.
-func decodeSemanticCandidateBundles(raw any) []semanticCandidateBundleHit {
-	items, ok := raw.([]map[string]any)
-	if !ok {
-		return nil
-	}
-	out := make([]semanticCandidateBundleHit, 0, len(items))
-	for _, item := range items {
-		out = append(out, semanticCandidateBundleHit{
-			PrimaryPath:  normalizeCodeSearchPath(stringValue(item["primary_path"])),
-			RelatedPaths: decodeStringSliceAny(item["related_paths"]),
-			Symbols:      decodeStringSliceAny(item["symbols"]),
-			Score:        floatValue(item["score"]),
-			MatchReason:  stringValue(item["match_reason"]),
-		})
-	}
-	return out
-}
-
-//nolint:unused // Kept with semantic bundle decoding helpers.
-func decodeStringSliceAny(raw any) []string {
-	switch typed := raw.(type) {
-	case []string:
-		out := make([]string, 0, len(typed))
-		for _, item := range typed {
-			if item = strings.TrimSpace(item); item != "" {
-				out = append(out, item)
-			}
-		}
-		return out
-	case []any:
-		out := make([]string, 0, len(typed))
-		for _, item := range typed {
-			if s, ok := item.(string); ok {
-				if s = strings.TrimSpace(s); s != "" {
-					out = append(out, s)
-				}
-			}
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
-//nolint:unused // Kept with semanticCodeSearchHits for opt-in semantic bundle decoding.
-func semanticBundleSnippet(bundle semanticCandidateBundleHit) string {
-	parts := make([]string, 0, 2)
-	if bundle.MatchReason != "" {
-		parts = append(parts, "semantic bundle: "+bundle.MatchReason)
-	}
-	if len(bundle.Symbols) > 0 {
-		parts = append(parts, "symbols: "+strings.Join(bundle.Symbols, ", "))
-	}
-	return strings.Join(parts, "\n")
 }
 
 func (a *ReadOnlyAdapter) localCodeProbeSearch(ctx context.Context, query string, taskType string, requiredEvidence []string, limit int, options codeSearchRequestOptions, budget *localProviderBudget) ([]rankedCodeSearchHit, error) {
@@ -5879,11 +5752,6 @@ func codeProbeSnippet(reason string, excerpt string) string {
 	default:
 		return reason + "\nexcerpt: " + excerpt
 	}
-}
-
-//nolint:unused // Kept for tests/debug callers that want default code-search fusion without request options.
-func mergeCodeSearchHits(limit int, repoHits []contextengine.CodeSearchHit, rankedGroups ...[]rankedCodeSearchHit) []contextengine.CodeSearchHit {
-	return mergeCodeSearchHitsWithOptions(limit, codeSearchRequestOptions{}, repoHits, rankedGroups...)
 }
 
 type mergedCodeSearchHit struct {

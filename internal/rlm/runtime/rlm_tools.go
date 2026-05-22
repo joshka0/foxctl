@@ -796,15 +796,6 @@ func (e *RLMToolsExecutor) mostRecentChildNodeID() string {
 	return e.submitted[len(e.submitted)-1].handle.NodeID
 }
 
-//nolint:unused // Kept for recursive tool routing variants.
-func (e *RLMToolsExecutor) resolveParentNodeID(input string) string {
-	parentNodeID := strings.TrimSpace(input)
-	if parentNodeID != "" {
-		return parentNodeID
-	}
-	return e.parentNodeID
-}
-
 func summarizeNodes(nodes []Node, childNumber func(string) int, maxSummaryChars int) []rlmNodeSummary {
 	if len(nodes) == 0 {
 		return []rlmNodeSummary{}
@@ -840,17 +831,6 @@ func summarizeNodes(nodes []Node, childNumber func(string) int, maxSummaryChars 
 			}
 		}
 		out = append(out, item)
-	}
-	return out
-}
-
-//nolint:unused // Kept for recursive tool input normalization variants.
-func trimNonEmptyStrings(values []string) []string {
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			out = append(out, trimmed)
-		}
 	}
 	return out
 }

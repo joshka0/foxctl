@@ -872,16 +872,6 @@ func runtimeForwardCertification(node BraidNode, sourceNodeID string, source *Ru
 	}
 }
 
-//nolint:unused // Kept for dependency-verification policy variants.
-func braidDependencyVerificationPassed(dependencySummaries map[string]string) bool {
-	for _, summary := range dependencySummaries {
-		if braidVerificationSummaryPassed(summary) {
-			return true
-		}
-	}
-	return false
-}
-
 func braidSolutionAnswerFromSummary(summary string) (string, bool) {
 	if artifact, ok := parseBraidNodeArtifact(summary); ok {
 		answer := braidNodeArtifactAnswerString(artifact)
@@ -3245,12 +3235,6 @@ func helperAnswerFromToolResult(result string) string {
 	return answer
 }
 
-//nolint:unused // Kept for older helper result consumers during LongCoT runtime migration.
-func helperAnswerAndVerifiedFromToolResult(result string) (string, bool) {
-	answer, cert := helperAnswerAndCertificationFromToolResult(BraidNode{}, result)
-	return answer, cert != nil && cert.Pass
-}
-
 func helperAnswerAndCertificationFromToolResult(node BraidNode, result string) (string, *RuntimeCertification) {
 	var decoded struct {
 		OK           bool           `json:"ok"`
@@ -5037,23 +5021,6 @@ func braidNodeAnswerObjectTemplate(ids []string) string {
 	return "{" + strings.Join(parts, ", ") + "}"
 }
 
-//nolint:unused // Kept for router/pre-split diagnostics while adaptive splitting is feature-gated.
-func adaptiveBraidSplitDeclaredTargetIDs(node BraidNode) []string {
-	input := node.InputSchema
-	if len(input) == 0 {
-		return nil
-	}
-	for _, key := range []string{"solve_targets", "nodes_to_solve"} {
-		if ids := extractBraidNodeIDsFromAny(input[key]); len(ids) > 1 {
-			return ids
-		}
-		if ids := stringSliceFromAny(input[key]); len(ids) > 1 {
-			return dedupeNonEmptyStrings(ids)
-		}
-	}
-	return nil
-}
-
 var (
 	braidNodeIDRangeRE  = regexp.MustCompile(`\bnode_(\d+)\s*(?:to|-|through)\s*node_(\d+)\b`)
 	braidNodeIDRE       = regexp.MustCompile(`\bnode_\d+\b`)
@@ -6093,11 +6060,6 @@ func braidNodePartialCanFeedDownstream(node BraidNode, finalNodeID string, graph
 	return false
 }
 
-//nolint:unused // Kept for generated split graph cleanup variants.
-func isGeneratedBraidSplitParseNode(node BraidNode) bool {
-	return node.Kind == "extract" && strings.HasSuffix(node.ID, "__parse")
-}
-
 func braidNodeDependsOn(graph BraidGraph, nodeID string, dependencyID string) bool {
 	seen := map[string]struct{}{}
 	var visit func(string) bool
@@ -6879,59 +6841,6 @@ func braidSplitParentSchema(input map[string]any) map[string]any {
 	return parent
 }
 
-//nolint:unused // Kept for feature-gated router pre-split experiments.
-func applyBraidRouterSplits(graph *BraidGraph, toolExec *replToolExecutor, phaseName string) {
-	if graph == nil || len(graph.Nodes) == 0 {
-		return
-	}
-	for {
-		applied := false
-		for _, node := range append([]BraidNode(nil), graph.Nodes...) {
-			if !shouldBraidRouterSplitNode(node) {
-				continue
-			}
-			plan, ok := buildAdaptiveBraidSplitPlan(node, "router pre-split broad solve node before helper execution")
-			if !ok {
-				continue
-			}
-			if applyAdaptiveBraidSplitPlan(graph, plan) {
-				applied = true
-				if toolExec != nil && toolExec.recorder != nil {
-					toolExec.recorder.RecordBraidEvent(BraidEvent{
-						Phase:   phaseName,
-						NodeID:  node.ID,
-						Status:  "router_split",
-						Message: fmt.Sprintf("split broad solve node into %d target nodes", len(plan.Targets)),
-					})
-				}
-				break
-			}
-		}
-		if !applied {
-			return
-		}
-	}
-}
-
-//nolint:unused // Kept with applyBraidRouterSplits.
-func shouldBraidRouterSplitNode(node BraidNode) bool {
-	if node.Kind != "solve" {
-		return false
-	}
-	policy := braidNodeEffectiveHelperPolicy(node)
-	if policy != BraidNodeHelperPolicyPreferred && policy != BraidNodeHelperPolicyRequired {
-		return false
-	}
-	if strings.Contains(node.ID, "__adaptive_") || strings.HasSuffix(node.ID, "__adaptive_merge") {
-		return false
-	}
-	if len(adaptiveBraidCycleClusters(node)) > 0 {
-		return true
-	}
-	targets := adaptiveBraidSplitDeclaredTargetIDs(node)
-	return len(targets) >= 2
-}
-
 func braidNodeHasRegisteredSplitPolicy(node BraidNode) bool {
 	contract, ok := braidScaffoldContractFor(node.ScaffoldClass, node.ScaffoldID)
 	return ok && contract.SplitPolicy != nil
@@ -6947,31 +6856,6 @@ func shouldStructuralSplitFromInput(node BraidNode) bool {
 	}
 	plan := generalsolver.AnalyzeForSplit(syntheticItem)
 	return plan.Strategy != generalsolver.SplitStrategyNone
-}
-
-// splitChunkCountForNode determines how many solve sub-items to create.
-//
-//nolint:unused // Kept for helper-factory split sizing variants.
-func splitChunkCountForNode(node BraidNode) int {
-	// Try structural analysis first.
-	if parsed, ok := helperFactoryExtractInstanceFields(node.Question); ok && len(parsed) > 0 {
-		syntheticItem := generalsolver.WorkItem{
-			ID:      node.ID,
-			Payload: parsed,
-		}
-		plan := generalsolver.AnalyzeForSplit(syntheticItem)
-		if plan.ChunkCount > 0 {
-			return plan.ChunkCount
-		}
-	}
-	// Archetype-based default: 4 chunks for compute-heavy archetypes.
-	archetype := strings.ToLower(strings.TrimSpace(node.Archetype))
-	switch archetype {
-	case "symbolic_trace":
-		return 4
-	default:
-		return 2
-	}
 }
 
 // applyGraphLevelSplits examines each work item in the solver state and splits

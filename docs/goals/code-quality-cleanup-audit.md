@@ -143,7 +143,7 @@ by cleanup value and implementation risk.
 
 ## Unused, Deprecated, And Legacy Code
 
-- [ ] Remove staticcheck-confirmed unused Go code in a focused RLM slice.
+- [x] Remove staticcheck-confirmed unused Go code in a focused RLM slice.
   - Scope: unused semantic bundle helpers, old braid router-split helpers,
     unused scaffold/factory helpers, unused RLM tool helpers.
   - Tests: staticcheck `U1000`, `go test ./internal/rlm/...`.
