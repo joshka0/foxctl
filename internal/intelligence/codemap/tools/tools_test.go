@@ -115,6 +115,63 @@ func TestReadFile(t *testing.T) {
 	})
 }
 
+func TestSearchPatternArgs(t *testing.T) {
+	t.Run("builds default skill input", func(t *testing.T) {
+		input := searchPatternArgs{Pattern: "func main"}.skillInput("/workspace")
+
+		if input["path"] != "/workspace" {
+			t.Fatalf("path=%v", input["path"])
+		}
+		if input["pattern"] != "func main" {
+			t.Fatalf("pattern=%v", input["pattern"])
+		}
+		if input["case_insensitive"] != true {
+			t.Fatalf("case_insensitive=%v", input["case_insensitive"])
+		}
+		if input["max_matches"] != 50 || input["max_blocks"] != 20 || input["max_block_lines"] != 100 {
+			t.Fatalf("limits=%v", input)
+		}
+	})
+
+	t.Run("applies optional overrides", func(t *testing.T) {
+		caseSensitive := false
+		input := searchPatternArgs{
+			Pattern:         "func main",
+			Path:            "cmd/foxctl",
+			CaseInsensitive: &caseSensitive,
+			MaxMatches:      7,
+		}.skillInput("/workspace")
+
+		if input["path"] != filepath.Join("/workspace", "cmd/foxctl") {
+			t.Fatalf("path=%v", input["path"])
+		}
+		if input["case_insensitive"] != false {
+			t.Fatalf("case_insensitive=%v", input["case_insensitive"])
+		}
+		if input["max_matches"] != 7 {
+			t.Fatalf("max_matches=%v", input["max_matches"])
+		}
+	})
+
+	t.Run("rejects invalid argument type before skill execution", func(t *testing.T) {
+		r, err := NewRegistry(WithWorkspace(t.TempDir()))
+		if err != nil {
+			t.Fatalf("NewRegistry() error = %v", err)
+		}
+
+		result, err := r.searchPattern(context.Background(), map[string]any{
+			"pattern":     "func main",
+			"max_matches": "7",
+		})
+		if err != nil {
+			t.Fatalf("searchPattern() error = %v", err)
+		}
+		if !result.IsError {
+			t.Fatal("expected invalid argument error")
+		}
+	})
+}
+
 func TestFinishCodemap(t *testing.T) {
 	tmpDir := t.TempDir()
 

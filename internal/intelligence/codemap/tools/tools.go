@@ -272,38 +272,52 @@ func (r *Registry) registerSearchPattern() error {
 
 // searchPattern implements the search_pattern tool.
 func (r *Registry) searchPattern(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
-	pattern, ok := args["pattern"].(string)
-	if !ok || pattern == "" {
+	input, err := decodeToolArgs[searchPatternArgs](args)
+	if err != nil {
+		return errorResult(fmt.Sprintf("invalid search_pattern arguments: %v", err)), nil
+	}
+	if input.Pattern == "" {
 		return errorResult("pattern is required"), nil
 	}
 
 	// Build input for code/context_ripgrep skill
-	input := map[string]any{
-		"path":             r.workspace,
-		"pattern":          pattern,
-		"case_insensitive": true,
-		"max_matches":      50,
-		"max_blocks":       20,
-		"max_block_lines":  100,
-	}
-
-	if path, ok := args["path"].(string); ok && path != "" {
-		input["path"] = filepath.Join(r.workspace, path)
-	}
-	if ci, ok := args["case_insensitive"].(bool); ok {
-		input["case_insensitive"] = ci
-	}
-	if mm, ok := args["max_matches"].(float64); ok && mm > 0 {
-		input["max_matches"] = int(mm)
-	}
+	skillInput := input.skillInput(r.workspace)
 
 	// Execute skill
-	result, err := r.runSkill(ctx, "code/context_ripgrep", input)
+	result, err := r.runSkill(ctx, "code/context_ripgrep", skillInput)
 	if err != nil {
 		return errorResult(fmt.Sprintf("search failed: %v", err)), nil
 	}
 
 	return successResult(result), nil
+}
+
+type searchPatternArgs struct {
+	Pattern         string `json:"pattern"`
+	Path            string `json:"path,omitempty"`
+	CaseInsensitive *bool  `json:"case_insensitive,omitempty"`
+	MaxMatches      int    `json:"max_matches,omitempty"`
+}
+
+func (a searchPatternArgs) skillInput(workspace string) map[string]any {
+	input := map[string]any{
+		"path":             workspace,
+		"pattern":          a.Pattern,
+		"case_insensitive": true,
+		"max_matches":      50,
+		"max_blocks":       20,
+		"max_block_lines":  100,
+	}
+	if a.Path != "" {
+		input["path"] = filepath.Join(workspace, a.Path)
+	}
+	if a.CaseInsensitive != nil {
+		input["case_insensitive"] = *a.CaseInsensitive
+	}
+	if a.MaxMatches > 0 {
+		input["max_matches"] = a.MaxMatches
+	}
+	return input
 }
 
 // registerGetSymbols registers the get_symbols tool.
