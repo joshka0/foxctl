@@ -22,23 +22,18 @@ import (
 )
 
 type roomStatusParticipantResponse struct {
-	ActorID              string                       `json:"actor_id"`
-	Role                 string                       `json:"role,omitempty"`
-	Backend              string                       `json:"backend,omitempty"`
-	Session              string                       `json:"session,omitempty"`
-	PaneID               string                       `json:"pane_id,omitempty"`
-	Unbound              bool                         `json:"unbound,omitempty"`
-	TransportEndpoint    string                       `json:"transport_endpoint,omitempty"`
-	TransportKind        string                       `json:"transport_kind,omitempty"`
-	DeliveryBinding      *RoomDeliveryBindingResponse `json:"delivery_binding,omitempty"`
-	TransportStatus      string                       `json:"transport_status,omitempty"`
-	RuntimeBindingStatus string                       `json:"runtime_binding_status,omitempty"`
-	LastActiveAt         *time.Time                   `json:"last_active_at,omitempty"`
-	Status               string                       `json:"status"`
-	AssignedTaskCount    int                          `json:"assigned_task_count"`
-	OwnedTaskCount       int                          `json:"owned_task_count"`
-	ActionableInboxCount int                          `json:"actionable_inbox_count"`
-	LatestActionable     *roomStatusEntryResponse     `json:"latest_actionable,omitempty"`
+	ActorID              string                   `json:"actor_id"`
+	Role                 string                   `json:"role,omitempty"`
+	Unbound              bool                     `json:"unbound,omitempty"`
+	Transport            agent.ParticipantState   `json:"transport"`
+	TransportStatus      string                   `json:"transport_status,omitempty"`
+	RuntimeBindingStatus string                   `json:"runtime_binding_status,omitempty"`
+	LastActiveAt         *time.Time               `json:"last_active_at,omitempty"`
+	Status               string                   `json:"status"`
+	AssignedTaskCount    int                      `json:"assigned_task_count"`
+	OwnedTaskCount       int                      `json:"owned_task_count"`
+	ActionableInboxCount int                      `json:"actionable_inbox_count"`
+	LatestActionable     *roomStatusEntryResponse `json:"latest_actionable,omitempty"`
 }
 
 type roomTaskPulseSummaryResponse struct {
@@ -2195,35 +2190,16 @@ func apiBuildRoomStatusParticipants(room agent.RoomSummary, messages []agent.Boa
 	}
 	now := time.Now().UTC()
 	participants := make([]roomStatusParticipantResponse, 0, len(participantSet))
+	participantStates := agent.BuildParticipantStates(room.Members)
 	for actorID := range participantSet {
 		member := memberByActor[actorID]
+		transport := agent.ParticipantStateForActorID(participantStates, actorID)
 		p := roomStatusParticipantResponse{
-			ActorID: actorID,
-			Role:    apiRoomMemberRole(room.Members, actorID),
-			Status:  "idle",
-			Backend: strings.TrimSpace(member.Backend),
-			Session: strings.TrimSpace(member.Session),
-			PaneID:  strings.TrimSpace(member.PaneID),
-			Unbound: member.Unbound,
-			TransportEndpoint: strings.TrimSpace(firstNonEmpty(
-				member.TransportEndpoint,
-				func() string {
-					if member.DeliveryBinding == nil {
-						return ""
-					}
-					return member.DeliveryBinding.TransportEndpoint
-				}(),
-			)),
-			TransportKind: strings.TrimSpace(firstNonEmpty(
-				member.TransportKind,
-				func() string {
-					if member.DeliveryBinding == nil {
-						return ""
-					}
-					return member.DeliveryBinding.TransportKind
-				}(),
-			)),
-			DeliveryBinding:      convertRoomDeliveryBinding(member.DeliveryBinding),
+			ActorID:              actorID,
+			Role:                 apiRoomMemberRole(room.Members, actorID),
+			Status:               "idle",
+			Unbound:              transport.Membership == agent.MembershipUnbound,
+			Transport:            transport,
 			TransportStatus:      apiRoomParticipantTransportStatus(member),
 			RuntimeBindingStatus: apiRoomParticipantBindingStatus(member),
 		}

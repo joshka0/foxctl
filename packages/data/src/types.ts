@@ -908,16 +908,11 @@ export interface AgentMemoryCompressResult {
 export interface RoomMember {
   actor_id: string;
   role?: string;
-  backend?: string;
-  session?: string;
-  pane_id?: string;
   joined_at?: string;
   last_active_at?: string;
   status?: "online" | "idle" | "stale" | string;
   session_id?: string;
   unbound?: boolean;
-  transport_endpoint?: string;
-  transport_kind?: string;
   delivery_binding?: RoomDeliveryBinding;
 }
 
@@ -1083,7 +1078,7 @@ export interface RoomStatusParticipant {
   owned_task_count: number;
   actionable_inbox_count: number;
   latest_actionable?: RoomStatusEntry;
-  transport?: ParticipantState;
+  transport: ParticipantState;
 }
 
 export interface RoomTaskPulseSummary {

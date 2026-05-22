@@ -881,14 +881,10 @@ func TestRoomDetailHandler_PutMemberBinding(t *testing.T) {
 	if !ok {
 		t.Fatalf("member type=%T want map[string]any", body["member"])
 	}
-	if got := strings.TrimSpace(fmt.Sprint(member["session"])); got != "146" {
-		t.Fatalf("session=%q want 146", got)
-	}
-	if got := strings.TrimSpace(fmt.Sprint(member["pane_id"])); got != "%159" {
-		t.Fatalf("pane_id=%q want %%159", got)
-	}
-	if got := strings.TrimSpace(fmt.Sprint(member["transport_endpoint"])); got != "/tmp/droid-a.sock" {
-		t.Fatalf("transport_endpoint=%q want /tmp/droid-a.sock", got)
+	for _, key := range []string{"backend", "session", "pane_id", "transport_endpoint", "transport_kind"} {
+		if _, ok := member[key]; ok {
+			t.Fatalf("member contains legacy transport field %q: %#v", key, member)
+		}
 	}
 	binding, ok := member["delivery_binding"].(map[string]any)
 	if !ok {
@@ -899,6 +895,41 @@ func TestRoomDetailHandler_PutMemberBinding(t *testing.T) {
 	}
 	if got := strings.TrimSpace(fmt.Sprint(binding["health"])); got != "ready" {
 		t.Fatalf("delivery_binding.health=%q want ready", got)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/rooms/alpha?workspace_id=ws1", nil)
+	getRR := httptest.NewRecorder()
+	h.ServeHTTP(getRR, getReq)
+	if getRR.Code != http.StatusOK {
+		t.Fatalf("get status=%d body=%s", getRR.Code, getRR.Body.String())
+	}
+	getBody := decodeResponseBody(t, getRR)
+	room, ok := getBody["room"].(map[string]any)
+	if !ok {
+		t.Fatalf("room type=%T want map[string]any", getBody["room"])
+	}
+	members, ok := room["members"].([]any)
+	if !ok {
+		t.Fatalf("room.members type=%T want []any", room["members"])
+	}
+	var detailMember map[string]any
+	for _, raw := range members {
+		candidate, _ := raw.(map[string]any)
+		if strings.TrimSpace(fmt.Sprint(candidate["actor_id"])) == "droid-a" {
+			detailMember = candidate
+			break
+		}
+	}
+	if detailMember == nil {
+		t.Fatalf("room.members=%#v want droid-a", members)
+	}
+	for _, key := range []string{"backend", "session", "pane_id", "transport_endpoint", "transport_kind"} {
+		if _, ok := detailMember[key]; ok {
+			t.Fatalf("detail member contains legacy transport field %q: %#v", key, detailMember)
+		}
+	}
+	if _, ok := detailMember["delivery_binding"].(map[string]any); !ok {
+		t.Fatalf("detail member delivery_binding type=%T want map[string]any", detailMember["delivery_binding"])
 	}
 }
 
@@ -2344,6 +2375,21 @@ func TestRoomDetailHandler_GetControlSnapshotIncludesLoopHealthAndLinkedCards(t 
 	}
 	if got := strings.TrimSpace(fmt.Sprint(member["runtime_binding_status"])); got != "ready" {
 		t.Fatalf("runtime_binding_status=%q want ready", got)
+	}
+	for _, key := range []string{"backend", "session", "pane_id", "transport_endpoint", "transport_kind", "delivery_binding"} {
+		if _, ok := member[key]; ok {
+			t.Fatalf("participant contains legacy transport field %q: %#v", key, member)
+		}
+	}
+	transport, ok := member["transport"].(map[string]any)
+	if !ok {
+		t.Fatalf("transport type=%T want map[string]any", member["transport"])
+	}
+	if got := strings.TrimSpace(fmt.Sprint(transport["transport_endpoint"])); got != "/tmp/gemini-a.sock" {
+		t.Fatalf("transport.transport_endpoint=%q want /tmp/gemini-a.sock", got)
+	}
+	if got := strings.TrimSpace(fmt.Sprint(transport["mux_backend"])); got != "tmux" {
+		t.Fatalf("transport.mux_backend=%q want tmux", got)
 	}
 
 	if got := strings.TrimSpace(fmt.Sprint(body["task_card_link"])); got != "issue_id_equals_task_id" {

@@ -46,16 +46,11 @@ type RoomResponse struct {
 }
 
 type RoomMemberResponse struct {
-	ActorID           string                       `json:"actor_id"`
-	Role              string                       `json:"role,omitempty"`
-	Backend           string                       `json:"backend,omitempty"`
-	Session           string                       `json:"session,omitempty"`
-	PaneID            string                       `json:"pane_id,omitempty"`
-	Unbound           bool                         `json:"unbound,omitempty"`
-	JoinedAt          string                       `json:"joined_at,omitempty"`
-	TransportEndpoint string                       `json:"transport_endpoint,omitempty"`
-	TransportKind     string                       `json:"transport_kind,omitempty"`
-	DeliveryBinding   *RoomDeliveryBindingResponse `json:"delivery_binding,omitempty"`
+	ActorID         string                       `json:"actor_id"`
+	Role            string                       `json:"role,omitempty"`
+	Unbound         bool                         `json:"unbound,omitempty"`
+	JoinedAt        string                       `json:"joined_at,omitempty"`
+	DeliveryBinding *RoomDeliveryBindingResponse `json:"delivery_binding,omitempty"`
 }
 
 type RoomDeliveryBindingResponse struct {
@@ -2140,15 +2135,10 @@ func convertRoomMembers(members []agent.RoomMember) []RoomMemberResponse {
 	out := make([]RoomMemberResponse, 0, len(members))
 	for _, member := range members {
 		resp := RoomMemberResponse{
-			ActorID:           member.ActorID,
-			Role:              member.Role,
-			Backend:           member.Backend,
-			Session:           member.Session,
-			PaneID:            member.PaneID,
-			Unbound:           member.Unbound,
-			TransportEndpoint: member.TransportEndpoint,
-			TransportKind:     member.TransportKind,
-			DeliveryBinding:   convertRoomDeliveryBinding(member.DeliveryBinding),
+			ActorID:         member.ActorID,
+			Role:            member.Role,
+			Unbound:         member.Unbound,
+			DeliveryBinding: convertRoomDeliveryBinding(member.DeliveryBinding),
 		}
 		if !member.JoinedAt.IsZero() {
 			resp.JoinedAt = member.JoinedAt.Format(time.RFC3339)
