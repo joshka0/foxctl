@@ -84,8 +84,10 @@ by cleanup value and implementation risk.
   - Progress: backend agent list/detail/patch paths use one canonical
     `AgentResponse` conversion helper, and fixed daemon response maps were
     replaced by typed response structs.
-  - Backend targets: type remaining room-control status/inbox response wrappers
-    that still assemble fixed responses through anonymous maps.
+  - Progress: room-control status, control-snapshot, inbox, tasks, loop,
+    coordinator handoff, message action, and task action responses now use
+    named DTO envelopes instead of anonymous maps. The compact inbox room
+    helper now returns a typed summary instead of a map-shaped JSON blob.
   - Room transport targets: choose `delivery_binding` plus explicit transport
     fields as canonical, then remove or isolate legacy `backend/session/pane_id`
     compatibility.

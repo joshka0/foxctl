@@ -356,12 +356,20 @@ func TestCompactRoomSummaryForInboxOmitsBulkLists(t *testing.T) {
 		DispatchAgentIDs: []string{"x"},
 	}
 	got := CompactRoomSummaryForInbox(s)
+	raw, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal compact summary: %v", err)
+	}
+	var encoded map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &encoded); err != nil {
+		t.Fatalf("unmarshal compact summary: %v", err)
+	}
 	for _, key := range []string{"task_ids", "participants", "members", "description", "dispatch_agent_ids"} {
-		if _, ok := got[key]; ok {
+		if _, ok := encoded[key]; ok {
 			t.Fatalf("unexpected key %q in compact summary", key)
 		}
 	}
-	if got["id"] != "r1" || got["message_count"] != 9 {
+	if got.ID != "r1" || got.MessageCount != 9 {
 		t.Fatalf("got=%v", got)
 	}
 }

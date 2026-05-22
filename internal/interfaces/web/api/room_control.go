@@ -194,6 +194,89 @@ type roomLinkedOrchestrationCardResponse struct {
 	LinkedTaskID    string                         `json:"linked_task_id,omitempty"`
 }
 
+type roomStatusResponse struct {
+	Room              RoomResponse                        `json:"room"`
+	Participants      []roomStatusParticipantResponse     `json:"participants"`
+	TaskPulse         roomTaskPulseSummaryResponse        `json:"task_pulse"`
+	Backlog           roomStatusBacklogResponse           `json:"backlog"`
+	ActionableBacklog roomStatusActionableBacklogResponse `json:"actionable_backlog"`
+	Loop              roomLoopResponse                    `json:"loop"`
+}
+
+type roomControlSnapshotResponse struct {
+	Room                     RoomResponse                          `json:"room"`
+	Participants             []roomStatusParticipantResponse       `json:"participants"`
+	Loop                     roomLoopResponse                      `json:"loop"`
+	LoopHealth               roomControlSnapshotLoopHealthResponse `json:"loop_health"`
+	Inbox                    roomControlSnapshotInboxResponse      `json:"inbox"`
+	Tasks                    []roomTaskResponse                    `json:"tasks"`
+	TaskCount                int                                   `json:"task_count"`
+	Reminders                []RoomReminderResponse                `json:"reminders"`
+	Messages                 []roomControlSnapshotMessageResponse  `json:"messages"`
+	LinkedOrchestrationCards []roomLinkedOrchestrationCardResponse `json:"linked_orchestration_cards"`
+	TaskCardLink             string                                `json:"task_card_link"`
+	TaskFilter               string                                `json:"task_filter,omitempty"`
+	IssueFilter              string                                `json:"issue_filter,omitempty"`
+	OrchestrationCardsError  string                                `json:"orchestration_cards_error,omitempty"`
+}
+
+type roomInboxCompactResponse struct {
+	Room    agent.CompactRoomSummary `json:"room"`
+	Actor   string                   `json:"actor"`
+	Filter  string                   `json:"filter"`
+	Count   int                      `json:"count"`
+	Entries []roomInboxEntryResponse `json:"entries"`
+}
+
+type roomInboxFullResponse struct {
+	Room    RoomResponse             `json:"room"`
+	Actor   string                   `json:"actor"`
+	Filter  string                   `json:"filter"`
+	Count   int                      `json:"count"`
+	Entries []roomInboxEntryResponse `json:"entries"`
+}
+
+type roomTasksResponse struct {
+	Room  RoomResponse       `json:"room"`
+	Tasks []roomTaskResponse `json:"tasks"`
+	Count int                `json:"count"`
+}
+
+type roomTaskCreateResponse struct {
+	RoomID  string              `json:"room_id"`
+	Task    roomTaskResponse    `json:"task"`
+	Message *agent.BoardMessage `json:"message"`
+	Actor   string              `json:"actor"`
+}
+
+type roomLoopStateResponse struct {
+	RoomID string           `json:"room_id"`
+	Loop   roomLoopResponse `json:"loop"`
+}
+
+type roomCoordinatorSetResponse struct {
+	Room                RoomResponse `json:"room"`
+	PreviousCoordinator string       `json:"previous_coordinator"`
+	Coordinator         string       `json:"coordinator"`
+	Actor               string       `json:"actor"`
+	EventKind           string       `json:"event_kind"`
+}
+
+type roomMessageActionResponse struct {
+	RoomID         string                   `json:"room_id"`
+	MessageIDs     []string                 `json:"message_ids"`
+	Updated        int                      `json:"updated"`
+	ResolvedStatus agent.BoardMessageStatus `json:"resolved_status"`
+	Actor          string                   `json:"actor"`
+}
+
+type roomTaskActionResponse struct {
+	RoomID string           `json:"room_id"`
+	Task   roomTaskResponse `json:"task"`
+	Action string           `json:"action"`
+	Actor  string           `json:"actor"`
+}
+
 type roomLoopPatchRequest struct {
 	WorkspaceID                  string  `json:"workspace_id"`
 	ActorID                      string  `json:"actor_id"`
@@ -316,13 +399,13 @@ func handleRoomStatusGet(w http.ResponseWriter, r *http.Request, cfg config.Conf
 	now := time.Now().UTC()
 	taskPulse := apiBuildRoomTaskPulseSummary(tasks, now, staleAfter)
 	backlog := apiBuildRoomStatusBacklog(summary, messages)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"room":               convertRoomSummary(summary),
-		"participants":       apiBuildRoomStatusParticipants(summary, messages, tasks, staleAfter),
-		"task_pulse":         taskPulse,
-		"backlog":            backlog,
-		"actionable_backlog": apiBuildRoomStatusActionableBacklog(summary, messages, tasks, backlog, taskPulse, filters, staleAfter, now, verbose),
-		"loop":               apiConvertRoomLoop(loop),
+	writeJSON(w, http.StatusOK, roomStatusResponse{
+		Room:              convertRoomSummary(summary),
+		Participants:      apiBuildRoomStatusParticipants(summary, messages, tasks, staleAfter),
+		TaskPulse:         taskPulse,
+		Backlog:           backlog,
+		ActionableBacklog: apiBuildRoomStatusActionableBacklog(summary, messages, tasks, backlog, taskPulse, filters, staleAfter, now, verbose),
+		Loop:              apiConvertRoomLoop(loop),
 	})
 }
 
@@ -419,27 +502,27 @@ func handleRoomControlSnapshotGet(w http.ResponseWriter, r *http.Request, cfg co
 		log.Warn().Err(cardsErr).Str("room_id", roomID).Msg("failed to load linked orchestration cards for room snapshot")
 	}
 
-	response := map[string]any{
-		"room":                       convertRoomSummary(summary),
-		"participants":               apiBuildRoomStatusParticipants(summary, messages, tasks, loop.TaskStaleAfter),
-		"loop":                       apiConvertRoomLoop(loop),
-		"loop_health":                apiBuildRoomLoopHealthSnapshot(r.Context(), coordStore, loop, time.Now().UTC()),
-		"inbox":                      apiBuildRoomControlSnapshotInbox(actorID, inboxEntries),
-		"tasks":                      taskPayload,
-		"task_count":                 len(taskPayload),
-		"reminders":                  reminderPayload,
-		"messages":                   apiBuildRoomControlSnapshotMessages(messages, taskFilter),
-		"linked_orchestration_cards": cards,
-		"task_card_link":             "issue_id_equals_task_id",
+	response := roomControlSnapshotResponse{
+		Room:                     convertRoomSummary(summary),
+		Participants:             apiBuildRoomStatusParticipants(summary, messages, tasks, loop.TaskStaleAfter),
+		Loop:                     apiConvertRoomLoop(loop),
+		LoopHealth:               apiBuildRoomLoopHealthSnapshot(r.Context(), coordStore, loop, time.Now().UTC()),
+		Inbox:                    apiBuildRoomControlSnapshotInbox(actorID, inboxEntries),
+		Tasks:                    taskPayload,
+		TaskCount:                len(taskPayload),
+		Reminders:                reminderPayload,
+		Messages:                 apiBuildRoomControlSnapshotMessages(messages, taskFilter),
+		LinkedOrchestrationCards: cards,
+		TaskCardLink:             "issue_id_equals_task_id",
 	}
 	if taskFilter != "" {
-		response["task_filter"] = taskFilter
+		response.TaskFilter = taskFilter
 	}
 	if issueFilter != "" {
-		response["issue_filter"] = issueFilter
+		response.IssueFilter = issueFilter
 	}
 	if cardsErr != nil {
-		response["orchestration_cards_error"] = cardsErr.Error()
+		response.OrchestrationCardsError = cardsErr.Error()
 	}
 	writeJSON(w, http.StatusOK, response)
 }
@@ -674,16 +757,23 @@ func handleRoomInboxGet(w http.ResponseWriter, r *http.Request, cfg config.Confi
 		return
 	}
 	entries := apiBuildRoomInboxEntries(actorID, messages, filter, includeBroadcasts)
-	roomPayload := any(convertRoomSummary(summary))
+	filter = apiNormalizeRoomInboxFilter(filter)
 	if compact {
-		roomPayload = agent.CompactRoomSummaryForInbox(summary)
+		writeJSON(w, http.StatusOK, roomInboxCompactResponse{
+			Room:    agent.CompactRoomSummaryForInbox(summary),
+			Actor:   actorID,
+			Filter:  filter,
+			Count:   len(entries),
+			Entries: entries,
+		})
+		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"room":    roomPayload,
-		"actor":   actorID,
-		"filter":  apiNormalizeRoomInboxFilter(filter),
-		"count":   len(entries),
-		"entries": entries,
+	writeJSON(w, http.StatusOK, roomInboxFullResponse{
+		Room:    convertRoomSummary(summary),
+		Actor:   actorID,
+		Filter:  filter,
+		Count:   len(entries),
+		Entries: entries,
 	})
 }
 
@@ -737,10 +827,10 @@ func handleRoomTasksGet(w http.ResponseWriter, r *http.Request, cfg config.Confi
 	for _, task := range tasks {
 		resp = append(resp, convertRoomTask(task))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"room":  convertRoomSummary(summary),
-		"tasks": resp,
-		"count": len(resp),
+	writeJSON(w, http.StatusOK, roomTasksResponse{
+		Room:  convertRoomSummary(summary),
+		Tasks: resp,
+		Count: len(resp),
 	})
 }
 
@@ -835,11 +925,11 @@ func handleRoomTasksPost(w http.ResponseWriter, r *http.Request, cfg config.Conf
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"room_id": roomID,
-		"task":    convertRoomTask(task),
-		"message": msg,
-		"actor":   req.ActorID,
+	writeJSON(w, http.StatusCreated, roomTaskCreateResponse{
+		RoomID:  roomID,
+		Task:    convertRoomTask(task),
+		Message: msg,
+		Actor:   req.ActorID,
 	})
 }
 
@@ -888,9 +978,9 @@ func handleRoomLoopGet(w http.ResponseWriter, r *http.Request, cfg config.Config
 		httpError(w, http.StatusInternalServerError, "failed to load room loop")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"room_id": roomID,
-		"loop":    apiConvertRoomLoop(loop),
+	writeJSON(w, http.StatusOK, roomLoopStateResponse{
+		RoomID: roomID,
+		Loop:   apiConvertRoomLoop(loop),
 	})
 }
 
@@ -970,9 +1060,9 @@ func handleRoomLoopPatch(w http.ResponseWriter, r *http.Request, cfg config.Conf
 		ActorID:     req.ActorID,
 		UpdatedAt:   time.Now().UTC().Format(time.RFC3339),
 	})
-	writeJSON(w, http.StatusOK, map[string]any{
-		"room_id": roomID,
-		"loop":    apiConvertRoomLoop(persisted),
+	writeJSON(w, http.StatusOK, roomLoopStateResponse{
+		RoomID: roomID,
+		Loop:   apiConvertRoomLoop(persisted),
 	})
 }
 
@@ -1058,12 +1148,12 @@ func handleRoomCoordinatorSet(w http.ResponseWriter, r *http.Request, cfg config
 		httpError(w, http.StatusInternalServerError, "failed to update coordinator")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"room":                 convertRoomSummary(updated),
-		"previous_coordinator": currentCoordinator,
-		"coordinator":          req.TargetID,
-		"actor":                req.ActorID,
-		"event_kind":           "lead_change",
+	writeJSON(w, http.StatusOK, roomCoordinatorSetResponse{
+		Room:                convertRoomSummary(updated),
+		PreviousCoordinator: currentCoordinator,
+		Coordinator:         req.TargetID,
+		Actor:               req.ActorID,
+		EventKind:           "lead_change",
 	})
 }
 
@@ -1151,12 +1241,12 @@ func handleRoomMessageAction(w http.ResponseWriter, r *http.Request, cfg config.
 		httpError(w, http.StatusNotFound, "no room messages were updated")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"room_id":         roomID,
-		"message_ids":     messageIDs,
-		"updated":         updated,
-		"resolved_status": status,
-		"actor":           req.ActorID,
+	writeJSON(w, http.StatusOK, roomMessageActionResponse{
+		RoomID:         roomID,
+		MessageIDs:     messageIDs,
+		Updated:        updated,
+		ResolvedStatus: status,
+		Actor:          req.ActorID,
 	})
 }
 
@@ -1233,12 +1323,12 @@ func handleRoomMessagesResolveBulk(w http.ResponseWriter, r *http.Request, cfg c
 		httpError(w, http.StatusNotFound, "no room messages were resolved")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"room_id":         roomID,
-		"message_ids":     ids,
-		"updated":         updated,
-		"resolved_status": status,
-		"actor":           req.ActorID,
+	writeJSON(w, http.StatusOK, roomMessageActionResponse{
+		RoomID:         roomID,
+		MessageIDs:     ids,
+		Updated:        updated,
+		ResolvedStatus: status,
+		Actor:          req.ActorID,
 	})
 }
 
@@ -1339,11 +1429,11 @@ func handleRoomTaskAction(w http.ResponseWriter, r *http.Request, cfg config.Con
 		UpdatedAt:   time.Now().UTC().Format(time.RFC3339),
 	})
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"room_id": roomID,
-		"task":    convertRoomTask(task),
-		"action":  strings.ToLower(strings.TrimSpace(action)),
-		"actor":   req.ActorID,
+	writeJSON(w, http.StatusOK, roomTaskActionResponse{
+		RoomID: roomID,
+		Task:   convertRoomTask(task),
+		Action: strings.ToLower(strings.TrimSpace(action)),
+		Actor:  req.ActorID,
 	})
 }
 

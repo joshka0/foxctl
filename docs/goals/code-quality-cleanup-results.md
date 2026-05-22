@@ -73,6 +73,11 @@ merge, rebase or merge current `main` and rerun the full verification set.
   conversion path.
 - Fixed agent-daemon, companion personality, skills/MCP, and room-agile
   responses now use named DTOs instead of anonymous `map[string]any` wrappers.
+- Room-control fixed response envelopes now use named DTOs, including status,
+  control-snapshot, inbox, tasks, loop, coordinator handoff, message actions,
+  and task actions.
+- `agent.CompactRoomSummaryForInbox` now returns a typed compact room summary
+  instead of a map-shaped JSON blob.
 
 ### Legacy And Compatibility Removal
 
@@ -135,8 +140,6 @@ Verification has been run slice-by-slice, including:
 ### Compatibility Layers
 
 - Avoid duplicate `gui-agent` copies of shared `@foxctl/data/client` functions.
-- Type the remaining room-control response wrappers that still assemble fixed
-  response envelopes with anonymous maps.
 - Decide whether the internal `UpdateRoomMemberTransport` pane registration
   path should move to an explicit binding update helper.
 - Migrate or isolate older non-v2 `OpenDBCompat*` callers in the legacy storage
@@ -177,7 +180,6 @@ Verification has been run slice-by-slice, including:
 
 ## Recommended Next Slices
 
-1. Type the remaining room-control fixed response wrappers.
-2. Reduce duplicate `gui-agent` API client functions where `@foxctl/data/client`
+1. Reduce duplicate `gui-agent` API client functions where `@foxctl/data/client`
    is already the canonical implementation.
-3. Add reliable unused-code tooling and frontend verification docs.
+2. Add reliable unused-code tooling and frontend verification docs.

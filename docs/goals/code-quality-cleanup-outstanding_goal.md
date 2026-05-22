@@ -224,7 +224,7 @@ Done when:
   any broad architecture move.
 - Verification passes for each affected package.
 
-### 9. Residual Typed Wrappers And Weak Casts (Weak Casts Complete)
+### 9. Residual Typed Wrappers And Weak Casts (Complete)
 
 Clean up remaining fixed response maps and frontend casts that were outside the
 completed DTO/SSE slices.
@@ -232,8 +232,14 @@ completed DTO/SSE slices.
 Done when:
 
 - Room-control fixed response wrappers use named DTOs where the JSON shape is
-  fixed.
-- Verification passes for each affected package.
+  fixed. Completed for status, control-snapshot, inbox, tasks, loop,
+  coordinator handoff, message action, and task action responses. The compact
+  inbox room helper now returns a typed summary instead of a map-shaped JSON
+  blob.
+- Verification passed:
+  - `go test ./internal/domain/agent`
+  - `go test ./internal/interfaces/web/api -run 'TestRoomDetailHandler_(GetStatusReturnsCoordinatorSummary|GetStatusReturnsPersistedLoopState|GetInboxReturnsActorScopedEntries|CoordinatorSetTransfersRole|GetLoopReturnsPersistedState|PatchLoopRequiresCoordinator|PatchLoopAllowsLocalDevSuperuser|PatchLoopPersistsPolicy|PatchLoopPublishesRoomLoopUpdatedEvent|MessageAckUpdatesStatus|GetControlSnapshotIncludesLoopHealthAndLinkedCards|GetTasksReturnsRoomLinkedTasks|TaskClaimActionUpdatesTask|PostTaskUsesExplicitMilestoneSelection|PostTaskRejectsUnknownMilestoneSelection)$'`
+  - `go test ./internal/interfaces/web/api`
 
 ## Verification
 

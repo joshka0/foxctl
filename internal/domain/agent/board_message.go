@@ -219,41 +219,56 @@ type RoomSummary struct {
 	SandboxConfig    *SandboxConfig `json:"sandbox_config,omitempty"`
 }
 
-// CompactRoomSummaryForInbox returns a small JSON-friendly map for inbox-style responses.
-// It omits bulky fields (task_ids, participants, members, description, dispatch_agent_ids)
-// to keep agent-facing payloads small.
-func CompactRoomSummaryForInbox(s RoomSummary) map[string]any {
-	out := map[string]any{
-		"id":            s.ID,
-		"workspace_id":  s.WorkspaceID,
-		"stream":        s.Stream,
-		"title":         s.Title,
-		"message_count": s.MessageCount,
-		"unread_count":  s.UnreadCount,
+type CompactRoomSummary struct {
+	ID              string `json:"id"`
+	WorkspaceID     string `json:"workspace_id"`
+	Stream          string `json:"stream"`
+	Title           string `json:"title"`
+	MessageCount    int    `json:"message_count"`
+	UnreadCount     int    `json:"unread_count"`
+	DispatchPolicy  string `json:"dispatch_policy,omitempty"`
+	LatestSubject   string `json:"latest_subject,omitempty"`
+	LatestPreview   string `json:"latest_preview,omitempty"`
+	LatestSender    string `json:"latest_sender,omitempty"`
+	LatestMessageAt string `json:"latest_message_at,omitempty"`
+	CreatedAt       string `json:"created_at,omitempty"`
+	UpdatedAt       string `json:"updated_at,omitempty"`
+	ArchivedAt      string `json:"archived_at,omitempty"`
+}
+
+// CompactRoomSummaryForInbox returns the small room shape used by inbox responses.
+func CompactRoomSummaryForInbox(s RoomSummary) CompactRoomSummary {
+	out := CompactRoomSummary{
+		ID:           s.ID,
+		WorkspaceID:  s.WorkspaceID,
+		Stream:       s.Stream,
+		Title:        s.Title,
+		MessageCount: s.MessageCount,
+		UnreadCount:  s.UnreadCount,
 	}
 	if s.DispatchPolicy != "" {
-		out["dispatch_policy"] = s.DispatchPolicy
+		out.DispatchPolicy = s.DispatchPolicy
 	}
 	if s.LatestSubject != "" {
-		out["latest_subject"] = s.LatestSubject
+		out.LatestSubject = s.LatestSubject
 	}
 	if s.LatestPreview != "" {
-		out["latest_preview"] = s.LatestPreview
+		out.LatestPreview = s.LatestPreview
 	}
 	if s.LatestSender != "" {
-		out["latest_sender"] = s.LatestSender
+		out.LatestSender = s.LatestSender
 	}
 	if !s.LatestMessageAt.IsZero() {
-		out["latest_message_at"] = s.LatestMessageAt.Format(time.RFC3339)
+		out.LatestMessageAt = s.LatestMessageAt.Format(time.RFC3339)
 	}
 	if !s.CreatedAt.IsZero() {
-		out["created_at"] = s.CreatedAt.Format(time.RFC3339)
+		out.CreatedAt = s.CreatedAt.Format(time.RFC3339)
 	}
 	if !s.UpdatedAt.IsZero() {
-		out["updated_at"] = s.UpdatedAt.Format(time.RFC3339)
+		out.UpdatedAt = s.UpdatedAt.Format(time.RFC3339)
 	}
 	if s.ArchivedAt != nil && !s.ArchivedAt.IsZero() {
-		out["archived_at"] = s.ArchivedAt.Format(time.RFC3339)
+		out.ArchivedAt = s.ArchivedAt.Format(time.RFC3339)
 	}
 	return out
 }
