@@ -18,18 +18,6 @@ export function parseOrchestrationBoardPayload(data: unknown): OrchestrationBoar
   throw new Error("orchestration board response missing board or artifact payload");
 }
 
-export function isOrchestrationBoardPayloadBoard(
-  payload: OrchestrationBoardPayload,
-): payload is Extract<OrchestrationBoardPayload, { kind: "board" }> {
-  return payload.kind === "board";
-}
-
-export function isOrchestrationBoardPayloadArtifact(
-  payload: OrchestrationBoardPayload,
-): payload is Extract<OrchestrationBoardPayload, { kind: "artifact" }> {
-  return payload.kind === "artifact";
-}
-
 export function isOrchestrationBoard(data: unknown): data is OrchestrationBoard {
   const record = asRecord(data);
   if (!record) return false;

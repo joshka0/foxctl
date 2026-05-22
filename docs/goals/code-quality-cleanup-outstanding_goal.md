@@ -30,8 +30,11 @@ Remaining areas from the results doc after the completed slices:
   - Keep similar GUI/data-client wrapper names separate unless the shared client
     owns the same route, params, response shape, and auth semantics.
 - Dead frontend code:
-  - Delete or replace remaining unused GUI API wrappers and utility exports when
-    caller evidence proves they are dead.
+  - Completed current zero-caller deletion pass for GUI API wrappers and tiny
+    dead `@foxctl/data` orchestration exports.
+  - Follow-up only: add a real dead-export/dependency graph pass before
+    deleting active-looking shared-client exports that TypeScript's unused
+    checks cannot prove dead.
 - Structural consolidation:
   - Completed: consolidate duplicated skill `inline_mode` parsing.
   - Completed: consolidate repeated repo-index skill workspace resolution
@@ -197,7 +200,7 @@ Done when:
     documented command/manual check if no test harness exists
   - focused tests or smoke checks for `integrations/hermes/client.py`
 
-### 7. Dead Frontend Code And Unused Tooling
+### 7. Dead Frontend Code And Unused Tooling (Mostly Complete)
 
 Delete confirmed unused frontend code and add dependable unused-code workflow
 coverage.
@@ -212,8 +215,15 @@ Done when:
   `getOrchestrationBoardCard` wrapper was deleted, and the orchestration board
   store moved to canonical `@foxctl/data/client` wrappers after adding
   `archived_only` support there.
+- Completed in current slices: confirmed zero-caller GUI API wrappers were
+  deleted for orchestration cleanup, mailbox, blackboard, room mutation,
+  console-session settings/session/message, persisted-session get, health, and
+  flow status/log calls. Tiny dead `@foxctl/data` orchestration exports were
+  also removed.
 - Unused-code tooling is documented and wired so future cleanup can be repeated
   with `bun run unused:frontend`.
+- Remaining scope: add a project-level dead-export/dependency graph pass before
+  further shared-client export deletion.
 - Verification passes:
   - `bun run --cwd packages/gui-agent build`
   - `bun run --cwd packages/foxterm typecheck`

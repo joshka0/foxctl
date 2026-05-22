@@ -352,24 +352,6 @@ export interface OrchestrationArchiveCardsResult {
 export type OrchestrationRestoreCardsRequest = OrchestrationArchiveCardsRequest;
 export type OrchestrationRestoreCardsResult = OrchestrationArchiveCardsResult;
 
-export interface OrchestrationDispatchResult {
-  request_id: string;
-  workspace_id?: string;
-  issue_id: string;
-  issue_identifier?: string;
-  status: string;
-  policy_status?: string;
-  last_outcome?: string;
-  denial_reason?: string;
-  suggestion?: string;
-  run_id?: string;
-  turn_id?: string;
-  agent_id?: string;
-  actor_id?: string;
-  idempotent?: boolean;
-  ts: string;
-}
-
 export interface OrchestrationCardRuntime {
   enabled: boolean;
   agent_id?: string;

@@ -127,6 +127,17 @@ merge, rebase or merge current `main` and rerun the full verification set.
   export, and the unused `ActivityFeed` component were removed. The activity
   store, activity focus store, and activity types remain because they are live
   in logs, sidebars, agent lists, and v2 explorer surfaces.
+- Dead GUI API wrappers were removed after caller search confirmed no live
+  frontend imports: orchestration cleanup, agent memory compression, mailbox
+  list/send, room patch/delete/member patch, blackboard list/post/delete,
+  health, console-session settings, console-session list/delete/messages,
+  persisted-session get, and flow status/log fetch. Similar live GUI/data
+  wrappers stay separate where route, params, response shape, or GUI auth
+  behavior differ.
+- Dead `@foxctl/data` orchestration exports were removed:
+  `dispatchOrchestrationIssue`, `OrchestrationDispatchResult`, and the unused
+  `isOrchestrationBoardPayloadBoard` /
+  `isOrchestrationBoardPayloadArtifact` predicates.
 
 ### Honesty Fixes
 
@@ -179,8 +190,11 @@ Verification has been run slice-by-slice, including:
 
 ### Dead Frontend Code
 
-- Delete or replace remaining unused GUI API wrappers and unused utility exports
-  if they are confirmed unused.
+- Completed: deleted the confirmed zero-caller GUI API wrappers and tiny dead
+  `@foxctl/data` orchestration exports found by the current audit.
+- Follow-up: add a broader dead-export/dependency graph pass before deleting
+  active-looking wrappers from shared clients. `bun run unused:frontend` catches
+  unused locals/imports, but exported API wrappers still need caller evidence.
 - `bun run unused:frontend` is now the repeatable compiler/linter gate for
   unused frontend imports, locals, and parameters. It does not replace caller
   search or a future dead-export dependency graph pass.
@@ -226,6 +240,6 @@ Verification has been run slice-by-slice, including:
 
 ## Recommended Next Slices
 
-1. Audit similar remaining GUI/data-client wrapper names and delete or keep
-   them with caller evidence based on exact route, params, response shape, and
-   GUI auth behavior.
+1. Add a project-level dead-export/dependency graph pass for frontend packages,
+   then use it to audit shared-client exports that compiler/linter unused checks
+   cannot prove dead.

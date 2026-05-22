@@ -26,13 +26,10 @@ import type {
   AgentSession,
   OrchestrationArchiveCardsRequest,
   OrchestrationArchiveCardsResult,
-  OrchestrationCleanupCardsRequest,
-  OrchestrationCleanupCardsResult,
   OrchestrationRestoreCardsRequest,
   OrchestrationRestoreCardsResult,
   OrchestrationSeedCardsRequest,
   OrchestrationSeedCardsResult,
-  BlackboardRecord,
 } from "@foxctl/data/types";
 import type { LogsListResponse } from "@/types/activity";
 import type { PresenceBundle } from "@/types/companion";
@@ -49,21 +46,11 @@ import type {
   FlowEdge,
   FlowTransformKind,
   FlowTriggerKind,
-  FlowStatusResponse,
-  FlowRunLog,
 } from "@/types/flow";
 import { isRoomMessageEvent, parseSSEEnvelope } from "@/types/sse";
 
 const API_BASE = "/api";
 const IS_DEV = import.meta.env.DEV;
-
-interface MailboxListResponse {
-  messages: MailboxMessage[];
-}
-
-interface BlackboardListResponse {
-  records: BlackboardRecord[];
-}
 
 const DEV_AUTH_SESSION: AuthSessionResponse = {
   session: {
@@ -285,19 +272,6 @@ export async function seedOrchestrationCards(
 ): Promise<OrchestrationSeedCardsResult> {
   const env = await request<ApiEnvelope<OrchestrationSeedCardsResult>>(
     "/orchestration/seed-cards",
-    {
-      method: "POST",
-      body: JSON.stringify(params),
-    },
-  );
-  return unwrapEnvelope(env);
-}
-
-export async function cleanupOrchestrationCards(
-  params: OrchestrationCleanupCardsRequest,
-): Promise<OrchestrationCleanupCardsResult> {
-  const env = await request<ApiEnvelope<OrchestrationCleanupCardsResult>>(
-    "/orchestration/cleanup-cards",
     {
       method: "POST",
       body: JSON.stringify(params),
@@ -585,30 +559,6 @@ export async function cancelAgentStream(
   });
 }
 
-export async function compressAgentMemory(
-  agentId: string,
-  params: {
-    conversation_id?: string;
-    distill?: boolean;
-  } = {},
-): Promise<{
-  conversation_id: string;
-  summarized: number;
-  skipped: number;
-  distilled: boolean;
-  processed_dates?: string[];
-  policy: {
-    memory_scope: string;
-    memory_retention: string;
-    default_distill: boolean;
-  };
-}> {
-  return request(`/agents/${agentId}/memory/compress`, {
-    method: "POST",
-    body: JSON.stringify(params),
-  });
-}
-
 /**
  * Fetches daemon sessions for the specified agent.
  *
@@ -620,52 +570,6 @@ export async function listAgentSessions(agentId: string): Promise<{
   count: number;
 }> {
   return request(`/agents/${agentId}/daemon/sessions`);
-}
-
-/**
- * Fetches mailbox messages for a workspace with optional actor filtering, unread-only filtering, and result limiting.
- *
- * @param params - Query parameters:
- *   - `workspace_id`: the workspace to query (required)
- *   - `actor_id`: optional actor to filter messages for
- *   - `only_unread`: if `true`, return only unread messages
- *   - `limit`: maximum number of messages to return
- * @returns MailboxListResponse containing the matching messages and metadata (e.g., count)
- */
-export async function listMailbox(params: {
-  workspace_id: string;
-  actor_id?: string;
-  only_unread?: boolean;
-  limit?: number;
-}): Promise<MailboxListResponse> {
-  const query = new URLSearchParams();
-  query.set("workspace_id", params.workspace_id);
-  if (params.actor_id) query.set("actor_id", params.actor_id);
-  if (params.only_unread) query.set("only_unread", "true");
-  if (params.limit) query.set("limit", String(params.limit));
-
-  return request<MailboxListResponse>(`/mailbox?${query}`);
-}
-
-/**
- * Sends a mailbox message within a workspace.
- *
- * @param params - Message payload containing `workspace_id`, `sender`, `recipient`, `subject`, and `body`; optional `kind` and `priority` may be provided
- * @returns The created message `id` and its `status`
- */
-export async function sendMessage(params: {
-  workspace_id: string;
-  sender: string;
-  recipient: string;
-  subject: string;
-  body: string;
-  kind?: string;
-  priority?: number;
-}): Promise<{ id: string; status: string }> {
-  return request("/mailbox", {
-    method: "POST",
-    body: JSON.stringify(params),
-  });
 }
 
 export async function listRooms(params: {
@@ -711,52 +615,6 @@ export async function getRoom(
   );
 }
 
-export async function patchRoom(
-  roomId: string,
-  params: {
-    workspace_id: string;
-    title?: string;
-    description?: string;
-    dispatch_policy?:
-      | "all_subtree"
-      | "children_only"
-      | "lead_only"
-      | "selected";
-    dispatch_agent_ids?: string[];
-  },
-): Promise<{ room: Room }> {
-  const query = new URLSearchParams();
-  query.set("workspace_id", params.workspace_id);
-
-  return request<{ room: Room }>(
-    `/rooms/${encodeURIComponent(roomId)}?${query}`,
-    {
-      method: "PATCH",
-      body: JSON.stringify({
-        title: params.title,
-        description: params.description,
-        dispatch_policy: params.dispatch_policy,
-        dispatch_agent_ids: params.dispatch_agent_ids,
-      }),
-    },
-  );
-}
-
-export async function deleteRoom(
-  roomId: string,
-  params: { workspace_id: string },
-): Promise<{ status: string; room_id: string; workspace_id: string }> {
-  const query = new URLSearchParams();
-  query.set("workspace_id", params.workspace_id);
-
-  return request<{ status: string; room_id: string; workspace_id: string }>(
-    `/rooms/${encodeURIComponent(roomId)}?${query}`,
-    {
-      method: "DELETE",
-    },
-  );
-}
-
 export async function archiveRoom(
   roomId: string,
   params: { workspace_id: string },
@@ -779,32 +637,13 @@ export async function restoreRoom(
   });
 }
 
-export async function patchRoomMembers(
-  roomId: string,
-  params: {
-    workspace_id: string;
-    members: Array<{ actor_id: string; role?: string }>;
-  },
-): Promise<{ room: Room }> {
-  const query = new URLSearchParams();
-  query.set("workspace_id", params.workspace_id);
-
-  return request<{ room: Room }>(
-    `/rooms/${encodeURIComponent(roomId)}/members?${query}`,
-    {
-      method: "PATCH",
-      body: JSON.stringify({ members: params.members }),
-    },
-  );
-}
-
 export async function listRoomMessages(
   roomId: string,
   params: { workspace_id: string; limit?: number },
 ): Promise<{
   room_id: string;
   stream: string;
-  messages: MailboxListResponse["messages"];
+  messages: MailboxMessage[];
   count: number;
 }> {
   const query = new URLSearchParams();
@@ -814,7 +653,7 @@ export async function listRoomMessages(
   return request<{
     room_id: string;
     stream: string;
-    messages: MailboxListResponse["messages"];
+    messages: MailboxMessage[];
     count: number;
   }>(`/rooms/${encodeURIComponent(roomId)}/messages?${query}`);
 }
@@ -1205,61 +1044,6 @@ export async function patchRoomLoop(
 }
 
 /**
- * Fetches blackboard entries using optional filters.
- *
- * @param params - Filter and pagination options
- * @param params.ns - Namespace to filter entries by
- * @param params.topic - Topic to filter entries by
- * @param params.all - If `true`, include all entries (override default visibility)
- * @param params.limit - Maximum number of entries to return
- * @returns A BlackboardListResponse containing matching entries and associated metadata (for example, `count`)
- */
-export async function listBlackboard(params: {
-  ns?: string;
-  topic?: string;
-  all?: boolean;
-  limit?: number;
-}): Promise<BlackboardListResponse> {
-  const query = new URLSearchParams();
-  if (params.ns) query.set("ns", params.ns);
-  if (params.topic) query.set("topic", params.topic);
-  if (params.all) query.set("all", "true");
-  if (params.limit) query.set("limit", String(params.limit));
-
-  return request<BlackboardListResponse>(`/blackboard?${query}`);
-}
-
-/**
- * Posts an entry to the blackboard under a namespace and topic.
- *
- * @param params.ns - Optional namespace for the blackboard entry
- * @param params.topic - Topic name for the entry
- * @param params.payload - String payload to store in the blackboard entry
- * @param params.ttl_sec - Optional time-to-live in seconds for the entry
- * @returns An object with the created entry's `id` and the operation `status`
- */
-export async function postBlackboard(params: {
-  ns?: string;
-  topic: string;
-  payload: string;
-  ttl_sec?: number;
-}): Promise<{ id: string; status: string }> {
-  return request("/blackboard", {
-    method: "POST",
-    body: JSON.stringify(params),
-  });
-}
-
-/**
- * Delete a blackboard entry identified by `id`.
- *
- * @param id - The blackboard entry identifier to remove
- */
-export async function deleteBlackboard(id: string): Promise<void> {
-  await request(`/blackboard/${id}`, { method: "DELETE" });
-}
-
-/**
  * Fetches server logs filtered by the provided query parameters.
  *
  * @param params.limit - Maximum number of log entries to return.
@@ -1417,15 +1201,6 @@ export async function switchWorkspace(path: string): Promise<{
 }
 
 /**
- * Retrieves the service health status.
- *
- * @returns An object with `status` containing the current health state (for example, `"ok"`).
- */
-export async function getHealth(): Promise<{ status: string }> {
-  return request("/health");
-}
-
-/**
  * Fetch per-conversation settings for a companion conversation.
  */
 export async function getCompanionConversationSettings(
@@ -1462,43 +1237,6 @@ export async function deleteCompanionConversationSettings(
   conversationId: string,
 ): Promise<{ ok: boolean; message: string }> {
   return request(`/companion/conversations/${conversationId}/settings`, {
-    method: "DELETE",
-  });
-}
-
-/**
- * Fetch per-session settings for a console session.
- */
-export async function getConsoleSessionSettings(sessionId: string): Promise<{
-  session_id: string;
-  settings: ConversationSettings;
-}> {
-  return request(`/console/sessions/${sessionId}/settings`);
-}
-
-/**
- * Patch per-session settings for a console session.
- */
-export async function patchConsoleSessionSettings(
-  sessionId: string,
-  patch: ConversationSettingsPatch,
-): Promise<{
-  session_id: string;
-  settings: ConversationSettings;
-}> {
-  return request(`/console/sessions/${sessionId}/settings`, {
-    method: "PATCH",
-    body: JSON.stringify(patch),
-  });
-}
-
-/**
- * Delete all per-session settings for a console session (reset to defaults).
- */
-export async function deleteConsoleSessionSettings(
-  sessionId: string,
-): Promise<{ ok: boolean; message: string }> {
-  return request(`/console/sessions/${sessionId}/settings`, {
     method: "DELETE",
   });
 }
@@ -1615,20 +1353,6 @@ function extractToolCalls(msg: RawConsoleMessage): ToolCall[] | undefined {
 }
 
 /**
- * Fetches console sessions, optionally filtered by workspace.
- *
- * @param workspace - Optional workspace identifier to filter returned sessions
- * @returns An object containing `sessions` (array of ConsoleSession) and `count` (total number of sessions matching the query)
- */
-export async function listConsoleSessions(workspace?: string): Promise<{
-  sessions: ConsoleSession[];
-  count: number;
-}> {
-  const query = workspace ? `?workspace=${encodeURIComponent(workspace)}` : "";
-  return request(`/console/sessions${query}`);
-}
-
-/**
  * Create a new console session.
  *
  * @param params - Parameters for the new session
@@ -1707,13 +1431,6 @@ export async function getConsoleSession(sessionId: string): Promise<{
 }
 
 /**
- * Delete a console session by its ID.
- */
-export async function deleteConsoleSession(sessionId: string): Promise<void> {
-  await request(`/console/sessions/${sessionId}`, { method: "DELETE" });
-}
-
-/**
  * Submits content to a console session for processing.
  *
  * @param correlationId - Optional client-provided correlation identifier to track the message across requests
@@ -1761,27 +1478,6 @@ export async function cancelConsoleSession(
     method: "POST",
     body: JSON.stringify({ correlation_id: correlationId }),
   });
-}
-
-/**
- * Fetches messages for a console session.
- *
- * @param sessionId - The ID of the console session to retrieve messages from
- * @returns An object with `messages` — an array of ConsoleMessage entries, and `count` — the total number of messages
- */
-export async function getConsoleMessages(sessionId: string): Promise<{
-  messages: ConsoleMessage[];
-  count: number;
-}> {
-  const data = await request<{
-    messages: RawConsoleMessage[];
-    count: number;
-  }>(`/console/sessions/${sessionId}/messages`);
-
-  return {
-    messages: (data.messages || []).map(normalizeConsoleMessage),
-    count: data.count,
-  };
 }
 
 // Provider Availability
@@ -2191,18 +1887,6 @@ export async function listPersistedSessions(params?: {
 }
 
 /**
- * Fetches a persisted session by its ID.
- *
- * @param sessionId - The ID of the persisted session to retrieve
- * @returns An object containing the `session` (`PersistedSession`)
- */
-export async function getPersistedSession(sessionId: string): Promise<{
-  session: PersistedSession;
-}> {
-  return request(`/sessions/${sessionId}`);
-}
-
-/**
  * Fetches paginated messages for a persisted session.
  *
  * @param sessionId - The persisted session's identifier
@@ -2367,16 +2051,6 @@ export async function pauseFlow(
   });
 }
 
-export async function getFlowStatus(
-  flowId: string,
-  workspace?: string,
-): Promise<FlowStatusResponse> {
-  const query = new URLSearchParams();
-  if (workspace) query.set("workspace", workspace);
-  const suffix = query.size > 0 ? `?${query}` : "";
-  return request(`/flows/${encodeURIComponent(flowId)}/status${suffix}`);
-}
-
 export interface FlowNodeTerminalResponse {
   session_id: string;
   rows: number;
@@ -2395,21 +2069,4 @@ export async function getFlowNodeTerminal(
   if (workspace) query.set("workspace", workspace);
   const suffix = query.size > 0 ? `?${query}` : "";
   return request(`/flows/${encodeURIComponent(flowId)}/nodes/${encodeURIComponent(nodeId)}/terminal${suffix}`);
-}
-
-export async function getFlowRunLogs(
-  flowId: string,
-  runId: string,
-  params?: {
-    node_id?: string;
-    limit?: number;
-    offset?: number;
-  },
-): Promise<{ logs: FlowRunLog[]; count: number }> {
-  const query = new URLSearchParams();
-  if (params?.node_id) query.set("node_id", params.node_id);
-  if (params?.limit) query.set("limit", String(params.limit));
-  if (params?.offset) query.set("offset", String(params.offset));
-  const suffix = query.size > 0 ? `?${query}` : "";
-  return request(`/flows/${encodeURIComponent(flowId)}/runs/${encodeURIComponent(runId)}/logs${suffix}`);
 }

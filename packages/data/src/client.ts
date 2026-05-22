@@ -68,7 +68,6 @@ import type {
   OrchestrationBoardCardRuntimeResult,
   OrchestrationCardAction,
   OrchestrationCardActionResult,
-  OrchestrationDispatchResult,
   OrchestrationLaneID,
   OrchestrationRefreshResult,
 } from "./types";
@@ -428,25 +427,6 @@ export async function applyOrchestrationCardAction(params: {
 }): Promise<OrchestrationCardActionResult> {
   const env = await request<ApiEnvelope<OrchestrationCardActionResult>>(
     "/api/orchestration/card-action",
-    {
-      method: "POST",
-      body: JSON.stringify(params),
-    },
-  );
-  return unwrapEnvelope(env);
-}
-
-export async function dispatchOrchestrationIssue(params: {
-  request_id: string;
-  workspace_id?: string;
-  issue_id: string;
-  issue_identifier?: string;
-  title?: string;
-  prompt?: string;
-  parent_agent_id?: string;
-}): Promise<OrchestrationDispatchResult> {
-  const env = await request<ApiEnvelope<OrchestrationDispatchResult>>(
-    "/api/orchestration/dispatch-issue",
     {
       method: "POST",
       body: JSON.stringify(params),
