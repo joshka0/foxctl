@@ -15,6 +15,15 @@ export interface AgentctlResult<T = unknown> {
   error?: string;
 }
 
+interface FoxctlEnvelope<T = unknown> {
+  status?: string;
+  data?: T;
+  error?: {
+    code?: string;
+    message?: string;
+  };
+}
+
 /**
  * Internal format for foxctl hooks/* skills (used by shell hooks)
  *
@@ -35,6 +44,37 @@ export interface RunSkillOptions {
   workspace?: string;
   ephemeral?: boolean;
   timeout?: number;
+}
+
+export function formatSkillFailure(
+  skill: string,
+  result: Pick<AgentctlResult, "error">
+): string {
+  const error = result.error?.trim() || "unknown error";
+  return [`foxctl skill failed`, `skill: ${skill}`, `error: ${error}`].join("\n");
+}
+
+function parseSkillEnvelope<T>(skill: string, output: string): AgentctlResult<T> {
+  const parsed = JSON.parse(output) as FoxctlEnvelope<T>;
+
+  if (parsed.status === "ok") {
+    return { success: true, data: parsed.data as T };
+  }
+
+  if (parsed.status === "error") {
+    const code = parsed.error?.code?.trim();
+    const message = parsed.error?.message?.trim();
+    const detail = [code, message].filter(Boolean).join(": ");
+    return {
+      success: false,
+      error: detail || `Skill ${skill} returned an error envelope`,
+    };
+  }
+
+  return {
+    success: false,
+    error: `Skill ${skill} returned unexpected status ${parsed.status ?? "missing"}`,
+  };
 }
 
 /**
@@ -60,6 +100,7 @@ export async function runSkill<T = unknown>(
   options?: RunSkillOptions
 ): Promise<AgentctlResult<T>> {
   const args = ["run", skill, "--input", JSON.stringify(input)];
+  const foxctlBin = process.env.FOXCTL_BIN || "foxctl";
 
   // For OpenCode integration flows, prefer inline output over CAS digests.
   if (skill === "session/summarize") {
@@ -74,7 +115,7 @@ export async function runSkill<T = unknown>(
   }
 
   try {
-    const proc = Bun.spawn(["foxctl", ...args], {
+    const proc = Bun.spawn([foxctlBin, ...args], {
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -103,8 +144,7 @@ export async function runSkill<T = unknown>(
         } as AgentctlResult<T>;
       }
 
-      const parsed = JSON.parse(output);
-      return { success: true, data: parsed.data as T } as AgentctlResult<T>;
+      return parseSkillEnvelope<T>(skill, output);
     })();
 
     try {
@@ -135,6 +175,7 @@ export async function runSkillFromFile<T = unknown>(
   options?: RunSkillOptions
 ): Promise<AgentctlResult<T>> {
   const args = ["run", skill, "--input-file", inputPath];
+  const foxctlBin = process.env.FOXCTL_BIN || "foxctl";
 
   // For OpenCode integration flows, prefer inline output over CAS digests.
   if (skill === "session/summarize") {
@@ -150,7 +191,7 @@ export async function runSkillFromFile<T = unknown>(
 
   const timeout = options?.timeout ?? 30000;
 
-  const proc = Bun.spawn(["foxctl", ...args], {
+  const proc = Bun.spawn([foxctlBin, ...args], {
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -174,8 +215,7 @@ export async function runSkillFromFile<T = unknown>(
       };
     }
 
-    const result = JSON.parse(stdout);
-    return { success: true, data: result.data as T };
+    return parseSkillEnvelope<T>(skill, stdout);
   } catch (error) {
     clearTimeout(timeoutId);
     proc.kill();

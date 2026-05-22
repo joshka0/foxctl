@@ -5,6 +5,7 @@
   "description": "OpenCode plugins for foxctl integration",
   "main": "index.ts",
   "scripts": {
+    "test": "bun test",
     "typecheck": "tsc --noEmit",
     "build": "bun build ./index.ts --outdir dist"
   },
