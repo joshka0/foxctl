@@ -26,9 +26,6 @@ func NewProducer(store Store) *Producer {
 
 // BuildPostReviewEvent creates a PostReviewEvent from a ReviewArtifact.
 // This is called when a review transitions to "ok" and the diff is applied.
-//
-// NOTE: The Files field is currently empty because the diff application layer
-// does not exist yet. See docs/impl_plan/universal_swe_grep_and_agents_deferred.md D1.
 func BuildPostReviewEvent(artifact agent.ReviewArtifact, files []indexing.FileChange) indexing.PostReviewEvent {
 	now := time.Now().UTC()
 
@@ -40,7 +37,7 @@ func BuildPostReviewEvent(artifact agent.ReviewArtifact, files []indexing.FileCh
 		ReviewKind:    artifact.Kind,
 		ReviewStatus:  "ok",
 		DiffAppliedAt: now,
-		Files:         files, // Populated by caller; empty until diff layer exists
+		Files:         files,
 		Source:        EventSource,
 		Metadata:      nil, // Reserved for commit/branch info
 		CreatedAt:     now,
@@ -51,10 +48,6 @@ func BuildPostReviewEvent(artifact agent.ReviewArtifact, files []indexing.FileCh
 // Produce creates and persists a PostReviewEvent for the given artifact.
 // If an event already exists for this (workspace, task, review) with the same
 // payload, it returns the existing event (idempotent).
-//
-// The files parameter is currently expected to be nil/empty until the diff
-// application layer is implemented. Indexers should handle empty file lists
-// gracefully.
 //
 // Index:
 //
@@ -71,12 +64,4 @@ func BuildPostReviewEvent(artifact agent.ReviewArtifact, files []indexing.FileCh
 func (p *Producer) Produce(ctx context.Context, artifact agent.ReviewArtifact, files []indexing.FileChange) (indexing.PostReviewEvent, error) {
 	event := BuildPostReviewEvent(artifact, files)
 	return p.store.Put(ctx, event)
-}
-
-// ProduceFromReview is a convenience method that produces an event with an
-// empty file list. This is the stub behavior until the diff layer exists.
-//
-// See: docs/impl_plan/universal_swe_grep_and_agents_deferred.md D1
-func (p *Producer) ProduceFromReview(ctx context.Context, artifact agent.ReviewArtifact) (indexing.PostReviewEvent, error) {
-	return p.Produce(ctx, artifact, nil)
 }

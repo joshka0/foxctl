@@ -3,6 +3,7 @@ package indexing
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -130,6 +131,42 @@ func TestPostReviewHandler_Handle_NoActiveIndexers(t *testing.T) {
 	}
 	if !result.Skipped {
 		t.Error("expected result to be skipped when no active indexers")
+	}
+}
+
+func TestPostReviewHandler_Handle_JobsModeUnsupported(t *testing.T) {
+	indexer := newMockIndexer("test_indexer")
+	cfg := PostReviewConfig{
+		Enabled: true,
+		Mode:    FanoutModeJobs,
+		Indexers: []IndexerConfig{
+			{ID: "test_indexer", Kind: "test", Enabled: true},
+		},
+	}
+	handler := NewPostReviewHandler(cfg, zerolog.Nop())
+	if err := handler.RegisterIndexer(indexer); err != nil {
+		t.Fatalf("RegisterIndexer failed: %v", err)
+	}
+
+	event := PostReviewEvent{
+		WorkspaceID: "ws-1",
+		Files: []FileChange{
+			{Path: "foo.go", ChangeKind: ChangeKindModified},
+		},
+	}
+
+	result, err := handler.Handle(context.Background(), event)
+	if err == nil {
+		t.Fatal("expected jobs mode to return an error")
+	}
+	if !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("expected unsupported jobs mode error, got %v", err)
+	}
+	if result != nil {
+		t.Fatalf("expected nil result when jobs mode is unsupported, got %#v", result)
+	}
+	if indexer.callCount.Load() != 0 {
+		t.Fatalf("jobs mode must not fall back to running indexers, got %d calls", indexer.callCount.Load())
 	}
 }
 
@@ -439,14 +476,15 @@ func TestPostReviewConfig_Validate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "jobs mode is valid",
+			name: "jobs mode is reserved but unsupported",
 			config: PostReviewConfig{
 				Mode: FanoutModeJobs,
 			},
-			wantErr: false,
+			wantErr: true,
+			errMsg:  "unsupported",
 		},
 		{
-			name: "empty mode is valid (defaults to jobs)",
+			name: "empty mode is valid (defaults to inline)",
 			config: PostReviewConfig{
 				Mode: "",
 			},
@@ -505,7 +543,7 @@ func TestPostReviewConfig_Validate(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Error("expected error, got nil")
-				} else if tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
+				} else if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
 					t.Errorf("error %q should contain %q", err.Error(), tt.errMsg)
 				}
 			} else if err != nil {
@@ -520,7 +558,7 @@ func TestPostReviewConfig_EffectiveMode(t *testing.T) {
 		mode FanoutMode
 		want FanoutMode
 	}{
-		{mode: "", want: FanoutModeJobs},
+		{mode: "", want: FanoutModeInline},
 		{mode: FanoutModeInline, want: FanoutModeInline},
 		{mode: FanoutModeJobs, want: FanoutModeJobs},
 	}
@@ -531,18 +569,4 @@ func TestPostReviewConfig_EffectiveMode(t *testing.T) {
 			t.Errorf("EffectiveMode() with mode=%q: got %q, want %q", tt.mode, got, tt.want)
 		}
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(len(s) > 0 && len(substr) > 0 && searchString(s, substr)))
-}
-
-func searchString(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

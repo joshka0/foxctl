@@ -160,18 +160,6 @@ func (h *PostReviewHandler) HandleReviewApproved(
 	return result, nil
 }
 
-// HandleReviewApprovedStub is a convenience method for handling approved
-// reviews without a file list. This is the stub behavior until the diff
-// application layer is implemented.
-//
-// See: docs/impl_plan/universal_swe_grep_and_agents_deferred.md D1
-func (h *PostReviewHandler) HandleReviewApprovedStub(
-	ctx context.Context,
-	artifact agent.ReviewArtifact,
-) (*PostReviewResult, error) {
-	return h.HandleReviewApproved(ctx, artifact, nil)
-}
-
 // SetTestHook sets a callback invoked when an event is produced.
 // For testing only.
 func (h *PostReviewHandler) SetTestHook(fn func(indexing.PostReviewEvent)) {

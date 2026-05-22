@@ -193,7 +193,7 @@ by cleanup value and implementation risk.
 
 ## Stubs And Honesty Fixes
 
-- [ ] Make indexing `FanoutModeJobs` honest.
+- [x] Make indexing `FanoutModeJobs` honest.
   - Scope: indexing handler/types and overseer post-review stubs.
   - Target: either implement real job enqueueing plus file propagation, or remove
     the jobs mode until it exists.
