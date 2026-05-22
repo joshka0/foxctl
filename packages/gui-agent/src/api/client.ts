@@ -1,4 +1,5 @@
 import type {
+  ApiEnvelope,
   ContextWikiMemoryProposal,
   ContextWikiOverview,
   ContextWikiNextProposalMergeResult,
@@ -27,12 +28,19 @@ import type {
   OrchestrationBoard,
   OrchestrationBoardArtifactRef,
   OrchestrationBoardCardRuntimeResult,
+  OrchestrationBoardResult,
+  OrchestrationArchiveCardsRequest,
+  OrchestrationArchiveCardsResult,
   OrchestrationCard,
   OrchestrationCardAction,
   OrchestrationCardActionResult,
+  OrchestrationCleanupCardsRequest,
+  OrchestrationCleanupCardsResult,
   OrchestrationLaneID,
   OrchestrationRefreshResult,
-  OrchestrationSeedCardInput,
+  OrchestrationRestoreCardsRequest,
+  OrchestrationRestoreCardsResult,
+  OrchestrationSeedCardsRequest,
   OrchestrationSeedCardsResult,
   Flow,
   FlowNode,
@@ -200,16 +208,6 @@ async function request<T>(
   }
 }
 
-// ApiEnvelope matches the canonical foxctl envelope returned by some API endpoints.
-interface ApiEnvelope<T> {
-  version: number;
-  status: "ok" | "error" | "progress";
-  command: string;
-  data: T;
-  meta: { ts: string; [key: string]: unknown };
-  error: { code?: string; message?: string };
-}
-
 function unwrapEnvelope<T>(env: ApiEnvelope<T>): T {
   if (env.status !== "ok") {
     throw new Error(env.error?.message || "Request failed");
@@ -275,11 +273,6 @@ export async function signOutAuthSession(): Promise<void> {
     }
     throw new Error(text || `Sign out failed: ${response.status}`);
   }
-}
-
-export interface OrchestrationBoardResult {
-  board: OrchestrationBoard | null;
-  artifact: OrchestrationBoardArtifactRef | null;
 }
 
 export interface OrchestrationBoardGetParams {
@@ -406,11 +399,9 @@ export async function refreshOrchestration(params: {
   return unwrapEnvelope(env);
 }
 
-export async function seedOrchestrationCards(params: {
-  request_id: string;
-  workspace_id?: string;
-  cards: OrchestrationSeedCardInput[];
-}): Promise<OrchestrationSeedCardsResult> {
+export async function seedOrchestrationCards(
+  params: OrchestrationSeedCardsRequest,
+): Promise<OrchestrationSeedCardsResult> {
   const env = await request<ApiEnvelope<OrchestrationSeedCardsResult>>(
     "/orchestration/seed-cards",
     {
@@ -421,75 +412,42 @@ export async function seedOrchestrationCards(params: {
   return unwrapEnvelope(env);
 }
 
-export async function cleanupOrchestrationCards(params: {
-  request_id: string;
-  workspace_id: string;
-  issue_ids?: string[];
-}): Promise<{
-  request_id: string;
-  deleted_cards: number;
-  deleted_events: number;
-  ts: string;
-}> {
-  const env = await request<
-    ApiEnvelope<{
-      request_id: string;
-      deleted_cards: number;
-      deleted_events: number;
-      ts: string;
-    }>
-  >("/orchestration/cleanup-cards", {
-    method: "POST",
-    body: JSON.stringify(params),
-  });
+export async function cleanupOrchestrationCards(
+  params: OrchestrationCleanupCardsRequest,
+): Promise<OrchestrationCleanupCardsResult> {
+  const env = await request<ApiEnvelope<OrchestrationCleanupCardsResult>>(
+    "/orchestration/cleanup-cards",
+    {
+      method: "POST",
+      body: JSON.stringify(params),
+    },
+  );
   return unwrapEnvelope(env);
 }
 
-export async function archiveOrchestrationCards(params: {
-  request_id: string;
-  workspace_id: string;
-  issue_ids?: string[];
-}): Promise<{
-  request_id: string;
-  updated: number;
-  action: string;
-  ts: string;
-}> {
-  const env = await request<
-    ApiEnvelope<{
-      request_id: string;
-      updated: number;
-      action: string;
-      ts: string;
-    }>
-  >("/orchestration/archive-cards", {
-    method: "POST",
-    body: JSON.stringify(params),
-  });
+export async function archiveOrchestrationCards(
+  params: OrchestrationArchiveCardsRequest,
+): Promise<OrchestrationArchiveCardsResult> {
+  const env = await request<ApiEnvelope<OrchestrationArchiveCardsResult>>(
+    "/orchestration/archive-cards",
+    {
+      method: "POST",
+      body: JSON.stringify(params),
+    },
+  );
   return unwrapEnvelope(env);
 }
 
-export async function restoreOrchestrationCards(params: {
-  request_id: string;
-  workspace_id: string;
-  issue_ids?: string[];
-}): Promise<{
-  request_id: string;
-  updated: number;
-  action: string;
-  ts: string;
-}> {
-  const env = await request<
-    ApiEnvelope<{
-      request_id: string;
-      updated: number;
-      action: string;
-      ts: string;
-    }>
-  >("/orchestration/restore-cards", {
-    method: "POST",
-    body: JSON.stringify(params),
-  });
+export async function restoreOrchestrationCards(
+  params: OrchestrationRestoreCardsRequest,
+): Promise<OrchestrationRestoreCardsResult> {
+  const env = await request<ApiEnvelope<OrchestrationRestoreCardsResult>>(
+    "/orchestration/restore-cards",
+    {
+      method: "POST",
+      body: JSON.stringify(params),
+    },
+  );
   return unwrapEnvelope(env);
 }
 

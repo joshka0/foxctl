@@ -63,9 +63,9 @@ by cleanup value and implementation risk.
     mailbox, room, blackboard, and agent types that drift from `@foxctl/data`.
   - Target: add `@foxctl/data` to `gui-agent`; move shared DTOs and make
     UI-only types explicit extensions.
-  - Progress: room loop/control, delivery binding, mailbox, blackboard, and
-    room task DTOs now live in `@foxctl/data`; agent and remaining orchestration
-    DTOs still need consolidation.
+  - Progress: room loop/control, delivery binding, mailbox, blackboard, room
+    task, orchestration board, and orchestration seed/archive/cleanup DTOs now
+    live in `@foxctl/data`; agent DTOs still need consolidation.
   - Tests: data typecheck, gui-agent build, foxterm typecheck.
 
 - [x] Add canonical room loop and delivery binding DTOs.

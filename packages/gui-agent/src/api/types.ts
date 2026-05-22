@@ -1,10 +1,32 @@
 import type {
+  ApiEnvelope as DataApiEnvelope,
   BlackboardRecord as DataBlackboardRecord,
   BulkResolveRequest as DataBulkResolveRequest,
   LeadChangeEvent as DataLeadChangeEvent,
   MailboxMessage as DataMailboxMessage,
   MuxPane as DataMuxPane,
   MuxPaneCapture as DataMuxPaneCapture,
+  OrchestrationBoard as DataOrchestrationBoard,
+  OrchestrationBoardArtifactRef as DataOrchestrationBoardArtifactRef,
+  OrchestrationBoardCardRuntimeResult as DataOrchestrationBoardCardRuntimeResult,
+  OrchestrationBoardResult as DataOrchestrationBoardResult,
+  OrchestrationArchiveCardsRequest as DataOrchestrationArchiveCardsRequest,
+  OrchestrationArchiveCardsResult as DataOrchestrationArchiveCardsResult,
+  OrchestrationCard as DataOrchestrationCard,
+  OrchestrationCardAction as DataOrchestrationCardAction,
+  OrchestrationCardActionResult as DataOrchestrationCardActionResult,
+  OrchestrationCleanupCardsRequest as DataOrchestrationCleanupCardsRequest,
+  OrchestrationCleanupCardsResult as DataOrchestrationCleanupCardsResult,
+  OrchestrationLane as DataOrchestrationLane,
+  OrchestrationLaneID as DataOrchestrationLaneID,
+  OrchestrationRefreshResult as DataOrchestrationRefreshResult,
+  OrchestrationRestoreCardsRequest as DataOrchestrationRestoreCardsRequest,
+  OrchestrationRestoreCardsResult as DataOrchestrationRestoreCardsResult,
+  OrchestrationRuntimeTree as DataOrchestrationRuntimeTree,
+  OrchestrationRuntimeTreeNode as DataOrchestrationRuntimeTreeNode,
+  OrchestrationSeedCardInput as DataOrchestrationSeedCardInput,
+  OrchestrationSeedCardsRequest as DataOrchestrationSeedCardsRequest,
+  OrchestrationSeedCardsResult as DataOrchestrationSeedCardsResult,
   ParticipantState as DataParticipantState,
   Room as DataRoom,
   RoomDeliveryBinding as DataRoomDeliveryBinding,
@@ -19,6 +41,8 @@ import type {
   RoomStatusParticipant as DataRoomStatusParticipant,
   RoomTask as DataRoomTask,
 } from "@foxctl/data/types";
+
+export type ApiEnvelope<T> = DataApiEnvelope<T>;
 
 // Agent types
 export interface Agent {
@@ -225,118 +249,27 @@ export interface CompanionConversation {
 }
 
 // Orchestration (v2 runtime board)
-export type OrchestrationLaneID =
-  | "Todo"
-  | "Claimed"
-  | "Running"
-  | "RetryQueued"
-  | "Blocked"
-  | "Review"
-  | "Done";
-
-export interface OrchestrationCard {
-  workspace_id?: string;
-  issue_id: string;
-  issue_identifier?: string;
-  title?: string;
-  state: string;
-  lane?: OrchestrationLaneID;
-  tracker_state?: string;
-  policy_status?: string;
-  last_outcome?: string;
-  eligibility?: string;
-  denial_reason?: string;
-  suggestion?: string;
-  run_id?: string;
-  agent_id?: string;
-  actor_id?: string;
-  attempt?: number;
-  retry_due_at?: string;
-  last_event_type?: string;
-  last_event_at?: string;
-  archived_at?: string;
-}
-
-export type OrchestrationCardAction = "retry-now" | "release" | "mark-done";
-
-export interface OrchestrationRuntimeTreeNode {
-  tag?: string;
-  agent_id?: string;
-  pid?: string;
-  metadata?: Record<string, unknown>;
-  status?: string;
-  state?: unknown;
-  error?: string;
-  children?: OrchestrationRuntimeTreeNode[];
-}
-
-export interface OrchestrationRuntimeTree {
-  enabled: boolean;
-  agent_id?: string;
-  depth: number;
-  root?: OrchestrationRuntimeTreeNode;
-  error?: string;
-}
-
-export interface OrchestrationBoardCardRuntimeResult {
-  card: OrchestrationCard;
-  runtime?: OrchestrationRuntimeTree;
-}
-
-export interface OrchestrationLane {
-  id: OrchestrationLaneID;
-  title: string;
-  cards: OrchestrationCard[];
-}
-
-export interface OrchestrationBoard {
-  generated_at: string;
-  counts: Partial<Record<OrchestrationLaneID, number>>;
-  lanes: OrchestrationLane[];
-  next_cursor?: string;
-}
-
-export interface OrchestrationBoardArtifactRef {
-  summary: string;
-  artifact: string;
-  hint?: string;
-  generated_at?: string;
-  counts?: Partial<Record<OrchestrationLaneID, number>>;
-}
-
-export interface OrchestrationRefreshResult {
-  request_id: string;
-  queued: boolean;
-  coalesced?: boolean;
-  idempotent?: boolean;
-  ts: string;
-}
-
-export interface OrchestrationSeedCardInput {
-  issue_id?: string;
-  issue_identifier?: string;
-  title: string;
-  state?: string;
-  tracker_state?: string;
-  policy_status?: string;
-  last_outcome?: string;
-  eligibility?: string;
-}
-
-export interface OrchestrationSeedCardsResult {
-  request_id: string;
-  created: number;
-  skipped?: number;
-  ts: string;
-}
-
-export interface OrchestrationCardActionResult {
-  request_id: string;
-  action: OrchestrationCardAction;
-  card: OrchestrationCard;
-  idempotent?: boolean;
-  ts: string;
-}
+export type OrchestrationLaneID = DataOrchestrationLaneID;
+export type OrchestrationCard = DataOrchestrationCard;
+export type OrchestrationCardAction = DataOrchestrationCardAction;
+export type OrchestrationRuntimeTreeNode = DataOrchestrationRuntimeTreeNode;
+export type OrchestrationRuntimeTree = DataOrchestrationRuntimeTree;
+export type OrchestrationBoardCardRuntimeResult = DataOrchestrationBoardCardRuntimeResult;
+export type OrchestrationLane = DataOrchestrationLane;
+export type OrchestrationBoard = DataOrchestrationBoard;
+export type OrchestrationBoardArtifactRef = DataOrchestrationBoardArtifactRef;
+export type OrchestrationBoardResult = DataOrchestrationBoardResult;
+export type OrchestrationRefreshResult = DataOrchestrationRefreshResult;
+export type OrchestrationSeedCardInput = DataOrchestrationSeedCardInput;
+export type OrchestrationSeedCardsRequest = DataOrchestrationSeedCardsRequest;
+export type OrchestrationSeedCardsResult = DataOrchestrationSeedCardsResult;
+export type OrchestrationCardActionResult = DataOrchestrationCardActionResult;
+export type OrchestrationCleanupCardsRequest = DataOrchestrationCleanupCardsRequest;
+export type OrchestrationCleanupCardsResult = DataOrchestrationCleanupCardsResult;
+export type OrchestrationArchiveCardsRequest = DataOrchestrationArchiveCardsRequest;
+export type OrchestrationArchiveCardsResult = DataOrchestrationArchiveCardsResult;
+export type OrchestrationRestoreCardsRequest = DataOrchestrationRestoreCardsRequest;
+export type OrchestrationRestoreCardsResult = DataOrchestrationRestoreCardsResult;
 
 export interface ContextWikiProposalWorkPacket {
   proposal_id: string;

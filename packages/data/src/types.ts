@@ -256,6 +256,11 @@ export interface OrchestrationBoardResult {
   artifact: OrchestrationBoardArtifactRef | null;
 }
 
+export interface OrchestrationBoardCardResult {
+  card: OrchestrationCard;
+  runtime?: OrchestrationCardRuntime;
+}
+
 export type OrchestrationCardAction = "retry-now" | "release" | "mark-done";
 
 export interface OrchestrationCardActionResult {
@@ -265,6 +270,59 @@ export interface OrchestrationCardActionResult {
   idempotent?: boolean;
   ts: string;
 }
+
+export interface OrchestrationSeedCardInput {
+  issue_id?: string;
+  issue_identifier?: string;
+  title: string;
+  state?: string;
+  tracker_state?: string;
+  policy_status?: string;
+  last_outcome?: string;
+  eligibility?: string;
+}
+
+export interface OrchestrationSeedCardsRequest {
+  request_id: string;
+  workspace_id?: string;
+  cards: OrchestrationSeedCardInput[];
+}
+
+export interface OrchestrationSeedCardsResult {
+  request_id: string;
+  created: number;
+  skipped?: number;
+  ts: string;
+}
+
+export interface OrchestrationCleanupCardsRequest {
+  request_id: string;
+  workspace_id: string;
+  issue_ids?: string[];
+}
+
+export interface OrchestrationCleanupCardsResult {
+  request_id: string;
+  deleted_cards: number;
+  deleted_events: number;
+  ts: string;
+}
+
+export interface OrchestrationArchiveCardsRequest {
+  request_id: string;
+  workspace_id: string;
+  issue_ids?: string[];
+}
+
+export interface OrchestrationArchiveCardsResult {
+  request_id: string;
+  updated: number;
+  action: "archived" | "restored" | string;
+  ts: string;
+}
+
+export type OrchestrationRestoreCardsRequest = OrchestrationArchiveCardsRequest;
+export type OrchestrationRestoreCardsResult = OrchestrationArchiveCardsResult;
 
 export interface OrchestrationDispatchResult {
   request_id: string;
@@ -282,6 +340,15 @@ export interface OrchestrationDispatchResult {
   actor_id?: string;
   idempotent?: boolean;
   ts: string;
+}
+
+export interface OrchestrationCardRuntime {
+  enabled: boolean;
+  agent_id?: string;
+  status?: string;
+  state?: unknown;
+  children?: Record<string, unknown>;
+  error?: string;
 }
 
 export interface OrchestrationRuntimeTreeNode {
