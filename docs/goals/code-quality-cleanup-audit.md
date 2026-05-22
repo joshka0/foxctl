@@ -203,7 +203,7 @@ by cleanup value and implementation risk.
     behavior, or isolate it as experimental and stop presenting spike behavior
     as a normal backend.
 
-- [ ] Remove `internal/rlm` `ErrNotImplemented` runtime path.
+- [x] Remove `internal/rlm` `ErrNotImplemented` runtime path.
   - Target: split validation from execution or require a real executor at
     construction.
 

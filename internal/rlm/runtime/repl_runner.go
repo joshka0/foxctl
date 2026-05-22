@@ -199,10 +199,7 @@ type sandboxWorkDirProvider interface {
 
 // Run executes a bounded REPL-backed RLM attempt.
 func (r *REPLRunner) Run(ctx context.Context, task rlm.Task, env rlm.Environment) (rlm.Result, error) {
-	if err := rlm.ValidateTask(task); err != nil {
-		return rlm.Result{}, err
-	}
-	if err := rlm.ValidateEnvironment(env); err != nil {
+	if err := rlm.ValidateRunRequest(task, env); err != nil {
 		return rlm.Result{}, err
 	}
 	identity := PlanIdentity(task)
