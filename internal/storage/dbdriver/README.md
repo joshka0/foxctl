@@ -250,18 +250,26 @@ For code that expects `*sql.DB`:
 ```go
 // Open with new driver
 db, err := dbdriver.OpenDB(ctx, cfg, nil)
+if err != nil {
+    panic(err)
+}
 
 // Convert to *sql.DB for legacy code
-sqlDB, ok := dbdriver.ToSQLDB(db)
-if !ok {
-    panic("failed to convert")
+sqlDB, err := dbdriver.ToSQLDB(db)
+if err != nil {
+    panic(err)
 }
 
 // Use as normal *sql.DB
 legacyFunction(sqlDB)
 
-// Or use OpenDBCompat directly
-sqlDB, err := dbdriver.OpenDBCompat(ctx, cfg, nil)
+// Prefer dbutil.OpenStoreDB for store code that still exposes *sql.DB.
+// If a low-level bridge is unavoidable, keep the returned closer.
+sqlDB, closeFn, err := dbdriver.OpenDBCompatWithCloser(ctx, cfg, nil)
+if err != nil {
+    panic(err)
+}
+defer closeFn()
 ```
 
 ## Interface

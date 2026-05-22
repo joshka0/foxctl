@@ -103,9 +103,10 @@ by cleanup value and implementation risk.
     transport-only storage helper was deleted.
   - Progress: v2 Turso stores now depend on a narrow `StoreDB` capability and
     v2 openers use `dbdriver.OpenDB`; older non-v2 `OpenDBCompat*` callers are
-    intentionally left for a separate storage-lane migration.
-  - Other targets: migrate or isolate older legacy storage compatibility
-    callers. Remaining GUI/data-client functions with
+    isolated behind `dbutil.OpenStoreDB`. Local SQLite-only callers use
+    `dbutil.OpenSQLiteDBShared`, and dead `OpenDBCompat` /
+    `sqliteutil.OpenDBWithDriver` pass-throughs were deleted.
+  - Other targets: remaining GUI/data-client functions with
     similar names currently diverge by route, params, response shape, or GUI
     auth behavior and should not be mechanically redirected.
   - Tests: data typecheck, gui-agent build, foxterm typecheck, affected Go

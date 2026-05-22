@@ -16,7 +16,6 @@ import (
 	"unicode/utf8"
 
 	errs "github.com/joshka0/foxctl/internal/platform/errors"
-	"github.com/joshka0/foxctl/internal/storage/dbdriver"
 
 	_ "modernc.org/sqlite" // register sqlite driver
 )
@@ -208,15 +207,13 @@ func buildSQLiteDSN(path string, busyTimeoutMs int, enableForeignKeys bool) (str
 	return u.String(), nil
 }
 
-// OpenDB creates parent directories for the provided path, opens a SQLite database,
-// enables WAL journaling, and runs the provided migration function. Callers are
-// OpenDB opens a SQLite database for the given path, prepares the environment, and runs an optional migration.
+// OpenDB opens a SQLite database for the given path, prepares the environment,
+// and runs an optional migration.
 //
-// OpenDB validates the database path (except for in-memory paths), creates parent directories for file-backed
-// databases, constructs an appropriate DSN with a default busy timeout, opens the connection, ensures the
-// journal mode is WAL for file-backed databases, and enables foreign key enforcement (PRAGMA foreign_keys=ON).
-// If a non-nil migrate function is provided it is executed before the open call returns. On any setup or
-// migration failure the opened database is closed and the error is returned. The caller is responsible for
+// OpenDB validates the database path (except for in-memory paths), creates
+// parent directories for file-backed databases, constructs a DSN with a default
+// busy timeout, opens the connection, ensures WAL journaling for file-backed
+// databases, and enables foreign key enforcement. The caller is responsible for
 // closing the returned *sql.DB.
 func OpenDB(ctx context.Context, path string, migrate func(context.Context, *sql.DB) error) (*sql.DB, error) {
 	if path == "" {
@@ -325,13 +322,4 @@ func OpenDBShared(ctx context.Context, path string, migrate func(context.Context
 // connection is closed and that error is returned.
 func OpenInMemory(ctx context.Context, migrate func(context.Context, *sql.DB) error) (*sql.DB, error) {
 	return OpenDB(ctx, ":memory:", migrate)
-}
-
-// OpenDBWithDriver opens a database using the new driver abstraction system.
-// This supports both SQLite and Turso databases based on configuration.
-// OpenDBWithDriver opens a database using the provided driver configuration and returns a database handle and a closer function to release resources.
-// If migrate is non-nil it will be executed; on migration failure the opened database is closed and the migration error is returned.
-// The cfg may be populated from environment variables using dbdriver.ConfigLoader.
-func OpenDBWithDriver(ctx context.Context, cfg dbdriver.Config, migrate func(context.Context, *sql.DB) error) (*sql.DB, func() error, error) {
-	return dbdriver.OpenDBCompatWithCloser(ctx, cfg, migrate)
 }

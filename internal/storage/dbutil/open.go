@@ -22,8 +22,8 @@ import (
 //
 //	Purpose: Centralize store DB opening behind a driver-agnostic facade (sqlite/turso/postgres)
 //	Keywords: dbutil, dbdriver, store_db, turso, sqlite, postgres
-//	Related: dbdriver.ConfigLoader.LoadConfig, sqliteutil.OpenDBShared, dbdriver.OpenDBCompatWithCloser
-//	Flow: load dbdriver.Config from env → open via sqlite shared pool or dbdriver compat → return (*sql.DB, closeFn)
+//	Related: dbdriver.ConfigLoader.LoadConfig, sqliteutil.OpenDBShared, dbdriver.OpenDB
+//	Flow: load dbdriver.Config from env → open via sqlite shared pool or stdlib DB bridge → return (*sql.DB, closeFn)
 //	Resources: storageRoot directory, dbdriver config
 //	Events: none
 //	OutputFields: *sql.DB, closeFn
@@ -57,5 +57,9 @@ func OpenStoreDB(
 		return sqliteutil.OpenDBShared(ctx, cfg.SQLite.Path, migrate)
 	}
 
+	return openStdlibStoreDB(ctx, cfg, migrate)
+}
+
+func openStdlibStoreDB(ctx context.Context, cfg dbdriver.Config, migrate func(context.Context, *sql.DB) error) (*sql.DB, func() error, error) {
 	return dbdriver.OpenDBCompatWithCloser(ctx, cfg, migrate)
 }

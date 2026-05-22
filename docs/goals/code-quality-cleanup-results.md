@@ -45,6 +45,10 @@ merge, rebase or merge current `main` and rerun the full verification set.
 - v2 Turso store constructors now depend on a narrow `StoreDB` capability
   interface, and v2 openers use `dbdriver.OpenDB` directly instead of
   `OpenDBCompatWithCloser`.
+- Legacy stdlib `*sql.DB` compatibility is now isolated behind
+  `dbutil.OpenStoreDB` for non-v2 named stores. Dead `OpenDBCompat` and
+  `sqliteutil.OpenDBWithDriver` pass-throughs were deleted, while local
+  SQLite-only callers use `dbutil.OpenSQLiteDBShared`.
 
 ### Type And Contract Cleanup
 
@@ -158,8 +162,6 @@ Verification has been run slice-by-slice, including:
 
 ### Compatibility Layers
 
-- Migrate or isolate older non-v2 `OpenDBCompat*` callers in the legacy storage
-  lane without widening the v2 Turso cleanup.
 - Similar remaining GUI/data-client wrapper names currently differ by route,
   params, response shape, or GUI auth behavior; keep them separate until the
   shared client owns an actually matching contract.
@@ -224,5 +226,6 @@ Verification has been run slice-by-slice, including:
 
 ## Recommended Next Slices
 
-1. Migrate or isolate older non-v2 `OpenDBCompat*` callers in the legacy
-   storage lane without widening the v2 Turso cleanup.
+1. Audit similar remaining GUI/data-client wrapper names and delete or keep
+   them with caller evidence based on exact route, params, response shape, and
+   GUI auth behavior.

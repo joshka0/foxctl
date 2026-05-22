@@ -27,7 +27,6 @@ tests that only preserve accidental implementation detail.
 Remaining areas from the results doc after the completed slices:
 
 - Compatibility layers:
-  - Migrate or isolate older non-v2 `OpenDBCompat*` callers.
   - Keep similar GUI/data-client wrapper names separate unless the shared client
     owns the same route, params, response shape, and auth semantics.
 - Dead frontend code:
