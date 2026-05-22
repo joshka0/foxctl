@@ -365,17 +365,18 @@ CREATE INDEX IF NOT EXISTS idx_mailbox_workspace ON mailbox(workspace);
 	}
 
 	// Add session columns if they don't exist (migration for existing databases)
-	sessionColumns := []string{
-		`ALTER TABLE mailbox ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE mailbox ADD COLUMN workspace TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE mailbox ADD COLUMN agent_id TEXT NOT NULL DEFAULT ''`,
+	sessionColumns := []struct {
+		name       string
+		columnType string
+		defaultVal string
+	}{
+		{name: "session_id", columnType: "TEXT NOT NULL", defaultVal: "''"},
+		{name: "workspace", columnType: "TEXT NOT NULL", defaultVal: "''"},
+		{name: "agent_id", columnType: "TEXT NOT NULL", defaultVal: "''"},
 	}
-	for _, stmt := range sessionColumns {
-		if _, err := db.ExecContext(ctx, stmt); err != nil {
-			// Ignore "duplicate column" errors
-			if !isDuplicateColumnError(err) {
-				return fmt.Errorf("mailbox: migrate session columns: %w", err)
-			}
+	for _, column := range sessionColumns {
+		if err := dbutil.AddColumnIfNotExists(ctx, db, "mailbox", column.name, column.columnType, column.defaultVal); err != nil {
+			return fmt.Errorf("mailbox: migrate add %s column: %w", column.name, err)
 		}
 	}
 
@@ -386,32 +387,11 @@ CREATE INDEX IF NOT EXISTS idx_mailbox_workspace ON mailbox(workspace);
 	}
 	for _, stmt := range sessionIndexes {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
-			// Ignore errors, index might already exist
-			_ = err
+			return fmt.Errorf("mailbox: migrate session index %q: %w", stmt, err)
 		}
 	}
 
 	return nil
-}
-
-// isDuplicateColumnError checks if an error is a "duplicate column" error.
-// SQLite error format: "SQL logic error: duplicate column name: xxx (1)"
-func isDuplicateColumnError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errStr := err.Error()
-	// Simple substring search for "duplicate column name"
-	const needle = "duplicate column name"
-	if len(errStr) < len(needle) {
-		return false
-	}
-	for i := 0; i <= len(errStr)-len(needle); i++ {
-		if errStr[i:i+len(needle)] == needle {
-			return true
-		}
-	}
-	return false
 }
 
 func scanMessage(rows *sql.Rows) (agent.Message, error) {

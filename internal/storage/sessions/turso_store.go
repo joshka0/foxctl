@@ -17,6 +17,7 @@ import (
 	ws "github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/storage"
 	"github.com/joshka0/foxctl/internal/storage/dbdriver"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
 	"github.com/joshka0/foxctl/internal/storage/sqlutil"
 	"github.com/joshka0/foxctl/internal/storage/vector"
 )
@@ -187,20 +188,22 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int)
 
 	// Run column migrations for existing tables (safe to run multiple times)
 	columnMigrations := []struct {
-		column string
-		alter  string
+		column     string
+		columnType string
+		defaultVal string
 	}{
-		{"workspace_id", "ALTER TABLE sessions ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''"},
-		{"parent_session_id", "ALTER TABLE sessions ADD COLUMN parent_session_id TEXT"},
-		{"agent_id", "ALTER TABLE sessions ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'foxctl'"},
-		{"agent_type", "ALTER TABLE sessions ADD COLUMN agent_type TEXT NOT NULL DEFAULT 'claude'"},
-		{"status", "ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'ok'"},
-		{"content_hash", "ALTER TABLE sessions ADD COLUMN content_hash TEXT"},
-		{"error_message", "ALTER TABLE sessions ADD COLUMN error_message TEXT"},
+		{column: "workspace_id", columnType: "TEXT NOT NULL", defaultVal: "''"},
+		{column: "parent_session_id", columnType: "TEXT"},
+		{column: "agent_id", columnType: "TEXT NOT NULL", defaultVal: "'foxctl'"},
+		{column: "agent_type", columnType: "TEXT NOT NULL", defaultVal: "'claude'"},
+		{column: "status", columnType: "TEXT NOT NULL", defaultVal: "'ok'"},
+		{column: "content_hash", columnType: "TEXT"},
+		{column: "error_message", columnType: "TEXT"},
 	}
 	for _, m := range columnMigrations {
-		// Try to add the column - ignore error if it already exists
-		_, _ = db.ExecContext(ctx, m.alter)
+		if err := dbutil.AddColumnIfNotExists(ctx, db, "sessions", m.column, m.columnType, m.defaultVal); err != nil {
+			return fmt.Errorf("add sessions %s column: %w", m.column, err)
+		}
 	}
 
 	// Create indexes
@@ -219,7 +222,7 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int)
 	}
 	for _, idx := range indexes {
 		if _, err := db.ExecContext(ctx, idx); err != nil {
-			return fmt.Errorf("create index: %w", err)
+			return fmt.Errorf("create index %q: %w", idx, err)
 		}
 	}
 
@@ -308,25 +311,21 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int)
 	if err != nil {
 		return fmt.Errorf("create session_chunk_summaries table: %w", err)
 	}
-	if _, err := db.ExecContext(ctx, `ALTER TABLE session_chunk_summaries ADD COLUMN chunk_index_min INTEGER`); err != nil {
-		if !strings.Contains(err.Error(), "duplicate column") {
-			return fmt.Errorf("add chunk_index_min column: %w", err)
-		}
+	if err := dbutil.AddColumnIfNotExists(ctx, db, "session_chunk_summaries", "chunk_index_min", "INTEGER", ""); err != nil {
+		return fmt.Errorf("add chunk_index_min column: %w", err)
 	}
-	if _, err := db.ExecContext(ctx, `ALTER TABLE session_chunk_summaries ADD COLUMN chunk_index_max INTEGER`); err != nil {
-		if !strings.Contains(err.Error(), "duplicate column") {
-			return fmt.Errorf("add chunk_index_max column: %w", err)
-		}
+	if err := dbutil.AddColumnIfNotExists(ctx, db, "session_chunk_summaries", "chunk_index_max", "INTEGER", ""); err != nil {
+		return fmt.Errorf("add chunk_index_max column: %w", err)
 	}
 
 	if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_chunk_summaries_session ON session_chunk_summaries(session_id)`); err != nil {
-		return fmt.Errorf("create chunk summary index: %w", err)
+		return fmt.Errorf("create idx_chunk_summaries_session: %w", err)
 	}
 	if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_chunk_summaries_window ON session_chunk_summaries(session_id, window_index)`); err != nil {
-		return fmt.Errorf("create chunk summary index: %w", err)
+		return fmt.Errorf("create idx_chunk_summaries_window: %w", err)
 	}
 	if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_chunk_summaries_range ON session_chunk_summaries(session_id, window_index, chunk_index_min, chunk_index_max)`); err != nil {
-		return fmt.Errorf("create chunk summary index: %w", err)
+		return fmt.Errorf("create idx_chunk_summaries_range: %w", err)
 	}
 
 	return nil

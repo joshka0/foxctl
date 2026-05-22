@@ -125,8 +125,16 @@ func (w *Watcher) ensureSchema(ctx context.Context) error {
 		return fmt.Errorf("create schema: %w", err)
 	}
 
-	// Create trigger separately (SQLite doesn't support IF NOT EXISTS for triggers)
-	// We'll ignore the error if it already exists
+	exists, err := w.sqliteObjectExists(ctx, "trigger", "mailbox_notify_trigger")
+	if err != nil {
+		return fmt.Errorf("check mailbox notify trigger: %w", err)
+	}
+	if exists {
+		return nil
+	}
+
+	// Create trigger separately: older SQLite variants do not consistently
+	// support CREATE TRIGGER IF NOT EXISTS.
 	trigger := `
 		CREATE TRIGGER mailbox_notify_trigger
 		AFTER INSERT ON mailbox
@@ -134,9 +142,24 @@ func (w *Watcher) ensureSchema(ctx context.Context) error {
 			INSERT INTO mailbox_notify (to_ns) VALUES (NEW.to_ns);
 		END;
 	`
-	_, _ = w.db.ExecContext(ctx, trigger) // Ignore error if exists
+	if _, err := w.db.ExecContext(ctx, trigger); err != nil {
+		return fmt.Errorf("create mailbox notify trigger: %w", err)
+	}
 
 	return nil
+}
+
+func (w *Watcher) sqliteObjectExists(ctx context.Context, kind, name string) (bool, error) {
+	var count int
+	err := w.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM sqlite_master
+		WHERE type = ? AND name = ?
+	`, kind, name).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 // run is the main watcher loop.

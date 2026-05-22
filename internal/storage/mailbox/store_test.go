@@ -2,12 +2,16 @@ package mailbox
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/domain/agent"
+
+	_ "modernc.org/sqlite"
 )
 
 func TestMailboxStore(t *testing.T) {
@@ -164,6 +168,43 @@ func TestMailboxStore(t *testing.T) {
 			t.Errorf("expected 0 messages after delete, got %d", len(messages))
 		}
 	})
+}
+
+func TestMigrateIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if err := migrate(ctx, db); err != nil {
+		t.Fatalf("first migrate: %v", err)
+	}
+	if err := migrate(ctx, db); err != nil {
+		t.Fatalf("second migrate: %v", err)
+	}
+}
+
+func TestMigrateReturnsIndexCreationError(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if _, err := db.ExecContext(ctx, `CREATE TABLE idx_mailbox_session (id TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+
+	err = migrate(ctx, db)
+	if err == nil {
+		t.Fatal("expected migration error")
+	}
+	if !strings.Contains(err.Error(), "idx_mailbox_session") {
+		t.Fatalf("error=%q want idx_mailbox_session context", err)
+	}
 }
 
 func TestMailboxPollNoBlock(t *testing.T) {

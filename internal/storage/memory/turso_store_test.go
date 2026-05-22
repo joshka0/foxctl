@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,8 @@ import (
 	"github.com/joshka0/foxctl/internal/platform/symbolutil"
 	"github.com/joshka0/foxctl/internal/storage/dbdriver"
 	"github.com/joshka0/foxctl/internal/storage/sqliteutil"
+
+	_ "modernc.org/sqlite"
 )
 
 func TestTursoStoreCloudOpenWhenConfigured(t *testing.T) {
@@ -34,6 +37,43 @@ func TestTursoStoreCloudOpenWhenConfigured(t *testing.T) {
 
 	if store.vectorDimension != 4 {
 		t.Fatalf("vectorDimension = %d, want 4", store.vectorDimension)
+	}
+}
+
+func TestTursoMigrationIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if err := migrateTursoWithDimensions(ctx, db, 4); err != nil {
+		t.Fatalf("first migrate: %v", err)
+	}
+	if err := migrateTursoWithDimensions(ctx, db, 4); err != nil {
+		t.Fatalf("second migrate: %v", err)
+	}
+}
+
+func TestTursoMigrationReturnsIndexCreationError(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if _, err := db.ExecContext(ctx, `CREATE TABLE idx_named_memory_lifecycle (id TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+
+	err = migrateTursoWithDimensions(ctx, db, 4)
+	if err == nil {
+		t.Fatal("expected migration error")
+	}
+	if !strings.Contains(err.Error(), "idx_named_memory_lifecycle") {
+		t.Fatalf("error=%q want idx_named_memory_lifecycle context", err)
 	}
 }
 

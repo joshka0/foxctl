@@ -3,6 +3,7 @@ package actor
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
@@ -144,6 +145,38 @@ func TestWatcher_ensureSchema(t *testing.T) {
 	}
 	if count != 1 {
 		t.Error("mailbox_notify_trigger not created")
+	}
+}
+
+func TestWatcherEnsureSchemaIsIdempotent(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	w := NewWatcher(db)
+	ctx := context.Background()
+
+	if err := w.ensureSchema(ctx); err != nil {
+		t.Fatalf("first ensureSchema() error = %v", err)
+	}
+	if err := w.ensureSchema(ctx); err != nil {
+		t.Fatalf("second ensureSchema() error = %v", err)
+	}
+}
+
+func TestWatcherEnsureSchemaReturnsTriggerCreationError(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	w := NewWatcher(db)
+	err = w.ensureSchema(context.Background())
+	if err == nil {
+		t.Fatal("expected trigger creation error")
+	}
+	if !strings.Contains(err.Error(), "mailbox") {
+		t.Fatalf("error=%q want mailbox context", err)
 	}
 }
 

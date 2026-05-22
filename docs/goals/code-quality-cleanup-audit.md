@@ -19,7 +19,7 @@ by cleanup value and implementation risk.
 
 ## Highest Priority Remaining Work
 
-- [ ] Make schema migrations fail honestly.
+- [x] Make schema migrations fail honestly.
   - Scope: `internal/storage/tasks/store.go`,
     `internal/storage/sessions/turso_store.go`,
     `internal/storage/memory/turso_store.go`,
