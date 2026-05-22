@@ -23,22 +23,22 @@ flowchart LR
 
 `deploy/kubernetes` currently contains three practical operational modes:
 
-1. Base manifests (legacy defaults)
+1. Base manifests
 2. PostgreSQL overlay
 3. Local overlay (k3s/dev variants)
 
-## Base manifests (legacy-biased snapshot)
+## Base manifests
 
 `deploy/kubernetes/base/` is the base set used as the foundation:
 
 - `deployment.yaml`: `foxctl` pod with web service and readiness/liveness probes using `foxctl health` exec checks.
-- `configmap.yaml`: defaulting to `FOXCTL_DB_DRIVER=turso` and old CAS key names (`FOXCTL_CAS_BACKEND`/`FOXCTL_CAS_BUCKET`).
+- `configmap.yaml`: defaulting to `FOXCTL_DB_DRIVER=turso` and CAS driver keys read by the runtime.
 - `workspace-deployment.yaml`: optional dedicated workspace pod with git-sync sidecar for mounted source.
-- `cronjobs.yaml`: scheduled companion workloads (rerank, sqlite maintenance), still wired for the same env style as base.
+- `cronjobs.yaml`: scheduled companion workloads (rerank, sqlite maintenance), wired with the same CAS env style as base.
 - `embedding-worker.yaml`: separate worker deployment for background embedding pipeline.
 
-This base is useful as a starting point or historical template but still
-contains mixed configuration generations.
+This base is useful as a starting point or historical template. Production
+storage settings are normally supplied by an overlay.
 
 ## PostgreSQL production overlay (implemented)
 
@@ -113,7 +113,7 @@ Prefer:
 - `FOXCTL_WORKSPACE`, `FOXCTL_STORAGE_ROOT`
 - `FOXCTL_JIDO_*` when enabling Jido-backed orchestration or companion bridges
 
-Legacy keys still seen in base artifacts:
+Historical CAS keys that should not be reintroduced:
 
 - `FOXCTL_CAS_BACKEND`
 - `FOXCTL_CAS_BUCKET`

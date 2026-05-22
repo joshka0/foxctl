@@ -32,9 +32,9 @@ spec:
           value: "sqlite"
         - name: FOXCTL_V2_EVENTS_DB_DRIVER
           value: "sqlite"
-        - name: FOXCTL_CAS_BACKEND
+        - name: FOXCTL_CAS_DRIVER
           value: "file"
-        - name: FOXCTL_CAS_ROOT
+        - name: FOXCTL_CAS_PATH
           value: "/var/cache/foxctl/cas"
         lifecycle:
           preStop:

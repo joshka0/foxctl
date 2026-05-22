@@ -15,6 +15,7 @@ by cleanup value and implementation risk.
 - [x] Remove confirmed dead helpers/constants in touched Go packages and tests.
 - [x] Make malformed flow edge conditions fail flow start instead of silently
   becoming unconditional edges.
+- [x] Update Kubernetes base/local CAS env vars to the runtime key names.
 
 ## Highest Priority Remaining Work
 
@@ -154,7 +155,7 @@ by cleanup value and implementation risk.
   - Scope: test-only imports from old skill runner helpers.
   - Target: move tests to `skillmain` / `skilltest`, then delete the package.
 
-- [ ] Update Kubernetes CAS env names.
+- [x] Update Kubernetes CAS env names.
   - Scope: base/local manifests.
   - Target: replace legacy `FOXCTL_CAS_BACKEND` / `FOXCTL_CAS_BUCKET` with
     current CAS driver/path/S3 bucket variables.
