@@ -17,14 +17,14 @@ import (
 )
 
 const (
-	embedDim     = 4096
-	embedAPIURL  = "http://127.0.0.1:8100/v1/embeddings"
-	embedModel   = "Qwen3-Embedding-8B"
-	topK         = 20
-	oversampleK  = 60
-	bitWidth     = 4
-	embedDelay   = 50 * time.Millisecond
-	maxChars     = 512
+	embedDim    = 4096
+	embedAPIURL = "http://127.0.0.1:8100/v1/embeddings"
+	embedModel  = "Qwen3-Embedding-8B"
+	topK        = 20
+	oversampleK = 60
+	bitWidth    = 4
+	embedDelay  = 50 * time.Millisecond
+	maxChars    = 512
 )
 
 var queries = []string{
