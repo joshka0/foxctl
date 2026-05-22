@@ -14,6 +14,7 @@ import (
 	"github.com/joshka0/foxctl/internal/context/contextplane"
 	"github.com/joshka0/foxctl/internal/domain/envelope"
 	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/runtime/memoryblur"
 	"github.com/joshka0/foxctl/internal/storage/obsidianindex"
 	taskstore "github.com/joshka0/foxctl/internal/storage/tasks"
 	"github.com/joshka0/foxctl/internal/tooling/tools/obsidian"
@@ -838,6 +839,167 @@ func MemoryPutHandler(_ config.Config, _ zerolog.Logger) http.HandlerFunc {
 			"status":         proposal.Status,
 		}))
 	}
+}
+
+// ── Context Memory Drafts ───────────────────────────────────────────────
+
+type contextMemoryDraftsRequest struct {
+	Workspace              string   `json:"workspace,omitempty"`
+	VaultPath              string   `json:"vault_path,omitempty"`
+	ApplyDrafts            bool     `json:"apply_drafts,omitempty"`
+	DryRun                 *bool    `json:"dry_run,omitempty"`
+	Lookback               string   `json:"lookback,omitempty"`
+	Limit                  int      `json:"limit,omitempty"`
+	BlurWithAgent          bool     `json:"blur_with_agent,omitempty"`
+	BlurAgent              string   `json:"blur_agent,omitempty"`
+	BlurAgentBin           string   `json:"blur_agent_bin,omitempty"`
+	BlurAgentProvider      string   `json:"blur_agent_provider,omitempty"`
+	BlurAgentModel         string   `json:"blur_agent_model,omitempty"`
+	BlurAgentCommand       []string `json:"blur_agent_command,omitempty"`
+	BlurAgentPromptMode    string   `json:"blur_agent_prompt_mode,omitempty"`
+	PiMode                 string   `json:"pi_mode,omitempty"`
+	PiSDKBin               string   `json:"pi_sdk_bin,omitempty"`
+	PiSDKScript            string   `json:"pi_sdk_script,omitempty"`
+	PiSDKCWD               string   `json:"pi_sdk_cwd,omitempty"`
+	PiAgentDir             string   `json:"pi_agent_dir,omitempty"`
+	PiThinking             string   `json:"pi_thinking,omitempty"`
+	PiNoExtensions         *bool    `json:"pi_no_extensions,omitempty"`
+	HermesIgnoreRules      *bool    `json:"hermes_ignore_rules,omitempty"`
+	HermesIgnoreUserConfig bool     `json:"hermes_ignore_user_config,omitempty"`
+	FoxctlAgentID          string   `json:"foxctl_agent_id,omitempty"`
+	FoxctlDispatcher       string   `json:"foxctl_dispatcher,omitempty"`
+	FoxctlConversationID   string   `json:"foxctl_conversation_id,omitempty"`
+}
+
+func ContextMemoryDraftsHandler(cfg config.Config, _ zerolog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		var req contextMemoryDraftsRequest
+		if err := readJSON(w, r, &req); err != nil {
+			httpError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+			return
+		}
+		wp := strings.TrimSpace(req.Workspace)
+		if wp == "" {
+			wp = strings.TrimSpace(GetCurrentWorkspace())
+		}
+		if wp == "" {
+			httpError(w, http.StatusBadRequest, "workspace is required")
+			return
+		}
+		var lookback time.Duration
+		if strings.TrimSpace(req.Lookback) != "" {
+			parsed, err := time.ParseDuration(strings.TrimSpace(req.Lookback))
+			if err != nil || parsed <= 0 {
+				httpError(w, http.StatusBadRequest, "lookback must be a positive Go duration such as 24h")
+				return
+			}
+			lookback = parsed
+		}
+		dryRun := true
+		if req.DryRun != nil {
+			dryRun = *req.DryRun
+		}
+		var blurAgent contextplane.MemoryBlurAgent
+		if req.BlurWithAgent {
+			var err error
+			blurAgent, err = contextMemoryDraftBlurAgent(req)
+			if err != nil {
+				httpError(w, http.StatusBadRequest, "invalid blur agent: "+err.Error())
+				return
+			}
+		}
+		report, err := contextplane.RunAutonomousMemoryDrafts(r.Context(), contextplane.AutonomousMemoryDraftRunOptions{
+			StorageRoot:   cfg.Storage.Root,
+			WorkspacePath: wp,
+			VaultPath:     resolveContextVaultPath(strings.TrimSpace(req.VaultPath)),
+			Lookback:      lookback,
+			Limit:         req.Limit,
+			ApplyDrafts:   req.ApplyDrafts,
+			DryRun:        dryRun,
+			BlurWithAgent: req.BlurWithAgent,
+			BlurAgent:     blurAgent,
+			BlurAgentName: firstNonEmpty(strings.TrimSpace(req.BlurAgent), memoryblur.BackendPi),
+		})
+		if err != nil {
+			httpError(w, http.StatusInternalServerError, "memory drafts failed: "+err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, envelope.OK("context.memory_drafts", map[string]any{
+			"workspace_path": wp,
+			"report":         report,
+		}))
+	}
+}
+
+func contextMemoryDraftBlurAgent(req contextMemoryDraftsRequest) (contextplane.MemoryBlurAgent, error) {
+	backend := strings.ToLower(strings.TrimSpace(req.BlurAgent))
+	if backend == "" {
+		backend = memoryblur.BackendPi
+	}
+	piNoExtensions := true
+	if req.PiNoExtensions != nil {
+		piNoExtensions = *req.PiNoExtensions
+	}
+	hermesIgnoreRules := true
+	if req.HermesIgnoreRules != nil {
+		hermesIgnoreRules = *req.HermesIgnoreRules
+	}
+	commandBin := ""
+	if len(req.BlurAgentCommand) > 0 {
+		commandBin = req.BlurAgentCommand[0]
+	}
+	if strings.TrimSpace(commandBin) == "" {
+		commandBin = req.BlurAgentBin
+	}
+	return memoryblur.NewAgent(memoryblur.AgentOptions{
+		Backend: backend,
+		Command: memoryblur.CommandAgentOptions{
+			Name:       memoryblur.BackendCommand,
+			Bin:        strings.TrimSpace(commandBin),
+			Args:       commandArgsAfterFirst(req.BlurAgentCommand),
+			PromptMode: strings.TrimSpace(req.BlurAgentPromptMode),
+		},
+		Pi: memoryblur.PiAgentOptions{
+			PiBin:        firstNonEmpty(strings.TrimSpace(req.BlurAgentBin), "pi"),
+			Mode:         firstNonEmpty(strings.TrimSpace(req.PiMode), memoryblur.PiModeSDK),
+			SDKBin:       firstNonEmpty(strings.TrimSpace(req.PiSDKBin), "bun"),
+			SDKScript:    strings.TrimSpace(req.PiSDKScript),
+			SDKCWD:       strings.TrimSpace(req.PiSDKCWD),
+			AgentDir:     strings.TrimSpace(req.PiAgentDir),
+			Thinking:     firstNonEmpty(strings.TrimSpace(req.PiThinking), "off"),
+			Provider:     strings.TrimSpace(req.BlurAgentProvider),
+			Model:        strings.TrimSpace(req.BlurAgentModel),
+			NoExtensions: piNoExtensions,
+		},
+		Claude: memoryblur.ClaudeAgentOptions{
+			ClaudeBin: firstNonEmpty(strings.TrimSpace(req.BlurAgentBin), "claude"),
+			Model:     strings.TrimSpace(req.BlurAgentModel),
+		},
+		Hermes: memoryblur.HermesAgentOptions{
+			HermesBin:        firstNonEmpty(strings.TrimSpace(req.BlurAgentBin), "hermes"),
+			Provider:         strings.TrimSpace(req.BlurAgentProvider),
+			Model:            strings.TrimSpace(req.BlurAgentModel),
+			IgnoreRules:      hermesIgnoreRules,
+			IgnoreUserConfig: req.HermesIgnoreUserConfig,
+		},
+		Foxctl: memoryblur.FoxctlAgentOptions{
+			FoxctlBin:      firstNonEmpty(strings.TrimSpace(req.BlurAgentBin), "foxctl"),
+			AgentID:        strings.TrimSpace(req.FoxctlAgentID),
+			Dispatcher:     strings.TrimSpace(req.FoxctlDispatcher),
+			ConversationID: strings.TrimSpace(req.FoxctlConversationID),
+		},
+	})
+}
+
+func commandArgsAfterFirst(argv []string) []string {
+	if len(argv) <= 1 {
+		return nil
+	}
+	return append([]string(nil), argv[1:]...)
 }
 
 // ── Embedding Flush ─────────────────────────────────────────────────────

@@ -27,8 +27,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/joshka0/foxctl/internal/context/contextplane"
 	"github.com/joshka0/foxctl/internal/context/memorycore"
 	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/runtime/memoryblur"
 	"github.com/joshka0/foxctl/internal/storage"
 	"github.com/joshka0/foxctl/internal/storage/memory"
 )
@@ -39,6 +41,15 @@ import (
 
 // Config holds curator worker configuration.
 type Config struct {
+	// RuntimeConfig is the daemon's materialized foxctl config.
+	RuntimeConfig config.Config `yaml:"-" json:"-"`
+
+	// WorkspacePath scopes context-plane and contextengine maintenance.
+	WorkspacePath string `yaml:"workspace_path" json:"workspace_path,omitempty"`
+
+	// VaultPath enables Obsidian-backed draft creation when memory drafts apply.
+	VaultPath string `yaml:"vault_path" json:"vault_path,omitempty"`
+
 	// ActiveInterval is the tick for the active (light) loop. Default: 5m.
 	ActiveInterval time.Duration `yaml:"active_interval" json:"active_interval"`
 
@@ -68,21 +79,55 @@ type Config struct {
 
 	// DreamEnabled controls whether the dream loop runs. Default: true.
 	DreamEnabled bool `yaml:"dream_enabled" json:"dream_enabled"`
+
+	// MemoryDraftsEnabled controls autonomous retrieval-feedback memory draft planning.
+	MemoryDraftsEnabled bool `yaml:"memory_drafts_enabled" json:"memory_drafts_enabled"`
+
+	// MemoryDraftsApplyDrafts writes planned drafts to the Obsidian inbox and records prepared proposals.
+	MemoryDraftsApplyDrafts bool `yaml:"memory_drafts_apply_drafts" json:"memory_drafts_apply_drafts"`
+
+	// MemoryDraftLookback bounds the retrieval feedback scan. Default: 24h.
+	MemoryDraftLookback time.Duration `yaml:"memory_draft_lookback" json:"memory_draft_lookback"`
+
+	// MemoryDraftLimit bounds planned drafts per dream cycle. Default: 20.
+	MemoryDraftLimit int `yaml:"memory_draft_limit" json:"memory_draft_limit"`
+
+	// MemoryDraftBlurWithAgent runs a configured real agent over planned drafts.
+	MemoryDraftBlurWithAgent bool `yaml:"memory_draft_blur_with_agent" json:"memory_draft_blur_with_agent"`
+
+	// MemoryDraftBlurAgent selects the blur backend (pi|hermes|claude|foxctl).
+	MemoryDraftBlurAgent string `yaml:"memory_draft_blur_agent" json:"memory_draft_blur_agent,omitempty"`
+
+	MemoryDraftBlurAgentBin      string `yaml:"memory_draft_blur_agent_bin" json:"memory_draft_blur_agent_bin,omitempty"`
+	MemoryDraftBlurAgentProvider string `yaml:"memory_draft_blur_agent_provider" json:"memory_draft_blur_agent_provider,omitempty"`
+	MemoryDraftBlurAgentModel    string `yaml:"memory_draft_blur_agent_model" json:"memory_draft_blur_agent_model,omitempty"`
+	MemoryDraftBlurFoxctlAgentID string `yaml:"memory_draft_blur_foxctl_agent_id" json:"memory_draft_blur_foxctl_agent_id,omitempty"`
+	MemoryDraftBlurPiMode        string `yaml:"memory_draft_blur_pi_mode" json:"memory_draft_blur_pi_mode,omitempty"`
+	MemoryDraftBlurPiSDKBin      string `yaml:"memory_draft_blur_pi_sdk_bin" json:"memory_draft_blur_pi_sdk_bin,omitempty"`
+	MemoryDraftBlurPiSDKScript   string `yaml:"memory_draft_blur_pi_sdk_script" json:"memory_draft_blur_pi_sdk_script,omitempty"`
+	MemoryDraftBlurPiAgentDir    string `yaml:"memory_draft_blur_pi_agent_dir" json:"memory_draft_blur_pi_agent_dir,omitempty"`
+	MemoryDraftBlurPiThinking    string `yaml:"memory_draft_blur_pi_thinking" json:"memory_draft_blur_pi_thinking,omitempty"`
 }
 
 // DefaultConfig returns sensible defaults — both loops enabled.
 func DefaultConfig() Config {
 	return Config{
-		ActiveInterval:   5 * time.Minute,
-		DreamInterval:    24 * time.Hour,
-		StaleAfterDays:   30,
-		ArchiveAfterDays: 90,
-		MinConfidence:    0.5,
-		HandoffStaleDays: 30,
-		Enabled:          true,
-		DryRun:           false,
-		ActiveEnabled:    true,
-		DreamEnabled:     true,
+		ActiveInterval:            5 * time.Minute,
+		DreamInterval:             24 * time.Hour,
+		StaleAfterDays:            30,
+		ArchiveAfterDays:          90,
+		MinConfidence:             0.5,
+		HandoffStaleDays:          30,
+		Enabled:                   true,
+		DryRun:                    false,
+		ActiveEnabled:             true,
+		DreamEnabled:              true,
+		MemoryDraftLookback:       24 * time.Hour,
+		MemoryDraftLimit:          20,
+		MemoryDraftBlurAgent:      "pi",
+		MemoryDraftBlurPiMode:     memoryblur.PiModeSDK,
+		MemoryDraftBlurPiSDKBin:   "bun",
+		MemoryDraftBlurPiThinking: "off",
 	}
 }
 
@@ -120,6 +165,56 @@ func ConfigFromEnv(base Config) Config {
 	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_DREAM_ENABLED")); v != "" {
 		base.DreamEnabled = strings.EqualFold(v, "true") || v == "1"
 	}
+	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_MEMORY_DRAFTS_ENABLED")); v != "" {
+		base.MemoryDraftsEnabled = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_MEMORY_DRAFTS_APPLY_DRAFTS")); v != "" {
+		base.MemoryDraftsApplyDrafts = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_MEMORY_DRAFT_LOOKBACK")); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			base.MemoryDraftLookback = d
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_MEMORY_DRAFT_LIMIT")); v != "" {
+		var parsed int
+		if _, err := fmt.Sscanf(v, "%d", &parsed); err == nil && parsed > 0 {
+			base.MemoryDraftLimit = parsed
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_MEMORY_DRAFT_BLUR_WITH_AGENT")); v != "" {
+		base.MemoryDraftBlurWithAgent = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_MEMORY_DRAFT_BLUR_AGENT")); v != "" {
+		base.MemoryDraftBlurAgent = v
+	}
+	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_MEMORY_DRAFT_BLUR_AGENT_BIN")); v != "" {
+		base.MemoryDraftBlurAgentBin = v
+	}
+	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_MEMORY_DRAFT_BLUR_AGENT_PROVIDER")); v != "" {
+		base.MemoryDraftBlurAgentProvider = v
+	}
+	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_MEMORY_DRAFT_BLUR_AGENT_MODEL")); v != "" {
+		base.MemoryDraftBlurAgentModel = v
+	}
+	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_MEMORY_DRAFT_BLUR_FOXCTL_AGENT_ID")); v != "" {
+		base.MemoryDraftBlurFoxctlAgentID = v
+	}
+	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_MEMORY_DRAFT_BLUR_PI_MODE")); v != "" {
+		base.MemoryDraftBlurPiMode = v
+	}
+	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_MEMORY_DRAFT_BLUR_PI_SDK_BIN")); v != "" {
+		base.MemoryDraftBlurPiSDKBin = v
+	}
+	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_MEMORY_DRAFT_BLUR_PI_SDK_SCRIPT")); v != "" {
+		base.MemoryDraftBlurPiSDKScript = v
+	}
+	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_MEMORY_DRAFT_BLUR_PI_AGENT_DIR")); v != "" {
+		base.MemoryDraftBlurPiAgentDir = v
+	}
+	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_MEMORY_DRAFT_BLUR_PI_THINKING")); v != "" {
+		base.MemoryDraftBlurPiThinking = v
+	}
 	// Legacy: FOXCTL_CURATOR_INTERVAL overrides both (backward compat)
 	if v := strings.TrimSpace(os.Getenv("FOXCTL_CURATOR_INTERVAL")); v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {
@@ -135,12 +230,13 @@ func ConfigFromEnv(base Config) Config {
 
 // Report is the result of a single curator pass (either active or dream).
 type Report struct {
-	ID          string        `json:"id"`
-	Phase       string        `json:"phase"` // "active" or "dream"
-	GeneratedAt time.Time     `json:"generated_at"`
-	Config      Config        `json:"config"`
-	Summary     Summary       `json:"summary"`
-	Memory      *MemoryReport `json:"memory,omitempty"`
+	ID           string             `json:"id"`
+	Phase        string             `json:"phase"` // "active" or "dream"
+	GeneratedAt  time.Time          `json:"generated_at"`
+	Config       Config             `json:"config"`
+	Summary      Summary            `json:"summary"`
+	Memory       *MemoryReport      `json:"memory,omitempty"`
+	MemoryDrafts *MemoryDraftReport `json:"memory_drafts,omitempty"`
 }
 
 // Summary holds aggregate counts.
@@ -154,6 +250,9 @@ type Summary struct {
 	Handoffs             int `json:"handoffs"`
 	StaleHandoffs        int `json:"stale_handoffs"`
 	Errors               int `json:"errors"`
+	MemoryDraftsPlanned  int `json:"memory_drafts_planned"`
+	MemoryDraftsWritten  int `json:"memory_drafts_written"`
+	MemoryDraftProposals int `json:"memory_draft_proposals"`
 }
 
 // MemoryReport wraps the memory curator's output.
@@ -174,6 +273,9 @@ type ApplySummary struct {
 	Skipped   int `json:"skipped"`
 	Failed    int `json:"failed"`
 }
+
+// MemoryDraftReport summarizes autonomous draft-only curation.
+type MemoryDraftReport = contextplane.AutonomousMemoryDraftRunReport
 
 // ---------------------------------------------------------------------------
 // Worker — runs both active and dream loops concurrently
@@ -354,10 +456,15 @@ func (w *Worker) runDream(ctx context.Context) {
 	w.lastDreamRunAt = time.Now().UTC()
 	w.mu.Unlock()
 
+	var duplicateClusters, overlapClusters int
+	if report.Memory != nil {
+		duplicateClusters = report.Memory.DuplicateClusters
+		overlapClusters = report.Memory.OverlapClusters
+	}
 	slog.Info("curator [dream]: cycle complete",
 		"memory_records", report.Summary.MemoryRecords,
-		"duplicates", report.Memory.DuplicateClusters,
-		"overlaps", report.Memory.OverlapClusters,
+		"duplicates", duplicateClusters,
+		"overlaps", overlapClusters,
 		"proposals", report.Summary.MemoryProposals)
 }
 
@@ -375,7 +482,7 @@ func (w *Worker) execute(ctx context.Context, phase string, deep bool) (*Report,
 	}
 
 	if w.memFn != nil {
-		memStore, err := w.memFn(ctx, config.Config{})
+		memStore, err := w.memFn(ctx, w.cfg.RuntimeConfig)
 		if err != nil {
 			slog.Error("curator: open memory store", "error", err, "phase", phase)
 			report.Summary.Errors++
@@ -387,8 +494,93 @@ func (w *Worker) execute(ctx context.Context, phase string, deep bool) (*Report,
 			report.Summary.MemoryProposals = memReport.DemotionProposals + memReport.ArchiveProposals
 		}
 	}
+	if deep && w.cfg.MemoryDraftsEnabled {
+		draftReport := w.curateMemoryDrafts(ctx, now)
+		report.MemoryDrafts = draftReport
+		report.Summary.MemoryDraftsPlanned = draftReport.DraftsPlanned
+		report.Summary.MemoryDraftsWritten = draftReport.DraftsWritten
+		report.Summary.MemoryDraftProposals = draftReport.ProposalsRecorded
+		report.Summary.Errors += draftReport.Errors
+	}
 
 	return report, nil
+}
+
+func (w *Worker) curateMemoryDrafts(ctx context.Context, now time.Time) *MemoryDraftReport {
+	blurAgent, blurAgentErr := w.memoryDraftBlurAgent()
+	report, err := contextplane.RunAutonomousMemoryDrafts(ctx, contextplane.AutonomousMemoryDraftRunOptions{
+		StorageRoot:   w.cfg.RuntimeConfig.Storage.Root,
+		WorkspacePath: strings.TrimSpace(w.cfg.WorkspacePath),
+		VaultPath:     strings.TrimSpace(w.cfg.VaultPath),
+		Now:           now,
+		Lookback:      w.cfg.MemoryDraftLookback,
+		Limit:         w.cfg.MemoryDraftLimit,
+		ApplyDrafts:   w.cfg.MemoryDraftsApplyDrafts,
+		DryRun:        w.cfg.DryRun,
+		BlurWithAgent: w.cfg.MemoryDraftBlurWithAgent,
+		BlurAgent:     blurAgent,
+		BlurAgentName: strings.TrimSpace(w.cfg.MemoryDraftBlurAgent),
+	})
+	if blurAgentErr != nil {
+		report.Enabled = w.cfg.MemoryDraftsEnabled
+		report.Errors++
+		report.BlurErrors++
+		report.ErrorMessages = append(report.ErrorMessages, blurAgentErr.Error())
+	}
+	if err != nil {
+		report.Enabled = w.cfg.MemoryDraftsEnabled
+		report.Errors++
+		report.ErrorMessages = append(report.ErrorMessages, err.Error())
+		slog.Error("curator: memory draft pass failed", "error", err)
+	}
+	return &report
+}
+
+func (w *Worker) memoryDraftBlurAgent() (contextplane.MemoryBlurAgent, error) {
+	if !w.cfg.MemoryDraftBlurWithAgent {
+		return nil, nil
+	}
+	backend := strings.TrimSpace(w.cfg.MemoryDraftBlurAgent)
+	if backend == "" {
+		backend = memoryblur.BackendPi
+	}
+	return memoryblur.NewAgent(memoryblur.AgentOptions{
+		Backend: backend,
+		Pi: memoryblur.PiAgentOptions{
+			PiBin:        firstNonEmpty(strings.TrimSpace(w.cfg.MemoryDraftBlurAgentBin), "pi"),
+			Mode:         firstNonEmpty(strings.TrimSpace(w.cfg.MemoryDraftBlurPiMode), memoryblur.PiModeSDK),
+			SDKBin:       firstNonEmpty(strings.TrimSpace(w.cfg.MemoryDraftBlurPiSDKBin), "bun"),
+			SDKScript:    strings.TrimSpace(w.cfg.MemoryDraftBlurPiSDKScript),
+			AgentDir:     strings.TrimSpace(w.cfg.MemoryDraftBlurPiAgentDir),
+			Thinking:     firstNonEmpty(strings.TrimSpace(w.cfg.MemoryDraftBlurPiThinking), "off"),
+			Provider:     strings.TrimSpace(w.cfg.MemoryDraftBlurAgentProvider),
+			Model:        strings.TrimSpace(w.cfg.MemoryDraftBlurAgentModel),
+			NoExtensions: true,
+		},
+		Claude: memoryblur.ClaudeAgentOptions{
+			ClaudeBin: firstNonEmpty(strings.TrimSpace(w.cfg.MemoryDraftBlurAgentBin), "claude"),
+			Model:     strings.TrimSpace(w.cfg.MemoryDraftBlurAgentModel),
+		},
+		Hermes: memoryblur.HermesAgentOptions{
+			HermesBin:   firstNonEmpty(strings.TrimSpace(w.cfg.MemoryDraftBlurAgentBin), "hermes"),
+			Provider:    strings.TrimSpace(w.cfg.MemoryDraftBlurAgentProvider),
+			Model:       strings.TrimSpace(w.cfg.MemoryDraftBlurAgentModel),
+			IgnoreRules: true,
+		},
+		Foxctl: memoryblur.FoxctlAgentOptions{
+			FoxctlBin: firstNonEmpty(strings.TrimSpace(w.cfg.MemoryDraftBlurAgentBin), "foxctl"),
+			AgentID:   strings.TrimSpace(w.cfg.MemoryDraftBlurFoxctlAgentID),
+		},
+	})
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (w *Worker) curateMemory(ctx context.Context, memStore storage.MemoryStore, deep bool) *MemoryReport {

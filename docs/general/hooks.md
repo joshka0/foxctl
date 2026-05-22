@@ -77,6 +77,46 @@ Core fields include event identity, principal/workspace/session metadata, provid
 | Inject-capable events (`PostToolUse`, `UserPromptSubmit`, `SessionStart`) | Can apply immediate context injection |
 | Blocking support depends on provider capabilities | Dispatcher honors `decision:block` when supported |
 
+## Provider Auto Hooks
+
+Some provider integrations expose lifecycle hooks outside the generic
+workspace hook dispatcher. The current provider-backed autonomous memory lane
+uses those hooks to run `POST /api/context/memory-drafts` in the background.
+
+| Provider | Hooks used | Default | Effect |
+|---------|------------|---------|--------|
+| Pi | `session_start`, `before_agent_start` | disabled | Starts a background interval runner and opportunistically checks before agent starts |
+| Hermes | `on_session_start`, `on_session_end` | disabled | Starts a daemon thread and flushes/stops it at session end |
+
+The provider auto hook creates only Obsidian inbox memory drafts and prepared
+ContextWiki review proposals. It does not merge canonical notes. Enable it only
+when a vault path is configured and the workspace is expected to record typed
+contextengine retrieval feedback.
+
+Use `scripts/doctor-pi-hermes-integrations.sh` to verify that the local Pi and
+Hermes installs point at the current checkout and include the foxctl tool and
+automatic memory draft hook markers. Add `--apply` to relink
+`~/.pi/extensions/foxctl.ts` and `~/.hermes/plugins/foxctl` to this checkout.
+
+Related provider controls:
+
+- Pi:
+  - `--foxctl-memory-drafts-auto`
+  - `--foxctl-vault-path`
+  - `--foxctl-memory-drafts-apply`
+  - `--foxctl-memory-drafts-dry-run`
+  - `--foxctl-memory-drafts-interval-seconds`
+  - `--foxctl-memory-drafts-lookback`
+  - `--foxctl-memory-drafts-limit`
+- Hermes:
+  - `memory_drafts_auto`
+  - `vault_path`
+  - `memory_drafts_apply`
+  - `memory_drafts_dry_run`
+  - `memory_drafts_interval_seconds`
+  - `memory_drafts_lookback`
+  - `memory_drafts_limit`
+
 ## Dispatcher Flow
 
 1. Select enabled hooks matching event.

@@ -1,6 +1,6 @@
 # Foxctl Plugin for Hermes Agent
 
-Deep integration between foxctl's intelligence, coordination, and flow orchestration layers and hermes-agent, providing 71 tools spanning 11 categories.
+Deep integration between foxctl's intelligence, coordination, and flow orchestration layers and hermes-agent, providing 72 tools spanning 11 categories.
 
 ## Tool Categories
 
@@ -125,6 +125,7 @@ Deep integration between foxctl's intelligence, coordination, and flow orchestra
 | Tool | Description |
 |---|---|
 | `foxctl_context_curator` | Unified curator report: memory, observations, tensions, handoffs, vault drafts |
+| `foxctl_context_memory_drafts` | Plan or write Obsidian inbox memory drafts from contextengine retrieval feedback |
 
 ### System
 
@@ -138,6 +139,18 @@ Deep integration between foxctl's intelligence, coordination, and flow orchestra
 # Symlink the plugin directory into hermes plugins
 ln -sf /path/to/foxctl/integrations/hermes ~/.hermes/plugins/foxctl
 ```
+
+To verify or relink both Hermes and Pi to the current foxctl checkout, run:
+
+```bash
+scripts/doctor-pi-hermes-integrations.sh
+scripts/doctor-pi-hermes-integrations.sh --apply
+```
+
+The doctor checks that Hermes has lifecycle hooks, the automatic memory draft
+tool, ContextWiki/vault tools, memory curator tools, and flow tools installed.
+Override the default Hermes target with
+`HERMES_FOXCTL_PLUGIN_PATH=/path/to/hermes/plugins/foxctl`.
 
 ## Configure
 
@@ -157,15 +170,23 @@ foxctl:
   auto_bind: false
   memory_context: true
   epic_context: true
+  memory_drafts_auto: false
+  memory_drafts_apply: true
+  memory_drafts_dry_run: false
+  memory_drafts_interval_seconds: 900
+  memory_drafts_lookback: "24h"
+  memory_drafts_limit: 20
 ```
 
-Environment variable overrides: `FOXCTL_URL`, `FOXCTL_WORKSPACE`, `FOXCTL_ROOM`, `FOXCTL_EPIC_ID`, `FOXCTL_ACTOR`, `FOXCTL_SESSION`, `FOXCTL_AUTO_BIND`.
+Environment variable overrides: `FOXCTL_URL`, `FOXCTL_WORKSPACE`, `FOXCTL_ROOM`, `FOXCTL_EPIC_ID`, `FOXCTL_ACTOR`, `FOXCTL_SESSION`, `FOXCTL_AUTO_BIND`, `FOXCTL_VAULT_PATH`, `FOXCTL_MEMORY_DRAFTS_AUTO`, `FOXCTL_MEMORY_DRAFTS_APPLY`, `FOXCTL_MEMORY_DRAFTS_DRY_RUN`, `FOXCTL_MEMORY_DRAFTS_INTERVAL_SECONDS`, `FOXCTL_MEMORY_DRAFTS_LOOKBACK`, `FOXCTL_MEMORY_DRAFTS_LIMIT`.
+
+Set `memory_drafts_auto: true` to let Hermes lifecycle hooks create Obsidian inbox memory drafts in the background from contextengine retrieval feedback. These writes remain draft-only and review-gated; canonical note merges still require the ContextWiki proposal review path.
 
 ## Architecture
 
 ```
 hermes agent
-  └── plugin: foxctl (71 tools, 11 categories)
+  └── plugin: foxctl (72 tools, 11 categories)
        ├── tools.py      → tool registrations + schemas
        ├── client.py     → HTTP + CLI client with envelope unwrapping
        ├── config.py     → config.yaml + env var reading

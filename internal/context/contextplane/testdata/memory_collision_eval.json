@@ -1,0 +1,220 @@
+{
+  "cases": [
+    {
+      "name": "urban_emergency_routes_collide_with_immunology",
+      "workspace_id": "eval-memory-collision",
+      "entropy": 0.4,
+      "threshold": 0.7,
+      "limit": 3,
+      "query": {
+        "id": "q-urban-emergency",
+        "domain": "Urban Logistics",
+        "text": "Emergency vehicles need local intersection clearance without a central controller.",
+        "literal_vector": [1, 0, 0, 0],
+        "structural_vector": [0, 1, 0, 0],
+        "source_refs": [
+          { "type": "event", "ref": "retrieval_episode:urban-emergency" }
+        ]
+      },
+      "memories": [
+        {
+          "id": "mem-immunology-local-response",
+          "original_domain": "Immunology",
+          "summary": "Immune cells respond locally near infection sites.",
+          "abstract_schema": "Decentralized edge-node threat response with local replication.",
+          "literal_vector": [0, 1, 0, 0],
+          "structural_vector": [0, 1, 0, 0],
+          "source_refs": [
+            { "type": "memory_claim", "ref": "claim:immunology-local-response" }
+          ]
+        },
+        {
+          "id": "mem-traffic-mainframe",
+          "original_domain": "Urban Logistics",
+          "summary": "Traffic lights can be centrally scheduled by a control room.",
+          "abstract_schema": "Central coordinator assigns priority to dependent nodes.",
+          "literal_vector": [1, 0, 0, 0],
+          "structural_vector": [0.55, 0.45, 0, 0],
+          "source_refs": [
+            { "type": "memory_claim", "ref": "claim:traffic-mainframe" }
+          ]
+        }
+      ],
+      "want_top_memory_id": "mem-immunology-local-response",
+      "want_absent_memory_ids": ["mem-traffic-mainframe"]
+    },
+    {
+      "name": "release_rollout_collides_with_firebreaks",
+      "workspace_id": "eval-memory-collision",
+      "entropy": 0.45,
+      "threshold": 0.7,
+      "limit": 3,
+      "include_same_domain": true,
+      "strategy": "room_seed_collision",
+      "query": {
+        "id": "q-release-rollout",
+        "domain": "Release Engineering",
+        "text": "Rollouts should isolate blast radius while keeping regional progress moving.",
+        "literal_vector": [1, 0, 0],
+        "structural_vector": [0, 1, 0],
+        "source_refs": [
+          { "type": "event", "ref": "retrieval_episode:release-rollout" }
+        ]
+      },
+      "memories": [
+        {
+          "id": "mem-release-dashboard",
+          "original_domain": "Release Engineering",
+          "summary": "A rollout dashboard tracks regions and approval state.",
+          "abstract_schema": "Central status aggregation over ordered rollout phases.",
+          "literal_vector": [0.99, 0.1, 0],
+          "structural_vector": [0.5, 0.5, 0],
+          "source_refs": [
+            { "type": "memory_claim", "ref": "claim:release-dashboard" }
+          ]
+        },
+        {
+          "id": "mem-forest-firebreaks",
+          "original_domain": "Forest Management",
+          "summary": "Firebreaks isolate spread while controlled burns continue.",
+          "abstract_schema": "Compartmentalized propagation with bounded local failure.",
+          "literal_vector": [0, 1, 0],
+          "structural_vector": [0, 1, 0],
+          "source_refs": [
+            { "type": "memory_claim", "ref": "claim:forest-firebreaks" }
+          ]
+        }
+      ],
+      "want_top_memory_id": "mem-forest-firebreaks"
+    },
+    {
+      "name": "queue_backpressure_collides_with_watersheds",
+      "workspace_id": "eval-memory-collision",
+      "entropy": 0.35,
+      "threshold": 0.7,
+      "limit": 3,
+      "query": {
+        "id": "q-backpressure",
+        "domain": "Distributed Systems",
+        "text": "Queue pressure should drain locally before it overloads a global coordinator.",
+        "literal_vector": [1, 0, 0, 0],
+        "structural_vector": [0, 0, 1, 0],
+        "source_refs": [
+          { "type": "event", "ref": "retrieval_episode:backpressure" }
+        ]
+      },
+      "memories": [
+        {
+          "id": "mem-watershed-spillways",
+          "original_domain": "Watershed Management",
+          "summary": "Local spillways drain excess water before main channels overflow.",
+          "abstract_schema": "Distributed pressure relief through local bypass paths.",
+          "literal_vector": [0, 1, 0, 0],
+          "structural_vector": [0, 0, 1, 0],
+          "source_refs": [
+            { "type": "memory_claim", "ref": "claim:watershed-spillways" }
+          ]
+        },
+        {
+          "id": "mem-queue-dashboard",
+          "original_domain": "Distributed Systems",
+          "summary": "Queue dashboards reveal hot partitions and delayed consumers.",
+          "abstract_schema": "Central visibility into local pressure.",
+          "literal_vector": [1, 0, 0, 0],
+          "structural_vector": [0.4, 0.2, 0.4, 0],
+          "source_refs": [
+            { "type": "memory_claim", "ref": "claim:queue-dashboard" }
+          ]
+        }
+      ],
+      "want_top_memory_id": "mem-watershed-spillways",
+      "want_absent_memory_ids": ["mem-queue-dashboard"]
+    },
+    {
+      "name": "moderation_routing_collides_with_ant_foraging",
+      "workspace_id": "eval-memory-collision",
+      "entropy": 0.4,
+      "threshold": 0.7,
+      "limit": 3,
+      "query": {
+        "id": "q-moderation-routing",
+        "domain": "Content Moderation",
+        "text": "Review work should route around overloaded teams while still converging on urgent cases.",
+        "literal_vector": [1, 0, 0],
+        "structural_vector": [0, 0, 1],
+        "source_refs": [
+          { "type": "event", "ref": "retrieval_episode:moderation-routing" }
+        ]
+      },
+      "memories": [
+        {
+          "id": "mem-ant-foraging",
+          "original_domain": "Ant Colony Foraging",
+          "summary": "Ants reinforce productive paths while abandoning depleted routes.",
+          "abstract_schema": "Decentralized load routing through local reinforcement signals.",
+          "literal_vector": [0, 1, 0],
+          "structural_vector": [0, 0, 1],
+          "source_refs": [
+            { "type": "memory_claim", "ref": "claim:ant-foraging" }
+          ]
+        },
+        {
+          "id": "mem-moderation-queue",
+          "original_domain": "Content Moderation",
+          "summary": "Moderation queues can be sorted by priority and team capacity.",
+          "abstract_schema": "Central priority sorting over work queues.",
+          "literal_vector": [1, 0, 0],
+          "structural_vector": [0.6, 0, 0.4],
+          "source_refs": [
+            { "type": "memory_claim", "ref": "claim:moderation-queue" }
+          ]
+        }
+      ],
+      "want_top_memory_id": "mem-ant-foraging",
+      "want_absent_memory_ids": ["mem-moderation-queue"]
+    },
+    {
+      "name": "agent_task_handoffs_collide_with_mycelium",
+      "workspace_id": "eval-memory-collision",
+      "entropy": 0.35,
+      "threshold": 0.7,
+      "limit": 3,
+      "query": {
+        "id": "q-agent-handoff",
+        "domain": "Agent Coordination",
+        "text": "Worker agents should pass useful signals to nearby tasks without flooding the overseer.",
+        "literal_vector": [1, 0, 0, 0],
+        "structural_vector": [0, 0, 0, 1],
+        "source_refs": [
+          { "type": "event", "ref": "retrieval_episode:agent-handoff" }
+        ]
+      },
+      "memories": [
+        {
+          "id": "mem-mycelium-nutrient-signaling",
+          "original_domain": "Mycology",
+          "summary": "Mycelial networks move nutrients and signals through nearby filaments.",
+          "abstract_schema": "Distributed local propagation through neighboring nodes with selective amplification.",
+          "literal_vector": [0, 1, 0, 0],
+          "structural_vector": [0, 0, 0, 1],
+          "source_refs": [
+            { "type": "memory_claim", "ref": "claim:mycelium-nutrient-signaling" }
+          ]
+        },
+        {
+          "id": "mem-agent-status-report",
+          "original_domain": "Agent Coordination",
+          "summary": "Agents can send status reports to an overseer.",
+          "abstract_schema": "Central broadcast of worker status to a supervisor.",
+          "literal_vector": [1, 0, 0, 0],
+          "structural_vector": [0.6, 0, 0, 0.4],
+          "source_refs": [
+            { "type": "memory_claim", "ref": "claim:agent-status-report" }
+          ]
+        }
+      ],
+      "want_top_memory_id": "mem-mycelium-nutrient-signaling",
+      "want_absent_memory_ids": ["mem-agent-status-report"]
+    }
+  ]
+}

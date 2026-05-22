@@ -244,6 +244,8 @@ type MemoryStore interface {
 	Stats(ctx context.Context) (MemoryStats, error)
 	// UpdateEmbedding stores an embedding vector for a named memory entry.
 	UpdateEmbedding(ctx context.Context, name, workspace string, embedding []float32) error
+	// GetEmbedding retrieves the embedding vector for a named memory entry.
+	GetEmbedding(ctx context.Context, name, workspace string) ([]float32, error)
 	// SearchSimilar finds entries similar to the given embedding using vector similarity.
 	SearchSimilar(ctx context.Context, workspace string, embedding []float32, limit int) ([]ScoredEntry, error)
 	// SearchSimilarByType finds entries of a specific type using vector similarity.

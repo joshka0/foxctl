@@ -36,6 +36,12 @@ retrievable, and safe to provide to agents.
 
 The implemented slice now includes a real control-plane runtime, an Obsidian adapter and local vault index, MCP surfaces for ContextWiki and vault operations, and a bounded daemon maintenance loop. It still stops short of the full long-horizon `contextd` design from the larger proposal.
 
+The newest memory slice adds an autonomous draft lane: typed contextengine
+retrieval feedback can be converted into Obsidian inbox memory drafts and
+prepared ContextWiki review proposals without asking an agent to call a tool.
+This remains draft-only automation. Canonical vault notes are not mutated until
+the existing proposal review/merge path is used.
+
 ## Implemented Surface
 
 Command:
@@ -86,6 +92,11 @@ Command:
 - `foxctl obsidian bridge apply`
 - `foxctl obsidian bridge apply-batch`
 - `foxctl obsidian bridge tidy`
+- HTTP: `POST /api/context/memory-drafts`
+- Pi tool/hook: `foxctl_context_memory_drafts` and
+  `--foxctl-memory-drafts-auto`
+- Hermes tool/hook: `foxctl_context_memory_drafts` and
+  `memory_drafts_auto`
 
 Behavior:
 
@@ -115,6 +126,16 @@ Behavior:
 - explicitly review-merges promotion drafts into canonical vault notes through a bounded merge path
 - merges repeated observations and tensions into stable records instead of blindly appending duplicates
 - can persist deduped ContextWiki memory proposals from retrieval-inspection flows and expose low-risk apply/reject surfaces for proposal review
+- can plan autonomous memory drafts from typed contextengine retrieval feedback
+  (`answer_corrected`, `retrieval_missed`, `wrong_file_retrieved`,
+  `stale_context_used`, `gap_created`)
+- writes autonomous memory candidates to the Obsidian inbox under
+  `inbox/drafted-from-foxctl/memory/<workspace>/<date>/`
+- records matching `memory_draft` proposals as prepared review work packets
+  instead of merging directly into canonical memory notes
+- exposes a one-shot HTTP/API trigger for connector and provider hooks through
+  `POST /api/context/memory-drafts`; direct calls default to dry-run unless
+  `dry_run:false` is explicit
 - refreshes top-of-mind and rethink state in a leader-safe daemon maintenance loop when the daemon is running with a workspace
 - exposes a first Phase 1 Obsidian adapter through CLI and MCP
 - includes an initial Phase 2 vault index for note/headings/links/aliases
@@ -194,6 +215,38 @@ Current hook behavior:
   - emits prompt-ready next-merge context plus `proposal_work_packet`
   - claims the selected packet by default so it is not re-offered until merged or released
 
+Provider auto-hook behavior:
+
+- Pi and Hermes can opt into autonomous memory-draft creation without requiring
+  the agent to call `foxctl_context_memory_drafts`.
+- Pi starts the background runner from its `session_start` event and also runs a
+  throttled opportunistic check from `before_agent_start`.
+- Hermes starts a daemon thread from `on_session_start` and flushes/stops it
+  from `on_session_end`.
+- Both provider hooks call `POST /api/context/memory-drafts`.
+- Both provider hooks remain opt-in. They write only Obsidian inbox drafts and
+  prepared review proposals; canonical note merges still require the
+  ContextWiki proposal review flow.
+
+Provider controls:
+
+- Pi:
+  - `--foxctl-memory-drafts-auto`
+  - `--foxctl-vault-path`
+  - `--foxctl-memory-drafts-apply`
+  - `--foxctl-memory-drafts-dry-run`
+  - `--foxctl-memory-drafts-interval-seconds`
+  - `--foxctl-memory-drafts-lookback`
+  - `--foxctl-memory-drafts-limit`
+- Hermes:
+  - `memory_drafts_auto`
+  - `memory_drafts_apply`
+  - `memory_drafts_dry_run`
+  - `memory_drafts_interval_seconds`
+  - `memory_drafts_lookback`
+  - `memory_drafts_limit`
+  - `vault_path`
+
 Task continuity delivery split:
 
 - `foxctl context task-history-summary`
@@ -272,6 +325,7 @@ Implemented now:
 - official Obsidian CLI invocation for reads and search
 - related-note lookup through wikilinks, backlinks, and aliases
 - safe draft/inbox-first note creation
+- autonomous memory draft creation from contextengine retrieval feedback
 - bounded append-under-heading behavior
 - session capture and evergreen draft creation through the adapter
 - explicit reviewed merge from draft content into canonical note targets
@@ -312,6 +366,34 @@ Default docs-bridge layout:
 - draft bundle:
   - `inbox/drafted-from-foxctl/docs-bridge/<project>/`
 
+Default autonomous memory-draft layout:
+
+- draft bundle:
+  - `inbox/drafted-from-foxctl/memory/<project>/<YYYY-MM-DD>/`
+- prepared proposal kind:
+  - `memory_draft`
+- suggested canonical target:
+  - `notes/memory/<project>.md`
+
+Autonomous memory draft frontmatter includes:
+
+- `type: memory`
+- `status: draft`
+- `trust: raw`
+- `memory_kind`
+- `lifecycle: candidate`
+- `review_status: needs_review`
+- `source_lane: contextengine_retrieval_feedback`
+- `workspace_id`
+- `dedupe_key`
+- `feedback_kind`
+- `feedback_id`
+- `episode_id`
+- `query`
+- `source_refs`
+- `evidence_refs`
+- `tags`
+
 Bridge metadata contract:
 
 - repo docs may carry:
@@ -341,6 +423,10 @@ Current behavior:
   - rebuilds the local Obsidian index
   - recomputes vault health
   - folds health findings into ContextWiki maintenance tasks
+- if autonomous memory drafts are enabled:
+  - scans recent typed contextengine retrieval feedback
+  - plans bounded Obsidian inbox memory drafts
+  - optionally writes the drafts and prepared review proposals during the dream loop
 
 Controls:
 
@@ -348,6 +434,18 @@ Controls:
   - optional duration override for the refresh ticker
 - `FOXCTL_OBSIDIAN_VAULT_PATH`
   - optional vault path for health-driven maintenance refresh
+- `FOXCTL_CONTEXTWIKI_VAULT_PATH`
+  - alternate vault path used by ContextWiki maintenance and memory-draft writes
+- `FOXCTL_CURATOR_MEMORY_DRAFTS_ENABLED`
+  - opt into dream-loop autonomous memory draft planning
+- `FOXCTL_CURATOR_MEMORY_DRAFTS_APPLY_DRAFTS`
+  - write planned inbox drafts and prepared proposals when the curator is not in dry-run mode
+- `FOXCTL_CURATOR_DRY_RUN`
+  - keeps the curator in report-only mode when true
+- `FOXCTL_CURATOR_MEMORY_DRAFT_LOOKBACK`
+  - duration window for feedback scans, default `24h`
+- `FOXCTL_CURATOR_MEMORY_DRAFT_LIMIT`
+  - maximum planned drafts per dream cycle, default `20`
 - `FOXCTL_OBSIDIAN_SEMANTIC_ENABLED`
   - explicit override for semantic note search in ContextWiki retrieval
   - use `false` or `0` to force lexical-only behavior
@@ -418,6 +516,8 @@ Persistence split:
   - maintenance tasks
   - memory proposals
   - evidence import runs
+- autonomous memory drafts are markdown files in the Obsidian inbox, while their
+  review state is tracked as `memory_draft` rows in the memory proposal table
 - legacy NDJSON files remain part of the scaffold, but mutable ContextWiki state is now loaded into the dedicated store and updated there
 
 ## Retrieval Policy Note
@@ -505,7 +605,7 @@ This slice intentionally still stops short of:
 
 - semantic retrieval or embeddings as a requirement for vault recall
 - repo-graph-driven symbol backlinks from the code index into vault notes
-- a full reviewed merge queue with human review states beyond `drafted -> reviewed_merged`
+- a full human-review state machine beyond the current prepared proposal and reviewed merge packet flow
 - automatic installation into external user-home hook layouts such as `~/.claude/hooks/foxctl/`
 - the full external `contextd` service described in the longer proposal
 
@@ -533,3 +633,4 @@ Expected next increments:
 2. Promote beyond heuristic observation capture into richer semantic clustering and deduplication.
 3. Extend reviewed merge into a fuller human-review state machine for canonical notes.
 4. Add a richer bootstrap path that can also install ContextWiki wrappers into external user-home hook layouts.
+5. Add provider-hook support for any additional agent providers that expose stable lifecycle events.
