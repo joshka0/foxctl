@@ -31,7 +31,7 @@ by cleanup value and implementation risk.
   - Tests: corrupt/bad DDL fixtures, duplicate-column idempotency, startup
     failure when required indexes/triggers cannot be created.
 
-- [ ] Stop swallowing controlled storage decode corruption.
+- [x] Stop swallowing controlled storage decode corruption.
   - Scope: trajectory, sessions, pattern store, and testwatch storage decode
     paths.
   - Problem: foxctl-owned JSON/timestamp fields decode to empty values on

@@ -360,9 +360,21 @@ func scanPatternRow(row *sql.Row) (Pattern, error) {
 		return Pattern{}, err
 	}
 
-	_ = sqlutil.ScanJSON(toolsJSON, &p.ToolSequence)  //nolint:errcheck
-	p.LastSeen, _ = sqlutil.ScanTimestamp(lastSeen)   //nolint:errcheck
-	p.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt) //nolint:errcheck
+	if toolsJSON == "" {
+		return Pattern{}, fmt.Errorf("decode pattern %q tool_sequence: empty JSON", p.ID)
+	}
+	if err := sqlutil.ScanJSON(toolsJSON, &p.ToolSequence); err != nil {
+		return Pattern{}, fmt.Errorf("decode pattern %q tool_sequence: %w", p.ID, err)
+	}
+	var parseErr error
+	p.LastSeen, parseErr = scanPatternTimestamp(lastSeen, fmt.Sprintf("pattern %q last_seen", p.ID))
+	if parseErr != nil {
+		return Pattern{}, parseErr
+	}
+	p.CreatedAt, parseErr = scanPatternTimestamp(createdAt, fmt.Sprintf("pattern %q created_at", p.ID))
+	if parseErr != nil {
+		return Pattern{}, parseErr
+	}
 
 	return p, nil
 }
@@ -382,9 +394,20 @@ func scanPatternRows(rows *sql.Rows) ([]Pattern, error) {
 			return nil, err
 		}
 
-		_ = sqlutil.ScanJSON(toolsJSON, &p.ToolSequence)  //nolint:errcheck
-		p.LastSeen, _ = sqlutil.ScanTimestamp(lastSeen)   //nolint:errcheck
-		p.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt) //nolint:errcheck
+		if toolsJSON == "" {
+			return nil, fmt.Errorf("decode pattern %q tool_sequence: empty JSON", p.ID)
+		}
+		if err := sqlutil.ScanJSON(toolsJSON, &p.ToolSequence); err != nil {
+			return nil, fmt.Errorf("decode pattern %q tool_sequence: %w", p.ID, err)
+		}
+		p.LastSeen, err = scanPatternTimestamp(lastSeen, fmt.Sprintf("pattern %q last_seen", p.ID))
+		if err != nil {
+			return nil, err
+		}
+		p.CreatedAt, err = scanPatternTimestamp(createdAt, fmt.Sprintf("pattern %q created_at", p.ID))
+		if err != nil {
+			return nil, err
+		}
 
 		patterns = append(patterns, p)
 	}
@@ -392,4 +415,15 @@ func scanPatternRows(rows *sql.Rows) ([]Pattern, error) {
 		return nil, err
 	}
 	return patterns, nil
+}
+
+func scanPatternTimestamp(src, field string) (time.Time, error) {
+	if src == "" {
+		return time.Time{}, fmt.Errorf("decode %s: empty timestamp", field)
+	}
+	ts, err := sqlutil.ScanTimestamp(src)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("decode %s: %w", field, err)
+	}
+	return ts, nil
 }

@@ -597,7 +597,7 @@ func (s *TursoStore) List(ctx context.Context, opts ListOptions) ([]Session, err
 	for rows.Next() {
 		session, err := scanSessionRows(rows)
 		if err != nil {
-			continue
+			return nil, err
 		}
 		sessions = append(sessions, session)
 	}
@@ -644,7 +644,7 @@ func (s *TursoStore) Search(ctx context.Context, query string, limit int) ([]Ses
 	for rows.Next() {
 		session, err := scanSessionRows(rows)
 		if err != nil {
-			continue
+			return nil, err
 		}
 		sessions = append(sessions, session)
 	}
@@ -722,7 +722,7 @@ func (s *TursoStore) SearchSimilar(ctx context.Context, workspace string, queryE
 			&createdAtStr, &updatedAtStr, &distance,
 		)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("sessions: search similar scan: %w", err)
 		}
 
 		session.ProjectName = projectName.String
@@ -748,19 +748,37 @@ func (s *TursoStore) SearchSimilar(ctx context.Context, workspace string, queryE
 			session.Status = storage.SessionStatusOK
 		}
 
-		session.StartedAt, _ = sqlutil.ScanTimestamp(startedAtStr)
-		session.CreatedAt, _ = sqlutil.ScanTimestamp(createdAtStr)
-		session.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAtStr)
-		if endedAt.Valid {
-			session.EndedAt, _ = sqlutil.ScanTimestamp(endedAt.String)
+		if err := decodeTimestampInto(&session.StartedAt, startedAtStr, "sessions.started_at"); err != nil {
+			return nil, err
+		}
+		if err := decodeTimestampInto(&session.CreatedAt, createdAtStr, "sessions.created_at"); err != nil {
+			return nil, err
+		}
+		if err := decodeTimestampInto(&session.UpdatedAt, updatedAtStr, "sessions.updated_at"); err != nil {
+			return nil, err
+		}
+		if err := decodeNullableTimestampInto(&session.EndedAt, endedAt, "sessions.ended_at"); err != nil {
+			return nil, err
 		}
 
-		_ = sqlutil.ScanJSON(accomplishedJSON, &session.Accomplished)
-		_ = sqlutil.ScanJSON(decisionsJSON, &session.Decisions)
-		_ = sqlutil.ScanJSON(gotchasJSON, &session.Gotchas)
-		_ = sqlutil.ScanJSON(userInsightsJSON, &session.UserInsights)
-		_ = sqlutil.ScanJSON(tagsJSON, &session.Tags)
-		_ = sqlutil.ScanJSON(keyFilesJSON, &session.KeyFiles)
+		if err := decodeJSONInto(accomplishedJSON, "sessions.accomplished", &session.Accomplished); err != nil {
+			return nil, err
+		}
+		if err := decodeJSONInto(decisionsJSON, "sessions.decisions", &session.Decisions); err != nil {
+			return nil, err
+		}
+		if err := decodeJSONInto(gotchasJSON, "sessions.gotchas", &session.Gotchas); err != nil {
+			return nil, err
+		}
+		if err := decodeJSONInto(userInsightsJSON, "sessions.user_insights", &session.UserInsights); err != nil {
+			return nil, err
+		}
+		if err := decodeJSONInto(tagsJSON, "sessions.tags", &session.Tags); err != nil {
+			return nil, err
+		}
+		if err := decodeJSONInto(keyFilesJSON, "sessions.key_files", &session.KeyFiles); err != nil {
+			return nil, err
+		}
 
 		// Convert cosine distance to similarity (distance is 0 for identical, 2 for opposite)
 		similarity := 1.0 - distance
@@ -983,14 +1001,22 @@ func (s *TursoStore) GetTurns(ctx context.Context, sessionID string, opts TurnLi
 			&turn.Resolution, &turn.TokensUsed, &timestampStr, &createdAtStr,
 		)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("sessions: get turns scan: %w", err)
 		}
 
 		turn.HasError = hasError != 0
-		turn.Timestamp, _ = sqlutil.ScanTimestamp(timestampStr)
-		turn.CreatedAt, _ = sqlutil.ScanTimestamp(createdAtStr)
-		_ = sqlutil.ScanJSON(toolCallsJSON, &turn.ToolCalls)
-		_ = sqlutil.ScanJSON(filesTouchedJSON, &turn.FilesTouched)
+		if err := decodeTimestampInto(&turn.Timestamp, timestampStr, "session_turns.timestamp"); err != nil {
+			return nil, err
+		}
+		if err := decodeTimestampInto(&turn.CreatedAt, createdAtStr, "session_turns.created_at"); err != nil {
+			return nil, err
+		}
+		if err := decodeJSONInto(toolCallsJSON, "session_turns.tool_calls", &turn.ToolCalls); err != nil {
+			return nil, err
+		}
+		if err := decodeJSONInto(filesTouchedJSON, "session_turns.files_touched", &turn.FilesTouched); err != nil {
+			return nil, err
+		}
 
 		turns = append(turns, turn)
 	}
@@ -1033,14 +1059,22 @@ func (s *TursoStore) SearchTurns(ctx context.Context, query string, limit int) (
 			&turn.Resolution, &turn.TokensUsed, &timestampStr, &createdAtStr,
 		)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("sessions: search turns scan: %w", err)
 		}
 
 		turn.HasError = hasError != 0
-		turn.Timestamp, _ = sqlutil.ScanTimestamp(timestampStr)
-		turn.CreatedAt, _ = sqlutil.ScanTimestamp(createdAtStr)
-		_ = sqlutil.ScanJSON(toolCallsJSON, &turn.ToolCalls)
-		_ = sqlutil.ScanJSON(filesTouchedJSON, &turn.FilesTouched)
+		if err := decodeTimestampInto(&turn.Timestamp, timestampStr, "session_turns.timestamp"); err != nil {
+			return nil, err
+		}
+		if err := decodeTimestampInto(&turn.CreatedAt, createdAtStr, "session_turns.created_at"); err != nil {
+			return nil, err
+		}
+		if err := decodeJSONInto(toolCallsJSON, "session_turns.tool_calls", &turn.ToolCalls); err != nil {
+			return nil, err
+		}
+		if err := decodeJSONInto(filesTouchedJSON, "session_turns.files_touched", &turn.FilesTouched); err != nil {
+			return nil, err
+		}
 
 		turns = append(turns, turn)
 	}
@@ -1151,13 +1185,19 @@ func (s *TursoStore) GetChunks(ctx context.Context, sessionID string, limit int)
 			&hasError, &chunk.ErrorType, &chunk.EmbeddingModel, &createdAtStr,
 		)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("sessions: get chunks scan: %w", err)
 		}
 
 		chunk.HasError = hasError != 0
-		chunk.CreatedAt, _ = sqlutil.ScanTimestamp(createdAtStr)
-		_ = sqlutil.ScanJSON(toolsUsedJSON, &chunk.ToolsUsed)
-		_ = sqlutil.ScanJSON(filesTouchedJSON, &chunk.FilesTouched)
+		if err := decodeTimestampInto(&chunk.CreatedAt, createdAtStr, "session_chunks.created_at"); err != nil {
+			return nil, err
+		}
+		if err := decodeJSONInto(toolsUsedJSON, "session_chunks.tools_used", &chunk.ToolsUsed); err != nil {
+			return nil, err
+		}
+		if err := decodeJSONInto(filesTouchedJSON, "session_chunks.files_touched", &chunk.FilesTouched); err != nil {
+			return nil, err
+		}
 
 		chunks = append(chunks, chunk)
 	}
@@ -1220,13 +1260,19 @@ func (s *TursoStore) SearchChunks(ctx context.Context, embedding []float32, limi
 			&hasError, &chunk.ErrorType, &chunk.EmbeddingModel, &createdAtStr, &distance,
 		)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("sessions: search chunks scan: %w", err)
 		}
 
 		chunk.HasError = hasError != 0
-		chunk.CreatedAt, _ = sqlutil.ScanTimestamp(createdAtStr)
-		_ = sqlutil.ScanJSON(toolsUsedJSON, &chunk.ToolsUsed)
-		_ = sqlutil.ScanJSON(filesTouchedJSON, &chunk.FilesTouched)
+		if err := decodeTimestampInto(&chunk.CreatedAt, createdAtStr, "session_chunks.created_at"); err != nil {
+			return nil, err
+		}
+		if err := decodeJSONInto(toolsUsedJSON, "session_chunks.tools_used", &chunk.ToolsUsed); err != nil {
+			return nil, err
+		}
+		if err := decodeJSONInto(filesTouchedJSON, "session_chunks.files_touched", &chunk.FilesTouched); err != nil {
+			return nil, err
+		}
 
 		// Convert cosine distance to similarity (distance is in [0, 2], normalize to [0, 1])
 		results = append(results, ScoredChunk{
@@ -1351,7 +1397,7 @@ ORDER BY created_at ASC`, sessionID, windowIndex)
 			&createdAtStr, &updatedAtStr,
 		)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("sessions: get chunk summaries scan: %w", err)
 		}
 		if trigger.Valid {
 			summary.Trigger = trigger.String
@@ -1359,14 +1405,14 @@ ORDER BY created_at ASC`, sessionID, windowIndex)
 		if summaryModel.Valid {
 			summary.SummaryModel = summaryModel.String
 		}
-		if createdAtStr.Valid {
-			summary.CreatedAt, _ = sqlutil.ScanTimestamp(createdAtStr.String)
+		if err := decodeNullableTimestampInto(&summary.CreatedAt, createdAtStr, "session_chunk_summaries.created_at"); err != nil {
+			return nil, err
 		}
-		if updatedAtStr.Valid {
-			summary.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAtStr.String)
+		if err := decodeNullableTimestampInto(&summary.UpdatedAt, updatedAtStr, "session_chunk_summaries.updated_at"); err != nil {
+			return nil, err
 		}
-		if chunkIndicesJSON.Valid {
-			_ = sqlutil.ScanJSON(chunkIndicesJSON.String, &summary.ChunkIndices)
+		if err := decodeNullableJSONInto(chunkIndicesJSON, "session_chunk_summaries.chunk_indices", &summary.ChunkIndices); err != nil {
+			return nil, err
 		}
 		if chunkIndexMin.Valid {
 			summary.ChunkIndexMin = int(chunkIndexMin.Int64)
@@ -1384,14 +1430,14 @@ ORDER BY created_at ASC`, sessionID, windowIndex)
 				}
 			}
 		}
-		if toolsJSON.Valid {
-			_ = sqlutil.ScanJSON(toolsJSON.String, &summary.Tools)
+		if err := decodeNullableJSONInto(toolsJSON, "session_chunk_summaries.tools", &summary.Tools); err != nil {
+			return nil, err
 		}
-		if filesJSON.Valid {
-			_ = sqlutil.ScanJSON(filesJSON.String, &summary.Files)
+		if err := decodeNullableJSONInto(filesJSON, "session_chunk_summaries.files", &summary.Files); err != nil {
+			return nil, err
 		}
-		if errorsJSON.Valid {
-			_ = sqlutil.ScanJSON(errorsJSON.String, &summary.Errors)
+		if err := decodeNullableJSONInto(errorsJSON, "session_chunk_summaries.errors", &summary.Errors); err != nil {
+			return nil, err
 		}
 
 		summaries = append(summaries, summary)
@@ -1430,14 +1476,14 @@ WHERE id = ?`, summaryID)
 	if summaryModel.Valid {
 		summary.SummaryModel = summaryModel.String
 	}
-	if createdAtStr.Valid {
-		summary.CreatedAt, _ = sqlutil.ScanTimestamp(createdAtStr.String)
+	if err := decodeNullableTimestampInto(&summary.CreatedAt, createdAtStr, "session_chunk_summaries.created_at"); err != nil {
+		return SessionChunkSummary{}, err
 	}
-	if updatedAtStr.Valid {
-		summary.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAtStr.String)
+	if err := decodeNullableTimestampInto(&summary.UpdatedAt, updatedAtStr, "session_chunk_summaries.updated_at"); err != nil {
+		return SessionChunkSummary{}, err
 	}
-	if chunkIndicesJSON.Valid {
-		_ = sqlutil.ScanJSON(chunkIndicesJSON.String, &summary.ChunkIndices)
+	if err := decodeNullableJSONInto(chunkIndicesJSON, "session_chunk_summaries.chunk_indices", &summary.ChunkIndices); err != nil {
+		return SessionChunkSummary{}, err
 	}
 	if chunkIndexMin.Valid {
 		summary.ChunkIndexMin = int(chunkIndexMin.Int64)
@@ -1455,14 +1501,14 @@ WHERE id = ?`, summaryID)
 			}
 		}
 	}
-	if toolsJSON.Valid {
-		_ = sqlutil.ScanJSON(toolsJSON.String, &summary.Tools)
+	if err := decodeNullableJSONInto(toolsJSON, "session_chunk_summaries.tools", &summary.Tools); err != nil {
+		return SessionChunkSummary{}, err
 	}
-	if filesJSON.Valid {
-		_ = sqlutil.ScanJSON(filesJSON.String, &summary.Files)
+	if err := decodeNullableJSONInto(filesJSON, "session_chunk_summaries.files", &summary.Files); err != nil {
+		return SessionChunkSummary{}, err
 	}
-	if errorsJSON.Valid {
-		_ = sqlutil.ScanJSON(errorsJSON.String, &summary.Errors)
+	if err := decodeNullableJSONInto(errorsJSON, "session_chunk_summaries.errors", &summary.Errors); err != nil {
+		return SessionChunkSummary{}, err
 	}
 
 	return summary, nil
@@ -1752,14 +1798,14 @@ func scanContextWindowRow(row *sql.Row) (ContextWindow, error) {
 		return ContextWindow{}, fmt.Errorf("sessions: scan context window: %w", err)
 	}
 
-	if startedAt.Valid {
-		window.StartedAt, _ = sqlutil.ScanTimestamp(startedAt.String)
+	if err := decodeNullableTimestampInto(&window.StartedAt, startedAt, "session_context_windows.started_at"); err != nil {
+		return ContextWindow{}, err
 	}
-	if endedAt.Valid {
-		window.EndedAt, _ = sqlutil.ScanTimestamp(endedAt.String)
+	if err := decodeNullableTimestampInto(&window.EndedAt, endedAt, "session_context_windows.ended_at"); err != nil {
+		return ContextWindow{}, err
 	}
-	if createdAt.Valid {
-		window.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt.String)
+	if err := decodeNullableTimestampInto(&window.CreatedAt, createdAt, "session_context_windows.created_at"); err != nil {
+		return ContextWindow{}, err
 	}
 	window.Trigger = trigger.String
 	window.Summary = summary.String
@@ -1790,14 +1836,14 @@ func scanContextWindowsRows(rows *sql.Rows) ([]ContextWindow, error) {
 			return nil, fmt.Errorf("sessions: scan context windows: %w", err)
 		}
 
-		if startedAt.Valid {
-			window.StartedAt, _ = sqlutil.ScanTimestamp(startedAt.String)
+		if err := decodeNullableTimestampInto(&window.StartedAt, startedAt, "session_context_windows.started_at"); err != nil {
+			return nil, err
 		}
-		if endedAt.Valid {
-			window.EndedAt, _ = sqlutil.ScanTimestamp(endedAt.String)
+		if err := decodeNullableTimestampInto(&window.EndedAt, endedAt, "session_context_windows.ended_at"); err != nil {
+			return nil, err
 		}
-		if createdAt.Valid {
-			window.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt.String)
+		if err := decodeNullableTimestampInto(&window.CreatedAt, createdAt, "session_context_windows.created_at"); err != nil {
+			return nil, err
 		}
 		window.Trigger = trigger.String
 		window.Summary = summary.String
@@ -1867,22 +1913,17 @@ func scanSessionRow(row *sql.Row) (Session, error) {
 		return Session{}, fmt.Errorf("sessions: scan: %w", err)
 	}
 
-	// Parse timestamps
-	if startedAt.Valid {
-		ts, _ := sqlutil.ScanTimestamp(startedAt.String)
-		session.StartedAt = ts
+	if err := decodeNullableTimestampInto(&session.StartedAt, startedAt, "sessions.started_at"); err != nil {
+		return Session{}, err
 	}
-	if endedAt.Valid {
-		ts, _ := sqlutil.ScanTimestamp(endedAt.String)
-		session.EndedAt = ts
+	if err := decodeNullableTimestampInto(&session.EndedAt, endedAt, "sessions.ended_at"); err != nil {
+		return Session{}, err
 	}
-	if createdAt.Valid {
-		ts, _ := sqlutil.ScanTimestamp(createdAt.String)
-		session.CreatedAt = ts
+	if err := decodeNullableTimestampInto(&session.CreatedAt, createdAt, "sessions.created_at"); err != nil {
+		return Session{}, err
 	}
-	if updatedAt.Valid {
-		ts, _ := sqlutil.ScanTimestamp(updatedAt.String)
-		session.UpdatedAt = ts
+	if err := decodeNullableTimestampInto(&session.UpdatedAt, updatedAt, "sessions.updated_at"); err != nil {
+		return Session{}, err
 	}
 
 	// Assign nullable strings
@@ -1944,24 +1985,23 @@ func scanSessionRow(row *sql.Row) (Session, error) {
 		session.TotalTokens = int(totalTokens.Int64)
 	}
 
-	// Parse JSON arrays
-	if accomplished.Valid {
-		_ = sqlutil.ScanJSON(accomplished.String, &session.Accomplished)
+	if err := decodeNullableJSONInto(accomplished, "sessions.accomplished", &session.Accomplished); err != nil {
+		return Session{}, err
 	}
-	if decisions.Valid {
-		_ = sqlutil.ScanJSON(decisions.String, &session.Decisions)
+	if err := decodeNullableJSONInto(decisions, "sessions.decisions", &session.Decisions); err != nil {
+		return Session{}, err
 	}
-	if gotchas.Valid {
-		_ = sqlutil.ScanJSON(gotchas.String, &session.Gotchas)
+	if err := decodeNullableJSONInto(gotchas, "sessions.gotchas", &session.Gotchas); err != nil {
+		return Session{}, err
 	}
-	if userInsights.Valid {
-		_ = sqlutil.ScanJSON(userInsights.String, &session.UserInsights)
+	if err := decodeNullableJSONInto(userInsights, "sessions.user_insights", &session.UserInsights); err != nil {
+		return Session{}, err
 	}
-	if tags.Valid {
-		_ = sqlutil.ScanJSON(tags.String, &session.Tags)
+	if err := decodeNullableJSONInto(tags, "sessions.tags", &session.Tags); err != nil {
+		return Session{}, err
 	}
-	if keyFiles.Valid {
-		_ = sqlutil.ScanJSON(keyFiles.String, &session.KeyFiles)
+	if err := decodeNullableJSONInto(keyFiles, "sessions.key_files", &session.KeyFiles); err != nil {
+		return Session{}, err
 	}
 
 	return session, nil
@@ -1990,22 +2030,17 @@ func scanSessionRows(rows *sql.Rows) (Session, error) {
 		return Session{}, fmt.Errorf("sessions: scan: %w", err)
 	}
 
-	// Parse timestamps
-	if startedAt.Valid {
-		ts, _ := sqlutil.ScanTimestamp(startedAt.String)
-		session.StartedAt = ts
+	if err := decodeNullableTimestampInto(&session.StartedAt, startedAt, "sessions.started_at"); err != nil {
+		return Session{}, err
 	}
-	if endedAt.Valid {
-		ts, _ := sqlutil.ScanTimestamp(endedAt.String)
-		session.EndedAt = ts
+	if err := decodeNullableTimestampInto(&session.EndedAt, endedAt, "sessions.ended_at"); err != nil {
+		return Session{}, err
 	}
-	if createdAt.Valid {
-		ts, _ := sqlutil.ScanTimestamp(createdAt.String)
-		session.CreatedAt = ts
+	if err := decodeNullableTimestampInto(&session.CreatedAt, createdAt, "sessions.created_at"); err != nil {
+		return Session{}, err
 	}
-	if updatedAt.Valid {
-		ts, _ := sqlutil.ScanTimestamp(updatedAt.String)
-		session.UpdatedAt = ts
+	if err := decodeNullableTimestampInto(&session.UpdatedAt, updatedAt, "sessions.updated_at"); err != nil {
+		return Session{}, err
 	}
 
 	// Assign nullable strings
@@ -2067,24 +2102,23 @@ func scanSessionRows(rows *sql.Rows) (Session, error) {
 		session.TotalTokens = int(totalTokens.Int64)
 	}
 
-	// Parse JSON arrays
-	if accomplished.Valid {
-		_ = sqlutil.ScanJSON(accomplished.String, &session.Accomplished)
+	if err := decodeNullableJSONInto(accomplished, "sessions.accomplished", &session.Accomplished); err != nil {
+		return Session{}, err
 	}
-	if decisions.Valid {
-		_ = sqlutil.ScanJSON(decisions.String, &session.Decisions)
+	if err := decodeNullableJSONInto(decisions, "sessions.decisions", &session.Decisions); err != nil {
+		return Session{}, err
 	}
-	if gotchas.Valid {
-		_ = sqlutil.ScanJSON(gotchas.String, &session.Gotchas)
+	if err := decodeNullableJSONInto(gotchas, "sessions.gotchas", &session.Gotchas); err != nil {
+		return Session{}, err
 	}
-	if userInsights.Valid {
-		_ = sqlutil.ScanJSON(userInsights.String, &session.UserInsights)
+	if err := decodeNullableJSONInto(userInsights, "sessions.user_insights", &session.UserInsights); err != nil {
+		return Session{}, err
 	}
-	if tags.Valid {
-		_ = sqlutil.ScanJSON(tags.String, &session.Tags)
+	if err := decodeNullableJSONInto(tags, "sessions.tags", &session.Tags); err != nil {
+		return Session{}, err
 	}
-	if keyFiles.Valid {
-		_ = sqlutil.ScanJSON(keyFiles.String, &session.KeyFiles)
+	if err := decodeNullableJSONInto(keyFiles, "sessions.key_files", &session.KeyFiles); err != nil {
+		return Session{}, err
 	}
 
 	return session, nil
@@ -2390,7 +2424,7 @@ func (s *TursoStore) GetAncestorChain(ctx context.Context, sessionID string, max
 	for rows.Next() {
 		session, err := scanSessionRows(rows)
 		if err != nil {
-			continue
+			return nil, err
 		}
 		sessions = append(sessions, session)
 	}
@@ -2447,7 +2481,7 @@ func (s *TursoStore) SearchSimilarGlobal(ctx context.Context, queryEmbedding []f
 			&createdAtStr, &updatedAtStr, &distance,
 		)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("sessions: search similar global scan: %w", err)
 		}
 
 		session.ProjectName = projectName.String
@@ -2473,19 +2507,37 @@ func (s *TursoStore) SearchSimilarGlobal(ctx context.Context, queryEmbedding []f
 			session.Status = storage.SessionStatusOK
 		}
 
-		session.StartedAt, _ = sqlutil.ScanTimestamp(startedAtStr)
-		session.CreatedAt, _ = sqlutil.ScanTimestamp(createdAtStr)
-		session.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAtStr)
-		if endedAt.Valid {
-			session.EndedAt, _ = sqlutil.ScanTimestamp(endedAt.String)
+		if err := decodeTimestampInto(&session.StartedAt, startedAtStr, "sessions.started_at"); err != nil {
+			return nil, err
+		}
+		if err := decodeTimestampInto(&session.CreatedAt, createdAtStr, "sessions.created_at"); err != nil {
+			return nil, err
+		}
+		if err := decodeTimestampInto(&session.UpdatedAt, updatedAtStr, "sessions.updated_at"); err != nil {
+			return nil, err
+		}
+		if err := decodeNullableTimestampInto(&session.EndedAt, endedAt, "sessions.ended_at"); err != nil {
+			return nil, err
 		}
 
-		_ = sqlutil.ScanJSON(accomplishedJSON, &session.Accomplished)
-		_ = sqlutil.ScanJSON(decisionsJSON, &session.Decisions)
-		_ = sqlutil.ScanJSON(gotchasJSON, &session.Gotchas)
-		_ = sqlutil.ScanJSON(userInsightsJSON, &session.UserInsights)
-		_ = sqlutil.ScanJSON(tagsJSON, &session.Tags)
-		_ = sqlutil.ScanJSON(keyFilesJSON, &session.KeyFiles)
+		if err := decodeJSONInto(accomplishedJSON, "sessions.accomplished", &session.Accomplished); err != nil {
+			return nil, err
+		}
+		if err := decodeJSONInto(decisionsJSON, "sessions.decisions", &session.Decisions); err != nil {
+			return nil, err
+		}
+		if err := decodeJSONInto(gotchasJSON, "sessions.gotchas", &session.Gotchas); err != nil {
+			return nil, err
+		}
+		if err := decodeJSONInto(userInsightsJSON, "sessions.user_insights", &session.UserInsights); err != nil {
+			return nil, err
+		}
+		if err := decodeJSONInto(tagsJSON, "sessions.tags", &session.Tags); err != nil {
+			return nil, err
+		}
+		if err := decodeJSONInto(keyFilesJSON, "sessions.key_files", &session.KeyFiles); err != nil {
+			return nil, err
+		}
 
 		// Convert cosine distance to similarity (distance is 0 for identical, 2 for opposite)
 		similarity := 1.0 - distance
@@ -2614,7 +2666,7 @@ func (s *TursoStore) SearchSimilarMultiWorkspace(ctx context.Context, workspaces
 			&createdAtStr, &updatedAtStr, &distance,
 		)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("sessions: search similar multi-workspace scan: %w", err)
 		}
 
 		session.ProjectName = projectName.String
@@ -2640,19 +2692,37 @@ func (s *TursoStore) SearchSimilarMultiWorkspace(ctx context.Context, workspaces
 			session.Status = storage.SessionStatusOK
 		}
 
-		session.StartedAt, _ = sqlutil.ScanTimestamp(startedAtStr)
-		session.CreatedAt, _ = sqlutil.ScanTimestamp(createdAtStr)
-		session.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAtStr)
-		if endedAt.Valid {
-			session.EndedAt, _ = sqlutil.ScanTimestamp(endedAt.String)
+		if err := decodeTimestampInto(&session.StartedAt, startedAtStr, "sessions.started_at"); err != nil {
+			return nil, err
+		}
+		if err := decodeTimestampInto(&session.CreatedAt, createdAtStr, "sessions.created_at"); err != nil {
+			return nil, err
+		}
+		if err := decodeTimestampInto(&session.UpdatedAt, updatedAtStr, "sessions.updated_at"); err != nil {
+			return nil, err
+		}
+		if err := decodeNullableTimestampInto(&session.EndedAt, endedAt, "sessions.ended_at"); err != nil {
+			return nil, err
 		}
 
-		_ = sqlutil.ScanJSON(accomplishedJSON, &session.Accomplished)
-		_ = sqlutil.ScanJSON(decisionsJSON, &session.Decisions)
-		_ = sqlutil.ScanJSON(gotchasJSON, &session.Gotchas)
-		_ = sqlutil.ScanJSON(userInsightsJSON, &session.UserInsights)
-		_ = sqlutil.ScanJSON(tagsJSON, &session.Tags)
-		_ = sqlutil.ScanJSON(keyFilesJSON, &session.KeyFiles)
+		if err := decodeJSONInto(accomplishedJSON, "sessions.accomplished", &session.Accomplished); err != nil {
+			return nil, err
+		}
+		if err := decodeJSONInto(decisionsJSON, "sessions.decisions", &session.Decisions); err != nil {
+			return nil, err
+		}
+		if err := decodeJSONInto(gotchasJSON, "sessions.gotchas", &session.Gotchas); err != nil {
+			return nil, err
+		}
+		if err := decodeJSONInto(userInsightsJSON, "sessions.user_insights", &session.UserInsights); err != nil {
+			return nil, err
+		}
+		if err := decodeJSONInto(tagsJSON, "sessions.tags", &session.Tags); err != nil {
+			return nil, err
+		}
+		if err := decodeJSONInto(keyFilesJSON, "sessions.key_files", &session.KeyFiles); err != nil {
+			return nil, err
+		}
 
 		similarity := 1.0 - distance
 		results = append(results, storage.SimilarSession{
@@ -2685,12 +2755,16 @@ func (s *TursoStore) GetEdges(ctx context.Context, sessionID string) ([]storage.
 		err := rows.Scan(&edge.ID, &edge.Workspace, &edge.FromSession, &edge.ToSession,
 			&edge.EdgeType, &createdAtStr, &metadataJSON)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("sessions: get edges scan: %w", err)
 		}
 
-		edge.CreatedAt, _ = sqlutil.ScanTimestamp(createdAtStr)
+		if err := decodeTimestampInto(&edge.CreatedAt, createdAtStr, "session_edges.created_at"); err != nil {
+			return nil, err
+		}
 		if metadataJSON.Valid && metadataJSON.String != "" {
-			_ = json.Unmarshal([]byte(metadataJSON.String), &edge.Metadata)
+			if err := decodeJSONInto(metadataJSON.String, "session_edges.metadata", &edge.Metadata); err != nil {
+				return nil, err
+			}
 		}
 
 		edges = append(edges, edge)
