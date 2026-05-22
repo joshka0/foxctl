@@ -82,6 +82,10 @@ merge, rebase or merge current `main` and rerun the full verification set.
   `@foxctl/data/client` wrappers for board load, runtime load, card action,
   and refresh. The shared board client supports `archived_only`, and the
   unused GUI-only `getOrchestrationBoardCard` wrapper was deleted.
+- Frontend unused-code checks now have a repeatable gate:
+  `bun run unused:frontend`. The shared data, gui-agent, foxterm, and GUI auth
+  gateway TypeScript configs enforce unused locals/parameters where applicable,
+  and GitLab runs the gate in a Bun-based `typescript-frontend` job.
 
 ### Legacy And Compatibility Removal
 
@@ -134,6 +138,8 @@ Verification has been run slice-by-slice, including:
 - `bun run --cwd packages/data typecheck`
 - `bun run --cwd packages/gui-agent build`
 - `bun run --cwd packages/foxterm typecheck`
+- `bun run check:frontend`
+- `bun run unused:frontend`
 - `make check-doc-links`
 - `git diff --check`
 - commit-hook static analysis, `gofumpt`, `golangci-lint`, large-file guard,
@@ -166,6 +172,9 @@ Verification has been run slice-by-slice, including:
 
 - Delete or replace remaining unused GUI API wrappers and unused utility exports
   if they are confirmed unused.
+- `bun run unused:frontend` is now the repeatable compiler/linter gate for
+  unused frontend imports, locals, and parameters. It does not replace caller
+  search or a future dead-export dependency graph pass.
 
 ### Structural Consolidation
 
@@ -180,10 +189,16 @@ Verification has been run slice-by-slice, including:
 
 ### Tooling
 
-- Add dependable unused-code tooling to the local/CI workflow.
-- Document or install reliable TypeScript verification commands for
-  `gui-agent`, `foxterm`, and `@foxctl/data`.
+- Completed: dependable frontend unused-code and verification commands are wired
+  locally and in GitLab CI via `bun run check:frontend` and
+  `bun run unused:frontend`.
+- Follow-up: `bun run --cwd packages/gui-agent lint` still has existing React
+  hook rule failures and should be cleaned up before joining the mandatory root
+  frontend gate.
+- Follow-up: add a project-level dead-export/dependency graph pass only after
+  the current compiler and linter gates are consistently clean.
 
 ## Recommended Next Slices
 
-1. Add reliable unused-code tooling and frontend verification docs.
+1. Clean up existing `gui-agent` ESLint React hook findings so the package lint
+   gate can become mandatory.

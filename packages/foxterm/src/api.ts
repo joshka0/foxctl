@@ -10,7 +10,6 @@ import type {
   RoomLoopResult,
   RoomMessage,
   RoomSendMessageResult,
-  RoomStatusParticipant,
   RoomTask,
   V2RunTranscript,
   V2RuntimeEvent,

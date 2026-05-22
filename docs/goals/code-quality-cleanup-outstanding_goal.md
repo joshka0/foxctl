@@ -41,9 +41,11 @@ Remaining areas from the results doc after the completed slices:
   - Consolidate chat adapter command parsing and SSE activity decoding.
   - Extract shared Jido/goruntime orchestration reconciliation helpers.
 - Tooling:
-  - Add dependable unused-code tooling to local/CI workflow.
-  - Document reliable TypeScript verification commands for `gui-agent`,
-    `foxterm`, and `@foxctl/data`.
+  - Completed: dependable unused-code and TypeScript frontend verification
+    commands are wired locally and in GitLab CI:
+    `bun run check:frontend` and `bun run unused:frontend`.
+  - Follow-up: clean up existing `gui-agent` ESLint React hook findings before
+    making package ESLint mandatory in the root frontend gate.
 
 ## Quality Bar
 
@@ -203,7 +205,8 @@ Done when:
   `getOrchestrationBoardCard` wrapper was deleted, and the orchestration board
   store moved to canonical `@foxctl/data/client` wrappers after adding
   `archived_only` support there.
-- Unused-code tooling is documented or wired so future cleanup can be repeated.
+- Unused-code tooling is documented and wired so future cleanup can be repeated
+  with `bun run unused:frontend`.
 - Verification passes:
   - `bun run --cwd packages/gui-agent build`
   - `bun run --cwd packages/foxterm typecheck`

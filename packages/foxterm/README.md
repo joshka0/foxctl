@@ -44,6 +44,15 @@ the web server uses another host or port:
 FOXCTL_API_URL=http://127.0.0.1:3000 bun run --cwd packages/foxterm dev
 ```
 
+Verification from repo root:
+
+```bash
+bun run check:frontend
+bun run unused:frontend
+```
+
+`check:frontend` includes `bun run --cwd packages/foxterm typecheck`.
+
 Runs view shortcuts:
 
 - `:` or `Ctrl+p` opens the command palette for discoverable actions.

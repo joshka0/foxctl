@@ -492,7 +492,7 @@ web-run: web-build
 	@./bin/foxctl-web
 
 # TypeScript/Bun targets
-.PHONY: ts-install ts-dev-tui ts-dev-gui ts-build ts-typecheck ts-typecheck-fast ts-lint ts-lint-fix ts-check
+.PHONY: ts-install ts-dev-tui ts-dev-gui ts-build ts-typecheck ts-typecheck-fast ts-check-frontend ts-unused-frontend ts-lint ts-lint-fix ts-check
 
 ts-install:
 	@command -v bun >/dev/null 2>&1 || { echo "bun not installed. See: https://bun.sh"; exit 1; }
@@ -581,6 +581,12 @@ ts-typecheck: ts-install
 # Fast TypeScript check using tsgo (10x faster than tsc)
 ts-typecheck-fast: ts-install
 	@bun run typecheck:fast
+
+ts-check-frontend: ts-install
+	@bun run check:frontend
+
+ts-unused-frontend: ts-install
+	@bun run unused:frontend
 
 # Lint TypeScript packages using oxlint (fast Rust-based linter)
 ts-lint: ts-install
