@@ -1,7 +1,5 @@
 import type {
   ApiEnvelope,
-  OrchestrationBoard,
-  OrchestrationBoardArtifactRef,
   OrchestrationCard,
   OrchestrationCardAction,
   OrchestrationCardActionResult,
@@ -18,6 +16,10 @@ import type {
   V2RuntimeEvent,
   V2StreamType,
 } from "@foxctl/data/types";
+import {
+  parseOrchestrationBoardPayload,
+  type OrchestrationBoardPayload,
+} from "@foxctl/data/orchestration";
 
 const DEFAULT_API_BASE = "http://127.0.0.1:8090";
 const DEFAULT_WORKSPACE_ID = ".";
@@ -322,8 +324,7 @@ export interface OrchestrationCardWorkItem {
 }
 
 export interface OrchestrationCardWorkResult {
-  board: OrchestrationBoard | null;
-  artifact: OrchestrationBoardArtifactRef | null;
+  payload: OrchestrationBoardPayload;
   items: OrchestrationCardWorkItem[];
 }
 
@@ -847,9 +848,10 @@ export async function getOrchestrationCardWork(params?: {
   const envelope = await requestEnvelope<unknown>(
     `/api/orchestration/board-get?${query.toString()}`,
   );
-  const result = normalizeBoardPayload(unwrapEnvelope(envelope));
+  const payload = parseOrchestrationBoardPayload(unwrapEnvelope(envelope));
+  const board = payload.kind === "board" ? payload.board : null;
   const items =
-    safeArray(result.board?.lanes).flatMap((lane) =>
+    safeArray(board?.lanes).flatMap((lane) =>
       safeArray(lane.cards).filter(hasIssueID).map((card) => ({
         id: card.issue_id,
         laneId: safeString(lane.id, "Other"),
@@ -857,7 +859,7 @@ export async function getOrchestrationCardWork(params?: {
         card,
       })),
     );
-  return { ...result, items };
+  return { payload, items };
 }
 
 export async function applyOrchestrationCardAction(
@@ -1078,30 +1080,6 @@ function unwrapEnvelope<T>(envelope: ApiEnvelope<T>): T {
     throw new Error(envelope.error?.message ?? "request failed");
   }
   return envelope.data;
-}
-
-function normalizeBoardPayload(data: unknown): {
-  board: OrchestrationBoard | null;
-  artifact: OrchestrationBoardArtifactRef | null;
-} {
-  if (!data || typeof data !== "object") {
-    return { board: null, artifact: null };
-  }
-  const record = data as Record<string, unknown>;
-  if (Array.isArray(record.lanes)) {
-    const board = data as OrchestrationBoard;
-    return {
-      board: { ...board, lanes: safeArray(board.lanes) },
-      artifact: null,
-    };
-  }
-  if (typeof record.artifact === "string") {
-    return {
-      board: null,
-      artifact: data as OrchestrationBoardArtifactRef,
-    };
-  }
-  return { board: null, artifact: null };
 }
 
 function apiURL(path: string): string {

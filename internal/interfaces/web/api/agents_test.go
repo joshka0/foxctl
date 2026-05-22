@@ -775,6 +775,106 @@ func TestAgentPatchHandler_UpdatesMemoryRetention(t *testing.T) {
 	}
 }
 
+func TestAgentPatchHandler_EmitsCanonicalAgentResponse(t *testing.T) {
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	resetAgentStreamRegistry()
+
+	cfg := orchestrationTestConfig(t.TempDir())
+	store, err := agents.Open(context.Background(), cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open agents store: %v", err)
+	}
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil {
+			t.Fatalf("close agents store: %v", closeErr)
+		}
+	}()
+
+	err = store.Create(context.Background(), agentdomain.Agent{
+		ID:              "agent-patch-canonical-1",
+		ParentID:        "agent-parent-1",
+		Namespace:       "ws-1",
+		WorkspaceRoot:   "/workspace/root",
+		WorkspaceSource: "sandbox",
+		Name:            "Canonical Agent",
+		Slug:            "canonical",
+		Role:            "companion",
+		Prompt:          "Use one conversion module for every response path.",
+		SkillsAllow:     []string{"code/search"},
+		Policy:          agentdomain.Policy{},
+		ShareBB:         "scoped",
+		State:           agentdomain.StateStopped,
+		CreatedAt:       time.Date(2026, time.March, 6, 12, 0, 0, 0, time.UTC),
+		HeartbeatAt:     time.Date(2026, time.March, 6, 12, 5, 0, 0, time.UTC),
+		LLMProvider:     "openai",
+		LLMModel:        "gpt-5",
+		LLMBaseURL:      "https://api.example.test/v1",
+		LLMAuthMode:     "header",
+		LLMAuthHeader:   "X-Agent-Key",
+		LLMAuthPrefix:   "Token",
+		ExecMode:        agentdomain.ModeReactive,
+		ThinkInterval:   45,
+		MemoryScope:     agentdomain.MemoryScopeAgent,
+		MemoryRetention: agentdomain.MemoryRetentionCompanion,
+		SandboxProvider: "opensandbox",
+		SandboxID:       "sandbox-1",
+		RepoURL:         "https://github.com/example/repo.git",
+		RepoRef:         "main",
+	})
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/agents/agent-patch-canonical-1", strings.NewReader(`{"conversation_id":"conversation-1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	AgentDetailHandler(cfg, zerolog.Nop(), nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	payload := decodeResponseBody(t, rr)
+	agentWrap, _ := payload["agent"].(map[string]any)
+	want := map[string]string{
+		"id":               "agent-patch-canonical-1",
+		"parent_id":        "agent-parent-1",
+		"ns":               "ws-1",
+		"workspace_root":   "/workspace/root",
+		"workspace_source": "sandbox",
+		"name":             "Canonical Agent",
+		"slug":             "canonical",
+		"role":             "companion",
+		"prompt_summary":   "Use one conversion module for every response path.",
+		"share_bb":         "scoped",
+		"state":            "stopped",
+		"created_at":       "2026-03-06T12:00:00Z",
+		"heartbeat_at":     "2026-03-06T12:05:00Z",
+		"llm_provider":     "openai",
+		"llm_model":        "gpt-5",
+		"llm_base_url":     "https://api.example.test/v1",
+		"llm_auth_mode":    "header",
+		"llm_auth_header":  "X-Agent-Key",
+		"llm_auth_prefix":  "Token",
+		"exec_mode":        "reactive",
+		"conversation_id":  "conversation-1",
+		"memory_scope":     "agent",
+		"memory_retention": "companion",
+		"sandbox_provider": "opensandbox",
+		"sandbox_id":       "sandbox-1",
+		"repo_url":         "https://github.com/example/repo.git",
+		"repo_ref":         "main",
+	}
+	for key, expected := range want {
+		if got := strings.TrimSpace(fmt.Sprint(agentWrap[key])); got != expected {
+			t.Fatalf("%s=%q want %q", key, got, expected)
+		}
+	}
+	if got, ok := agentWrap["think_interval"].(float64); !ok || got != 45 {
+		t.Fatalf("think_interval=%v want 45", agentWrap["think_interval"])
+	}
+}
+
 func TestPrepareSandboxBackedSpawn_OpenSandbox(t *testing.T) {
 	prepared, err := prepareSandboxBackedSpawn(context.Background(), AgentSpawnRequest{
 		SandboxProvider: "opensandbox",

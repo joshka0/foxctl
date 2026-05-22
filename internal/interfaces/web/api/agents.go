@@ -316,6 +316,45 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func agentResponseFromAgent(agent agenttypes.Agent) AgentResponse {
+	resp := AgentResponse{
+		ID:              agent.ID,
+		ParentID:        agent.ParentID,
+		Namespace:       agent.Namespace,
+		WorkspaceRoot:   agent.WorkspaceRoot,
+		WorkspaceSource: agent.WorkspaceSource,
+		Name:            agent.Name,
+		Slug:            agent.Slug,
+		Role:            agent.Role,
+		PromptSummary:   summarizePrompt(agent.Prompt, 100),
+		SkillsAllow:     agent.SkillsAllow,
+		ShareBB:         agent.ShareBB,
+		State:           string(agent.State),
+		LLMProvider:     agent.LLMProvider,
+		LLMModel:        agent.LLMModel,
+		LLMBaseURL:      agent.LLMBaseURL,
+		LLMAuthMode:     agent.LLMAuthMode,
+		LLMAuthHeader:   agent.LLMAuthHeader,
+		LLMAuthPrefix:   agent.LLMAuthPrefix,
+		ExecMode:        string(agent.ExecMode),
+		ThinkInterval:   agent.ThinkInterval,
+		ConversationID:  agent.ConversationID,
+		MemoryScope:     string(agenttypes.NormalizeMemoryScope(agent.MemoryScope)),
+		MemoryRetention: string(agenttypes.NormalizeMemoryRetention(agent.MemoryRetention)),
+		SandboxProvider: agent.SandboxProvider,
+		SandboxID:       agent.SandboxID,
+		RepoURL:         agent.RepoURL,
+		RepoRef:         agent.RepoRef,
+	}
+	if !agent.CreatedAt.IsZero() {
+		resp.CreatedAt = agent.CreatedAt.Format("2006-01-02T15:04:05Z07:00")
+	}
+	if !agent.HeartbeatAt.IsZero() {
+		resp.HeartbeatAt = agent.HeartbeatAt.Format("2006-01-02T15:04:05Z07:00")
+	}
+	return resp
+}
+
 // AgentsListHandler provides an HTTP handler for listing agents at GET /api/agents.
 //
 // The handler accepts an optional `limit` query parameter (1–500, default 100) to cap
@@ -359,42 +398,7 @@ func AgentsListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 		// Convert to response format
 		resp := make([]AgentResponse, 0, len(agentList))
 		for _, a := range agentList {
-			ar := AgentResponse{
-				ID:              a.ID,
-				ParentID:        a.ParentID,
-				Namespace:       a.Namespace,
-				WorkspaceRoot:   a.WorkspaceRoot,
-				WorkspaceSource: a.WorkspaceSource,
-				Name:            a.Name,
-				Slug:            a.Slug,
-				Role:            a.Role,
-				PromptSummary:   summarizePrompt(a.Prompt, 100),
-				SkillsAllow:     a.SkillsAllow,
-				ShareBB:         a.ShareBB,
-				State:           string(a.State),
-				LLMProvider:     a.LLMProvider,
-				LLMModel:        a.LLMModel,
-				LLMBaseURL:      a.LLMBaseURL,
-				LLMAuthMode:     a.LLMAuthMode,
-				LLMAuthHeader:   a.LLMAuthHeader,
-				LLMAuthPrefix:   a.LLMAuthPrefix,
-				ExecMode:        string(a.ExecMode),
-				ThinkInterval:   a.ThinkInterval,
-				ConversationID:  a.ConversationID,
-				MemoryScope:     string(agenttypes.NormalizeMemoryScope(a.MemoryScope)),
-				MemoryRetention: string(agenttypes.NormalizeMemoryRetention(a.MemoryRetention)),
-				SandboxProvider: a.SandboxProvider,
-				SandboxID:       a.SandboxID,
-				RepoURL:         a.RepoURL,
-				RepoRef:         a.RepoRef,
-			}
-			if !a.CreatedAt.IsZero() {
-				ar.CreatedAt = a.CreatedAt.Format("2006-01-02T15:04:05Z07:00")
-			}
-			if !a.HeartbeatAt.IsZero() {
-				ar.HeartbeatAt = a.HeartbeatAt.Format("2006-01-02T15:04:05Z07:00")
-			}
-			resp = append(resp, ar)
+			resp = append(resp, agentResponseFromAgent(a))
 		}
 
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -549,44 +553,8 @@ func AgentDetailHandlerWithRuntime(cfg config.Config, log zerolog.Logger, events
 			return
 		}
 
-		ar := AgentResponse{
-			ID:              agent.ID,
-			ParentID:        agent.ParentID,
-			Namespace:       agent.Namespace,
-			WorkspaceRoot:   agent.WorkspaceRoot,
-			WorkspaceSource: agent.WorkspaceSource,
-			Name:            agent.Name,
-			Slug:            agent.Slug,
-			Role:            agent.Role,
-			PromptSummary:   summarizePrompt(agent.Prompt, 100),
-			SkillsAllow:     agent.SkillsAllow,
-			ShareBB:         agent.ShareBB,
-			State:           string(agent.State),
-			LLMProvider:     agent.LLMProvider,
-			LLMModel:        agent.LLMModel,
-			LLMBaseURL:      agent.LLMBaseURL,
-			LLMAuthMode:     agent.LLMAuthMode,
-			LLMAuthHeader:   agent.LLMAuthHeader,
-			LLMAuthPrefix:   agent.LLMAuthPrefix,
-			ExecMode:        string(agent.ExecMode),
-			ThinkInterval:   agent.ThinkInterval,
-			ConversationID:  agent.ConversationID,
-			MemoryScope:     string(agenttypes.NormalizeMemoryScope(agent.MemoryScope)),
-			MemoryRetention: string(agenttypes.NormalizeMemoryRetention(agent.MemoryRetention)),
-			SandboxProvider: agent.SandboxProvider,
-			SandboxID:       agent.SandboxID,
-			RepoURL:         agent.RepoURL,
-			RepoRef:         agent.RepoRef,
-		}
-		if !agent.CreatedAt.IsZero() {
-			ar.CreatedAt = agent.CreatedAt.Format("2006-01-02T15:04:05Z07:00")
-		}
-		if !agent.HeartbeatAt.IsZero() {
-			ar.HeartbeatAt = agent.HeartbeatAt.Format("2006-01-02T15:04:05Z07:00")
-		}
-
 		writeJSON(w, http.StatusOK, map[string]any{
-			"agent": ar,
+			"agent": agentResponseFromAgent(agent),
 		})
 	}
 }
@@ -2360,41 +2328,8 @@ func handleAgentPatch(w http.ResponseWriter, r *http.Request, cfg config.Config,
 		agent.MemoryRetention = retention
 	}
 
-	// Return updated agent
-	ar := AgentResponse{
-		ID:              agent.ID,
-		ParentID:        agent.ParentID,
-		Namespace:       agent.Namespace,
-		WorkspaceRoot:   agent.WorkspaceRoot,
-		WorkspaceSource: agent.WorkspaceSource,
-		Name:            agent.Name,
-		Slug:            agent.Slug,
-		Role:            agent.Role,
-		PromptSummary:   summarizePrompt(agent.Prompt, 100),
-		SkillsAllow:     agent.SkillsAllow,
-		ShareBB:         agent.ShareBB,
-		State:           string(agent.State),
-		LLMProvider:     agent.LLMProvider,
-		LLMModel:        agent.LLMModel,
-		ExecMode:        string(agent.ExecMode),
-		ThinkInterval:   agent.ThinkInterval,
-		ConversationID:  agent.ConversationID,
-		MemoryScope:     string(agenttypes.NormalizeMemoryScope(agent.MemoryScope)),
-		MemoryRetention: string(agenttypes.NormalizeMemoryRetention(agent.MemoryRetention)),
-		SandboxProvider: agent.SandboxProvider,
-		SandboxID:       agent.SandboxID,
-		RepoURL:         agent.RepoURL,
-		RepoRef:         agent.RepoRef,
-	}
-	if !agent.CreatedAt.IsZero() {
-		ar.CreatedAt = agent.CreatedAt.Format("2006-01-02T15:04:05Z07:00")
-	}
-	if !agent.HeartbeatAt.IsZero() {
-		ar.HeartbeatAt = agent.HeartbeatAt.Format("2006-01-02T15:04:05Z07:00")
-	}
-
 	writeJSON(w, http.StatusOK, map[string]any{
-		"agent": ar,
+		"agent": agentResponseFromAgent(agent),
 	})
 }
 

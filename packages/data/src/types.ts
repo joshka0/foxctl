@@ -284,11 +284,6 @@ export interface OrchestrationBoardArtifactRef {
   counts?: Partial<Record<OrchestrationLaneID, number>>;
 }
 
-export interface OrchestrationBoardResult {
-  board: OrchestrationBoard | null;
-  artifact: OrchestrationBoardArtifactRef | null;
-}
-
 export interface OrchestrationBoardCardResult {
   card: OrchestrationCard;
   runtime?: OrchestrationCardRuntime;

@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./client": "./src/client.ts",
+    "./orchestration": "./src/orchestration.ts",
     "./types": "./src/types.ts"
   },
   "scripts": {

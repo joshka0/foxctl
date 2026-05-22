@@ -24,10 +24,7 @@ import type {
   RoomSendMessageResult,
   RoomReminder,
   AgentSession,
-  OrchestrationBoard,
-  OrchestrationBoardArtifactRef,
   OrchestrationBoardCardRuntimeResult,
-  OrchestrationBoardResult,
   OrchestrationArchiveCardsRequest,
   OrchestrationArchiveCardsResult,
   OrchestrationCard,
@@ -43,6 +40,10 @@ import type {
   OrchestrationSeedCardsResult,
   BlackboardRecord,
 } from "@foxctl/data/types";
+import {
+  parseOrchestrationBoardPayload,
+  type OrchestrationBoardPayload,
+} from "@foxctl/data/orchestration";
 import type { LogsListResponse } from "@/types/activity";
 import type { PresenceBundle } from "@/types/companion";
 import type {
@@ -302,26 +303,9 @@ export interface OrchestrationBoardGetParams {
   archived_only?: boolean;
 }
 
-function normalizeBoardPayload(data: unknown): OrchestrationBoardResult {
-  if (!data || typeof data !== "object") {
-    return { board: null, artifact: null };
-  }
-  const asRecord = data as Record<string, unknown>;
-  if (Array.isArray(asRecord.lanes)) {
-    return { board: asRecord as unknown as OrchestrationBoard, artifact: null };
-  }
-  if (typeof asRecord.artifact === "string") {
-    return {
-      board: null,
-      artifact: asRecord as unknown as OrchestrationBoardArtifactRef,
-    };
-  }
-  return { board: null, artifact: null };
-}
-
 export async function getOrchestrationBoard(
   params: OrchestrationBoardGetParams = {},
-): Promise<OrchestrationBoardResult> {
+): Promise<OrchestrationBoardPayload> {
   const query = new URLSearchParams();
   if (params.request_id) query.set("request_id", params.request_id);
   if (params.workspace_id) query.set("workspace_id", params.workspace_id);
@@ -336,7 +320,7 @@ export async function getOrchestrationBoard(
   const env = await request<ApiEnvelope<unknown>>(
     `/orchestration/board-get${suffix}`,
   );
-  return normalizeBoardPayload(unwrapEnvelope(env));
+  return parseOrchestrationBoardPayload(unwrapEnvelope(env));
 }
 
 export interface OrchestrationBoardCardGetParams {

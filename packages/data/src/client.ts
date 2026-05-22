@@ -65,9 +65,6 @@ import type {
   ConsoleCancelResponse,
   ConsoleFeedbackRequest,
   ConsoleFeedbackResponse,
-  OrchestrationBoard,
-  OrchestrationBoardArtifactRef,
-  OrchestrationBoardResult,
   OrchestrationBoardCardRuntimeResult,
   OrchestrationCardAction,
   OrchestrationCardActionResult,
@@ -75,6 +72,10 @@ import type {
   OrchestrationLaneID,
   OrchestrationRefreshResult,
 } from "./types";
+import {
+  parseOrchestrationBoardPayload,
+  type OrchestrationBoardPayload,
+} from "./orchestration";
 
 // Get API base URL - works in both Vite (browser) and Bun environments
 function getApiBase(): string {
@@ -162,23 +163,6 @@ function unwrapEnvelope<T>(env: ApiEnvelope<T>): T {
     throw new APIError(500, env.error?.message || "Request failed");
   }
   return env.data;
-}
-
-function normalizeBoardPayload(data: unknown): OrchestrationBoardResult {
-  if (!data || typeof data !== "object") {
-    return { board: null, artifact: null };
-  }
-  const asRecord = data as Record<string, unknown>;
-  if (Array.isArray(asRecord.lanes)) {
-    return { board: asRecord as unknown as OrchestrationBoard, artifact: null };
-  }
-  if (typeof asRecord.artifact === "string") {
-    return {
-      board: null,
-      artifact: asRecord as unknown as OrchestrationBoardArtifactRef,
-    };
-  }
-  return { board: null, artifact: null };
 }
 
 // Jobs
@@ -379,7 +363,7 @@ export async function getOrchestrationBoard(params?: {
   limit?: number;
   cursor?: string;
   lane?: OrchestrationLaneID;
-}): Promise<OrchestrationBoardResult> {
+}): Promise<OrchestrationBoardPayload> {
   const query = new URLSearchParams();
   if (params?.request_id) query.set("request_id", params.request_id);
   if (params?.workspace_id) query.set("workspace_id", params.workspace_id);
@@ -393,7 +377,7 @@ export async function getOrchestrationBoard(params?: {
   const env = await request<ApiEnvelope<unknown>>(
     `/api/orchestration/board-get${suffix}`,
   );
-  return normalizeBoardPayload(unwrapEnvelope(env));
+  return parseOrchestrationBoardPayload(unwrapEnvelope(env));
 }
 
 export async function getOrchestrationBoardCardRuntime(params: {

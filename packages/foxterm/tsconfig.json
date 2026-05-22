@@ -16,6 +16,7 @@
     "paths": {
       "@foxctl/data": ["../data/src/index.ts"],
       "@foxctl/data/client": ["../data/src/client.ts"],
+      "@foxctl/data/orchestration": ["../data/src/orchestration.ts"],
       "@foxctl/data/types": ["../data/src/types.ts"]
     }
   },

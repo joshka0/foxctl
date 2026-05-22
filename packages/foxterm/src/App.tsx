@@ -1215,14 +1215,15 @@ export function App({ onExit }: AppProps) {
         workspaceId: WORKSPACE_ID,
         limit: 100,
       });
+      const artifact = result.payload.kind === "artifact" ? result.payload.artifact.artifact : null;
       setCardItems(result.items);
-      setCardArtifact(result.artifact?.artifact ?? null);
+      setCardArtifact(artifact);
       setSelectedCardId((current) => current ?? result.items[0]?.id ?? null);
       setCardLoadState("ready");
       setLastCardLoadAt(new Date().toLocaleTimeString());
       setStatus({
-        tone: result.artifact ? "warning" : "success",
-        text: cardStatus(result.items.length, result.artifact?.artifact),
+        tone: artifact ? "warning" : "success",
+        text: cardStatus(result.items.length, artifact ?? undefined),
       });
     } catch (error) {
       setCardLoadState("error");
