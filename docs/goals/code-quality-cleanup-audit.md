@@ -174,7 +174,7 @@ by cleanup value and implementation risk.
 
 ## Structural Simplification Candidates
 
-- [ ] Consolidate workspace repair helpers across storage packages.
+- [x] Consolidate workspace repair helpers across storage packages.
   - Scope: memory, graph, sessions, tasks, and trajectory workspace repair.
   - Target: shared pure path repair plus table/column collection helpers while
     keeping store-specific migrations local.
