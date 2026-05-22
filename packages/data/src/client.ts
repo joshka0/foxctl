@@ -84,6 +84,12 @@ interface ViteImportMeta {
   };
 }
 
+interface ProcessGlobal {
+  env?: {
+    FOXCTL_API_URL?: string;
+  };
+}
+
 function getApiBase(): string {
   // Vite environment (browser bundled with Vite)
   const meta = import.meta as ViteImportMeta;
@@ -91,8 +97,11 @@ function getApiBase(): string {
     return meta.env.VITE_API_URL;
   }
   // Bun/Node environment
-  if (typeof process !== "undefined" && process.env?.FOXCTL_API_URL) {
-    return process.env.FOXCTL_API_URL;
+  const runtime = globalThis as typeof globalThis & {
+    process?: ProcessGlobal;
+  };
+  if (runtime.process?.env?.FOXCTL_API_URL) {
+    return runtime.process.env.FOXCTL_API_URL;
   }
   // Default: relative URLs (works with proxy or same-origin)
   return "";
@@ -362,13 +371,18 @@ export async function getBlackboard(params?: {
   return request(`/api/blackboard${query ? `?${query}` : ""}`);
 }
 
-export async function getOrchestrationBoard(params?: {
+export interface OrchestrationBoardGetParams {
   request_id?: string;
   workspace_id?: string;
   limit?: number;
   cursor?: string;
   lane?: OrchestrationLaneID;
-}): Promise<OrchestrationBoardPayload> {
+  archived_only?: boolean;
+}
+
+export async function getOrchestrationBoard(
+  params?: OrchestrationBoardGetParams,
+): Promise<OrchestrationBoardPayload> {
   const query = new URLSearchParams();
   if (params?.request_id) query.set("request_id", params.request_id);
   if (params?.workspace_id) query.set("workspace_id", params.workspace_id);
@@ -377,6 +391,7 @@ export async function getOrchestrationBoard(params?: {
   }
   if (params?.cursor) query.set("cursor", params.cursor);
   if (params?.lane) query.set("lane", params.lane);
+  if (params?.archived_only) query.set("archived_only", "true");
 
   const suffix = query.size > 0 ? `?${query.toString()}` : "";
   const env = await request<ApiEnvelope<unknown>>(

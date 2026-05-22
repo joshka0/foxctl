@@ -78,6 +78,10 @@ merge, rebase or merge current `main` and rerun the full verification set.
   and task actions.
 - `agent.CompactRoomSummaryForInbox` now returns a typed compact room summary
   instead of a map-shaped JSON blob.
+- The GUI orchestration board store now imports canonical
+  `@foxctl/data/client` wrappers for board load, runtime load, card action,
+  and refresh. The shared board client supports `archived_only`, and the
+  unused GUI-only `getOrchestrationBoardCard` wrapper was deleted.
 
 ### Legacy And Compatibility Removal
 
@@ -139,11 +143,13 @@ Verification has been run slice-by-slice, including:
 
 ### Compatibility Layers
 
-- Avoid duplicate `gui-agent` copies of shared `@foxctl/data/client` functions.
 - Decide whether the internal `UpdateRoomMemberTransport` pane registration
   path should move to an explicit binding update helper.
 - Migrate or isolate older non-v2 `OpenDBCompat*` callers in the legacy storage
   lane without widening the v2 Turso cleanup.
+- Similar remaining GUI/data-client wrapper names currently differ by route,
+  params, response shape, or GUI auth behavior; keep them separate until the
+  shared client owns an actually matching contract.
 
 ### Weak Types
 
@@ -180,6 +186,4 @@ Verification has been run slice-by-slice, including:
 
 ## Recommended Next Slices
 
-1. Reduce duplicate `gui-agent` API client functions where `@foxctl/data/client`
-   is already the canonical implementation.
-2. Add reliable unused-code tooling and frontend verification docs.
+1. Add reliable unused-code tooling and frontend verification docs.

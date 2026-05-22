@@ -24,26 +24,16 @@ import type {
   RoomSendMessageResult,
   RoomReminder,
   AgentSession,
-  OrchestrationBoardCardRuntimeResult,
   OrchestrationArchiveCardsRequest,
   OrchestrationArchiveCardsResult,
-  OrchestrationCard,
-  OrchestrationCardAction,
-  OrchestrationCardActionResult,
   OrchestrationCleanupCardsRequest,
   OrchestrationCleanupCardsResult,
-  OrchestrationLaneID,
-  OrchestrationRefreshResult,
   OrchestrationRestoreCardsRequest,
   OrchestrationRestoreCardsResult,
   OrchestrationSeedCardsRequest,
   OrchestrationSeedCardsResult,
   BlackboardRecord,
 } from "@foxctl/data/types";
-import {
-  parseOrchestrationBoardPayload,
-  type OrchestrationBoardPayload,
-} from "@foxctl/data/orchestration";
 import type { LogsListResponse } from "@/types/activity";
 import type { PresenceBundle } from "@/types/companion";
 import type {
@@ -288,113 +278,6 @@ export async function signOutAuthSession(): Promise<void> {
     }
     throw new Error(text || `Sign out failed: ${response.status}`);
   }
-}
-
-export interface OrchestrationBoardGetParams {
-  request_id?: string;
-  workspace_id?: string;
-  limit?: number;
-  cursor?: string;
-  lane?: OrchestrationLaneID;
-  archived_only?: boolean;
-}
-
-export async function getOrchestrationBoard(
-  params: OrchestrationBoardGetParams = {},
-): Promise<OrchestrationBoardPayload> {
-  const query = new URLSearchParams();
-  if (params.request_id) query.set("request_id", params.request_id);
-  if (params.workspace_id) query.set("workspace_id", params.workspace_id);
-  if (typeof params.limit === "number" && Number.isFinite(params.limit)) {
-    query.set("limit", String(params.limit));
-  }
-  if (params.cursor) query.set("cursor", params.cursor);
-  if (params.lane) query.set("lane", params.lane);
-  if (params.archived_only) query.set("archived_only", "true");
-
-  const suffix = query.size > 0 ? `?${query.toString()}` : "";
-  const env = await request<ApiEnvelope<unknown>>(
-    `/orchestration/board-get${suffix}`,
-  );
-  return parseOrchestrationBoardPayload(unwrapEnvelope(env));
-}
-
-export interface OrchestrationBoardCardGetParams {
-  request_id?: string;
-  workspace_id?: string;
-  issue_id: string;
-}
-
-export async function getOrchestrationBoardCard(
-  params: OrchestrationBoardCardGetParams,
-): Promise<OrchestrationCard> {
-  const query = new URLSearchParams();
-  if (params.request_id) query.set("request_id", params.request_id);
-  if (params.workspace_id) query.set("workspace_id", params.workspace_id);
-  query.set("issue_id", params.issue_id);
-
-  const env = await request<ApiEnvelope<{ card: OrchestrationCard }>>(
-    `/orchestration/board-card-get?${query.toString()}`,
-  );
-  const data = unwrapEnvelope(env);
-  if (!data?.card) {
-    throw new Error("Missing card payload");
-  }
-  return data.card;
-}
-
-export interface OrchestrationBoardCardRuntimeGetParams {
-  request_id?: string;
-  workspace_id?: string;
-  issue_id: string;
-  depth?: number;
-}
-
-export async function getOrchestrationBoardCardRuntime(
-  params: OrchestrationBoardCardRuntimeGetParams,
-): Promise<OrchestrationBoardCardRuntimeResult> {
-  const query = new URLSearchParams();
-  if (params.request_id) query.set("request_id", params.request_id);
-  if (params.workspace_id) query.set("workspace_id", params.workspace_id);
-  query.set("issue_id", params.issue_id);
-  if (typeof params.depth === "number" && Number.isFinite(params.depth)) {
-    query.set("depth", String(params.depth));
-  }
-
-  const env = await request<ApiEnvelope<OrchestrationBoardCardRuntimeResult>>(
-    `/orchestration/board-card-runtime-get?${query.toString()}`,
-  );
-  return unwrapEnvelope(env);
-}
-
-export async function applyOrchestrationCardAction(params: {
-  request_id: string;
-  workspace_id?: string;
-  issue_id: string;
-  action: OrchestrationCardAction;
-}): Promise<OrchestrationCardActionResult> {
-  const env = await request<ApiEnvelope<OrchestrationCardActionResult>>(
-    "/orchestration/card-action",
-    {
-      method: "POST",
-      body: JSON.stringify(params),
-    },
-  );
-  return unwrapEnvelope(env);
-}
-
-export async function refreshOrchestration(params: {
-  request_id: string;
-  workspace_id?: string;
-}): Promise<OrchestrationRefreshResult> {
-  const env = await request<ApiEnvelope<OrchestrationRefreshResult>>(
-    "/orchestration/refresh",
-    {
-      method: "POST",
-      body: JSON.stringify(params),
-    },
-  );
-  return unwrapEnvelope(env);
 }
 
 export async function seedOrchestrationCards(

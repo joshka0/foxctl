@@ -5,7 +5,7 @@ import {
   getOrchestrationBoardCardRuntime,
   refreshOrchestration,
   type OrchestrationBoardGetParams,
-} from '@/api/client'
+} from '@foxctl/data/client'
 import type {
   OrchestrationBoard,
   OrchestrationBoardArtifactRef,

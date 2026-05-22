@@ -88,6 +88,10 @@ by cleanup value and implementation risk.
     coordinator handoff, message action, and task action responses now use
     named DTO envelopes instead of anonymous maps. The compact inbox room
     helper now returns a typed summary instead of a map-shaped JSON blob.
+  - Progress: the GUI orchestration board store now uses the canonical
+    `@foxctl/data/client` board/runtime/action/refresh wrappers. The shared
+    board client gained `archived_only` support, and the unused GUI-local
+    `getOrchestrationBoardCard` wrapper was deleted.
   - Room transport targets: choose `delivery_binding` plus explicit transport
     fields as canonical, then remove or isolate legacy `backend/session/pane_id`
     compatibility.
@@ -97,9 +101,11 @@ by cleanup value and implementation risk.
   - Progress: v2 Turso stores now depend on a narrow `StoreDB` capability and
     v2 openers use `dbdriver.OpenDB`; older non-v2 `OpenDBCompat*` callers are
     intentionally left for a separate storage-lane migration.
-  - Other targets: reduce duplicate `gui-agent` data-client wrappers, decide
-    whether the internal pane transport update path should move to a binding
-    helper, and migrate or isolate older legacy storage compatibility callers.
+  - Other targets: decide whether the internal pane transport update path
+    should move to a binding helper, and migrate or isolate older legacy
+    storage compatibility callers. Remaining GUI/data-client functions with
+    similar names currently diverge by route, params, response shape, or GUI
+    auth behavior and should not be mechanically redirected.
   - Tests: data typecheck, gui-agent build, foxterm typecheck, affected Go
     package tests, and docs link check when this tracker changes.
 

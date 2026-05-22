@@ -27,13 +27,11 @@ tests that only preserve accidental implementation detail.
 Remaining areas from the results doc after the completed slices:
 
 - Compatibility layers:
-  - Avoid duplicate `gui-agent` copies of shared `@foxctl/data/client`
-    functions.
-  - Type remaining room-control fixed response wrappers that still assemble
-    anonymous maps.
   - Decide whether the internal pane transport update path should move to a
     binding helper.
   - Migrate or isolate older non-v2 `OpenDBCompat*` callers.
+  - Keep similar GUI/data-client wrapper names separate unless the shared client
+    owns the same route, params, response shape, and auth semantics.
 - Dead frontend code:
   - Delete or replace remaining unused GUI API wrappers and utility exports when
     caller evidence proves they are dead.
@@ -201,6 +199,10 @@ Done when:
   dependency tooling, or import graph checks.
 - Dead slices listed in `code-quality-cleanup-results.md` are deleted or marked
   as live with evidence.
+- Completed in current slices: the unused GUI-local
+  `getOrchestrationBoardCard` wrapper was deleted, and the orchestration board
+  store moved to canonical `@foxctl/data/client` wrappers after adding
+  `archived_only` support there.
 - Unused-code tooling is documented or wired so future cleanup can be repeated.
 - Verification passes:
   - `bun run --cwd packages/gui-agent build`
