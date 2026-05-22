@@ -39,7 +39,7 @@ Remaining areas from the results doc after the completed slices:
   - Completed: consolidate duplicated skill `inline_mode` parsing.
   - Completed: consolidate repeated repo-index skill workspace resolution
     helpers.
-  - Consolidate OpenAPI plugin stdio/envelope harness code.
+  - Completed: consolidate OpenAPI plugin stdio/envelope harness code.
   - Consolidate chat adapter command parsing and SSE activity decoding.
   - Extract shared Jido/goruntime orchestration reconciliation helpers.
 - Tooling:
@@ -223,8 +223,9 @@ Done when:
 
 - Completed: duplicated skill `inline_mode` parsing and repo-index workspace
   resolution helpers are consolidated only where the same rule is duplicated.
-- OpenAPI plugin stdio/envelope harness code has a clear shared seam if there
-  are two or more real Adapters.
+- Completed: OpenAPI plugin stdio/envelope harness code is consolidated
+  without changing protocol validation behavior or hiding command-specific
+  logic.
 - Chat adapter command parsing and SSE activity decoding share canonical logic
   only when it improves Locality.
 - Jido/goruntime reconciliation helpers are extracted as pure helpers before

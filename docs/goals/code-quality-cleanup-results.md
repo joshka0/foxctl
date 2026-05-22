@@ -190,7 +190,10 @@ Verification has been run slice-by-slice, including:
   resolution into `internal/adapters/skillslib/workspaceutil`. Query/open
   skills use required workspace resolution, while wrapper skills keep their
   existing current-directory fallback.
-- Consolidate OpenAPI plugin stdio/envelope harness code.
+- Completed: consolidated OpenAPI plugin stdio/envelope harness code into
+  `internal/interfaces/openapi/plugin` helpers for handshake writing, request
+  payload decoding, typed data decoding, and response envelope writing. The
+  auth and pagination plugins still own their command-specific behavior.
 - Consolidate chat adapter command parsing and SSE activity decoding across
   Teams, Telegram, and Discord adapters.
 - Extract shared Jido/goruntime orchestration reconciliation helpers, starting
@@ -209,5 +212,6 @@ Verification has been run slice-by-slice, including:
 
 ## Recommended Next Slices
 
-1. Consolidate OpenAPI plugin stdio/envelope harness code if caller evidence
-   shows the repeated harness is the same contract.
+1. Audit chat adapter command parsing and SSE activity decoding across Teams,
+   Telegram, and Discord adapters before deciding whether a shared module would
+   improve locality.

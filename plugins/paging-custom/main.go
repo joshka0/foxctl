@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/joshka0/foxctl/internal/domain/envelope"
 	plugin "github.com/joshka0/foxctl/internal/interfaces/openapi/plugin"
 )
 
@@ -18,26 +17,16 @@ func main() {
 			Commands:  []string{plugin.CommandPagination},
 			Protocols: []string{"core/v1"},
 		}
-		if err := json.NewEncoder(os.Stdout).Encode(handshake); err != nil {
+		if err := plugin.WriteHandshake(os.Stdout, handshake); err != nil {
 			safeStderr("write handshake: %v\n", err)
 			os.Exit(1)
 		}
 		return
 	}
 
-	var env envelope.Envelope
-	if err := json.NewDecoder(os.Stdin).Decode(&env); err != nil {
-		emitError(fmt.Errorf("decode envelope: %w", err))
-		return
-	}
-	if env.Command != plugin.CommandPagination {
-		emitError(fmt.Errorf("unexpected command %s", env.Command))
-		return
-	}
-
 	var payload plugin.PaginationRequestPayload
-	if err := decodePayload(env.Data, &payload); err != nil {
-		emitError(fmt.Errorf("decode payload: %w", err))
+	if err := plugin.ReadRequest(os.Stdin, plugin.CommandPagination, &payload); err != nil {
+		emitError(err)
 		return
 	}
 
@@ -67,8 +56,9 @@ func main() {
 		}
 	}
 
-	out := envelope.OK(plugin.CommandPagination, result)
-	writeEnvelope(out)
+	if err := plugin.WriteOK(os.Stdout, plugin.CommandPagination, result); err != nil {
+		safeStderr("write envelope: %v\n", err)
+	}
 }
 
 func extractCursor(body map[string]any) string {
@@ -103,27 +93,11 @@ func extractItems(body map[string]any) []any {
 }
 
 func emitError(err error) {
-	env := envelope.Error(plugin.CommandPagination, "ERUNTIME", err.Error(), nil)
-	writeEnvelope(env)
-}
-
-func writeEnvelope(env envelope.Envelope) {
-	if err := envelope.Write(os.Stdout, env); err != nil {
+	if err := plugin.WriteError(os.Stdout, plugin.CommandPagination, "ERUNTIME", err.Error(), nil); err != nil {
 		safeStderr("write envelope: %v\n", err)
 	}
 }
 
 func safeStderr(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format, args...)
-}
-
-func decodePayload(data any, v any) error {
-	if data == nil {
-		return nil
-	}
-	raw, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(raw, v)
 }
