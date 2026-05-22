@@ -75,7 +75,7 @@ func (f *fakeCodeEnvelopeProvider) BuildCodeEnvelope(_ context.Context, req Code
 			{Name: "semantic_anchor", Text: "ENFORCES anchor:foxctl:invariant:no-send-without-read"},
 		},
 		Keywords:          []string{"read-before-write"},
-		Metadata:          map[string]any{"anchor_count": 1},
+		Metadata:          SemanticEnvelopeProviderMetadata{OwnerNodeID: "owner-node-1"},
 		DigestParts:       []string{"anchor:foxctl:invariant:no-send-without-read", "ENFORCES"},
 		CoChangeNeighbors: []string{"pkg/audit.go"},
 	}, nil
@@ -417,6 +417,20 @@ func TestSemanticEnvelopeMetadataParsesLegacyMap(t *testing.T) {
 			"digest":                "sha256:legacy",
 			"provider_version":      "legacy-provider",
 			"include_cochange_text": true,
+			"metadata": map[string]any{
+				"owner_node_id": "repo:symbol:Guard",
+				"warning_count": float64(2),
+				"anchors": []any{
+					map[string]any{
+						"relation":          "ENFORCES",
+						"target_id":         "invariant:no-send-without-read",
+						"target_display":    "no-send-without-read",
+						"target_type":       "invariant",
+						"validation_status": "current",
+						"path":              "pkg/main.go",
+					},
+				},
+			},
 			"text_sections": []any{
 				map[string]any{"name": "test_target", "text": "pkg/file_test.go#TestThing"},
 				map[string]any{"name": "doc_target", "text": "docs/example.md"},
@@ -431,6 +445,22 @@ func TestSemanticEnvelopeMetadataParsesLegacyMap(t *testing.T) {
 	}
 	if cochange := coChangeTextFromMetadata(metadata); cochange != "pkg/a.go, pkg/b.go" {
 		t.Fatalf("cochange=%q", cochange)
+	}
+	envelope, ok := semanticEnvelopeMetadataFromValue(metadata[metadataKeySemanticEnvelope])
+	if !ok {
+		t.Fatal("expected legacy envelope metadata to parse")
+	}
+	if envelope.Metadata == nil {
+		t.Fatal("expected typed provider metadata")
+	}
+	if got := envelope.Metadata.OwnerNodeID; got != "repo:symbol:Guard" {
+		t.Fatalf("owner_node_id=%q", got)
+	}
+	if got := envelope.Metadata.WarningCount; got != 2 {
+		t.Fatalf("warning_count=%d", got)
+	}
+	if len(envelope.Metadata.Anchors) != 1 || envelope.Metadata.Anchors[0].TargetID != "invariant:no-send-without-read" {
+		t.Fatalf("anchors=%#v", envelope.Metadata.Anchors)
 	}
 }
 

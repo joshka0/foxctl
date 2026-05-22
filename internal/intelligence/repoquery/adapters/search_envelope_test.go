@@ -64,8 +64,11 @@ func TestSemanticAnchorEnvelopeProviderBuildsSearchEnvelope(t *testing.T) {
 	if bits.TextSections[0].Name != "semantic_anchor" {
 		t.Fatalf("section name=%q want semantic_anchor", bits.TextSections[0].Name)
 	}
-	if bits.Metadata["owner_node_id"] != owner.ID {
-		t.Fatalf("owner metadata=%#v want %q", bits.Metadata["owner_node_id"], owner.ID)
+	if bits.Metadata.OwnerNodeID != owner.ID {
+		t.Fatalf("owner metadata=%#v want %q", bits.Metadata.OwnerNodeID, owner.ID)
+	}
+	if len(bits.Metadata.Anchors) != 1 {
+		t.Fatalf("anchors=%#v want one anchor", bits.Metadata.Anchors)
 	}
 
 	bits, err = provider.BuildCodeEnvelope(ctx, searchindex.CodeEnvelopeRequest{Document: searchindex.Document{
@@ -77,8 +80,8 @@ func TestSemanticAnchorEnvelopeProviderBuildsSearchEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildCodeEnvelope by symbol ref: %v", err)
 	}
-	if bits.Metadata["owner_node_id"] != owner.ID {
-		t.Fatalf("symbol-ref owner metadata=%#v want %q", bits.Metadata["owner_node_id"], owner.ID)
+	if bits.Metadata.OwnerNodeID != owner.ID {
+		t.Fatalf("symbol-ref owner metadata=%#v want %q", bits.Metadata.OwnerNodeID, owner.ID)
 	}
 }
 

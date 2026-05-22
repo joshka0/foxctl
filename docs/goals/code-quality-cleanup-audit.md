@@ -105,7 +105,7 @@ by cleanup value and implementation risk.
   subset structs.
   - Scope: `internal/v2/runtime/tools`.
 
-- [ ] Type known semantic envelope metadata.
+- [x] Type known semantic envelope metadata.
   - Scope: `internal/intelligence/searchindex`.
   - Target: `SemanticEnvelopeMetadata` with backward-compatible legacy map
     parsing.
