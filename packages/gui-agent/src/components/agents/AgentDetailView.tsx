@@ -1197,7 +1197,7 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
   ]);
 
   useEffect(() => {
-    const cleanup = subscribeToRoomEvents(controlRoomID, roomWorkspacePath, (_event) => {
+    const cleanup = subscribeToRoomEvents(controlRoomID, roomWorkspacePath, () => {
       void Promise.all([
         queryClient.invalidateQueries({
           queryKey: ["rooms", roomWorkspacePath],

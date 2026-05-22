@@ -11,6 +11,7 @@ bun run check:frontend
 That command runs:
 
 - `bun run --cwd packages/data typecheck`
+- `bun run --cwd packages/gui-agent lint`
 - `bun run --cwd packages/gui-agent build`
 - `bun run --cwd packages/gui-agent test`
 - `bun run --cwd packages/foxterm typecheck`
@@ -31,13 +32,3 @@ review.
 replace caller search, DAG grep, or future dependency-graph tooling such as
 Knip. Use it as the repeatable local and CI gate for compiler/linter-proven
 unused code before deleting broader exports.
-
-The `gui-agent` ESLint command is still useful for React-specific issues:
-
-```bash
-bun run --cwd packages/gui-agent lint
-```
-
-It is intentionally not part of `check:frontend` yet because the existing
-React hook rule failures need a focused cleanup slice before the command can be
-made mandatory.

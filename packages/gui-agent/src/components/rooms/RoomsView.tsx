@@ -44,7 +44,7 @@ export function RoomsView() {
     queryFn: () => listRooms({ workspace_id: workspaceID.trim(), limit: 100, archived_only: showArchived }),
   })
 
-  const rooms = roomsQuery.data?.rooms ?? []
+  const rooms = useMemo(() => roomsQuery.data?.rooms ?? [], [roomsQuery.data?.rooms])
 
   useEffect(() => {
     if (rooms.length === 0) return

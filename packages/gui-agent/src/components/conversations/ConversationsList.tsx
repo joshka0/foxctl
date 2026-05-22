@@ -430,7 +430,7 @@ export function ConversationsList() {
     return () => {
       cancelled = true;
     };
-  }, [selectedConversation, agents]);
+  }, [selectedConversation, agents, getKnownModelsForProvider]);
 
   // Resolve route-selected conversation after conversation data loads.
   useEffect(() => {

@@ -44,8 +44,8 @@ Remaining areas from the results doc after the completed slices:
   - Completed: dependable unused-code and TypeScript frontend verification
     commands are wired locally and in GitLab CI:
     `bun run check:frontend` and `bun run unused:frontend`.
-  - Follow-up: clean up existing `gui-agent` ESLint React hook findings before
-    making package ESLint mandatory in the root frontend gate.
+  - Completed: `gui-agent` ESLint React hook findings are clean, and package
+    ESLint is mandatory in the root frontend gate.
 
 ## Quality Bar
 

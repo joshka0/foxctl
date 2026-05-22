@@ -40,9 +40,9 @@ bun run check:frontend
 bun run unused:frontend
 ```
 
-`check:frontend` runs the shared data typecheck, this GUI build, GUI behavior
-tests, foxterm typecheck, and GUI auth gateway typecheck. `unused:frontend`
-adds the root oxlint pass.
+`check:frontend` runs the shared data typecheck, this GUI lint/build, GUI
+behavior tests, foxterm typecheck, and GUI auth gateway typecheck.
+`unused:frontend` adds the root oxlint pass.
 
 ## API Integration
 

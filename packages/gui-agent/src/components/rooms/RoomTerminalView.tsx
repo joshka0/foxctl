@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -125,15 +125,12 @@ export function RoomTerminalView({ roomId, workspaceId, panes, participants, sen
   const [bindActor, setBindActor] = useState('')
   const [rebindNotice, setRebindNotice] = useState('')
 
-  useEffect(() => {
-    if (selectedKey && !terminalParticipants.some((participant) => participant.actor_id === selectedKey)) {
-      setSelectedKey('')
-    }
-  }, [terminalParticipants, selectedKey])
-
-  const selectedPane = selectedKey ? participantPaneByActor.get(selectedKey) : undefined
+  const activeSelectedKey = terminalParticipants.some((participant) => participant.actor_id === selectedKey)
+    ? selectedKey
+    : ''
+  const selectedPane = activeSelectedKey ? participantPaneByActor.get(activeSelectedKey) : undefined
   const target = selectedPane ? paneTarget(selectedPane) : ''
-  const paneRecipient = selectedKey || (selectedPane ? paneDispatchActor(selectedPane) : '')
+  const paneRecipient = activeSelectedKey || (selectedPane ? paneDispatchActor(selectedPane) : '')
   const isBroadcast = audienceMode === 'broadcast'
   const selectedParticipant = useMemo(() => {
     if (audienceMode !== 'selected' || selectedRecipients.length !== 1) return undefined
@@ -142,38 +139,24 @@ export function RoomTerminalView({ roomId, workspaceId, panes, participants, sen
   const transportUnavailable = selectedParticipant?.transport?.transport === 'unavailable'
   const transportReady = selectedParticipant?.transport?.transport === 'available'
   const bindOptions = useMemo(() => participants.map((participant) => participant.actor_id).filter(Boolean).sort(), [participants])
+  const preferredBindActor = paneRecipient && bindOptions.includes(paneRecipient) ? paneRecipient : bindOptions[0] || ''
+  const effectiveBindActor = bindActor && bindOptions.includes(bindActor) ? bindActor : preferredBindActor
 
-  useEffect(() => {
-    const preferred = paneRecipient && bindOptions.includes(paneRecipient) ? paneRecipient : bindOptions[0] || ''
-    if (!bindActor || !bindOptions.includes(bindActor)) {
-      setBindActor(preferred)
-    }
-  }, [bindActor, bindOptions, paneRecipient])
-
-  useEffect(() => {
-    const recipients = reminderEligibleParticipants.map((participant) => participant.actor_id)
-    if (selectedRecipients.length === 1 && recipients.includes(selectedRecipients[0])) {
-      setReminderRecipient(selectedRecipients[0])
-      return
-    }
-    if (paneRecipient && recipients.includes(paneRecipient)) {
-      setReminderRecipient(paneRecipient)
-      return
-    }
-    if (reminderRecipient && recipients.includes(reminderRecipient)) return
-    if (sender && recipients.includes(sender)) {
-      setReminderRecipient(sender)
-      return
-    }
-    setReminderRecipient(recipients[0] || '')
-  }, [paneRecipient, reminderEligibleParticipants, reminderRecipient, selectedRecipients, sender])
-
-  useEffect(() => {
-    if (!isBroadcast) return
-    if (ackRequired) setAckRequired(false)
-    if (replyExpected) setReplyExpected(false)
-    if (interrupt) setInterrupt(false)
-  }, [ackRequired, interrupt, isBroadcast, replyExpected])
+  const reminderRecipients = useMemo(
+    () => reminderEligibleParticipants.map((participant) => participant.actor_id),
+    [reminderEligibleParticipants],
+  )
+  const defaultReminderRecipient =
+    selectedRecipients.length === 1 && reminderRecipients.includes(selectedRecipients[0])
+      ? selectedRecipients[0]
+      : paneRecipient && reminderRecipients.includes(paneRecipient)
+        ? paneRecipient
+        : reminderRecipient && reminderRecipients.includes(reminderRecipient)
+          ? reminderRecipient
+          : sender && reminderRecipients.includes(sender)
+            ? sender
+            : reminderRecipients[0] || ''
+  const effectiveReminderRecipient = defaultReminderRecipient
 
   const captureQuery = useQuery({
     queryKey: ['room', roomId, 'terminal-capture', target],
@@ -245,11 +228,6 @@ export function RoomTerminalView({ roomId, workspaceId, panes, participants, sen
       : selectedRecipients.length === 1
         ? selectedRecipients[0]
         : `${selectedRecipients.length} selected`
-  const effectiveReminderRecipient =
-    selectedRecipients.length === 1 && reminderEligibleParticipants.some((participant) => participant.actor_id === selectedRecipients[0])
-      ? selectedRecipients[0]
-      : reminderRecipient
-
   const statusLine = reminderError
     ? `ERR · ${reminderError}`
     : sendError
@@ -306,7 +284,7 @@ export function RoomTerminalView({ roomId, workspaceId, panes, participants, sen
         ) : (
           terminalParticipants.map((participant) => {
             const pane = participantPaneByActor.get(participant.actor_id)
-            const active = participant.actor_id === selectedKey
+            const active = participant.actor_id === activeSelectedKey
             return (
               <Button
                 key={participant.actor_id}
@@ -349,9 +327,9 @@ export function RoomTerminalView({ roomId, workspaceId, panes, participants, sen
                     : captureQuery.data?.content || 'No PTY output available yet.'}
               </pre>
             </ScrollArea>
-          ) : selectedKey ? (
+          ) : activeSelectedKey ? (
             <div className="h-full flex items-center justify-center text-sm text-white/50 px-6 text-center">
-              No tmux PTY is currently attached for <span className="mx-1 font-mono text-white/80">{selectedKey}</span>. Delivery can still work through participant transport if transport is available.
+              No tmux PTY is currently attached for <span className="mx-1 font-mono text-white/80">{activeSelectedKey}</span>. Delivery can still work through participant transport if transport is available.
             </div>
           ) : (
             <div className="h-full flex items-center justify-center text-sm text-white/50">
@@ -407,7 +385,15 @@ export function RoomTerminalView({ roomId, workspaceId, panes, participants, sen
         <div className="grid grid-cols-1 md:grid-cols-[140px_minmax(0,1fr)_140px_220px] gap-2">
           <select
             value={audienceMode}
-            onChange={(e) => setAudienceMode(e.target.value === 'broadcast' ? 'broadcast' : 'selected')}
+            onChange={(e) => {
+              const nextMode = e.target.value === 'broadcast' ? 'broadcast' : 'selected'
+              setAudienceMode(nextMode)
+              if (nextMode === 'broadcast') {
+                setAckRequired(false)
+                setReplyExpected(false)
+                setInterrupt(false)
+              }
+            }}
             className="h-8 rounded-md border border-input bg-background px-3 text-xs font-mono"
             disabled={!!sending}
           >
@@ -617,7 +603,7 @@ export function RoomTerminalView({ roomId, workspaceId, panes, participants, sen
             </div>
             <div className="flex items-center gap-2">
               <select
-                value={bindActor}
+                value={effectiveBindActor}
                 onChange={(e) => setBindActor(e.target.value)}
                 className="h-8 rounded-md border border-input bg-background px-3 text-xs font-mono"
                 disabled={!selectedPane || !!rebinding}
@@ -630,13 +616,13 @@ export function RoomTerminalView({ roomId, workspaceId, panes, participants, sen
                 variant="outline"
                 size="sm"
                 className="h-8 text-[10px] font-black uppercase tracking-tight"
-                disabled={!selectedPane || !bindActor || !!rebinding}
+                disabled={!selectedPane || !effectiveBindActor || !!rebinding}
                 onClick={async () => {
-                  if (!selectedPane || !bindActor) return
-                  const participant = participants.find((entry) => entry.actor_id === bindActor)
+                  if (!selectedPane || !effectiveBindActor) return
+                  const participant = participants.find((entry) => entry.actor_id === effectiveBindActor)
                   try {
                     await onRebind({
-                      actorId: bindActor,
+                      actorId: effectiveBindActor,
                       delivery_binding: {
                         mux_backend: selectedPane.backend,
                         mux_session: selectedPane.session,
@@ -645,7 +631,7 @@ export function RoomTerminalView({ roomId, workspaceId, panes, participants, sen
                         transport_kind: selectedPane.socket_path ? 'pane_socket' : participantTransportKind(participant?.transport),
                       },
                     })
-                    setRebindNotice(`rebound ${bindActor} to ${selectedPane.session_pane || selectedPane.id || selectedPane.session}`)
+                    setRebindNotice(`rebound ${effectiveBindActor} to ${selectedPane.session_pane || selectedPane.id || selectedPane.session}`)
                   } catch (error) {
                     setRebindNotice(error instanceof Error ? error.message : 'failed to rebind room member')
                   }
@@ -660,15 +646,15 @@ export function RoomTerminalView({ roomId, workspaceId, panes, participants, sen
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-4 text-[10px] text-muted-foreground font-mono">
             <label className="inline-flex items-center gap-1.5 cursor-pointer">
-              <input type="checkbox" checked={ackRequired} disabled={isBroadcast || selectedRecipients.length > 1 || !!sending} onChange={(e) => setAckRequired(e.target.checked)} />
+              <input type="checkbox" checked={isBroadcast ? false : ackRequired} disabled={isBroadcast || selectedRecipients.length > 1 || !!sending} onChange={(e) => setAckRequired(e.target.checked)} />
               <span className={isBroadcast || selectedRecipients.length > 1 ? 'opacity-50' : ''}>ack</span>
             </label>
             <label className="inline-flex items-center gap-1.5 cursor-pointer">
-              <input type="checkbox" checked={replyExpected} disabled={isBroadcast || selectedRecipients.length > 1 || !!sending} onChange={(e) => setReplyExpected(e.target.checked)} />
+              <input type="checkbox" checked={isBroadcast ? false : replyExpected} disabled={isBroadcast || selectedRecipients.length > 1 || !!sending} onChange={(e) => setReplyExpected(e.target.checked)} />
               <span className={isBroadcast || selectedRecipients.length > 1 ? 'opacity-50' : ''}>reply</span>
             </label>
             <label className="inline-flex items-center gap-1.5 cursor-pointer">
-              <input type="checkbox" checked={interrupt} disabled={isBroadcast || !!sending} onChange={(e) => setInterrupt(e.target.checked)} />
+              <input type="checkbox" checked={isBroadcast ? false : interrupt} disabled={isBroadcast || !!sending} onChange={(e) => setInterrupt(e.target.checked)} />
               <span className={isBroadcast ? 'opacity-50' : ''}>interrupt</span>
             </label>
           </div>

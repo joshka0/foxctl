@@ -86,6 +86,9 @@ merge, rebase or merge current `main` and rerun the full verification set.
   `bun run unused:frontend`. The shared data, gui-agent, foxterm, and GUI auth
   gateway TypeScript configs enforce unused locals/parameters where applicable,
   and GitLab runs the gate in a Bun-based `typescript-frontend` job.
+- Existing `gui-agent` ESLint React hook findings were cleaned up, and
+  `bun run --cwd packages/gui-agent lint` now participates in
+  `bun run check:frontend`.
 
 ### Legacy And Compatibility Removal
 
@@ -137,6 +140,7 @@ Verification has been run slice-by-slice, including:
 - `go test` for affected storage, runtime, indexing, and provider packages
 - `bun run --cwd packages/data typecheck`
 - `bun run --cwd packages/gui-agent build`
+- `bun run --cwd packages/gui-agent lint`
 - `bun run --cwd packages/foxterm typecheck`
 - `bun run check:frontend`
 - `bun run unused:frontend`
@@ -192,13 +196,12 @@ Verification has been run slice-by-slice, including:
 - Completed: dependable frontend unused-code and verification commands are wired
   locally and in GitLab CI via `bun run check:frontend` and
   `bun run unused:frontend`.
-- Follow-up: `bun run --cwd packages/gui-agent lint` still has existing React
-  hook rule failures and should be cleaned up before joining the mandatory root
-  frontend gate.
+- Completed: `bun run --cwd packages/gui-agent lint` is clean and included in
+  `bun run check:frontend`.
 - Follow-up: add a project-level dead-export/dependency graph pass only after
   the current compiler and linter gates are consistently clean.
 
 ## Recommended Next Slices
 
-1. Clean up existing `gui-agent` ESLint React hook findings so the package lint
-   gate can become mandatory.
+1. Continue structural consolidation follow-ups, starting with one repeated
+   helper family that has clear caller evidence.
