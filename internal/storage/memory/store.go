@@ -9,10 +9,12 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/joshka0/foxctl/internal/adapters/artifacts"
+	"github.com/joshka0/foxctl/internal/intelligence/turbovec"
 	"github.com/joshka0/foxctl/internal/platform/config"
 	errs "github.com/joshka0/foxctl/internal/platform/errors"
 	"github.com/joshka0/foxctl/internal/platform/timeutil"
@@ -41,6 +43,10 @@ type Store struct {
 	artifactManager artifacts.Manager
 	path            string
 	close           func() error
+
+	// searcher is lazily initialized on first vector search.
+	searcher     vector.VectorSearcher
+	searcherOnce sync.Once
 }
 
 // Stats aliases the shared memory stats type.
@@ -1384,6 +1390,16 @@ func (s *Store) Relevant(ctx context.Context, workspace string, limit int) ([]Sc
 	return scored, nil
 }
 
+// getSearcher lazily initializes the vector searcher on first call.
+// It uses the embedding dimensions from the query to configure the searcher.
+func (s *Store) getSearcher(dim int) vector.VectorSearcher {
+	s.searcherOnce.Do(func() {
+		socketPath := turbovec.DefaultSocketPath()
+		s.searcher = vector.NewSearcher("memory", socketPath, dim)
+	})
+	return s.searcher
+}
+
 // SearchSimilar finds entries similar to the given embedding using in-memory cosine similarity.
 // This is a fallback for SQLite which doesn't support native vector search.
 // For better performance with large datasets, use Turso with native vector search.
@@ -1443,26 +1459,50 @@ func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedd
 		return nil, fmt.Errorf("memory: search similar rows: %w", err)
 	}
 
-	// Compute cosine similarity for each candidate
-	results := make([]ScoredEntry, 0, len(candidates))
-	for _, c := range candidates {
-		similarity := vector.Cosine(queryEmbedding, c.embedding)
-		if similarity > 0.5 { // Filter low-similarity results
-			results = append(results, ScoredEntry{
-				Entry: c.entry,
-				Score: similarity,
-			})
+	// Build candidate list for the vector searcher.
+	idEmbeds := make([]vector.IDEmbedding, len(candidates))
+	for i, c := range candidates {
+		idEmbeds[i] = vector.IDEmbedding{ID: c.entry.ID, Embedding: c.embedding}
+	}
+
+	// Use the vector searcher for cosine similarity ranking.
+	searcher := s.getSearcher(len(queryEmbedding))
+	scored, err := searcher.Search(ctx, queryEmbedding, idEmbeds, limit)
+	if err != nil {
+		// Fallback to inline cosine if searcher fails.
+		scored = nil
+		for _, c := range candidates {
+			similarity := vector.Cosine(queryEmbedding, c.embedding)
+			if similarity > 0.5 {
+				scored = append(scored, vector.ScoredID{ID: c.entry.ID, Score: similarity})
+			}
+		}
+		sort.Slice(scored, func(i, j int) bool {
+			return scored[i].Score > scored[j].Score
+		})
+		if len(scored) > limit {
+			scored = scored[:limit]
 		}
 	}
 
-	// Sort by similarity (highest first)
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Score > results[j].Score
-	})
+	// Build lookup map for entries by ID.
+	entryMap := make(map[string]NamedEntry, len(candidates))
+	for _, c := range candidates {
+		entryMap[c.entry.ID] = c.entry
+	}
 
-	// Apply limit
-	if len(results) > limit {
-		results = results[:limit]
+	// Map scored results back to ScoredEntry, applying threshold.
+	results := make([]ScoredEntry, 0, len(scored))
+	for _, s := range scored {
+		if s.Score <= 0.5 {
+			continue
+		}
+		if entry, ok := entryMap[s.ID]; ok {
+			results = append(results, ScoredEntry{
+				Entry: entry,
+				Score: s.Score,
+			})
+		}
 	}
 
 	return results, nil
@@ -1538,26 +1578,50 @@ func (s *Store) SearchSimilarByType(ctx context.Context, workspace, entryType st
 		return nil, fmt.Errorf("memory: search similar by type rows: %w", err)
 	}
 
-	// Compute cosine similarity for each candidate
-	results := make([]ScoredEntry, 0, len(candidates))
-	for _, c := range candidates {
-		similarity := vector.Cosine(queryEmbedding, c.embedding)
-		if similarity > 0.5 { // Filter low-similarity results
-			results = append(results, ScoredEntry{
-				Entry: c.entry,
-				Score: similarity,
-			})
+	// Build candidate list for the vector searcher.
+	idEmbeds := make([]vector.IDEmbedding, len(candidates))
+	for i, c := range candidates {
+		idEmbeds[i] = vector.IDEmbedding{ID: c.entry.ID, Embedding: c.embedding}
+	}
+
+	// Use the vector searcher for cosine similarity ranking.
+	searcher := s.getSearcher(len(queryEmbedding))
+	scored, err := searcher.Search(ctx, queryEmbedding, idEmbeds, limit)
+	if err != nil {
+		// Fallback to inline cosine if searcher fails.
+		scored = nil
+		for _, c := range candidates {
+			similarity := vector.Cosine(queryEmbedding, c.embedding)
+			if similarity > 0.5 {
+				scored = append(scored, vector.ScoredID{ID: c.entry.ID, Score: similarity})
+			}
+		}
+		sort.Slice(scored, func(i, j int) bool {
+			return scored[i].Score > scored[j].Score
+		})
+		if len(scored) > limit {
+			scored = scored[:limit]
 		}
 	}
 
-	// Sort by similarity (highest first)
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Score > results[j].Score
-	})
+	// Build lookup map for entries by ID.
+	entryMap := make(map[string]NamedEntry, len(candidates))
+	for _, c := range candidates {
+		entryMap[c.entry.ID] = c.entry
+	}
 
-	// Apply limit
-	if len(results) > limit {
-		results = results[:limit]
+	// Map scored results back to ScoredEntry, applying threshold.
+	results := make([]ScoredEntry, 0, len(scored))
+	for _, s := range scored {
+		if s.Score <= 0.5 {
+			continue
+		}
+		if entry, ok := entryMap[s.ID]; ok {
+			results = append(results, ScoredEntry{
+				Entry: entry,
+				Score: s.Score,
+			})
+		}
 	}
 
 	return results, nil

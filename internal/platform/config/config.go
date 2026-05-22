@@ -62,6 +62,7 @@ type Config struct {
 	Logging        LoggingSettings   `mapstructure:"logging" json:"logging"`
 	OpenAPI        OpenAPISettings   `mapstructure:"openapi" json:"openapi"`
 	Embedding      EmbeddingSettings `mapstructure:"embedding" json:"embedding"`
+	Turbovec       TurbovecSettings  `mapstructure:"turbovec" json:"turbovec"`
 	Search         SearchSettings    `mapstructure:"search" json:"search"`
 	Indexing       IndexingSettings  `mapstructure:"indexing" json:"indexing"`
 	Database       DatabaseSettings  `mapstructure:"database" json:"database"`
@@ -409,6 +410,21 @@ func (e EmbeddingSettings) MarshalJSON() ([]byte, error) {
 		redacted.APIKey = "[REDACTED]"
 	}
 	return json.Marshal(redacted)
+}
+
+// TurbovecSettings configure the turbovec vector index sidecar integration.
+// Env vars: FOXCTL_TURBOVEC_ENABLED, FOXCTL_TURBOVEC_SOCKET, FOXCTL_TURBOVEC_BIT_WIDTH.
+type TurbovecSettings struct {
+	// Enabled determines whether the turbovec sidecar is used for vector recall.
+	// When false (default), VectorRecall falls back to brute-force SQLite cosine similarity.
+	Enabled bool `mapstructure:"enabled" json:"enabled"`
+
+	// SocketPath is the path to the turbovecd Unix socket.
+	// Default: ~/.foxctl/turbovecd.sock
+	SocketPath string `mapstructure:"socket_path" json:"socket_path"`
+
+	// BitWidth is the quantization bit width (2, 3, or 4). Default: 4.
+	BitWidth int `mapstructure:"bit_width" json:"bit_width"`
 }
 
 // SearchSettings configure web search provider API keys.
@@ -948,6 +964,9 @@ func applyDefaults(v *viper.Viper, defaultHome string) {
 	v.SetDefault("database.postgres.require_vector", false)
 	v.SetDefault("database.vector.enabled", true)
 	v.SetDefault("database.vector.dimensions", dbdriver.DefaultVectorDimensions)
+	// Turbovec sidecar defaults
+	v.SetDefault("turbovec.enabled", true)
+	v.SetDefault("turbovec.bit_width", 4)
 	// CAS policy defaults - store always on, expose off by default (hooks/tools)
 	v.SetDefault("cas.store", true)
 	v.SetDefault("cas.expose", "off")
@@ -1313,6 +1332,28 @@ func finalizeConfig(cfg Config, home string) Config {
 	if cfg.Embedding.Provider == "" && (cfg.Embedding.BaseURL != "" || strings.EqualFold(os.Getenv("FOXCTL_OBSIDIAN_SEMANTIC_PROVIDER"), "openai_compat") || strings.EqualFold(os.Getenv("FOXCTL_OBSIDIAN_SEMANTIC_PROVIDER"), "openai-compatible")) {
 		cfg.Embedding.Provider = "openai_compat"
 	}
+
+	// Turbovec sidecar env var overrides
+	if v := os.Getenv("FOXCTL_TURBOVEC_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(strings.TrimSpace(v)); err == nil {
+			cfg.Turbovec.Enabled = b
+		}
+	}
+	if v := os.Getenv("FOXCTL_TURBOVEC_SOCKET"); v != "" {
+		cfg.Turbovec.SocketPath = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("FOXCTL_TURBOVEC_BIT_WIDTH"); v != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
+			cfg.Turbovec.BitWidth = n
+		}
+	}
+	if cfg.Turbovec.SocketPath == "" {
+		cfg.Turbovec.SocketPath = filepath.Join(cfg.Home, "turbovecd.sock")
+	}
+	if cfg.Turbovec.BitWidth <= 0 {
+		cfg.Turbovec.BitWidth = 4
+	}
+
 	// Search API key env var overrides (FC/IS compliant)
 	if key := os.Getenv("TAVILY_API_KEY"); key != "" && cfg.Search.TavilyAPIKey == "" {
 		cfg.Search.TavilyAPIKey = key

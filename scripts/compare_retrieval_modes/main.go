@@ -98,7 +98,12 @@ func main() {
 	}
 	defer memStore.Close()
 
-	indexStore, err := searchindex.Open(ctx, cfg.Storage.Root)
+	indexStore, err := searchindex.OpenWithTurboVec(ctx, cfg.Storage.Root, workspace, cfg.Database.Vector.Dimensions, searchindex.TurboVecConfig{
+		Enabled:    cfg.Turbovec.Enabled,
+		SocketPath: cfg.Turbovec.SocketPath,
+		DataDir:    cfg.Storage.Root,
+		BitWidth:   cfg.Turbovec.BitWidth,
+	})
 	if err != nil {
 		panic(err)
 	}

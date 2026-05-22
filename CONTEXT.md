@@ -240,6 +240,14 @@ _Avoid_: envelope
 Structured failure information inside an **Envelope**.
 _Avoid_: stderr, panic text
 
+**Turbovec**:
+The compressed vector search engine (TurboQuant algorithm) that accelerates semantic retrieval for foxctl workspaces.
+_Avoid_: vector database, vector store, ANN index
+
+**Turbovec sidecar**:
+The turbovecd Unix domain socket service that manages compressed vector indices alongside foxctl.
+_Avoid_: turbovec daemon, vector server
+
 ## Relationships
 
 - **Foxctl Context** defines the domain-language boundary for humans and agents.
