@@ -70,7 +70,7 @@ by cleanup value and implementation risk.
   - Target: centralize `RoomLoop`, delivery trace/result, health snapshot, and
     room delivery binding shapes.
 
-- [ ] Replace query-plan wrapper structs with a deliberate shared contract.
+- [x] Replace query-plan wrapper structs with a deliberate shared contract.
   - Scope: `internal/intelligence/searchquery`,
     `internal/intelligence/codecontext`, `internal/intelligence/retrieval/v2`.
   - Target: use aliases to the central `searchquery` types unless a stable
