@@ -1,7 +1,21 @@
 import type {
+  Agent as DataAgent,
+  AgentAskStreamCancelRequest as DataAgentAskStreamCancelRequest,
+  AgentAskStreamCancelResponse as DataAgentAskStreamCancelResponse,
+  AgentAskStreamRequest as DataAgentAskStreamRequest,
+  AgentAskStreamResponse as DataAgentAskStreamResponse,
+  AgentChatStreamEvent as DataAgentChatStreamEvent,
+  AgentPatchRequest as DataAgentPatchRequest,
+  AgentRuntimeTree as DataAgentRuntimeTree,
+  AgentRuntimeTreeNode as DataAgentRuntimeTreeNode,
+  AgentSession as DataAgentSession,
+  AgentSpawnRequest as DataAgentSpawnRequest,
+  AgentSpawnResponse as DataAgentSpawnResponse,
+  AgentsListResponse as DataAgentsListResponse,
   ApiEnvelope as DataApiEnvelope,
   BlackboardRecord as DataBlackboardRecord,
   BulkResolveRequest as DataBulkResolveRequest,
+  CoChangeHit as DataCoChangeHit,
   LeadChangeEvent as DataLeadChangeEvent,
   MailboxMessage as DataMailboxMessage,
   MuxPane as DataMuxPane,
@@ -45,95 +59,18 @@ import type {
 export type ApiEnvelope<T> = DataApiEnvelope<T>;
 
 // Agent types
-export interface Agent {
-  id: string;
-  parent_id?: string;
-  ns: string;
-  name?: string; // Human name (e.g., "Luna", "Atlas")
-  slug?: string; // Human-readable handle (e.g., "researcher")
-  role?: string;
-  skills_allow: string[];
-  share_bb: string;
-  state: "running" | "idle" | "stopped" | "error" | "unknown";
-  created_at: string;
-  updated_at?: string;
-  heartbeat_at?: string;
-  prompt_summary?: string;
-  llm_provider?: string;
-  llm_model?: string;
-  exec_mode?: "reactive" | "autonomous" | "proactive" | "tick" | "story";
-  think_interval?: number;
-  conversation_id?: string; // Linked companion conversation ID
-  workspace_root?: string;
-  workspace_source?: "local" | "sandbox" | string;
-  sandbox_provider?: string;
-  sandbox_id?: string;
-  repo_url?: string;
-  repo_ref?: string;
-  memory_scope?: "agent" | "session" | string;
-  memory_retention?: "companion" | "durable" | "task" | "ephemeral" | string;
-}
-
-export interface CoChangeHit {
-  name: string;
-  anchor_path: string;
-  summary: string;
-  score: number;
-  neighbors?: string[];
-  updated_at?: string;
-}
-
-export interface AgentSession {
-  session_id: string;
-  actor_id: string;
-  role: string;
-  status: string; // 'running', 'stopped', etc.
-  iterations: number;
-  started_at: string;
-}
-
-export interface AgentRuntimeTreeNode {
-  tag?: string;
-  agent_id?: string;
-  pid?: string;
-  metadata?: Record<string, unknown>;
-  status?: string;
-  state?: unknown;
-  error?: string;
-  children?: AgentRuntimeTreeNode[];
-}
-
-export interface AgentRuntimeTree {
-  enabled: boolean;
-  agent_id?: string;
-  depth: number;
-  root?: AgentRuntimeTreeNode;
-  error?: string;
-}
-
-export interface AgentChatStreamEvent {
-  agent_id: string;
-  conversation_id: string;
-  correlation_id: string;
-  phase:
-    | "started"
-    | "delta"
-    | "tool_call"
-    | "tool_result"
-    | "completed"
-    | "cancelled"
-    | "error"
-    | string;
-  content?: string;
-  content_delta?: string;
-  tool_name?: string;
-  tool_call_id?: string;
-  tool_arguments?: unknown;
-  tool_output?: string;
-  context_queries?: number;
-  error?: string;
-  metadata?: Record<string, unknown>;
-}
+export type Agent = DataAgent;
+export type CoChangeHit = DataCoChangeHit;
+export type AgentSession = DataAgentSession;
+export type AgentRuntimeTreeNode = DataAgentRuntimeTreeNode;
+export type AgentRuntimeTree = DataAgentRuntimeTree;
+export type AgentChatStreamEvent = DataAgentChatStreamEvent;
+export type AgentSpawnRequest = DataAgentSpawnRequest;
+export type AgentPatchRequest = DataAgentPatchRequest;
+export type AgentAskStreamRequest = DataAgentAskStreamRequest;
+export type AgentAskStreamResponse = DataAgentAskStreamResponse;
+export type AgentAskStreamCancelRequest = DataAgentAskStreamCancelRequest;
+export type AgentAskStreamCancelResponse = DataAgentAskStreamCancelResponse;
 
 export type RoomMessageEvent = DataRoomMessageEvent;
 export type RoomLiveRelayResult = DataRoomLiveRelayResult;
@@ -374,24 +311,8 @@ export interface ContextWikiMemoryProposal {
 }
 
 // API Response wrappers
-export interface AgentsListResponse {
-  agents: Agent[];
-  total: number;
-}
-
-export interface AgentSpawnResponse {
-  session_id: string;
-  actor_id: string;
-  status: string;
-  name?: string; // Generated or provided name
-  workspace_id?: string;
-  workspace_root?: string;
-  workspace_source?: "local" | "sandbox" | string;
-  sandbox_provider?: string;
-  sandbox_id?: string;
-  repo_url?: string;
-  repo_ref?: string;
-}
+export type AgentsListResponse = DataAgentsListResponse;
+export type AgentSpawnResponse = DataAgentSpawnResponse;
 
 export interface MailboxListResponse {
   messages: MailboxMessage[];

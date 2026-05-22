@@ -5,7 +5,13 @@ import type {
   ContextWikiNextProposalMergeResult,
   AgentsListResponse,
   AgentRuntimeTree,
+  AgentAskStreamCancelRequest,
+  AgentAskStreamCancelResponse,
+  AgentAskStreamRequest,
+  AgentAskStreamResponse,
+  AgentPatchRequest,
   AgentSpawnResponse,
+  AgentSpawnRequest,
   CoChangeHit,
   MailboxListResponse,
   MailboxMessage,
@@ -593,38 +599,7 @@ export async function getAgentRuntime(
   );
 }
 
-export interface SpawnAgentParams {
-  role: string;
-  prompt: string;
-  workspace_id?: string;
-  workspace_root?: string;
-  workspace_source?: "local" | "sandbox";
-  sandbox_provider?: string;
-  sandbox_id?: string;
-  repo_url?: string;
-  repo_ref?: string;
-  sandbox_image?: string;
-  sandbox_timeout_s?: number;
-  allow_egress?: string[];
-  skills_allow?: string[];
-  parent_id?: string;
-  memory_scope?: "agent" | "session";
-  memory_retention?: "companion" | "durable" | "task" | "ephemeral";
-  room_id?: string;
-  room_role?: string;
-  // Agent metadata
-  name?: string; // Human name (auto-generated if empty)
-  slug?: string; // Human-readable handle
-  // Execution config
-  exec_mode?: "reactive" | "autonomous" | "proactive" | "tick" | "story";
-  think_interval?: number;
-  max_iterations?: number;
-  max_context_tokens?: number;
-  max_auto_turns?: number;
-  // LLM override
-  llm_provider?: string;
-  llm_model?: string;
-}
+export type SpawnAgentParams = AgentSpawnRequest;
 
 /**
  * Spawn a new agent using the provided configuration parameters.
@@ -694,11 +669,7 @@ export async function startAgent(
   });
 }
 
-export interface PatchAgentParams {
-  conversation_id?: string; // empty string to unlink
-  memory_scope?: "agent" | "session";
-  memory_retention?: "companion" | "durable" | "task" | "ephemeral";
-}
+export type PatchAgentParams = AgentPatchRequest;
 
 /**
  * Update properties of an existing agent.
@@ -719,20 +690,8 @@ export async function patchAgent(
 
 export async function askAgentStream(
   agentId: string,
-  params: {
-    message: string;
-    correlation_id?: string;
-    conversation_id?: string;
-    context?: Record<string, unknown>;
-    response_schema?: Record<string, unknown>;
-    response_keys?: string[];
-  },
-): Promise<{
-  accepted: boolean;
-  agent_id: string;
-  correlation_id: string;
-  conversation_id: string;
-}> {
+  params: AgentAskStreamRequest,
+): Promise<AgentAskStreamResponse> {
   return request(`/agents/${agentId}/ask-stream`, {
     method: "POST",
     body: JSON.stringify(params),
@@ -742,15 +701,12 @@ export async function askAgentStream(
 export async function cancelAgentStream(
   agentId: string,
   correlationId?: string,
-): Promise<{
-  ok: boolean;
-  agent_id: string;
-  correlation_id?: string;
-  cancelled: number;
-}> {
+): Promise<AgentAskStreamCancelResponse> {
   return request(`/agents/${agentId}/ask-stream/cancel`, {
     method: "POST",
-    body: JSON.stringify({ correlation_id: correlationId }),
+    body: JSON.stringify({
+      correlation_id: correlationId,
+    } satisfies AgentAskStreamCancelRequest),
   });
 }
 

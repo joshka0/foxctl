@@ -598,7 +598,13 @@ export interface APIResponse<T> {
 }
 
 // Agent types (from agents.db)
-export type AgentState = "starting" | "running" | "stopped" | "error";
+export type AgentState =
+  | "starting"
+  | "running"
+  | "idle"
+  | "stopped"
+  | "error"
+  | "unknown";
 export type BlackboardShareMode = "all" | "scoped" | "none";
 export type AgentMemoryScope = "agent" | "session";
 export type AgentMemoryRetention =
@@ -606,6 +612,13 @@ export type AgentMemoryRetention =
   | "durable"
   | "task"
   | "ephemeral";
+export type AgentWorkspaceSource = "local" | "sandbox" | string;
+export type AgentExecutionMode =
+  | "reactive"
+  | "autonomous"
+  | "proactive"
+  | "tick"
+  | "story";
 
 export interface Agent {
   id: string;
@@ -615,21 +628,176 @@ export interface Agent {
   slug?: string;
   role?: string;
   prompt?: string;
-  skills_allow?: string[] | string;
+  prompt_summary?: string;
+  skills_allow: string[];
   policy?: Record<string, unknown> | string;
-  share_bb: BlackboardShareMode;
+  share_bb: BlackboardShareMode | string;
   state: AgentState;
+  updated_at?: string;
   llm_provider?: string;
   llm_model?: string;
-  exec_mode?: string;
+  llm_base_url?: string;
+  llm_auth_mode?: string;
+  llm_auth_header?: string;
+  llm_auth_prefix?: string;
+  exec_mode?: AgentExecutionMode | string;
   think_interval?: number;
   conversation_id?: string;
   memory_scope?: AgentMemoryScope | string;
   memory_retention?: AgentMemoryRetention | string;
   max_iterations?: number;
   max_auto_turns?: number;
+  workspace_root?: string;
+  workspace_source?: AgentWorkspaceSource;
+  sandbox_provider?: string;
+  sandbox_id?: string;
+  repo_url?: string;
+  repo_ref?: string;
   created_at: string;
   heartbeat_at?: string;
+}
+
+export interface AgentsListResponse {
+  agents: Agent[];
+  total: number;
+}
+
+export interface AgentSpawnRequest {
+  role: string;
+  prompt: string;
+  workspace_id?: string;
+  workspace_root?: string;
+  workspace_source?: "local" | "sandbox";
+  sandbox_provider?: string;
+  sandbox_id?: string;
+  repo_url?: string;
+  repo_ref?: string;
+  sandbox_image?: string;
+  sandbox_timeout_s?: number;
+  allow_egress?: string[];
+  skills_allow?: string[];
+  parent_id?: string;
+  memory_scope?: AgentMemoryScope;
+  memory_retention?: AgentMemoryRetention;
+  room_id?: string;
+  room_role?: string;
+  name?: string;
+  slug?: string;
+  exec_mode?: AgentExecutionMode;
+  think_interval?: number;
+  max_iterations?: number;
+  max_context_tokens?: number;
+  max_auto_turns?: number;
+  llm_provider?: string;
+  llm_model?: string;
+}
+
+export interface AgentSpawnResponse {
+  session_id: string;
+  actor_id: string;
+  status: string;
+  name?: string;
+  workspace_id?: string;
+  workspace_root?: string;
+  workspace_source?: AgentWorkspaceSource;
+  sandbox_provider?: string;
+  sandbox_id?: string;
+  repo_url?: string;
+  repo_ref?: string;
+}
+
+export interface AgentPatchRequest {
+  conversation_id?: string;
+  memory_scope?: AgentMemoryScope;
+  memory_retention?: AgentMemoryRetention;
+}
+
+export interface AgentSession {
+  session_id: string;
+  actor_id: string;
+  role: string;
+  status: string;
+  iterations: number;
+  started_at: string;
+}
+
+export interface AgentRuntimeTreeNode {
+  tag?: string;
+  agent_id?: string;
+  pid?: string;
+  metadata?: Record<string, unknown>;
+  status?: string;
+  state?: unknown;
+  error?: string;
+  children?: AgentRuntimeTreeNode[];
+}
+
+export interface AgentRuntimeTree {
+  enabled: boolean;
+  agent_id?: string;
+  depth: number;
+  root?: AgentRuntimeTreeNode;
+  error?: string;
+}
+
+export interface AgentAskStreamRequest {
+  message: string;
+  correlation_id?: string;
+  conversation_id?: string;
+  context?: Record<string, unknown>;
+  response_schema?: Record<string, unknown>;
+  response_keys?: string[];
+}
+
+export interface AgentAskStreamResponse {
+  accepted: boolean;
+  agent_id: string;
+  correlation_id: string;
+  conversation_id: string;
+}
+
+export interface AgentAskStreamCancelRequest {
+  correlation_id?: string;
+}
+
+export interface AgentAskStreamCancelResponse {
+  ok: boolean;
+  agent_id: string;
+  correlation_id?: string;
+  cancelled: number;
+}
+
+export interface AgentChatStreamEvent {
+  agent_id: string;
+  conversation_id: string;
+  correlation_id: string;
+  phase:
+    | "started"
+    | "delta"
+    | "tool_call"
+    | "tool_result"
+    | "completed"
+    | "cancelled"
+    | "error"
+    | string;
+  content?: string;
+  content_delta?: string;
+  tool_name?: string;
+  tool_call_id?: string;
+  tool_arguments?: unknown;
+  tool_output?: string;
+  context_queries?: number;
+  error?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface CoChangeHit {
+  name: string;
+  anchor_path: string;
+  summary: string;
+  score: number;
+  neighbors?: string[];
+  updated_at?: string;
 }
 
 export interface AgentMemoryStats {

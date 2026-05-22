@@ -139,6 +139,7 @@ export function AgentList() {
     : agents;
   const sortedMatchedAgents = useMemo(() => {
     const rank: Record<Agent["state"], number> = {
+      starting: 0,
       running: 0,
       error: 1,
       idle: 2,
