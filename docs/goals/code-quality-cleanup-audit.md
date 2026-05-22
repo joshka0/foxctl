@@ -188,7 +188,7 @@ by cleanup value and implementation risk.
 - [ ] Consolidate chat adapter command parsing and SSE activity decoding.
   - Scope: Teams, Telegram, Discord chat adapters.
 
-- [ ] Consolidate v2 Turso store opening boilerplate.
+- [x] Consolidate v2 Turso store opening boilerplate.
   - Scope: projections, turn requests, effects, and workers stores.
 
 - [ ] Extract shared Jido/goruntime orchestration reconciliation helpers.
