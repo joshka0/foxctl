@@ -1013,6 +1013,65 @@ func TestRoomDetailHandler_PutMemberBinding(t *testing.T) {
 	}
 }
 
+func TestRoomDetailHandler_MemberTransportRouteRemoved(t *testing.T) {
+	cfg := orchestrationTestConfig(t.TempDir())
+	listHandler := RoomsListHandler(cfg, zerolog.Nop())
+	h := RoomDetailHandler(cfg, zerolog.Nop(), nil)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"id":"alpha",
+		"title":"Alpha Room",
+		"members":[
+			{"actor_id":"coordinator-a","role":"coordinator"},
+			{"actor_id":"droid-a","role":"participant"}
+		]
+	}`))
+	createRR := httptest.NewRecorder()
+	listHandler.ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
+	}
+
+	putReq := httptest.NewRequest(http.MethodPut, "/api/rooms/alpha/members/droid-a/transport?workspace_id=ws1", strings.NewReader(`{
+		"actor_id":"coordinator-a",
+		"transport_endpoint":"/tmp/droid-a.sock",
+		"transport_kind":"pane_socket"
+	}`))
+	putRR := httptest.NewRecorder()
+	h.ServeHTTP(putRR, putReq)
+	if putRR.Code != http.StatusNotFound {
+		t.Fatalf("legacy transport route status=%d body=%s", putRR.Code, putRR.Body.String())
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/rooms/alpha?workspace_id=ws1", nil)
+	getRR := httptest.NewRecorder()
+	h.ServeHTTP(getRR, getReq)
+	if getRR.Code != http.StatusOK {
+		t.Fatalf("get status=%d body=%s", getRR.Code, getRR.Body.String())
+	}
+	getBody := decodeResponseBody(t, getRR)
+	room := getBody["room"].(map[string]any)
+	members := room["members"].([]any)
+	for _, raw := range members {
+		member := raw.(map[string]any)
+		if strings.TrimSpace(fmt.Sprint(member["actor_id"])) != "droid-a" {
+			continue
+		}
+		binding, _ := member["delivery_binding"].(map[string]any)
+		if rawEndpoint, ok := binding["transport_endpoint"]; ok && strings.TrimSpace(fmt.Sprint(rawEndpoint)) != "" {
+			t.Fatalf("legacy transport route unexpectedly updated delivery_binding: %#v", member)
+		}
+		for _, key := range []string{"backend", "session", "pane_id", "transport_endpoint", "transport_kind"} {
+			if _, ok := member[key]; ok {
+				t.Fatalf("member contains legacy transport field %q after removed route: %#v", key, member)
+			}
+		}
+		return
+	}
+	t.Fatalf("room.members=%#v want droid-a", members)
+}
+
 func TestRoomDetailHandler_MembersPatchRequiresCoordinator(t *testing.T) {
 	cfg := orchestrationTestConfig(t.TempDir())
 	listHandler := RoomsListHandler(cfg, zerolog.Nop())

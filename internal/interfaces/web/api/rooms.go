@@ -621,11 +621,11 @@ func handleRoomSubresourceRoute(w http.ResponseWriter, r *http.Request, cfg conf
 	case "restore":
 		handleRoomPostOnly(w, r, func() { handleRoomRestore(w, r, cfg, log, roomID) })
 	case "members":
-		// /members/{actor_id}/transport or /members/{actor_id}/binding
-		if len(parts) >= 3 && strings.TrimSpace(parts[2]) == "transport" {
-			actorID := strings.TrimSpace(parts[1])
-			handleRoomPutOnly(w, r, func() { handleRoomMemberTransportPut(w, r, cfg, log, roomID, actorID) })
-		} else if len(parts) >= 3 && strings.TrimSpace(parts[2]) == "binding" {
+		if len(parts) >= 3 {
+			if strings.TrimSpace(parts[2]) != "binding" {
+				httpError(w, http.StatusNotFound, "room member subroute not found")
+				return true
+			}
 			actorID := strings.TrimSpace(parts[1])
 			handleRoomPutOnly(w, r, func() { handleRoomMemberBindingPut(w, r, cfg, log, roomID, actorID) })
 		} else {
@@ -763,91 +763,6 @@ func handleRoomPutOnly(w http.ResponseWriter, r *http.Request, next func()) {
 		return
 	}
 	next()
-}
-
-// handleRoomMemberTransportPut handles PUT /api/rooms/{id}/members/{actor_id}/transport.
-// It updates transport_endpoint and transport_kind for a single existing room member
-// without disturbing other members. Returns 404 if the actor is not a current member.
-func handleRoomMemberTransportPut(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID, actorID string) {
-	roomID = strings.TrimSpace(roomID)
-	actorID = strings.TrimSpace(actorID)
-	if roomID == "" || actorID == "" {
-		httpError(w, http.StatusBadRequest, "room_id and actor_id required")
-		return
-	}
-
-	var req struct {
-		ActorID           string `json:"actor_id"`
-		TransportEndpoint string `json:"transport_endpoint"`
-		TransportKind     string `json:"transport_kind"`
-	}
-	if err := readJSON(w, r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
-		return
-	}
-	req.ActorID = strings.TrimSpace(req.ActorID)
-
-	workspaceID := roomWorkspaceID(r)
-	if workspaceID == "" {
-		httpError(w, http.StatusBadRequest, "workspace_id required")
-		return
-	}
-
-	store, err := blackboard.OpenBoardStore(r.Context(), cfg.Storage.Root)
-	if err != nil {
-		log.Error().Err(err).Msg("failed to open board store")
-		httpError(w, http.StatusInternalServerError, "failed to open board store")
-		return
-	}
-	defer store.Close()
-	room, err := store.GetRoom(r.Context(), workspaceID, roomID, req.ActorID)
-	if err != nil {
-		if errors.Is(err, blackboard.ErrRoomNotFound) {
-			httpError(w, http.StatusNotFound, "room not found")
-			return
-		}
-		log.Error().Err(err).Str("room_id", roomID).Msg("failed to load room before transport update")
-		httpError(w, http.StatusInternalServerError, "failed to update member transport")
-		return
-	}
-	if req.ActorID == "" {
-		httpError(w, http.StatusBadRequest, "actor_id required")
-		return
-	}
-	if !apiSameRoomParticipant(req.ActorID, actorID) && !apiRoomActorHasCoordinatorAccess(room.Members, req.ActorID) {
-		httpError(w, http.StatusForbidden, "member transport update requires self or coordinator role")
-		return
-	}
-
-	if err := store.UpdateRoomMemberTransport(r.Context(), workspaceID, roomID, actorID, req.TransportEndpoint, req.TransportKind); err != nil {
-		if errors.Is(err, blackboard.ErrRoomMemberNotFound) {
-			httpError(w, http.StatusNotFound, fmt.Sprintf("actor %q is not a member of room %q", actorID, roomID))
-			return
-		}
-		log.Error().Err(err).Str("room_id", roomID).Str("actor_id", actorID).Msg("failed to update member transport")
-		httpError(w, http.StatusInternalServerError, "failed to update member transport")
-		return
-	}
-
-	updated, err := store.GetRoom(r.Context(), workspaceID, roomID, "")
-	if err != nil {
-		log.Error().Err(err).Str("room_id", roomID).Msg("failed to reload room after transport update")
-		httpError(w, http.StatusInternalServerError, "failed to reload room")
-		return
-	}
-
-	// Return the updated member record.
-	var member *RoomMemberResponse
-	for _, m := range convertRoomMembers(updated.Members) {
-		m := m
-		if m.ActorID == actorID {
-			member = &m
-			break
-		}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"member": member,
-	})
 }
 
 func handleRoomMemberBindingPut(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID, actorID string) {
