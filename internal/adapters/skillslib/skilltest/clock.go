@@ -3,32 +3,15 @@ package skilltest
 import (
 	"sync"
 	"time"
+
+	"github.com/joshka0/foxctl/internal/platform/timeutil"
 )
 
-// Clock provides time operations that can be mocked in tests.
-type Clock interface {
-	Now() time.Time
-	Since(t time.Time) time.Duration
-	Until(t time.Time) time.Duration
-}
+// Clock aliases the production clock boundary for existing skill tests.
+type Clock = timeutil.Clock
 
-// RealClock implements Clock using the real system time.
-type RealClock struct{}
-
-// Now returns the current time.
-func (RealClock) Now() time.Time {
-	return time.Now()
-}
-
-// Since returns the time elapsed since t.
-func (RealClock) Since(t time.Time) time.Duration {
-	return time.Since(t)
-}
-
-// Until returns the time until t.
-func (RealClock) Until(t time.Time) time.Duration {
-	return time.Until(t)
-}
+// RealClock aliases the production real clock for existing skill tests.
+type RealClock = timeutil.RealClock
 
 // FakeClock implements Clock with a manually controllable time.
 // It is safe for concurrent use.

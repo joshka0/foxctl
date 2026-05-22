@@ -15,6 +15,7 @@ import (
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/workspaceutil"
 	"github.com/joshka0/foxctl/internal/context/sessionkit"
 	"github.com/joshka0/foxctl/internal/context/sessionkit/claudejsonl"
+	"github.com/joshka0/foxctl/internal/context/sessionkit/snapshot"
 	"github.com/joshka0/foxctl/internal/intelligence/analysis/tasksgraph"
 	"github.com/joshka0/foxctl/internal/platform/timeutil"
 	"github.com/joshka0/foxctl/internal/storage/memory"
@@ -30,42 +31,11 @@ type Input struct {
 	Summary   string `json:"summary,omitempty"` // Optional user-provided summary
 }
 
-// SessionSnapshot represents the captured session state with tasks, plans, and metadata.
-type SessionSnapshot struct {
-	SnapshotID   string            `json:"snapshot_id"`
-	SessionID    string            `json:"session_id,omitempty"`
-	Trigger      string            `json:"trigger"`
-	Workspace    string            `json:"workspace"`
-	Timestamp    time.Time         `json:"timestamp"`
-	ActiveTask   *TaskInfo         `json:"active_task,omitempty"`
-	ActivePlan   *PlanInfo         `json:"active_plan,omitempty"`
-	PendingTodos []TaskInfo        `json:"pending_todos,omitempty"`
-	Decisions    []string          `json:"decisions,omitempty"`
-	Insights     []string          `json:"insights,omitempty"`
-	Summary      string            `json:"summary,omitempty"`
-	Metadata     map[string]string `json:"metadata,omitempty"`
-}
-
-// PlanInfo represents a simplified plan for the snapshot with task linkage.
-type PlanInfo struct {
-	FilePath    string   `json:"file_path"`
-	FileName    string   `json:"file_name"`
-	Title       string   `json:"title"`
-	ContentHash string   `json:"content_hash"`
-	Sections    []string `json:"sections,omitempty"`     // Top-level section titles
-	LinkedTasks int      `json:"linked_tasks,omitempty"` // Number of tasks linked to this plan
-	ModTime     string   `json:"mod_time,omitempty"`     // ISO format
-}
-
-// TaskInfo represents a simplified task for the snapshot with essential fields.
-type TaskInfo struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	Description string `json:"description,omitempty"`
-	Status      string `json:"status"`
-	Notes       string `json:"notes,omitempty"`
-	Gotchas     string `json:"gotchas,omitempty"`
-}
+type (
+	SessionSnapshot = snapshot.Snapshot
+	PlanInfo        = snapshot.PlanInfo
+	TaskInfo        = snapshot.TaskInfo
+)
 
 // Output defines the skill output with snapshot metadata and capture statistics.
 type Output struct {

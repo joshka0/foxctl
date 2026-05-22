@@ -36,8 +36,6 @@ const (
 	debounceCooldown  = 10 * time.Second
 )
 
-// Environment variable names for impact analysis configuration.
-// FC/IS: Constants ensure consistency between LoadConfig and ConfigFromMap.
 const (
 	EnvImpactDisabled   = "FOXCTL_IMPACT_DISABLED"
 	EnvImpactMaxSymbols = "FOXCTL_IMPACT_MAX_SYMBOLS"
@@ -47,7 +45,6 @@ const (
 )
 
 // Config holds impact analysis configuration.
-// Config holds impact analysis configuration.
 type Config struct {
 	MaxSymbols int           `json:"max_symbols"`
 	MaxRefs    int           `json:"max_refs"`
@@ -55,8 +52,7 @@ type Config struct {
 	Disabled   bool          `json:"disabled"`
 }
 
-// LoadConfig loads configuration from environment.
-// FC/IS: Collects env values at boundary, delegates parsing to ConfigFromMap.
+// LoadConfig loads impact analysis configuration from the process environment.
 func LoadConfig() Config {
 	envMap := map[string]string{
 		EnvImpactDisabled:   os.Getenv(EnvImpactDisabled),
@@ -67,9 +63,7 @@ func LoadConfig() Config {
 	return ConfigFromMap(envMap)
 }
 
-// ConfigFromMap creates a Config from a string map.
-// FC/IS: Pure function for parsing - no os.Getenv calls.
-// Tests can call this directly with controlled values.
+// ConfigFromMap creates a Config from environment values.
 func ConfigFromMap(envMap map[string]string) Config {
 	cfg := Config{
 		MaxSymbols: defaultMaxSymbols,
@@ -98,7 +92,6 @@ func ConfigFromMap(envMap map[string]string) Config {
 }
 
 // Symbol represents a code symbol.
-// Symbol represents a code symbol.
 type Symbol struct {
 	Name    string `json:"name"`
 	Type    string `json:"type"`
@@ -106,7 +99,6 @@ type Symbol struct {
 	EndLine int    `json:"end_line,omitempty"`
 }
 
-// Impact represents the impact analysis result for a symbol.
 // Impact represents the impact analysis result for a symbol.
 type Impact struct {
 	Symbol     string   `json:"symbol"`
@@ -117,7 +109,6 @@ type Impact struct {
 	ImplFiles  []string `json:"impl_files,omitempty"`
 }
 
-// Language represents a supported language with its LSP skill.
 // Language represents a supported language with its LSP skill.
 type Language struct {
 	Name     string

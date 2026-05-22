@@ -369,11 +369,6 @@ func parseGoTestOutput(lines []string) ([]testwatch.Failure, string) {
 
 var pytestFailPattern = regexp.MustCompile(`FAILED\s+(\S+)::(\S+)`)
 
-// pytestFileLinePattern is reserved for future use to extract line numbers from pytest output.
-//
-//nolint:unused
-var pytestFileLinePattern = regexp.MustCompile(`(\S+\.py):(\d+)`)
-
 func parsePytestOutput(lines []string) ([]testwatch.Failure, string) {
 	var failures []testwatch.Failure
 	var summary string

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -933,6 +934,30 @@ func TestEngineFanOutWithConditions(t *testing.T) {
 	}
 	if !foundC {
 		t.Errorf("C should have been executed (no condition), calls: %v", calls)
+	}
+}
+
+func TestEngineStartRejectsMalformedEdgeCondition(t *testing.T) {
+	store := newMockStore()
+	exec := newMockExecutor(nil)
+	registry := map[NodeKind]NodeExecutor{
+		NodeSkill: exec,
+	}
+
+	flow := makeFlow("f1", "malformed-condition")
+	flow.State = FlowDraft
+	_, _ = store.CreateFlow(context.Background(), flow)
+	_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+	_, _ = store.AddNode(context.Background(), makeNode("b", "f1", "target", NodeSkill, "{}"))
+	_, _ = store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, "status =="))
+
+	eng := NewEngine(store, registry, 16)
+	err := eng.Start(context.Background(), "f1")
+	if err == nil {
+		t.Fatal("Start succeeded with malformed edge condition")
+	}
+	if !strings.Contains(err.Error(), "edge e1 condition") {
+		t.Fatalf("Start error = %q, want edge condition context", err)
 	}
 }
 

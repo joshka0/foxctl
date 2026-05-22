@@ -29,15 +29,6 @@ type AgentInventoryItem struct {
 	LastActive string // formatted timestamp or "—" if never
 }
 
-// StubAgent is a lightweight agent record used by the walking skeleton to
-// display inventory rows before the live API is connected.
-// Deprecated: use AgentInventoryItem for new code.
-type StubAgent struct {
-	ID     string
-	Role   string
-	Status string
-}
-
 // CockpitScreen is the root component for the M3 walking-skeleton operator
 // cockpit. It renders a three-lane layout (Main / Detail / Evidence) per
 // architecture.md and information-architecture.md.
@@ -99,23 +90,6 @@ func NewCockpitScreen(apiURL string) *CockpitScreen {
 		focusedLane:   0, // Main lane is focused by default
 		phaseChanges:  make(chan CockpitPhase, 8),
 	}
-}
-
-// SetStubAgents sets the stub agent list for the walking-skeleton inventory.
-// Deprecated: use SetAgents for new code.
-func (c *CockpitScreen) SetStubAgents(agents []StubAgent) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	items := make([]AgentInventoryItem, len(agents))
-	for i, a := range agents {
-		items[i] = AgentInventoryItem{
-			ID:     a.ID,
-			Role:   a.Role,
-			Status: a.Status,
-		}
-	}
-	c.agents = items
-	c.clampSelectionLocked()
 }
 
 // SetAgents sets the live agent inventory items. The items are sorted

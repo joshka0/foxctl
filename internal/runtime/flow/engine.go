@@ -122,6 +122,10 @@ func (e *Engine) Start(ctx context.Context, flowID string) error {
 	if err != nil {
 		return fmt.Errorf("flow: load edges: %w", err)
 	}
+	edgeConditions, err := parseEdgeConditions(edges)
+	if err != nil {
+		return err
+	}
 
 	if len(nodes) == 0 {
 		return fmt.Errorf("flow: %s has no nodes", flowID)
@@ -215,15 +219,7 @@ func (e *Engine) Start(ctx context.Context, flowID string) error {
 
 		targetNode := findNodeByID(nodes, edge.ToNodeID)
 
-		// Parse condition.
-		var cond Condition
-		if edge.Condition != "" {
-			var pErr error
-			cond, pErr = ParseCondition(edge.Condition)
-			if pErr != nil {
-				cond = AlwaysCondition // Fallback to always pass on parse error
-			}
-		}
+		cond := edgeConditions[edge.ID]
 
 		pauseCh := make(chan struct{})
 		resumeCh := make(chan struct{})
@@ -314,6 +310,21 @@ func (e *Engine) Start(ctx context.Context, flowID string) error {
 	}
 
 	return nil
+}
+
+func parseEdgeConditions(edges []FlowEdge) (map[string]Condition, error) {
+	conditions := make(map[string]Condition, len(edges))
+	for _, edge := range edges {
+		if edge.Condition == "" {
+			continue
+		}
+		cond, err := ParseCondition(edge.Condition)
+		if err != nil {
+			return nil, fmt.Errorf("flow: edge %s condition: %w", edge.ID, err)
+		}
+		conditions[edge.ID] = cond
+	}
+	return conditions, nil
 }
 
 // Stop terminates all executors and evaluators for the given flow.

@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -19,16 +18,6 @@ import (
 func newTestContext(t *testing.T, buf *bytes.Buffer) (*skillmain.RunContext, func()) {
 	t.Helper()
 	return skilltest.NewTestRunContext(t, buf, nil)
-}
-
-//nolint:unused // Test utility for future tests
-func decodeEnvelope(t *testing.T, buf *bytes.Buffer) map[string]any {
-	t.Helper()
-	var env map[string]any
-	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
-		t.Fatalf("unmarshal envelope: %v\nbuffer: %s", err, buf.String())
-	}
-	return env
 }
 
 // Tests for validation

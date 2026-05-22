@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skilltest"
+	"github.com/joshka0/foxctl/internal/platform/timeutil"
 	"github.com/joshka0/foxctl/internal/runtime/observability"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -110,7 +110,7 @@ type CompressScanWorker struct {
 	Inserter CompressionJobInserter
 
 	// Clock provides current time for deterministic date calculations.
-	Clock skilltest.Clock
+	Clock timeutil.Clock
 
 	// ScanLimit is the maximum number of conversations scanned per run.
 	ScanLimit int
@@ -133,7 +133,7 @@ func (w *CompressScanWorker) Work(ctx context.Context, job *river.Job[CompressSc
 
 	clock := w.Clock
 	if clock == nil {
-		clock = skilltest.RealClock{}
+		clock = timeutil.RealClock{}
 	}
 
 	limit := w.ScanLimit

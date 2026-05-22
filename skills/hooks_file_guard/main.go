@@ -38,12 +38,6 @@ const (
 const (
 	// DefaultReservationTTL is the default TTL for auto-created reservations.
 	DefaultReservationTTL = 10 * time.Minute
-
-	// defaultRoomEnv is the env var for the coordination room.
-	defaultRoomEnv = "FOXCTL_ROOM"
-
-	// defaultRoom is the fallback room ID.
-	defaultRoom = "alpha"
 )
 
 // main is the skill entry point for hooks/file_guard.
