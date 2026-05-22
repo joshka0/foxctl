@@ -32,7 +32,7 @@ Remaining areas from the results doc after the completed slices:
 - Dead frontend code:
   - Completed current zero-caller deletion pass for GUI API wrappers and tiny
     dead `@foxctl/data` orchestration exports.
-  - Completed: added a real report-only dead-export/dependency graph pass with
+  - Completed: added a real targeted dead-export/dependency graph gate with
     `bun run dead:frontend`.
   - Completed: hard-cut the broad `@foxctl/data/client` helper surface to
     active UI callers.
@@ -166,7 +166,7 @@ Done when:
 - Verification passes:
   - `go test ./internal/interfaces/web/api`
 
-### 5. Room Transport Canonicalization (Mostly Complete)
+### 5. Room Transport Canonicalization (Complete)
 
 Choose the final room transport contract and remove or isolate legacy room
 transport compatibility.
@@ -179,6 +179,10 @@ Done when:
   the legacy transport-only storage helper is deleted.
 - Legacy `backend/session/pane_id` handling is deleted when caller evidence
   proves it is dead, or isolated at one boundary if still needed.
+- The member binding HTTP route accepts canonical `delivery_binding` updates,
+  or explicit `unbound` updates, and no longer maps legacy top-level transport
+  fields into the binding.
+- Binding updates return a named `RoomMemberBindingResponse` DTO.
 - GUI/foxterm callers use the canonical contract.
 - Verification passes:
   - `go test ./internal/interfaces/web/api`
@@ -193,15 +197,16 @@ Done when:
 
 - OpenCode hook skill failures preserve structured error context instead of
   presenting empty results.
-- Hermes memory write/query fallback reports failure when both CLI and HTTP
-  paths fail.
+- Hermes memory write fallback reports failure when both CLI and HTTP paths
+  fail. Memory query uses the HTTP skill path directly and does not carry a
+  hidden CLI/HTTP fallback chain.
 - Expected fallback cases remain intentional and tested.
 - Verification passes:
   - focused tests for `configs/opencode-hooks/index.ts` if available, or a
     documented command/manual check if no test harness exists
   - focused tests or smoke checks for `integrations/hermes/client.py`
 
-### 7. Dead Frontend Code And Unused Tooling (Mostly Complete)
+### 7. Dead Frontend Code And Unused Tooling (Complete)
 
 Delete confirmed unused frontend code and add dependable unused-code workflow
 coverage.
@@ -221,9 +226,9 @@ Done when:
   console-session settings/session/message, persisted-session get, health, and
   flow status/log calls. Tiny dead `@foxctl/data` orchestration exports were
   also removed.
-- Completed in current slices: `bun run dead:frontend` now provides a
-  TypeScript-graph report over active frontend packages without new
-  dependencies; `bun run unused:frontend` runs it after compiler/linter gates.
+- Completed in current slices: `bun run dead:frontend` now provides a strict
+  TypeScript-graph gate over active frontend packages without new dependencies;
+  `bun run unused:frontend` runs it after compiler/linter gates.
 - Completed in current slices: unused GUI-local API response/helper types were
   made package-private, internal orchestration board guards were unexported, and
   the obsolete `APIResponse<T>` type was deleted.

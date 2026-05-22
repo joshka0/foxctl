@@ -935,11 +935,6 @@ func TestRoomDetailHandler_PutMemberBinding(t *testing.T) {
 
 	putReq := httptest.NewRequest(http.MethodPut, "/api/rooms/alpha/members/droid-a/binding?workspace_id=ws1", strings.NewReader(`{
 		"actor_id":"droid-a",
-		"backend":"tmux",
-		"session":"146",
-		"pane_id":"%159",
-		"transport_endpoint":"/tmp/droid-a.sock",
-		"transport_kind":"pane_socket",
 		"delivery_binding":{
 			"mux_backend":"tmux",
 			"mux_session":"146",
@@ -1010,6 +1005,44 @@ func TestRoomDetailHandler_PutMemberBinding(t *testing.T) {
 	}
 	if _, ok := detailMember["delivery_binding"].(map[string]any); !ok {
 		t.Fatalf("detail member delivery_binding type=%T want map[string]any", detailMember["delivery_binding"])
+	}
+}
+
+func TestRoomDetailHandler_PutMemberBindingRequiresDeliveryBinding(t *testing.T) {
+	cfg := orchestrationTestConfig(t.TempDir())
+	listHandler := RoomsListHandler(cfg, zerolog.Nop())
+	h := RoomDetailHandler(cfg, zerolog.Nop(), nil)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"id":"alpha",
+		"title":"Alpha Room",
+		"members":[
+			{"actor_id":"coordinator-a","role":"coordinator"},
+			{"actor_id":"droid-a","role":"participant"}
+		]
+	}`))
+	createRR := httptest.NewRecorder()
+	listHandler.ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
+	}
+
+	putReq := httptest.NewRequest(http.MethodPut, "/api/rooms/alpha/members/droid-a/binding?workspace_id=ws1", strings.NewReader(`{
+		"actor_id":"droid-a",
+		"backend":"tmux",
+		"session":"146",
+		"pane_id":"%159",
+		"transport_endpoint":"/tmp/droid-a.sock",
+		"transport_kind":"pane_socket"
+	}`))
+	putRR := httptest.NewRecorder()
+	h.ServeHTTP(putRR, putReq)
+	if putRR.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", putRR.Code, putRR.Body.String())
+	}
+	if !strings.Contains(putRR.Body.String(), "delivery_binding required") {
+		t.Fatalf("body=%s want delivery_binding required", putRR.Body.String())
 	}
 }
 
@@ -1156,9 +1189,7 @@ func TestRoomDetailHandler_PutMemberBindingRejectsSelfRoleChange(t *testing.T) {
 
 	putReq := httptest.NewRequest(http.MethodPut, "/api/rooms/alpha/members/droid-a/binding?workspace_id=ws1", strings.NewReader(`{
 		"actor_id":"droid-a",
-		"role":"coordinator",
-		"transport_endpoint":"/tmp/droid-a.sock",
-		"transport_kind":"pane_socket"
+		"role":"coordinator"
 	}`))
 	putRR := httptest.NewRecorder()
 	h.ServeHTTP(putRR, putReq)
@@ -2415,11 +2446,6 @@ func TestRoomDetailHandler_GetControlSnapshotIncludesLoopHealthAndLinkedCards(t 
 			{
 				"actor_id":"gemini-a",
 				"role":"reviewer",
-				"backend":"tmux",
-				"session":"146",
-				"pane_id":"%159",
-				"transport_endpoint":"/tmp/gemini-a.sock",
-				"transport_kind":"pane_socket",
 				"delivery_binding":{
 					"mux_backend":"tmux",
 					"mux_session":"146",

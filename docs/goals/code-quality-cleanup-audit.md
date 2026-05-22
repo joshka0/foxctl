@@ -57,7 +57,7 @@ by cleanup value and implementation risk.
 
 ## Type And Contract Consolidation
 
-- [ ] Remove compatibility layers discovered after DTO consolidation.
+- [x] Remove compatibility layers discovered after DTO consolidation.
   - Audit source: read-only local DAG/grep pass plus three explorer subagent
     audits on frontend DTOs, backend/API compatibility, and repo-wide legacy
     shims.
@@ -98,6 +98,9 @@ by cleanup value and implementation risk.
   - Progress: room member/status responses no longer emit legacy top-level
     transport mirrors, and the legacy HTTP
     `/api/rooms/{room}/members/{actor}/transport` route was removed.
+  - Progress: the canonical binding route now accepts `delivery_binding` or
+    explicit `unbound` updates and no longer maps legacy top-level transport
+    fields into the binding.
   - Progress: pane transport registration now updates the canonical
     `delivery_binding` through `UpdateRoomMemberBinding`, and the old
     transport-only storage helper was deleted.
@@ -109,6 +112,9 @@ by cleanup value and implementation risk.
   - Other targets: remaining GUI/data-client functions with
     similar names currently diverge by route, params, response shape, or GUI
     auth behavior and should not be mechanically redirected.
+  - Status: completed for the audited compatibility targets. Remaining similar
+    wrappers are intentionally not compatibility layers because caller evidence
+    shows different routes, params, auth behavior, or response shapes.
   - Tests: data typecheck, gui-agent build, foxterm typecheck, affected Go
     package tests, and docs link check when this tracker changes.
 
@@ -187,10 +193,12 @@ by cleanup value and implementation risk.
   - Target: preserve structured skill errors in injected context; fail closed or
     warn for large-file stat failures.
 
-- [x] Make Hermes memory fallback failures honest.
+- [x] Make Hermes memory write fallback failures honest.
   - Scope: `integrations/hermes/client.py` and config loading.
   - Target: catch expected exceptions only, accumulate errors, and return
     `ok:false` or raise when both CLI and HTTP paths fail.
+  - Status: completed for the write path. Memory query uses the HTTP skill path
+    directly and has no hidden CLI/HTTP fallback chain to harden.
 
 - [x] Reject empty/malformed LLM verification output.
   - Scope: verification LLM client and CoVe refiner.
@@ -212,7 +220,7 @@ by cleanup value and implementation risk.
     unused scaffold/factory helpers, unused RLM tool helpers.
   - Tests: staticcheck `U1000`, `go test ./internal/rlm/...`.
 
-- [ ] Delete or replace dead frontend slices.
+- [x] Delete or replace dead frontend slices.
   - Scope: remaining unused GUI API wrappers and unused utility exports.
   - Progress: foxterm `getRun` / `RunDetail` were removed after caller search
     found no references outside their definitions.
@@ -220,6 +228,9 @@ by cleanup value and implementation risk.
     barrel export, and the unused `ActivityFeed` component were removed after
     local and independent worker audits found no callers. Activity stores and
     activity types remain live.
+  - Progress: confirmed zero-caller GUI API wrappers and dead
+    `@foxctl/data` orchestration exports were deleted. `bun run dead:frontend`
+    now fails on externally unused frontend exports in targeted modules.
   - Tests: gui-agent build/test and foxterm typecheck after dependencies are
     installed.
 
@@ -248,21 +259,39 @@ by cleanup value and implementation risk.
   - Target: shared pure path repair plus table/column collection helpers while
     keeping store-specific migrations local.
 
-- [ ] Consolidate skill inline output and workspace resolution helpers.
+- [x] Consolidate skill inline mode parsing and workspace resolution helpers.
   - Scope: repo-index/search/codemap skills.
+  - Completed: shared `inline_mode` parsing lives in
+    `internal/adapters/skillslib/inlineutil`; shared workspace path resolution
+    lives in `internal/adapters/skillslib/workspaceutil`.
+  - Deferred: inline output emitters stay skill-local because preview/artifact
+    shapes differ by skill.
 
-- [ ] Consolidate OpenAPI plugin stdio/envelope harness.
+- [x] Consolidate OpenAPI plugin stdio/envelope harness.
   - Scope: plugin command mains.
+  - Completed: plugin handshake, request decoding, typed data decoding, and
+    response envelope writing share `internal/interfaces/openapi/plugin`
+    helpers.
 
-- [ ] Consolidate chat adapter command parsing and SSE activity decoding.
+- [x] Consolidate chat adapter SSE activity decoding; defer command parsing.
   - Scope: Teams, Telegram, Discord chat adapters.
+  - Completed: SSE activity decoding shares
+    `internal/interfaces/chatadapter.DecodeActivitySSEMessage`.
+  - Deferred: command parsing remains adapter-local because Discord receives
+    typed slash-command options while Teams and Telegram currently parse
+    different text-command inputs.
 
 - [x] Consolidate v2 Turso store opening boilerplate.
   - Scope: projections, turn requests, effects, and workers stores.
 
-- [ ] Extract shared Jido/goruntime orchestration reconciliation helpers.
+- [x] Extract shared Jido/goruntime orchestration reconciliation helpers.
   - Target: start with pure helpers such as retry delay, append/project, payload
     builders, and terminal event construction before attempting a larger move.
+  - Completed: retry delay and append/project event ordering live in
+    `internal/v2/runtime/orchestration`.
+  - Deferred: payload builders and terminal event identity helpers remain
+    adapter-local until the runtime-child identity contract is intentionally
+    aligned.
 
 ## Stubs And Honesty Fixes
 
@@ -282,9 +311,16 @@ by cleanup value and implementation risk.
 
 ## Tooling Follow-Up
 
-- [ ] Add dependable unused-code tooling to local/CI workflow.
+- [x] Add dependable unused-code tooling to local/CI workflow.
   - Current audit used `staticcheck U1000` successfully. `knip` was useful but
     blocked by missing frontend dependencies/config resolution.
+  - Completed: `bun run unused:frontend` runs the focused frontend gate, root
+    package lint, and strict `bun run dead:frontend`; GitLab CI runs the same
+    frontend unused-code gate.
 
-- [ ] Add TypeScript dependency installation or CI command docs for reliable
+- [x] Add TypeScript dependency installation or CI command docs for reliable
   `gui-agent`, `foxterm`, and `@foxctl/data` verification.
+  - Completed: `docs/general/frontend-verification.md` documents
+    `bun run check:frontend`, `bun run unused:frontend`, and
+    `bun run dead:frontend`; `.gitlab-ci.yml` includes the
+    `typescript-frontend` job.

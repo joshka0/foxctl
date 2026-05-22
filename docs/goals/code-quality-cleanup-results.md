@@ -21,6 +21,8 @@ Current shape:
 - Made storage migration/decode failures more honest.
 - Moved shared infrastructure contracts out of runtime-owned packages.
 - Hard-cut several API compatibility responses to canonical typed DTOs.
+- Hard-cut room member binding updates to the canonical `delivery_binding`
+  request shape.
 - Isolated v2 Turso stores from the raw `*sql.DB` compatibility opener.
 - Added or tightened tests around the risky cleanup areas.
 
@@ -80,6 +82,8 @@ the full verification set has been rerun after the merge.
 - Room-control fixed response envelopes now use named DTOs, including status,
   control-snapshot, inbox, tasks, loop, coordinator handoff, message actions,
   and task actions.
+- Room member binding updates now return a named `RoomMemberBindingResponse`
+  DTO instead of a fixed anonymous response map.
 - `agent.CompactRoomSummaryForInbox` now returns a typed compact room summary
   instead of a map-shaped JSON blob.
 - The GUI orchestration board store now imports canonical
@@ -90,9 +94,9 @@ the full verification set has been rerun after the merge.
   `bun run unused:frontend`. The shared data, gui-agent, foxterm, and GUI auth
   gateway TypeScript configs enforce unused locals/parameters where applicable,
   and GitLab runs the gate in a Bun-based `typescript-frontend` job.
-- Frontend exported-symbol checks now have a repo-local dependency graph pass:
+- Frontend exported-symbol checks now have a repo-local dependency graph gate:
   `bun run dead:frontend`. It uses the TypeScript compiler API over active
-  frontend packages and reports targeted externally unused exports.
+  frontend packages and fails on targeted externally unused exports.
 - Existing `gui-agent` ESLint React hook findings were cleaned up, and
   `bun run --cwd packages/gui-agent lint` now participates in
   `bun run check:frontend`.
@@ -120,6 +124,9 @@ the full verification set has been rerun after the merge.
   `transport`/status fields.
 - The legacy HTTP `PUT /api/rooms/{room}/members/{actor}/transport` route was
   removed after GUI and foxterm moved to the canonical member binding route.
+- The canonical member binding route now accepts `delivery_binding` or
+  explicit `unbound` updates and no longer maps legacy top-level transport
+  fields into the binding.
 - Pane transport registration now uses the canonical surgical
   `UpdateRoomMemberBinding` path, preserving existing mux presentation fields
   while updating the pane-socket delivery binding. The narrower
@@ -190,8 +197,12 @@ Final main-sync verification on 2026-05-23:
 - focused coverage reproductions for the agent daemon reply path and console
   no-events smoke path
 - focused live TUI daemon fixture tests
+- focused room API hard-cut tests for member binding and control snapshot
+- `go test ./internal/interfaces/web/api`
+- `python3 -m unittest integrations.hermes.test_client`
 - `make check`
 - `bun run unused:frontend`
+- `make check-doc-links`
 - `git diff --check`
 
 ## Outstanding Items
@@ -201,6 +212,9 @@ Final main-sync verification on 2026-05-23:
 - Similar remaining GUI/data-client wrapper names currently differ by route,
   params, response shape, or GUI auth behavior; keep them separate until the
   shared client owns an actually matching contract.
+- The room member binding route has been hard-cut to the canonical
+  `delivery_binding` request shape. Persisted mux/transport columns remain an
+  internal storage model used behind the binding seam.
 
 ### Weak Types
 
@@ -217,14 +231,15 @@ Final main-sync verification on 2026-05-23:
 
 - Completed: deleted the confirmed zero-caller GUI API wrappers and tiny dead
   `@foxctl/data` orchestration exports found by the current audit.
-- Completed: added a broader report-only dead-export/dependency graph pass for
-  active frontend packages with `bun run dead:frontend`, and wired it into
+- Completed: added a broader dead-export/dependency graph gate for active
+  frontend packages with `bun run dead:frontend`, and wired it into
   `bun run unused:frontend`.
 - Completed: hard-cut the current broad `@foxctl/data/client` endpoint helper
   surface to only active UI callers.
 - `bun run unused:frontend` is now the repeatable compiler/linter gate for
   unused frontend imports, locals, parameters, and targeted export graph
-  findings. The export pass does not replace caller search before deletion.
+  findings. The strict export gate does not replace caller search before
+  deletion.
 
 ### Structural Consolidation
 
@@ -262,11 +277,10 @@ Final main-sync verification on 2026-05-23:
   `bun run unused:frontend`.
 - Completed: `bun run --cwd packages/gui-agent lint` is clean and included in
   `bun run check:frontend`.
-- Completed: project-level frontend dead-export report command
-  `bun run dead:frontend` is wired without adding dependencies.
+- Completed: project-level frontend dead-export gate `bun run dead:frontend`
+  is wired without adding dependencies.
 
 ## Recommended Next Slices
 
-1. Re-run a completion audit against this goal file and the MR after the next
-   main-branch sync to decide whether any residual cleanup item is still
-   unproven.
+1. Wait for remote CI on the current MR head before treating the cleanup as
+   merge-ready.

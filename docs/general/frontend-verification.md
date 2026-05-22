@@ -23,8 +23,8 @@ For unused-code cleanup, run:
 bun run unused:frontend
 ```
 
-This runs the frontend gate, `oxlint packages/`, and the targeted dead-export
-report:
+This runs the frontend gate, `oxlint packages/`, and the targeted strict
+dead-export gate:
 
 ```bash
 bun run dead:frontend
@@ -34,5 +34,6 @@ The TypeScript packages listed above enable `noUnusedLocals` and
 `noUnusedParameters`, so unused imports, locals, and parameters fail the package
 checks instead of relying on informal review.
 
-`dead:frontend` is intentionally targeted to active frontend modules; it does
-not replace caller search or DAG grep before deleting broader exports.
+`dead:frontend` is intentionally targeted to active frontend modules and fails
+when those targeted modules expose an externally unused export. It does not
+replace caller search or DAG grep before deleting broader exports.
