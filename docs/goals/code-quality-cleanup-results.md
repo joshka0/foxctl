@@ -20,6 +20,8 @@ Current shape:
 - Removed several legacy wrappers and dead runtime paths.
 - Made storage migration/decode failures more honest.
 - Moved shared infrastructure contracts out of runtime-owned packages.
+- Hard-cut several API compatibility responses to canonical typed DTOs.
+- Isolated v2 Turso stores from the raw `*sql.DB` compatibility opener.
 - Added or tightened tests around the risky cleanup areas.
 
 Integration note: `main` has advanced while this branch has been open. Before
@@ -40,12 +42,22 @@ merge, rebase or merge current `main` and rerun the full verification set.
 - Workspace repair logic was consolidated across memory, graph, sessions,
   tasks, and trajectory stores.
 - v2 Turso store opening boilerplate was consolidated behind shared helpers.
+- v2 Turso store constructors now depend on a narrow `StoreDB` capability
+  interface, and v2 openers use `dbdriver.OpenDB` directly instead of
+  `OpenDBCompatWithCloser`.
 
 ### Type And Contract Cleanup
 
 - Shared frontend API DTOs were consolidated into `@foxctl/data`.
+- The `gui-agent` `@/api/types` pass-through facade was removed; shared GUI
+  DTO imports now point directly at `@foxctl/data/types`, while GUI-only view
+  models live in local modules.
 - Room loop, delivery binding, mailbox, blackboard, room task, orchestration,
   envelope, and agent DTOs now share a first-class package boundary.
+- Orchestration board responses now parse through an
+  `OrchestrationBoardPayload` union for inline board vs CAS artifact payloads.
+- Frontend event stream boundaries now use typed SSE guards for room messages,
+  room timeline events, agent chat stream events, and flow status events.
 - Query-plan wrapper structs were replaced by a shared search query contract.
 - OpenAI-compatible SSE stream DTOs moved into a neutral provider
   compatibility package.
@@ -54,6 +66,10 @@ merge, rebase or merge current `main` and rerun the full verification set.
 - v2 tool JSON schema parsing now uses typed schema subset structs.
 - Codemap tool handlers now decode through typed per-tool argument models.
 - Semantic envelope metadata is typed at the boundary.
+- Backend agent list/detail/patch responses use one canonical `AgentResponse`
+  conversion path.
+- Fixed agent-daemon, companion personality, skills/MCP, and room-agile
+  responses now use named DTOs instead of anonymous `map[string]any` wrappers.
 
 ### Legacy And Compatibility Removal
 
@@ -70,6 +86,13 @@ merge, rebase or merge current `main` and rerun the full verification set.
 - GUI console model requests now send canonical
   `story_gather_model` / `story_dialogue_model` / `llm_model` fields instead
   of deprecated `tool_model` / `response_model` shims.
+- Room member/status responses no longer emit legacy top-level transport
+  mirrors; clients use canonical `delivery_binding` and computed
+  `transport`/status fields.
+- The legacy HTTP `PUT /api/rooms/{room}/members/{actor}/transport` route was
+  removed after GUI and foxterm moved to the canonical member binding route.
+- Room transport docs and skill-pack guidance were refreshed so future agents
+  do not rebuild against deleted legacy response fields.
 
 ### Honesty Fixes
 
@@ -78,6 +101,10 @@ merge, rebase or merge current `main` and rerun the full verification set.
 - Empty or malformed CoVe LLM output is rejected instead of accepted.
 - RLM split failures are recorded or returned.
 - New symbol embedding jobs require canonical symbol memory identity.
+- OpenCode direct tool failures now surface structured foxctl error details
+  instead of presenting failed runs as empty search results.
+- Hermes memory writes now report failure when both CLI and companion import
+  paths fail, with attempted errors preserved for diagnosis.
 
 ### Verification Used During Slices
 
@@ -98,31 +125,24 @@ Verification has been run slice-by-slice, including:
 
 ### Compatibility Layers
 
-- Remove the remaining `gui-agent` `@/api/types` DTO alias facade.
-- Migrate shared GUI DTO imports directly to `@foxctl/data/types`.
-- Move GUI-only view models and helpers into local GUI modules.
 - Avoid duplicate `gui-agent` copies of shared `@foxctl/data/client` functions.
-- Consolidate duplicated backend `AgentResponse` conversion.
-- Replace map-shaped daemon fallback responses with typed response structs.
-- Choose and enforce the canonical room transport model:
-  `delivery_binding` plus explicit transport fields, or isolate legacy
-  `backend/session/pane_id` compatibility.
-- Decide whether v2 Turso `OpenDBCompatWithCloser` is transitional debt or
-  should move to `dbdriver.DB`.
+- Type the remaining room-control response wrappers that still assemble fixed
+  response envelopes with anonymous maps.
+- Decide whether the internal `UpdateRoomMemberTransport` pane registration
+  path should move to an explicit binding update helper.
+- Migrate or isolate older non-v2 `OpenDBCompat*` callers in the legacy storage
+  lane without widening the v2 Turso cleanup.
 
 ### Weak Types
 
-- Type orchestration board payload normalization with an
-  `OrchestrationBoardPayload` union and guards for board vs artifact reference.
-- Remove frontend double-casts around Flow details, room timeline events, and
-  agent chat SSE events.
-- Add explicit `FlowDetail`, typed timeline event input, `SSEEnvelope<T>`, and
-  stream event guards.
+- Remove residual frontend weak casts that were outside the typed SSE slice,
+  starting with `LogsViewer` event metadata and the `import.meta` environment
+  cast in `@foxctl/data/client`.
 
 ### Hidden Fallbacks
 
-- Surface OpenCode hook skill failures instead of presenting empty results.
-- Make Hermes memory fallback failures honest when both CLI and HTTP paths fail.
+- No known high-priority hidden fallback honesty item remains from the current
+  audit. Keep this lane open only for new caller-evidenced failures.
 
 ### Dead Frontend Code
 
@@ -149,8 +169,10 @@ Verification has been run slice-by-slice, including:
 
 ## Recommended Next Slices
 
-1. Remove the `gui-agent` `@/api/types` alias facade in sub-slices.
-2. Type orchestration board payload normalization.
-3. Remove frontend double-casts around known API shapes.
-4. Make Hermes fallback failures honest.
+1. Delete confirmed dead frontend/foxterm code, starting with foxterm
+   `getRun`/`RunDetail` if caller evidence stays clean.
+2. Type the remaining room-control fixed response wrappers.
+3. Reduce duplicate `gui-agent` API client functions where `@foxctl/data/client`
+   is already the canonical implementation.
+4. Remove residual frontend weak casts that are not true external boundaries.
 5. Add reliable unused-code tooling and frontend verification docs.

@@ -24,32 +24,20 @@ tests that only preserve accidental implementation detail.
 - Main has advanced while this branch was open. Before final merge, integrate
   current `main` and rerun full verification.
 
-Outstanding areas from the results doc:
+Remaining areas from the results doc after the completed slices:
 
 - Compatibility layers:
-  - Remove remaining `gui-agent` `@/api/types` DTO alias facade.
-  - Migrate shared GUI DTO imports to `@foxctl/data/types`.
-  - Move GUI-only view models/helpers into local GUI modules.
   - Avoid duplicate `gui-agent` copies of shared `@foxctl/data/client`
     functions.
-  - Consolidate duplicated backend `AgentResponse` conversion.
-  - Replace map-shaped daemon fallback responses with typed response structs.
-  - Choose and enforce canonical room transport modeling around
-    `delivery_binding` plus explicit transport fields, or isolate legacy
-    `backend/session/pane_id` compatibility.
-  - Decide whether v2 Turso `OpenDBCompatWithCloser` is transitional debt or
-    should move to `dbdriver.DB`.
+  - Type remaining room-control fixed response wrappers that still assemble
+    anonymous maps.
+  - Decide whether the internal pane transport update path should move to a
+    binding helper.
+  - Migrate or isolate older non-v2 `OpenDBCompat*` callers.
 - Weak types:
-  - Type orchestration board payload normalization with an
-    `OrchestrationBoardPayload` union and guards for board vs artifact
-    references.
-  - Remove frontend double-casts around Flow details, room timeline events, and
-    agent chat SSE events.
-  - Add explicit `FlowDetail`, typed timeline event input, `SSEEnvelope<T>`,
-    and stream event guards.
-- Hidden fallbacks:
-  - Surface OpenCode hook skill failures instead of empty/quiet fallback output.
-  - Make Hermes memory fallback failures honest when CLI and HTTP both fail.
+  - Remove residual frontend weak casts outside true unknown boundaries,
+    starting with `LogsViewer` event metadata and the `import.meta` environment
+    cast in `@foxctl/data/client`.
 - Dead frontend code:
   - Delete or replace old `CompanionChat`, `chatStore`, unused activity feed,
     unused GUI API wrappers, unused utility exports, foxterm `getRun`, and
@@ -113,7 +101,7 @@ Use these standards throughout:
 
 ## Milestones
 
-### 1. Frontend DTO Facade Removal
+### 1. Frontend DTO Facade Removal (Complete)
 
 Remove the remaining `gui-agent` `@/api/types` compatibility facade.
 
@@ -128,7 +116,7 @@ Done when:
   - `bun run --cwd packages/data typecheck`
   - `bun run --cwd packages/gui-agent build`
 
-### 2. Orchestration Board Payload Contract
+### 2. Orchestration Board Payload Contract (Complete)
 
 Replace board/artifact shape sniffing with a typed
 `OrchestrationBoardPayload` union and guards.
@@ -144,7 +132,7 @@ Done when:
   - `bun run --cwd packages/gui-agent build`
   - `bun run --cwd packages/foxterm typecheck`
 
-### 3. Frontend Typed Event Boundaries
+### 3. Frontend Typed Event Boundaries (Complete)
 
 Remove frontend double-casts around Flow details, room timeline events, and
 agent chat SSE.
@@ -159,7 +147,7 @@ Done when:
 - Verification passes:
   - `bun run --cwd packages/gui-agent build`
 
-### 4. Backend Response Canonicalization
+### 4. Backend Response Canonicalization (Complete)
 
 Consolidate duplicated `AgentResponse` conversion and replace map-shaped daemon
 fallback responses with typed structs.
@@ -174,7 +162,7 @@ Done when:
 - Verification passes:
   - `go test ./internal/interfaces/web/api`
 
-### 5. Room Transport Canonicalization
+### 5. Room Transport Canonicalization (Mostly Complete)
 
 Choose the final room transport contract and remove or isolate legacy room
 transport compatibility.
@@ -191,7 +179,7 @@ Done when:
   - `bun run --cwd packages/gui-agent build`
   - `bun run --cwd packages/foxterm typecheck`
 
-### 6. Hidden Fallback Honesty
+### 6. Hidden Fallback Honesty (Complete)
 
 Make OpenCode hook and Hermes memory fallback failures explicit.
 
@@ -239,6 +227,19 @@ Done when:
   only when it improves Locality.
 - Jido/goruntime reconciliation helpers are extracted as pure helpers before
   any broad architecture move.
+- Verification passes for each affected package.
+
+### 9. Residual Typed Wrappers And Weak Casts
+
+Clean up remaining fixed response maps and frontend casts that were outside the
+completed DTO/SSE slices.
+
+Done when:
+
+- Room-control fixed response wrappers use named DTOs where the JSON shape is
+  fixed.
+- Residual frontend casts in `LogsViewer` and `@foxctl/data/client` are either
+  replaced with explicit contracts or documented as true external boundaries.
 - Verification passes for each affected package.
 
 ## Verification

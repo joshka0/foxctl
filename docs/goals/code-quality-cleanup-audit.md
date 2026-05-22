@@ -64,6 +64,9 @@ by cleanup value and implementation risk.
   - Frontend targets: delete the `gui-agent` `@/api/types` DTO alias facade,
     migrate shared DTO imports to `@foxctl/data/types`, and move only UI-local
     view models/helpers into local GUI modules.
+  - Progress: the `gui-agent` `@/api/types` facade was deleted; shared GUI DTO
+    imports now point directly at `@foxctl/data/types`, with GUI-only activity,
+    companion, ContextWiki, and flow models moved local to GUI modules.
   - Client targets: align `@foxctl/data/client` to canonical backend routes,
     remove unsupported aliases such as `/api/agents/{id}/message`,
     `/api/mailbox/send`, and `/api/mailbox/{id}/ack`, and avoid duplicate
@@ -78,16 +81,23 @@ by cleanup value and implementation risk.
   - Progress: GUI console model requests now send canonical
     `story_gather_model` / `story_dialogue_model` / `llm_model` fields, and
     the deprecated `tool_model` / `response_model` shim was removed.
-  - Backend targets: make room status/inbox emit canonical DTOs directly,
-    consolidate duplicated `AgentResponse` conversion, and replace map-shaped
-    daemon fallback responses with typed response structs.
+  - Progress: backend agent list/detail/patch paths use one canonical
+    `AgentResponse` conversion helper, and fixed daemon response maps were
+    replaced by typed response structs.
+  - Backend targets: type remaining room-control status/inbox response wrappers
+    that still assemble fixed responses through anonymous maps.
   - Room transport targets: choose `delivery_binding` plus explicit transport
     fields as canonical, then remove or isolate legacy `backend/session/pane_id`
     compatibility.
-  - Other targets: remove foxterm DTO pass-through aliases, delete deprecated
-    console `tool_model` / `response_model` shims, make Hermes memory fallback
-    failures honest, and decide whether v2 Turso `OpenDBCompatWithCloser` is
-    transitional debt or should move to `dbdriver.DB`.
+  - Progress: room member/status responses no longer emit legacy top-level
+    transport mirrors, and the legacy HTTP
+    `/api/rooms/{room}/members/{actor}/transport` route was removed.
+  - Progress: v2 Turso stores now depend on a narrow `StoreDB` capability and
+    v2 openers use `dbdriver.OpenDB`; older non-v2 `OpenDBCompat*` callers are
+    intentionally left for a separate storage-lane migration.
+  - Other targets: reduce duplicate `gui-agent` data-client wrappers, decide
+    whether the internal pane transport update path should move to a binding
+    helper, and migrate or isolate older legacy storage compatibility callers.
   - Tests: data typecheck, gui-agent build, foxterm typecheck, affected Go
     package tests, and docs link check when this tracker changes.
 
@@ -125,15 +135,21 @@ by cleanup value and implementation risk.
 
 ## Weak Types And Boundary Cleanup
 
-- [ ] Type orchestration board payload normalization.
+- [x] Type orchestration board payload normalization.
   - Scope: `packages/data`, `packages/gui-agent`, `packages/foxterm`.
   - Target: `OrchestrationBoardPayload` union with guards for board vs artifact
     reference.
 
-- [ ] Remove frontend double-casts around known API shapes.
+- [x] Remove frontend double-casts around known API shapes.
   - Scope: Flow canvas details, room timeline events, and agent chat SSE.
   - Target: explicit `FlowDetail`, typed timeline event input, `SSEEnvelope<T>`,
     and stream event guards.
+
+- [ ] Remove residual frontend weak casts outside the typed stream boundary.
+  - Scope: `packages/gui-agent/src/components/actions/LogsViewer.tsx` and
+    `packages/data/src/client.ts`.
+  - Target: replace implementation casts with explicit local metadata/env
+    contracts where the boundary shape is known.
 
 - [x] Replace Go path extraction map blobs with typed input structs.
   - Scope: `internal/platform/pathutil` and hook pathutil tests.
@@ -155,12 +171,12 @@ by cleanup value and implementation risk.
 
 ## Defensive Programming And Hidden Fallbacks
 
-- [ ] Surface OpenCode hook skill failures instead of presenting empty results.
+- [x] Surface OpenCode hook skill failures instead of presenting empty results.
   - Scope: `configs/opencode-hooks/index.ts`.
   - Target: preserve structured skill errors in injected context; fail closed or
     warn for large-file stat failures.
 
-- [ ] Make Hermes memory fallback failures honest.
+- [x] Make Hermes memory fallback failures honest.
   - Scope: `integrations/hermes/client.py` and config loading.
   - Target: catch expected exceptions only, accumulate errors, and return
     `ok:false` or raise when both CLI and HTTP paths fail.
