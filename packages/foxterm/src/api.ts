@@ -57,8 +57,6 @@ export interface RunListResult {
   count: number;
 }
 
-export interface RunDetail extends RunListItem {}
-
 export interface CreateRunInput {
   prompt: string;
   runId?: string;
@@ -371,13 +369,6 @@ export async function getRuns(params?: {
     items,
     count: typeof data?.count === "number" ? data.count : items.length,
   };
-}
-
-export async function getRun(runId: string): Promise<RunDetail> {
-  const envelope = await requestEnvelope<RunDetail>(
-    `/api/v2/runs/${encodeURIComponent(runId)}`,
-  );
-  return unwrapEnvelope(envelope);
 }
 
 export async function getRunTranscript(
