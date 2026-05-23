@@ -186,50 +186,67 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int)
 	}
 	for _, idx := range indexes {
 		if _, err := db.ExecContext(ctx, idx); err != nil {
-			return fmt.Errorf("create index: %w", err)
+			return fmt.Errorf("create index %q: %w", idx, err)
 		}
 	}
 
 	// Add atomic processing columns for SimpleMem-style semantic lossless compression.
 	// These columns support UpdateAtomic which stores self-contained rewrites and extracted metadata.
-	// Ignore duplicate-column errors for existing databases.
-	atomicColumns := []string{
-		`ALTER TABLE named_memory ADD COLUMN atomic_text TEXT`, // Self-contained, disambiguated rewrite
-		`ALTER TABLE named_memory ADD COLUMN entities TEXT`,    // JSON array of extracted entities
-		`ALTER TABLE named_memory ADD COLUMN keywords TEXT`,    // JSON array of BM25 keywords
+	// Suppress duplicate-column errors only; every other schema error fails startup.
+	atomicColumns := []struct {
+		name       string
+		columnType string
+		defaultVal string
+	}{
+		{name: "atomic_text", columnType: "TEXT"},
+		{name: "entities", columnType: "TEXT"},
+		{name: "keywords", columnType: "TEXT"},
 	}
-	for _, stmt := range atomicColumns {
-		// Ignore errors from "duplicate column" - columns may already exist.
-		_, _ = db.ExecContext(ctx, stmt) //nolint:errcheck
+	for _, column := range atomicColumns {
+		if err := dbutil.AddColumnIfNotExists(ctx, db, "named_memory", column.name, column.columnType, column.defaultVal); err != nil {
+			return fmt.Errorf("add named_memory %s column: %w", column.name, err)
+		}
 	}
 
-	lifecycleColumns := []string{
-		`ALTER TABLE named_memory ADD COLUMN lifecycle_state TEXT NOT NULL DEFAULT 'active'`,
-		`ALTER TABLE named_memory ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE named_memory ADD COLUMN review_status TEXT NOT NULL DEFAULT 'unreviewed'`,
-		`ALTER TABLE named_memory ADD COLUMN superseded_by TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE named_memory ADD COLUMN review_notes TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE named_memory ADD COLUMN last_used_at TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE named_memory ADD COLUMN last_validated_at TEXT NOT NULL DEFAULT ''`,
+	lifecycleColumns := []struct {
+		name       string
+		columnType string
+		defaultVal string
+	}{
+		{name: "lifecycle_state", columnType: "TEXT NOT NULL", defaultVal: "'active'"},
+		{name: "pinned", columnType: "INTEGER NOT NULL", defaultVal: "0"},
+		{name: "review_status", columnType: "TEXT NOT NULL", defaultVal: "'unreviewed'"},
+		{name: "superseded_by", columnType: "TEXT NOT NULL", defaultVal: "''"},
+		{name: "review_notes", columnType: "TEXT NOT NULL", defaultVal: "''"},
+		{name: "last_used_at", columnType: "TEXT NOT NULL", defaultVal: "''"},
+		{name: "last_validated_at", columnType: "TEXT NOT NULL", defaultVal: "''"},
 	}
-	for _, stmt := range lifecycleColumns {
-		_, _ = db.ExecContext(ctx, stmt) //nolint:errcheck
+	for _, column := range lifecycleColumns {
+		if err := dbutil.AddColumnIfNotExists(ctx, db, "named_memory", column.name, column.columnType, column.defaultVal); err != nil {
+			return fmt.Errorf("add named_memory %s column: %w", column.name, err)
+		}
 	}
-	telemetryColumns := []string{
-		`ALTER TABLE named_memory ADD COLUMN selected_count INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE named_memory ADD COLUMN use_count INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE named_memory ADD COLUMN success_count INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE named_memory ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE named_memory ADD COLUMN patch_count INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE named_memory ADD COLUMN restore_count INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE named_memory ADD COLUMN last_selected_at TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE named_memory ADD COLUMN last_succeeded_at TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE named_memory ADD COLUMN last_failed_at TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE named_memory ADD COLUMN last_patched_at TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE named_memory ADD COLUMN last_restored_at TEXT NOT NULL DEFAULT ''`,
+	telemetryColumns := []struct {
+		name       string
+		columnType string
+		defaultVal string
+	}{
+		{name: "selected_count", columnType: "INTEGER NOT NULL", defaultVal: "0"},
+		{name: "use_count", columnType: "INTEGER NOT NULL", defaultVal: "0"},
+		{name: "success_count", columnType: "INTEGER NOT NULL", defaultVal: "0"},
+		{name: "failure_count", columnType: "INTEGER NOT NULL", defaultVal: "0"},
+		{name: "patch_count", columnType: "INTEGER NOT NULL", defaultVal: "0"},
+		{name: "restore_count", columnType: "INTEGER NOT NULL", defaultVal: "0"},
+		{name: "last_selected_at", columnType: "TEXT NOT NULL", defaultVal: "''"},
+		{name: "last_succeeded_at", columnType: "TEXT NOT NULL", defaultVal: "''"},
+		{name: "last_failed_at", columnType: "TEXT NOT NULL", defaultVal: "''"},
+		{name: "last_patched_at", columnType: "TEXT NOT NULL", defaultVal: "''"},
+		{name: "last_restored_at", columnType: "TEXT NOT NULL", defaultVal: "''"},
 	}
-	for _, stmt := range telemetryColumns {
-		_, _ = db.ExecContext(ctx, stmt) //nolint:errcheck
+	for _, column := range telemetryColumns {
+		if err := dbutil.AddColumnIfNotExists(ctx, db, "named_memory", column.name, column.columnType, column.defaultVal); err != nil {
+			return fmt.Errorf("add named_memory %s column: %w", column.name, err)
+		}
 	}
 	if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_named_memory_lifecycle ON named_memory(workspace, lifecycle_state, updated_at DESC)`); err != nil {
 		return fmt.Errorf("create lifecycle index: %w", err)

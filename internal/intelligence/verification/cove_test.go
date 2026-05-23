@@ -344,6 +344,91 @@ Another correction line`
 	}
 }
 
+func TestRequireLLMOutputRejectsEmpty(t *testing.T) {
+	_, err := requireLLMOutput("refinement", " \n\t ")
+	if err == nil || !contains(err.Error(), "empty LLM output") {
+		t.Fatalf("error=%v want empty LLM output", err)
+	}
+}
+
+func TestParseRefinerOutput(t *testing.T) {
+	raw := `{
+		"final_answer": "Paris is the capital of France.",
+		"corrections_made": [
+			"Original: Lyon is the capital -> Corrected: Paris is the capital"
+		]
+	}`
+
+	answer, corrections, err := parseRefinerOutput(raw, CoVeModeDefault)
+	if err != nil {
+		t.Fatalf("parseRefinerOutput() error = %v", err)
+	}
+	if answer != "Paris is the capital of France." {
+		t.Fatalf("answer=%q", answer)
+	}
+	if len(corrections) != 1 {
+		t.Fatalf("corrections=%v want one correction", corrections)
+	}
+}
+
+func TestParseRefinerOutputRejectsMalformedContract(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "empty",
+			raw:  "",
+			want: "empty",
+		},
+		{
+			name: "plain text",
+			raw:  "This is a final answer, but not the JSON contract.",
+			want: "must be a JSON object",
+		},
+		{
+			name: "missing final answer",
+			raw:  `{"corrections_made":"No corrections needed."}`,
+			want: "final_answer",
+		},
+		{
+			name: "missing corrections",
+			raw:  `{"final_answer":"answer"}`,
+			want: "corrections_made",
+		},
+		{
+			name: "null corrections",
+			raw:  `{"final_answer":"answer","corrections_made":null}`,
+			want: "must not be null",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := parseRefinerOutput(tt.raw, CoVeModeDefault)
+			if err == nil || !contains(err.Error(), tt.want) {
+				t.Fatalf("error=%v want substring %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseRefinerOutputGateUsesFinalAnswerContract(t *testing.T) {
+	raw := `{"final_answer":"STATUS: DONE\nBLOCKERS:\n- none\nEVIDENCE:\n- c1 verified","corrections_made":"No corrections needed."}`
+
+	answer, corrections, err := parseRefinerOutput(raw, CoVeModeGate)
+	if err != nil {
+		t.Fatalf("parseRefinerOutput() error = %v", err)
+	}
+	if !contains(answer, "STATUS: DONE") {
+		t.Fatalf("answer=%q missing gate status", answer)
+	}
+	if corrections != nil {
+		t.Fatalf("gate corrections=%v want nil", corrections)
+	}
+}
+
 func TestBatchVerificationResultSummary(t *testing.T) {
 	batch := BatchVerificationResult{
 		TotalClaims:    5,

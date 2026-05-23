@@ -851,19 +851,26 @@ func scanTrajectory(row *sql.Row) (Trajectory, error) {
 	t.SessionID = sessionID.String
 
 	if taskIDsJSON.Valid && taskIDsJSON.String != "" {
-		// Optional JSON field; parse errors leave default empty slice.
-		_ = sqlutil.ScanJSON(taskIDsJSON.String, &t.TaskIDs) //nolint:errcheck
+		if err := sqlutil.ScanJSON(taskIDsJSON.String, &t.TaskIDs); err != nil {
+			return Trajectory{}, fmt.Errorf("decode trajectory %q task_ids_json: %w", t.ID, err)
+		}
 	}
 
 	if outcomeJSON.Valid && outcomeJSON.String != "" {
 		t.Outcome = &Outcome{}
-		// Optional JSON field; parse errors leave default empty struct.
-		_ = sqlutil.ScanJSON(outcomeJSON.String, t.Outcome) //nolint:errcheck
+		if err := sqlutil.ScanJSON(outcomeJSON.String, t.Outcome); err != nil {
+			return Trajectory{}, fmt.Errorf("decode trajectory %q outcome_json: %w", t.ID, err)
+		}
 	}
 
-	// Timestamp parsing for required fields; format is controlled by our writes.
-	t.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt) //nolint:errcheck
-	t.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt) //nolint:errcheck
+	t.CreatedAt, err = scanRequiredTimestamp(createdAt, fmt.Sprintf("trajectory %q created_at", t.ID))
+	if err != nil {
+		return Trajectory{}, err
+	}
+	t.UpdatedAt, err = scanRequiredTimestamp(updatedAt, fmt.Sprintf("trajectory %q updated_at", t.ID))
+	if err != nil {
+		return Trajectory{}, err
+	}
 
 	return t, nil
 }
@@ -894,19 +901,26 @@ func scanTrajectoryRows(rows *sql.Rows) (Trajectory, error) {
 	t.SessionID = sessionID.String
 
 	if taskIDsJSON.Valid && taskIDsJSON.String != "" {
-		// Optional JSON field; parse errors leave default empty slice.
-		_ = sqlutil.ScanJSON(taskIDsJSON.String, &t.TaskIDs) //nolint:errcheck
+		if err := sqlutil.ScanJSON(taskIDsJSON.String, &t.TaskIDs); err != nil {
+			return Trajectory{}, fmt.Errorf("decode trajectory %q task_ids_json: %w", t.ID, err)
+		}
 	}
 
 	if outcomeJSON.Valid && outcomeJSON.String != "" {
 		t.Outcome = &Outcome{}
-		// Optional JSON field; parse errors leave default empty struct.
-		_ = sqlutil.ScanJSON(outcomeJSON.String, t.Outcome) //nolint:errcheck
+		if err := sqlutil.ScanJSON(outcomeJSON.String, t.Outcome); err != nil {
+			return Trajectory{}, fmt.Errorf("decode trajectory %q outcome_json: %w", t.ID, err)
+		}
 	}
 
-	// Timestamp parsing for required fields; format is controlled by our writes.
-	t.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt) //nolint:errcheck
-	t.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt) //nolint:errcheck
+	t.CreatedAt, err = scanRequiredTimestamp(createdAt, fmt.Sprintf("trajectory %q created_at", t.ID))
+	if err != nil {
+		return Trajectory{}, err
+	}
+	t.UpdatedAt, err = scanRequiredTimestamp(updatedAt, fmt.Sprintf("trajectory %q updated_at", t.ID))
+	if err != nil {
+		return Trajectory{}, err
+	}
 
 	return t, nil
 }
@@ -926,18 +940,22 @@ func scanUserRequest(row *sql.Row) (UserRequestCapture, error) {
 	}
 
 	ur.Source = Source(source)
-	// Timestamp parsing; format is controlled by our writes.
-	ur.TS, _ = sqlutil.ScanTimestamp(ts) //nolint:errcheck
+	ur.TS, err = scanRequiredTimestamp(ts, fmt.Sprintf("user_request %q ts", ur.ID))
+	if err != nil {
+		return UserRequestCapture{}, err
+	}
 
 	if cmdCtxJSON.Valid && cmdCtxJSON.String != "" {
 		ur.CommandContext = &CommandContext{}
-		// Optional JSON field; parse errors leave default empty struct.
-		_ = sqlutil.ScanJSON(cmdCtxJSON.String, ur.CommandContext) //nolint:errcheck
+		if err := sqlutil.ScanJSON(cmdCtxJSON.String, ur.CommandContext); err != nil {
+			return UserRequestCapture{}, fmt.Errorf("decode user_request %q command_context_json: %w", ur.ID, err)
+		}
 	}
 	if taskHintsJSON.Valid && taskHintsJSON.String != "" {
 		ur.TaskHints = &TaskHints{}
-		// Optional JSON field; parse errors leave default empty struct.
-		_ = sqlutil.ScanJSON(taskHintsJSON.String, ur.TaskHints) //nolint:errcheck
+		if err := sqlutil.ScanJSON(taskHintsJSON.String, ur.TaskHints); err != nil {
+			return UserRequestCapture{}, fmt.Errorf("decode user_request %q task_hints_json: %w", ur.ID, err)
+		}
 	}
 
 	return ur, nil
@@ -958,18 +976,22 @@ func scanUserRequestRows(rows *sql.Rows) (UserRequestCapture, error) {
 	}
 
 	ur.Source = Source(source)
-	// Timestamp parsing; format is controlled by our writes.
-	ur.TS, _ = sqlutil.ScanTimestamp(ts) //nolint:errcheck
+	ur.TS, err = scanRequiredTimestamp(ts, fmt.Sprintf("user_request %q ts", ur.ID))
+	if err != nil {
+		return UserRequestCapture{}, err
+	}
 
 	if cmdCtxJSON.Valid && cmdCtxJSON.String != "" {
 		ur.CommandContext = &CommandContext{}
-		// Optional JSON field; parse errors leave default empty struct.
-		_ = sqlutil.ScanJSON(cmdCtxJSON.String, ur.CommandContext) //nolint:errcheck
+		if err := sqlutil.ScanJSON(cmdCtxJSON.String, ur.CommandContext); err != nil {
+			return UserRequestCapture{}, fmt.Errorf("decode user_request %q command_context_json: %w", ur.ID, err)
+		}
 	}
 	if taskHintsJSON.Valid && taskHintsJSON.String != "" {
 		ur.TaskHints = &TaskHints{}
-		// Optional JSON field; parse errors leave default empty struct.
-		_ = sqlutil.ScanJSON(taskHintsJSON.String, ur.TaskHints) //nolint:errcheck
+		if err := sqlutil.ScanJSON(taskHintsJSON.String, ur.TaskHints); err != nil {
+			return UserRequestCapture{}, fmt.Errorf("decode user_request %q task_hints_json: %w", ur.ID, err)
+		}
 	}
 
 	return ur, nil
@@ -994,18 +1016,22 @@ func scanEventRows(rows *sql.Rows) (Event, error) {
 	e.Command = command.String
 	e.Status = status.String
 	e.DataArtifact = dataArtifact.String
-	// Timestamp parsing; format is controlled by our writes.
-	e.TS, _ = sqlutil.ScanTimestamp(ts) //nolint:errcheck
+	e.TS, err = scanRequiredTimestamp(ts, fmt.Sprintf("event %q ts", e.ID))
+	if err != nil {
+		return Event{}, err
+	}
 
 	if dataInlineJSON.Valid && dataInlineJSON.String != "" {
 		e.DataInline = make(map[string]any)
-		// Optional JSON field; parse errors leave default empty map.
-		_ = sqlutil.ScanJSON(dataInlineJSON.String, &e.DataInline) //nolint:errcheck
+		if err := sqlutil.ScanJSON(dataInlineJSON.String, &e.DataInline); err != nil {
+			return Event{}, fmt.Errorf("decode event %q data_inline_json: %w", e.ID, err)
+		}
 	}
 	if metaJSON.Valid && metaJSON.String != "" {
 		e.Meta = &EventMeta{}
-		// Optional JSON field; parse errors leave default empty struct.
-		_ = sqlutil.ScanJSON(metaJSON.String, e.Meta) //nolint:errcheck
+		if err := sqlutil.ScanJSON(metaJSON.String, e.Meta); err != nil {
+			return Event{}, fmt.Errorf("decode event %q meta_json: %w", e.ID, err)
+		}
 	}
 
 	return e, nil
@@ -1013,3 +1039,14 @@ func scanEventRows(rows *sql.Rows) (Event, error) {
 
 // Helper to avoid unused import warning when timeutil is used only for NowUTC.
 var _ = time.Now
+
+func scanRequiredTimestamp(src, field string) (time.Time, error) {
+	if src == "" {
+		return time.Time{}, fmt.Errorf("decode %s: empty timestamp", field)
+	}
+	ts, err := sqlutil.ScanTimestamp(src)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("decode %s: %w", field, err)
+	}
+	return ts, nil
+}

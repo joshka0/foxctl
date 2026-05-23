@@ -1,16 +1,24 @@
 import type {
-  OrchestrationBoard,
-  OrchestrationBoardArtifactRef,
+  ApiEnvelope,
   OrchestrationCard,
   OrchestrationCardAction,
   OrchestrationCardActionResult,
   OrchestrationBoardCardRuntimeResult,
   Room,
+  RoomControlSnapshot,
+  RoomLoop,
+  RoomLoopResult,
+  RoomMessage,
+  RoomSendMessageResult,
   RoomTask,
   V2RunTranscript,
   V2RuntimeEvent,
   V2StreamType,
 } from "@foxctl/data/types";
+import {
+  parseOrchestrationBoardPayload,
+  type OrchestrationBoardPayload,
+} from "@foxctl/data/orchestration";
 
 const DEFAULT_API_BASE = "http://127.0.0.1:8090";
 const DEFAULT_WORKSPACE_ID = ".";
@@ -34,15 +42,6 @@ export const WORKSPACE_ROOT =
   "";
 export const ATCP_DAEMON_HINT = "restart API with ATCP: bun run dev:server";
 
-export interface ApiEnvelope<T> {
-  version: number;
-  status: "ok" | "error" | "progress";
-  command: string;
-  data: T;
-  meta: { ts: string; [key: string]: unknown };
-  error: { code?: string; message?: string };
-}
-
 export interface RunListItem {
   run_id: string;
   status: string;
@@ -56,8 +55,6 @@ export interface RunListResult {
   items: RunListItem[];
   count: number;
 }
-
-export interface RunDetail extends RunListItem {}
 
 export interface CreateRunInput {
   prompt: string;
@@ -124,24 +121,6 @@ export interface RoomMemberInput {
   role?: string;
 }
 
-export interface RoomMessage {
-  id: string;
-  related_message_id?: string;
-  sender: string;
-  recipient: string;
-  subject: string;
-  body: string;
-  kind: string;
-  priority: number;
-  status: string;
-  ack_required?: boolean;
-  reply_expected?: boolean;
-  interrupt?: boolean;
-  created_at: string;
-  task_id?: string;
-  stream?: string;
-}
-
 export interface RoomMessagesResult {
   room_id: string;
   stream: string;
@@ -162,69 +141,6 @@ export interface SendRoomMessageInput {
   dispatchAgentIds?: string[];
 }
 
-export interface SendRoomMessageResult {
-  id: string;
-  room_id: string;
-  stream: string;
-  status: string;
-  message?: string;
-  dispatched?: number;
-  skipped?: number;
-  delivery_owner?: string;
-  delivery_pending?: boolean;
-}
-
-export interface RoomLoop {
-  enabled: boolean;
-  managed_by?: string;
-  last_tick_at?: string;
-  delivery_lease_name?: string;
-  delivery_owner_id?: string;
-  delivery_cursor_message_id?: string;
-  delivery_cursor_at?: string;
-  pulse_interval?: string;
-  task_followup_interval?: string;
-  reply_stale_after?: string;
-  task_stale_after?: string;
-  min_pulse_floor?: string;
-  interrupt_attempt_limit?: number;
-  reminder_backoff_cap?: number;
-  coordinator_pulse_enabled?: boolean;
-  coordinator_escalation_enabled?: boolean;
-  last_delivery_trace?: {
-    workspace_id?: string;
-    room_id?: string;
-    message_id?: string;
-    task_id?: string;
-    recipient?: string;
-    delivery_lease_name?: string;
-    delivery_owner_id?: string;
-    relay_backend?: string;
-    chosen_actor_id?: string;
-    chosen_mux_backend?: string;
-    chosen_mux_session?: string;
-    chosen_mux_pane_id?: string;
-    chosen_transport_endpoint?: string;
-    chosen_transport_kind?: string;
-    chosen_submit_mode?: string;
-    fallback_attempted?: boolean;
-    outcome?: string;
-    delivered_count?: number;
-    failed_count?: number;
-    delivered_to?: string[];
-    failed_members?: string[];
-    cursor_before_message_id?: string;
-    cursor_after_message_id?: string;
-    cursor_advanced?: boolean;
-    observed_at?: string;
-  };
-}
-
-export interface RoomLoopResult {
-  room_id: string;
-  loop: RoomLoop;
-}
-
 export interface PatchRoomLoopInput {
   roomId: string;
   workspaceId?: string;
@@ -232,125 +148,6 @@ export interface PatchRoomLoopInput {
   enabled?: boolean;
   coordinatorPulseEnabled?: boolean;
   coordinatorEscalationEnabled?: boolean;
-}
-
-export interface RoomStatusEntry {
-  id: string;
-  sender: string;
-  recipient: string;
-  subject: string;
-  priority: number;
-  status: string;
-  created_at: string;
-  category: string;
-  flags?: string[];
-  preview?: string;
-}
-
-export interface RoomStatusParticipant {
-  actor_id: string;
-  role?: string;
-  backend?: string;
-  session?: string;
-  pane_id?: string;
-  unbound?: boolean;
-  transport_endpoint?: string;
-  transport_kind?: string;
-  delivery_binding?: unknown;
-  transport_status?: string;
-  runtime_binding_status?: string;
-  last_active_at?: string;
-  status: string;
-  assigned_task_count: number;
-  owned_task_count: number;
-  actionable_inbox_count: number;
-  latest_actionable?: RoomStatusEntry;
-}
-
-export interface RoomLoopHealth {
-  status: string;
-  reason?: string;
-  last_tick_age?: string;
-}
-
-export interface RoomControlInbox {
-  actor_id: string;
-  count: number;
-  ack_required: number;
-  reply_expected: number;
-  latest_actionable?: RoomStatusEntry[];
-}
-
-export interface RoomControlMessage {
-  id: string;
-  task_id?: string;
-  related_message_id?: string;
-  sender: string;
-  recipient: string;
-  subject: string;
-  kind: string;
-  status: string;
-  ack_required?: boolean;
-  reply_expected?: boolean;
-  priority: number;
-  created_at: string;
-  preview?: string;
-}
-
-export interface RoomControlReminder {
-  id: string;
-  workspace_id: string;
-  room_id: string;
-  root_message_id: string;
-  task_id?: string;
-  story_id?: string;
-  milestone_id?: string;
-  sender: string;
-  recipient: string;
-  subject: string;
-  body: string;
-  ack_required: boolean;
-  reply_expected: boolean;
-  interrupt: boolean;
-  passive: boolean;
-  interval: string;
-  max_iterations: number;
-  sent_count: number;
-  active: boolean;
-  last_sent_at?: string;
-  created_at?: string;
-  updated_at?: string;
-}
-
-export interface RoomLinkedOrchestrationCard {
-  issue_id: string;
-  issue_identifier?: string;
-  title?: string;
-  state: string;
-  lane?: string;
-  tracker_state?: string;
-  policy_status?: string;
-  last_outcome?: string;
-  eligibility?: string;
-  run_id?: string;
-  agent_id?: string;
-  linked_task_id?: string;
-}
-
-export interface RoomControlSnapshot {
-  room: Room;
-  participants: RoomStatusParticipant[];
-  loop: RoomLoop;
-  loop_health: RoomLoopHealth;
-  inbox: RoomControlInbox;
-  tasks: RoomTask[];
-  task_count: number;
-  reminders: RoomControlReminder[];
-  messages: RoomControlMessage[];
-  linked_orchestration_cards: RoomLinkedOrchestrationCard[];
-  task_card_link?: string;
-  task_filter?: string;
-  issue_filter?: string;
 }
 
 export interface SpawnAgentInput {
@@ -524,8 +321,7 @@ export interface OrchestrationCardWorkItem {
 }
 
 export interface OrchestrationCardWorkResult {
-  board: OrchestrationBoard | null;
-  artifact: OrchestrationBoardArtifactRef | null;
+  payload: OrchestrationBoardPayload;
   items: OrchestrationCardWorkItem[];
 }
 
@@ -572,13 +368,6 @@ export async function getRuns(params?: {
     items,
     count: typeof data?.count === "number" ? data.count : items.length,
   };
-}
-
-export async function getRun(runId: string): Promise<RunDetail> {
-  const envelope = await requestEnvelope<RunDetail>(
-    `/api/v2/runs/${encodeURIComponent(runId)}`,
-  );
-  return unwrapEnvelope(envelope);
 }
 
 export async function getRunTranscript(
@@ -698,7 +487,7 @@ export async function getRoomMessages(params: {
 
 export async function sendRoomMessage(
   input: SendRoomMessageInput,
-): Promise<SendRoomMessageResult> {
+): Promise<RoomSendMessageResult> {
   const roomId = input.roomId.trim();
   const body = input.body.trim();
   if (roomId === "") {
@@ -725,7 +514,7 @@ export async function sendRoomMessage(
   if (input.dispatchAgentIds && input.dispatchAgentIds.length > 0) {
     payload.dispatch_agent_ids = input.dispatchAgentIds;
   }
-  return requestJSON<SendRoomMessageResult>(
+  return requestJSON<RoomSendMessageResult>(
     `/api/rooms/${encodeURIComponent(roomId)}/messages`,
     {
       method: "POST",
@@ -807,7 +596,7 @@ export async function getRoomControlSnapshot(params: {
     ...result,
     room: result.room,
     participants: safeArray(result?.participants),
-    loop: result?.loop ?? { enabled: false },
+    loop: result?.loop ?? defaultRoomLoop(),
     loop_health: result?.loop_health ?? { status: "unknown" },
     inbox: result?.inbox ?? {
       actor_id: params.actorId ?? ACTOR_ID,
@@ -1049,9 +838,10 @@ export async function getOrchestrationCardWork(params?: {
   const envelope = await requestEnvelope<unknown>(
     `/api/orchestration/board-get?${query.toString()}`,
   );
-  const result = normalizeBoardPayload(unwrapEnvelope(envelope));
+  const payload = parseOrchestrationBoardPayload(unwrapEnvelope(envelope));
+  const board = payload.kind === "board" ? payload.board : null;
   const items =
-    safeArray(result.board?.lanes).flatMap((lane) =>
+    safeArray(board?.lanes).flatMap((lane) =>
       safeArray(lane.cards).filter(hasIssueID).map((card) => ({
         id: card.issue_id,
         laneId: safeString(lane.id, "Other"),
@@ -1059,7 +849,7 @@ export async function getOrchestrationCardWork(params?: {
         card,
       })),
     );
-  return { ...result, items };
+  return { payload, items };
 }
 
 export async function applyOrchestrationCardAction(
@@ -1282,30 +1072,6 @@ function unwrapEnvelope<T>(envelope: ApiEnvelope<T>): T {
   return envelope.data;
 }
 
-function normalizeBoardPayload(data: unknown): {
-  board: OrchestrationBoard | null;
-  artifact: OrchestrationBoardArtifactRef | null;
-} {
-  if (!data || typeof data !== "object") {
-    return { board: null, artifact: null };
-  }
-  const record = data as Record<string, unknown>;
-  if (Array.isArray(record.lanes)) {
-    const board = data as OrchestrationBoard;
-    return {
-      board: { ...board, lanes: safeArray(board.lanes) },
-      artifact: null,
-    };
-  }
-  if (typeof record.artifact === "string") {
-    return {
-      board: null,
-      artifact: data as OrchestrationBoardArtifactRef,
-    };
-  }
-  return { board: null, artifact: null };
-}
-
 function apiURL(path: string): string {
   return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
 }
@@ -1337,6 +1103,22 @@ function roomQuery(params: { workspaceId: string; limit: number }): string {
   query.set("workspace_id", params.workspaceId);
   query.set("limit", String(params.limit));
   return query.toString();
+}
+
+function defaultRoomLoop(): RoomLoop {
+  return {
+    enabled: false,
+    managed_by: "",
+    pulse_interval: "",
+    task_followup_interval: "",
+    reply_stale_after: "",
+    task_stale_after: "",
+    min_pulse_floor: "",
+    interrupt_attempt_limit: 0,
+    reminder_backoff_cap: 0,
+    coordinator_pulse_enabled: false,
+    coordinator_escalation_enabled: false,
+  };
 }
 
 function safeArray<T>(value: T[] | null | undefined): T[] {

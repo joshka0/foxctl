@@ -68,6 +68,20 @@ type AgentResponse struct {
 	RepoRef         string   `json:"repo_ref,omitempty"`
 }
 
+type AgentsListResponse struct {
+	Agents []AgentResponse `json:"agents"`
+	Total  int             `json:"total"`
+}
+
+type AgentDetailResponse struct {
+	Agent AgentResponse `json:"agent"`
+}
+
+type AgentTrashResponse struct {
+	Status  string `json:"status"`
+	AgentID string `json:"agent_id"`
+}
+
 // AgentSpawnRequest is the request body for spawning a new agent.
 type AgentSpawnRequest struct {
 	Role            string   `json:"role"`
@@ -316,6 +330,45 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func agentResponseFromAgent(agent agenttypes.Agent) AgentResponse {
+	resp := AgentResponse{
+		ID:              agent.ID,
+		ParentID:        agent.ParentID,
+		Namespace:       agent.Namespace,
+		WorkspaceRoot:   agent.WorkspaceRoot,
+		WorkspaceSource: agent.WorkspaceSource,
+		Name:            agent.Name,
+		Slug:            agent.Slug,
+		Role:            agent.Role,
+		PromptSummary:   summarizePrompt(agent.Prompt, 100),
+		SkillsAllow:     agent.SkillsAllow,
+		ShareBB:         agent.ShareBB,
+		State:           string(agent.State),
+		LLMProvider:     agent.LLMProvider,
+		LLMModel:        agent.LLMModel,
+		LLMBaseURL:      agent.LLMBaseURL,
+		LLMAuthMode:     agent.LLMAuthMode,
+		LLMAuthHeader:   agent.LLMAuthHeader,
+		LLMAuthPrefix:   agent.LLMAuthPrefix,
+		ExecMode:        string(agent.ExecMode),
+		ThinkInterval:   agent.ThinkInterval,
+		ConversationID:  agent.ConversationID,
+		MemoryScope:     string(agenttypes.NormalizeMemoryScope(agent.MemoryScope)),
+		MemoryRetention: string(agenttypes.NormalizeMemoryRetention(agent.MemoryRetention)),
+		SandboxProvider: agent.SandboxProvider,
+		SandboxID:       agent.SandboxID,
+		RepoURL:         agent.RepoURL,
+		RepoRef:         agent.RepoRef,
+	}
+	if !agent.CreatedAt.IsZero() {
+		resp.CreatedAt = agent.CreatedAt.Format("2006-01-02T15:04:05Z07:00")
+	}
+	if !agent.HeartbeatAt.IsZero() {
+		resp.HeartbeatAt = agent.HeartbeatAt.Format("2006-01-02T15:04:05Z07:00")
+	}
+	return resp
+}
+
 // AgentsListHandler provides an HTTP handler for listing agents at GET /api/agents.
 //
 // The handler accepts an optional `limit` query parameter (1–500, default 100) to cap
@@ -359,47 +412,12 @@ func AgentsListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 		// Convert to response format
 		resp := make([]AgentResponse, 0, len(agentList))
 		for _, a := range agentList {
-			ar := AgentResponse{
-				ID:              a.ID,
-				ParentID:        a.ParentID,
-				Namespace:       a.Namespace,
-				WorkspaceRoot:   a.WorkspaceRoot,
-				WorkspaceSource: a.WorkspaceSource,
-				Name:            a.Name,
-				Slug:            a.Slug,
-				Role:            a.Role,
-				PromptSummary:   summarizePrompt(a.Prompt, 100),
-				SkillsAllow:     a.SkillsAllow,
-				ShareBB:         a.ShareBB,
-				State:           string(a.State),
-				LLMProvider:     a.LLMProvider,
-				LLMModel:        a.LLMModel,
-				LLMBaseURL:      a.LLMBaseURL,
-				LLMAuthMode:     a.LLMAuthMode,
-				LLMAuthHeader:   a.LLMAuthHeader,
-				LLMAuthPrefix:   a.LLMAuthPrefix,
-				ExecMode:        string(a.ExecMode),
-				ThinkInterval:   a.ThinkInterval,
-				ConversationID:  a.ConversationID,
-				MemoryScope:     string(agenttypes.NormalizeMemoryScope(a.MemoryScope)),
-				MemoryRetention: string(agenttypes.NormalizeMemoryRetention(a.MemoryRetention)),
-				SandboxProvider: a.SandboxProvider,
-				SandboxID:       a.SandboxID,
-				RepoURL:         a.RepoURL,
-				RepoRef:         a.RepoRef,
-			}
-			if !a.CreatedAt.IsZero() {
-				ar.CreatedAt = a.CreatedAt.Format("2006-01-02T15:04:05Z07:00")
-			}
-			if !a.HeartbeatAt.IsZero() {
-				ar.HeartbeatAt = a.HeartbeatAt.Format("2006-01-02T15:04:05Z07:00")
-			}
-			resp = append(resp, ar)
+			resp = append(resp, agentResponseFromAgent(a))
 		}
 
-		writeJSON(w, http.StatusOK, map[string]any{
-			"agents": resp,
-			"total":  len(resp),
+		writeJSON(w, http.StatusOK, AgentsListResponse{
+			Agents: resp,
+			Total:  len(resp),
 		})
 	}
 }
@@ -549,44 +567,8 @@ func AgentDetailHandlerWithRuntime(cfg config.Config, log zerolog.Logger, events
 			return
 		}
 
-		ar := AgentResponse{
-			ID:              agent.ID,
-			ParentID:        agent.ParentID,
-			Namespace:       agent.Namespace,
-			WorkspaceRoot:   agent.WorkspaceRoot,
-			WorkspaceSource: agent.WorkspaceSource,
-			Name:            agent.Name,
-			Slug:            agent.Slug,
-			Role:            agent.Role,
-			PromptSummary:   summarizePrompt(agent.Prompt, 100),
-			SkillsAllow:     agent.SkillsAllow,
-			ShareBB:         agent.ShareBB,
-			State:           string(agent.State),
-			LLMProvider:     agent.LLMProvider,
-			LLMModel:        agent.LLMModel,
-			LLMBaseURL:      agent.LLMBaseURL,
-			LLMAuthMode:     agent.LLMAuthMode,
-			LLMAuthHeader:   agent.LLMAuthHeader,
-			LLMAuthPrefix:   agent.LLMAuthPrefix,
-			ExecMode:        string(agent.ExecMode),
-			ThinkInterval:   agent.ThinkInterval,
-			ConversationID:  agent.ConversationID,
-			MemoryScope:     string(agenttypes.NormalizeMemoryScope(agent.MemoryScope)),
-			MemoryRetention: string(agenttypes.NormalizeMemoryRetention(agent.MemoryRetention)),
-			SandboxProvider: agent.SandboxProvider,
-			SandboxID:       agent.SandboxID,
-			RepoURL:         agent.RepoURL,
-			RepoRef:         agent.RepoRef,
-		}
-		if !agent.CreatedAt.IsZero() {
-			ar.CreatedAt = agent.CreatedAt.Format("2006-01-02T15:04:05Z07:00")
-		}
-		if !agent.HeartbeatAt.IsZero() {
-			ar.HeartbeatAt = agent.HeartbeatAt.Format("2006-01-02T15:04:05Z07:00")
-		}
-
-		writeJSON(w, http.StatusOK, map[string]any{
-			"agent": ar,
+		writeJSON(w, http.StatusOK, AgentDetailResponse{
+			Agent: agentResponseFromAgent(agent),
 		})
 	}
 }
@@ -604,17 +586,24 @@ type AgentDaemonStartResponse struct {
 	Status    string `json:"status"`
 }
 
+type AgentDaemonSessionsResponse struct {
+	Sessions []daemon.AgentSessionInfo `json:"sessions"`
+	Count    int                       `json:"count"`
+}
+
+type AgentDaemonKillResponse struct {
+	OK        bool   `json:"ok"`
+	SessionID string `json:"session_id"`
+	Status    string `json:"status"`
+	Message   string `json:"message"`
+}
+
 func handleAgentDaemonStart(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, agentID string) {
 	handleAgentDaemonStartWithRoute(w, r, cfg, log, agentID)
 }
 
-// handleAgentDaemonStartLegacy starts an agent via the daemon using the agent's stored configuration
-// and an optional request body.
-//
-// It ensures the daemon is running, spawns a daemon session using the workspace and prompt
-// from the request (falling back to the agent's namespace and prompt), updates the agent's
-// state to running in the store, and writes an AgentDaemonStartResponse on success or an
-// appropriate HTTP error on failure.
+// handleAgentDaemonStartWithRoute starts an agent via the daemon using the
+// stored agent configuration plus optional workspace and prompt overrides.
 func handleAgentDaemonStartWithRoute(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, agentID string) {
 	if r.Method != http.MethodPost {
 		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -711,10 +700,7 @@ func handleAgentDaemonSessions(w http.ResponseWriter, r *http.Request, log zerol
 	handleAgentDaemonSessionsWithRoute(w, r, log, agentID)
 }
 
-// handleAgentDaemonSessionsLegacy handles GET requests to list active daemon sessions for the specified agentID.
-// It ensures the daemon is running, filters daemon sessions by ActorID equal to agentID, and writes a JSON
-// response with "sessions" (slice of session info) and "count" (number of sessions). It responds with 405 on
-// non-GET methods, 503 if the daemon cannot be started, and 500 on internal listing errors.
+// handleAgentDaemonSessionsWithRoute lists active daemon sessions for one persisted agent.
 func handleAgentDaemonSessionsWithRoute(w http.ResponseWriter, r *http.Request, log zerolog.Logger, agentID string) {
 	if r.Method != http.MethodGet {
 		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -744,9 +730,9 @@ func handleAgentDaemonSessionsWithRoute(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"sessions": filtered,
-		"count":    len(filtered),
+	writeJSON(w, http.StatusOK, AgentDaemonSessionsResponse{
+		Sessions: filtered,
+		Count:    len(filtered),
 	})
 }
 
@@ -754,11 +740,8 @@ func handleAgentDaemonKillWithRuntime(w http.ResponseWriter, r *http.Request, cf
 	handleAgentDaemonKillWithRoute(w, r, cfg, log, agentID, runtimeHost)
 }
 
-// handleAgentDaemonKillLegacy terminates a running daemon session for the given agent and ensures the agent's stored state is set to stopped.
-//
-// It handles POST requests and writes JSON HTTP responses describing the outcome. If the daemon is not running or no matching session is found,
-// the handler updates the agent state to "stopped" and returns an OK payload indicating no active session; on successful termination it returns
-// the killed session ID and status. Errors are reported via appropriate HTTP error responses.
+// handleAgentDaemonKillWithRoute terminates a daemon session and keeps the
+// persisted agent state aligned when no daemon session is active.
 func handleAgentDaemonKillWithRoute(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, agentID string, runtimeHost OrchestrationRuntimeHost) {
 	if r.Method != http.MethodPost {
 		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -792,11 +775,11 @@ func handleAgentDaemonKillWithRoute(w http.ResponseWriter, r *http.Request, cfg 
 				httpError(w, http.StatusInternalServerError, "agent signaled but failed to update state")
 				return
 			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"ok":         true,
-				"session_id": "",
-				"status":     string(signalResp.Status),
-				"message":    "agent runtime signaled",
+			writeJSON(w, http.StatusOK, AgentDaemonKillResponse{
+				OK:        true,
+				SessionID: "",
+				Status:    string(signalResp.Status),
+				Message:   "agent runtime signaled",
 			})
 			return
 		}
@@ -812,11 +795,11 @@ func handleAgentDaemonKillWithRoute(w http.ResponseWriter, r *http.Request, cfg 
 			return
 		}
 
-		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":         true,
-			"session_id": "",
-			"status":     "stopped",
-			"message":    "agent state updated (daemon not running)",
+		writeJSON(w, http.StatusOK, AgentDaemonKillResponse{
+			OK:        true,
+			SessionID: "",
+			Status:    "stopped",
+			Message:   "agent state updated (daemon not running)",
 		})
 		return
 	}
@@ -854,11 +837,11 @@ func handleAgentDaemonKillWithRoute(w http.ResponseWriter, r *http.Request, cfg 
 			return
 		}
 
-		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":         true,
-			"session_id": "",
-			"status":     "stopped",
-			"message":    "agent state updated (no active session found)",
+		writeJSON(w, http.StatusOK, AgentDaemonKillResponse{
+			OK:        true,
+			SessionID: "",
+			Status:    "stopped",
+			Message:   "agent state updated (no active session found)",
 		})
 		return
 	}
@@ -878,11 +861,11 @@ func handleAgentDaemonKillWithRoute(w http.ResponseWriter, r *http.Request, cfg 
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":         true,
-		"session_id": sessionID,
-		"status":     result.Status,
-		"message":    "agent session killed",
+	writeJSON(w, http.StatusOK, AgentDaemonKillResponse{
+		OK:        true,
+		SessionID: sessionID,
+		Status:    result.Status,
+		Message:   "agent session killed",
 	})
 }
 
@@ -2290,9 +2273,9 @@ func handleAgentTrash(w http.ResponseWriter, r *http.Request, cfg config.Config,
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{
-		"status":   "trashed",
-		"agent_id": agentID,
+	writeJSON(w, http.StatusOK, AgentTrashResponse{
+		Status:  "trashed",
+		AgentID: agentID,
 	})
 }
 
@@ -2360,41 +2343,8 @@ func handleAgentPatch(w http.ResponseWriter, r *http.Request, cfg config.Config,
 		agent.MemoryRetention = retention
 	}
 
-	// Return updated agent
-	ar := AgentResponse{
-		ID:              agent.ID,
-		ParentID:        agent.ParentID,
-		Namespace:       agent.Namespace,
-		WorkspaceRoot:   agent.WorkspaceRoot,
-		WorkspaceSource: agent.WorkspaceSource,
-		Name:            agent.Name,
-		Slug:            agent.Slug,
-		Role:            agent.Role,
-		PromptSummary:   summarizePrompt(agent.Prompt, 100),
-		SkillsAllow:     agent.SkillsAllow,
-		ShareBB:         agent.ShareBB,
-		State:           string(agent.State),
-		LLMProvider:     agent.LLMProvider,
-		LLMModel:        agent.LLMModel,
-		ExecMode:        string(agent.ExecMode),
-		ThinkInterval:   agent.ThinkInterval,
-		ConversationID:  agent.ConversationID,
-		MemoryScope:     string(agenttypes.NormalizeMemoryScope(agent.MemoryScope)),
-		MemoryRetention: string(agenttypes.NormalizeMemoryRetention(agent.MemoryRetention)),
-		SandboxProvider: agent.SandboxProvider,
-		SandboxID:       agent.SandboxID,
-		RepoURL:         agent.RepoURL,
-		RepoRef:         agent.RepoRef,
-	}
-	if !agent.CreatedAt.IsZero() {
-		ar.CreatedAt = agent.CreatedAt.Format("2006-01-02T15:04:05Z07:00")
-	}
-	if !agent.HeartbeatAt.IsZero() {
-		ar.HeartbeatAt = agent.HeartbeatAt.Format("2006-01-02T15:04:05Z07:00")
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"agent": ar,
+	writeJSON(w, http.StatusOK, AgentDetailResponse{
+		Agent: agentResponseFromAgent(agent),
 	})
 }
 

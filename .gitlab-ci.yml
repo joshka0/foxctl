@@ -199,6 +199,14 @@ integration-tests:
         make test-integration
       fi
 
+typescript-frontend:
+  stage: check
+  image: oven/bun:1.3.14
+  before_script:
+    - bun install --frozen-lockfile
+  script:
+    - bun run unused:frontend
+
 # --- Stage: build ---
 build:
   stage: build

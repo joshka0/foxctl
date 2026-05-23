@@ -6,34 +6,15 @@ import (
 	"encoding/json"
 	"io"
 	"strings"
+
+	"github.com/joshka0/foxctl/internal/providers/llmcompat"
 )
 
 // StreamDelta represents a chunk of streaming LLM output.
-type StreamDelta struct {
-	// ContentDelta is new text content.
-	ContentDelta string `json:"content_delta,omitempty"`
-
-	// ToolCallDelta is a partial tool call update.
-	ToolCallDelta *ToolCallDelta `json:"tool_call_delta,omitempty"`
-
-	// FinishReason indicates why streaming stopped.
-	FinishReason string `json:"finish_reason,omitempty"`
-}
+type StreamDelta = llmcompat.StreamDelta
 
 // ToolCallDelta represents a streaming tool call update.
-type ToolCallDelta struct {
-	// Index is the tool call index in the array.
-	Index int `json:"index"`
-
-	// ID is the tool call ID (only in first chunk).
-	ID string `json:"id,omitempty"`
-
-	// Name is the function name (only in first chunk).
-	Name string `json:"name,omitempty"`
-
-	// ArgumentsDelta is the incremental arguments JSON.
-	ArgumentsDelta string `json:"arguments_delta,omitempty"`
-}
+type ToolCallDelta = llmcompat.ToolCallDelta
 
 // StreamParser parses SSE streams from OpenAI-compatible APIs.
 type StreamParser struct {
@@ -97,7 +78,7 @@ func (p *StreamParser) Parse() error {
 
 // parseChunk parses a single SSE data chunk.
 func (p *StreamParser) parseChunk(data []byte) (*StreamDelta, error) {
-	var chunk oaiStreamChunk
+	var chunk llmcompat.ChatCompletionStreamChunk
 	if err := json.Unmarshal(data, &chunk); err != nil {
 		return nil, err
 	}
@@ -213,33 +194,6 @@ type CompletedToolCall struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
-}
-
-// OpenAI streaming types
-
-type oaiStreamChunk struct {
-	ID      string `json:"id"`
-	Choices []struct {
-		Index        int      `json:"index"`
-		Delta        oaiDelta `json:"delta"`
-		FinishReason string   `json:"finish_reason"`
-	} `json:"choices"`
-}
-
-type oaiDelta struct {
-	Role      string             `json:"role,omitempty"`
-	Content   string             `json:"content,omitempty"`
-	ToolCalls []oaiToolCallDelta `json:"tool_calls,omitempty"`
-}
-
-type oaiToolCallDelta struct {
-	Index    int    `json:"index"`
-	ID       string `json:"id,omitempty"`
-	Type     string `json:"type,omitempty"`
-	Function struct {
-		Name      string `json:"name,omitempty"`
-		Arguments string `json:"arguments,omitempty"`
-	} `json:"function,omitempty"`
 }
 
 // ParseSSEStream is a convenience function to parse an SSE stream.

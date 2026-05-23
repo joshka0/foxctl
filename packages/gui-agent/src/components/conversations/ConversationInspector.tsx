@@ -18,7 +18,7 @@ import type {
   PersonalityInfo,
   ProviderAvailability,
 } from "@/api/client";
-import type { AgentSession } from "@/api/types";
+import type { AgentSession } from '@foxctl/data/types';
 import type { Conversation } from "@/lib/conversation-list-models";
 import type { ContextInfo, ExecMode } from "@/components/conversations/types";
 import { useAgentOperations } from "@/hooks/useAgentOperations";

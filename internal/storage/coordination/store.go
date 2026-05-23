@@ -70,7 +70,6 @@ type RoomLoopDeliveryTrace struct {
 	ChosenTransportEndpoint string    `json:"chosen_transport_endpoint,omitempty"`
 	ChosenTransportKind     string    `json:"chosen_transport_kind,omitempty"`
 	ChosenSubmitMode        string    `json:"chosen_submit_mode,omitempty"`
-	FallbackAttempted       bool      `json:"fallback_attempted,omitempty"`
 	DeliveredCount          int       `json:"delivered_count,omitempty"`
 	FailedCount             int       `json:"failed_count,omitempty"`
 	DeliveredTo             []string  `json:"delivered_to,omitempty"`

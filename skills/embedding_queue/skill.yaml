@@ -31,7 +31,7 @@ signature:
     - name: symbols
       type: array
       required: false
-      description: Symbols to enqueue (for enqueue operation) - objects with symbol_id, file_path, symbol_name, language, package_id, symbol_key, memory_name, content
+      description: Symbols to enqueue (for enqueue operation) - objects with file_path, symbol_name, content, and either memory_name or package_id + symbol_key
     - name: memories
       type: array
       required: false
@@ -49,7 +49,7 @@ signature:
     - name: symbol_id
       type: string
       required: false
-      description: Symbol ID (for get operation)
+      description: Canonical symbol embedding ID (for get operation), usually package_id::symbol_key
     - name: file_path
       type: string
       required: false
@@ -134,7 +134,7 @@ signature:
           operation: enqueue
           workspace_id: myproject
           symbols:
-            - symbol_id: "main.go:Handler"
+            - symbol_id: "go:root::func Handler"
               file_path: "main.go"
               symbol_name: "Handler"
               language: "go"
@@ -173,7 +173,7 @@ signature:
         example_input:
           operation: get
           workspace_id: myproject
-          symbol_id: "main.go:Handler"
+          symbol_id: "go:root::func Handler"
       - id: cleanup-old
         description: "Cleanup old completed jobs"
         example_input:

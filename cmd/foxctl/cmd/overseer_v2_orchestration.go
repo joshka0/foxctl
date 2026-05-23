@@ -320,7 +320,7 @@ func openOverseerOrchestrationStore(ctx context.Context, cfg config.Config) (*tu
 		return nil, nil, err
 	}
 
-	db, closeFn, err := dbdriver.OpenDBCompatWithCloser(ctx, dbCfg, tursoorchestration.MigrateSchema)
+	db, err := dbdriver.OpenDB(ctx, dbCfg, tursoorchestration.MigrateSchema)
 	if err != nil {
 		return nil, nil, fmt.Errorf("orchestration store open: %w", err)
 	}
@@ -328,7 +328,7 @@ func openOverseerOrchestrationStore(ctx context.Context, cfg config.Config) (*tu
 	store := tursoorchestration.NewStore(db, tursoorchestration.StoreOptions{
 		LaneOptions: coreorchestration.DefaultLaneOptions(),
 	})
-	return store, closeFn, nil
+	return store, db.Close, nil
 }
 
 func openOverseerOrchestrationEventStore(ctx context.Context, cfg config.Config) (*tursoevents.Store, error) {
@@ -336,11 +336,11 @@ func openOverseerOrchestrationEventStore(ctx context.Context, cfg config.Config)
 	if err != nil {
 		return nil, err
 	}
-	db, closeFn, err := dbdriver.OpenDBCompatWithCloser(ctx, dbCfg, tursoevents.MigrateSchema)
+	db, err := dbdriver.OpenDB(ctx, dbCfg, tursoevents.MigrateSchema)
 	if err != nil {
 		return nil, fmt.Errorf("orchestration event store open: %w", err)
 	}
-	return tursoevents.NewStore(db, closeFn), nil
+	return tursoevents.NewStore(db, db.Close), nil
 }
 
 func overseerOrchestrationDBConfig(cfg config.Config) (dbdriver.Config, error) {

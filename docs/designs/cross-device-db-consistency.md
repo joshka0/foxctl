@@ -68,7 +68,9 @@ Implementation status:
 
 - `ConfigLoader` supports `FOXCTL_DB_DRIVER` as a global fallback.
 - `ConfigLoader` supports `LoadConfig(storeName, defaultPath)` for arbitrary stores.
-- Most stores still bypass `ConfigLoader` by calling `sqliteutil.OpenDBShared` directly (Phase 1/2 migrates these callsites).
+- Most logical stores now open through `dbutil.OpenStoreDB`; remaining direct
+  SQLite openers are explicit-path internals, tests, or tools rather than
+  named store configuration paths.
 
 Proposed env conventions:
 

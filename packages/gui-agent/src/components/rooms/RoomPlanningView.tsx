@@ -3,7 +3,7 @@ import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import { formatRelativeTime } from '@/lib/time'
-import type { MailboxMessage } from '@/api/types'
+import type { MailboxMessage } from '@foxctl/data/types'
 
 interface RoomPlanningViewProps {
   messages: MailboxMessage[]

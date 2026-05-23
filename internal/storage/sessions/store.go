@@ -607,7 +607,7 @@ func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedd
 	for rows.Next() {
 		session, err := scanSession(rows)
 		if err != nil {
-			continue // Skip malformed rows
+			return nil, fmt.Errorf("sessions: search similar scan: %w", err)
 		}
 
 		// Deserialize embedding
@@ -1100,15 +1100,15 @@ func (s *Store) GetEdges(ctx context.Context, sessionID string) ([]SessionEdge, 
 			return nil, fmt.Errorf("sessions: scan edge: %w", err)
 		}
 
-		if createdAt.Valid {
-			ts, _ := sqlutil.ScanTimestamp(createdAt.String)
-			edge.CreatedAt = ts
+		if err := decodeNullableTimestampInto(&edge.CreatedAt, createdAt, "session_edges.created_at"); err != nil {
+			return nil, err
 		}
 		if metadata.Valid {
 			var m map[string]any
-			if err := sqlutil.ScanJSON(metadata.String, &m); err == nil {
-				edge.Metadata = m
+			if err := decodeJSONInto(metadata.String, "session_edges.metadata", &m); err != nil {
+				return nil, err
 			}
+			edge.Metadata = m
 		}
 
 		edges = append(edges, edge)
@@ -2187,17 +2187,14 @@ func scanContextWindow(row scannable) (ContextWindow, error) {
 		return ContextWindow{}, fmt.Errorf("sessions: scan context window: %w", err)
 	}
 
-	if startedAt.Valid {
-		ts, _ := sqlutil.ScanTimestamp(startedAt.String)
-		window.StartedAt = ts
+	if err := decodeNullableTimestampInto(&window.StartedAt, startedAt, "session_context_windows.started_at"); err != nil {
+		return ContextWindow{}, err
 	}
-	if endedAt.Valid {
-		ts, _ := sqlutil.ScanTimestamp(endedAt.String)
-		window.EndedAt = ts
+	if err := decodeNullableTimestampInto(&window.EndedAt, endedAt, "session_context_windows.ended_at"); err != nil {
+		return ContextWindow{}, err
 	}
-	if createdAt.Valid {
-		ts, _ := sqlutil.ScanTimestamp(createdAt.String)
-		window.CreatedAt = ts
+	if err := decodeNullableTimestampInto(&window.CreatedAt, createdAt, "session_context_windows.created_at"); err != nil {
+		return ContextWindow{}, err
 	}
 	if trigger.Valid {
 		window.Trigger = trigger.String
@@ -2275,8 +2272,12 @@ func (s *Store) GetEmbeddingMetadata(ctx context.Context, workspace string) (*Em
 		meta.WorkspacePath = workspacePath
 	}
 
-	meta.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt)
-	meta.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt)
+	if err := decodeTimestampInto(&meta.CreatedAt, createdAt, "session_embedding_metadata.created_at"); err != nil {
+		return nil, err
+	}
+	if err := decodeTimestampInto(&meta.UpdatedAt, updatedAt, "session_embedding_metadata.updated_at"); err != nil {
+		return nil, err
+	}
 
 	return &meta, nil
 }
@@ -2443,17 +2444,15 @@ func scanChunk(row scannable) (SessionChunk, error) {
 		chunk.ContextWindowIndex = int(contextWindowIndex.Int64)
 	}
 
-	if createdAt.Valid {
-		ts, err := sqlutil.ScanTimestamp(createdAt.String)
-		errs.Ignore(err, "parse chunk created_at")
-		chunk.CreatedAt = ts
+	if err := decodeNullableTimestampInto(&chunk.CreatedAt, createdAt, "session_chunks.created_at"); err != nil {
+		return SessionChunk{}, err
 	}
 
-	if toolsUsed.Valid {
-		errs.Ignore(sqlutil.ScanJSON(toolsUsed.String, &chunk.ToolsUsed), "parse tools_used JSON")
+	if err := decodeNullableJSONInto(toolsUsed, "session_chunks.tools_used", &chunk.ToolsUsed); err != nil {
+		return SessionChunk{}, err
 	}
-	if filesTouched.Valid {
-		errs.Ignore(sqlutil.ScanJSON(filesTouched.String, &chunk.FilesTouched), "parse files_touched JSON")
+	if err := decodeNullableJSONInto(filesTouched, "session_chunks.files_touched", &chunk.FilesTouched); err != nil {
+		return SessionChunk{}, err
 	}
 
 	return chunk, nil
@@ -2484,19 +2483,15 @@ func scanChunkSummary(row scannable) (SessionChunkSummary, error) {
 	if summaryModel.Valid {
 		summary.SummaryModel = summaryModel.String
 	}
-	if createdAt.Valid {
-		ts, err := sqlutil.ScanTimestamp(createdAt.String)
-		errs.Ignore(err, "parse chunk summary created_at")
-		summary.CreatedAt = ts
+	if err := decodeNullableTimestampInto(&summary.CreatedAt, createdAt, "session_chunk_summaries.created_at"); err != nil {
+		return SessionChunkSummary{}, err
 	}
-	if updatedAt.Valid {
-		ts, err := sqlutil.ScanTimestamp(updatedAt.String)
-		errs.Ignore(err, "parse chunk summary updated_at")
-		summary.UpdatedAt = ts
+	if err := decodeNullableTimestampInto(&summary.UpdatedAt, updatedAt, "session_chunk_summaries.updated_at"); err != nil {
+		return SessionChunkSummary{}, err
 	}
 
-	if chunkIndices.Valid {
-		errs.Ignore(sqlutil.ScanJSON(chunkIndices.String, &summary.ChunkIndices), "parse chunk_indices JSON")
+	if err := decodeNullableJSONInto(chunkIndices, "session_chunk_summaries.chunk_indices", &summary.ChunkIndices); err != nil {
+		return SessionChunkSummary{}, err
 	}
 	if chunkIndexMin.Valid {
 		summary.ChunkIndexMin = int(chunkIndexMin.Int64)
@@ -2514,14 +2509,14 @@ func scanChunkSummary(row scannable) (SessionChunkSummary, error) {
 			}
 		}
 	}
-	if tools.Valid {
-		errs.Ignore(sqlutil.ScanJSON(tools.String, &summary.Tools), "parse tools JSON")
+	if err := decodeNullableJSONInto(tools, "session_chunk_summaries.tools", &summary.Tools); err != nil {
+		return SessionChunkSummary{}, err
 	}
-	if files.Valid {
-		errs.Ignore(sqlutil.ScanJSON(files.String, &summary.Files), "parse files JSON")
+	if err := decodeNullableJSONInto(files, "session_chunk_summaries.files", &summary.Files); err != nil {
+		return SessionChunkSummary{}, err
 	}
-	if errors.Valid {
-		errs.Ignore(sqlutil.ScanJSON(errors.String, &summary.Errors), "parse errors JSON")
+	if err := decodeNullableJSONInto(errors, "session_chunk_summaries.errors", &summary.Errors); err != nil {
+		return SessionChunkSummary{}, err
 	}
 
 	return summary, nil
@@ -2618,22 +2613,18 @@ func scanTurn(row scannable) (SessionTurn, error) {
 		turn.Resolution = resolution.String
 	}
 
-	if timestamp.Valid {
-		ts, err := sqlutil.ScanTimestamp(timestamp.String)
-		errs.Ignore(err, "parse turn timestamp")
-		turn.Timestamp = ts
+	if err := decodeNullableTimestampInto(&turn.Timestamp, timestamp, "session_turns.timestamp"); err != nil {
+		return SessionTurn{}, err
 	}
-	if createdAt.Valid {
-		ts, err := sqlutil.ScanTimestamp(createdAt.String)
-		errs.Ignore(err, "parse turn created_at")
-		turn.CreatedAt = ts
+	if err := decodeNullableTimestampInto(&turn.CreatedAt, createdAt, "session_turns.created_at"); err != nil {
+		return SessionTurn{}, err
 	}
 
-	if toolCalls.Valid {
-		errs.Ignore(sqlutil.ScanJSON(toolCalls.String, &turn.ToolCalls), "parse tool_calls JSON")
+	if err := decodeNullableJSONInto(toolCalls, "session_turns.tool_calls", &turn.ToolCalls); err != nil {
+		return SessionTurn{}, err
 	}
-	if filesTouched.Valid {
-		errs.Ignore(sqlutil.ScanJSON(filesTouched.String, &turn.FilesTouched), "parse files_touched JSON")
+	if err := decodeNullableJSONInto(filesTouched, "session_turns.files_touched", &turn.FilesTouched); err != nil {
+		return SessionTurn{}, err
 	}
 
 	return turn, nil
@@ -3044,8 +3035,12 @@ ORDER BY workspace_id ASC
 		if err := rows.Scan(&meta.WorkspaceID, &meta.WorkspacePath, &meta.TableName, &meta.ColumnName, &meta.Provider, &meta.Model, &meta.Dimensions, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("sessions: list embedding metadata scan: %w", err)
 		}
-		meta.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt)
-		meta.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt)
+		if err := decodeTimestampInto(&meta.CreatedAt, createdAt, "session_embedding_metadata.created_at"); err != nil {
+			return nil, err
+		}
+		if err := decodeTimestampInto(&meta.UpdatedAt, updatedAt, "session_embedding_metadata.updated_at"); err != nil {
+			return nil, err
+		}
 		items = append(items, meta)
 	}
 	if err := rows.Err(); err != nil {
@@ -3137,26 +3132,17 @@ func scanSession(row scannable) (Session, error) {
 		return Session{}, fmt.Errorf("sessions: scan: %w", err)
 	}
 
-	// Parse timestamps (errors are non-critical for optional fields)
-	if startedAt.Valid {
-		ts, err := sqlutil.ScanTimestamp(startedAt.String)
-		errs.Ignore(err, "parse started_at timestamp")
-		session.StartedAt = ts
+	if err := decodeNullableTimestampInto(&session.StartedAt, startedAt, "sessions.started_at"); err != nil {
+		return Session{}, err
 	}
-	if endedAt.Valid {
-		ts, err := sqlutil.ScanTimestamp(endedAt.String)
-		errs.Ignore(err, "parse ended_at timestamp")
-		session.EndedAt = ts
+	if err := decodeNullableTimestampInto(&session.EndedAt, endedAt, "sessions.ended_at"); err != nil {
+		return Session{}, err
 	}
-	if createdAt.Valid {
-		ts, err := sqlutil.ScanTimestamp(createdAt.String)
-		errs.Ignore(err, "parse created_at timestamp")
-		session.CreatedAt = ts
+	if err := decodeNullableTimestampInto(&session.CreatedAt, createdAt, "sessions.created_at"); err != nil {
+		return Session{}, err
 	}
-	if updatedAt.Valid {
-		ts, err := sqlutil.ScanTimestamp(updatedAt.String)
-		errs.Ignore(err, "parse updated_at timestamp")
-		session.UpdatedAt = ts
+	if err := decodeNullableTimestampInto(&session.UpdatedAt, updatedAt, "sessions.updated_at"); err != nil {
+		return Session{}, err
 	}
 
 	// Assign nullable strings
@@ -3170,27 +3156,26 @@ func scanSession(row scannable) (Session, error) {
 		session.ToolsPattern = toolsPattern.String
 	}
 
-	// Parse JSON arrays (errors are non-critical for optional fields)
-	if accomplished.Valid {
-		errs.Ignore(sqlutil.ScanJSON(accomplished.String, &session.Accomplished), "parse accomplished JSON")
+	if err := decodeNullableJSONInto(accomplished, "sessions.accomplished", &session.Accomplished); err != nil {
+		return Session{}, err
 	}
-	if decisions.Valid {
-		errs.Ignore(sqlutil.ScanJSON(decisions.String, &session.Decisions), "parse decisions JSON")
+	if err := decodeNullableJSONInto(decisions, "sessions.decisions", &session.Decisions); err != nil {
+		return Session{}, err
 	}
-	if gotchas.Valid {
-		errs.Ignore(sqlutil.ScanJSON(gotchas.String, &session.Gotchas), "parse gotchas JSON")
+	if err := decodeNullableJSONInto(gotchas, "sessions.gotchas", &session.Gotchas); err != nil {
+		return Session{}, err
 	}
-	if userInsights.Valid {
-		errs.Ignore(sqlutil.ScanJSON(userInsights.String, &session.UserInsights), "parse userInsights JSON")
+	if err := decodeNullableJSONInto(userInsights, "sessions.user_insights", &session.UserInsights); err != nil {
+		return Session{}, err
 	}
-	if tags.Valid {
-		errs.Ignore(sqlutil.ScanJSON(tags.String, &session.Tags), "parse tags JSON")
+	if err := decodeNullableJSONInto(tags, "sessions.tags", &session.Tags); err != nil {
+		return Session{}, err
 	}
-	if keyFiles.Valid {
-		errs.Ignore(sqlutil.ScanJSON(keyFiles.String, &session.KeyFiles), "parse keyFiles JSON")
+	if err := decodeNullableJSONInto(keyFiles, "sessions.key_files", &session.KeyFiles); err != nil {
+		return Session{}, err
 	}
-	if keyQuestions.Valid {
-		errs.Ignore(sqlutil.ScanJSON(keyQuestions.String, &session.KeyQuestions), "parse keyQuestions JSON")
+	if err := decodeNullableJSONInto(keyQuestions, "sessions.key_questions", &session.KeyQuestions); err != nil {
+		return Session{}, err
 	}
 
 	session.Embedding = embedding

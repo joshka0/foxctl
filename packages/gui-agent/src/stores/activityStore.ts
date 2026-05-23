@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ActivityEvent } from '../api/types'
+import type { ActivityEvent } from '@/types/activity'
 
 interface ActivityState {
   events: ActivityEvent[]

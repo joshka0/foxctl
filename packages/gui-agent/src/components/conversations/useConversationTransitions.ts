@@ -13,12 +13,13 @@ import {
   type PersistedSession,
   type PersonalityInfo,
 } from "@/api/client";
-import type { Agent } from "@/api/types";
+import type { Agent } from '@foxctl/data/types';
 import { getAgentDisplayName } from "@/lib/agent-utils";
 import { matchAgentToConversation } from "@/lib/conversation-utils";
 import type { Conversation } from "@/lib/conversation-list-models";
 import {
   buildHistoricalFollowUpPrompt,
+  consoleSessionModelParams,
   getSessionMessageContent,
 } from "@/lib/conversation-session-utils";
 import type { ContextInfo } from "@/components/conversations/types";
@@ -279,8 +280,7 @@ export function useConversationTransitions({
       const sessionData = await createConsoleSession({
         workspace: "/",
         profile: "companion",
-        tool_model: toolModel,
-        response_model: responseModel,
+        ...consoleSessionModelParams(toolModel, responseModel),
       });
       activateConsoleSession(sessionData);
 
@@ -333,8 +333,7 @@ Agent Details:
 - State: ${agent.state}
 
 Help the user understand and interact with this agent's work.`,
-          tool_model: toolModel,
-          response_model: responseModel,
+          ...consoleSessionModelParams(toolModel, responseModel),
         });
         activateConsoleSession(sessionData);
 
@@ -405,8 +404,7 @@ Help the user understand and interact with this agent's work.`,
         workspace: historical.workspace_path || "/",
         profile: "companion",
         system_prompt: systemPrompt,
-        tool_model: toolModel,
-        response_model: responseModel,
+        ...consoleSessionModelParams(toolModel, responseModel),
       });
       activateConsoleSession(sessionData, { systemPrompt });
 

@@ -2,25 +2,22 @@ package rlm
 
 import (
 	"context"
-	"errors"
 	"testing"
 )
 
-func TestReadOnlyRunnerRequiresPrompt(t *testing.T) {
+func TestValidateRunRequestRequiresPrompt(t *testing.T) {
 	t.Parallel()
 
-	runner := ReadOnlyRunner{}
-	_, err := runner.Run(context.Background(), Task{}, Environment{})
+	err := ValidateRunRequest(Task{}, Environment{})
 	if err == nil || err.Error() != "rlm: prompt is required" {
 		t.Fatalf("err=%v", err)
 	}
 }
 
-func TestReadOnlyRunnerRejectsWritableTools(t *testing.T) {
+func TestValidateRunRequestRejectsWritableTools(t *testing.T) {
 	t.Parallel()
 
-	runner := ReadOnlyRunner{}
-	_, err := runner.Run(context.Background(), Task{Prompt: "inspect"}, Environment{
+	err := ValidateRunRequest(Task{Prompt: "inspect"}, Environment{
 		Tools: []Tool{{Name: "write_file", ReadOnly: false}},
 	})
 	if err == nil || err.Error() != "rlm: first-version runtime only allows read-only tools" {
@@ -28,30 +25,27 @@ func TestReadOnlyRunnerRejectsWritableTools(t *testing.T) {
 	}
 }
 
-func TestReadOnlyRunnerReturnsNotImplemented(t *testing.T) {
+func TestValidateRunRequestAllowsReadOnlyTools(t *testing.T) {
 	t.Parallel()
 
-	runner := ReadOnlyRunner{}
-	_, err := runner.Run(context.Background(), Task{Prompt: "inspect"}, Environment{
+	err := ValidateRunRequest(Task{Prompt: "inspect"}, Environment{
 		Tools: []Tool{{Name: "retrieve_mixed", ReadOnly: true}},
 	})
-	if !errors.Is(err, ErrNotImplemented) {
-		t.Fatalf("err=%v want ErrNotImplemented", err)
+	if err != nil {
+		t.Fatalf("ValidateRunRequest: %v", err)
 	}
 }
 
-func TestReadOnlyRunnerExecutesRunFunc(t *testing.T) {
+func TestRunFuncExecutes(t *testing.T) {
 	t.Parallel()
 
-	runner := ReadOnlyRunner{
-		Execute: func(_ context.Context, task Task, env Environment) (Result, error) {
-			return Result{
-				Answer:       task.Prompt,
-				Iterations:   1,
-				EvidenceRefs: []string{env.Tools[0].Name},
-			}, nil
-		},
-	}
+	runner := RunFunc(func(_ context.Context, task Task, env Environment) (Result, error) {
+		return Result{
+			Answer:       task.Prompt,
+			Iterations:   1,
+			EvidenceRefs: []string{env.Tools[0].Name},
+		}, nil
+	})
 	got, err := runner.Run(context.Background(), Task{Prompt: "inspect repo"}, Environment{
 		Tools: []Tool{{Name: "retrieve_mixed", ReadOnly: true}},
 	})

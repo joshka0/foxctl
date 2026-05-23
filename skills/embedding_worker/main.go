@@ -1139,11 +1139,6 @@ func symbolMemoryEntryName(job *embedding.EmbeddingJob) string {
 	if workspaceID != "" && packageID != "" && symbolKey != "" {
 		return symbolutil.KeyEntryName(workspaceID, packageID, symbolKey)
 	}
-	filePath := strings.TrimSpace(job.FilePath)
-	symbolName := strings.TrimSpace(job.SymbolName)
-	if workspaceID != "" && filePath != "" && symbolName != "" {
-		return symbolutil.EntryName(workspaceID, filePath, symbolName)
-	}
 	return ""
 }
 

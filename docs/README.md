@@ -21,6 +21,7 @@ This is the canonical map for docs in this repository.
 - [docs/general/repoindex-pageindex.md](general/repoindex-pageindex.md) - PageIndex-inspired retrieval model for repoindex, DAG grep, and semantic comments.
 - [docs/general/core-package-coverage.md](general/core-package-coverage.md) - Machine-friendly core package coverage matrix.
 - [docs/general/refactor-scout.md](general/refactor-scout.md) - Local refactor scout/advisor workflow, seam vocabulary, language coverage, and ContextWiki fit.
+- [docs/general/frontend-verification.md](general/frontend-verification.md) - Focused TypeScript/frontend verification and unused-code gates.
 - [docs/general/code-search-evals.md](general/code-search-evals.md) - Stable code-search eval suites, checked-in policies, and wrapper commands.
 - [docs/general/retrieval-evals.md](general/retrieval-evals.md) - Stable ContextWiki retrieval eval suites, wrapper commands, and current expected bands.
 - [docs/general/tmux-collaboration.md](general/tmux-collaboration.md) - tmux-based live collaboration setup, structured pane inspection, and ContextWiki promotion flow.

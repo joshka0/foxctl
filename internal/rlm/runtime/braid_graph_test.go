@@ -4411,6 +4411,46 @@ func TestApplyGraphLevelSplits(t *testing.T) {
 	}
 }
 
+func TestApplyGraphLevelSplitsRecordsSplitFailure(t *testing.T) {
+	t.Parallel()
+
+	state := generalsolver.NewSolverState()
+	_ = generalsolver.AddWorkItem(state, generalsolver.WorkItem{
+		ID:        "n2",
+		Goal:      "Solve queries.",
+		Archetype: generalsolver.ArchetypeExplicitDAG,
+		Status:    generalsolver.StatusReady,
+		Payload: map[string]any{
+			"queries": []map[string]any{
+				{"prompt": "first"},
+				{"prompt": "second"},
+			},
+		},
+	})
+	_ = generalsolver.AddWorkItem(state, generalsolver.WorkItem{
+		ID:        "n2__parse",
+		Goal:      "Existing parse item.",
+		Archetype: generalsolver.ArchetypeExplicitDAG,
+		Status:    generalsolver.StatusPending,
+	})
+
+	applyGraphLevelSplits(state, nil)
+
+	if _, exists := state.Items["n2"]; !exists {
+		t.Fatal("n2 should remain after split failure")
+	}
+	if len(state.FailureLog) != 1 {
+		t.Fatalf("failure log entries=%d want 1", len(state.FailureLog))
+	}
+	entry := state.FailureLog[0]
+	if entry.WorkItemID != "n2" || !strings.Contains(entry.Reason, "graph_level_split") {
+		t.Fatalf("failure entry=%+v, want graph_level_split for n2", entry)
+	}
+	if stage, _ := entry.Feedback["stage"].(string); stage != "graph_level_split" {
+		t.Fatalf("failure feedback stage=%q want graph_level_split", stage)
+	}
+}
+
 func TestSeedSolverStateFromBraidGraph_WithSmallPayload(t *testing.T) {
 	t.Parallel()
 
@@ -4444,9 +4484,63 @@ func TestAttemptSplitHelperExecution_TooSmallToSplit(t *testing.T) {
 	handoff := BraidNodeHandoff{Node: node}
 
 	// No toolExec -> returns false.
-	result, ok := attemptSplitHelperExecution(context.TODO(), "phase", node, input, handoff, "", nil, nil)
+	result, ok, err := attemptSplitHelperExecution(context.TODO(), "phase", node, input, handoff, "", nil, nil)
+	if err != nil {
+		t.Fatalf("attemptSplitHelperExecution() error = %v", err)
+	}
 	if ok {
 		t.Fatalf("expected false for nil toolExec, got result=%q", result)
+	}
+}
+
+func TestAttemptSplitHelperExecutionReturnsErrorForChunkFailures(t *testing.T) {
+	t.Parallel()
+
+	helper := &HelperFactoryTools{Config: HelperFactoryConfig{
+		Language: HelperLanguageGo,
+		Attempts: 1,
+		PresetSource: `func Solve(input map[string]any) map[string]any {
+	return map[string]any{"ok": false}
+}`,
+	}}
+	toolExec := &replToolExecutor{
+		recorder:      NewRecorder(),
+		helperFactory: helper,
+	}
+	node := BraidNode{ID: "n_split", Kind: "solve", Question: "Solve split task."}
+	input := map[string]any{
+		"queries": []map[string]any{
+			{"prompt": "chunk 1"},
+			{"prompt": "chunk 2"},
+		},
+	}
+	handoff := BraidNodeHandoff{Node: node}
+	var output engine.EngineOutput
+
+	result, ok, err := attemptSplitHelperExecution(context.Background(), "phase", node, input, handoff, "", toolExec, &output)
+	if !ok {
+		t.Fatal("attemptSplitHelperExecution() did not attempt a query split")
+	}
+	if err == nil {
+		t.Fatalf("attemptSplitHelperExecution() error = nil, result=%q", result)
+	}
+	if !strings.Contains(err.Error(), "split execution failed for 2/2 chunks") {
+		t.Fatalf("error=%v, want split failure detail", err)
+	}
+	if !strings.Contains(result, "status: blocked") {
+		t.Fatalf("result=%q, want blocked summary", result)
+	}
+	if len(output.ToolCalls) != 2 {
+		t.Fatalf("tool calls=%d want 2", len(output.ToolCalls))
+	}
+	var sawSplitFailed bool
+	for _, event := range toolExec.recorder.Events() {
+		if event.Braid != nil && event.Braid.Status == "split_failed" {
+			sawSplitFailed = true
+		}
+	}
+	if !sawSplitFailed {
+		t.Fatal("missing split_failed braid event")
 	}
 }
 

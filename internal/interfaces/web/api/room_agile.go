@@ -37,6 +37,174 @@ type RoomAgileRequest struct {
 	Artifact      string `json:"artifact,omitempty"`       // artifact ref (sha256:...) for validation
 }
 
+type RoomAgileResponse struct {
+	Action    string            `json:"action"`
+	RoomID    string            `json:"room_id"`
+	Workspace string            `json:"workspace"`
+	Result    RoomAgileEnvelope `json:"result"`
+}
+
+type RoomAgileEnvelope struct {
+	Version int              `json:"version"`
+	Status  string           `json:"status"`
+	Command string           `json:"command"`
+	Data    roomAgileResult  `json:"data"`
+	Meta    RoomAgileMeta    `json:"meta"`
+	Error   RoomAgileNoError `json:"error"`
+}
+
+type RoomAgileMeta struct {
+	Source string `json:"source"`
+}
+
+type RoomAgileNoError struct{}
+
+type roomAgileMessageView struct {
+	ID               string `json:"id"`
+	Kind             string `json:"kind"`
+	Subject          string `json:"subject"`
+	Body             string `json:"body"`
+	Sender           string `json:"sender"`
+	Recipient        string `json:"recipient"`
+	RelatedMessageID string `json:"related_message_id"`
+	CreatedAt        string `json:"created_at"`
+}
+
+type roomAgileEpicView struct {
+	roomAgileMessageView
+	Title      string                `json:"title"`
+	Status     string                `json:"status"`
+	Finalized  bool                  `json:"finalized,omitempty"`
+	FinalBrief *roomAgileMessageView `json:"final_brief,omitempty"`
+	Closed     bool                  `json:"closed,omitempty"`
+}
+
+type roomAgileMilestoneView struct {
+	roomAgileMessageView
+	EpicID     string                `json:"epic_id"`
+	Title      string                `json:"title"`
+	Objective  string                `json:"objective"`
+	Status     string                `json:"status"`
+	Review     *roomAgileMessageView `json:"review,omitempty"`
+	Summarized bool                  `json:"summarized,omitempty"`
+}
+
+type roomAgileStoryView struct {
+	roomAgileMessageView
+	MilestoneID     string                 `json:"milestone_id"`
+	Title           string                 `json:"title"`
+	Status          string                 `json:"status"`
+	Validations     []roomAgileMessageView `json:"validations,omitempty"`
+	ValidationCount int                    `json:"validation_count,omitempty"`
+}
+
+type roomAgileEpicStatus struct {
+	EpicID           string `json:"epic_id"`
+	EpicStatus       string `json:"epic_status"`
+	MilestoneCount   int    `json:"milestone_count"`
+	StoryCount       int    `json:"story_count"`
+	OpenStoryCount   int    `json:"open_story_count"`
+	ValidatedStories int    `json:"validated_stories"`
+}
+
+type roomAgileHealth struct {
+	Status   string   `json:"status"`
+	Warnings []string `json:"warnings"`
+}
+
+type roomAgileNextAction struct {
+	Action  string `json:"action"`
+	Reason  string `json:"reason,omitempty"`
+	StoryID string `json:"story_id,omitempty"`
+	Title   string `json:"title,omitempty"`
+}
+
+type roomAgileEpicListResult struct {
+	RoomID string              `json:"room_id"`
+	Epics  []roomAgileEpicView `json:"epics"`
+	Count  int                 `json:"count"`
+}
+
+type roomAgileEpicResult struct {
+	RoomID string             `json:"room_id"`
+	Epic   *roomAgileEpicView `json:"epic"`
+}
+
+type roomAgileEpicPlanResult struct {
+	RoomID     string                   `json:"room_id"`
+	Epic       *roomAgileEpicView       `json:"epic"`
+	Status     roomAgileEpicStatus      `json:"status"`
+	Milestones []roomAgileMilestoneView `json:"milestones"`
+	Stories    []roomAgileStoryView     `json:"stories"`
+	Health     *roomAgileHealth         `json:"health,omitempty"`
+	Next       []roomAgileNextAction    `json:"next,omitempty"`
+}
+
+type roomAgileMilestoneListResult struct {
+	RoomID     string                   `json:"room_id"`
+	Milestones []roomAgileMilestoneView `json:"milestones"`
+	Count      int                      `json:"count"`
+}
+
+type roomAgileMilestoneResult struct {
+	RoomID    string                  `json:"room_id"`
+	Milestone *roomAgileMilestoneView `json:"milestone"`
+	Stories   []roomAgileStoryView    `json:"stories"`
+}
+
+type roomAgileStoryListResult struct {
+	RoomID  string               `json:"room_id"`
+	Stories []roomAgileStoryView `json:"stories"`
+	Count   int                  `json:"count"`
+}
+
+type roomAgileStoryResult struct {
+	RoomID string              `json:"room_id"`
+	Story  *roomAgileStoryView `json:"story"`
+}
+
+type roomAgileStoryStateResult struct {
+	Message roomAgileMessageView   `json:"message"`
+	Story   roomAgileStoryMutation `json:"story"`
+}
+
+type roomAgileStoryMutation struct {
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Status   string `json:"status"`
+	Previous string `json:"previous"`
+}
+
+type roomAgileStoryValidationResult struct {
+	Message roomAgileMessageView `json:"message"`
+	StoryID string               `json:"story_id"`
+}
+
+type roomAgileStoryProposeResult struct {
+	Message roomAgileMessageView `json:"message"`
+}
+
+type roomAgileStoryAcceptResult struct {
+	Message    roomAgileMessageView `json:"message"`
+	ProposalID string               `json:"proposal_id"`
+}
+
+type roomAgileResult interface {
+	roomAgileResult()
+}
+
+func (roomAgileEpicListResult) roomAgileResult()        {}
+func (roomAgileEpicResult) roomAgileResult()            {}
+func (roomAgileEpicPlanResult) roomAgileResult()        {}
+func (roomAgileMilestoneListResult) roomAgileResult()   {}
+func (roomAgileMilestoneResult) roomAgileResult()       {}
+func (roomAgileStoryListResult) roomAgileResult()       {}
+func (roomAgileStoryResult) roomAgileResult()           {}
+func (roomAgileStoryStateResult) roomAgileResult()      {}
+func (roomAgileStoryValidationResult) roomAgileResult() {}
+func (roomAgileStoryProposeResult) roomAgileResult()    {}
+func (roomAgileStoryAcceptResult) roomAgileResult()     {}
+
 func handleRoomAgileRoute(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string) {
 	if r.Method != http.MethodPost {
 		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -97,14 +265,7 @@ func handleRoomAgileRoute(w http.ResponseWriter, r *http.Request, cfg config.Con
 		return
 	}
 
-	mutatingActions := map[string]bool{
-		"story_state":    true,
-		"story_validate": true,
-		"story_propose":  true,
-		"story_accept":   true,
-	}
-
-	if mutatingActions[req.Action] {
+	if isRoomAgileMutatingAction(req.Action) {
 		result, err := buildRoomAgileMutatingResult(r.Context(), roomID, workspace, req, messages, store)
 		if err != nil {
 			if errors.Is(err, blackboard.ErrRoomNotFound) {
@@ -118,21 +279,7 @@ func handleRoomAgileRoute(w http.ResponseWriter, r *http.Request, cfg config.Con
 			httpError(w, status, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"action":    req.Action,
-			"room_id":   roomID,
-			"workspace": workspace,
-			"result": map[string]any{
-				"version": 1,
-				"status":  "ok",
-				"command": "foxctl.room.agile." + strings.ReplaceAll(req.Action, "_", "."),
-				"data":    result,
-				"meta": map[string]any{
-					"source": "web:/api/rooms/{room_id}/agile",
-				},
-				"error": map[string]any{},
-			},
-		})
+		writeJSON(w, http.StatusOK, roomAgileResponse(req.Action, roomID, workspace, result))
 		return
 	}
 
@@ -141,24 +288,37 @@ func handleRoomAgileRoute(w http.ResponseWriter, r *http.Request, cfg config.Con
 		httpError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"action":    req.Action,
-		"room_id":   roomID,
-		"workspace": workspace,
-		"result": map[string]any{
-			"version": 1,
-			"status":  "ok",
-			"command": "foxctl.room.agile." + strings.ReplaceAll(req.Action, "_", "."),
-			"data":    result,
-			"meta": map[string]any{
-				"source": "web:/api/rooms/{room_id}/agile",
-			},
-			"error": map[string]any{},
-		},
-	})
+	writeJSON(w, http.StatusOK, roomAgileResponse(req.Action, roomID, workspace, result))
 }
 
-func buildRoomAgileReadResult(roomID string, req RoomAgileRequest, messages []agent.BoardMessage) (map[string]any, error) {
+func isRoomAgileMutatingAction(action string) bool {
+	switch action {
+	case "story_state", "story_validate", "story_propose", "story_accept":
+		return true
+	default:
+		return false
+	}
+}
+
+func roomAgileResponse(action, roomID, workspace string, data roomAgileResult) RoomAgileResponse {
+	return RoomAgileResponse{
+		Action:    action,
+		RoomID:    roomID,
+		Workspace: workspace,
+		Result: RoomAgileEnvelope{
+			Version: 1,
+			Status:  "ok",
+			Command: "foxctl.room.agile." + strings.ReplaceAll(action, "_", "."),
+			Data:    data,
+			Meta: RoomAgileMeta{
+				Source: "web:/api/rooms/{room_id}/agile",
+			},
+			Error: RoomAgileNoError{},
+		},
+	}
+}
+
+func buildRoomAgileReadResult(roomID string, req RoomAgileRequest, messages []agent.BoardMessage) (roomAgileResult, error) {
 	epics := apiRoomAgileEpics(messages)
 	milestones := apiRoomAgileMilestones(messages)
 	stories := apiRoomAgileStories(messages)
@@ -166,64 +326,65 @@ func buildRoomAgileReadResult(roomID string, req RoomAgileRequest, messages []ag
 	switch req.Action {
 	case "epic_show":
 		if req.EpicID == "" {
-			return map[string]any{"room_id": roomID, "epics": epics, "count": len(epics)}, nil
+			return roomAgileEpicListResult{RoomID: roomID, Epics: epics, Count: len(epics)}, nil
 		}
-		epic := findByID(epics, req.EpicID)
+		epic := findRoomAgileEpicByID(epics, req.EpicID)
 		if epic == nil {
 			return nil, fmt.Errorf("epic %q not found", req.EpicID)
 		}
-		return map[string]any{"room_id": roomID, "epic": epic}, nil
+		return roomAgileEpicResult{RoomID: roomID, Epic: epic}, nil
 	case "epic_resume", "epic_health", "epic_next":
 		if req.EpicID == "" {
 			return nil, fmt.Errorf("epic_id is required for %s", req.Action)
 		}
-		epic := findByID(epics, req.EpicID)
+		epic := findRoomAgileEpicByID(epics, req.EpicID)
 		if epic == nil {
 			return nil, fmt.Errorf("epic %q not found", req.EpicID)
 		}
-		relatedMilestones := filterByField(milestones, "epic_id", req.EpicID)
+		relatedMilestones := filterMilestonesByEpicID(milestones, req.EpicID)
 		relatedStories := filterStoriesByEpic(stories, relatedMilestones)
 		status := apiRoomAgileEpicStatus(epic, relatedMilestones, relatedStories)
-		data := map[string]any{
-			"room_id":    roomID,
-			"epic":       epic,
-			"status":     status,
-			"milestones": relatedMilestones,
-			"stories":    relatedStories,
+		data := roomAgileEpicPlanResult{
+			RoomID:     roomID,
+			Epic:       epic,
+			Status:     status,
+			Milestones: relatedMilestones,
+			Stories:    relatedStories,
 		}
 		if req.Action == "epic_health" {
-			data["health"] = apiRoomAgileHealth(status)
+			health := apiRoomAgileHealth(status)
+			data.Health = &health
 		}
 		if req.Action == "epic_next" {
-			data["next"] = apiRoomAgileNext(status, relatedMilestones, relatedStories)
+			data.Next = apiRoomAgileNext(status, relatedMilestones, relatedStories)
 		}
 		return data, nil
 	case "milestone_show":
 		if req.MilestoneID == "" {
-			return map[string]any{"room_id": roomID, "milestones": milestones, "count": len(milestones)}, nil
+			return roomAgileMilestoneListResult{RoomID: roomID, Milestones: milestones, Count: len(milestones)}, nil
 		}
-		milestone := findByID(milestones, req.MilestoneID)
+		milestone := findRoomAgileMilestoneByID(milestones, req.MilestoneID)
 		if milestone == nil {
 			return nil, fmt.Errorf("milestone %q not found", req.MilestoneID)
 		}
-		return map[string]any{"room_id": roomID, "milestone": milestone, "stories": filterByField(stories, "milestone_id", req.MilestoneID)}, nil
+		return roomAgileMilestoneResult{RoomID: roomID, Milestone: milestone, Stories: filterStoriesByMilestoneID(stories, req.MilestoneID)}, nil
 	case "story_show":
 		if req.StoryID == "" {
-			return map[string]any{"room_id": roomID, "stories": stories, "count": len(stories)}, nil
+			return roomAgileStoryListResult{RoomID: roomID, Stories: stories, Count: len(stories)}, nil
 		}
-		story := findByID(stories, req.StoryID)
+		story := findRoomAgileStoryByID(stories, req.StoryID)
 		if story == nil {
 			return nil, fmt.Errorf("story %q not found", req.StoryID)
 		}
-		return map[string]any{"room_id": roomID, "story": story}, nil
+		return roomAgileStoryResult{RoomID: roomID, Story: story}, nil
 	default:
 		return nil, fmt.Errorf("unsupported room-agile action %q", req.Action)
 	}
 }
 
-func apiRoomAgileEpics(messages []agent.BoardMessage) []map[string]any {
+func apiRoomAgileEpics(messages []agent.BoardMessage) []roomAgileEpicView {
 	closed := map[string]bool{}
-	finalized := map[string]map[string]any{}
+	finalized := map[string]roomAgileMessageView{}
 	for _, msg := range messages {
 		switch msg.Kind {
 		case agent.BoardMessageKindEpicFinalize:
@@ -236,32 +397,33 @@ func apiRoomAgileEpics(messages []agent.BoardMessage) []map[string]any {
 			}
 		}
 	}
-	var out []map[string]any
+	var out []roomAgileEpicView
 	for _, msg := range messages {
 		if msg.Kind != agent.BoardMessageKindEpic {
 			continue
 		}
-		view := apiMessageView(msg)
-		view["title"] = strings.TrimSpace(strings.TrimPrefix(msg.Subject, "Epic:"))
+		view := roomAgileEpicView{
+			roomAgileMessageView: apiMessageView(msg),
+			Title:                strings.TrimSpace(strings.TrimPrefix(msg.Subject, "Epic:")),
+			Status:               "discovery",
+		}
 		if final, ok := finalized[msg.ID]; ok {
-			view["finalized"] = true
-			view["final_brief"] = final
-			view["status"] = "finalized"
-		} else {
-			view["status"] = "discovery"
+			view.Finalized = true
+			view.FinalBrief = &final
+			view.Status = "finalized"
 		}
 		if closed[msg.ID] {
-			view["closed"] = true
-			view["status"] = "closed"
+			view.Closed = true
+			view.Status = "closed"
 		}
 		out = append(out, view)
 	}
 	return out
 }
 
-func apiRoomAgileMilestones(messages []agent.BoardMessage) []map[string]any {
+func apiRoomAgileMilestones(messages []agent.BoardMessage) []roomAgileMilestoneView {
 	summarized := map[string]bool{}
-	reviewed := map[string]map[string]any{}
+	reviewed := map[string]roomAgileMessageView{}
 	for _, msg := range messages {
 		switch msg.Kind {
 		case agent.BoardMessageKindMilestoneSummary:
@@ -274,32 +436,34 @@ func apiRoomAgileMilestones(messages []agent.BoardMessage) []map[string]any {
 			}
 		}
 	}
-	var out []map[string]any
+	var out []roomAgileMilestoneView
 	for _, msg := range messages {
 		if msg.Kind != agent.BoardMessageKindMilestone {
 			continue
 		}
-		view := apiMessageView(msg)
 		meta := parseLineMeta(msg.Body)
-		view["epic_id"] = firstNonEmpty(meta["EpicID"], msg.RelatedMessageID)
-		view["title"] = strings.TrimSpace(strings.TrimPrefix(msg.Subject, "Milestone:"))
-		view["objective"] = firstNonEmpty(meta["Objective"], meta["Goal"])
-		view["status"] = "open"
-		if reviewed[msg.ID] != nil {
-			view["review"] = reviewed[msg.ID]
+		view := roomAgileMilestoneView{
+			roomAgileMessageView: apiMessageView(msg),
+			EpicID:               firstNonEmpty(meta["EpicID"], msg.RelatedMessageID),
+			Title:                strings.TrimSpace(strings.TrimPrefix(msg.Subject, "Milestone:")),
+			Objective:            firstNonEmpty(meta["Objective"], meta["Goal"]),
+			Status:               "open",
+		}
+		if review, ok := reviewed[msg.ID]; ok {
+			view.Review = &review
 		}
 		if summarized[msg.ID] {
-			view["summarized"] = true
-			view["status"] = "summarized"
+			view.Summarized = true
+			view.Status = "summarized"
 		}
 		out = append(out, view)
 	}
 	return out
 }
 
-func apiRoomAgileStories(messages []agent.BoardMessage) []map[string]any {
+func apiRoomAgileStories(messages []agent.BoardMessage) []roomAgileStoryView {
 	states := map[string]string{}
-	validations := map[string][]map[string]any{}
+	validations := map[string][]roomAgileMessageView{}
 	for _, msg := range messages {
 		switch msg.Kind {
 		case agent.BoardMessageKindStoryState:
@@ -313,34 +477,36 @@ func apiRoomAgileStories(messages []agent.BoardMessage) []map[string]any {
 			}
 		}
 	}
-	var out []map[string]any
+	var out []roomAgileStoryView
 	for _, msg := range messages {
 		if msg.Kind != agent.BoardMessageKindStory {
 			continue
 		}
-		view := apiMessageView(msg)
-		view["milestone_id"] = msg.RelatedMessageID
-		view["title"] = strings.TrimSpace(strings.TrimPrefix(msg.Subject, "Story:"))
-		view["status"] = firstNonEmpty(states[msg.ID], "accepted")
+		view := roomAgileStoryView{
+			roomAgileMessageView: apiMessageView(msg),
+			MilestoneID:          msg.RelatedMessageID,
+			Title:                strings.TrimSpace(strings.TrimPrefix(msg.Subject, "Story:")),
+			Status:               firstNonEmpty(states[msg.ID], "accepted"),
+		}
 		if vals := validations[msg.ID]; len(vals) > 0 {
-			view["validations"] = vals
-			view["validation_count"] = len(vals)
+			view.Validations = vals
+			view.ValidationCount = len(vals)
 		}
 		out = append(out, view)
 	}
 	return out
 }
 
-func apiMessageView(msg agent.BoardMessage) map[string]any {
-	return map[string]any{
-		"id":                 msg.ID,
-		"kind":               string(msg.Kind),
-		"subject":            msg.Subject,
-		"body":               msg.Body,
-		"sender":             msg.Sender,
-		"recipient":          msg.Recipient,
-		"related_message_id": msg.RelatedMessageID,
-		"created_at":         msg.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+func apiMessageView(msg agent.BoardMessage) roomAgileMessageView {
+	return roomAgileMessageView{
+		ID:               msg.ID,
+		Kind:             string(msg.Kind),
+		Subject:          msg.Subject,
+		Body:             msg.Body,
+		Sender:           msg.Sender,
+		Recipient:        msg.Recipient,
+		RelatedMessageID: msg.RelatedMessageID,
+		CreatedAt:        msg.CreatedAt.Format(time.RFC3339),
 	}
 }
 
@@ -360,93 +526,124 @@ func parseLineMeta(body string) map[string]string {
 	return out
 }
 
-func findByID(items []map[string]any, id string) map[string]any {
-	for _, item := range items {
-		if fmt.Sprint(item["id"]) == id {
-			return item
+func findRoomAgileEpicByID(items []roomAgileEpicView, id string) *roomAgileEpicView {
+	for i := range items {
+		if items[i].ID == id {
+			return &items[i]
 		}
 	}
 	return nil
 }
 
-func filterByField(items []map[string]any, field, value string) []map[string]any {
-	var out []map[string]any
+func findRoomAgileMilestoneByID(items []roomAgileMilestoneView, id string) *roomAgileMilestoneView {
+	for i := range items {
+		if items[i].ID == id {
+			return &items[i]
+		}
+	}
+	return nil
+}
+
+func findRoomAgileStoryByID(items []roomAgileStoryView, id string) *roomAgileStoryView {
+	for i := range items {
+		if items[i].ID == id {
+			return &items[i]
+		}
+	}
+	return nil
+}
+
+func filterMilestonesByEpicID(items []roomAgileMilestoneView, epicID string) []roomAgileMilestoneView {
+	var out []roomAgileMilestoneView
 	for _, item := range items {
-		if fmt.Sprint(item[field]) == value {
+		if item.EpicID == epicID {
 			out = append(out, item)
 		}
 	}
 	return out
 }
 
-func filterStoriesByEpic(stories, milestones []map[string]any) []map[string]any {
-	milestoneIDs := map[string]struct{}{}
-	for _, milestone := range milestones {
-		if id := fmt.Sprint(milestone["id"]); id != "" {
-			milestoneIDs[id] = struct{}{}
+func filterStoriesByMilestoneID(items []roomAgileStoryView, milestoneID string) []roomAgileStoryView {
+	var out []roomAgileStoryView
+	for _, item := range items {
+		if item.MilestoneID == milestoneID {
+			out = append(out, item)
 		}
 	}
-	var out []map[string]any
+	return out
+}
+
+func filterStoriesByEpic(stories []roomAgileStoryView, milestones []roomAgileMilestoneView) []roomAgileStoryView {
+	milestoneIDs := map[string]struct{}{}
+	for _, milestone := range milestones {
+		if milestone.ID != "" {
+			milestoneIDs[milestone.ID] = struct{}{}
+		}
+	}
+	var out []roomAgileStoryView
 	for _, story := range stories {
-		if _, ok := milestoneIDs[fmt.Sprint(story["milestone_id"])]; ok {
+		if _, ok := milestoneIDs[story.MilestoneID]; ok {
 			out = append(out, story)
 		}
 	}
 	return out
 }
 
-func apiRoomAgileEpicStatus(epic map[string]any, milestones, stories []map[string]any) map[string]any {
+func apiRoomAgileEpicStatus(epic *roomAgileEpicView, milestones []roomAgileMilestoneView, stories []roomAgileStoryView) roomAgileEpicStatus {
 	openStories := 0
 	validatedStories := 0
 	for _, story := range stories {
-		status := fmt.Sprint(story["status"])
-		if status != "done" && status != "validated" && status != "waived" {
+		if story.Status != "done" && story.Status != "validated" && story.Status != "waived" {
 			openStories++
 		}
-		if count, ok := story["validation_count"].(int); ok && count > 0 {
+		if story.ValidationCount > 0 {
 			validatedStories++
 		}
 	}
-	return map[string]any{
-		"epic_id":           epic["id"],
-		"epic_status":       epic["status"],
-		"milestone_count":   len(milestones),
-		"story_count":       len(stories),
-		"open_story_count":  openStories,
-		"validated_stories": validatedStories,
+	return roomAgileEpicStatus{
+		EpicID:           epic.ID,
+		EpicStatus:       epic.Status,
+		MilestoneCount:   len(milestones),
+		StoryCount:       len(stories),
+		OpenStoryCount:   openStories,
+		ValidatedStories: validatedStories,
 	}
 }
 
-func apiRoomAgileHealth(status map[string]any) map[string]any {
+func apiRoomAgileHealth(status roomAgileEpicStatus) roomAgileHealth {
 	var warnings []string
-	if status["epic_status"] == "discovery" {
+	if status.EpicStatus == "discovery" {
 		warnings = append(warnings, "epic_not_finalized")
 	}
-	if status["milestone_count"] == 0 {
+	if status.MilestoneCount == 0 {
 		warnings = append(warnings, "no_milestones")
 	}
-	if status["story_count"] == 0 {
+	if status.StoryCount == 0 {
 		warnings = append(warnings, "no_stories")
 	}
-	return map[string]any{
-		"status":   map[bool]string{true: "healthy", false: "needs_attention"}[len(warnings) == 0],
-		"warnings": warnings,
+	healthStatus := "needs_attention"
+	if len(warnings) == 0 {
+		healthStatus = "healthy"
+	}
+	return roomAgileHealth{
+		Status:   healthStatus,
+		Warnings: warnings,
 	}
 }
 
-func apiRoomAgileNext(status map[string]any, milestones, stories []map[string]any) []map[string]any {
-	if status["epic_status"] == "discovery" {
-		return []map[string]any{{"action": "finalize_epic", "reason": "epic is still in discovery"}}
+func apiRoomAgileNext(status roomAgileEpicStatus, milestones []roomAgileMilestoneView, stories []roomAgileStoryView) []roomAgileNextAction {
+	if status.EpicStatus == "discovery" {
+		return []roomAgileNextAction{{Action: "finalize_epic", Reason: "epic is still in discovery"}}
 	}
 	if len(milestones) == 0 {
-		return []map[string]any{{"action": "start_milestone", "reason": "no milestones exist"}}
+		return []roomAgileNextAction{{Action: "start_milestone", Reason: "no milestones exist"}}
 	}
 	for _, story := range stories {
-		if fmt.Sprint(story["status"]) == "accepted" {
-			return []map[string]any{{"action": "start_story", "story_id": story["id"], "title": story["title"]}}
+		if story.Status == "accepted" {
+			return []roomAgileNextAction{{Action: "start_story", StoryID: story.ID, Title: story.Title}}
 		}
 	}
-	return []map[string]any{{"action": "review_milestone", "reason": "no accepted stories are waiting to start"}}
+	return []roomAgileNextAction{{Action: "review_milestone", Reason: "no accepted stories are waiting to start"}}
 }
 
 // validStoryStates is the set of allowed lifecycle states for a story.
@@ -467,7 +664,7 @@ func validateStoryState(target string) error {
 // buildRoomAgileMutatingResult handles the four mutating story-lifecycle actions
 // (story_state, story_validate, story_propose, story_accept). Each action
 // builds a BoardMessage, persists it via store.SendMessage, and returns a
-// result map in the standard envelope shape.
+// typed result in the standard envelope shape.
 func buildRoomAgileMutatingResult(
 	ctx context.Context,
 	roomID string,
@@ -475,7 +672,7 @@ func buildRoomAgileMutatingResult(
 	req RoomAgileRequest,
 	messages []agent.BoardMessage,
 	store blackboard.BoardStore,
-) (map[string]any, error) {
+) (roomAgileResult, error) {
 	switch req.Action {
 	case "story_state":
 		return handleStoryState(ctx, roomID, workspace, req, messages, store)
@@ -496,25 +693,24 @@ func handleStoryState(
 	req RoomAgileRequest,
 	messages []agent.BoardMessage,
 	store blackboard.BoardStore,
-) (map[string]any, error) {
+) (roomAgileStoryStateResult, error) {
 	if req.StoryID == "" {
-		return nil, fmt.Errorf("story_id is required for story_state")
+		return roomAgileStoryStateResult{}, fmt.Errorf("story_id is required for story_state")
 	}
 	if req.State == "" {
-		return nil, fmt.Errorf("state is required for story_state")
+		return roomAgileStoryStateResult{}, fmt.Errorf("state is required for story_state")
 	}
 	if err := validateStoryState(req.State); err != nil {
-		return nil, err
+		return roomAgileStoryStateResult{}, err
 	}
 
-	// Look up the story in existing messages.
 	stories := apiRoomAgileStories(messages)
-	story := findByID(stories, req.StoryID)
+	story := findRoomAgileStoryByID(stories, req.StoryID)
 	if story == nil {
-		return nil, fmt.Errorf("story %q not found", req.StoryID)
+		return roomAgileStoryStateResult{}, fmt.Errorf("story %q not found", req.StoryID)
 	}
 
-	oldStatus := fmt.Sprint(story["status"])
+	oldStatus := story.Status
 
 	body := fmt.Sprintf("State: %s\nPreviousStatus: %s", req.State, oldStatus)
 	if req.Notes != "" {
@@ -535,16 +731,16 @@ func handleStoryState(
 		CreatedAt:        time.Now().UTC(),
 	}
 	if err := store.SendMessage(ctx, msg); err != nil {
-		return nil, fmt.Errorf("failed to send story_state message: %w", err)
+		return roomAgileStoryStateResult{}, fmt.Errorf("failed to send story_state message: %w", err)
 	}
 
-	return map[string]any{
-		"message": apiMessageView(*msg),
-		"story": map[string]any{
-			"id":       story["id"],
-			"title":    story["title"],
-			"status":   req.State,
-			"previous": oldStatus,
+	return roomAgileStoryStateResult{
+		Message: apiMessageView(*msg),
+		Story: roomAgileStoryMutation{
+			ID:       story.ID,
+			Title:    story.Title,
+			Status:   req.State,
+			Previous: oldStatus,
 		},
 	}, nil
 }
@@ -555,22 +751,21 @@ func handleStoryValidate(
 	req RoomAgileRequest,
 	messages []agent.BoardMessage,
 	store blackboard.BoardStore,
-) (map[string]any, error) {
+) (roomAgileStoryValidationResult, error) {
 	if req.StoryID == "" {
-		return nil, fmt.Errorf("story_id is required for story_validate")
+		return roomAgileStoryValidationResult{}, fmt.Errorf("story_id is required for story_validate")
 	}
 	if req.Verdict == "" {
-		return nil, fmt.Errorf("verdict is required for story_validate")
+		return roomAgileStoryValidationResult{}, fmt.Errorf("verdict is required for story_validate")
 	}
 	if req.ValidatorType == "" {
-		return nil, fmt.Errorf("validator_type is required for story_validate")
+		return roomAgileStoryValidationResult{}, fmt.Errorf("validator_type is required for story_validate")
 	}
 
-	// Look up the story in existing messages.
 	stories := apiRoomAgileStories(messages)
-	story := findByID(stories, req.StoryID)
+	story := findRoomAgileStoryByID(stories, req.StoryID)
 	if story == nil {
-		return nil, fmt.Errorf("story %q not found", req.StoryID)
+		return roomAgileStoryValidationResult{}, fmt.Errorf("story %q not found", req.StoryID)
 	}
 
 	var bodyLines []string
@@ -600,12 +795,12 @@ func handleStoryValidate(
 		CreatedAt:        time.Now().UTC(),
 	}
 	if err := store.SendMessage(ctx, msg); err != nil {
-		return nil, fmt.Errorf("failed to send story_validate message: %w", err)
+		return roomAgileStoryValidationResult{}, fmt.Errorf("failed to send story_validate message: %w", err)
 	}
 
-	return map[string]any{
-		"message":  apiMessageView(*msg),
-		"story_id": req.StoryID,
+	return roomAgileStoryValidationResult{
+		Message: apiMessageView(*msg),
+		StoryID: req.StoryID,
 	}, nil
 }
 
@@ -614,12 +809,12 @@ func handleStoryPropose(
 	roomID, workspace string,
 	req RoomAgileRequest,
 	store blackboard.BoardStore,
-) (map[string]any, error) {
+) (roomAgileStoryProposeResult, error) {
 	if req.MilestoneID == "" {
-		return nil, fmt.Errorf("milestone_id is required for story_propose")
+		return roomAgileStoryProposeResult{}, fmt.Errorf("milestone_id is required for story_propose")
 	}
 	if req.Title == "" {
-		return nil, fmt.Errorf("title is required for story_propose")
+		return roomAgileStoryProposeResult{}, fmt.Errorf("title is required for story_propose")
 	}
 
 	var bodyLines []string
@@ -645,12 +840,10 @@ func handleStoryPropose(
 		CreatedAt:        time.Now().UTC(),
 	}
 	if err := store.SendMessage(ctx, msg); err != nil {
-		return nil, fmt.Errorf("failed to send story_propose message: %w", err)
+		return roomAgileStoryProposeResult{}, fmt.Errorf("failed to send story_propose message: %w", err)
 	}
 
-	return map[string]any{
-		"message": apiMessageView(*msg),
-	}, nil
+	return roomAgileStoryProposeResult{Message: apiMessageView(*msg)}, nil
 }
 
 func handleStoryAccept(
@@ -659,9 +852,9 @@ func handleStoryAccept(
 	req RoomAgileRequest,
 	messages []agent.BoardMessage,
 	store blackboard.BoardStore,
-) (map[string]any, error) {
+) (roomAgileStoryAcceptResult, error) {
 	if req.ProposalID == "" {
-		return nil, fmt.Errorf("proposal_id is required for story_accept")
+		return roomAgileStoryAcceptResult{}, fmt.Errorf("proposal_id is required for story_accept")
 	}
 
 	// Find the proposal message by scanning raw messages.
@@ -673,7 +866,7 @@ func handleStoryAccept(
 		}
 	}
 	if proposal == nil {
-		return nil, fmt.Errorf("proposal %q not found", req.ProposalID)
+		return roomAgileStoryAcceptResult{}, fmt.Errorf("proposal %q not found", req.ProposalID)
 	}
 
 	msg := &agent.BoardMessage{
@@ -690,11 +883,11 @@ func handleStoryAccept(
 		CreatedAt:        time.Now().UTC(),
 	}
 	if err := store.SendMessage(ctx, msg); err != nil {
-		return nil, fmt.Errorf("failed to send story_accept message: %w", err)
+		return roomAgileStoryAcceptResult{}, fmt.Errorf("failed to send story_accept message: %w", err)
 	}
 
-	return map[string]any{
-		"message":     apiMessageView(*msg),
-		"proposal_id": req.ProposalID,
+	return roomAgileStoryAcceptResult{
+		Message:    apiMessageView(*msg),
+		ProposalID: req.ProposalID,
 	}, nil
 }

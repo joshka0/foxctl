@@ -23,7 +23,8 @@ description: "Run durable multi-agent rooms with transport-first delivery, parti
 - CLI, web/API, `gui-agent`, mux panes, and chat adapters are clients or presentation layers on top of that kernel.
 - `foxctl room` is the source of truth.
 - room-scoped clients should use `GET /api/rooms/{room-id}/events?workspace_id=...` instead of subscribing to the global `/api/events` feed and filtering `room.message` client-side.
-- room member payloads expose `delivery_binding` as the authoritative routing/binding record; older top-level fields like `backend`, `session`, `pane_id`, `transport_endpoint`, and `transport_kind` are compatibility mirrors while clients migrate.
+- room member payloads expose `delivery_binding` as the authoritative routing/binding record; older top-level fields like `backend`, `session`, `pane_id`, `transport_endpoint`, and `transport_kind` are not emitted in room member API responses.
+- use `/members/{actor-id}/binding` with `delivery_binding` for transport updates; the older `/members/{actor-id}/transport` route has been removed.
 - `room send` writes durable chat messages and triggers participant transport first; mux viewer delivery is secondary.
 - **`room send` routing:** prefer **`--to <participant-id>`** for anything meant for **one** agent so relay and inbox routing stay unambiguous; omit `--to` only when you **intentionally** broadcast to everyone else in the room.
 - **`room send` identity:** prefer **`--sender <your-participant-id>`** whenever the shell is not clearly bound to a mux pane (running outside tmux/zellij, scripts, or MCP); when you are inside the correct pane, sender can be omitted because foxctl infers it.

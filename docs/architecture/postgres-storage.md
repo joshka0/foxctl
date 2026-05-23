@@ -70,7 +70,7 @@ Current PostgreSQL-oriented deployment overlays use:
 - `FOXCTL_CAS_S3_FORCE_PATH_STYLE`
 - `FOXCTL_CAS_S3_DISABLE_SSL`
 
-Legacy base manifests may still show older env keys (`FOXCTL_CAS_BACKEND`, `FOXCTL_CAS_BUCKET`); these are documented as historical drift in `docs/guides/kubernetes.md`.
+Historical manifests may show older env keys (`FOXCTL_CAS_BACKEND`, `FOXCTL_CAS_BUCKET`), but current Kubernetes manifests should use `FOXCTL_CAS_DRIVER` and `FOXCTL_CAS_S3_*`.
 
 ## Teams conversation references
 

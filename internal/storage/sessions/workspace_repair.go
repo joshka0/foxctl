@@ -3,10 +3,8 @@ package sessions
 import (
 	"context"
 	"os"
-	"path/filepath"
-	"strings"
 
-	ws "github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/storage/workspacerepair"
 )
 
 // repairWorkspaceIDs best-effort backfills stable workspace IDs for legacy rows.
@@ -69,98 +67,33 @@ func (s *Store) repairWorkspaceIDs(ctx context.Context) {
 		if err := rows.Scan(&raw); err != nil {
 			continue
 		}
-		raw = strings.TrimSpace(raw)
-		if raw == "" {
-			continue
-		}
-
-		// Only compute IDs from paths that exist locally; hashing stale absolute paths
-		// would make future queries less likely to match.
-		effective := raw
-		repaired := repairHomePath(raw, userHome)
-		if repaired != raw && pathExists(repaired) {
-			effective = repaired
-		}
-		if !pathExists(effective) {
-			continue
-		}
-
-		workspaceID := ws.ID(effective)
-		if workspaceID == "" || workspaceID == raw {
+		resolved, ok := workspacerepair.ResolvePathWorkspace(raw, userHome)
+		if !ok {
 			continue
 		}
 
 		// Best-effort updates: keep old paths intact unless we can safely repair them.
-		if effective != raw {
+		if resolved.EffectivePath != resolved.RawPath {
 			if _, err := s.db.ExecContext(ctx, `
 				UPDATE sessions
 				SET workspace_id = ?, workspace_path = ?
-				WHERE workspace_id = '' AND workspace_path = ?`, workspaceID, effective, raw); err != nil {
-				logger.Warn().Err(err).Str("from", raw).Str("to", workspaceID).Msg("sessions: workspace repair update failed")
+				WHERE workspace_id = '' AND workspace_path = ?`, resolved.WorkspaceID, resolved.EffectivePath, resolved.RawPath); err != nil {
+				logger.Warn().Err(err).Str("from", resolved.RawPath).Str("to", resolved.WorkspaceID).Msg("sessions: workspace repair update failed")
 				continue
 			}
 		} else {
 			if _, err := s.db.ExecContext(ctx, `
 				UPDATE sessions
 				SET workspace_id = ?
-				WHERE workspace_id = '' AND workspace_path = ?`, workspaceID, raw); err != nil {
-				logger.Warn().Err(err).Str("from", raw).Str("to", workspaceID).Msg("sessions: workspace repair update failed")
+				WHERE workspace_id = '' AND workspace_path = ?`, resolved.WorkspaceID, resolved.RawPath); err != nil {
+				logger.Warn().Err(err).Str("from", resolved.RawPath).Str("to", resolved.WorkspaceID).Msg("sessions: workspace repair update failed")
 				continue
 			}
 		}
 
 		// Keep session_edges.workspace aligned when it stores a legacy workspace path.
-		_, _ = s.db.ExecContext(ctx, `UPDATE session_edges SET workspace = ? WHERE workspace = ?`, workspaceID, raw)
+		_, _ = s.db.ExecContext(ctx, `UPDATE session_edges SET workspace = ? WHERE workspace = ?`, resolved.WorkspaceID, resolved.RawPath)
 
-		logger.Info().Str("from", raw).Str("to", workspaceID).Msg("sessions: repaired workspace IDs")
+		logger.Info().Str("from", resolved.RawPath).Str("to", resolved.WorkspaceID).Msg("sessions: repaired workspace IDs")
 	}
-}
-
-func pathExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
-}
-
-func repairHomePath(raw, userHome string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return raw
-	}
-	if userHome == "" {
-		return raw
-	}
-
-	// Expand "~" for legacy config values.
-	if strings.HasPrefix(raw, "~") {
-		trimmed := strings.TrimPrefix(raw, "~")
-		trimmed = strings.TrimPrefix(trimmed, string(filepath.Separator))
-		return filepath.Join(userHome, trimmed)
-	}
-
-	// Repair stale macOS home paths after a username change:
-	//   raw:      /Users/olduser/...
-	//   userHome: /Users/newuser
-	if strings.HasPrefix(raw, "/Users/") && strings.HasPrefix(userHome, "/Users/") {
-		rest := strings.TrimPrefix(raw, "/Users/")
-		oldUser, remainder, _ := strings.Cut(rest, "/")
-		if oldUser == "" {
-			return raw
-		}
-
-		homeRest := strings.TrimPrefix(userHome, "/Users/")
-		newUser, _, _ := strings.Cut(homeRest, "/")
-		if newUser == "" || newUser == oldUser {
-			return raw
-		}
-
-		// Only rewrite if the old user directory is gone.
-		if _, err := os.Stat(filepath.Join("/Users", oldUser)); os.IsNotExist(err) {
-			if remainder == "" {
-				return filepath.Join("/Users", newUser)
-			}
-			return filepath.Join("/Users", newUser, remainder)
-		}
-	}
-
-	return raw
 }

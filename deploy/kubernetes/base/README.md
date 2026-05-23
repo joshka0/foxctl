@@ -32,7 +32,7 @@ kubectl apply -k deploy/kubernetes/overlays/postgres
 | File | Role |
 |------|------|
 | `deployment.yaml` | Main `foxctl` deployment |
-| `configmap.yaml` | Base env vars, including some legacy defaults |
+| `configmap.yaml` | Base env vars |
 | `workspace-deployment.yaml` | Optional workspace pod with git-sync sidecar |
 | `embedding-worker.yaml` | Background embedding worker deployment |
 | `cronjobs.yaml` | Scheduled maintenance workloads |
@@ -42,8 +42,7 @@ kubectl apply -k deploy/kubernetes/overlays/postgres
 ## Important caveats
 
 - The base `ConfigMap` still defaults `FOXCTL_DB_DRIVER` to `turso`.
-- The base also still uses older CAS key names like `FOXCTL_CAS_BACKEND` and
-  `FOXCTL_CAS_BUCKET`.
+- CAS configuration uses the runtime key names read by `internal/storage/cas`.
 - Production-oriented PostgreSQL and newer CAS settings live in
   `deploy/kubernetes/overlays/postgres`.
 - Local development overrides live in `deploy/kubernetes/overlays/local`.

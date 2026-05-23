@@ -59,9 +59,12 @@ import type {
   FlowNodeKind,
   FlowNode as FlowNodeType,
   FlowEdge as FlowEdgeType,
-  RoomStatus,
   FlowStatusResponse,
-} from '@/api/types'
+} from '@/types/flow'
+import { isFlowStatusResponse } from '@/types/flow'
+import type {
+  RoomStatus,
+} from '@foxctl/data/types'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -103,6 +106,17 @@ const NODE_KINDS: { kind: FlowNodeKind; label: string; icon: React.ReactNode; de
 const nodeTypes = { flowNode: FlowCanvasNode }
 const edgeTypes = { flowEdge: FlowCanvasEdge }
 
+function fallbackNodePosition(nodeId: string, index: number): { x: number; y: number } {
+  let hash = 0
+  for (let i = 0; i < nodeId.length; i += 1) {
+    hash = (hash * 31 + nodeId.charCodeAt(i)) >>> 0
+  }
+  return {
+    x: 80 + ((hash + index * 97) % 400),
+    y: 80 + (((hash >>> 3) + index * 53) % 300),
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -127,19 +141,20 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
     queryFn: () => getFlow(flowId),
   })
 
-  const flowRoomId = (flowData as unknown as { room_id?: string })?.room_id
+  const flowRoomId = flowData?.room_id
 
   // SSE stream for flow status (replaces polling)
   useEffect(() => {
     if (mode !== 'runtime') {
-      setStatusData(null)
       return
     }
     const es = new EventSource(`/api/flows/${encodeURIComponent(flowId)}/events?workspace=.`,)
     es.onmessage = (ev) => {
       try {
-        const parsed = JSON.parse(ev.data) as FlowStatusResponse
-        setStatusData(parsed)
+        const parsed: unknown = JSON.parse(ev.data)
+        if (isFlowStatusResponse(parsed)) {
+          setStatusData(parsed)
+        }
       } catch {
         // ignore malformed events
       }
@@ -151,6 +166,7 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
       es.close()
     }
   }, [mode, flowId])
+  const activeStatusData = mode === 'runtime' ? statusData : null
 
   // Room list for linking
   const { data: roomsData } = useQuery({
@@ -176,13 +192,13 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
   useEffect(() => {
     if (!flowData) return
 
-    const apiNodes: FlowNodeType[] = (flowData as unknown as { nodes: FlowNodeType[] }).nodes ?? []
-    const apiEdges: FlowEdgeType[] = (flowData as unknown as { edges: FlowEdgeType[] }).edges ?? []
+    const apiNodes: FlowNodeType[] = flowData.nodes
+    const apiEdges: FlowEdgeType[] = flowData.edges
 
-    const rfNodes: Node<CanvasNodeData>[] = apiNodes.map((n) => ({
+    const rfNodes: Node<CanvasNodeData>[] = apiNodes.map((n, index) => ({
       id: n.id,
       type: 'flowNode',
-      position: n.position ?? { x: Math.random() * 400, y: Math.random() * 300 },
+      position: n.position ?? fallbackNodePosition(n.id, index),
       data: {
         label: n.label,
         kind: n.kind,
@@ -204,15 +220,15 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
 
     setNodes(rfNodes)
     setEdges(rfEdges)
-  }, [flowData, setNodes, setEdges])
+  }, [flowData, flowId, setNodes, setEdges])
 
   // Overlay runtime status onto nodes/edges
   useEffect(() => {
-    if (!statusData || mode !== 'runtime') return
+    if (!activeStatusData) return
 
     setNodes((prev) =>
       prev.map((n) => {
-        const nodeStatus = statusData.nodes.find((ns) => ns.id === n.id)
+        const nodeStatus = activeStatusData.nodes.find((ns) => ns.id === n.id)
         if (!nodeStatus) return n
         return {
           ...n,
@@ -229,7 +245,7 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
 
     setEdges((prev) =>
       prev.map((e) => {
-        const edgeStatus = statusData.edges.find((es) => es.id === e.id)
+        const edgeStatus = activeStatusData.edges.find((es) => es.id === e.id)
         if (!edgeStatus) return { ...e, data: { ...e.data, active: false } }
         return {
           ...e,
@@ -241,7 +257,7 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
         }
       }),
     )
-  }, [statusData, mode, setNodes, setEdges])
+  }, [activeStatusData, setNodes, setEdges])
 
   // Mutations
   const addNodeMutation = useMutation({
@@ -331,16 +347,17 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
   // Add node from palette
   const handleAddNode = (kind: FlowNodeKind, label: string) => {
     const viewport = rfInstance?.getViewport() ?? { x: 0, y: 0, zoom: 1 }
+    const offset = (nodes.length % 5) * 24
     const position = {
-      x: -viewport.x / viewport.zoom + 100 + Math.random() * 50,
-      y: -viewport.y / viewport.zoom + 100 + Math.random() * 50,
+      x: -viewport.x / viewport.zoom + 100 + offset,
+      y: -viewport.y / viewport.zoom + 100 + offset,
     }
     addNodeMutation.mutate({ kind, label, position })
     setShowPalette(false)
   }
 
-  const isRunning = statusData?.state === 'running'
-  const isPaused = statusData?.state === 'paused'
+  const isRunning = activeStatusData?.state === 'running'
+  const isPaused = activeStatusData?.state === 'paused'
 
   if (isLoading) {
     return (
@@ -407,7 +424,7 @@ export function FlowCanvas({ flowId, flowName, onBack }: FlowCanvasProps) {
               <span className="text-xs font-bold truncate max-w-[160px]"
               >{flowName}
               </span>
-              <FlowStateBadge state={statusData?.state ?? (flowData as unknown as { state: string })?.state ?? 'draft'}
+              <FlowStateBadge state={activeStatusData?.state ?? flowData?.state ?? 'draft'}
               />
             </div>
           </Panel>

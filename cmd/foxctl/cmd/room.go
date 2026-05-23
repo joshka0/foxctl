@@ -2424,9 +2424,11 @@ func runRoomCreateWithProvision(cmd *cobra.Command, workspace, roomID, title, de
 		members = ensureRoomCoordinatorMember(members, agent.RoomMember{
 			ActorID: identity.Sender,
 			Role:    "coordinator",
-			Backend: identity.Backend,
-			Session: identity.Session,
-			PaneID:  identity.PaneID,
+			DeliveryBinding: &agent.RoomDeliveryBinding{
+				MuxBackend: identity.Backend,
+				MuxSession: identity.Session,
+				MuxPaneID:  identity.PaneID,
+			},
 		})
 	}
 	memberSpecs = mergeProvisionSpecsWithMembers(memberSpecs, members)
@@ -2503,15 +2505,8 @@ func ensureRoomCoordinatorMember(existing []agent.RoomMember, member agent.RoomM
 		if strings.TrimSpace(out[i].Role) == "" {
 			out[i].Role = "coordinator"
 		}
-		if out[i].Backend == "" {
-			out[i].Backend = member.Backend
-		}
-		if out[i].Session == "" {
-			out[i].Session = member.Session
-		}
-		if out[i].PaneID == "" {
-			out[i].PaneID = member.PaneID
-		}
+		out[i].DeliveryBinding = mergeRoomDeliveryBinding(out[i].DeliveryBinding, member.DeliveryBinding)
+		out[i] = normalizeRoomMember(out[i])
 		return out
 	}
 	return append(out, member)
@@ -16034,6 +16029,13 @@ func runRoomJoin(cmd *cobra.Command, workspace, roomID, actorID, role, backend, 
 		ActorID: strings.TrimSpace(actorID),
 		Role:    strings.TrimSpace(role),
 	}
+	var bindingUpdate *agent.RoomDeliveryBinding
+	ensureBindingUpdate := func() *agent.RoomDeliveryBinding {
+		if bindingUpdate == nil {
+			bindingUpdate = &agent.RoomDeliveryBinding{}
+		}
+		return bindingUpdate
+	}
 	if current || member.ActorID == "" {
 		identity, resolveErr := resolveRoomSender(cmd.Context(), actorID)
 		if resolveErr != nil {
@@ -16045,33 +16047,28 @@ func runRoomJoin(cmd *cobra.Command, workspace, roomID, actorID, role, backend, 
 			member.ActorID = identity.Sender
 		}
 		if current {
-			member.Backend = identity.Backend
-			member.Session = identity.Session
-			member.PaneID = identity.PaneID
+			binding := ensureBindingUpdate()
+			binding.MuxBackend = identity.Backend
+			binding.MuxSession = identity.Session
+			binding.MuxPaneID = identity.PaneID
 		}
 	}
 	if value := strings.TrimSpace(backend); value != "" {
-		member.Backend = strings.ToLower(value)
+		ensureBindingUpdate().MuxBackend = strings.ToLower(value)
 	}
 	if value := strings.TrimSpace(session); value != "" {
-		member.Session = value
+		ensureBindingUpdate().MuxSession = value
 	}
 	if value := strings.TrimSpace(paneID); value != "" {
-		member.PaneID = value
+		ensureBindingUpdate().MuxPaneID = value
 	}
 	if value := strings.TrimSpace(transportEndpoint); value != "" {
-		member.TransportEndpoint = value
+		ensureBindingUpdate().TransportEndpoint = value
 	}
 	if value := strings.TrimSpace(transportKind); value != "" {
-		member.TransportKind = strings.ToLower(value)
+		ensureBindingUpdate().TransportKind = strings.ToLower(value)
 	}
-	member.DeliveryBinding = mergeRoomDeliveryBinding(member.DeliveryBinding, &agent.RoomDeliveryBinding{
-		MuxBackend:        member.Backend,
-		MuxSession:        member.Session,
-		MuxPaneID:         member.PaneID,
-		TransportEndpoint: member.TransportEndpoint,
-		TransportKind:     member.TransportKind,
-	})
+	member.DeliveryBinding = mergeRoomDeliveryBinding(member.DeliveryBinding, bindingUpdate)
 	member.Unbound = unbound
 	member = normalizeRoomMember(member)
 	store, err := openRoomBoardStore(cmd.Context())
@@ -16151,6 +16148,13 @@ func runRoomRebind(cmd *cobra.Command, workspace, roomID, actorID, role, backend
 	if value := strings.TrimSpace(role); value != "" {
 		member.Role = value
 	}
+	var bindingUpdate *agent.RoomDeliveryBinding
+	ensureBindingUpdate := func() *agent.RoomDeliveryBinding {
+		if bindingUpdate == nil {
+			bindingUpdate = &agent.RoomDeliveryBinding{}
+		}
+		return bindingUpdate
+	}
 	if current {
 		identity, resolveErr := resolveRoomSender(cmd.Context(), actorID)
 		if resolveErr != nil {
@@ -16158,32 +16162,27 @@ func runRoomRebind(cmd *cobra.Command, workspace, roomID, actorID, role, backend
 				"hint": "Run inside tmux/zellij with --current, or pass explicit --backend/--session/--pane-id values.",
 			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 		}
-		member.Backend = identity.Backend
-		member.Session = identity.Session
-		member.PaneID = identity.PaneID
+		binding := ensureBindingUpdate()
+		binding.MuxBackend = identity.Backend
+		binding.MuxSession = identity.Session
+		binding.MuxPaneID = identity.PaneID
 	}
 	if value := strings.TrimSpace(backend); value != "" {
-		member.Backend = strings.ToLower(value)
+		ensureBindingUpdate().MuxBackend = strings.ToLower(value)
 	}
 	if value := strings.TrimSpace(session); value != "" {
-		member.Session = value
+		ensureBindingUpdate().MuxSession = value
 	}
 	if value := strings.TrimSpace(paneID); value != "" {
-		member.PaneID = value
+		ensureBindingUpdate().MuxPaneID = value
 	}
 	if value := strings.TrimSpace(transportEndpoint); value != "" {
-		member.TransportEndpoint = value
+		ensureBindingUpdate().TransportEndpoint = value
 	}
 	if value := strings.TrimSpace(transportKind); value != "" {
-		member.TransportKind = strings.ToLower(value)
+		ensureBindingUpdate().TransportKind = strings.ToLower(value)
 	}
-	member.DeliveryBinding = mergeRoomDeliveryBinding(member.DeliveryBinding, &agent.RoomDeliveryBinding{
-		MuxBackend:        member.Backend,
-		MuxSession:        member.Session,
-		MuxPaneID:         member.PaneID,
-		TransportEndpoint: member.TransportEndpoint,
-		TransportKind:     member.TransportKind,
-	})
+	member.DeliveryBinding = mergeRoomDeliveryBinding(member.DeliveryBinding, bindingUpdate)
 	member.Unbound = unbound
 	member = normalizeRoomMember(member)
 
@@ -16296,13 +16295,8 @@ func runRoomRestore(cmd *cobra.Command, workspace, roomID, actorID, backend, ses
 	}
 
 	member := agent.RoomMember{
-		ActorID:           actorID,
-		Backend:           result.Backend,
-		Session:           result.Session,
-		PaneID:            result.PaneID,
-		TransportEndpoint: result.TransportEndpoint,
-		TransportKind:     result.TransportKind,
-		Unbound:           false,
+		ActorID: actorID,
+		Unbound: false,
 		DeliveryBinding: &agent.RoomDeliveryBinding{
 			MuxBackend:        result.Backend,
 			MuxSession:        result.Session,
@@ -16843,21 +16837,6 @@ func mergeRoomMembers(existing []agent.RoomMember, additions ...agent.RoomMember
 			if member.Role != "" {
 				out[pos].Role = member.Role
 			}
-			if member.Backend != "" {
-				out[pos].Backend = member.Backend
-			}
-			if member.Session != "" {
-				out[pos].Session = member.Session
-			}
-			if member.PaneID != "" {
-				out[pos].PaneID = member.PaneID
-			}
-			if member.TransportEndpoint != "" {
-				out[pos].TransportEndpoint = member.TransportEndpoint
-			}
-			if member.TransportKind != "" {
-				out[pos].TransportKind = member.TransportKind
-			}
 			out[pos].DeliveryBinding = mergeRoomDeliveryBinding(out[pos].DeliveryBinding, member.DeliveryBinding)
 			out[pos].Unbound = member.Unbound
 			out[pos] = normalizeRoomMember(out[pos])
@@ -16876,11 +16855,6 @@ func normalizeRoomMember(member agent.RoomMember) agent.RoomMember {
 func trimRoomMemberUpdate(member agent.RoomMember) agent.RoomMember {
 	member.ActorID = strings.TrimSpace(member.ActorID)
 	member.Role = strings.TrimSpace(member.Role)
-	member.Backend = strings.ToLower(strings.TrimSpace(member.Backend))
-	member.Session = strings.TrimSpace(member.Session)
-	member.PaneID = strings.TrimSpace(member.PaneID)
-	member.TransportEndpoint = strings.TrimSpace(member.TransportEndpoint)
-	member.TransportKind = strings.ToLower(strings.TrimSpace(member.TransportKind))
 	if member.DeliveryBinding != nil {
 		member.DeliveryBinding = &agent.RoomDeliveryBinding{
 			MuxBackend:        strings.ToLower(strings.TrimSpace(member.DeliveryBinding.MuxBackend)),
@@ -16890,15 +16864,6 @@ func trimRoomMemberUpdate(member agent.RoomMember) agent.RoomMember {
 			TransportKind:     strings.ToLower(strings.TrimSpace(member.DeliveryBinding.TransportKind)),
 			SubmitMode:        strings.TrimSpace(member.DeliveryBinding.SubmitMode),
 			Health:            strings.TrimSpace(member.DeliveryBinding.Health),
-			FallbackPolicy:    strings.TrimSpace(member.DeliveryBinding.FallbackPolicy),
-		}
-	} else if member.Backend != "" || member.Session != "" || member.PaneID != "" || member.TransportEndpoint != "" || member.TransportKind != "" {
-		member.DeliveryBinding = &agent.RoomDeliveryBinding{
-			MuxBackend:        member.Backend,
-			MuxSession:        member.Session,
-			MuxPaneID:         member.PaneID,
-			TransportEndpoint: member.TransportEndpoint,
-			TransportKind:     member.TransportKind,
 		}
 	}
 	return member
@@ -16937,9 +16902,6 @@ func mergeRoomDeliveryBinding(base, update *agent.RoomDeliveryBinding) *agent.Ro
 	}
 	if update.Health != "" {
 		base.Health = update.Health
-	}
-	if update.FallbackPolicy != "" {
-		base.FallbackPolicy = update.FallbackPolicy
 	}
 	return base
 }
@@ -16999,9 +16961,6 @@ func provisionRoomMembers(ctx context.Context, workspace string, room agent.Room
 			if createErr != nil {
 				return nil, createErr
 			}
-			member.Backend = "tmux"
-			member.Session = result.Session
-			member.PaneID = result.Pane.ID
 			transportEndpoint := agentpane.DefaultSocketPath(result.Session, member.ActorID)
 			member.DeliveryBinding = &agent.RoomDeliveryBinding{
 				MuxBackend:        "tmux",
@@ -17038,9 +16997,6 @@ func provisionRoomMembers(ctx context.Context, workspace string, room agent.Room
 			if createErr != nil {
 				return nil, createErr
 			}
-			member.Backend = "zellij"
-			member.Session = result.Session
-			member.PaneID = result.PaneName
 			transportEndpoint := agentpane.DefaultSocketPath(result.Session, member.ActorID)
 			member.DeliveryBinding = &agent.RoomDeliveryBinding{
 				MuxBackend:        "zellij",
@@ -18065,15 +18021,14 @@ type roomRelayDeliveryFailure struct {
 }
 
 type roomRelayResult struct {
-	Backend           string                     `json:"backend"`
-	DeliveredCount    int                        `json:"delivered_count"`
-	FailedCount       int                        `json:"failed_count"`
-	FallbackAttempted bool                       `json:"fallback_attempted,omitempty"`
-	DeliveredTo       []string                   `json:"delivered_to,omitempty"`
-	FailedMembers     []string                   `json:"failed_members,omitempty"`
-	DeliveryFailures  []roomRelayDeliveryFailure `json:"delivery_failures,omitempty"`
-	SkippedMembers    []string                   `json:"skipped_members,omitempty"`
-	Error             string                     `json:"error,omitempty"`
+	Backend          string                     `json:"backend"`
+	DeliveredCount   int                        `json:"delivered_count"`
+	FailedCount      int                        `json:"failed_count"`
+	DeliveredTo      []string                   `json:"delivered_to,omitempty"`
+	FailedMembers    []string                   `json:"failed_members,omitempty"`
+	DeliveryFailures []roomRelayDeliveryFailure `json:"delivery_failures,omitempty"`
+	SkippedMembers   []string                   `json:"skipped_members,omitempty"`
+	Error            string                     `json:"error,omitempty"`
 }
 
 func defaultRoomRelayOptions() roomRelayOptions {
@@ -18111,7 +18066,7 @@ type roomRelayOptions struct {
 func relayRoomMessage(ctx context.Context, client *tmuxbridge.Client, room agent.RoomSummary, msg agent.BoardMessage, relay roomRelayOptions) roomRelayResult {
 	switch strings.TrimSpace(strings.ToLower(relay.Backend)) {
 	case "auto", "mixed":
-		result := relayRoomMessageAuto(ctx, client, room, msg, relay)
+		result := relayRoomMessageAuto(ctx, client, room, msg)
 		// Also deliver to sandbox tmux session if present.
 		if room.SandboxConfig != nil && room.SandboxConfig.IsSandbox() {
 			sandboxResult := relayRoomMessageToSandbox(ctx, client, room, msg)
@@ -18135,181 +18090,8 @@ func relayRoomMessage(ctx context.Context, client *tmuxbridge.Client, room agent
 	}
 }
 
-func relayRoomMessageAuto(ctx context.Context, client *tmuxbridge.Client, room agent.RoomSummary, msg agent.BoardMessage, relay roomRelayOptions) roomRelayResult {
-	// Transport-first relay: use explicit participant state to decide delivery
-	// targets. When participants have explicit transport state (CanTriggerTurn=true
-	// with a transport endpoint), delivery goes through the participant transport
-	// path independent of mux presentation attachment. Participants without explicit
-	// transport state fall through to the legacy mux relay path for backward compat.
-	participantResult := relayViaParticipants(ctx, client, room, msg)
-	if participantResult.DeliveredCount > 0 || participantResult.FailedCount > 0 {
-		// Some participants were resolved via explicit transport state.
-		// Merge participant result with legacy mux relay for any remaining members.
-		legacyResult := relayRoomMessageAutoLegacy(ctx, client, room, msg, relay)
-		return mergeRelayResults(participantResult, legacyResult, room.Members)
-	}
-	// No participants had explicit transport state; fall through to legacy path.
-	return relayRoomMessageAutoLegacy(ctx, client, room, msg, relay)
-}
-
-// relayRoomMessageAutoLegacy is the original auto relay path using raw mux heuristics.
-// It is preserved for backward compatibility when participants lack explicit transport state.
-func relayRoomMessageAutoLegacy(ctx context.Context, client *tmuxbridge.Client, room agent.RoomSummary, msg agent.BoardMessage, relay roomRelayOptions) roomRelayResult {
-	result := roomRelayResult{Backend: "auto"}
-	tmuxTargets, zellijTargets, failed, skipped := collectRoomRelayTargetsByBackend(room, msg)
-	result.SkippedMembers = append(result.SkippedMembers, skipped...)
-	if len(failed) > 0 {
-		result.FailedMembers = append(result.FailedMembers, failed...)
-		result.FailedCount += len(failed)
-	}
-	seenTmux := make(map[string]struct{}, len(tmuxTargets))
-	for _, target := range tmuxTargets {
-		target = strings.TrimSpace(target)
-		if target == "" {
-			continue
-		}
-		if _, dup := seenTmux[target]; dup {
-			continue
-		}
-		seenTmux[target] = struct{}{}
-		_, err := client.DeliverTextWithOptions(ctx, target, formatRoomRelayContent(room, msg), tmuxbridge.DeliverOptions{Interrupt: msg.Interrupt})
-		if err != nil {
-			result.FailedCount++
-			result.FailedMembers = append(result.FailedMembers, target)
-			result.DeliveryFailures = append(result.DeliveryFailures, roomRelayDeliveryFailure{Target: target, Reason: err.Error()})
-			continue
-		}
-		result.DeliveredCount++
-		result.DeliveredTo = append(result.DeliveredTo, target)
-	}
-	for session, targets := range zellijTargets {
-		zellijResult := relayRoomMessageZellijTargets(ctx, room, msg, session, targets, relay)
-		result.DeliveredCount += zellijResult.DeliveredCount
-		result.FailedCount += zellijResult.FailedCount
-		result.DeliveredTo = append(result.DeliveredTo, zellijResult.DeliveredTo...)
-		result.FailedMembers = append(result.FailedMembers, zellijResult.FailedMembers...)
-		result.SkippedMembers = append(result.SkippedMembers, zellijResult.SkippedMembers...)
-		if result.Error == "" && zellijResult.Error != "" {
-			result.Error = zellijResult.Error
-		}
-	}
-	return result
-}
-
-// mergeRelayResults deduplicates and merges two relay results. The primary result
-// (participant transport) takes precedence; the legacy result contributes only
-// deliveries for actors not already covered.
-//
-// Because the participant path records actor IDs (e.g. "claude-a") while the
-// legacy path records pane targets (e.g. "%42"), we normalize legacy targets
-// to actor IDs using the room member list before deduplication.
-func mergeRelayResults(primary, legacy roomRelayResult, members []agent.RoomMember) roomRelayResult {
-	if legacy.DeliveredCount > 0 || legacy.FailedCount > 0 || len(legacy.SkippedMembers) > 0 || len(legacy.DeliveryFailures) > 0 || strings.TrimSpace(legacy.Error) != "" {
-		primary.FallbackAttempted = true
-	}
-	// Build pane-target → actor-ID map for legacy deduplication.
-	paneToActor := make(map[string]string, len(members))
-	for _, m := range members {
-		m = normalizeRoomMember(m)
-		actorID := strings.TrimSpace(m.ActorID)
-		if actorID == "" {
-			continue
-		}
-		if pane := strings.TrimSpace(m.PaneID); pane != "" {
-			paneToActor[pane] = actorID
-		}
-		// Also map the full tmux participant ID.
-		if m.Backend == "tmux" && m.Session != "" && m.PaneID != "" {
-			full := "tmux:" + m.Session + ":" + m.PaneID
-			paneToActor[full] = actorID
-		}
-	}
-
-	// Only successful primary deliveries are authoritative. Primary skips and
-	// primary transport failures must still permit legacy mux fallback.
-	seenDelivered := make(map[string]struct{}, len(primary.DeliveredTo))
-	for _, id := range primary.DeliveredTo {
-		seenDelivered[id] = struct{}{}
-	}
-	seenFailed := make(map[string]struct{}, len(primary.FailedMembers))
-	for _, id := range primary.FailedMembers {
-		seenFailed[id] = struct{}{}
-	}
-
-	// Merge legacy deliveries, normalizing pane targets to actor IDs.
-	for _, id := range legacy.DeliveredTo {
-		actorID := resolveActorIDForLegacyTarget(id, paneToActor)
-		if _, dup := seenDelivered[actorID]; dup {
-			continue
-		}
-		seenDelivered[actorID] = struct{}{}
-		if _, failed := seenFailed[actorID]; failed {
-			removeActorID(&primary.FailedMembers, actorID)
-			if primary.FailedCount > 0 {
-				primary.FailedCount--
-			}
-			delete(seenFailed, actorID)
-		}
-		primary.DeliveredCount++
-		primary.DeliveredTo = append(primary.DeliveredTo, actorID)
-	}
-	for _, id := range legacy.FailedMembers {
-		actorID := resolveActorIDForLegacyTarget(id, paneToActor)
-		if _, delivered := seenDelivered[actorID]; delivered {
-			continue
-		}
-		if _, dup := seenFailed[actorID]; dup {
-			continue
-		}
-		seenFailed[actorID] = struct{}{}
-		primary.FailedCount++
-		primary.FailedMembers = append(primary.FailedMembers, actorID)
-	}
-	for _, id := range legacy.SkippedMembers {
-		actorID := resolveActorIDForLegacyTarget(id, paneToActor)
-		if _, delivered := seenDelivered[actorID]; delivered {
-			continue
-		}
-		primary.SkippedMembers = append(primary.SkippedMembers, actorID)
-	}
-	primary.DeliveryFailures = append(primary.DeliveryFailures, legacy.DeliveryFailures...)
-	if primary.Error == "" && legacy.Error != "" {
-		primary.Error = legacy.Error
-	}
-	return primary
-}
-
-func removeActorID(values *[]string, target string) {
-	if values == nil || len(*values) == 0 {
-		return
-	}
-	out := (*values)[:0]
-	removed := false
-	for _, value := range *values {
-		if !removed && value == target {
-			removed = true
-			continue
-		}
-		out = append(out, value)
-	}
-	*values = out
-}
-
-// resolveActorIDForLegacyTarget maps a legacy relay target (pane ID like "%42"
-// or a mux address) back to the actor ID. Returns the target itself if no
-// mapping is found (preserving the legacy value as a fallback).
-func resolveActorIDForLegacyTarget(target string, paneToActor map[string]string) string {
-	target = strings.TrimSpace(target)
-	if actorID, ok := paneToActor[target]; ok {
-		return actorID
-	}
-	// Try parsing as tmux participant ID.
-	if ref, ok := tmuxbridge.ParseParticipantID(target); ok {
-		if actorID, ok := paneToActor[ref.Target]; ok {
-			return actorID
-		}
-	}
-	return target
+func relayRoomMessageAuto(ctx context.Context, client *tmuxbridge.Client, room agent.RoomSummary, msg agent.BoardMessage) roomRelayResult {
+	return relayViaParticipants(ctx, client, room, msg)
 }
 
 func relayRoomMessageTmux(ctx context.Context, client *tmuxbridge.Client, room agent.RoomSummary, msg agent.BoardMessage) roomRelayResult {
@@ -18646,10 +18428,11 @@ func buildRoomStatusParticipants(room agent.RoomSummary, messages []agent.BoardM
 // For pane_socket members it probes the socket file existence to determine Transport
 // and Runtime availability. All other state dimensions are derived from member fields.
 func deriveParticipantTransportState(m agent.RoomMember) agent.ParticipantState {
+	m = normalizeRoomMember(m)
 	state := agent.ParticipantStateFromRoomMember(m)
 	// Probe pane socket: the socket path is a real filesystem path, not a mux address.
-	if m.TransportEndpoint != "" && m.TransportKind == agent.PaneSocketTransportKind {
-		_, statErr := os.Stat(m.TransportEndpoint)
+	if binding := m.DeliveryBinding; binding != nil && binding.TransportEndpoint != "" && binding.TransportKind == agent.PaneSocketTransportKind {
+		_, statErr := os.Stat(binding.TransportEndpoint)
 		state = agent.ApplySocketProbe(state, statErr == nil, statErr)
 	}
 	return state
@@ -19332,12 +19115,12 @@ func relayRecipientMatchesMember(room agent.RoomSummary, member agent.RoomMember
 	// relay to the coordinator pane — otherwise we fan out twice and the label target often fails
 	// (failed_count 1) while the timeline still shows status ok.
 	if recipient == "human-a" && roomPreferCoordinatorRelayForHumanA(room) {
-		return strings.EqualFold(strings.TrimSpace(member.Role), "coordinator") && strings.TrimSpace(member.PaneID) != ""
+		return strings.EqualFold(strings.TrimSpace(member.Role), "coordinator") && roomMemberMuxPaneID(member) != ""
 	}
 	if sameRoomParticipant(actorID, recipient) {
 		return true
 	}
-	if pane := strings.TrimSpace(member.PaneID); pane != "" && recipient == pane {
+	if pane := roomMemberMuxPaneID(member); pane != "" && recipient == pane {
 		return true
 	}
 	if ref, ok := tmuxbridge.ParseParticipantID(actorID); ok && recipient == ref.Target {
@@ -19371,11 +19154,41 @@ func roomPreferCoordinatorRelayForHumanA(room agent.RoomSummary) bool {
 		if strings.TrimSpace(m.ActorID) == "human-a" {
 			hasHumanA = true
 		}
-		if strings.EqualFold(strings.TrimSpace(m.Role), "coordinator") && strings.TrimSpace(m.PaneID) != "" {
+		if strings.EqualFold(strings.TrimSpace(m.Role), "coordinator") && roomMemberMuxPaneID(m) != "" {
 			coordHasPane = true
 		}
 	}
 	return hasHumanA && coordHasPane
+}
+
+func roomMemberMuxPaneID(member agent.RoomMember) string {
+	member = normalizeRoomMember(member)
+	if member.DeliveryBinding == nil {
+		return ""
+	}
+	return strings.TrimSpace(member.DeliveryBinding.MuxPaneID)
+}
+
+func roomMemberTransportKind(member agent.RoomMember) string {
+	member = normalizeRoomMember(member)
+	if member.DeliveryBinding == nil {
+		return ""
+	}
+	return strings.TrimSpace(member.DeliveryBinding.TransportKind)
+}
+
+func roomDeliveryTransportEndpoint(binding *agent.RoomDeliveryBinding) string {
+	if binding == nil {
+		return ""
+	}
+	return strings.TrimSpace(binding.TransportEndpoint)
+}
+
+func roomDeliveryTransportKind(binding *agent.RoomDeliveryBinding) string {
+	if binding == nil {
+		return ""
+	}
+	return strings.TrimSpace(binding.TransportKind)
 }
 
 // collectRoomRelayMembers returns room members that should receive this relay (same routing as targets).
@@ -19400,15 +19213,6 @@ func collectRoomRelayMembers(room agent.RoomSummary, msg agent.BoardMessage) ([]
 		members = append(members, member)
 	}
 	return members, skipped
-}
-
-func collectRoomRelayTargets(room agent.RoomSummary, msg agent.BoardMessage) ([]string, []string) {
-	members, skipped := collectRoomRelayMembers(room, msg)
-	targets := make([]string, 0, len(members))
-	for _, member := range members {
-		targets = append(targets, roomMemberTmuxTarget(member))
-	}
-	return targets, skipped
 }
 
 func collectRoomRelayTargetsByBackend(room agent.RoomSummary, msg agent.BoardMessage) ([]string, map[string][]string, []string, []string) {
@@ -19441,10 +19245,12 @@ func collectRoomRelayTargetsByBackend(room agent.RoomSummary, msg agent.BoardMes
 			zellijTargets[session] = append(zellijTargets[session], zellijTarget)
 		case "herdr":
 			// Herdr delivery is handled by the participant-transport path and by
-			// explicit backend=herdr relay. Do not route it through tmux fallback.
+			// explicit backend=herdr relay. Do not route it through tmux relay.
 			skipped = append(skipped, target)
-		default:
+		case "tmux":
 			tmuxTargets = append(tmuxTargets, roomMemberTmuxTarget(member))
+		default:
+			failed = append(failed, target)
 		}
 	}
 	return tmuxTargets, zellijTargets, failed, skipped
@@ -19490,13 +19296,7 @@ func roomMemberRelayBackend(member agent.RoomMember) string {
 			}
 		}
 	}
-	if strings.HasPrefix(member.ActorID, "herdr:") {
-		return "herdr"
-	}
-	if strings.HasPrefix(member.ActorID, "zellij:") {
-		return "zellij"
-	}
-	return "tmux"
+	return ""
 }
 
 func resolveRoomMemberZellijTarget(member agent.RoomMember) (string, string, bool) {
@@ -19526,9 +19326,6 @@ func resolveRoomMemberZellijTarget(member agent.RoomMember) (string, string, boo
 			}
 		}
 	}
-	if session, paneID, ok := parseZellijParticipantID(member.ActorID); ok {
-		return session, formatZellijParticipantID(session, paneID), true
-	}
 	return "", "", false
 }
 
@@ -19553,9 +19350,6 @@ func resolveRoomMemberHerdrTarget(member agent.RoomMember) (string, string, bool
 				return ref.Session, ref.PaneID, true
 			}
 		}
-	}
-	if ref, ok := herdrbridge.ParseParticipantID(member.ActorID); ok {
-		return ref.Session, ref.PaneID, true
 	}
 	return "", "", false
 }
@@ -19586,10 +19380,7 @@ func roomMemberTmuxTarget(member agent.RoomMember) string {
 			}
 		}
 	}
-	if ref, ok := tmuxbridge.ParseParticipantID(strings.TrimSpace(member.ActorID)); ok {
-		return ref.Target
-	}
-	return strings.TrimSpace(member.ActorID)
+	return ""
 }
 
 func roomMemberSubmitMode(member agent.RoomMember) string {

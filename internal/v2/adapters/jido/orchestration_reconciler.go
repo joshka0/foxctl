@@ -13,6 +13,7 @@ import (
 	v2events "github.com/joshka0/foxctl/internal/v2/core/events"
 	v2orchestration "github.com/joshka0/foxctl/internal/v2/core/orchestration"
 	"github.com/joshka0/foxctl/internal/v2/core/spawn"
+	v2runtimeorchestration "github.com/joshka0/foxctl/internal/v2/runtime/orchestration"
 )
 
 const (
@@ -294,7 +295,7 @@ func (r *OrchestrationReconciler) RecordDispatchSpawned(ctx context.Context, req
 		Payload:       v2events.MustMarshalPayload(issue),
 	}
 
-	if err := r.appendAndProject(ctx, evt); err != nil {
+	if err := v2runtimeorchestration.AppendAndProject(ctx, r.events, r.projections, evt); err != nil {
 		return v2events.Event{}, err
 	}
 	return evt, nil
@@ -352,7 +353,7 @@ func (r *OrchestrationReconciler) RecordDispatchFailed(ctx context.Context, req 
 		Payload:       v2events.MustMarshalPayload(issue),
 	}
 
-	if err := r.appendAndProject(ctx, evt); err != nil {
+	if err := v2runtimeorchestration.AppendAndProject(ctx, r.events, r.projections, evt); err != nil {
 		return v2events.Event{}, err
 	}
 	return evt, nil
@@ -386,7 +387,7 @@ func (r *OrchestrationReconciler) RecordDispatchCompleted(ctx context.Context, c
 		Payload:       v2events.MustMarshalPayload(payload),
 	}
 
-	if err := r.appendAndProject(ctx, evt); err != nil {
+	if err := v2runtimeorchestration.AppendAndProject(ctx, r.events, r.projections, evt); err != nil {
 		return v2events.Event{}, err
 	}
 	return evt, nil
@@ -438,22 +439,10 @@ func (r *OrchestrationReconciler) RecordDispatchRuntimeFailed(ctx context.Contex
 		Payload:       v2events.MustMarshalPayload(payload),
 	}
 
-	if err := r.appendAndProject(ctx, evt); err != nil {
+	if err := v2runtimeorchestration.AppendAndProject(ctx, r.events, r.projections, evt); err != nil {
 		return v2events.Event{}, err
 	}
 	return evt, nil
-}
-
-func (r *OrchestrationReconciler) appendAndProject(ctx context.Context, evt v2events.Event) error {
-	if err := r.events.Append(ctx, evt); err != nil {
-		return err
-	}
-	if r.projections != nil {
-		if err := r.projections.Apply(ctx, evt); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func dispatchIssuePayload(req spawn.Request, resp spawn.Response) (map[string]any, bool) {
@@ -562,36 +551,13 @@ func (r *OrchestrationReconciler) retryPlan(message string, currentAttempt int) 
 	if cfg.MaxAttempts > 0 && nextAttempt > cfg.MaxAttempts {
 		return retryPlan{}, false
 	}
-	dueAt := r.now().UTC().Add(retryDelay(nextAttempt, cfg.BaseDelay, cfg.MaxDelay))
+	dueAt := r.now().UTC().Add(v2runtimeorchestration.RetryDelay(nextAttempt, cfg.BaseDelay, cfg.MaxDelay))
 	return retryPlan{
 		Class:      class,
 		Attempt:    nextAttempt,
 		DueAt:      dueAt.Format(time.RFC3339Nano),
 		Suggestion: chooseNonEmpty(cfg.Suggestion, "retry scheduled after transient runtime failure"),
 	}, true
-}
-
-func retryDelay(attempt int, base, max time.Duration) time.Duration {
-	if attempt < 1 {
-		attempt = 1
-	}
-	if base <= 0 {
-		base = time.Second
-	}
-	if max <= 0 {
-		max = 5 * time.Minute
-	}
-	delay := base
-	for i := 1; i < attempt; i++ {
-		if delay >= max {
-			return max
-		}
-		delay *= 2
-		if delay > max {
-			return max
-		}
-	}
-	return delay
 }
 
 type childLifecycle struct {

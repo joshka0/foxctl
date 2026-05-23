@@ -334,7 +334,8 @@ Define explicit behavior:
 - **Integration tests:**
   - Simulate:
     - Task → review_request → review `ok` → diff apply → event emitted.
-    - End‑to‑end path to a fake indexer (inline + job modes).
+    - End‑to‑end path to a fake indexer in inline mode.
+    - Jobs mode fails explicitly until real enqueueing is wired.
 
 - **Golden fixtures:**
   - If events cross process boundaries:
@@ -357,6 +358,7 @@ Define explicit behavior:
 - **Phase C (jobs mode in dev/staging)**
   - Wire indexers as jobs.
   - Validate job/state transitions + WFQ scheduling.
+  - Keep `mode="jobs"` rejected until enqueueing and file propagation are real.
 
 - **Phase D (production rollout)**
   - Enable in production with:
@@ -370,7 +372,7 @@ Define explicit behavior:
 
 - Config‑only rollback:
 
-  - Set `indexing.post_review.enabled=false` to stop emitting events and jobs.
+  - Set `indexing.post_review.enabled=false` to stop event production and inline dispatch.
   - Existing events remain stored but are ignored.
 
 - Code rollback:

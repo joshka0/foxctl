@@ -13,18 +13,19 @@ import (
 
 	"github.com/joshka0/foxctl/internal/storage/dbdriver"
 	"github.com/joshka0/foxctl/internal/storage/sqlutil"
+	tursoadapter "github.com/joshka0/foxctl/internal/v2/adapters/turso"
 	v2events "github.com/joshka0/foxctl/internal/v2/core/events"
 )
 
 // Store persists append-only runtime events to a SQL database.
 type Store struct {
-	db      *sql.DB
+	db      tursoadapter.StoreDB
 	closeFn func() error
 	now     func() time.Time
 }
 
-// NewStore constructs an event store over an existing sql.DB.
-func NewStore(db *sql.DB, closeFn func() error) *Store {
+// NewStore constructs an event store over an existing SQL database.
+func NewStore(db tursoadapter.StoreDB, closeFn func() error) *Store {
 	return &Store{
 		db:      db,
 		closeFn: closeFn,
@@ -54,11 +55,11 @@ func Open(ctx context.Context, storageRoot string) (*Store, error) {
 		cfg = dbdriver.NewConfigLoader(storageRoot).LoadConfig("V2_EVENTS", "v2_events.db")
 	}
 
-	db, closeFn, err := dbdriver.OpenDBCompatWithCloser(ctx, cfg, MigrateSchema)
+	db, err := dbdriver.OpenDB(ctx, cfg, MigrateSchema)
 	if err != nil {
 		return nil, fmt.Errorf("v2 events open: %w", err)
 	}
-	return NewStore(db, closeFn), nil
+	return NewStore(db, db.Close), nil
 }
 
 func hasDriverOverride() bool {

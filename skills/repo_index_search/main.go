@@ -3,13 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"path/filepath"
 	"strings"
 
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/inlineutil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/workspaceutil"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
 	"github.com/joshka0/foxctl/internal/intelligence/repoquery"
 	"github.com/joshka0/foxctl/internal/platform/errors"
@@ -36,17 +36,17 @@ type Output struct {
 	Artifact     string             `json:"artifact,omitempty"`
 }
 
-type InlineMode string
+type InlineMode = inlineutil.Mode
 
 const (
-	InlineModeAuto         InlineMode = "auto"
-	InlineModeFull         InlineMode = "full"
-	InlineModePreview      InlineMode = "preview"
-	InlineModeArtifactOnly InlineMode = "artifact_only"
-	defaultPreviewResults             = 20
-	defaultPreviewAnchors             = 12
-	previewDocLimit                   = 240
-	previewSummaryLimit               = 180
+	InlineModeAuto         = inlineutil.ModeAuto
+	InlineModeFull         = inlineutil.ModeFull
+	InlineModePreview      = inlineutil.ModePreview
+	InlineModeArtifactOnly = inlineutil.ModeArtifactOnly
+	defaultPreviewResults  = 20
+	defaultPreviewAnchors  = 12
+	previewDocLimit        = 240
+	previewSummaryLimit    = 180
 )
 
 func main() {
@@ -58,7 +58,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		return skillerr.Arg("query is required", skillerr.WithHint("provide a non-empty query string, for example \"auth\" or \"repo index dag grep\""))
 	}
 
-	workspaceRoot, err := resolveWorkspace(rc.Workspace, in.Workspace)
+	workspaceRoot, err := workspaceutil.ResolvePath(rc.Workspace, in.Workspace)
 	if err != nil {
 		return skillerr.WrapIO("resolve workspace", err)
 	}
@@ -88,33 +88,11 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	})
 }
 
-func resolveWorkspace(base, override string) (string, error) {
-	workspace := strings.TrimSpace(override)
-	if workspace == "" {
-		workspace = base
-	}
-	if workspace == "" {
-		return "", fmt.Errorf("workspace is required")
-	}
-	if !filepath.IsAbs(workspace) && base != "" {
-		workspace = filepath.Join(base, workspace)
-	}
-	return filepath.Abs(workspace)
-}
-
 func parseInlineMode(value string) (InlineMode, error) {
-	switch InlineMode(strings.ToLower(strings.TrimSpace(value))) {
-	case "", InlineModeAuto:
-		return InlineModeAuto, nil
-	case InlineModeFull:
-		return InlineModeFull, nil
-	case InlineModePreview:
-		return InlineModePreview, nil
-	case InlineModeArtifactOnly:
-		return InlineModeArtifactOnly, nil
-	default:
-		return InlineModeAuto, skillerr.Arg("inline_mode must be one of: auto, full, preview, artifact_only")
+	if mode, ok := inlineutil.Parse(value); ok {
+		return mode, nil
 	}
+	return InlineModeAuto, skillerr.Arg("inline_mode must be one of: " + inlineutil.ValidModes)
 }
 
 func compactSearchNode(node repoindex.Node) repoindex.Node {

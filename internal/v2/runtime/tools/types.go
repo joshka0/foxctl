@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -16,7 +17,41 @@ type compiledTool struct {
 
 type toolSchema struct {
 	required  []string
-	propTypes map[string]string
+	propTypes map[string]JSONSchemaType
+}
+
+// JSONSchemaType is the supported subset of JSON Schema primitive and object
+// types used by v2 tool parameter definitions.
+type JSONSchemaType string
+
+const (
+	// JSONSchemaTypeObject validates JSON object values.
+	JSONSchemaTypeObject JSONSchemaType = "object"
+	// JSONSchemaTypeString validates JSON string values.
+	JSONSchemaTypeString JSONSchemaType = "string"
+	// JSONSchemaTypeBoolean validates JSON boolean values.
+	JSONSchemaTypeBoolean JSONSchemaType = "boolean"
+	// JSONSchemaTypeNumber validates JSON number values.
+	JSONSchemaTypeNumber JSONSchemaType = "number"
+	// JSONSchemaTypeInteger validates JSON number values without fractions.
+	JSONSchemaTypeInteger JSONSchemaType = "integer"
+	// JSONSchemaTypeArray validates JSON array values.
+	JSONSchemaTypeArray JSONSchemaType = "array"
+)
+
+// JSONSchema is the narrow JSON-schema subset foxctl accepts for v2 tool
+// parameter contracts.
+type JSONSchema struct {
+	Type        JSONSchemaType             `json:"type,omitempty"`
+	Description string                     `json:"description,omitempty"`
+	Required    []string                   `json:"required,omitempty"`
+	Properties  map[string]JSONSchemaField `json:"properties"`
+}
+
+// JSONSchemaField describes one property in a v2 tool parameter schema.
+type JSONSchemaField struct {
+	Type        JSONSchemaType `json:"type,omitempty"`
+	Description string         `json:"description,omitempty"`
 }
 
 func compileSchema(raw json.RawMessage) (*toolSchema, error) {
@@ -24,45 +59,37 @@ func compileSchema(raw json.RawMessage) (*toolSchema, error) {
 		return nil, nil
 	}
 
-	var schema map[string]any
+	var schema JSONSchema
 	if err := json.Unmarshal(raw, &schema); err != nil {
 		return nil, fmt.Errorf("decode tool schema: %w", err)
+	}
+	if schema.Type != "" && schema.Type != JSONSchemaTypeObject {
+		return nil, fmt.Errorf("tool schema type must be %q, got %q", JSONSchemaTypeObject, schema.Type)
 	}
 
 	out := &toolSchema{
 		required:  []string{},
-		propTypes: map[string]string{},
+		propTypes: map[string]JSONSchemaType{},
 	}
 
-	if required, ok := schema["required"].([]any); ok {
-		for i, v := range required {
-			s, ok := v.(string)
-			if !ok {
-				return nil, fmt.Errorf("invalid required entry at index %d: %T", i, v)
-			}
-			s = strings.TrimSpace(s)
-			if s == "" {
-				return nil, fmt.Errorf("invalid required entry at index %d: empty string", i)
-			}
-			out.required = append(out.required, s)
+	for i, s := range schema.Required {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return nil, fmt.Errorf("invalid required entry at index %d: empty string", i)
 		}
+		out.required = append(out.required, s)
 	}
 
-	props, ok := schema["properties"].(map[string]any)
-	if !ok {
-		return out, nil
-	}
-	for name, value := range props {
-		propObj, ok := value.(map[string]any)
-		if !ok {
-			continue
+	for name, prop := range schema.Properties {
+		key := strings.TrimSpace(name)
+		if key == "" {
+			return nil, fmt.Errorf("invalid property name %q: empty string", name)
 		}
-		propType, _ := propObj["type"].(string)
-		propType = strings.TrimSpace(strings.ToLower(propType))
+		propType := JSONSchemaType(strings.TrimSpace(strings.ToLower(string(prop.Type))))
 		if propType == "" {
 			continue
 		}
-		out.propTypes[name] = propType
+		out.propTypes[key] = propType
 	}
 
 	return out, nil
@@ -76,7 +103,7 @@ func validateArgs(schema *toolSchema, args json.RawMessage) error {
 		args = json.RawMessage(`{}`)
 	}
 
-	var obj map[string]any
+	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(args, &obj); err != nil {
 		return fmt.Errorf("invalid args json: %w", err)
 	}
@@ -99,30 +126,47 @@ func validateArgs(schema *toolSchema, args json.RawMessage) error {
 	return nil
 }
 
-func matchesJSONType(v any, typ string) bool {
+func matchesJSONType(raw json.RawMessage, typ JSONSchemaType) bool {
+	if isJSONNull(raw) {
+		return false
+	}
 	switch typ {
-	case "string":
-		_, ok := v.(string)
-		return ok
-	case "boolean":
-		_, ok := v.(bool)
-		return ok
-	case "number":
-		_, ok := v.(float64)
-		return ok
-	case "integer":
-		f, ok := v.(float64)
-		if !ok {
+	case JSONSchemaTypeString:
+		var s string
+		return json.Unmarshal(raw, &s) == nil
+	case JSONSchemaTypeBoolean:
+		var b bool
+		return json.Unmarshal(raw, &b) == nil
+	case JSONSchemaTypeNumber:
+		var n json.Number
+		return decodeJSONNumber(raw, &n) == nil
+	case JSONSchemaTypeInteger:
+		var n json.Number
+		if err := decodeJSONNumber(raw, &n); err != nil {
+			return false
+		}
+		f, err := n.Float64()
+		if err != nil {
 			return false
 		}
 		return math.Trunc(f) == f
-	case "object":
-		_, ok := v.(map[string]any)
-		return ok
-	case "array":
-		_, ok := v.([]any)
-		return ok
+	case JSONSchemaTypeObject:
+		var obj map[string]json.RawMessage
+		return json.Unmarshal(raw, &obj) == nil && obj != nil
+	case JSONSchemaTypeArray:
+		var arr []json.RawMessage
+		return json.Unmarshal(raw, &arr) == nil && arr != nil
 	default:
 		return false
 	}
+}
+
+func decodeJSONNumber(raw json.RawMessage, dst *json.Number) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	return dec.Decode(dst)
+}
+
+func isJSONNull(raw json.RawMessage) bool {
+	return string(bytes.TrimSpace(raw)) == "null"
 }

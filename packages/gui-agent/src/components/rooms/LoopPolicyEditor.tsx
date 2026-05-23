@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Modal } from '@/components/ui/modal'
 import { patchRoomLoop } from '@/api/client'
-import type { RoomLoop } from '@/api/types'
+import type { RoomLoop } from '@foxctl/data/types'
 import { Zap, Clock, ShieldAlert } from 'lucide-react'
 import { cn } from '@/lib/utils'
 

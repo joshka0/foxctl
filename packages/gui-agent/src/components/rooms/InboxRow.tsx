@@ -1,7 +1,7 @@
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import type { MailboxMessage } from '@/api/types'
+import type { MailboxMessage } from '@foxctl/data/types'
 import { cn } from '@/lib/utils'
 import { formatRelativeTime } from '@/lib/time'
 import { Check, CornerDownRight, HandMetal, MessageSquare, AlertTriangle, CheckCircle2 } from 'lucide-react'

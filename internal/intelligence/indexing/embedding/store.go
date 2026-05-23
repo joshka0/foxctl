@@ -12,7 +12,6 @@ import (
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/embeddingtext"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedqueue"
 	"github.com/joshka0/foxctl/internal/platform/config"
-	platformsymbol "github.com/joshka0/foxctl/internal/platform/symbolutil"
 	"github.com/joshka0/foxctl/internal/storage/dbutil"
 	"github.com/joshka0/foxctl/internal/storage/queue"
 )
@@ -180,11 +179,20 @@ func migrateLegacyJobs(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 
+		identity, ok := legacySymbolQueueIdentity(workspaceID, symbolID)
+		if !ok {
+			continue
+		}
+
 		payloadBytes, err := json.Marshal(embeddingPayload{
+			Kind:          embedqueue.TaskKindSymbol,
 			WorkspaceID:   workspaceID,
-			SymbolID:      symbolID,
+			SymbolID:      identity.SymbolID,
 			FilePath:      filePath,
 			SymbolName:    symbolName,
+			PackageID:     identity.PackageID,
+			SymbolKey:     identity.SymbolKey,
+			MemoryName:    identity.MemoryName,
 			Content:       content,
 			ContentDigest: contentDigest,
 		})
@@ -192,7 +200,12 @@ func migrateLegacyJobs(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 
-		dedupeKey := dedupeKeyForSymbol(workspaceID, SymbolInput{SymbolID: symbolID}, contentDigest, "")
+		dedupeKey := dedupeKeyForSymbol(workspaceID, SymbolInput{
+			SymbolID:   identity.SymbolID,
+			PackageID:  identity.PackageID,
+			SymbolKey:  identity.SymbolKey,
+			MemoryName: identity.MemoryName,
+		}, contentDigest, "")
 
 		if _, err := stmt.ExecContext(
 			ctx,
@@ -228,9 +241,11 @@ func (s *Store) Enqueue(ctx context.Context, req EnqueueRequest) (*EnqueueResult
 
 	queueReqs := make([]queue.EnqueueRequest, 0, len(req.Symbols))
 	model := req.Model
-	for _, sym := range req.Symbols {
-		storageSymbolID := symbolStorageID(sym)
-		memoryName := symbolMemoryName(req.WorkspaceID, sym)
+	for i, sym := range req.Symbols {
+		identity, err := resolveSymbolQueueIdentity(req.WorkspaceID, sym)
+		if err != nil {
+			return nil, fmt.Errorf("symbol[%d]: %w", i, err)
+		}
 		contentDigest := strings.TrimSpace(sym.ContentDigest)
 		if contentDigest == "" {
 			contentDigest = computeDigest(sym.Content)
@@ -246,14 +261,14 @@ func (s *Store) Enqueue(ctx context.Context, req EnqueueRequest) (*EnqueueResult
 						SELECT 1 FROM symbol_embeddings
 						WHERE workspace_id = ? AND symbol_id = ? AND content_digest = ? AND model = ?
 					)
-				`, req.WorkspaceID, storageSymbolID, contentDigest, model).Scan(&exists)
+				`, req.WorkspaceID, identity.SymbolID, contentDigest, model).Scan(&exists)
 			} else {
 				err = s.db.QueryRowContext(ctx, `
 					SELECT EXISTS(
 						SELECT 1 FROM symbol_embeddings
 						WHERE workspace_id = ? AND symbol_id = ? AND content_digest = ?
 					)
-				`, req.WorkspaceID, storageSymbolID, contentDigest).Scan(&exists)
+				`, req.WorkspaceID, identity.SymbolID, contentDigest).Scan(&exists)
 			}
 			if err == nil && exists {
 				result.Skipped++
@@ -264,13 +279,13 @@ func (s *Store) Enqueue(ctx context.Context, req EnqueueRequest) (*EnqueueResult
 		payloadBytes, err := json.Marshal(embeddingPayload{
 			Kind:          embedqueue.TaskKindSymbol,
 			WorkspaceID:   req.WorkspaceID,
-			SymbolID:      storageSymbolID,
+			SymbolID:      identity.SymbolID,
 			FilePath:      sym.FilePath,
 			SymbolName:    sym.SymbolName,
 			Language:      strings.TrimSpace(sym.Language),
-			PackageID:     strings.TrimSpace(sym.PackageID),
-			SymbolKey:     strings.TrimSpace(sym.SymbolKey),
-			MemoryName:    memoryName,
+			PackageID:     identity.PackageID,
+			SymbolKey:     identity.SymbolKey,
+			MemoryName:    identity.MemoryName,
 			Content:       sym.Content,
 			ContentDigest: contentDigest,
 			Model:         model,
@@ -282,7 +297,7 @@ func (s *Store) Enqueue(ctx context.Context, req EnqueueRequest) (*EnqueueResult
 		queueReqs = append(queueReqs, queue.EnqueueRequest{
 			GroupID:   req.WorkspaceID,
 			Payload:   payloadBytes,
-			DedupeKey: dedupeKeyForSymbol(req.WorkspaceID, symbolInputWithCanonicalFields(sym, storageSymbolID, memoryName), contentDigest, model),
+			DedupeKey: dedupeKeyForSymbol(req.WorkspaceID, symbolInputWithCanonicalIdentity(sym, identity), contentDigest, model),
 			Priority:  req.Priority,
 		})
 	}
@@ -398,21 +413,27 @@ func (s *Store) ClaimNextInWorkspaceKind(ctx context.Context, workspaceID string
 }
 
 func (s *Store) claimNext(ctx context.Context, workspaceID, kind string) (*EmbeddingJob, error) {
-	job, err := s.queue.ClaimNext(ctx, queue.ClaimOptions{GroupID: workspaceID, PayloadKind: strings.TrimSpace(kind)})
-	if err != nil {
-		return nil, err
-	}
-	if job == nil {
-		return nil, nil
-	}
+	for {
+		job, err := s.queue.ClaimNext(ctx, queue.ClaimOptions{GroupID: workspaceID, PayloadKind: strings.TrimSpace(kind)})
+		if err != nil {
+			return nil, err
+		}
+		if job == nil {
+			return nil, nil
+		}
 
-	payload, err := decodeEmbeddingPayload(job.Payload)
-	if err != nil {
-		_ = s.queue.Fail(ctx, job.ID, fmt.Sprintf("decode payload: %v", err))
-		return nil, err
-	}
+		payload, err := decodeEmbeddingPayload(job.Payload)
+		if err != nil {
+			_ = s.failTerminal(ctx, job.ID, fmt.Sprintf("decode payload: %v", err))
+			return nil, err
+		}
+		if err := validateStoredPayloadIdentity(payload); err != nil {
+			_ = s.failTerminal(ctx, job.ID, err.Error())
+			continue
+		}
 
-	return buildEmbeddingJob(job, payload), nil
+		return buildEmbeddingJob(job, payload), nil
+	}
 }
 
 // RequeueStaleRunning moves stale running jobs back to retry after a worker crash.
@@ -447,6 +468,9 @@ func (s *Store) Complete(ctx context.Context, jobID string, embedding []float32,
 
 	payload, err := decodeEmbeddingPayload(job.Payload)
 	if err != nil {
+		return err
+	}
+	if err := validateStoredPayloadIdentity(payload); err != nil {
 		return err
 	}
 
@@ -503,6 +527,16 @@ func (s *Store) CompleteJob(ctx context.Context, jobID string) error {
 // Fail records a job failure with retry scheduling.
 func (s *Store) Fail(ctx context.Context, jobID string, errMsg string) error {
 	return s.queue.Fail(ctx, jobID, errMsg)
+}
+
+func (s *Store) failTerminal(ctx context.Context, jobID, errMsg string) error {
+	nowStr := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err := s.db.ExecContext(ctx, fmt.Sprintf(`
+		UPDATE %s
+		SET state = 'error', updated_at = ?, completed_at = ?, error = ?
+		WHERE id = ?
+	`, embeddingQueueTable), nowStr, nowStr, errMsg, jobID)
+	return err
 }
 
 // GetJob fetches a job by ID.
@@ -778,67 +812,6 @@ func decodeEmbeddingPayload(data []byte) (embeddingPayload, error) {
 		payload.Kind = embedqueue.TaskKindSymbol
 	}
 	return payload, nil
-}
-
-func dedupeKeyForSymbol(workspaceID string, sym SymbolInput, contentDigest, model string) string {
-	return embedqueue.StableDedupeKey(
-		string(embedqueue.TaskKindSymbol),
-		workspaceID,
-		symbolDedupeIdentity(sym),
-		model,
-		contentDigest,
-	)
-}
-
-func symbolInputWithCanonicalFields(sym SymbolInput, storageSymbolID, memoryName string) SymbolInput {
-	sym.SymbolID = storageSymbolID
-	sym.MemoryName = memoryName
-	return sym
-}
-
-func symbolStorageID(sym SymbolInput) string {
-	packageID := strings.TrimSpace(sym.PackageID)
-	symbolKey := strings.TrimSpace(sym.SymbolKey)
-	if packageID != "" && symbolKey != "" {
-		return platformsymbol.ScopedSymbolID(packageID, symbolKey)
-	}
-	return strings.TrimSpace(sym.SymbolID)
-}
-
-func symbolMemoryName(workspaceID string, sym SymbolInput) string {
-	if name := strings.TrimSpace(sym.MemoryName); name != "" {
-		return name
-	}
-	workspaceID = strings.TrimSpace(workspaceID)
-	packageID := strings.TrimSpace(sym.PackageID)
-	symbolKey := strings.TrimSpace(sym.SymbolKey)
-	if workspaceID != "" && packageID != "" && symbolKey != "" {
-		return platformsymbol.KeyEntryName(workspaceID, packageID, symbolKey)
-	}
-	return ""
-}
-
-func symbolDedupeIdentity(sym SymbolInput) string {
-	if name := strings.TrimSpace(sym.MemoryName); name != "" {
-		return name
-	}
-	language := strings.TrimSpace(sym.Language)
-	packageID := strings.TrimSpace(sym.PackageID)
-	symbolKey := strings.TrimSpace(sym.SymbolKey)
-	if packageID != "" && symbolKey != "" {
-		return strings.Join([]string{language, packageID, symbolKey}, "\x00")
-	}
-	return strings.TrimSpace(sym.SymbolID)
-}
-
-func dedupeKeyForMemory(workspaceID, name, contentDigest, model string) string {
-	return embedqueue.StableDedupeKey(
-		string(embedqueue.TaskKindMemory),
-		workspaceID,
-		name,
-		model,
-		contentDigest,
-	)
 }
 
 func nullStringValue(value sql.NullString) any {

@@ -1,6 +1,7 @@
 package tools_test
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -84,6 +85,39 @@ func TestNewDefaultCatalogExcludesHeartwoodUnlessExtensionsRequested(t *testing.
 	}
 }
 
+func TestDefaultDefsParameterSchemasUseTypedObjectSubset(t *testing.T) {
+	t.Parallel()
+
+	defs := append([]coretool.ToolDef{}, tools.DefaultDefs()...)
+	defs = append(defs, tools.ExtensionDefs()...)
+
+	for _, def := range defs {
+		var schema tools.JSONSchema
+		if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+			t.Fatalf("%s parameters are not a typed JSON schema: %v", def.Name, err)
+		}
+		if schema.Type != tools.JSONSchemaTypeObject {
+			t.Fatalf("%s schema type=%q want %q", def.Name, schema.Type, tools.JSONSchemaTypeObject)
+		}
+		for _, required := range schema.Required {
+			if _, ok := schema.Properties[required]; !ok {
+				t.Fatalf("%s required field %q is not declared in properties", def.Name, required)
+			}
+		}
+		for name, field := range schema.Properties {
+			if strings.TrimSpace(name) == "" {
+				t.Fatalf("%s declares an empty property name", def.Name)
+			}
+			if !knownSchemaType(field.Type) {
+				t.Fatalf("%s.%s schema type=%q is not in the supported subset", def.Name, name, field.Type)
+			}
+			if strings.TrimSpace(field.Description) == "" {
+				t.Fatalf("%s.%s is missing a description", def.Name, name)
+			}
+		}
+	}
+}
+
 func canonicalNames(defs []coretool.ToolDef) []string {
 	out := make([]string, 0, len(defs))
 	for _, def := range defs {
@@ -95,6 +129,20 @@ func canonicalNames(defs []coretool.ToolDef) []string {
 
 func toolsCanonical(name string) string {
 	return strings.NewReplacer(".", "_", "/", "_").Replace(name)
+}
+
+func knownSchemaType(typ tools.JSONSchemaType) bool {
+	switch typ {
+	case tools.JSONSchemaTypeObject,
+		tools.JSONSchemaTypeString,
+		tools.JSONSchemaTypeBoolean,
+		tools.JSONSchemaTypeNumber,
+		tools.JSONSchemaTypeInteger,
+		tools.JSONSchemaTypeArray:
+		return true
+	default:
+		return false
+	}
 }
 
 func profilesSpecWithHeartwood() map[coretool.ProcessProfile]profiles.ProfileSpec {

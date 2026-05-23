@@ -20,6 +20,7 @@ import (
 
 	"github.com/joshka0/foxctl/internal/storage/dbdriver"
 	"github.com/joshka0/foxctl/internal/storage/sqlutil"
+	tursoadapter "github.com/joshka0/foxctl/internal/v2/adapters/turso"
 	"github.com/joshka0/foxctl/internal/v2/core/run"
 )
 
@@ -104,7 +105,7 @@ func (a Artifact) Clone() Artifact {
 
 // Store persists turn lineage and derived artifacts.
 type Store struct {
-	db            *sql.DB
+	db            tursoadapter.StoreDB
 	closeFn       func() error
 	now           func() time.Time
 	vectorEnabled atomic.Bool
@@ -112,8 +113,8 @@ type Store struct {
 	vectorDimensions int
 }
 
-// NewStore constructs a turns store over an existing sql.DB.
-func NewStore(db *sql.DB, closeFn func() error) *Store {
+// NewStore constructs a turns store over an existing SQL database.
+func NewStore(db tursoadapter.StoreDB, closeFn func() error) *Store {
 	return &Store{
 		db:      db,
 		closeFn: closeFn,
@@ -163,12 +164,12 @@ func Open(ctx context.Context, storageRoot string) (*Store, error) {
 
 	driverType := cfg.Driver
 	vectorDims := resolveVectorDimensions(cfg)
-	db, closeFn, err := dbdriver.OpenDBCompatWithCloser(ctx, cfg, MigrateSchema)
+	db, err := dbdriver.OpenDB(ctx, cfg, MigrateSchema)
 	if err != nil {
 		return nil, fmt.Errorf("v2 turns open: %w", err)
 	}
 
-	store := NewStore(db, closeFn)
+	store := NewStore(db, db.Close)
 	store.vectorEnabled.Store(driverType == dbdriver.DriverTurso)
 	store.vectorDimensions = vectorDims
 	return store, nil

@@ -6,13 +6,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/intelligence/indexing"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/fileio"
 	"github.com/joshka0/foxctl/internal/platform/fsutil"
 	"github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/storage"
@@ -147,7 +145,7 @@ func (idx *Indexer) Index(ctx context.Context, event indexing.PostReviewEvent) (
 // indexFile indexes a single file, creating or updating its embedding.
 func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEvent, file indexing.FileChange) error {
 	// Read file content
-	content, err := idx.readFileContent(file.Path)
+	content, err := fileio.ReadLimited(idx.workspaceRoot, file.Path, maxReadFileSize)
 	if err != nil {
 		return fmt.Errorf("read file: %w", err)
 	}
@@ -399,7 +397,7 @@ func (idx *Indexer) deleteFileEmbedding(ctx context.Context, workspace, path str
 }
 
 // maxReadFileSize is the maximum file size we'll read (10MB).
-const maxReadFileSize = 10 * 1024 * 1024
+const maxReadFileSize = fileio.DefaultReadLimit
 
 // =============================================================================
 // Job Execution Logic (P3.S4)
@@ -480,7 +478,7 @@ func (idx *Indexer) runIndexJob(ctx context.Context, args JobArgs, isInit bool) 
 // indexFileForJob indexes a single file for a job, returning chunk count.
 func (idx *Indexer) indexFileForJob(ctx context.Context, args JobArgs, file JobFileInput, configHash string) (chunksIndexed int, chunkStats chunkPlanStats, err error) {
 	// Read file content
-	content, err := idx.readFileContent(file.Path)
+	content, err := fileio.ReadLimited(idx.workspaceRoot, file.Path, maxReadFileSize)
 	if err != nil {
 		return 0, chunkPlanStats{}, fmt.Errorf("read file: %w", err)
 	}
@@ -736,78 +734,4 @@ func (idx *Indexer) classifyError(err error) string {
 func computeDigest(content []byte) string {
 	h := sha256.Sum256(content)
 	return "sha256:" + hex.EncodeToString(h[:])
-}
-
-// readFileContent reads file content from the workspace with path validation and size limits.
-func (idx *Indexer) readFileContent(path string) ([]byte, error) {
-	// Clean the path to prevent traversal attacks
-	cleanPath := filepath.Clean(path)
-
-	// Reject absolute paths or paths that escape the workspace
-	if filepath.IsAbs(cleanPath) {
-		return nil, fmt.Errorf("absolute paths not allowed: %s", path)
-	}
-	if strings.HasPrefix(cleanPath, "..") {
-		return nil, fmt.Errorf("path traversal not allowed: %s", path)
-	}
-
-	// Join with workspace root and resolve
-	fullPath := filepath.Join(idx.workspaceRoot, cleanPath)
-
-	// Resolve to absolute path
-	absPath, err := filepath.Abs(fullPath)
-	if err != nil {
-		return nil, fmt.Errorf("resolve path: %w", err)
-	}
-	absWorkspace, err := filepath.Abs(idx.workspaceRoot)
-	if err != nil {
-		return nil, fmt.Errorf("resolve workspace: %w", err)
-	}
-
-	// Resolve symlinks to detect symlink-based traversal attacks
-	// EvalSymlinks also calls Clean and Abs internally
-	evalPath, err := filepath.EvalSymlinks(absPath)
-	if err != nil {
-		// If the file doesn't exist yet, EvalSymlinks fails; fall back to absPath
-		// but this is fine since os.Stat below will catch non-existent files
-		if !os.IsNotExist(err) {
-			return nil, fmt.Errorf("resolve symlinks for path: %w", err)
-		}
-		evalPath = absPath
-	}
-	evalWorkspace, err := filepath.EvalSymlinks(absWorkspace)
-	if err != nil {
-		return nil, fmt.Errorf("resolve symlinks for workspace: %w", err)
-	}
-
-	// Ensure the resolved path (with symlinks evaluated) is within the workspace
-	if !strings.HasPrefix(evalPath, evalWorkspace+string(filepath.Separator)) && evalPath != evalWorkspace {
-		return nil, fmt.Errorf("path escapes workspace: %s", path)
-	}
-
-	// Stat the file to check type and size
-	// Use evalPath (symlink-resolved) for all I/O to avoid TOCTOU vulnerabilities
-	info, err := os.Stat(evalPath)
-	if err != nil {
-		return nil, err
-	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("not a regular file: %s", path)
-	}
-	if info.Size() > maxReadFileSize {
-		return nil, fmt.Errorf("file too large (%d bytes, max %d): %s", info.Size(), maxReadFileSize, path)
-	}
-
-	// Open and read with size limit
-	f, err := os.Open(evalPath)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		// File cleanup in defer; error is not actionable.
-		_ = f.Close() //nolint:errcheck
-	}()
-
-	// Use LimitReader as additional safety even though we checked size
-	return io.ReadAll(io.LimitReader(f, maxReadFileSize))
 }

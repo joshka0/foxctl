@@ -958,7 +958,7 @@ func openOrchestrationStore(ctx context.Context, cfg config.Config) (*tursoorche
 		return nil, nil, err
 	}
 
-	db, closeFn, err := dbdriver.OpenDBCompatWithCloser(ctx, dbCfg, tursoorchestration.MigrateSchema)
+	db, err := dbdriver.OpenDB(ctx, dbCfg, tursoorchestration.MigrateSchema)
 	if err != nil {
 		return nil, nil, fmt.Errorf("orchestration store open: %w", err)
 	}
@@ -966,7 +966,7 @@ func openOrchestrationStore(ctx context.Context, cfg config.Config) (*tursoorche
 	store := tursoorchestration.NewStore(db, tursoorchestration.StoreOptions{
 		LaneOptions: defaultOrchestrationLaneOptions(),
 	})
-	return store, closeFn, nil
+	return store, db.Close, nil
 }
 
 func defaultOrchestrationLaneOptions() coreorchestration.LaneOptions {
@@ -1097,11 +1097,11 @@ func openOrchestrationEventStore(ctx context.Context, cfg config.Config) (*turso
 	if err != nil {
 		return nil, err
 	}
-	db, closeFn, err := dbdriver.OpenDBCompatWithCloser(ctx, dbCfg, tursoevents.MigrateSchema)
+	db, err := dbdriver.OpenDB(ctx, dbCfg, tursoevents.MigrateSchema)
 	if err != nil {
 		return nil, fmt.Errorf("orchestration event store open: %w", err)
 	}
-	return tursoevents.NewStore(db, closeFn), nil
+	return tursoevents.NewStore(db, db.Close), nil
 }
 
 func seedOrchestrationProjectionCards(

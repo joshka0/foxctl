@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { SendHorizonal, ShieldAlert, ZapOff } from 'lucide-react'
-import type { RoomStatusParticipant } from '@/api/types'
+import type { RoomStatusParticipant } from '@foxctl/data/types'
 import { cn } from '@/lib/utils'
 
 interface AdminRoomComposerProps {
@@ -43,13 +43,6 @@ export function AdminRoomComposer({ sender, participants, onSend, disabled }: Ad
   const transportUnavailable = selectedParticipant?.transport?.transport === 'unavailable'
   const transportReady = selectedParticipant?.transport?.transport === 'available'
 
-  useEffect(() => {
-    if (!isBroadcast) return
-    if (ackRequired) setAckRequired(false)
-    if (replyExpected) setReplyExpected(false)
-    if (interrupt) setInterrupt(false)
-  }, [ackRequired, interrupt, isBroadcast, replyExpected])
-
   const canSend = body.trim().length > 0
 
   return (
@@ -70,7 +63,15 @@ export function AdminRoomComposer({ sender, participants, onSend, disabled }: Ad
         <div className="relative group">
           <select
             value={recipient}
-            onChange={(e) => setRecipient(e.target.value)}
+            onChange={(e) => {
+              const nextRecipient = e.target.value
+              setRecipient(nextRecipient)
+              if (nextRecipient === '*') {
+                setAckRequired(false)
+                setReplyExpected(false)
+                setInterrupt(false)
+              }
+            }}
             className={cn(
               "w-full h-8 rounded-md border border-input bg-background px-3 text-xs font-mono transition-colors appearance-none pr-8",
               transportUnavailable ? "border-red-500 text-red-600 focus:ring-red-500" : (transportReady ? "border-green-500/50" : "")
@@ -110,7 +111,7 @@ export function AdminRoomComposer({ sender, participants, onSend, disabled }: Ad
           <label className="inline-flex items-center gap-1.5 cursor-pointer">
             <input
               type="checkbox"
-              checked={ackRequired}
+              checked={isBroadcast ? false : ackRequired}
               disabled={isBroadcast}
               onChange={(e) => setAckRequired(e.target.checked)}
             />
@@ -119,7 +120,7 @@ export function AdminRoomComposer({ sender, participants, onSend, disabled }: Ad
           <label className="inline-flex items-center gap-1.5 cursor-pointer">
             <input
               type="checkbox"
-              checked={replyExpected}
+              checked={isBroadcast ? false : replyExpected}
               disabled={isBroadcast}
               onChange={(e) => setReplyExpected(e.target.checked)}
             />
@@ -128,7 +129,7 @@ export function AdminRoomComposer({ sender, participants, onSend, disabled }: Ad
           <label className="inline-flex items-center gap-1.5 cursor-pointer">
             <input
               type="checkbox"
-              checked={interrupt}
+              checked={isBroadcast ? false : interrupt}
               disabled={isBroadcast}
               onChange={(e) => setInterrupt(e.target.checked)}
             />

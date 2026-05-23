@@ -253,9 +253,8 @@ func (s *sqlStore) Close() error {
 // As part of schema evolution, the function may drop and recreate the active_epics table
 // to add session_id; this intentionally discards transient active-epic entries.
 //
-// The function returns an error if the primary schema creation step fails; individual
-// idempotent alter/update statements and auxiliary cleanup steps intentionally ignore
-// duplicate-column and similar minor errors.
+// The function returns an error if any required schema step fails. Idempotent
+// column migrations suppress only duplicate-column/already-exists errors.
 
 // MigrateSchema runs the tasks store DDL migrations against the given database.
 // This is exported so the CLI db migrate command can create PostgreSQL tables.
@@ -327,35 +326,37 @@ CREATE INDEX IF NOT EXISTS idx_active_epics_session ON active_epics(session_id);
 		return fmt.Errorf("tasks: migrate: %w", err)
 	}
 
-	// Add columns to existing tables (idempotent migration)
-	alterDDL := []string{
-		`ALTER TABLE tasks ADD COLUMN last_review_status TEXT`,
-		`ALTER TABLE tasks ADD COLUMN last_review_at TEXT`,
-		`ALTER TABLE tasks ADD COLUMN last_review_id TEXT`,
-		`ALTER TABLE tasks ADD COLUMN plan_file TEXT`,
-		`ALTER TABLE tasks ADD COLUMN plan_section TEXT`,
-		`ALTER TABLE tasks ADD COLUMN session_id TEXT`,
-		`ALTER TABLE tasks ADD COLUMN assigned_actor_id TEXT`,
-		`ALTER TABLE tasks ADD COLUMN assigned_at TEXT`,
-		`ALTER TABLE tasks ADD COLUMN owner_actor_id TEXT`,
-		`ALTER TABLE tasks ADD COLUMN claimed_at TEXT`,
-		`ALTER TABLE tasks ADD COLUMN heartbeat_at TEXT`,
-		`ALTER TABLE tasks ADD COLUMN blocked_reason TEXT`,
-		`ALTER TABLE tasks ADD COLUMN blocked_at TEXT`,
-		`ALTER TABLE tasks ADD COLUMN embedding BLOB`,
-		`ALTER TABLE tasks ADD COLUMN embedding_model TEXT`,
-		`ALTER TABLE tasks ADD COLUMN pagerank REAL`,
-		`ALTER TABLE tasks ADD COLUMN epic_id TEXT`,
-		`ALTER TABLE tasks ADD COLUMN milestone_id TEXT`,
-		// Atomic processing columns for SimpleMem-style semantic lossless compression.
-		// See: https://github.com/aiming-lab/SimpleMem
-		`ALTER TABLE tasks ADD COLUMN atomic_description TEXT`, // Self-contained, disambiguated rewrite
-		`ALTER TABLE tasks ADD COLUMN entities TEXT`,           // JSON array of extracted entities
-		`ALTER TABLE tasks ADD COLUMN keywords TEXT`,           // JSON array of BM25 keywords
+	// Add columns to existing tables (idempotent migration).
+	taskColumns := []struct {
+		name       string
+		columnType string
+	}{
+		{name: "last_review_status", columnType: "TEXT"},
+		{name: "last_review_at", columnType: "TEXT"},
+		{name: "last_review_id", columnType: "TEXT"},
+		{name: "plan_file", columnType: "TEXT"},
+		{name: "plan_section", columnType: "TEXT"},
+		{name: "session_id", columnType: "TEXT"},
+		{name: "assigned_actor_id", columnType: "TEXT"},
+		{name: "assigned_at", columnType: "TEXT"},
+		{name: "owner_actor_id", columnType: "TEXT"},
+		{name: "claimed_at", columnType: "TEXT"},
+		{name: "heartbeat_at", columnType: "TEXT"},
+		{name: "blocked_reason", columnType: "TEXT"},
+		{name: "blocked_at", columnType: "TEXT"},
+		{name: "embedding", columnType: "BLOB"},
+		{name: "embedding_model", columnType: "TEXT"},
+		{name: "pagerank", columnType: "REAL"},
+		{name: "epic_id", columnType: "TEXT"},
+		{name: "milestone_id", columnType: "TEXT"},
+		{name: "atomic_description", columnType: "TEXT"},
+		{name: "entities", columnType: "TEXT"},
+		{name: "keywords", columnType: "TEXT"},
 	}
-	for _, stmt := range alterDDL {
-		// Ignore errors from "duplicate column" - columns may already exist.
-		_, _ = db.ExecContext(ctx, stmt) //nolint:errcheck
+	for _, column := range taskColumns {
+		if err := dbutil.AddColumnIfNotExists(ctx, db, "tasks", column.name, column.columnType, ""); err != nil {
+			return fmt.Errorf("tasks: migrate add column %s: %w", column.name, err)
+		}
 	}
 
 	// Normalize JSON array columns to [] for legacy/partial rows.
@@ -366,49 +367,48 @@ CREATE INDEX IF NOT EXISTS idx_active_epics_session ON active_epics(session_id);
 		"UPDATE tasks SET keywords = '[]' WHERE keywords IS NULL OR trim(keywords) = '' OR keywords = 'null'",
 	}
 	for _, stmt := range fixup {
-		_, _ = db.ExecContext(ctx, stmt) //nolint:errcheck
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("tasks: migrate fixup %q: %w", stmt, err)
+		}
 	}
 
 	// Create plan_file index if missing (idempotent)
-	_, _ = db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_tasks_plan_file ON tasks(plan_file)`) //nolint:errcheck
+	if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_tasks_plan_file ON tasks(plan_file)`); err != nil {
+		return fmt.Errorf("tasks: migrate create idx_tasks_plan_file: %w", err)
+	}
 
 	// Create session index for cross-session queries (any AI coding tool)
-	_, _ = db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id)`) //nolint:errcheck
+	if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id)`); err != nil {
+		return fmt.Errorf("tasks: migrate create idx_tasks_session: %w", err)
+	}
 
 	// Migrate active_epics table to include session_id (if old schema exists)
-	// Check if session_id column exists by querying table info
-	var hasSessionID bool
-	rows, err := db.QueryContext(ctx, `PRAGMA table_info(active_epics)`)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var cid int
-			var name, ctype string
-			var notnull, pk int
-			var dfltValue any
-			if err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err == nil {
-				if name == "session_id" {
-					hasSessionID = true
-					break
-				}
-			}
-		}
+	// Check if session_id column exists before rebuilding the old transient table.
+	hasSessionID, err := dbutil.ColumnExists(ctx, db, "active_epics", "session_id")
+	if err != nil {
+		return fmt.Errorf("tasks: inspect active_epics schema: %w", err)
 	}
 	if !hasSessionID {
 		// Drop old table and let CREATE TABLE IF NOT EXISTS rebuild it.
 		// NOTE: This migration intentionally drops existing active_epics data.
 		// Active epics are transient session state that gets re-established via
 		// /anchor commands, so data loss during schema evolution is acceptable.
-		_, _ = db.ExecContext(ctx, `DROP TABLE IF EXISTS active_epics`) //nolint:errcheck
-		_, _ = db.ExecContext(ctx, `
+		if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS active_epics`); err != nil {
+			return fmt.Errorf("tasks: migrate drop legacy active_epics: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `
 CREATE TABLE IF NOT EXISTS active_epics (
 	workspace_id TEXT NOT NULL,
 	session_id TEXT NOT NULL,
 	epic_id TEXT NOT NULL,
 	PRIMARY KEY (workspace_id, session_id),
 	FOREIGN KEY(epic_id) REFERENCES epics(id) ON DELETE CASCADE
-)`) //nolint:errcheck
-		_, _ = db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_active_epics_session ON active_epics(session_id)`) //nolint:errcheck
+)`); err != nil {
+			return fmt.Errorf("tasks: migrate create active_epics: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_active_epics_session ON active_epics(session_id)`); err != nil {
+			return fmt.Errorf("tasks: migrate create idx_active_epics_session: %w", err)
+		}
 	}
 
 	return nil

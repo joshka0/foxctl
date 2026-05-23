@@ -6,10 +6,6 @@ import (
 	"strings"
 )
 
-// ErrNotImplemented indicates the runtime has been scaffolded but not yet connected
-// to a real recursive model execution backend.
-var ErrNotImplemented = errors.New("rlm: runner not implemented")
-
 // RunFunc adapts a function to the Runner interface.
 type RunFunc func(ctx context.Context, task Task, env Environment) (Result, error)
 
@@ -18,24 +14,16 @@ func (f RunFunc) Run(ctx context.Context, task Task, env Environment) (Result, e
 	return f(ctx, task, env)
 }
 
-// ReadOnlyRunner is the first experimental runtime shell.
-// It enforces basic bounded-task validation but does not yet execute a real recursive model.
-type ReadOnlyRunner struct {
-	Execute RunFunc
-}
-
-// Run validates the task/environment and delegates to Execute when configured.
-func (r ReadOnlyRunner) Run(ctx context.Context, task Task, env Environment) (Result, error) {
+// ValidateRunRequest enforces the shared task and environment contract before
+// a concrete runner starts execution.
+func ValidateRunRequest(task Task, env Environment) error {
 	if err := ValidateTask(task); err != nil {
-		return Result{}, err
+		return err
 	}
 	if err := ValidateEnvironment(env); err != nil {
-		return Result{}, err
+		return err
 	}
-	if r.Execute == nil {
-		return Result{}, ErrNotImplemented
-	}
-	return r.Execute(ctx, task, env)
+	return nil
 }
 
 // ValidateTask enforces the minimal read-only runtime contract.

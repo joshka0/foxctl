@@ -81,6 +81,8 @@ func TestBuildRepoSymbolMechanismCandidatesJoinsRepoShapeAndExistingEmbedding(t 
 			SymbolID:   storedSymbolID,
 			FilePath:   target.File,
 			SymbolName: target.Name,
+			PackageID:  "go:internal/alpha",
+			SymbolKey:  "Build",
 			Content:    "func Build() Runner { return Run() }",
 		}},
 	})

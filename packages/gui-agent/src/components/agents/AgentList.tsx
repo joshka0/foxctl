@@ -22,8 +22,8 @@ import {
   startAgent,
   type SpawnAgentParams,
 } from "@/api/client";
-import type { Agent, AgentSpawnResponse, Room } from "@/api/types";
-import type { ActivityEvent } from "@/api/types";
+import type { Agent, AgentSpawnResponse, Room } from '@foxctl/data/types';
+import type { ActivityEvent } from '@/types/activity';
 import { useActivityStore } from "@/stores/activityStore";
 import { useActivityFocusStore } from "@/stores/activityFocusStore";
 import { useViewStore } from "@/stores/viewStore";
@@ -139,6 +139,7 @@ export function AgentList() {
     : agents;
   const sortedMatchedAgents = useMemo(() => {
     const rank: Record<Agent["state"], number> = {
+      starting: 0,
       running: 0,
       error: 1,
       idle: 2,

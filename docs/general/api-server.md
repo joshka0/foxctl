@@ -92,10 +92,11 @@ other high-volume responses.
 - `GET /api/rooms/{id}/events?workspace_id=...` is the stable room-scoped SSE surface for room clients.
 - Existing-room mutation routes are actor-authorized:
   room patch and full member replacement require coordinator access.
-- Member transport and binding updates are self-service only for the target participant unless the caller has coordinator access.
+- Member binding updates are self-service only for the target participant unless the caller has coordinator access.
 - Role-changing member binding updates are coordinator-only even when the caller is updating their own binding.
 - Room member payloads now expose `delivery_binding` as the canonical binding/routing record.
-- Legacy top-level room member fields (`backend`, `session`, `pane_id`, `transport_endpoint`, `transport_kind`) are still mirrored for compatibility while clients migrate.
+- Legacy top-level room member fields (`backend`, `session`, `pane_id`, `transport_endpoint`, `transport_kind`) are not emitted in room member API responses.
+- The legacy `/members/{actor_id}/transport` route has been removed; use `/members/{actor_id}/binding` with `delivery_binding`.
 - Room status and loop/status responses expose `last_delivery_trace` from the persisted room-loop row.
 - Treat `last_delivery_trace` as the canonical explanation surface for the latest delivery decision:
   it records the chosen binding, chosen transport endpoint/kind, fallback attempt, outcome, and cursor movement for the last observed delivery.

@@ -10,7 +10,7 @@ import (
 
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
-	"github.com/joshka0/foxctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/platform/observability"
 	"github.com/joshka0/foxctl/internal/storage"
 	"github.com/joshka0/foxctl/internal/storage/memory"
 )

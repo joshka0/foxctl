@@ -2,7 +2,6 @@ package discord
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/bwmarrin/discordgo"
@@ -46,34 +45,8 @@ func (a *Adapter) startEventListener(ctx context.Context) {
 
 // processSSEMessage parses an SSE message and routes activity events.
 func (a *Adapter) processSSEMessage(raw []byte) {
-	// SSE format: "data: <json>\n\n" — strip the "data: " prefix
-	const prefix = "data: "
-	data := raw
-	if len(data) > len(prefix) && string(data[:len(prefix)]) == prefix {
-		data = data[len(prefix):]
-	}
-	// Trim trailing newlines
-	for len(data) > 0 && (data[len(data)-1] == '\n' || data[len(data)-1] == '\r') {
-		data = data[:len(data)-1]
-	}
-
-	var event sse.Event
-	if err := json.Unmarshal(data, &event); err != nil {
-		return // silently skip malformed events
-	}
-
-	if event.Type != "activity" {
-		return
-	}
-
-	// Re-marshal the Data field and decode as ActivityEvent
-	dataBytes, err := json.Marshal(event.Data)
-	if err != nil {
-		return
-	}
-
-	var activity observability.ActivityEvent
-	if err := json.Unmarshal(dataBytes, &activity); err != nil {
+	activity, ok, err := chatadapter.DecodeActivitySSEMessage(raw)
+	if err != nil || !ok {
 		return
 	}
 

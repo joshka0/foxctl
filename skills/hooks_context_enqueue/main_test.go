@@ -37,14 +37,6 @@ func assertOK(t *testing.T, env map[string]any) {
 	}
 }
 
-//nolint:unused // Test utility for future tests
-func assertError(t *testing.T, env map[string]any) {
-	t.Helper()
-	if env["status"] != "error" {
-		t.Fatalf("expected error status, got %v", env["status"])
-	}
-}
-
 func getData(t *testing.T, env map[string]any) map[string]any {
 	t.Helper()
 	data, ok := env["data"].(map[string]any)

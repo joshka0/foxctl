@@ -9,6 +9,10 @@ import type {
   OrchestrationCardAction,
   OrchestrationRuntimeTree,
   OrchestrationRuntimeTreeNode,
+  RoomControlSnapshot,
+  RoomLoop,
+  RoomMessage,
+  RoomStatusParticipant,
   V2RunTranscriptItem,
   V2RuntimeEvent,
 } from "@foxctl/data/types";
@@ -48,10 +52,6 @@ import {
   type ApplyOrchestrationCardActionInput,
   type GetOrchestrationCardRuntimeInput,
   type OrchestrationCardWorkItem,
-  type RoomControlSnapshot,
-  type RoomLoop,
-  type RoomMessage,
-  type RoomStatusParticipant,
   type RoomTaskWorkItem,
   type RunListItem,
   type SeedOrchestrationCardInput,
@@ -1215,14 +1215,15 @@ export function App({ onExit }: AppProps) {
         workspaceId: WORKSPACE_ID,
         limit: 100,
       });
+      const artifact = result.payload.kind === "artifact" ? result.payload.artifact.artifact : null;
       setCardItems(result.items);
-      setCardArtifact(result.artifact?.artifact ?? null);
+      setCardArtifact(artifact);
       setSelectedCardId((current) => current ?? result.items[0]?.id ?? null);
       setCardLoadState("ready");
       setLastCardLoadAt(new Date().toLocaleTimeString());
       setStatus({
-        tone: result.artifact ? "warning" : "success",
-        text: cardStatus(result.items.length, result.artifact?.artifact),
+        tone: artifact ? "warning" : "success",
+        text: cardStatus(result.items.length, artifact ?? undefined),
       });
     } catch (error) {
       setCardLoadState("error");
@@ -5642,7 +5643,6 @@ function roomDeliveryTraceSummary(loop: RoomLoop): string {
     trace.outcome || "unknown",
     shortActorLabel(actor),
     transport,
-    trace.fallback_attempted ? "fallback" : "",
     counts,
   ]
     .filter(Boolean)
@@ -5715,11 +5715,15 @@ function roomParticipantTone(participant: RoomStatusParticipant): string {
 function participantOpsSummary(participant: RoomStatusParticipant): string {
   const membership = participant.unbound ? "unbound" : "member";
   const transport =
-    participant.transport_status || participant.transport_kind || "no transport";
+    participant.transport_status ||
+    participant.transport?.transport ||
+    "no transport";
   const runtime = participant.runtime_binding_status || "runtime unknown";
-  const view = participant.backend
-    ? `${participant.backend}${
-        participant.pane_id ? `:${participant.pane_id}` : ""
+  const view = participant.transport?.mux_backend
+    ? `${participant.transport.mux_backend}${
+        participant.transport.transport_endpoint
+          ? `:${participant.transport.transport_endpoint}`
+          : ""
       }`
     : "no viewer";
   return [

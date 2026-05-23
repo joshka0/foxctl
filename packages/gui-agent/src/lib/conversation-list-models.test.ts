@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { PersistedSession } from "@/api/client";
-import type { Agent } from "@/api/types";
+import type { Agent } from '@foxctl/data/types';
 import {
   buildFeedItems,
   buildGroupedConversations,

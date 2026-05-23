@@ -179,7 +179,7 @@ func (m *Manager) InvokeAuth(ctx context.Context, ref string, payload AuthReques
 		return AuthResult{}, err
 	}
 	var result AuthResult
-	if err := decodeEnvelopeData(resp, &result); err != nil {
+	if err := DecodeData(resp.Data, &result); err != nil {
 		return AuthResult{}, newInvocationError(protocol.ErrorCodeEEnvelope, "decode auth plugin response", err, m.errorDetails(info, nil, nil))
 	}
 	return result, nil
@@ -203,7 +203,7 @@ func (m *Manager) InvokePagination(ctx context.Context, ref string, payload Pagi
 		return PaginationResult{}, err
 	}
 	var result PaginationResult
-	if err := decodeEnvelopeData(resp, &result); err != nil {
+	if err := DecodeData(resp.Data, &result); err != nil {
 		return PaginationResult{}, newInvocationError(protocol.ErrorCodeEEnvelope, "decode pagination plugin response", err, m.errorDetails(info, nil, nil))
 	}
 	return result, nil
@@ -525,17 +525,6 @@ func (m *Manager) errorDetails(info *pluginInfo, stderrBuf, stdoutBuf *limitedBu
 		details["stderr_truncated"] = true
 	}
 	return details
-}
-
-func decodeEnvelopeData(env envelope.Envelope, v any) error {
-	if env.Data == nil {
-		return nil
-	}
-	raw, err := json.Marshal(env.Data)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(raw, v)
 }
 
 func resolvePathList(base, raw string) []string {

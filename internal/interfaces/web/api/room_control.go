@@ -22,23 +22,18 @@ import (
 )
 
 type roomStatusParticipantResponse struct {
-	ActorID              string                       `json:"actor_id"`
-	Role                 string                       `json:"role,omitempty"`
-	Backend              string                       `json:"backend,omitempty"`
-	Session              string                       `json:"session,omitempty"`
-	PaneID               string                       `json:"pane_id,omitempty"`
-	Unbound              bool                         `json:"unbound,omitempty"`
-	TransportEndpoint    string                       `json:"transport_endpoint,omitempty"`
-	TransportKind        string                       `json:"transport_kind,omitempty"`
-	DeliveryBinding      *RoomDeliveryBindingResponse `json:"delivery_binding,omitempty"`
-	TransportStatus      string                       `json:"transport_status,omitempty"`
-	RuntimeBindingStatus string                       `json:"runtime_binding_status,omitempty"`
-	LastActiveAt         *time.Time                   `json:"last_active_at,omitempty"`
-	Status               string                       `json:"status"`
-	AssignedTaskCount    int                          `json:"assigned_task_count"`
-	OwnedTaskCount       int                          `json:"owned_task_count"`
-	ActionableInboxCount int                          `json:"actionable_inbox_count"`
-	LatestActionable     *roomStatusEntryResponse     `json:"latest_actionable,omitempty"`
+	ActorID              string                   `json:"actor_id"`
+	Role                 string                   `json:"role,omitempty"`
+	Unbound              bool                     `json:"unbound,omitempty"`
+	Transport            agent.ParticipantState   `json:"transport"`
+	TransportStatus      string                   `json:"transport_status,omitempty"`
+	RuntimeBindingStatus string                   `json:"runtime_binding_status,omitempty"`
+	LastActiveAt         *time.Time               `json:"last_active_at,omitempty"`
+	Status               string                   `json:"status"`
+	AssignedTaskCount    int                      `json:"assigned_task_count"`
+	OwnedTaskCount       int                      `json:"owned_task_count"`
+	ActionableInboxCount int                      `json:"actionable_inbox_count"`
+	LatestActionable     *roomStatusEntryResponse `json:"latest_actionable,omitempty"`
 }
 
 type roomTaskPulseSummaryResponse struct {
@@ -70,7 +65,7 @@ type roomStatusEntryResponse struct {
 	Preview   string                   `json:"preview,omitempty"`
 }
 
-type roomStatusActionRequiredResponse struct {
+type roomStatusActionableBacklogResponse struct {
 	ParticipantsWithPending int                       `json:"participants_with_pending"`
 	PendingAcks             int                       `json:"pending_acks"`
 	PendingReplies          int                       `json:"pending_replies"`
@@ -142,7 +137,6 @@ type roomLoopDeliveryTraceResponse struct {
 	ChosenTransportEndpoint string     `json:"chosen_transport_endpoint,omitempty"`
 	ChosenTransportKind     string     `json:"chosen_transport_kind,omitempty"`
 	ChosenSubmitMode        string     `json:"chosen_submit_mode,omitempty"`
-	FallbackAttempted       bool       `json:"fallback_attempted,omitempty"`
 	DeliveredCount          int        `json:"delivered_count,omitempty"`
 	FailedCount             int        `json:"failed_count,omitempty"`
 	DeliveredTo             []string   `json:"delivered_to,omitempty"`
@@ -197,6 +191,89 @@ type roomLinkedOrchestrationCardResponse struct {
 	RunID           string                         `json:"run_id,omitempty"`
 	AgentID         string                         `json:"agent_id,omitempty"`
 	LinkedTaskID    string                         `json:"linked_task_id,omitempty"`
+}
+
+type roomStatusResponse struct {
+	Room              RoomResponse                        `json:"room"`
+	Participants      []roomStatusParticipantResponse     `json:"participants"`
+	TaskPulse         roomTaskPulseSummaryResponse        `json:"task_pulse"`
+	Backlog           roomStatusBacklogResponse           `json:"backlog"`
+	ActionableBacklog roomStatusActionableBacklogResponse `json:"actionable_backlog"`
+	Loop              roomLoopResponse                    `json:"loop"`
+}
+
+type roomControlSnapshotResponse struct {
+	Room                     RoomResponse                          `json:"room"`
+	Participants             []roomStatusParticipantResponse       `json:"participants"`
+	Loop                     roomLoopResponse                      `json:"loop"`
+	LoopHealth               roomControlSnapshotLoopHealthResponse `json:"loop_health"`
+	Inbox                    roomControlSnapshotInboxResponse      `json:"inbox"`
+	Tasks                    []roomTaskResponse                    `json:"tasks"`
+	TaskCount                int                                   `json:"task_count"`
+	Reminders                []RoomReminderResponse                `json:"reminders"`
+	Messages                 []roomControlSnapshotMessageResponse  `json:"messages"`
+	LinkedOrchestrationCards []roomLinkedOrchestrationCardResponse `json:"linked_orchestration_cards"`
+	TaskCardLink             string                                `json:"task_card_link"`
+	TaskFilter               string                                `json:"task_filter,omitempty"`
+	IssueFilter              string                                `json:"issue_filter,omitempty"`
+	OrchestrationCardsError  string                                `json:"orchestration_cards_error,omitempty"`
+}
+
+type roomInboxCompactResponse struct {
+	Room    agent.CompactRoomSummary `json:"room"`
+	Actor   string                   `json:"actor"`
+	Filter  string                   `json:"filter"`
+	Count   int                      `json:"count"`
+	Entries []roomInboxEntryResponse `json:"entries"`
+}
+
+type roomInboxFullResponse struct {
+	Room    RoomResponse             `json:"room"`
+	Actor   string                   `json:"actor"`
+	Filter  string                   `json:"filter"`
+	Count   int                      `json:"count"`
+	Entries []roomInboxEntryResponse `json:"entries"`
+}
+
+type roomTasksResponse struct {
+	Room  RoomResponse       `json:"room"`
+	Tasks []roomTaskResponse `json:"tasks"`
+	Count int                `json:"count"`
+}
+
+type roomTaskCreateResponse struct {
+	RoomID  string              `json:"room_id"`
+	Task    roomTaskResponse    `json:"task"`
+	Message *agent.BoardMessage `json:"message"`
+	Actor   string              `json:"actor"`
+}
+
+type roomLoopStateResponse struct {
+	RoomID string           `json:"room_id"`
+	Loop   roomLoopResponse `json:"loop"`
+}
+
+type roomCoordinatorSetResponse struct {
+	Room                RoomResponse `json:"room"`
+	PreviousCoordinator string       `json:"previous_coordinator"`
+	Coordinator         string       `json:"coordinator"`
+	Actor               string       `json:"actor"`
+	EventKind           string       `json:"event_kind"`
+}
+
+type roomMessageActionResponse struct {
+	RoomID         string                   `json:"room_id"`
+	MessageIDs     []string                 `json:"message_ids"`
+	Updated        int                      `json:"updated"`
+	ResolvedStatus agent.BoardMessageStatus `json:"resolved_status"`
+	Actor          string                   `json:"actor"`
+}
+
+type roomTaskActionResponse struct {
+	RoomID string           `json:"room_id"`
+	Task   roomTaskResponse `json:"task"`
+	Action string           `json:"action"`
+	Actor  string           `json:"actor"`
 }
 
 type roomLoopPatchRequest struct {
@@ -321,13 +398,13 @@ func handleRoomStatusGet(w http.ResponseWriter, r *http.Request, cfg config.Conf
 	now := time.Now().UTC()
 	taskPulse := apiBuildRoomTaskPulseSummary(tasks, now, staleAfter)
 	backlog := apiBuildRoomStatusBacklog(summary, messages)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"room":            convertRoomSummary(summary),
-		"participants":    apiBuildRoomStatusParticipants(summary, messages, tasks, staleAfter),
-		"task_pulse":      taskPulse,
-		"backlog":         backlog,
-		"action_required": apiBuildRoomStatusActionRequired(summary, messages, tasks, backlog, taskPulse, filters, staleAfter, now, verbose),
-		"loop":            apiConvertRoomLoop(loop),
+	writeJSON(w, http.StatusOK, roomStatusResponse{
+		Room:              convertRoomSummary(summary),
+		Participants:      apiBuildRoomStatusParticipants(summary, messages, tasks, staleAfter),
+		TaskPulse:         taskPulse,
+		Backlog:           backlog,
+		ActionableBacklog: apiBuildRoomStatusActionableBacklog(summary, messages, tasks, backlog, taskPulse, filters, staleAfter, now, verbose),
+		Loop:              apiConvertRoomLoop(loop),
 	})
 }
 
@@ -424,27 +501,27 @@ func handleRoomControlSnapshotGet(w http.ResponseWriter, r *http.Request, cfg co
 		log.Warn().Err(cardsErr).Str("room_id", roomID).Msg("failed to load linked orchestration cards for room snapshot")
 	}
 
-	response := map[string]any{
-		"room":                       convertRoomSummary(summary),
-		"participants":               apiBuildRoomStatusParticipants(summary, messages, tasks, loop.TaskStaleAfter),
-		"loop":                       apiConvertRoomLoop(loop),
-		"loop_health":                apiBuildRoomLoopHealthSnapshot(r.Context(), coordStore, loop, time.Now().UTC()),
-		"inbox":                      apiBuildRoomControlSnapshotInbox(actorID, inboxEntries),
-		"tasks":                      taskPayload,
-		"task_count":                 len(taskPayload),
-		"reminders":                  reminderPayload,
-		"messages":                   apiBuildRoomControlSnapshotMessages(messages, taskFilter),
-		"linked_orchestration_cards": cards,
-		"task_card_link":             "issue_id_equals_task_id",
+	response := roomControlSnapshotResponse{
+		Room:                     convertRoomSummary(summary),
+		Participants:             apiBuildRoomStatusParticipants(summary, messages, tasks, loop.TaskStaleAfter),
+		Loop:                     apiConvertRoomLoop(loop),
+		LoopHealth:               apiBuildRoomLoopHealthSnapshot(r.Context(), coordStore, loop, time.Now().UTC()),
+		Inbox:                    apiBuildRoomControlSnapshotInbox(actorID, inboxEntries),
+		Tasks:                    taskPayload,
+		TaskCount:                len(taskPayload),
+		Reminders:                reminderPayload,
+		Messages:                 apiBuildRoomControlSnapshotMessages(messages, taskFilter),
+		LinkedOrchestrationCards: cards,
+		TaskCardLink:             "issue_id_equals_task_id",
 	}
 	if taskFilter != "" {
-		response["task_filter"] = taskFilter
+		response.TaskFilter = taskFilter
 	}
 	if issueFilter != "" {
-		response["issue_filter"] = issueFilter
+		response.IssueFilter = issueFilter
 	}
 	if cardsErr != nil {
-		response["orchestration_cards_error"] = cardsErr.Error()
+		response.OrchestrationCardsError = cardsErr.Error()
 	}
 	writeJSON(w, http.StatusOK, response)
 }
@@ -679,16 +756,23 @@ func handleRoomInboxGet(w http.ResponseWriter, r *http.Request, cfg config.Confi
 		return
 	}
 	entries := apiBuildRoomInboxEntries(actorID, messages, filter, includeBroadcasts)
-	roomPayload := any(convertRoomSummary(summary))
+	filter = apiNormalizeRoomInboxFilter(filter)
 	if compact {
-		roomPayload = agent.CompactRoomSummaryForInbox(summary)
+		writeJSON(w, http.StatusOK, roomInboxCompactResponse{
+			Room:    agent.CompactRoomSummaryForInbox(summary),
+			Actor:   actorID,
+			Filter:  filter,
+			Count:   len(entries),
+			Entries: entries,
+		})
+		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"room":    roomPayload,
-		"actor":   actorID,
-		"filter":  apiNormalizeRoomInboxFilter(filter),
-		"count":   len(entries),
-		"entries": entries,
+	writeJSON(w, http.StatusOK, roomInboxFullResponse{
+		Room:    convertRoomSummary(summary),
+		Actor:   actorID,
+		Filter:  filter,
+		Count:   len(entries),
+		Entries: entries,
 	})
 }
 
@@ -742,10 +826,10 @@ func handleRoomTasksGet(w http.ResponseWriter, r *http.Request, cfg config.Confi
 	for _, task := range tasks {
 		resp = append(resp, convertRoomTask(task))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"room":  convertRoomSummary(summary),
-		"tasks": resp,
-		"count": len(resp),
+	writeJSON(w, http.StatusOK, roomTasksResponse{
+		Room:  convertRoomSummary(summary),
+		Tasks: resp,
+		Count: len(resp),
 	})
 }
 
@@ -840,11 +924,11 @@ func handleRoomTasksPost(w http.ResponseWriter, r *http.Request, cfg config.Conf
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"room_id": roomID,
-		"task":    convertRoomTask(task),
-		"message": msg,
-		"actor":   req.ActorID,
+	writeJSON(w, http.StatusCreated, roomTaskCreateResponse{
+		RoomID:  roomID,
+		Task:    convertRoomTask(task),
+		Message: msg,
+		Actor:   req.ActorID,
 	})
 }
 
@@ -893,9 +977,9 @@ func handleRoomLoopGet(w http.ResponseWriter, r *http.Request, cfg config.Config
 		httpError(w, http.StatusInternalServerError, "failed to load room loop")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"room_id": roomID,
-		"loop":    apiConvertRoomLoop(loop),
+	writeJSON(w, http.StatusOK, roomLoopStateResponse{
+		RoomID: roomID,
+		Loop:   apiConvertRoomLoop(loop),
 	})
 }
 
@@ -975,9 +1059,9 @@ func handleRoomLoopPatch(w http.ResponseWriter, r *http.Request, cfg config.Conf
 		ActorID:     req.ActorID,
 		UpdatedAt:   time.Now().UTC().Format(time.RFC3339),
 	})
-	writeJSON(w, http.StatusOK, map[string]any{
-		"room_id": roomID,
-		"loop":    apiConvertRoomLoop(persisted),
+	writeJSON(w, http.StatusOK, roomLoopStateResponse{
+		RoomID: roomID,
+		Loop:   apiConvertRoomLoop(persisted),
 	})
 }
 
@@ -1063,12 +1147,12 @@ func handleRoomCoordinatorSet(w http.ResponseWriter, r *http.Request, cfg config
 		httpError(w, http.StatusInternalServerError, "failed to update coordinator")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"room":                 convertRoomSummary(updated),
-		"previous_coordinator": currentCoordinator,
-		"coordinator":          req.TargetID,
-		"actor":                req.ActorID,
-		"event_kind":           "lead_change",
+	writeJSON(w, http.StatusOK, roomCoordinatorSetResponse{
+		Room:                convertRoomSummary(updated),
+		PreviousCoordinator: currentCoordinator,
+		Coordinator:         req.TargetID,
+		Actor:               req.ActorID,
+		EventKind:           "lead_change",
 	})
 }
 
@@ -1156,12 +1240,12 @@ func handleRoomMessageAction(w http.ResponseWriter, r *http.Request, cfg config.
 		httpError(w, http.StatusNotFound, "no room messages were updated")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"room_id":         roomID,
-		"message_ids":     messageIDs,
-		"updated":         updated,
-		"resolved_status": status,
-		"actor":           req.ActorID,
+	writeJSON(w, http.StatusOK, roomMessageActionResponse{
+		RoomID:         roomID,
+		MessageIDs:     messageIDs,
+		Updated:        updated,
+		ResolvedStatus: status,
+		Actor:          req.ActorID,
 	})
 }
 
@@ -1238,12 +1322,12 @@ func handleRoomMessagesResolveBulk(w http.ResponseWriter, r *http.Request, cfg c
 		httpError(w, http.StatusNotFound, "no room messages were resolved")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"room_id":         roomID,
-		"message_ids":     ids,
-		"updated":         updated,
-		"resolved_status": status,
-		"actor":           req.ActorID,
+	writeJSON(w, http.StatusOK, roomMessageActionResponse{
+		RoomID:         roomID,
+		MessageIDs:     ids,
+		Updated:        updated,
+		ResolvedStatus: status,
+		Actor:          req.ActorID,
 	})
 }
 
@@ -1344,11 +1428,11 @@ func handleRoomTaskAction(w http.ResponseWriter, r *http.Request, cfg config.Con
 		UpdatedAt:   time.Now().UTC().Format(time.RFC3339),
 	})
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"room_id": roomID,
-		"task":    convertRoomTask(task),
-		"action":  strings.ToLower(strings.TrimSpace(action)),
-		"actor":   req.ActorID,
+	writeJSON(w, http.StatusOK, roomTaskActionResponse{
+		RoomID: roomID,
+		Task:   convertRoomTask(task),
+		Action: strings.ToLower(strings.TrimSpace(action)),
+		Actor:  req.ActorID,
 	})
 }
 
@@ -1966,7 +2050,6 @@ func apiConvertRoomLoopDeliveryTrace(trace *coordination.RoomLoopDeliveryTrace) 
 		ChosenTransportEndpoint: strings.TrimSpace(trace.ChosenTransportEndpoint),
 		ChosenTransportKind:     strings.TrimSpace(trace.ChosenTransportKind),
 		ChosenSubmitMode:        strings.TrimSpace(trace.ChosenSubmitMode),
-		FallbackAttempted:       trace.FallbackAttempted,
 		DeliveredCount:          trace.DeliveredCount,
 		FailedCount:             trace.FailedCount,
 		DeliveredTo:             append([]string(nil), trace.DeliveredTo...),
@@ -2195,35 +2278,16 @@ func apiBuildRoomStatusParticipants(room agent.RoomSummary, messages []agent.Boa
 	}
 	now := time.Now().UTC()
 	participants := make([]roomStatusParticipantResponse, 0, len(participantSet))
+	participantStates := agent.BuildParticipantStates(room.Members)
 	for actorID := range participantSet {
 		member := memberByActor[actorID]
+		transport := agent.ParticipantStateForActorID(participantStates, actorID)
 		p := roomStatusParticipantResponse{
-			ActorID: actorID,
-			Role:    apiRoomMemberRole(room.Members, actorID),
-			Status:  "idle",
-			Backend: strings.TrimSpace(member.Backend),
-			Session: strings.TrimSpace(member.Session),
-			PaneID:  strings.TrimSpace(member.PaneID),
-			Unbound: member.Unbound,
-			TransportEndpoint: strings.TrimSpace(firstNonEmpty(
-				member.TransportEndpoint,
-				func() string {
-					if member.DeliveryBinding == nil {
-						return ""
-					}
-					return member.DeliveryBinding.TransportEndpoint
-				}(),
-			)),
-			TransportKind: strings.TrimSpace(firstNonEmpty(
-				member.TransportKind,
-				func() string {
-					if member.DeliveryBinding == nil {
-						return ""
-					}
-					return member.DeliveryBinding.TransportKind
-				}(),
-			)),
-			DeliveryBinding:      convertRoomDeliveryBinding(member.DeliveryBinding),
+			ActorID:              actorID,
+			Role:                 apiRoomMemberRole(room.Members, actorID),
+			Status:               "idle",
+			Unbound:              transport.Membership == agent.MembershipUnbound,
+			Transport:            transport,
 			TransportStatus:      apiRoomParticipantTransportStatus(member),
 			RuntimeBindingStatus: apiRoomParticipantBindingStatus(member),
 		}
@@ -2288,8 +2352,8 @@ func apiBuildRoomStatusBacklog(room agent.RoomSummary, messages []agent.BoardMes
 	return backlog
 }
 
-func apiBuildRoomStatusActionRequired(room agent.RoomSummary, messages []agent.BoardMessage, tasks []taskstore.Task, backlog roomStatusBacklogResponse, taskPulse roomTaskPulseSummaryResponse, filters map[string]struct{}, staleAfter time.Duration, now time.Time, _ bool) roomStatusActionRequiredResponse {
-	return roomStatusActionRequiredResponse{
+func apiBuildRoomStatusActionableBacklog(room agent.RoomSummary, messages []agent.BoardMessage, tasks []taskstore.Task, backlog roomStatusBacklogResponse, taskPulse roomTaskPulseSummaryResponse, filters map[string]struct{}, staleAfter time.Duration, now time.Time, _ bool) roomStatusActionableBacklogResponse {
+	return roomStatusActionableBacklogResponse{
 		ParticipantsWithPending: apiRoomStatusFilteredCount(filters, "ack", "reply", backlog.ParticipantsWithPending),
 		PendingAcks:             apiRoomStatusFilteredCount(filters, "ack", "", backlog.PendingAcks),
 		PendingReplies:          apiRoomStatusFilteredCount(filters, "reply", "", backlog.PendingReplies),
@@ -2668,24 +2732,11 @@ func apiRoomParticipantTransportStatus(member agent.RoomMember) string {
 	if member.Unbound {
 		return "unbound"
 	}
-	kind := strings.TrimSpace(firstNonEmpty(
-		member.TransportKind,
-		func() string {
-			if member.DeliveryBinding == nil {
-				return ""
-			}
-			return member.DeliveryBinding.TransportKind
-		}(),
-	))
-	endpoint := strings.TrimSpace(firstNonEmpty(
-		member.TransportEndpoint,
-		func() string {
-			if member.DeliveryBinding == nil {
-				return ""
-			}
-			return member.DeliveryBinding.TransportEndpoint
-		}(),
-	))
+	if member.DeliveryBinding == nil {
+		return "unregistered"
+	}
+	kind := strings.TrimSpace(member.DeliveryBinding.TransportKind)
+	endpoint := strings.TrimSpace(member.DeliveryBinding.TransportEndpoint)
 	if kind == "" && endpoint == "" {
 		return "unregistered"
 	}
@@ -2693,10 +2744,12 @@ func apiRoomParticipantTransportStatus(member agent.RoomMember) string {
 		return "missing_endpoint"
 	}
 	switch strings.ToLower(kind) {
-	case "pane_socket":
+	case agent.PaneSocketTransportKind:
 		return "ready"
-	case "mux_pane":
-		return "legacy_mux"
+	case agent.MuxPaneTransportKind:
+		return "ready"
+	case agent.PiExtensionTransportKind:
+		return "viewer_inbox"
 	default:
 		return "custom"
 	}
@@ -2715,9 +2768,6 @@ func apiRoomParticipantBindingStatus(member agent.RoomMember) string {
 			strings.TrimSpace(member.DeliveryBinding.TransportEndpoint) != "" {
 			return "bound"
 		}
-	}
-	if strings.TrimSpace(member.Backend) != "" || strings.TrimSpace(member.Session) != "" || strings.TrimSpace(member.PaneID) != "" {
-		return "legacy_bound"
 	}
 	return "unknown"
 }

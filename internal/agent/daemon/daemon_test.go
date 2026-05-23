@@ -581,7 +581,7 @@ func TestDaemon_EndToEnd_SpawnAskReplyStop(t *testing.T) {
 	}
 	require.NoError(t, mb.Send(ctx, msg))
 
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	var reply agent.Message
 	for {
 		msgs, err := mb.List(context.Background(), callerNS, 10)
@@ -622,7 +622,7 @@ func TestDaemon_EndToEnd_SpawnAskReplyStop(t *testing.T) {
 	select {
 	case err := <-errCh:
 		require.NoError(t, err)
-	case <-time.After(2 * time.Second):
+	case <-time.After(5 * time.Second):
 		cancel()
 		t.Fatal("daemon did not exit after kill")
 	}

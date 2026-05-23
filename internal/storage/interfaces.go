@@ -72,11 +72,9 @@ type JobStore interface {
 	Result(ctx context.Context, id string) ([]byte, error)
 	Cancel(ctx context.Context, id string) error
 	Delete(ctx context.Context, id string) error
-	FindOrPrepareSkillJob(ctx context.Context, name string, input []byte, dedupe bool) (Job, bool, error)
 	SetWorkspace(ctx context.Context, jobID, workspacePath string) error
 	WaitForCompletion(ctx context.Context, jobID string, pollInterval time.Duration) (Job, error)
 	TailProgress(ctx context.Context, jobID string, follow bool, w io.Writer) error
-	ExecutePreparedSkill(ctx context.Context, jobID, manifestPath, artifactPath string) ([]byte, error)
 }
 
 // CASMetadata describes a stored CAS object.

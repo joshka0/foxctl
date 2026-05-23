@@ -139,6 +139,41 @@ func TestChooseRLMRunnerReplWithEphemeralSkills(t *testing.T) {
 	}
 }
 
+func TestBuildRLMCLIConfigUsesNoAuthForLocalLMStudioWithoutKey(t *testing.T) {
+	t.Setenv("FOXCTL_RLM_LLM_PROVIDER", "")
+	t.Setenv("FOXCTL_RLM_LLM_API_KEY", "")
+	t.Setenv("LMSTUDIO_API_KEY", "")
+
+	cfg := buildRLMCLIConfig(rlmCLIConfigInput{
+		Provider: "lmstudio",
+		Model:    "local-model",
+		BaseURL:  "http://localhost:1234/v1",
+	})
+	if cfg.Provider != "lmstudio" {
+		t.Fatalf("Provider=%q want lmstudio", cfg.Provider)
+	}
+	if cfg.AuthMode != "none" {
+		t.Fatalf("AuthMode=%q want none", cfg.AuthMode)
+	}
+	if cfg.APIKey != "" {
+		t.Fatalf("APIKey=%q want empty", cfg.APIKey)
+	}
+}
+
+func TestBuildRLMCLIConfigUsesEnvKeyWhenPresent(t *testing.T) {
+	t.Setenv("FOXCTL_RLM_LLM_PROVIDER", "")
+	t.Setenv("FOXCTL_RLM_LLM_API_KEY", "")
+	t.Setenv("LMSTUDIO_API_KEY", "local-key")
+
+	cfg := buildRLMCLIConfig(rlmCLIConfigInput{Provider: "lmstudio"})
+	if cfg.APIKey != "local-key" {
+		t.Fatalf("APIKey=%q want local-key", cfg.APIKey)
+	}
+	if cfg.AuthMode != "" {
+		t.Fatalf("AuthMode=%q want auto/default when key is configured", cfg.AuthMode)
+	}
+}
+
 func TestRLMRunCommandCarriesAsyncTreeBudgetFlags(t *testing.T) {
 	t.Parallel()
 

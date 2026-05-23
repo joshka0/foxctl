@@ -1473,8 +1473,7 @@ func TestFetchWithTestServer(t *testing.T) {
 			_, _ = w.Write([]byte(`{"status":"ok"}`))
 		})
 
-		// We can't fully test handleFetch without runner.RunnerContext,
-		// but we can test the HTTP interaction patterns
+		// This test covers the HTTP interaction patterns without invoking the full skill runner.
 		ctx := context.Background()
 		req, _ := http.NewRequestWithContext(ctx, "GET", "http://mock", nil)
 		req.Header.Set("X-Custom", "header")

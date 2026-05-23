@@ -220,7 +220,7 @@ func TestRetryQueue_PopDueSortedAndLimited(t *testing.T) {
 func TestRetryDelay_Capped(t *testing.T) {
 	t.Parallel()
 
-	delay := retryDelay(10, time.Second, 5*time.Second)
+	delay := RetryDelay(10, time.Second, 5*time.Second)
 	if delay != 5*time.Second {
 		t.Fatalf("delay=%s want 5s", delay)
 	}

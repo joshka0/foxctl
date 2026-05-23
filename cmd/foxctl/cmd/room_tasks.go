@@ -1643,7 +1643,6 @@ func updateRoomLoopLastDeliveryTrace(room agent.RoomSummary, msg agent.BoardMess
 		DeliveryLeaseName:     strings.TrimSpace(after.DeliveryLeaseName),
 		DeliveryOwnerID:       strings.TrimSpace(after.DeliveryOwnerID),
 		RelayBackend:          strings.TrimSpace(relayResult.Backend),
-		FallbackAttempted:     relayResult.FallbackAttempted,
 		DeliveredCount:        relayResult.DeliveredCount,
 		FailedCount:           relayResult.FailedCount,
 		DeliveredTo:           append([]string(nil), relayResult.DeliveredTo...),
@@ -2971,7 +2970,8 @@ func provisionAssigneePane(ctx context.Context, absWorkspace, roomID string, sum
 		if !sameRoomParticipant(member.ActorID, recipient) {
 			continue
 		}
-		if strings.TrimSpace(member.PaneID) != "" || strings.TrimSpace(member.Session) != "" {
+		binding := agent.NormalizeRoomDeliveryBinding(member.ActorID, member.DeliveryBinding)
+		if binding != nil && (strings.TrimSpace(binding.MuxPaneID) != "" || strings.TrimSpace(binding.MuxSession) != "") {
 			return nil, nil
 		}
 	}

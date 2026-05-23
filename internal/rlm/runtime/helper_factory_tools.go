@@ -1344,11 +1344,6 @@ func compactHelperFactoryLongText(value string, limit int) string {
 	return value[:limit] + "...[truncated]"
 }
 
-//nolint:unused // Kept for callers that do not provide verifier feedback.
-func helperFactoryRepairFeedback(stage, errText, source, raw string, input, output map[string]any) string {
-	return helperFactoryRepairFeedbackWithVerifier(stage, errText, source, raw, input, output, nil)
-}
-
 func helperFactoryRepairFeedbackWithVerifier(stage, errText, source, raw string, input, output, verifier map[string]any) string {
 	var b strings.Builder
 	b.WriteString("stage: ")

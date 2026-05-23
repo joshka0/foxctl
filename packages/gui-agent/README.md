@@ -31,6 +31,20 @@ Open: `http://localhost:5174`
 bun run --cwd packages/gui-agent build
 ```
 
+## Verification
+
+From repo root:
+
+```bash
+bun run check:frontend
+bun run unused:frontend
+```
+
+`check:frontend` runs the shared data typecheck, this GUI lint/build, GUI
+behavior tests, foxterm typecheck, and GUI auth gateway typecheck.
+`unused:frontend` adds the root oxlint pass and targeted frontend dead-export
+report.
+
 ## API Integration
 
 The frontend calls `/api/*` and `/ws` paths through Vite proxy configured in:

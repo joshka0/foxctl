@@ -158,13 +158,16 @@ func (r *Registry) registerReadFile() error {
 
 // readFile implements the read_file tool.
 func (r *Registry) readFile(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
-	path, ok := args["path"].(string)
-	if !ok || path == "" {
+	input, err := decodeToolArgs[readFileArgs](args)
+	if err != nil {
+		return errorResult(fmt.Sprintf("invalid read_file arguments: %v", err)), nil
+	}
+	if input.Path == "" {
 		return errorResult("path is required"), nil
 	}
 
 	// Resolve path relative to workspace
-	fullPath := filepath.Join(r.workspace, path)
+	fullPath := filepath.Join(r.workspace, input.Path)
 
 	// Evaluate symlinks to prevent path traversal via symlinks
 	resolvedPath, err := filepath.EvalSymlinks(fullPath)
@@ -199,11 +202,11 @@ func (r *Registry) readFile(ctx context.Context, args map[string]any) (*models.C
 	startLine := 1
 	endLine := len(lines)
 
-	if sl, ok := args["start_line"].(float64); ok && sl > 0 {
-		startLine = int(sl)
+	if input.StartLine > 0 {
+		startLine = input.StartLine
 	}
-	if el, ok := args["end_line"].(float64); ok && el > 0 {
-		endLine = int(el)
+	if input.EndLine > 0 {
+		endLine = input.EndLine
 	}
 
 	// Clamp to valid range
@@ -221,12 +224,18 @@ func (r *Registry) readFile(ctx context.Context, args map[string]any) (*models.C
 	selectedLines := lines[startLine-1 : endLine]
 
 	return successResult(map[string]any{
-		"path":        path,
+		"path":        input.Path,
 		"content":     strings.Join(selectedLines, "\n"),
 		"start_line":  startLine,
 		"end_line":    endLine,
 		"total_lines": len(lines),
 	}), nil
+}
+
+type readFileArgs struct {
+	Path      string `json:"path"`
+	StartLine int    `json:"start_line,omitempty"`
+	EndLine   int    `json:"end_line,omitempty"`
 }
 
 // registerSearchPattern registers the search_pattern tool.
@@ -263,38 +272,52 @@ func (r *Registry) registerSearchPattern() error {
 
 // searchPattern implements the search_pattern tool.
 func (r *Registry) searchPattern(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
-	pattern, ok := args["pattern"].(string)
-	if !ok || pattern == "" {
+	input, err := decodeToolArgs[searchPatternArgs](args)
+	if err != nil {
+		return errorResult(fmt.Sprintf("invalid search_pattern arguments: %v", err)), nil
+	}
+	if input.Pattern == "" {
 		return errorResult("pattern is required"), nil
 	}
 
 	// Build input for code/context_ripgrep skill
-	input := map[string]any{
-		"path":             r.workspace,
-		"pattern":          pattern,
-		"case_insensitive": true,
-		"max_matches":      50,
-		"max_blocks":       20,
-		"max_block_lines":  100,
-	}
-
-	if path, ok := args["path"].(string); ok && path != "" {
-		input["path"] = filepath.Join(r.workspace, path)
-	}
-	if ci, ok := args["case_insensitive"].(bool); ok {
-		input["case_insensitive"] = ci
-	}
-	if mm, ok := args["max_matches"].(float64); ok && mm > 0 {
-		input["max_matches"] = int(mm)
-	}
+	skillInput := input.skillInput(r.workspace)
 
 	// Execute skill
-	result, err := r.runSkill(ctx, "code/context_ripgrep", input)
+	result, err := r.runSkill(ctx, "code/context_ripgrep", skillInput)
 	if err != nil {
 		return errorResult(fmt.Sprintf("search failed: %v", err)), nil
 	}
 
 	return successResult(result), nil
+}
+
+type searchPatternArgs struct {
+	Pattern         string `json:"pattern"`
+	Path            string `json:"path,omitempty"`
+	CaseInsensitive *bool  `json:"case_insensitive,omitempty"`
+	MaxMatches      int    `json:"max_matches,omitempty"`
+}
+
+func (a searchPatternArgs) skillInput(workspace string) map[string]any {
+	input := map[string]any{
+		"path":             workspace,
+		"pattern":          a.Pattern,
+		"case_insensitive": true,
+		"max_matches":      50,
+		"max_blocks":       20,
+		"max_block_lines":  100,
+	}
+	if a.Path != "" {
+		input["path"] = filepath.Join(workspace, a.Path)
+	}
+	if a.CaseInsensitive != nil {
+		input["case_insensitive"] = *a.CaseInsensitive
+	}
+	if a.MaxMatches > 0 {
+		input["max_matches"] = a.MaxMatches
+	}
+	return input
 }
 
 // registerGetSymbols registers the get_symbols tool.
@@ -331,37 +354,51 @@ func (r *Registry) registerGetSymbols() error {
 
 // getSymbols implements the get_symbols tool.
 func (r *Registry) getSymbols(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
-	path, ok := args["path"].(string)
-	if !ok || path == "" {
+	input, err := decodeToolArgs[getSymbolsArgs](args)
+	if err != nil {
+		return errorResult(fmt.Sprintf("invalid get_symbols arguments: %v", err)), nil
+	}
+	if input.Path == "" {
 		return errorResult("path is required"), nil
 	}
 
 	// Build input for code/symbols skill
-	input := map[string]any{
-		"path":            filepath.Join(r.workspace, path),
-		"symbol_type":     "all",
-		"include_private": false,
-		"include_docs":    true,
-		"max_results":     200,
-	}
-
-	if st, ok := args["symbol_type"].(string); ok && st != "" {
-		input["symbol_type"] = st
-	}
-	if ip, ok := args["include_private"].(bool); ok {
-		input["include_private"] = ip
-	}
-	if id, ok := args["include_docs"].(bool); ok {
-		input["include_docs"] = id
-	}
+	skillInput := input.skillInput(r.workspace)
 
 	// Execute skill
-	result, err := r.runSkill(ctx, "code/symbols", input)
+	result, err := r.runSkill(ctx, "code/symbols", skillInput)
 	if err != nil {
 		return errorResult(fmt.Sprintf("get symbols failed: %v", err)), nil
 	}
 
 	return successResult(result), nil
+}
+
+type getSymbolsArgs struct {
+	Path           string `json:"path"`
+	SymbolType     string `json:"symbol_type,omitempty"`
+	IncludePrivate *bool  `json:"include_private,omitempty"`
+	IncludeDocs    *bool  `json:"include_docs,omitempty"`
+}
+
+func (a getSymbolsArgs) skillInput(workspace string) map[string]any {
+	input := map[string]any{
+		"path":            filepath.Join(workspace, a.Path),
+		"symbol_type":     "all",
+		"include_private": false,
+		"include_docs":    true,
+		"max_results":     200,
+	}
+	if a.SymbolType != "" {
+		input["symbol_type"] = a.SymbolType
+	}
+	if a.IncludePrivate != nil {
+		input["include_private"] = *a.IncludePrivate
+	}
+	if a.IncludeDocs != nil {
+		input["include_docs"] = *a.IncludeDocs
+	}
+	return input
 }
 
 // registerGetGraphNeighbors registers the get_graph_neighbors tool.
@@ -394,33 +431,18 @@ func (r *Registry) registerGetGraphNeighbors() error {
 
 // getGraphNeighbors implements the get_graph_neighbors tool.
 func (r *Registry) getGraphNeighbors(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
+	input, err := decodeToolArgs[getGraphNeighborsArgs](args)
+	if err != nil {
+		return errorResult(fmt.Sprintf("invalid get_graph_neighbors arguments: %v", err)), nil
+	}
+	if input.NodeID == "" {
+		return errorResult("node_id is required"), nil
+	}
 	if r.graphStore == nil {
 		return errorResult("graph store not available"), nil
 	}
 
-	nodeID, ok := args["node_id"].(string)
-	if !ok || nodeID == "" {
-		return errorResult("node_id is required"), nil
-	}
-
-	direction := "both"
-	if d, ok := args["direction"].(string); ok && d != "" {
-		direction = d
-	}
-
-	var edgeTypes []graph.EdgeType
-	if et, ok := args["edge_types"].([]any); ok {
-		for _, e := range et {
-			if s, ok := e.(string); ok {
-				edgeTypes = append(edgeTypes, graph.EdgeType(s))
-			}
-		}
-	}
-
-	neighbors, err := r.graphStore.GetNeighbors(ctx, r.workspace, nodeID, graph.NeighborOptions{
-		Direction: direction,
-		EdgeTypes: edgeTypes,
-	})
+	neighbors, err := r.graphStore.GetNeighbors(ctx, r.workspace, input.NodeID, input.options())
 	if err != nil {
 		return errorResult(fmt.Sprintf("get neighbors failed: %v", err)), nil
 	}
@@ -430,7 +452,7 @@ func (r *Registry) getGraphNeighbors(ctx context.Context, args map[string]any) (
 	for _, n := range neighbors {
 		// Determine direction based on edge from/to IDs
 		dir := "out"
-		if n.Edge.ToID == nodeID {
+		if n.Edge.ToID == input.NodeID {
 			dir = "in"
 		}
 		results = append(results, map[string]any{
@@ -445,10 +467,33 @@ func (r *Registry) getGraphNeighbors(ctx context.Context, args map[string]any) (
 	}
 
 	return successResult(map[string]any{
-		"node_id":   nodeID,
+		"node_id":   input.NodeID,
 		"neighbors": results,
 		"count":     len(results),
 	}), nil
+}
+
+type getGraphNeighborsArgs struct {
+	NodeID    string   `json:"node_id"`
+	Direction string   `json:"direction,omitempty"`
+	EdgeTypes []string `json:"edge_types,omitempty"`
+}
+
+func (a getGraphNeighborsArgs) options() graph.NeighborOptions {
+	direction := a.Direction
+	if direction == "" {
+		direction = "both"
+	}
+	edgeTypes := make([]graph.EdgeType, 0, len(a.EdgeTypes))
+	for _, edgeType := range a.EdgeTypes {
+		if edgeType != "" {
+			edgeTypes = append(edgeTypes, graph.EdgeType(edgeType))
+		}
+	}
+	return graph.NeighborOptions{
+		Direction: direction,
+		EdgeTypes: edgeTypes,
+	}
 }
 
 // registerSemanticSearch registers the semantic_search tool.
@@ -481,33 +526,47 @@ func (r *Registry) registerSemanticSearch() error {
 
 // semanticSearch implements the semantic_search tool.
 func (r *Registry) semanticSearch(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
-	query, ok := args["query"].(string)
-	if !ok || query == "" {
+	input, err := decodeToolArgs[semanticSearchArgs](args)
+	if err != nil {
+		return errorResult(fmt.Sprintf("invalid semantic_search arguments: %v", err)), nil
+	}
+	if input.Query == "" {
 		return errorResult("query is required"), nil
 	}
 
 	// Build input for code/semantic_search skill
-	input := map[string]any{
-		"query":     query,
-		"scope":     []string{"symbols"},
-		"limit":     20,
-		"workspace": r.workspace,
-	}
-
-	if scope, ok := args["scope"].(string); ok && scope != "" {
-		input["scope"] = []string{scope}
-	}
-	if limit, ok := args["limit"].(float64); ok && limit > 0 {
-		input["limit"] = int(limit)
-	}
+	skillInput := input.skillInput(r.workspace)
 
 	// Execute skill
-	result, err := r.runSkill(ctx, "code/semantic_search", input)
+	result, err := r.runSkill(ctx, "code/semantic_search", skillInput)
 	if err != nil {
 		return errorResult(fmt.Sprintf("semantic search failed: %v", err)), nil
 	}
 
 	return successResult(result), nil
+}
+
+type semanticSearchArgs struct {
+	Query string `json:"query"`
+	Scope string `json:"scope,omitempty"`
+	Limit int    `json:"limit,omitempty"`
+}
+
+func (a semanticSearchArgs) skillInput(workspace string) map[string]any {
+	scope := []string{"symbols"}
+	if a.Scope != "" {
+		scope = []string{a.Scope}
+	}
+	limit := 20
+	if a.Limit > 0 {
+		limit = a.Limit
+	}
+	return map[string]any{
+		"query":     a.Query,
+		"scope":     scope,
+		"limit":     limit,
+		"workspace": workspace,
+	}
 }
 
 // registerFinishCodemap registers the finish_codemap tool.
@@ -532,14 +591,17 @@ func (r *Registry) registerFinishCodemap() error {
 
 // finishCodemap implements the finish_codemap tool.
 func (r *Registry) finishCodemap(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
-	codemapStr, ok := args["codemap"].(string)
-	if !ok || codemapStr == "" {
+	input, err := decodeToolArgs[finishCodemapArgs](args)
+	if err != nil {
+		return errorResult(fmt.Sprintf("invalid finish_codemap arguments: %v", err)), nil
+	}
+	if input.Codemap == "" {
 		return errorResult("codemap JSON string is required"), nil
 	}
 
 	// Validate it's valid JSON
 	var codemap map[string]any
-	if err := json.Unmarshal([]byte(codemapStr), &codemap); err != nil {
+	if err := json.Unmarshal([]byte(input.Codemap), &codemap); err != nil {
 		return errorResult(fmt.Sprintf("invalid codemap JSON: %v", err)), nil
 	}
 
@@ -566,6 +628,10 @@ func (r *Registry) finishCodemap(ctx context.Context, args map[string]any) (*mod
 		"message": "Codemap captured successfully",
 		"codemap": codemap,
 	}), nil
+}
+
+type finishCodemapArgs struct {
+	Codemap string `json:"codemap"`
 }
 
 // runSkill executes a skill and returns the parsed data.
@@ -603,6 +669,18 @@ func (r *Registry) runSkill(ctx context.Context, skillName string, input map[str
 }
 
 // Helper functions
+
+func decodeToolArgs[T any](args map[string]any) (T, error) {
+	var out T
+	raw, err := json.Marshal(args)
+	if err != nil {
+		return out, err
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return out, err
+	}
+	return out, nil
+}
 
 func successResult(data map[string]any) *models.CallToolResult {
 	content, _ := json.Marshal(data)

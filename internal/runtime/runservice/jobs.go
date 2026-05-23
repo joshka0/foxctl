@@ -7,11 +7,10 @@ import (
 	"time"
 
 	errs "github.com/joshka0/foxctl/internal/platform/errors"
-	"github.com/joshka0/foxctl/internal/platform/logging"
+	runtimejobs "github.com/joshka0/foxctl/internal/runtime/jobs"
 	"github.com/joshka0/foxctl/internal/runtime/observability"
 	"github.com/joshka0/foxctl/internal/runtime/trajectorycapture"
 	"github.com/joshka0/foxctl/internal/storage/jobs"
-	"github.com/joshka0/foxctl/internal/storage/jobs/executor"
 	"github.com/joshka0/foxctl/internal/storage/jobs/persist"
 	"github.com/joshka0/foxctl/internal/storage/jobs/types"
 	"github.com/joshka0/foxctl/internal/storage/trajectory"
@@ -21,18 +20,16 @@ func (e *Executor) ensureJobStore() (err error) {
 	if e.jobStore != nil {
 		return nil
 	}
-	logger := logging.FromContext(e.ctx)
 	p, err := persist.Open(e.ctx, e.cfg.Paths.Jobs)
 	if err != nil {
 		return err
 	}
 	defer errs.CloseOnErr(p, &err)
-	exec := executor.New(
+	store := runtimejobs.NewSkillStore(
+		e.ctx,
 		e.cfg.Paths.Jobs, p,
-		executor.WithLogger(logger),
-		executor.WithCASPath(e.cfg.Paths.CAS),
+		runtimejobs.WithSkillStoreCASPath(e.cfg.Paths.CAS),
 	)
-	store := jobs.New(e.cfg.Paths.Jobs, p, exec)
 	recoveryStart := time.Now()
 	if recovered, recErr := store.RecoverStaleJobs(e.ctx, types.DefaultMaxJobAge); recErr != nil {
 		event := observability.NewEvent("job.recover").

@@ -8,17 +8,18 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/storage/sqlutil"
+	tursoadapter "github.com/joshka0/foxctl/internal/v2/adapters/turso"
 	"github.com/joshka0/foxctl/internal/v2/core/run"
 )
 
 // Store persists replayable model and tool effects.
 type Store struct {
-	db  *sql.DB
+	db  tursoadapter.StoreDB
 	now func() time.Time
 }
 
-// NewStore constructs an effect journal over an existing sql.DB.
-func NewStore(db *sql.DB) *Store {
+// NewStore constructs an effect journal over an existing SQL database.
+func NewStore(db tursoadapter.StoreDB) *Store {
 	return &Store{
 		db:  db,
 		now: func() time.Time { return time.Now().UTC() },

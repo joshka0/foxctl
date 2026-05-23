@@ -10,7 +10,7 @@ import { archiveRoom, listRooms, listWorkspaces, restoreRoom } from '@/api/clien
 import { useViewStore } from '@/stores/viewStore'
 import { cn, formatRelativeTime } from '@/lib/utils'
 import { ArchiveRestore, Hash, RefreshCw } from 'lucide-react'
-import type { Room } from '@/api/types'
+import type { Room } from '@foxctl/data/types'
 import { RoomControlCenter } from './RoomControlCenter'
 
 export function RoomsView() {
@@ -44,7 +44,7 @@ export function RoomsView() {
     queryFn: () => listRooms({ workspace_id: workspaceID.trim(), limit: 100, archived_only: showArchived }),
   })
 
-  const rooms = roomsQuery.data?.rooms ?? []
+  const rooms = useMemo(() => roomsQuery.data?.rooms ?? [], [roomsQuery.data?.rooms])
 
   useEffect(() => {
     if (rooms.length === 0) return

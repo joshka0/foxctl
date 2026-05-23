@@ -14,7 +14,7 @@ import { useViewStore } from '@/stores/viewStore'
 import { EventTraceDrawer } from '@/components/v2/EventTraceDrawer'
 import { RefDrilldownPanel } from '@/components/v2/RefDrilldownPanel'
 import { cleanupLogs, getLogs } from '@/api/client'
-import type { ActivityEvent } from '@/api/types'
+import type { ActivityEvent, LogEntry as ActivityLogEntry } from '@/types/activity'
 import {
   RefreshCw,
   AlertCircle,
@@ -96,7 +96,7 @@ function toStringArray(value: unknown): string[] {
 }
 
 function inferSurfaceTarget(log: LogEntry): SurfaceTarget | null {
-  const data = (log.data ?? {}) as Record<string, unknown>
+  const data = log.data ?? {}
   const turnRefs = toStringArray(data.turn_refs)
   const contextRefs = [
     ...toStringArray(data.slice_refs),
@@ -113,6 +113,48 @@ function inferSurfaceTarget(log: LogEntry): SurfaceTarget | null {
   return null
 }
 
+function rawActivityEvent(event: ActivityEvent): Record<string, unknown> {
+  return {
+    operation: event.operation,
+    command: event.command,
+    status: event.status,
+    component: event.component,
+    trace_id: event.trace_id,
+    span_id: event.span_id,
+    parent_id: event.parent_id,
+    service: event.service,
+    version: event.version,
+    subtype: event.subtype,
+    session_id: event.session_id,
+    agent_id: event.agent_id,
+    workspace_id: event.workspace_id,
+    job_id: event.job_id,
+    duration_ms: event.duration_ms,
+    error_type: event.error_type,
+    error_code: event.error_code,
+    error_message: event.error_message,
+    retriable: event.retriable,
+    ts: event.ts,
+    data: event.data,
+  }
+}
+
+function activityEventFromLogEntry(entry: ActivityLogEntry): ActivityEvent {
+  return {
+    operation: entry.operation,
+    command: entry.command,
+    status: entry.status,
+    component: entry.component,
+    session_id: entry.session_id,
+    agent_id: entry.agent_id,
+    workspace_id: entry.workspace_id,
+    duration_ms: entry.duration_ms,
+    error_message: entry.error_message,
+    ts: entry.ts,
+    data: entry.data,
+  }
+}
+
 /**
  * Convert an ActivityEvent into a normalized LogEntry for UI rendering.
  *
@@ -126,8 +168,8 @@ function inferSurfaceTarget(log: LogEntry): SurfaceTarget | null {
  */
 function activityToLog(event: ActivityEvent): LogEntry {
   // Extract component from operation (e.g., "hook.execute" -> "hook")
-  const component = (event as { component?: string }).component ?? event.operation.split('.')[0]
-  const data = event.data as Record<string, unknown> | undefined
+  const component = event.component ?? event.operation.split('.')[0]
+  const data = event.data
   const caller = typeof data?.caller === 'string' ? data.caller : undefined
   const callerFile = typeof data?.caller_file === 'string' ? data.caller_file : undefined
   const callerPath = typeof data?.caller_path === 'string' ? data.caller_path : undefined
@@ -141,6 +183,7 @@ function activityToLog(event: ActivityEvent): LogEntry {
     }
     return undefined
   })()
+  const dataError = typeof data?.error === 'string' ? data.error : undefined
 
   return {
     ts: event.ts,
@@ -166,10 +209,10 @@ function activityToLog(event: ActivityEvent): LogEntry {
     duration_ms: event.duration_ms,
     error_type: event.error_type,
     error_code: event.error_code,
-    error_message: event.error_message ?? (event.data?.error as string | undefined),
+    error_message: event.error_message ?? dataError,
     retriable: event.retriable,
     data: event.data,
-    raw: event as unknown as Record<string, unknown>,
+    raw: rawActivityEvent(event),
   }
 }
 
@@ -256,7 +299,7 @@ export function LogsViewer() {
     try {
       const response = await getLogs({ limit: 500 })
       // Preserve all log metadata from the API.
-      const activityEvents = response.entries.map((entry) => ({ ...entry })) as ActivityEvent[]
+      const activityEvents = response.entries.map(activityEventFromLogEntry)
       setEvents(activityEvents)
     } catch (err) {
       console.error(JSON.stringify({
@@ -1299,36 +1342,36 @@ function getErrorDetails(log: LogEntry): ErrorDetail[] {
   }
 
   const dataError =
-    (data as Record<string, unknown>).error ??
-    (data as Record<string, unknown>).error_message ??
-    (data as Record<string, unknown>).error_msg ??
-    (data as Record<string, unknown>).message
+    data.error ??
+    data.error_message ??
+    data.error_msg ??
+    data.message
 
   if (dataError && dataError !== log.error_message) {
     pushDetail("error", dataError)
   }
 
   const dataCode =
-    (data as Record<string, unknown>).code ??
-    (data as Record<string, unknown>).error_code ??
-    (data as Record<string, unknown>).errorCode
+    data.code ??
+    data.error_code ??
+    data.errorCode
 
   if (dataCode) {
     pushDetail("code", dataCode)
   }
 
   const dataHint =
-    (data as Record<string, unknown>).hint ??
-    (data as Record<string, unknown>).error_hint ??
-    (data as Record<string, unknown>).help
+    data.hint ??
+    data.error_hint ??
+    data.help
 
   if (dataHint) {
     pushDetail("hint", dataHint)
   }
 
   const dataStack =
-    (data as Record<string, unknown>).stack ??
-    (data as Record<string, unknown>).stacktrace
+    data.stack ??
+    data.stacktrace
 
   if (dataStack) {
     pushDetail("stack", dataStack)

@@ -157,10 +157,10 @@ type FanoutMode string
 
 const (
 	// FanoutModeInline runs indexers synchronously in the handler goroutine.
-	// Suitable for dev/test; not recommended for production.
+	// This is the only supported mode until job enqueueing is implemented.
 	FanoutModeInline FanoutMode = "inline"
-	// FanoutModeJobs enqueues one job per indexer via the WFQ scheduler.
-	// This is the default for production.
+	// FanoutModeJobs is reserved for future WFQ-backed job enqueueing.
+	// Validate rejects it until that scheduler path exists.
 	FanoutModeJobs FanoutMode = "jobs"
 )
 
@@ -171,20 +171,19 @@ type PostReviewConfig struct {
 	// Default: false; must be true to emit events/jobs.
 	Enabled bool `yaml:"enabled" json:"enabled"`
 
-	// Mode controls how indexers are invoked: "inline" or "jobs".
-	// Default: "jobs" for production.
+	// Mode controls how indexers are invoked. Only "inline" is supported today.
+	// "jobs" is reserved and rejected until real job enqueueing exists.
 	Mode FanoutMode `yaml:"mode" json:"mode"`
 
 	// Indexers lists the configured indexers.
 	Indexers []IndexerConfig `yaml:"indexers" json:"indexers"`
 
-	// ConcurrencyPerIndexer limits concurrent jobs per indexer in jobs mode.
+	// ConcurrencyPerIndexer is reserved for the future jobs mode.
 	// Default: 3. A value of 0 means unlimited concurrency.
 	ConcurrencyPerIndexer int `yaml:"concurrency_per_indexer" json:"concurrency_per_indexer"`
 
-	// Async controls whether indexing runs asynchronously (default: true).
-	// When false, task completion blocks until indexing completes.
-	// Deprecated: use Mode instead; kept for backward compatibility.
+	// Async is a deprecated compatibility field. It is ignored while only inline
+	// mode is supported.
 	Async bool `yaml:"async" json:"async"`
 }
 
@@ -192,10 +191,10 @@ type PostReviewConfig struct {
 func DefaultPostReviewConfig() PostReviewConfig {
 	return PostReviewConfig{
 		Enabled:               false, // Off by default until explicitly enabled
-		Mode:                  FanoutModeJobs,
+		Mode:                  FanoutModeInline,
 		Indexers:              []IndexerConfig{},
 		ConcurrencyPerIndexer: 3,
-		Async:                 true,
+		Async:                 false,
 	}
 }
 
@@ -204,11 +203,13 @@ func DefaultPostReviewConfig() PostReviewConfig {
 func (c PostReviewConfig) Validate() error {
 	// Validate mode
 	switch c.Mode {
-	case FanoutModeInline, FanoutModeJobs, "": // empty defaults to jobs
+	case FanoutModeInline, "": // empty defaults to inline
 		// ok
+	case FanoutModeJobs:
+		return fmt.Errorf("indexing.post_review.mode: %q is reserved but unsupported until job enqueueing is implemented; use %q", FanoutModeJobs, FanoutModeInline)
 	default:
-		return fmt.Errorf("indexing.post_review.mode: invalid value %q, must be %q or %q",
-			c.Mode, FanoutModeInline, FanoutModeJobs)
+		return fmt.Errorf("indexing.post_review.mode: invalid value %q, must be %q",
+			c.Mode, FanoutModeInline)
 	}
 
 	// Validate concurrency (0 = unlimited, negative is invalid).
@@ -232,10 +233,10 @@ func (c PostReviewConfig) Validate() error {
 	return nil
 }
 
-// EffectiveMode returns the mode to use, defaulting to jobs if empty.
+// EffectiveMode returns the mode to use, defaulting to inline if empty.
 func (c PostReviewConfig) EffectiveMode() FanoutMode {
 	if c.Mode == "" {
-		return FanoutModeJobs
+		return FanoutModeInline
 	}
 	return c.Mode
 }

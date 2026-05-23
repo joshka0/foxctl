@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/storage/sqlutil"
+	tursoadapter "github.com/joshka0/foxctl/internal/v2/adapters/turso"
 	v2events "github.com/joshka0/foxctl/internal/v2/core/events"
 )
 
@@ -73,11 +74,11 @@ type LegacyResolver interface {
 
 // Store applies events into projection tables.
 type Store struct {
-	db  *sql.DB
+	db  tursoadapter.StoreDB
 	now func() time.Time
 }
 
-func NewStore(db *sql.DB) *Store {
+func NewStore(db tursoadapter.StoreDB) *Store {
 	return &Store{
 		db: db,
 		now: func() time.Time {

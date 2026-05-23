@@ -41,6 +41,76 @@ func TestStripThinkTags(t *testing.T) {
 	}
 }
 
+func TestResolveCompanionEngineType(t *testing.T) {
+	tests := []struct {
+		name        string
+		configured  EngineType
+		requested   EngineType
+		einoEnabled bool
+		want        EngineType
+		wantErr     string
+	}{
+		{
+			name: "defaults to llmchat when gate is off",
+			want: EngineTypeLLMChat,
+		},
+		{
+			name:        "env gate opts default path into eino",
+			einoEnabled: true,
+			want:        EngineTypeEino,
+		},
+		{
+			name:        "explicit llmchat keeps default path even when gate is on",
+			configured:  EngineTypeLLMChat,
+			einoEnabled: true,
+			want:        EngineTypeLLMChat,
+		},
+		{
+			name:      "requesting eino without gate fails honestly",
+			requested: EngineTypeEino,
+			wantErr:   "requires FOXCTL_ENGINE_BACKEND=eino",
+		},
+		{
+			name:        "requesting eino with gate succeeds",
+			requested:   EngineTypeEino,
+			einoEnabled: true,
+			want:        EngineTypeEino,
+		},
+		{
+			name:      "unknown engine type fails",
+			requested: "bogus",
+			wantErr:   "unsupported engine_type",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveCompanionEngineType(tt.configured, tt.requested, tt.einoEnabled)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error=%v want substring %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveCompanionEngineType: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("engineType=%q want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCompanionEngineSupportsStreaming(t *testing.T) {
+	if !companionEngineSupportsStreaming(EngineTypeLLMChat) {
+		t.Fatal("llmchat should support companion streaming")
+	}
+	if companionEngineSupportsStreaming(EngineTypeEino) {
+		t.Fatal("eino should not be presented as streaming-capable yet")
+	}
+}
+
 func TestShouldRetryGroundedTurn(t *testing.T) {
 	tests := []struct {
 		name            string

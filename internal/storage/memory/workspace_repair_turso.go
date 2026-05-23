@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	ws "github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/storage/workspacerepair"
 )
 
 // repairWorkspaceIDs best-effort migrates legacy absolute-path workspace keys to stable IDs.
@@ -36,45 +36,26 @@ func (s *TursoStore) repairWorkspaceIDs(ctx context.Context) {
 		return
 	}
 
-	// Fast-path: if nothing looks like a filesystem path, there is nothing to repair.
-	if !tableHasPathWorkspace(ctx, db, "named_memory") &&
-		!tableHasPathWorkspace(ctx, db, "embedding_metadata") &&
-		!tableHasPathWorkspace(ctx, db, "indexer_state") {
+	if !workspacerepair.AnyPathWorkspace(ctx, db, workspaceRepairColumns...) {
 		return
 	}
 
 	userHome, _ := os.UserHomeDir()
-
-	workspaces := make(map[string]struct{})
-	collectPathWorkspaces(ctx, db, "named_memory", workspaces)
-	collectPathWorkspaces(ctx, db, "embedding_metadata", workspaces)
-	collectPathWorkspaces(ctx, db, "indexer_state", workspaces)
+	workspaces := workspacerepair.CollectPathWorkspaces(ctx, db, workspaceRepairColumns...)
 
 	for raw := range workspaces {
-		raw = strings.TrimSpace(raw)
-		if raw == "" || ws.LooksLikeID(raw) {
+		resolved, ok := workspacerepair.ResolvePathWorkspace(raw, userHome)
+		if !ok {
 			continue
 		}
 
-		targetID := ""
-		if pathExists(raw) {
-			targetID = ws.ID(raw)
-		}
-		repaired := repairHomePath(raw, userHome)
-		if repaired != raw && pathExists(repaired) {
-			targetID = ws.ID(repaired)
-		}
-		if targetID == "" || targetID == raw {
-			continue
-		}
-
-		moved, err := s.migrateWorkspace(ctx, raw, targetID)
+		moved, err := s.migrateWorkspace(ctx, resolved.RawPath, resolved.WorkspaceID)
 		if err != nil {
-			logger.Warn().Err(err).Str("from", raw).Str("to", targetID).Msg("memory(turso): workspace repair failed")
+			logger.Warn().Err(err).Str("from", resolved.RawPath).Str("to", resolved.WorkspaceID).Msg("memory(turso): workspace repair failed")
 			continue
 		}
 		if moved {
-			logger.Info().Str("from", raw).Str("to", targetID).Msg("memory(turso): repaired workspace IDs")
+			logger.Info().Str("from", resolved.RawPath).Str("to", resolved.WorkspaceID).Msg("memory(turso): repaired workspace IDs")
 		}
 	}
 }

@@ -110,12 +110,12 @@ func TestThreeLanes_NoOrphanedBoxDrawing_60x20(t *testing.T) {
 
 func TestThreeLanes_SelectionPreservedAcrossResizes(t *testing.T) {
 	cs := NewCockpitScreen("http://localhost:8090")
-	cs.SetStubAgents([]StubAgent{
+	cs.SetAgents([]AgentInventoryItem{
 		{ID: "agent-1", Role: "researcher", Status: "running"},
 		{ID: "agent-2", Role: "coder", Status: "idle"},
 		{ID: "agent-3", Role: "planner", Status: "running"},
 	})
-	cs.SetSelectedIndex(1) // select coder
+	cs.SetSelectedIndex(1)
 
 	sizes := [][2]int{{80, 24}, {120, 40}, {60, 20}, {80, 24}}
 	for _, size := range sizes {
@@ -165,7 +165,7 @@ func TestThreeLanes_WithAgents_ResizeSequence(t *testing.T) {
 	}
 	for _, size := range sizes {
 		cs := NewCockpitScreen("http://localhost:8090")
-		cs.SetStubAgents([]StubAgent{
+		cs.SetAgents([]AgentInventoryItem{
 			{ID: "agent-1", Role: "researcher", Status: "running"},
 			{ID: "agent-2", Role: "coder", Status: "idle"},
 			{ID: "agent-3", Role: "planner", Status: "running"},
@@ -186,7 +186,7 @@ func TestThreeLanes_WithAgents_ResizeSequence(t *testing.T) {
 
 func TestThreeLanes_NavigationThenResize(t *testing.T) {
 	cs := NewCockpitScreen("http://localhost:8090")
-	cs.SetStubAgents([]StubAgent{
+	cs.SetAgents([]AgentInventoryItem{
 		{ID: "agent-1", Role: "researcher", Status: "running"},
 		{ID: "agent-2", Role: "coder", Status: "idle"},
 		{ID: "agent-3", Role: "planner", Status: "running"},
@@ -218,7 +218,7 @@ func TestThreeLanes_NavigationThenResize(t *testing.T) {
 
 func TestThreeLanes_SelectionClampedAfterResize(t *testing.T) {
 	cs := NewCockpitScreen("http://localhost:8090")
-	cs.SetStubAgents([]StubAgent{
+	cs.SetAgents([]AgentInventoryItem{
 		{ID: "agent-1", Role: "researcher", Status: "running"},
 		{ID: "agent-2", Role: "coder", Status: "idle"},
 	})
@@ -231,7 +231,7 @@ func TestThreeLanes_SelectionClampedAfterResize(t *testing.T) {
 	}
 
 	// Remove an agent — selection should clamp to 0
-	cs.SetStubAgents([]StubAgent{
+	cs.SetAgents([]AgentInventoryItem{
 		{ID: "agent-1", Role: "researcher", Status: "running"},
 	})
 	cs.ClampSelection()

@@ -30,6 +30,7 @@ type OpenAIConfig struct {
 	Provider string
 	BaseURL  string
 	APIKey   string
+	AuthMode string
 	Model    string
 	Timeout  time.Duration
 }
@@ -42,7 +43,9 @@ type OpenAIClient struct {
 
 // NewOpenAIClient creates an OpenAI-compatible client with sensible defaults.
 func NewOpenAIClient(cfg OpenAIConfig) (*OpenAIClient, error) {
-	if strings.TrimSpace(cfg.APIKey) == "" {
+	cfg.Provider = strings.ToLower(strings.TrimSpace(cfg.Provider))
+	cfg.AuthMode = resolveAuthMode(cfg.Provider, cfg.AuthMode, cfg.APIKey)
+	if cfg.AuthMode != "none" && strings.TrimSpace(cfg.APIKey) == "" {
 		return nil, fmt.Errorf("api key is required")
 	}
 	if strings.TrimSpace(cfg.BaseURL) == "" {
@@ -65,6 +68,20 @@ func NewOpenAIClient(cfg OpenAIConfig) (*OpenAIClient, error) {
 		cfg:    cfg,
 		client: &http.Client{Timeout: cfg.Timeout},
 	}, nil
+}
+
+func resolveAuthMode(provider, authMode, apiKey string) string {
+	mode := strings.ToLower(strings.TrimSpace(authMode))
+	if mode != "" && mode != "auto" {
+		return mode
+	}
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "lmstudio", "openai_compat", "openai-compatible":
+		if strings.TrimSpace(apiKey) == "" {
+			return "none"
+		}
+	}
+	return "bearer"
 }
 
 type openAIRequest struct {
@@ -130,7 +147,9 @@ func (c *OpenAIClient) Chat(ctx context.Context, systemPrompt, userPrompt string
 		return "", fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+	if c.cfg.AuthMode != "none" {
+		req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+	}
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -164,7 +183,7 @@ func (c *OpenAIClient) Chat(ctx context.Context, systemPrompt, userPrompt string
 	if reasoning != "" {
 		return reasoning, nil
 	}
-	return "", nil
+	return "", fmt.Errorf("empty completion content")
 }
 
 func baseURLForProvider(provider string) string {

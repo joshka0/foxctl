@@ -1,15 +1,15 @@
 import { cn } from '@/lib/utils'
 import { formatRelativeTime } from '@/lib/time'
 import { MessageSquare, ClipboardList, Crown, AlertTriangle, ShieldCheck } from 'lucide-react'
-import type { LeadChangeEvent } from '@/api/types'
+import { isTimelineLeadChangeEvent, type TimelineMessageEvent } from '@/types/sse'
 
 interface TimelineEventProps {
-  event: any // Can be MailboxMessage or LeadChangeEvent
+  event: TimelineMessageEvent
   type: 'message' | 'task' | 'lead' | 'alert' | 'system'
 }
 
 export function TimelineEvent({ event, type }: TimelineEventProps) {
-  const isLeadChange = type === 'lead' || event.kind === 'lead_change'
+  const isLeadChange = type === 'lead' && isTimelineLeadChangeEvent(event)
   
   const iconMap = {
     message: <MessageSquare className="w-3 h-3" />,
@@ -23,7 +23,6 @@ export function TimelineEvent({ event, type }: TimelineEventProps) {
   const time = event.created_at || event.changed_at
 
   if (isLeadChange) {
-    const leadEvent = event as LeadChangeEvent
     return (
       <div className="flex gap-3 text-[11px] group relative py-1 px-2 rounded hover:bg-primary/5 transition-colors border border-transparent hover:border-primary/10">
         <div className="shrink-0 mt-0.5">
@@ -37,13 +36,13 @@ export function TimelineEvent({ event, type }: TimelineEventProps) {
             <span className="text-[9px] text-muted-foreground font-mono">{formatRelativeTime(time)}</span>
           </div>
           <p className="text-foreground/90 leading-normal">
-            <span className="font-bold">{leadEvent.previous_lead || 'none'}</span>
+            <span className="font-bold">{event.previous_lead || 'none'}</span>
             <span className="mx-1.5 opacity-50">→</span>
-            <span className="font-bold text-primary px-1 bg-primary/5 rounded">{leadEvent.new_lead}</span>
+            <span className="font-bold text-primary px-1 bg-primary/5 rounded">{event.new_lead}</span>
           </p>
-          {leadEvent.note && (
+          {event.note && (
             <p className="mt-1.5 text-[10px] text-muted-foreground italic border-l-2 border-primary/20 pl-2 py-0.5 bg-muted/30 rounded-r">
-              "{leadEvent.note}"
+              "{event.note}"
             </p>
           )}
         </div>

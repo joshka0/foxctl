@@ -9,6 +9,7 @@ import (
 
 	"github.com/joshka0/foxctl/internal/platform/timeutil"
 	"github.com/joshka0/foxctl/internal/storage/dbutil"
+	"github.com/joshka0/foxctl/internal/storage/sqlutil"
 )
 
 // Status represents the state of a watcher.
@@ -241,14 +242,23 @@ func scanTestStatus(row *sql.Row) (TestStatus, error) {
 	}
 
 	if startedAt.Valid {
-		ts.StartedAt = parseTimePtr(startedAt.String)
+		parsed, err := parseTimePtr(startedAt.String, "started_at")
+		if err != nil {
+			return TestStatus{}, err
+		}
+		ts.StartedAt = parsed
 	}
 	if finishedAt.Valid {
-		ts.FinishedAt = parseTimePtr(finishedAt.String)
+		parsed, err := parseTimePtr(finishedAt.String, "finished_at")
+		if err != nil {
+			return TestStatus{}, err
+		}
+		ts.FinishedAt = parsed
 	}
 	if failuresJSON.Valid && failuresJSON.String != "" {
-		// Optional JSON field; parse errors leave default empty slice.
-		_ = json.Unmarshal([]byte(failuresJSON.String), &ts.Failures) //nolint:errcheck
+		if err := json.Unmarshal([]byte(failuresJSON.String), &ts.Failures); err != nil {
+			return TestStatus{}, fmt.Errorf("decode failures_json: %w", err)
+		}
 	}
 
 	return ts, nil
@@ -268,23 +278,35 @@ func scanTestStatusRows(rows *sql.Rows) (TestStatus, error) {
 	}
 
 	if startedAt.Valid {
-		ts.StartedAt = parseTimePtr(startedAt.String)
+		parsed, err := parseTimePtr(startedAt.String, "started_at")
+		if err != nil {
+			return TestStatus{}, err
+		}
+		ts.StartedAt = parsed
 	}
 	if finishedAt.Valid {
-		ts.FinishedAt = parseTimePtr(finishedAt.String)
+		parsed, err := parseTimePtr(finishedAt.String, "finished_at")
+		if err != nil {
+			return TestStatus{}, err
+		}
+		ts.FinishedAt = parsed
 	}
 	if failuresJSON.Valid && failuresJSON.String != "" {
-		// Optional JSON field; parse errors leave default empty slice.
-		_ = json.Unmarshal([]byte(failuresJSON.String), &ts.Failures) //nolint:errcheck
+		if err := json.Unmarshal([]byte(failuresJSON.String), &ts.Failures); err != nil {
+			return TestStatus{}, fmt.Errorf("decode failures_json: %w", err)
+		}
 	}
 
 	return ts, nil
 }
 
-func parseTimePtr(s string) *time.Time {
-	ts := dbutil.ScanTimestampsMust(s)
-	if len(ts) > 0 {
-		return &ts[0]
+func parseTimePtr(s, field string) (*time.Time, error) {
+	ts, err := sqlutil.ScanTimestamp(s)
+	if err != nil {
+		return nil, fmt.Errorf("decode %s: %w", field, err)
 	}
-	return nil
+	if !ts.IsZero() {
+		return &ts, nil
+	}
+	return nil, nil
 }

@@ -28,9 +28,6 @@ type BoardStore interface {
 	UpsertRoom(ctx context.Context, room agent.Room) (agent.Room, error)
 	EnsureRoom(ctx context.Context, workspaceID, roomID, title string) (agent.Room, error)
 	ReplaceRoomMembers(ctx context.Context, workspaceID, roomID string, members []agent.RoomMember) ([]agent.RoomMember, error)
-	// UpdateRoomMemberTransport sets transport_endpoint and transport_kind for an existing room
-	// member. Returns ErrRoomMemberNotFound if the actor is not currently a member of the room.
-	UpdateRoomMemberTransport(ctx context.Context, workspaceID, roomID, actorID, endpoint, kind string) error
 	// UpdateRoomMemberBinding surgically updates one existing room member's transport/presentation
 	// binding without replacing the whole membership set. Returns ErrRoomMemberNotFound if absent.
 	UpdateRoomMemberBinding(ctx context.Context, workspaceID, roomID string, member agent.RoomMember) error
@@ -275,17 +272,18 @@ func (s *boardSQLStore) ReplaceRoomMembers(ctx context.Context, workspaceID, roo
 		if member.JoinedAt.IsZero() {
 			member.JoinedAt = time.Now().UTC()
 		}
+		binding := roomDeliveryBindingForStorage(member)
 		if err := retryBoardBusy(ctx, func() error {
 			_, execErr := tx.ExecContext(
 				ctx, `
-			INSERT INTO room_members (
-				workspace_id, room_id, actor_id, role, backend, session, pane_id, unbound, joined_at,
+				INSERT INTO room_members (
+					workspace_id, room_id, actor_id, role, backend, session, pane_id, unbound, joined_at,
 				transport_endpoint, transport_kind, delivery_submit_mode, delivery_health, delivery_fallback_policy
-			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				workspaceID, roomID, member.ActorID, member.Role, member.Backend, member.Session, member.PaneID, boardBoolToInt(member.Unbound), member.JoinedAt.Unix(),
-				member.TransportEndpoint, member.TransportKind,
-				member.DeliveryBinding.SubmitMode, member.DeliveryBinding.Health, member.DeliveryBinding.FallbackPolicy,
+				)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				workspaceID, roomID, member.ActorID, member.Role, binding.MuxBackend, binding.MuxSession, binding.MuxPaneID, boardBoolToInt(member.Unbound), member.JoinedAt.Unix(),
+				binding.TransportEndpoint, binding.TransportKind,
+				binding.SubmitMode, binding.Health, "",
 			)
 			return execErr
 		}); err != nil {
@@ -310,47 +308,6 @@ func (s *boardSQLStore) ReplaceRoomMembers(ctx context.Context, workspaceID, roo
 	return out, nil
 }
 
-func (s *boardSQLStore) UpdateRoomMemberTransport(ctx context.Context, workspaceID, roomID, actorID, endpoint, kind string) error {
-	workspaceID = workspaceutil.CanonicalWorkspaceKey(workspaceID)
-	roomID = strings.TrimSpace(roomID)
-	actorID = strings.TrimSpace(actorID)
-	endpoint = strings.TrimSpace(endpoint)
-	kind = strings.ToLower(strings.TrimSpace(kind))
-	if workspaceID == "" {
-		return fmt.Errorf("board: update member transport: workspace_id required")
-	}
-	if roomID == "" {
-		return fmt.Errorf("board: update member transport: room_id required")
-	}
-	if actorID == "" {
-		return fmt.Errorf("board: update member transport: actor_id required")
-	}
-
-	var result sql.Result
-	err := retryBoardBusy(ctx, func() error {
-		var execErr error
-		result, execErr = s.db.ExecContext(
-			ctx, `
-			UPDATE room_members
-			SET transport_endpoint = ?, transport_kind = ?
-			WHERE workspace_id = ? AND room_id = ? AND actor_id = ?`,
-			endpoint, kind, workspaceID, roomID, actorID,
-		)
-		return execErr
-	})
-	if err != nil {
-		return fmt.Errorf("board: update member transport: %w", err)
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("board: update member transport rows affected: %w", err)
-	}
-	if n == 0 {
-		return ErrRoomMemberNotFound
-	}
-	return nil
-}
-
 func (s *boardSQLStore) UpdateRoomMemberBinding(ctx context.Context, workspaceID, roomID string, member agent.RoomMember) error {
 	workspaceID = workspaceutil.CanonicalWorkspaceKey(workspaceID)
 	roomID = strings.TrimSpace(roomID)
@@ -364,25 +321,26 @@ func (s *boardSQLStore) UpdateRoomMemberBinding(ctx context.Context, workspaceID
 	if member.ActorID == "" {
 		return fmt.Errorf("board: update member binding: actor_id required")
 	}
+	binding := roomDeliveryBindingForStorage(member)
 
 	var result sql.Result
 	err := retryBoardBusy(ctx, func() error {
 		var execErr error
 		result, execErr = s.db.ExecContext(
 			ctx, `
-			UPDATE room_members
-			SET backend = ?, session = ?, pane_id = ?, unbound = ?, transport_endpoint = ?, transport_kind = ?,
-			    delivery_submit_mode = ?, delivery_health = ?, delivery_fallback_policy = ?
-			WHERE workspace_id = ? AND room_id = ? AND actor_id = ?`,
-			member.Backend,
-			member.Session,
-			member.PaneID,
+				UPDATE room_members
+				SET backend = ?, session = ?, pane_id = ?, unbound = ?, transport_endpoint = ?, transport_kind = ?,
+				    delivery_submit_mode = ?, delivery_health = ?, delivery_fallback_policy = ?
+				WHERE workspace_id = ? AND room_id = ? AND actor_id = ?`,
+			binding.MuxBackend,
+			binding.MuxSession,
+			binding.MuxPaneID,
 			boardBoolToInt(member.Unbound),
-			member.TransportEndpoint,
-			member.TransportKind,
-			member.DeliveryBinding.SubmitMode,
-			member.DeliveryBinding.Health,
-			member.DeliveryBinding.FallbackPolicy,
+			binding.TransportEndpoint,
+			binding.TransportKind,
+			binding.SubmitMode,
+			binding.Health,
+			"",
 			workspaceID,
 			roomID,
 			member.ActorID,
@@ -1521,28 +1479,43 @@ func (s *boardSQLStore) listRoomMembers(ctx context.Context, workspaceID, roomID
 			return nil, fmt.Errorf("board: scan room member: %w", err)
 		}
 		members = append(members, agent.NormalizeRoomMember(agent.RoomMember{
-			ActorID:           actorID,
-			Role:              role,
-			Backend:           backend,
-			Session:           session,
-			PaneID:            paneID,
-			Unbound:           unbound != 0,
-			JoinedAt:          time.Unix(joinedAt, 0).UTC(),
-			TransportEndpoint: transportEndpoint,
-			TransportKind:     transportKind,
-			DeliveryBinding: &agent.RoomDeliveryBinding{
-				MuxBackend:        backend,
-				MuxSession:        session,
-				MuxPaneID:         paneID,
-				TransportEndpoint: transportEndpoint,
-				TransportKind:     transportKind,
-				SubmitMode:        submitMode,
-				Health:            health,
-				FallbackPolicy:    fallbackPolicy,
-			},
+			ActorID:         actorID,
+			Role:            role,
+			Unbound:         unbound != 0,
+			JoinedAt:        time.Unix(joinedAt, 0).UTC(),
+			DeliveryBinding: roomDeliveryBindingFromStorage(backend, session, paneID, transportEndpoint, transportKind, submitMode, health),
 		}))
 	}
 	return members, nil
+}
+
+func roomDeliveryBindingFromStorage(backend, session, paneID, transportEndpoint, transportKind, submitMode, health string) *agent.RoomDeliveryBinding {
+	binding := agent.RoomDeliveryBinding{
+		MuxBackend:        strings.TrimSpace(backend),
+		MuxSession:        strings.TrimSpace(session),
+		MuxPaneID:         strings.TrimSpace(paneID),
+		TransportEndpoint: strings.TrimSpace(transportEndpoint),
+		TransportKind:     strings.TrimSpace(transportKind),
+		SubmitMode:        strings.TrimSpace(submitMode),
+		Health:            strings.TrimSpace(health),
+	}
+	if binding.MuxBackend == "" &&
+		binding.MuxSession == "" &&
+		binding.MuxPaneID == "" &&
+		binding.TransportEndpoint == "" &&
+		binding.TransportKind == "" &&
+		binding.SubmitMode == "" &&
+		binding.Health == "" {
+		return nil
+	}
+	return &binding
+}
+
+func roomDeliveryBindingForStorage(member agent.RoomMember) agent.RoomDeliveryBinding {
+	if member.DeliveryBinding == nil {
+		return agent.RoomDeliveryBinding{}
+	}
+	return *member.DeliveryBinding
 }
 
 func boardBoolToInt(v bool) int {

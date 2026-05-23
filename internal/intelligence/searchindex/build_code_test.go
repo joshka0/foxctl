@@ -75,7 +75,7 @@ func (f *fakeCodeEnvelopeProvider) BuildCodeEnvelope(_ context.Context, req Code
 			{Name: "semantic_anchor", Text: "ENFORCES anchor:foxctl:invariant:no-send-without-read"},
 		},
 		Keywords:          []string{"read-before-write"},
-		Metadata:          map[string]any{"anchor_count": 1},
+		Metadata:          SemanticEnvelopeProviderMetadata{OwnerNodeID: "owner-node-1"},
 		DigestParts:       []string{"anchor:foxctl:invariant:no-send-without-read", "ENFORCES"},
 		CoChangeNeighbors: []string{"pkg/audit.go"},
 	}, nil
@@ -377,18 +377,18 @@ func TestSemanticEnvelopeDigestTracksStableAnchorContractParts(t *testing.T) {
 		},
 	}
 	doc := applySemanticEnvelope(Document{SearchText: "base"}, base, BuildCodeOptions{})
-	envelope, ok := doc.Metadata[metadataKeySemanticEnvelope].(map[string]any)
+	envelope, ok := doc.Metadata[metadataKeySemanticEnvelope].(SemanticEnvelopeMetadata)
 	if !ok {
 		t.Fatalf("missing semantic envelope metadata: %#v", doc.Metadata)
 	}
-	digest, _ := envelope["digest"].(string)
+	digest := envelope.Digest
 	if !strings.HasPrefix(digest, "sha256:") {
 		t.Fatalf("digest=%q", digest)
 	}
-	if envelope["provider_version"] != "semantic-anchors-v1" {
-		t.Fatalf("provider_version=%#v", envelope["provider_version"])
+	if envelope.ProviderVersion != "semantic-anchors-v1" {
+		t.Fatalf("provider_version=%#v", envelope.ProviderVersion)
 	}
-	if envelope["include_cochange_text"] != false || envelope["cochange_metadata_only"] != true {
+	if envelope.IncludeCoChangeText || !envelope.CoChangeMetadataOnly {
 		t.Fatalf("unexpected cochange flags: %#v", envelope)
 	}
 	if sections := envelopeTextSectionsFromMetadata(doc.Metadata); len(sections) != 2 {
@@ -398,16 +398,69 @@ func TestSemanticEnvelopeDigestTracksStableAnchorContractParts(t *testing.T) {
 	changedProvider := base
 	changedProvider.ProviderVersion = "semantic-anchors-v2"
 	changedDoc := applySemanticEnvelope(Document{SearchText: "base"}, changedProvider, BuildCodeOptions{})
-	changedEnvelope := changedDoc.Metadata[metadataKeySemanticEnvelope].(map[string]any)
-	if changedEnvelope["digest"] == digest {
+	changedEnvelope := changedDoc.Metadata[metadataKeySemanticEnvelope].(SemanticEnvelopeMetadata)
+	if changedEnvelope.Digest == digest {
 		t.Fatal("digest did not change after provider version changed")
 	}
 
 	changedCap := base
 	withCoChange := applySemanticEnvelope(Document{SearchText: "base"}, changedCap, BuildCodeOptions{IncludeCoChangeNeighborsInEnvelope: true})
-	withCoChangeEnvelope := withCoChange.Metadata[metadataKeySemanticEnvelope].(map[string]any)
-	if withCoChangeEnvelope["digest"] == digest {
+	withCoChangeEnvelope := withCoChange.Metadata[metadataKeySemanticEnvelope].(SemanticEnvelopeMetadata)
+	if withCoChangeEnvelope.Digest == digest {
 		t.Fatal("digest did not change after co-change text cap changed")
+	}
+}
+
+func TestSemanticEnvelopeMetadataParsesLegacyMap(t *testing.T) {
+	metadata := map[string]any{
+		metadataKeySemanticEnvelope: map[string]any{
+			"digest":                "sha256:legacy",
+			"provider_version":      "legacy-provider",
+			"include_cochange_text": true,
+			"metadata": map[string]any{
+				"owner_node_id": "repo:symbol:Guard",
+				"warning_count": float64(2),
+				"anchors": []any{
+					map[string]any{
+						"relation":          "ENFORCES",
+						"target_id":         "invariant:no-send-without-read",
+						"target_display":    "no-send-without-read",
+						"target_type":       "invariant",
+						"validation_status": "current",
+						"path":              "pkg/main.go",
+					},
+				},
+			},
+			"text_sections": []any{
+				map[string]any{"name": "test_target", "text": "pkg/file_test.go#TestThing"},
+				map[string]any{"name": "doc_target", "text": "docs/example.md"},
+			},
+		},
+		metadataKeyCoChangeNeighbors: []any{"pkg/b.go", "pkg/a.go", "pkg/a.go"},
+	}
+
+	sections := envelopeTextSectionsFromMetadata(metadata)
+	if len(sections) != 2 {
+		t.Fatalf("sections=%#v want 2 legacy sections", sections)
+	}
+	if cochange := coChangeTextFromMetadata(metadata); cochange != "pkg/a.go, pkg/b.go" {
+		t.Fatalf("cochange=%q", cochange)
+	}
+	envelope, ok := semanticEnvelopeMetadataFromValue(metadata[metadataKeySemanticEnvelope])
+	if !ok {
+		t.Fatal("expected legacy envelope metadata to parse")
+	}
+	if envelope.Metadata == nil {
+		t.Fatal("expected typed provider metadata")
+	}
+	if got := envelope.Metadata.OwnerNodeID; got != "repo:symbol:Guard" {
+		t.Fatalf("owner_node_id=%q", got)
+	}
+	if got := envelope.Metadata.WarningCount; got != 2 {
+		t.Fatalf("warning_count=%d", got)
+	}
+	if len(envelope.Metadata.Anchors) != 1 || envelope.Metadata.Anchors[0].TargetID != "invariant:no-send-without-read" {
+		t.Fatalf("anchors=%#v", envelope.Metadata.Anchors)
 	}
 }
 

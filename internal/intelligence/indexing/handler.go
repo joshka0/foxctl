@@ -46,15 +46,14 @@ func (h *PostReviewHandler) RegisterIndexer(indexer Indexer) error {
 }
 
 // Handle processes a post-review event by invoking all enabled indexers.
-// If the handler is configured for async operation, this returns immediately
-// after dispatching the work; otherwise it blocks until all indexers complete.
+// Indexing currently runs inline; jobs mode is reserved until real enqueueing exists.
 //
 // Index:
 //
 //	Purpose: Dispatch post-review events to enabled indexers
 //	Keywords: post_review, indexers, fanout_mode, workspace_id, review_id
 //	Related: PostReviewHandler.runIndexers, Indexer.Index
-//	Flow: validate config/event → resolve enabled indexers → select mode → run indexers or spawn async
+//	Flow: validate config/event → select mode → resolve enabled indexers → run indexers
 //	Resources: registered indexers, config
 //	Events: post-review-handled
 //	OutputFields: PostReviewResult
@@ -70,6 +69,16 @@ func (h *PostReviewHandler) Handle(ctx context.Context, event PostReviewEvent) (
 	if len(event.Files) == 0 {
 		h.logger.Debug().Msg("no files in event, skipping")
 		return &PostReviewResult{Skipped: true, Reason: "no_files"}, nil
+	}
+
+	mode := h.config.EffectiveMode()
+	switch mode {
+	case FanoutModeInline:
+		// ok
+	case FanoutModeJobs:
+		return nil, fmt.Errorf("indexing post-review jobs mode is reserved but unsupported until job enqueueing is implemented")
+	default:
+		return nil, fmt.Errorf("indexing post-review mode %q is invalid", mode)
 	}
 
 	h.mu.RLock()
@@ -94,8 +103,6 @@ func (h *PostReviewHandler) Handle(ctx context.Context, event PostReviewEvent) (
 		return &PostReviewResult{Skipped: true, Reason: "no_active_indexers"}, nil
 	}
 
-	mode := h.config.EffectiveMode()
-
 	h.logger.Info().
 		Str("workspace_id", event.WorkspaceID).
 		Str("task_id", event.TaskID).
@@ -105,41 +112,7 @@ func (h *PostReviewHandler) Handle(ctx context.Context, event PostReviewEvent) (
 		Int("indexer_count", len(activeIndexers)).
 		Msg("handling post-review event")
 
-	switch mode {
-	case FanoutModeInline:
-		// Run synchronously in the current goroutine
-		return h.runIndexers(ctx, event, activeIndexers), nil
-
-	case FanoutModeJobs:
-		// Jobs mode: should enqueue one job per indexer with concurrency cap.
-		// TODO(phase2-c2): Wire to jobs system with WFQ scheduler and
-		// ConcurrencyPerIndexer cap. See deferred.md D3.
-		// For now, fall back to async goroutine to unblock callers.
-		if h.config.Async {
-			go func() {
-				result := h.runIndexers(ctx, event, activeIndexers)
-				if result.HasFailures() {
-					h.logger.Warn().
-						Str("event_id", event.ID).
-						Int("failures", len(result.IndexerResults)).
-						Msg("async indexers completed with failures")
-				} else {
-					h.logger.Info().
-						Str("event_id", event.ID).
-						Int("files_indexed", result.TotalFilesIndexed()).
-						Msg("async indexers completed")
-				}
-			}()
-			return &PostReviewResult{Async: true}, nil
-		}
-		// If Async is false but mode is jobs, run sync as fallback
-		return h.runIndexers(ctx, event, activeIndexers), nil
-
-	default:
-		// Should not happen if Validate() was called, but be defensive
-		h.logger.Warn().Str("mode", string(mode)).Msg("unknown mode, running inline")
-		return h.runIndexers(ctx, event, activeIndexers), nil
-	}
+	return h.runIndexers(ctx, event, activeIndexers), nil
 }
 
 type indexerWithConfig struct {

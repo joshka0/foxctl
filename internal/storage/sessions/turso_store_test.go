@@ -2,12 +2,16 @@ package sessions
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/joshka0/foxctl/internal/storage"
 	"github.com/joshka0/foxctl/internal/storage/dbdriver"
+
+	_ "modernc.org/sqlite"
 )
 
 func TestTursoStoreLocalNoCGOPath(t *testing.T) {
@@ -41,6 +45,43 @@ func TestTursoStoreLocalNoCGOPath(t *testing.T) {
 	}
 	if got.Summary != "local turso session" {
 		t.Fatalf("Summary = %q, want local turso session", got.Summary)
+	}
+}
+
+func TestTursoMigrationIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if err := migrateTursoWithDimensions(ctx, db, 4); err != nil {
+		t.Fatalf("first migrate: %v", err)
+	}
+	if err := migrateTursoWithDimensions(ctx, db, 4); err != nil {
+		t.Fatalf("second migrate: %v", err)
+	}
+}
+
+func TestTursoMigrationReturnsIndexCreationError(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if _, err := db.ExecContext(ctx, `CREATE TABLE idx_sessions_status (id TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+
+	err = migrateTursoWithDimensions(ctx, db, 4)
+	if err == nil {
+		t.Fatal("expected migration error")
+	}
+	if !strings.Contains(err.Error(), "idx_sessions_status") {
+		t.Fatalf("error=%q want idx_sessions_status context", err)
 	}
 }
 

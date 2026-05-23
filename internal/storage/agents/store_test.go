@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/domain/agent"
-	"github.com/joshka0/foxctl/internal/storage/dbdriver"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
 )
 
 func TestAgentStore(t *testing.T) {
@@ -373,8 +373,7 @@ func TestAgentStore_MigratesLegacyUniqueNamespaceSchema(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 
-	dbCfg := dbdriver.DefaultSQLiteConfig(tmpDir + "/agents.db")
-	db, closeFn, err := dbdriver.OpenDBCompatWithCloser(ctx, dbCfg, nil)
+	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, tmpDir+"/agents.db", nil)
 	if err != nil {
 		t.Fatalf("open raw sqlite db: %v", err)
 	}

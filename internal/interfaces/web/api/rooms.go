@@ -46,16 +46,15 @@ type RoomResponse struct {
 }
 
 type RoomMemberResponse struct {
-	ActorID           string                       `json:"actor_id"`
-	Role              string                       `json:"role,omitempty"`
-	Backend           string                       `json:"backend,omitempty"`
-	Session           string                       `json:"session,omitempty"`
-	PaneID            string                       `json:"pane_id,omitempty"`
-	Unbound           bool                         `json:"unbound,omitempty"`
-	JoinedAt          string                       `json:"joined_at,omitempty"`
-	TransportEndpoint string                       `json:"transport_endpoint,omitempty"`
-	TransportKind     string                       `json:"transport_kind,omitempty"`
-	DeliveryBinding   *RoomDeliveryBindingResponse `json:"delivery_binding,omitempty"`
+	ActorID         string                       `json:"actor_id"`
+	Role            string                       `json:"role,omitempty"`
+	Unbound         bool                         `json:"unbound,omitempty"`
+	JoinedAt        string                       `json:"joined_at,omitempty"`
+	DeliveryBinding *RoomDeliveryBindingResponse `json:"delivery_binding,omitempty"`
+}
+
+type RoomMemberBindingResponse struct {
+	Member *RoomMemberResponse `json:"member"`
 }
 
 type RoomDeliveryBindingResponse struct {
@@ -66,7 +65,6 @@ type RoomDeliveryBindingResponse struct {
 	TransportKind     string `json:"transport_kind,omitempty"`
 	SubmitMode        string `json:"submit_mode,omitempty"`
 	Health            string `json:"health,omitempty"`
-	FallbackPolicy    string `json:"fallback_policy,omitempty"`
 }
 
 type RoomCreateRequest struct {
@@ -88,15 +86,10 @@ type RoomPatchRequest struct {
 }
 
 type RoomMemberRequest struct {
-	ActorID           string                      `json:"actor_id"`
-	Role              string                      `json:"role,omitempty"`
-	Backend           string                      `json:"backend,omitempty"`
-	Session           string                      `json:"session,omitempty"`
-	PaneID            string                      `json:"pane_id,omitempty"`
-	Unbound           bool                        `json:"unbound,omitempty"`
-	TransportEndpoint string                      `json:"transport_endpoint,omitempty"`
-	TransportKind     string                      `json:"transport_kind,omitempty"`
-	DeliveryBinding   *RoomDeliveryBindingRequest `json:"delivery_binding,omitempty"`
+	ActorID         string                      `json:"actor_id"`
+	Role            string                      `json:"role,omitempty"`
+	Unbound         bool                        `json:"unbound,omitempty"`
+	DeliveryBinding *RoomDeliveryBindingRequest `json:"delivery_binding,omitempty"`
 }
 
 type RoomDeliveryBindingRequest struct {
@@ -107,7 +100,6 @@ type RoomDeliveryBindingRequest struct {
 	TransportKind     string `json:"transport_kind,omitempty"`
 	SubmitMode        string `json:"submit_mode,omitempty"`
 	Health            string `json:"health,omitempty"`
-	FallbackPolicy    string `json:"fallback_policy,omitempty"`
 }
 
 // RoomMessageSendRequest sends one message into a room-scoped stream.
@@ -626,11 +618,11 @@ func handleRoomSubresourceRoute(w http.ResponseWriter, r *http.Request, cfg conf
 	case "restore":
 		handleRoomPostOnly(w, r, func() { handleRoomRestore(w, r, cfg, log, roomID) })
 	case "members":
-		// /members/{actor_id}/transport or /members/{actor_id}/binding
-		if len(parts) >= 3 && strings.TrimSpace(parts[2]) == "transport" {
-			actorID := strings.TrimSpace(parts[1])
-			handleRoomPutOnly(w, r, func() { handleRoomMemberTransportPut(w, r, cfg, log, roomID, actorID) })
-		} else if len(parts) >= 3 && strings.TrimSpace(parts[2]) == "binding" {
+		if len(parts) >= 3 {
+			if strings.TrimSpace(parts[2]) != "binding" {
+				httpError(w, http.StatusNotFound, "room member subroute not found")
+				return true
+			}
 			actorID := strings.TrimSpace(parts[1])
 			handleRoomPutOnly(w, r, func() { handleRoomMemberBindingPut(w, r, cfg, log, roomID, actorID) })
 		} else {
@@ -770,91 +762,6 @@ func handleRoomPutOnly(w http.ResponseWriter, r *http.Request, next func()) {
 	next()
 }
 
-// handleRoomMemberTransportPut handles PUT /api/rooms/{id}/members/{actor_id}/transport.
-// It updates transport_endpoint and transport_kind for a single existing room member
-// without disturbing other members. Returns 404 if the actor is not a current member.
-func handleRoomMemberTransportPut(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID, actorID string) {
-	roomID = strings.TrimSpace(roomID)
-	actorID = strings.TrimSpace(actorID)
-	if roomID == "" || actorID == "" {
-		httpError(w, http.StatusBadRequest, "room_id and actor_id required")
-		return
-	}
-
-	var req struct {
-		ActorID           string `json:"actor_id"`
-		TransportEndpoint string `json:"transport_endpoint"`
-		TransportKind     string `json:"transport_kind"`
-	}
-	if err := readJSON(w, r, &req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
-		return
-	}
-	req.ActorID = strings.TrimSpace(req.ActorID)
-
-	workspaceID := roomWorkspaceID(r)
-	if workspaceID == "" {
-		httpError(w, http.StatusBadRequest, "workspace_id required")
-		return
-	}
-
-	store, err := blackboard.OpenBoardStore(r.Context(), cfg.Storage.Root)
-	if err != nil {
-		log.Error().Err(err).Msg("failed to open board store")
-		httpError(w, http.StatusInternalServerError, "failed to open board store")
-		return
-	}
-	defer store.Close()
-	room, err := store.GetRoom(r.Context(), workspaceID, roomID, req.ActorID)
-	if err != nil {
-		if errors.Is(err, blackboard.ErrRoomNotFound) {
-			httpError(w, http.StatusNotFound, "room not found")
-			return
-		}
-		log.Error().Err(err).Str("room_id", roomID).Msg("failed to load room before transport update")
-		httpError(w, http.StatusInternalServerError, "failed to update member transport")
-		return
-	}
-	if req.ActorID == "" {
-		httpError(w, http.StatusBadRequest, "actor_id required")
-		return
-	}
-	if !apiSameRoomParticipant(req.ActorID, actorID) && !apiRoomActorHasCoordinatorAccess(room.Members, req.ActorID) {
-		httpError(w, http.StatusForbidden, "member transport update requires self or coordinator role")
-		return
-	}
-
-	if err := store.UpdateRoomMemberTransport(r.Context(), workspaceID, roomID, actorID, req.TransportEndpoint, req.TransportKind); err != nil {
-		if errors.Is(err, blackboard.ErrRoomMemberNotFound) {
-			httpError(w, http.StatusNotFound, fmt.Sprintf("actor %q is not a member of room %q", actorID, roomID))
-			return
-		}
-		log.Error().Err(err).Str("room_id", roomID).Str("actor_id", actorID).Msg("failed to update member transport")
-		httpError(w, http.StatusInternalServerError, "failed to update member transport")
-		return
-	}
-
-	updated, err := store.GetRoom(r.Context(), workspaceID, roomID, "")
-	if err != nil {
-		log.Error().Err(err).Str("room_id", roomID).Msg("failed to reload room after transport update")
-		httpError(w, http.StatusInternalServerError, "failed to reload room")
-		return
-	}
-
-	// Return the updated member record.
-	var member *RoomMemberResponse
-	for _, m := range convertRoomMembers(updated.Members) {
-		m := m
-		if m.ActorID == actorID {
-			member = &m
-			break
-		}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"member": member,
-	})
-}
-
 func handleRoomMemberBindingPut(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID, actorID string) {
 	roomID = strings.TrimSpace(roomID)
 	actorID = strings.TrimSpace(actorID)
@@ -864,15 +771,10 @@ func handleRoomMemberBindingPut(w http.ResponseWriter, r *http.Request, cfg conf
 	}
 
 	var req struct {
-		ActorID           string                      `json:"actor_id"`
-		Role              string                      `json:"role"`
-		Backend           string                      `json:"backend"`
-		Session           string                      `json:"session"`
-		PaneID            string                      `json:"pane_id"`
-		Unbound           bool                        `json:"unbound"`
-		TransportEndpoint string                      `json:"transport_endpoint"`
-		TransportKind     string                      `json:"transport_kind"`
-		DeliveryBinding   *RoomDeliveryBindingRequest `json:"delivery_binding"`
+		ActorID         string                      `json:"actor_id"`
+		Role            string                      `json:"role"`
+		Unbound         bool                        `json:"unbound"`
+		DeliveryBinding *RoomDeliveryBindingRequest `json:"delivery_binding"`
 	}
 	if err := readJSON(w, r, &req); err != nil {
 		httpError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
@@ -916,16 +818,15 @@ func handleRoomMemberBindingPut(w http.ResponseWriter, r *http.Request, cfg conf
 		httpError(w, http.StatusForbidden, "only the coordinator can change room member roles")
 		return
 	}
+	if req.DeliveryBinding == nil && !req.Unbound {
+		httpError(w, http.StatusBadRequest, "delivery_binding required")
+		return
+	}
 
 	member := agent.RoomMember{
-		ActorID:           actorID,
-		Backend:           req.Backend,
-		Session:           req.Session,
-		PaneID:            req.PaneID,
-		Unbound:           req.Unbound,
-		TransportEndpoint: req.TransportEndpoint,
-		TransportKind:     req.TransportKind,
-		DeliveryBinding:   toAgentRoomDeliveryBinding(req.DeliveryBinding),
+		ActorID:         actorID,
+		Unbound:         req.Unbound,
+		DeliveryBinding: toAgentRoomDeliveryBinding(req.DeliveryBinding),
 	}
 	if err := store.UpdateRoomMemberBinding(r.Context(), workspaceID, roomID, member); err != nil {
 		if errors.Is(err, blackboard.ErrRoomMemberNotFound) {
@@ -952,9 +853,7 @@ func handleRoomMemberBindingPut(w http.ResponseWriter, r *http.Request, cfg conf
 			break
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"member": memberResp,
-	})
+	writeJSON(w, http.StatusOK, RoomMemberBindingResponse{Member: memberResp})
 }
 
 func handleRoomRemindersGet(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string) {
@@ -2140,15 +2039,10 @@ func convertRoomMembers(members []agent.RoomMember) []RoomMemberResponse {
 	out := make([]RoomMemberResponse, 0, len(members))
 	for _, member := range members {
 		resp := RoomMemberResponse{
-			ActorID:           member.ActorID,
-			Role:              member.Role,
-			Backend:           member.Backend,
-			Session:           member.Session,
-			PaneID:            member.PaneID,
-			Unbound:           member.Unbound,
-			TransportEndpoint: member.TransportEndpoint,
-			TransportKind:     member.TransportKind,
-			DeliveryBinding:   convertRoomDeliveryBinding(member.DeliveryBinding),
+			ActorID:         member.ActorID,
+			Role:            member.Role,
+			Unbound:         member.Unbound,
+			DeliveryBinding: convertRoomDeliveryBinding(member.DeliveryBinding),
 		}
 		if !member.JoinedAt.IsZero() {
 			resp.JoinedAt = member.JoinedAt.Format(time.RFC3339)
@@ -2170,7 +2064,6 @@ func convertRoomDeliveryBinding(binding *agent.RoomDeliveryBinding) *RoomDeliver
 		TransportKind:     binding.TransportKind,
 		SubmitMode:        binding.SubmitMode,
 		Health:            binding.Health,
-		FallbackPolicy:    binding.FallbackPolicy,
 	}
 }
 
@@ -2182,15 +2075,10 @@ func toRoomMembers(members []RoomMemberRequest) []agent.RoomMember {
 			continue
 		}
 		out = append(out, agent.RoomMember{
-			ActorID:           actorID,
-			Role:              strings.TrimSpace(member.Role),
-			Backend:           strings.ToLower(strings.TrimSpace(member.Backend)),
-			Session:           strings.TrimSpace(member.Session),
-			PaneID:            strings.TrimSpace(member.PaneID),
-			Unbound:           member.Unbound,
-			TransportEndpoint: strings.TrimSpace(member.TransportEndpoint),
-			TransportKind:     strings.ToLower(strings.TrimSpace(member.TransportKind)),
-			DeliveryBinding:   toAgentRoomDeliveryBinding(member.DeliveryBinding),
+			ActorID:         actorID,
+			Role:            strings.TrimSpace(member.Role),
+			Unbound:         member.Unbound,
+			DeliveryBinding: toAgentRoomDeliveryBinding(member.DeliveryBinding),
 		})
 	}
 	return out
@@ -2208,7 +2096,6 @@ func toAgentRoomDeliveryBinding(binding *RoomDeliveryBindingRequest) *agent.Room
 		TransportKind:     strings.ToLower(strings.TrimSpace(binding.TransportKind)),
 		SubmitMode:        strings.TrimSpace(binding.SubmitMode),
 		Health:            strings.TrimSpace(binding.Health),
-		FallbackPolicy:    strings.TrimSpace(binding.FallbackPolicy),
 	}
 }
 

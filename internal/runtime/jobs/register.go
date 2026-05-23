@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skilltest"
+	"github.com/joshka0/foxctl/internal/platform/timeutil"
 	workerspkg "github.com/joshka0/foxctl/internal/runtime/jobs/workers"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -20,7 +20,7 @@ func RegisterWorkers() *river.Workers {
 	mustRegisterWorker(workers, &workerspkg.CompressScanWorker{
 		Lister:   noopConversationLister{},
 		Inserter: noopInserter{},
-		Clock:    skilltest.RealClock{},
+		Clock:    timeutil.RealClock{},
 	})
 	mustRegisterWorker(workers, &workerspkg.AgentHeartbeatCheckWorker{Recoverer: noopStaleAgentRecoverer{}})
 	mustRegisterWorker(workers, &workerspkg.AgentIndexCleanupWorker{Cleaner: noopAgentIndexCleaner{}})

@@ -14,11 +14,17 @@ var (
 	// ExtractPath extracts the file path from tool input JSON.
 	ExtractPath = platformpath.ExtractPath
 
-	// ExtractPathFromMap extracts the file path from a map.
-	ExtractPathFromMap = platformpath.ExtractPathFromMap
+	// DecodeToolPathInput decodes a tool payload into the typed path input model.
+	DecodeToolPathInput = platformpath.DecodeToolPathInput
+
+	// ExtractPathFromInput extracts the first path from a typed path input.
+	ExtractPathFromInput = platformpath.ExtractPathFromInput
 
 	// ExtractPaths extracts all file paths from tool input JSON.
 	ExtractPaths = platformpath.ExtractPaths
+
+	// ExtractPathsFromInput extracts all paths from a typed path input.
+	ExtractPathsFromInput = platformpath.ExtractPathsFromInput
 
 	// NormalizePath normalizes a file path relative to workspace.
 	NormalizePath = platformpath.NormalizePath
@@ -38,6 +44,8 @@ var (
 	// PathFields are the field names to check for file paths.
 	PathFields = platformpath.PathFields
 )
+
+type ToolPathInput = platformpath.ToolPathInput
 
 // ResolveSearchPath resolves a search path candidate to an absolute path.
 // It handles empty candidates by defaulting to workspace, and validates

@@ -38,6 +38,15 @@ export interface JobActionResult {
   job?: JobSummary;
 }
 
+export interface ApiEnvelope<T> {
+  version: number;
+  status: "ok" | "error" | "progress";
+  command: string;
+  data: T;
+  meta: { ts: string; [key: string]: unknown };
+  error: { code?: string; message?: string };
+}
+
 export type V2StreamType = "run" | "agent" | "turn";
 
 export interface V2RuntimeEvent {
@@ -158,7 +167,47 @@ export interface MailboxMessage {
   priority: number;
   status: string;
   ack_required?: boolean;
+  reply_expected?: boolean;
+  interrupt?: boolean;
+  related_message_id?: string;
   created_at: string;
+  task_id?: string;
+  stream?: string;
+}
+
+export interface RoomMessage extends MailboxMessage {}
+
+export interface MailboxSendRequest {
+  workspace_id: string;
+  related_message_id?: string;
+  sender: string;
+  recipient: string;
+  subject: string;
+  body: string;
+  kind?: string;
+  priority?: number;
+  ack_required?: boolean;
+  task_id?: string;
+  stream?: string;
+}
+
+export interface MailboxSendResponse {
+  id: string;
+  status: string;
+  message?: string;
+}
+
+export interface MailboxStatusUpdateRequest {
+  workspace_id: string;
+  actor_id?: string;
+  action: "read" | "surfaced" | "ack";
+  message_ids: string[];
+}
+
+export interface MailboxStatusUpdateResponse {
+  action: string;
+  updated: number;
+  status: string;
 }
 
 export interface Reservation {
@@ -176,6 +225,9 @@ export interface BlackboardRecord {
   ts: number;
   ttl_sec: number;
   payload: string;
+  cas_ref?: string;
+  lease_by?: string;
+  lease_exp?: number;
 }
 
 // Orchestration (v2 runtime board)
@@ -208,6 +260,7 @@ export interface OrchestrationCard {
   retry_due_at?: string;
   last_event_type?: string;
   last_event_at?: string;
+  archived_at?: string;
 }
 
 export interface OrchestrationLane {
@@ -231,9 +284,9 @@ export interface OrchestrationBoardArtifactRef {
   counts?: Partial<Record<OrchestrationLaneID, number>>;
 }
 
-export interface OrchestrationBoardResult {
-  board: OrchestrationBoard | null;
-  artifact: OrchestrationBoardArtifactRef | null;
+export interface OrchestrationBoardCardResult {
+  card: OrchestrationCard;
+  runtime?: OrchestrationCardRuntime;
 }
 
 export type OrchestrationCardAction = "retry-now" | "release" | "mark-done";
@@ -246,22 +299,66 @@ export interface OrchestrationCardActionResult {
   ts: string;
 }
 
-export interface OrchestrationDispatchResult {
-  request_id: string;
-  workspace_id?: string;
-  issue_id: string;
+export interface OrchestrationSeedCardInput {
+  issue_id?: string;
   issue_identifier?: string;
-  status: string;
+  title: string;
+  state?: string;
+  tracker_state?: string;
   policy_status?: string;
   last_outcome?: string;
-  denial_reason?: string;
-  suggestion?: string;
-  run_id?: string;
-  turn_id?: string;
-  agent_id?: string;
-  actor_id?: string;
-  idempotent?: boolean;
+  eligibility?: string;
+}
+
+export interface OrchestrationSeedCardsRequest {
+  request_id: string;
+  workspace_id?: string;
+  cards: OrchestrationSeedCardInput[];
+}
+
+export interface OrchestrationSeedCardsResult {
+  request_id: string;
+  created: number;
+  skipped?: number;
   ts: string;
+}
+
+export interface OrchestrationCleanupCardsRequest {
+  request_id: string;
+  workspace_id: string;
+  issue_ids?: string[];
+}
+
+export interface OrchestrationCleanupCardsResult {
+  request_id: string;
+  deleted_cards: number;
+  deleted_events: number;
+  ts: string;
+}
+
+export interface OrchestrationArchiveCardsRequest {
+  request_id: string;
+  workspace_id: string;
+  issue_ids?: string[];
+}
+
+export interface OrchestrationArchiveCardsResult {
+  request_id: string;
+  updated: number;
+  action: "archived" | "restored" | string;
+  ts: string;
+}
+
+export type OrchestrationRestoreCardsRequest = OrchestrationArchiveCardsRequest;
+export type OrchestrationRestoreCardsResult = OrchestrationArchiveCardsResult;
+
+export interface OrchestrationCardRuntime {
+  enabled: boolean;
+  agent_id?: string;
+  status?: string;
+  state?: unknown;
+  children?: Record<string, unknown>;
+  error?: string;
 }
 
 export interface OrchestrationRuntimeTreeNode {
@@ -504,14 +601,14 @@ export interface CASReadResult {
   prev_page?: number;
 }
 
-// API Response types
-export interface APIResponse<T> {
-  data: T;
-  error?: string;
-}
-
 // Agent types (from agents.db)
-export type AgentState = "starting" | "running" | "stopped" | "error";
+export type AgentState =
+  | "starting"
+  | "running"
+  | "idle"
+  | "stopped"
+  | "error"
+  | "unknown";
 export type BlackboardShareMode = "all" | "scoped" | "none";
 export type AgentMemoryScope = "agent" | "session";
 export type AgentMemoryRetention =
@@ -519,6 +616,13 @@ export type AgentMemoryRetention =
   | "durable"
   | "task"
   | "ephemeral";
+export type AgentWorkspaceSource = "local" | "sandbox" | string;
+export type AgentExecutionMode =
+  | "reactive"
+  | "autonomous"
+  | "proactive"
+  | "tick"
+  | "story";
 
 export interface Agent {
   id: string;
@@ -528,21 +632,187 @@ export interface Agent {
   slug?: string;
   role?: string;
   prompt?: string;
-  skills_allow?: string[] | string;
+  prompt_summary?: string;
+  skills_allow: string[];
   policy?: Record<string, unknown> | string;
-  share_bb: BlackboardShareMode;
+  share_bb: BlackboardShareMode | string;
   state: AgentState;
+  updated_at?: string;
   llm_provider?: string;
   llm_model?: string;
-  exec_mode?: string;
+  llm_base_url?: string;
+  llm_auth_mode?: string;
+  llm_auth_header?: string;
+  llm_auth_prefix?: string;
+  exec_mode?: AgentExecutionMode | string;
   think_interval?: number;
   conversation_id?: string;
   memory_scope?: AgentMemoryScope | string;
   memory_retention?: AgentMemoryRetention | string;
   max_iterations?: number;
   max_auto_turns?: number;
+  workspace_root?: string;
+  workspace_source?: AgentWorkspaceSource;
+  sandbox_provider?: string;
+  sandbox_id?: string;
+  repo_url?: string;
+  repo_ref?: string;
   created_at: string;
   heartbeat_at?: string;
+}
+
+export interface AgentsListResponse {
+  agents: Agent[];
+  total: number;
+}
+
+export interface AgentSpawnRequest {
+  role: string;
+  prompt: string;
+  workspace_id?: string;
+  workspace_root?: string;
+  workspace_source?: "local" | "sandbox";
+  sandbox_provider?: string;
+  sandbox_id?: string;
+  repo_url?: string;
+  repo_ref?: string;
+  sandbox_image?: string;
+  sandbox_timeout_s?: number;
+  allow_egress?: string[];
+  skills_allow?: string[];
+  parent_id?: string;
+  memory_scope?: AgentMemoryScope;
+  memory_retention?: AgentMemoryRetention;
+  room_id?: string;
+  room_role?: string;
+  name?: string;
+  slug?: string;
+  exec_mode?: AgentExecutionMode;
+  think_interval?: number;
+  max_iterations?: number;
+  max_context_tokens?: number;
+  max_auto_turns?: number;
+  llm_provider?: string;
+  llm_model?: string;
+}
+
+export interface AgentSpawnResponse {
+  session_id: string;
+  actor_id: string;
+  status: string;
+  name?: string;
+  workspace_id?: string;
+  workspace_root?: string;
+  workspace_source?: AgentWorkspaceSource;
+  sandbox_provider?: string;
+  sandbox_id?: string;
+  repo_url?: string;
+  repo_ref?: string;
+}
+
+export interface AgentPatchRequest {
+  conversation_id?: string;
+  memory_scope?: AgentMemoryScope;
+  memory_retention?: AgentMemoryRetention;
+}
+
+export interface AgentAskRequest {
+  message: string;
+  response_schema?: Record<string, unknown>;
+  response_keys?: string[];
+}
+
+export interface AgentAskResponse {
+  reply: string;
+  conversation_id: string;
+}
+
+export interface AgentSession {
+  session_id: string;
+  actor_id: string;
+  role: string;
+  status: string;
+  iterations: number;
+  started_at: string;
+}
+
+export interface AgentRuntimeTreeNode {
+  tag?: string;
+  agent_id?: string;
+  pid?: string;
+  metadata?: Record<string, unknown>;
+  status?: string;
+  state?: unknown;
+  error?: string;
+  children?: AgentRuntimeTreeNode[];
+}
+
+export interface AgentRuntimeTree {
+  enabled: boolean;
+  agent_id?: string;
+  depth: number;
+  root?: AgentRuntimeTreeNode;
+  error?: string;
+}
+
+export interface AgentAskStreamRequest {
+  message: string;
+  correlation_id?: string;
+  conversation_id?: string;
+  context?: Record<string, unknown>;
+  response_schema?: Record<string, unknown>;
+  response_keys?: string[];
+}
+
+export interface AgentAskStreamResponse {
+  accepted: boolean;
+  agent_id: string;
+  correlation_id: string;
+  conversation_id: string;
+}
+
+export interface AgentAskStreamCancelRequest {
+  correlation_id?: string;
+}
+
+export interface AgentAskStreamCancelResponse {
+  ok: boolean;
+  agent_id: string;
+  correlation_id?: string;
+  cancelled: number;
+}
+
+export interface AgentChatStreamEvent {
+  agent_id: string;
+  conversation_id: string;
+  correlation_id: string;
+  phase:
+    | "started"
+    | "delta"
+    | "tool_call"
+    | "tool_result"
+    | "completed"
+    | "cancelled"
+    | "error"
+    | string;
+  content?: string;
+  content_delta?: string;
+  tool_name?: string;
+  tool_call_id?: string;
+  tool_arguments?: unknown;
+  tool_output?: string;
+  context_queries?: number;
+  error?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface CoChangeHit {
+  name: string;
+  anchor_path: string;
+  summary: string;
+  score: number;
+  neighbors?: string[];
+  updated_at?: string;
 }
 
 export interface AgentMemoryStats {
@@ -615,6 +885,21 @@ export interface RoomMember {
   actor_id: string;
   role?: string;
   joined_at?: string;
+  last_active_at?: string;
+  status?: "online" | "idle" | "stale" | string;
+  session_id?: string;
+  unbound?: boolean;
+  delivery_binding?: RoomDeliveryBinding;
+}
+
+export interface RoomDeliveryBinding {
+  mux_backend?: string;
+  mux_session?: string;
+  mux_pane_id?: string;
+  transport_endpoint?: string;
+  transport_kind?: string;
+  submit_mode?: string;
+  health?: string;
 }
 
 export interface Room {
@@ -641,11 +926,220 @@ export interface Room {
   participants?: string[];
   task_ids?: string[];
   members?: RoomMember[];
+  archived_at?: string;
 }
+
+export type ParticipantMembership = "active" | "unbound" | "none";
+export type TransportAvailability =
+  | "available"
+  | "unknown"
+  | "unavailable"
+  | "none";
+export type RuntimeAvailability = "live" | "unknown" | "stopped" | "none";
+export type PresentationAttachment = "attached" | "detached" | "none";
+export type ParticipantDeliveryCapability =
+  | "push_relay"
+  | "viewer_inbox"
+  | "none"
+  | string;
+
+export interface ParticipantState {
+  actor_id: string;
+  membership: ParticipantMembership;
+  transport_endpoint?: string;
+  transport_kind?: string;
+  transport: TransportAvailability;
+  runtime: RuntimeAvailability;
+  presentation: PresentationAttachment;
+  mux_backend?: string;
+  reason?: string;
+  delivery_capability: ParticipantDeliveryCapability;
+  can_trigger_turn: boolean;
+}
+
+export interface RoomMessageEvent {
+  workspace_id: string;
+  room_id: string;
+  stream: string;
+  message_id?: string;
+  correlation_id?: string;
+  sender?: string;
+  recipient?: string;
+  subject?: string;
+  phase?:
+    | "sent"
+    | "agent_started"
+    | "agent_delta"
+    | "agent_tool_call"
+    | "agent_tool_result"
+    | "agent_completed"
+    | "agent_error"
+    | string;
+  agent_id?: string;
+  content?: string;
+  content_delta?: string;
+  tool_name?: string;
+  tool_call_id?: string;
+  tool_output?: string;
+  is_error?: boolean;
+  dispatched?: number;
+  skipped?: number;
+  error?: string;
+}
+
+export interface RoomLiveRelayResult {
+  backend: string;
+  delivered_count?: number;
+  failed_count?: number;
+  delivered_to?: string[];
+  failed_members?: string[];
+  skipped_members?: string[];
+  error?: string;
+}
+
+export interface RoomSendMessageResult {
+  id: string;
+  room_id: string;
+  stream: string;
+  status: string;
+  message?: string;
+  dispatched?: number;
+  skipped?: number;
+  delivery_owner?: string;
+  delivery_pending?: boolean;
+  live_relay?: RoomLiveRelayResult[];
+}
+
+export interface RoomReminder {
+  id: string;
+  workspace_id: string;
+  room_id: string;
+  root_message_id: string;
+  task_id?: string;
+  story_id?: string;
+  milestone_id?: string;
+  sender: string;
+  recipient: string;
+  subject: string;
+  body: string;
+  ack_required: boolean;
+  reply_expected: boolean;
+  interrupt: boolean;
+  passive?: boolean;
+  interval: string;
+  max_iterations: number;
+  sent_count: number;
+  active: boolean;
+  last_sent_at?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface RoomStatusEntry {
+  id: string;
+  sender: string;
+  recipient: string;
+  subject: string;
+  priority: number;
+  status: string;
+  created_at: string;
+  category: string;
+  flags?: string[];
+  preview?: string;
+}
+
+export interface RoomStatusParticipant {
+  actor_id: string;
+  role?: string;
+  unbound?: boolean;
+  transport_status?: string;
+  runtime_binding_status?: string;
+  last_active_at?: string;
+  status: "active" | "idle" | "stale" | string;
+  assigned_task_count: number;
+  owned_task_count: number;
+  actionable_inbox_count: number;
+  latest_actionable?: RoomStatusEntry;
+  transport: ParticipantState;
+}
+
+export interface RoomTaskPulseSummary {
+  pending: number;
+  assigned_unclaimed?: number;
+  in_progress: number;
+  blocked: number;
+  stale: number;
+  completed: number;
+}
+
+export interface RoomStatusTaskSignal {
+  id: string;
+  title: string;
+  status: string;
+  assigned_actor_id?: string;
+  owner_actor_id?: string;
+  blocked_reason?: string;
+  heartbeat_at?: string;
+  signals?: string[];
+}
+
+export interface RoomStatusBacklog {
+  pending_acks: number;
+  pending_replies: number;
+  stale_tasks: number;
+  blocked_tasks: number;
+  assigned_unclaimed?: number;
+  participants_with_pending?: number;
+  latest_by_participant?: RoomStatusEntry[];
+  filter?: string[];
+  top_entries?: RoomStatusEntry[];
+  top_tasks?: RoomStatusTaskSignal[];
+}
+
+export interface RoomStatus {
+  room: Room;
+  coordinator_actor_id?: string;
+  participants: RoomStatusParticipant[];
+  task_pulse: RoomTaskPulseSummary;
+  actionable_backlog: RoomStatusBacklog;
+}
+
+export interface LeadChangeEvent {
+  room_id: string;
+  previous_lead: string;
+  new_lead: string;
+  note?: string;
+  changed_at: string;
+  changed_by: string;
+}
+
+export interface BulkResolveRequest {
+  workspace_id: string;
+  actor?: string;
+  filter?: {
+    kind?: string;
+    sender?: string;
+    subject_contains?: string;
+  };
+}
+
+export interface RoomInbox {
+  room_id: string;
+  entries: MailboxMessage[];
+  count: number;
+}
+
+export type RoomTaskStatus =
+  | "pending"
+  | "in_progress"
+  | "blocked"
+  | "completed"
+  | "abandoned";
 
 export interface RoomTask {
   id: string;
   workspace_id: string;
+  room_id: string;
   epic_id?: string;
   milestone_id?: string;
   title: string;
@@ -654,7 +1148,8 @@ export interface RoomTask {
   parent_id?: string;
   children?: string[];
   depends_on?: string[];
-  status: string;
+  status: RoomTaskStatus;
+  priority: number;
   created_at: string;
   completed_at?: string;
   assigned_actor_id?: string;
@@ -666,6 +1161,165 @@ export interface RoomTask {
   blocked_at?: string;
   notes?: string;
   gotchas?: string;
+  nudge_count: number;
+  last_nudged_at?: string;
+  stale?: boolean;
+  stale_duration_ms?: number;
+  reclaim_audit?: {
+    previous_owner: string;
+    reclaimed_by: string;
+    reclaimed_at: string;
+    reclaim_reason: string;
+    stale_duration_ms: number;
+  };
+  reassign_audit?: {
+    previous_assignee: string;
+    reassigned_by: string;
+    reassigned_at: string;
+    reassign_reason: string;
+  };
+}
+
+export interface RoomLoopDeliveryTrace {
+  workspace_id?: string;
+  room_id?: string;
+  message_id?: string;
+  task_id?: string;
+  recipient?: string;
+  delivery_lease_name?: string;
+  delivery_owner_id?: string;
+  relay_backend?: string;
+  chosen_actor_id?: string;
+  chosen_mux_backend?: string;
+  chosen_mux_session?: string;
+  chosen_mux_pane_id?: string;
+  chosen_transport_endpoint?: string;
+  chosen_transport_kind?: string;
+  chosen_submit_mode?: string;
+  outcome?: string;
+  delivered_count?: number;
+  failed_count?: number;
+  delivered_to?: string[];
+  failed_members?: string[];
+  cursor_before_message_id?: string;
+  cursor_after_message_id?: string;
+  cursor_advanced?: boolean;
+  observed_at?: string;
+}
+
+export interface RoomLoop {
+  enabled: boolean;
+  managed_by: string;
+  last_tick_at?: string;
+  delivery_lease_name?: string;
+  delivery_owner_id?: string;
+  delivery_cursor_message_id?: string;
+  delivery_cursor_at?: string;
+  pulse_interval: string;
+  task_followup_interval: string;
+  reply_stale_after: string;
+  task_stale_after: string;
+  min_pulse_floor: string;
+  interrupt_attempt_limit: number;
+  reminder_backoff_cap: number;
+  coordinator_pulse_enabled: boolean;
+  coordinator_escalation_enabled: boolean;
+  last_delivery_trace?: RoomLoopDeliveryTrace;
+}
+
+export interface RoomLoopResult {
+  room_id: string;
+  loop: RoomLoop;
+}
+
+export interface RoomLoopHealth {
+  status: string;
+  reason?: string;
+  last_tick_age?: string;
+}
+
+export interface RoomControlInbox {
+  actor_id: string;
+  count: number;
+  ack_required: number;
+  reply_expected: number;
+  latest_actionable?: RoomStatusEntry[];
+}
+
+export interface RoomControlMessage {
+  id: string;
+  task_id?: string;
+  related_message_id?: string;
+  sender: string;
+  recipient: string;
+  subject: string;
+  kind: string;
+  status: string;
+  ack_required?: boolean;
+  reply_expected?: boolean;
+  priority: number;
+  created_at: string;
+  preview?: string;
+}
+
+export interface RoomControlReminder extends RoomReminder {}
+
+export interface RoomLinkedOrchestrationCard {
+  issue_id: string;
+  issue_identifier?: string;
+  title?: string;
+  state: string;
+  lane?: string;
+  tracker_state?: string;
+  policy_status?: string;
+  last_outcome?: string;
+  eligibility?: string;
+  run_id?: string;
+  agent_id?: string;
+  linked_task_id?: string;
+}
+
+export interface RoomControlSnapshot {
+  room: Room;
+  participants: RoomStatusParticipant[];
+  loop: RoomLoop;
+  loop_health: RoomLoopHealth;
+  inbox: RoomControlInbox;
+  tasks: RoomTask[];
+  task_count: number;
+  reminders: RoomControlReminder[];
+  messages: RoomControlMessage[];
+  linked_orchestration_cards: RoomLinkedOrchestrationCard[];
+  task_card_link?: string;
+  task_filter?: string;
+  issue_filter?: string;
+}
+
+export interface MuxPane {
+  backend: "tmux" | "zellij" | string;
+  id?: string;
+  session: string;
+  session_pane?: string;
+  pane_name?: string;
+  label?: string;
+  participant_id?: string;
+  provider?: string;
+  room_id?: string;
+  current_command?: string;
+  display_command?: string;
+  wrapped?: boolean;
+  socket_path?: string;
+  ready_path?: string;
+  state?: string;
+  active?: boolean;
+}
+
+export interface MuxPaneCapture {
+  target: string;
+  resolved_target: string;
+  lines_requested: number;
+  content: string;
+  lines?: string[];
 }
 
 // Trajectory types (from trajectory.db)

@@ -220,18 +220,19 @@ func chooseRLMRunner(
 	ephemeralSkills bool,
 	extractSolution bool,
 ) rlm.Runner {
+	llmCfg := buildRLMCLIConfig(rlmCLIConfigInput{
+		Task:        task,
+		Provider:    llmProvider,
+		Model:       llmModel,
+		BaseURL:     llmBaseURL,
+		APIKey:      llmAPIKey,
+		Timeout:     llmTimeout,
+		ToolProfile: toolProfile,
+	})
 	switch strings.ToLower(strings.TrimSpace(executor)) {
 	case "llm", "lmstudio":
 		pm := rlm.NormalizePlanMode(planMode)
 		if pm == rlm.PlanModeLambda {
-			llmCfg := rlm.LLMConfig{
-				Provider:    firstNonEmpty(llmProvider, os.Getenv("FOXCTL_RLM_LLM_PROVIDER"), "lmstudio"),
-				Model:       firstNonEmpty(llmModel, os.Getenv("FOXCTL_RLM_LLM_MODEL"), os.Getenv("LMSTUDIO_MODEL")),
-				BaseURL:     firstNonEmpty(llmBaseURL, os.Getenv("FOXCTL_RLM_LLM_BASE_URL"), os.Getenv("LMSTUDIO_BASE_URL")),
-				APIKey:      firstNonEmpty(llmAPIKey, os.Getenv("FOXCTL_RLM_LLM_API_KEY"), os.Getenv("LMSTUDIO_API_KEY")),
-				Timeout:     llmTimeout,
-				ToolProfile: toolProfile,
-			}
 			return rlm.LambdaRunner{
 				Tools: adapter,
 				Config: rlm.LambdaConfig{
@@ -241,20 +242,13 @@ func chooseRLMRunner(
 				},
 			}
 		}
+		llmCfg.MaxIterations = task.MaxIterations
+		llmCfg.RequireToolUse = requireToolUse
+		llmCfg.RouteProfile = rlm.NormalizeRouteProfile(routeProfile)
+		llmCfg.PlanMode = pm
 		return rlm.LLMRunner{
-			Tools: adapter,
-			Config: rlm.LLMConfig{
-				Provider:       firstNonEmpty(llmProvider, os.Getenv("FOXCTL_RLM_LLM_PROVIDER"), "lmstudio"),
-				Model:          firstNonEmpty(llmModel, os.Getenv("FOXCTL_RLM_LLM_MODEL"), os.Getenv("LMSTUDIO_MODEL")),
-				BaseURL:        firstNonEmpty(llmBaseURL, os.Getenv("FOXCTL_RLM_LLM_BASE_URL"), os.Getenv("LMSTUDIO_BASE_URL")),
-				APIKey:         firstNonEmpty(llmAPIKey, os.Getenv("FOXCTL_RLM_LLM_API_KEY"), os.Getenv("LMSTUDIO_API_KEY")),
-				Timeout:        llmTimeout,
-				MaxIterations:  task.MaxIterations,
-				RequireToolUse: requireToolUse,
-				RouteProfile:   rlm.NormalizeRouteProfile(routeProfile),
-				PlanMode:       pm,
-				ToolProfile:    toolProfile,
-			},
+			Tools:  adapter,
+			Config: llmCfg,
 		}
 	case "repl", "rlm-repl":
 		timeout := llmTimeout
@@ -267,17 +261,13 @@ func chooseRLMRunner(
 			Attempts:            3,
 			ExtractSolutionLine: extractSolution,
 		}
+		replLLMCfg := llmCfg
+		replLLMCfg.Timeout = timeout
+		replLLMCfg.MaxIterations = task.MaxIterations
+		replLLMCfg.RequireToolUse = requireToolUse
 		return &rlmruntime.REPLRunner{
 			Config: rlmruntime.REPLRunnerConfig{
-				LLM: rlm.LLMConfig{
-					Provider:       firstNonEmpty(llmProvider, os.Getenv("FOXCTL_RLM_LLM_PROVIDER"), "lmstudio"),
-					Model:          firstNonEmpty(llmModel, os.Getenv("FOXCTL_RLM_LLM_MODEL"), os.Getenv("LMSTUDIO_MODEL")),
-					BaseURL:        firstNonEmpty(llmBaseURL, os.Getenv("FOXCTL_RLM_LLM_BASE_URL"), os.Getenv("LMSTUDIO_BASE_URL")),
-					APIKey:         firstNonEmpty(llmAPIKey, os.Getenv("FOXCTL_RLM_LLM_API_KEY"), os.Getenv("LMSTUDIO_API_KEY")),
-					Timeout:        timeout,
-					MaxIterations:  task.MaxIterations,
-					RequireToolUse: requireToolUse,
-				},
+				LLM: replLLMCfg,
 				Budget: rlmruntime.BudgetConfig{
 					MaxDepth:       task.MaxDepth,
 					MaxIterations:  task.MaxIterations,
@@ -327,6 +317,37 @@ func chooseRLMRunner(
 	default:
 		return rlm.InspectRunner{Tools: adapter}
 	}
+}
+
+type rlmCLIConfigInput struct {
+	Task        rlm.Task
+	Provider    string
+	Model       string
+	BaseURL     string
+	APIKey      string
+	Timeout     time.Duration
+	ToolProfile string
+}
+
+func buildRLMCLIConfig(in rlmCLIConfigInput) rlm.LLMConfig {
+	provider := firstNonEmpty(in.Provider, os.Getenv("FOXCTL_RLM_LLM_PROVIDER"), "lmstudio")
+	apiKey := firstNonEmpty(in.APIKey, os.Getenv("FOXCTL_RLM_LLM_API_KEY"), os.Getenv("LMSTUDIO_API_KEY"))
+	return rlm.LLMConfig{
+		Provider:    provider,
+		Model:       firstNonEmpty(in.Model, os.Getenv("FOXCTL_RLM_LLM_MODEL"), os.Getenv("LMSTUDIO_MODEL")),
+		BaseURL:     firstNonEmpty(in.BaseURL, os.Getenv("FOXCTL_RLM_LLM_BASE_URL"), os.Getenv("LMSTUDIO_BASE_URL")),
+		APIKey:      apiKey,
+		AuthMode:    defaultRLMCLIAuthMode(provider, apiKey),
+		Timeout:     in.Timeout,
+		ToolProfile: in.ToolProfile,
+	}
+}
+
+func defaultRLMCLIAuthMode(provider, apiKey string) string {
+	if strings.EqualFold(strings.TrimSpace(provider), "lmstudio") && strings.TrimSpace(apiKey) == "" {
+		return "none"
+	}
+	return ""
 }
 
 func buildRLMREPLCLISystemPromptForPolicy(kind rlmruntime.SandboxKind, helperEnabled bool, recursionEnabled bool) string {

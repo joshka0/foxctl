@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import { formatRelativeTime } from '@/lib/time'
-import type { MailboxMessage, RoomMember, RoomMessageEvent } from '@/api/types'
+import type { MailboxMessage, RoomMember, RoomMessageEvent } from '@foxctl/data/types'
 
 interface RoomChatViewProps {
   messages: MailboxMessage[]

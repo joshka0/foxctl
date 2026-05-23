@@ -7,10 +7,11 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "test": "bun test src/lib/conversation-list-models.test.ts",
+    "test": "bun test src/lib/*.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@foxctl/data": "workspace:*",
     "@tanstack/react-query": "5.90.20",
     "@xterm/xterm": "5.5.0",
     "@xyflow/react": "12.10.2",

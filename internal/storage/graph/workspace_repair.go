@@ -2,14 +2,17 @@ package graph
 
 import (
 	"context"
-	"database/sql"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/joshka0/foxctl/internal/platform/logging"
-	ws "github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/storage/workspacerepair"
 )
+
+var workspaceRepairColumns = []workspacerepair.WorkspaceColumn{
+	{Table: "graph_nodes", Column: "workspace"},
+	{Table: "graph_edges", Column: "workspace"},
+}
 
 // repairWorkspaceIDs best-effort migrates legacy absolute-path workspace keys to stable IDs.
 //
@@ -32,44 +35,25 @@ func (s *SQLiteStore) repairWorkspaceIDs(ctx context.Context) {
 		return
 	}
 
-	// Fast-path: if nothing looks like a filesystem path, there is nothing to repair.
-	if !tableHasPathWorkspace(ctx, s.db, "graph_nodes") && !tableHasPathWorkspace(ctx, s.db, "graph_edges") {
+	if !workspacerepair.AnyPathWorkspace(ctx, s.db, workspaceRepairColumns...) {
 		return
 	}
 
 	logger := logging.FromContext(ctx)
 	userHome, _ := os.UserHomeDir()
-
-	workspaces := make(map[string]struct{})
-	collectPathWorkspaces(ctx, s.db, "graph_nodes", workspaces)
-	collectPathWorkspaces(ctx, s.db, "graph_edges", workspaces)
+	workspaces := workspacerepair.CollectPathWorkspaces(ctx, s.db, workspaceRepairColumns...)
 
 	for raw := range workspaces {
-		raw = strings.TrimSpace(raw)
-		if raw == "" || ws.LooksLikeID(raw) {
+		resolved, ok := workspacerepair.ResolvePathWorkspace(raw, userHome)
+		if !ok {
 			continue
 		}
 
-		// Prefer a canonical ID derived from a path that exists on disk:
-		// - raw when it exists
-		// - repaired (username change / "~" expansion) when it exists
-		targetID := ""
-		if pathExists(raw) {
-			targetID = ws.ID(raw)
-		}
-		repaired := repairHomePath(raw, userHome)
-		if repaired != raw && pathExists(repaired) {
-			targetID = ws.ID(repaired)
-		}
-		if targetID == "" || targetID == raw {
+		if err := s.migrateWorkspace(ctx, resolved.RawPath, resolved.WorkspaceID); err != nil {
+			logger.Warn().Err(err).Str("from", resolved.RawPath).Str("to", resolved.WorkspaceID).Msg("graph: workspace repair failed")
 			continue
 		}
-
-		if err := s.migrateWorkspace(ctx, raw, targetID); err != nil {
-			logger.Warn().Err(err).Str("from", raw).Str("to", targetID).Msg("graph: workspace repair failed")
-			continue
-		}
-		logger.Info().Str("from", raw).Str("to", targetID).Msg("graph: repaired workspace IDs")
+		logger.Info().Str("from", resolved.RawPath).Str("to", resolved.WorkspaceID).Msg("graph: repaired workspace IDs")
 	}
 }
 
@@ -120,79 +104,4 @@ func (s *SQLiteStore) migrateWorkspace(ctx context.Context, from, to string) err
 	}
 
 	return tx.Commit()
-}
-
-func tableHasPathWorkspace(ctx context.Context, db *sql.DB, table string) bool {
-	var one int
-	err := db.QueryRowContext(ctx, "SELECT 1 FROM "+table+" WHERE workspace LIKE '%/%' OR workspace LIKE '~%' LIMIT 1").Scan(&one)
-	return err == nil
-}
-
-func collectPathWorkspaces(ctx context.Context, db *sql.DB, table string, out map[string]struct{}) {
-	rows, err := db.QueryContext(ctx, "SELECT DISTINCT workspace FROM "+table+" WHERE workspace LIKE '%/%' OR workspace LIKE '~%'")
-	if err != nil {
-		return
-	}
-	defer rows.Close() //nolint:errcheck
-
-	for rows.Next() {
-		var w string
-		if err := rows.Scan(&w); err != nil {
-			continue
-		}
-		w = strings.TrimSpace(w)
-		if w == "" {
-			continue
-		}
-		out[w] = struct{}{}
-	}
-}
-
-func pathExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
-}
-
-func repairHomePath(raw, userHome string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return raw
-	}
-	if userHome == "" {
-		return raw
-	}
-
-	// Expand "~" for legacy config values.
-	if strings.HasPrefix(raw, "~") {
-		trimmed := strings.TrimPrefix(raw, "~")
-		trimmed = strings.TrimPrefix(trimmed, string(filepath.Separator))
-		return filepath.Join(userHome, trimmed)
-	}
-
-	// Repair stale macOS home paths after a username change:
-	//   raw:      /Users/olduser/...
-	//   userHome: /Users/newuser
-	if strings.HasPrefix(raw, "/Users/") && strings.HasPrefix(userHome, "/Users/") {
-		rest := strings.TrimPrefix(raw, "/Users/")
-		oldUser, remainder, _ := strings.Cut(rest, "/")
-		if oldUser == "" {
-			return raw
-		}
-
-		homeRest := strings.TrimPrefix(userHome, "/Users/")
-		newUser, _, _ := strings.Cut(homeRest, "/")
-		if newUser == "" || newUser == oldUser {
-			return raw
-		}
-
-		// Only rewrite if the old user directory is gone.
-		if _, err := os.Stat(filepath.Join("/Users", oldUser)); os.IsNotExist(err) {
-			if remainder == "" {
-				return filepath.Join("/Users", newUser)
-			}
-			return filepath.Join("/Users", newUser, remainder)
-		}
-	}
-
-	return raw
 }

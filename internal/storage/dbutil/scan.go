@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joshka0/foxctl/internal/platform/observability"
 	"github.com/joshka0/foxctl/internal/platform/timeutil"
-	"github.com/joshka0/foxctl/internal/runtime/observability"
 )
 
 // ScanTimestamps scans multiple RFC3339Nano timestamp strings from a row.

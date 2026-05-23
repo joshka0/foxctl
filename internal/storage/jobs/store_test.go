@@ -4,16 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/joshka0/foxctl/internal/domain/skill"
 	"github.com/joshka0/foxctl/internal/storage/jobs/fsutil"
 	"github.com/joshka0/foxctl/internal/storage/jobs/types"
 )
@@ -119,99 +118,12 @@ func TestJobDirectoriesCreated(t *testing.T) {
 	}
 }
 
-func TestRunSkillCreatesJobAndResult(t *testing.T) {
-	testEnv := newStoreTestEnv(t)
-	bin := buildTestSkill(t, `package main
-import (
-  "encoding/json"
-  "fmt"
-  "os"
-)
-func main() {
-  var payload map[string]any
-  json.NewDecoder(os.Stdin).Decode(&payload)
-  fmt.Println("{\"version\":1,\"status\":\"ok\",\"command\":\"test\",\"data\":{\"message\":\"skill\"},\"meta\":{\"ts\":\"2025-01-01T00:00:00Z\"},\"error\":{}}")
-}
-`)
-	input := []byte(`{"foo":"bar"}`)
-	manifest := testExecManifest("test/skill")
-	job, result, err := testEnv.store.RunSkill(testEnv.ctx, manifest, bin, input)
-	if err != nil {
-		t.Fatalf("run skill: %v", err)
-	}
-	if job.State != StateOK {
-		t.Fatalf("expected state ok got %s", job.State)
-	}
-	if len(result) == 0 {
-		t.Fatalf("expected result bytes")
-	}
-}
-
-func TestProgressStreamingWrites(t *testing.T) {
-	testEnv := newStoreTestEnv(t)
-	bin := buildTestSkill(t, `package main
-import (
-  "encoding/json"
-  "fmt"
-  "os"
-  "time"
-)
-func main() {
-  time.Sleep(100 * time.Millisecond)
-  var payload map[string]any
-  json.NewDecoder(os.Stdin).Decode(&payload)
-  fmt.Println("{\"version\":1,\"status\":\"ok\",\"command\":\"test\",\"data\":{\"message\":\"skill\"},\"meta\":{\"ts\":\"2025-01-01T00:00:00Z\"},\"error\":{}}")
-}
-`)
-	input := []byte(`{"foo":"bar"}`)
-	manifest := testExecManifest("test/skill")
-	job, _, err := testEnv.store.RunSkill(testEnv.ctx, manifest, bin, input)
-	if err != nil {
-		t.Fatalf("run skill: %v", err)
-	}
-
-	progressPath := filepath.Join(testEnv.root, job.ID, "progress.ndjson")
-	if _, err := os.Stat(progressPath); err != nil {
-		t.Fatalf("expected progress file: %v", err)
-	}
-	data, err := os.ReadFile(progressPath)
-	if err != nil {
-		t.Fatalf("read progress: %v", err)
-	}
-	if len(data) == 0 {
-		t.Fatalf("expected progress events")
-	}
-	var event ProgressEvent
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(lines) > 0 && lines[0] != "" {
-		if err := json.Unmarshal([]byte(lines[0]), &event); err == nil {
-			if event.Timestamp.IsZero() {
-				t.Fatalf("expected timestamp in progress event")
-			}
-		}
-	}
-}
-
-func TestFindOrPrepareSkillJobDedupes(t *testing.T) {
+func TestOpenStoreRequiresInjectedExecutorForSkillJobs(t *testing.T) {
 	testEnv := newStoreTestEnv(t)
 
-	input := []byte(`{"foo":"bar"}`)
-	job1, dup1, err := testEnv.store.FindOrPrepareSkillJob(testEnv.ctx, "test", input, true)
-	if err != nil {
-		t.Fatalf("prepare: %v", err)
-	}
-	if dup1 {
-		t.Fatalf("expected first job not to be duplicate")
-	}
-	job2, dup2, err := testEnv.store.FindOrPrepareSkillJob(testEnv.ctx, "test", input, true)
-	if err != nil {
-		t.Fatalf("second prepare: %v", err)
-	}
-	if !dup2 {
-		t.Fatalf("expected duplicate on second call")
-	}
-	if job1.ID != job2.ID {
-		t.Fatalf("expected same job id, got %s != %s", job1.ID, job2.ID)
+	_, _, err := testEnv.store.FindOrPrepareSkillJob(testEnv.ctx, "test", []byte(`{"foo":"bar"}`), true)
+	if !errors.Is(err, errSkillExecutorNotConfigured) {
+		t.Fatalf("expected skill executor configuration error, got %v", err)
 	}
 }
 
@@ -297,15 +209,8 @@ func TestComputeSkillArgsHash(t *testing.T) {
 
 	input := []byte(`{"input":"value"}`)
 	hash1 := testEnv.store.ComputeSkillArgsHash("test", input)
-	job, dup, err := testEnv.store.FindOrPrepareSkillJob(testEnv.ctx, "test", input, false)
-	if err != nil {
-		t.Fatalf("prepare: %v", err)
-	}
-	if dup {
-		t.Fatalf("unexpected duplicate")
-	}
-	if hash1 != job.ArgsHash {
-		t.Fatalf("expected hash %s, got %s", hash1, job.ArgsHash)
+	if expected := types.ComputeSkillArgsHash("test", input); hash1 != expected {
+		t.Fatalf("expected hash %s, got %s", expected, hash1)
 	}
 	hash2 := testEnv.store.ComputeSkillArgsHash("test", []byte(`{"input":"different"}`))
 	if hash1 == hash2 {
@@ -460,47 +365,5 @@ func appendProgressLine(t testing.TB, path, line string) {
 	}()
 	if _, err := f.WriteString(line + "\n"); err != nil {
 		t.Fatalf("append progress: %v", err)
-	}
-}
-
-func buildTestSkill(t *testing.T, src string) string {
-	t.Helper()
-	dir := t.TempDir()
-	srcPath := filepath.Join(dir, "main.go")
-	if err := os.WriteFile(srcPath, []byte(src), 0o644); err != nil {
-		t.Fatalf("write skill: %v", err)
-	}
-	binPath := filepath.Join(dir, "skill")
-	cmd := exec.Command("go", "build", "-o", binPath, srcPath)
-	cmd.Env = os.Environ()
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build skill: %v\n%s", err, out)
-	}
-	return binPath
-}
-
-func testExecManifest(name string) skill.Manifest {
-	return skill.Manifest{
-		APIVersion: "foxctl/v1",
-		Kind:       "Skill",
-		Metadata: skill.Metadata{
-			Name:        name,
-			Version:     "0.0.1",
-			Description: "test manifest",
-		},
-		Distribution: skill.Distribution{
-			Type: "exec",
-			Exec: &skill.ExecDistribution{Entry: "skill"},
-		},
-		IO: skill.IOConfig{
-			Format:         "JSON",
-			InlineOutputKB: 32,
-		},
-		Signature: skill.Signature{
-			Command: name,
-		},
-		Capabilities: skill.Capabilities{
-			Network: "none",
-		},
 	}
 }

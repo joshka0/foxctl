@@ -22,6 +22,8 @@ const command = "verification/cove_verify"
 type llmConfig struct {
 	Provider string `json:"provider,omitempty"`
 	Model    string `json:"model,omitempty"`
+	BaseURL  string `json:"base_url,omitempty"`
+	AuthMode string `json:"auth_mode,omitempty"`
 }
 
 // timeouts defines operation timeouts for different verification phases.
@@ -257,16 +259,22 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 func resolveLLM(cfg *llmConfig) (verification.LLMClient, string, string, error) {
 	provider := ""
 	model := ""
+	baseURL := ""
+	authMode := ""
 	if cfg != nil {
-		provider = strings.TrimSpace(cfg.Provider)
+		provider = strings.ToLower(strings.TrimSpace(cfg.Provider))
 		model = strings.TrimSpace(cfg.Model)
+		baseURL = strings.TrimSpace(cfg.BaseURL)
+		authMode = strings.TrimSpace(cfg.AuthMode)
 	}
 
 	if provider == "" {
-		provider = env.GetString("FOXCTL_LLM_PROVIDER")
+		provider = strings.ToLower(strings.TrimSpace(env.GetString("FOXCTL_LLM_PROVIDER")))
 	}
 	if provider == "" {
 		switch {
+		case env.GetString("LMSTUDIO_BASE_URL") != "" || env.GetString("LMSTUDIO_MODEL") != "":
+			provider = "lmstudio"
 		case env.GetString("CEREBRAS_API_KEY") != "":
 			provider = "cerebras"
 		case env.GetString("GROQ_API_KEY") != "":
@@ -283,8 +291,20 @@ func resolveLLM(cfg *llmConfig) (verification.LLMClient, string, string, error) 
 	if model == "" {
 		model = env.GetString("FOXCTL_LLM_MODEL")
 	}
+	if model == "" && provider == "lmstudio" {
+		model = env.GetString("LMSTUDIO_MODEL")
+	}
 	if model == "" {
 		model = llmproviders.DefaultModelForProvider(provider)
+	}
+	if baseURL == "" {
+		baseURL = env.GetString("FOXCTL_LLM_BASE_URL")
+	}
+	if baseURL == "" && provider == "lmstudio" {
+		baseURL = env.GetString("LMSTUDIO_BASE_URL")
+	}
+	if authMode == "" {
+		authMode = env.GetString("FOXCTL_LLM_AUTH_MODE")
 	}
 
 	apiKey := env.GetString("FOXCTL_LLM_API_KEY")
@@ -298,15 +318,19 @@ func resolveLLM(cfg *llmConfig) (verification.LLMClient, string, string, error) 
 			apiKey = env.GetString("OPENROUTER_API_KEY")
 		case "openai":
 			apiKey = env.GetString("OPENAI_API_KEY")
+		case "lmstudio":
+			apiKey = env.GetString("LMSTUDIO_API_KEY")
 		}
 	}
-	if apiKey == "" {
+	if apiKey == "" && !allowsNoAPIKey(provider, authMode) {
 		return nil, provider, model, fmt.Errorf("LLM API key not configured for provider %q", provider)
 	}
 
 	client, err := verification.NewOpenAIClient(verification.OpenAIConfig{
 		Provider: provider,
+		BaseURL:  baseURL,
 		APIKey:   apiKey,
+		AuthMode: authMode,
 		Model:    model,
 	})
 	if err != nil {
@@ -314,6 +338,19 @@ func resolveLLM(cfg *llmConfig) (verification.LLMClient, string, string, error) 
 	}
 
 	return client, provider, model, nil
+}
+
+func allowsNoAPIKey(provider, authMode string) bool {
+	mode := strings.ToLower(strings.TrimSpace(authMode))
+	if mode != "" && mode != "auto" {
+		return mode == "none"
+	}
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "lmstudio", "openai_compat", "openai-compatible":
+		return true
+	default:
+		return false
+	}
 }
 
 // convertResult converts internal verification response to output format.

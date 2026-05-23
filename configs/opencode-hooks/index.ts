@@ -16,7 +16,7 @@ import type { Plugin } from "@opencode-ai/plugin";
 import { tool } from "@opencode-ai/plugin";
 
 const z = tool.schema;
-import { runSkill, getWorkspace } from "./lib/foxctl";
+import { runSkill, getWorkspace, formatSkillFailure } from "./lib/foxctl";
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -634,7 +634,11 @@ export const AgentctlPlugin: Plugin = async ({ client, directory, $ }) => {
             { workspace, ephemeral: true, timeout: 5000 }
           );
 
-          if (!result.success || !result.data?.records?.length) {
+          if (!result.success) {
+            return formatSkillFailure("memory/query", result);
+          }
+
+          if (!result.data?.records?.length) {
             return "No relevant memory records found.";
           }
 
@@ -667,7 +671,11 @@ export const AgentctlPlugin: Plugin = async ({ client, directory, $ }) => {
             { workspace, ephemeral: true, timeout: 10000 }
           );
 
-          if (!result.success || !result.data?.results?.length) {
+          if (!result.success) {
+            return formatSkillFailure("code/semantic_search", result);
+          }
+
+          if (!result.data?.results?.length) {
             return "No matches found.";
           }
 
@@ -718,7 +726,11 @@ export const AgentctlPlugin: Plugin = async ({ client, directory, $ }) => {
             { workspace, ephemeral: true, timeout: 3000 }
           );
 
-          if (!result.success || !result.data?.messages?.length) {
+          if (!result.success) {
+            return formatSkillFailure("mailbox/manage", result);
+          }
+
+          if (!result.data?.messages?.length) {
             return "No messages in inbox.";
           }
 
@@ -750,7 +762,11 @@ export const AgentctlPlugin: Plugin = async ({ client, directory, $ }) => {
             { workspace, ephemeral: true, timeout: 5000 }
           );
 
-          if (!result.success || !result.data?.preview?.length) {
+          if (!result.success) {
+            return formatSkillFailure("code/symbols", result);
+          }
+
+          if (!result.data?.preview?.length) {
             return "No symbols found.";
           }
 
@@ -783,7 +799,11 @@ export const AgentctlPlugin: Plugin = async ({ client, directory, $ }) => {
             };
           }>("todo/manage", { operation: "get_active", workspace_id: workspace }, { workspace, ephemeral: true, timeout: 3000 });
 
-          if (!result.success || !result.data?.task) {
+          if (!result.success) {
+            return formatSkillFailure("todo/manage", result);
+          }
+
+          if (!result.data?.task) {
             return "No active task. Use `foxctl todo add` to create one.";
           }
 
@@ -969,7 +989,11 @@ export const AgentctlPlugin: Plugin = async ({ client, directory, $ }) => {
             { workspace, ephemeral: true, timeout: 10000 }
           );
 
-          if (!result.success || !result.data?.results?.length) {
+          if (!result.success) {
+            return formatSkillFailure("code/context_ripgrep", result);
+          }
+
+          if (!result.data?.results?.length) {
             return "No matches found.";
           }
 

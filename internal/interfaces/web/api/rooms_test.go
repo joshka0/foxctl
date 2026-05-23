@@ -306,6 +306,54 @@ func TestRoomDetailHandler_GetAndPostMessages(t *testing.T) {
 	}
 }
 
+type roomAgileTestResponse[T any] struct {
+	Action    string `json:"action"`
+	RoomID    string `json:"room_id"`
+	Workspace string `json:"workspace"`
+	Result    struct {
+		Version int                        `json:"version"`
+		Status  string                     `json:"status"`
+		Command string                     `json:"command"`
+		Data    T                          `json:"data"`
+		Meta    RoomAgileMeta              `json:"meta"`
+		Error   map[string]json.RawMessage `json:"error"`
+	} `json:"result"`
+}
+
+func decodeRoomAgileTestResponse[T any](t *testing.T, rr *httptest.ResponseRecorder, action string) roomAgileTestResponse[T] {
+	t.Helper()
+	var body roomAgileTestResponse[T]
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode room-agile response: %v body=%s", err, rr.Body.String())
+	}
+	if body.Action != action {
+		t.Fatalf("action=%q want %q", body.Action, action)
+	}
+	if body.RoomID != "alpha" {
+		t.Fatalf("room_id=%q want alpha", body.RoomID)
+	}
+	if body.Workspace != "ws1" {
+		t.Fatalf("workspace=%q want ws1", body.Workspace)
+	}
+	if body.Result.Version != 1 {
+		t.Fatalf("result.version=%d want 1", body.Result.Version)
+	}
+	if body.Result.Status != "ok" {
+		t.Fatalf("result.status=%q want ok", body.Result.Status)
+	}
+	wantCommand := "foxctl.room.agile." + strings.ReplaceAll(action, "_", ".")
+	if body.Result.Command != wantCommand {
+		t.Fatalf("result.command=%q want %q", body.Result.Command, wantCommand)
+	}
+	if body.Result.Meta.Source != "web:/api/rooms/{room_id}/agile" {
+		t.Fatalf("result.meta.source=%q want web:/api/rooms/{room_id}/agile", body.Result.Meta.Source)
+	}
+	if len(body.Result.Error) != 0 {
+		t.Fatalf("result.error=%v want empty object", body.Result.Error)
+	}
+	return body
+}
+
 func TestRoomDetailHandler_RoomAgileReadEndpoint(t *testing.T) {
 	cfg := orchestrationTestConfig(t.TempDir())
 	listHandler := RoomsListHandler(cfg, zerolog.Nop())
@@ -391,20 +439,52 @@ func TestRoomDetailHandler_RoomAgileReadEndpoint(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	body := decodeResponseBody(t, rr)
-	result := body["result"].(map[string]any)
-	data := result["data"].(map[string]any)
-	status := data["status"].(map[string]any)
-	if got := int(status["milestone_count"].(float64)); got != 1 {
+	body := decodeRoomAgileTestResponse[roomAgileEpicPlanResult](t, rr, "epic_next")
+	data := body.Result.Data
+	if got := data.Status.MilestoneCount; got != 1 {
 		t.Fatalf("milestone_count=%d want 1", got)
 	}
-	if got := int(status["story_count"].(float64)); got != 1 {
+	if got := data.Status.StoryCount; got != 1 {
 		t.Fatalf("story_count=%d want 1", got)
 	}
-	next := data["next"].([]any)
-	first := next[0].(map[string]any)
-	if got := first["action"]; got != "start_story" {
+	if len(data.Next) != 1 {
+		t.Fatalf("next actions=%d want 1", len(data.Next))
+	}
+	first := data.Next[0]
+	if got := first.Action; got != "start_story" {
 		t.Fatalf("next action=%v want start_story", got)
+	}
+}
+
+func TestRoomDetailHandler_RoomAgileHealthEndpoint(t *testing.T) {
+	h, _, epicID, _, _ := setupRoomAgileTest(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/agile", strings.NewReader(fmt.Sprintf(`{
+		"workspace":"ws1",
+		"action":"epic_health",
+		"epic_id":"%s"
+	}`, epicID)))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("epic_health status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	body := decodeRoomAgileTestResponse[roomAgileEpicPlanResult](t, rr, "epic_health")
+	data := body.Result.Data
+	if data.Health == nil {
+		t.Fatalf("health missing")
+	}
+	if got := data.Health.Status; got != "healthy" {
+		t.Fatalf("health.status=%q want healthy", got)
+	}
+	if got := len(data.Health.Warnings); got != 0 {
+		t.Fatalf("health.warnings=%d want 0", got)
+	}
+	if got := len(data.Next); got != 0 {
+		t.Fatalf("next actions=%d want 0 for epic_health", got)
+	}
+	if got := data.Status.ValidatedStories; got != 0 {
+		t.Fatalf("validated_stories=%d want 0", got)
 	}
 }
 
@@ -855,11 +935,6 @@ func TestRoomDetailHandler_PutMemberBinding(t *testing.T) {
 
 	putReq := httptest.NewRequest(http.MethodPut, "/api/rooms/alpha/members/droid-a/binding?workspace_id=ws1", strings.NewReader(`{
 		"actor_id":"droid-a",
-		"backend":"tmux",
-		"session":"146",
-		"pane_id":"%159",
-		"transport_endpoint":"/tmp/droid-a.sock",
-		"transport_kind":"pane_socket",
 		"delivery_binding":{
 			"mux_backend":"tmux",
 			"mux_session":"146",
@@ -867,8 +942,7 @@ func TestRoomDetailHandler_PutMemberBinding(t *testing.T) {
 			"transport_endpoint":"/tmp/droid-a.sock",
 			"transport_kind":"pane_socket",
 			"submit_mode":"composer_ctrl_enter",
-			"health":"ready",
-			"fallback_policy":"allow_legacy_mux"
+			"health":"ready"
 		}
 	}`))
 	putRR := httptest.NewRecorder()
@@ -881,14 +955,10 @@ func TestRoomDetailHandler_PutMemberBinding(t *testing.T) {
 	if !ok {
 		t.Fatalf("member type=%T want map[string]any", body["member"])
 	}
-	if got := strings.TrimSpace(fmt.Sprint(member["session"])); got != "146" {
-		t.Fatalf("session=%q want 146", got)
-	}
-	if got := strings.TrimSpace(fmt.Sprint(member["pane_id"])); got != "%159" {
-		t.Fatalf("pane_id=%q want %%159", got)
-	}
-	if got := strings.TrimSpace(fmt.Sprint(member["transport_endpoint"])); got != "/tmp/droid-a.sock" {
-		t.Fatalf("transport_endpoint=%q want /tmp/droid-a.sock", got)
+	for _, key := range []string{"backend", "session", "pane_id", "transport_endpoint", "transport_kind"} {
+		if _, ok := member[key]; ok {
+			t.Fatalf("member contains legacy transport field %q: %#v", key, member)
+		}
 	}
 	binding, ok := member["delivery_binding"].(map[string]any)
 	if !ok {
@@ -900,6 +970,133 @@ func TestRoomDetailHandler_PutMemberBinding(t *testing.T) {
 	if got := strings.TrimSpace(fmt.Sprint(binding["health"])); got != "ready" {
 		t.Fatalf("delivery_binding.health=%q want ready", got)
 	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/rooms/alpha?workspace_id=ws1", nil)
+	getRR := httptest.NewRecorder()
+	h.ServeHTTP(getRR, getReq)
+	if getRR.Code != http.StatusOK {
+		t.Fatalf("get status=%d body=%s", getRR.Code, getRR.Body.String())
+	}
+	getBody := decodeResponseBody(t, getRR)
+	room, ok := getBody["room"].(map[string]any)
+	if !ok {
+		t.Fatalf("room type=%T want map[string]any", getBody["room"])
+	}
+	members, ok := room["members"].([]any)
+	if !ok {
+		t.Fatalf("room.members type=%T want []any", room["members"])
+	}
+	var detailMember map[string]any
+	for _, raw := range members {
+		candidate, _ := raw.(map[string]any)
+		if strings.TrimSpace(fmt.Sprint(candidate["actor_id"])) == "droid-a" {
+			detailMember = candidate
+			break
+		}
+	}
+	if detailMember == nil {
+		t.Fatalf("room.members=%#v want droid-a", members)
+	}
+	for _, key := range []string{"backend", "session", "pane_id", "transport_endpoint", "transport_kind"} {
+		if _, ok := detailMember[key]; ok {
+			t.Fatalf("detail member contains legacy transport field %q: %#v", key, detailMember)
+		}
+	}
+	if _, ok := detailMember["delivery_binding"].(map[string]any); !ok {
+		t.Fatalf("detail member delivery_binding type=%T want map[string]any", detailMember["delivery_binding"])
+	}
+}
+
+func TestRoomDetailHandler_PutMemberBindingRequiresDeliveryBinding(t *testing.T) {
+	cfg := orchestrationTestConfig(t.TempDir())
+	listHandler := RoomsListHandler(cfg, zerolog.Nop())
+	h := RoomDetailHandler(cfg, zerolog.Nop(), nil)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"id":"alpha",
+		"title":"Alpha Room",
+		"members":[
+			{"actor_id":"coordinator-a","role":"coordinator"},
+			{"actor_id":"droid-a","role":"participant"}
+		]
+	}`))
+	createRR := httptest.NewRecorder()
+	listHandler.ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
+	}
+
+	putReq := httptest.NewRequest(http.MethodPut, "/api/rooms/alpha/members/droid-a/binding?workspace_id=ws1", strings.NewReader(`{
+		"actor_id":"droid-a"
+	}`))
+	putRR := httptest.NewRecorder()
+	h.ServeHTTP(putRR, putReq)
+	if putRR.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", putRR.Code, putRR.Body.String())
+	}
+	if !strings.Contains(putRR.Body.String(), "delivery_binding required") {
+		t.Fatalf("body=%s want delivery_binding required", putRR.Body.String())
+	}
+}
+
+func TestRoomDetailHandler_MemberTransportRouteRemoved(t *testing.T) {
+	cfg := orchestrationTestConfig(t.TempDir())
+	listHandler := RoomsListHandler(cfg, zerolog.Nop())
+	h := RoomDetailHandler(cfg, zerolog.Nop(), nil)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"id":"alpha",
+		"title":"Alpha Room",
+		"members":[
+			{"actor_id":"coordinator-a","role":"coordinator"},
+			{"actor_id":"droid-a","role":"participant"}
+		]
+	}`))
+	createRR := httptest.NewRecorder()
+	listHandler.ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
+	}
+
+	putReq := httptest.NewRequest(http.MethodPut, "/api/rooms/alpha/members/droid-a/transport?workspace_id=ws1", strings.NewReader(`{
+		"actor_id":"coordinator-a",
+		"transport_endpoint":"/tmp/droid-a.sock",
+		"transport_kind":"pane_socket"
+	}`))
+	putRR := httptest.NewRecorder()
+	h.ServeHTTP(putRR, putReq)
+	if putRR.Code != http.StatusNotFound {
+		t.Fatalf("legacy transport route status=%d body=%s", putRR.Code, putRR.Body.String())
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/rooms/alpha?workspace_id=ws1", nil)
+	getRR := httptest.NewRecorder()
+	h.ServeHTTP(getRR, getReq)
+	if getRR.Code != http.StatusOK {
+		t.Fatalf("get status=%d body=%s", getRR.Code, getRR.Body.String())
+	}
+	getBody := decodeResponseBody(t, getRR)
+	room := getBody["room"].(map[string]any)
+	members := room["members"].([]any)
+	for _, raw := range members {
+		member := raw.(map[string]any)
+		if strings.TrimSpace(fmt.Sprint(member["actor_id"])) != "droid-a" {
+			continue
+		}
+		binding, _ := member["delivery_binding"].(map[string]any)
+		if rawEndpoint, ok := binding["transport_endpoint"]; ok && strings.TrimSpace(fmt.Sprint(rawEndpoint)) != "" {
+			t.Fatalf("legacy transport route unexpectedly updated delivery_binding: %#v", member)
+		}
+		for _, key := range []string{"backend", "session", "pane_id", "transport_endpoint", "transport_kind"} {
+			if _, ok := member[key]; ok {
+				t.Fatalf("member contains legacy transport field %q after removed route: %#v", key, member)
+			}
+		}
+		return
+	}
+	t.Fatalf("room.members=%#v want droid-a", members)
 }
 
 func TestRoomDetailHandler_MembersPatchRequiresCoordinator(t *testing.T) {
@@ -986,9 +1183,7 @@ func TestRoomDetailHandler_PutMemberBindingRejectsSelfRoleChange(t *testing.T) {
 
 	putReq := httptest.NewRequest(http.MethodPut, "/api/rooms/alpha/members/droid-a/binding?workspace_id=ws1", strings.NewReader(`{
 		"actor_id":"droid-a",
-		"role":"coordinator",
-		"transport_endpoint":"/tmp/droid-a.sock",
-		"transport_kind":"pane_socket"
+		"role":"coordinator"
 	}`))
 	putRR := httptest.NewRecorder()
 	h.ServeHTTP(putRR, putReq)
@@ -1518,7 +1713,7 @@ func TestRoomDetailHandler_GetStatusReturnsCoordinatorSummary(t *testing.T) {
 		t.Fatalf("status=%d body=%s", statusRR.Code, statusRR.Body.String())
 	}
 	body := decodeResponseBody(t, statusRR)
-	action, _ := body["action_required"].(map[string]any)
+	action, _ := body["actionable_backlog"].(map[string]any)
 	if got := int(action["pending_replies"].(float64)); got != 1 {
 		t.Fatalf("pending_replies=%d want 1", got)
 	}
@@ -1581,7 +1776,6 @@ func TestRoomDetailHandler_GetStatusReturnsPersistedLoopState(t *testing.T) {
 			ChosenTransportEndpoint: "/tmp/gemini-a.sock",
 			ChosenTransportKind:     "pane_socket",
 			ChosenSubmitMode:        "composer_ctrl_enter",
-			FallbackAttempted:       true,
 			DeliveredCount:          1,
 			Outcome:                 "delivered",
 			CursorBeforeMessageID:   "msg-8",
@@ -1631,9 +1825,6 @@ func TestRoomDetailHandler_GetStatusReturnsPersistedLoopState(t *testing.T) {
 	}
 	if got := strings.TrimSpace(fmt.Sprint(trace["message_id"])); got != "msg-9" {
 		t.Fatalf("last_delivery_trace.message_id=%q want msg-9", got)
-	}
-	if got := fmt.Sprint(trace["fallback_attempted"]); got != "true" {
-		t.Fatalf("last_delivery_trace.fallback_attempted=%q want true", got)
 	}
 	if got := strings.TrimSpace(fmt.Sprint(trace["chosen_transport_kind"])); got != "pane_socket" {
 		t.Fatalf("last_delivery_trace.chosen_transport_kind=%q want pane_socket", got)
@@ -2245,11 +2436,6 @@ func TestRoomDetailHandler_GetControlSnapshotIncludesLoopHealthAndLinkedCards(t 
 			{
 				"actor_id":"gemini-a",
 				"role":"reviewer",
-				"backend":"tmux",
-				"session":"146",
-				"pane_id":"%159",
-				"transport_endpoint":"/tmp/gemini-a.sock",
-				"transport_kind":"pane_socket",
 				"delivery_binding":{
 					"mux_backend":"tmux",
 					"mux_session":"146",
@@ -2344,6 +2530,21 @@ func TestRoomDetailHandler_GetControlSnapshotIncludesLoopHealthAndLinkedCards(t 
 	}
 	if got := strings.TrimSpace(fmt.Sprint(member["runtime_binding_status"])); got != "ready" {
 		t.Fatalf("runtime_binding_status=%q want ready", got)
+	}
+	for _, key := range []string{"backend", "session", "pane_id", "transport_endpoint", "transport_kind", "delivery_binding"} {
+		if _, ok := member[key]; ok {
+			t.Fatalf("participant contains legacy transport field %q: %#v", key, member)
+		}
+	}
+	transport, ok := member["transport"].(map[string]any)
+	if !ok {
+		t.Fatalf("transport type=%T want map[string]any", member["transport"])
+	}
+	if got := strings.TrimSpace(fmt.Sprint(transport["transport_endpoint"])); got != "/tmp/gemini-a.sock" {
+		t.Fatalf("transport.transport_endpoint=%q want /tmp/gemini-a.sock", got)
+	}
+	if got := strings.TrimSpace(fmt.Sprint(transport["mux_backend"])); got != "tmux" {
+		t.Fatalf("transport.mux_backend=%q want tmux", got)
 	}
 
 	if got := strings.TrimSpace(fmt.Sprint(body["task_card_link"])); got != "issue_id_equals_task_id" {
@@ -2754,18 +2955,15 @@ func TestRoomDetailHandler_RoomAgileStoryState(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("story_state in_progress status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	body := decodeResponseBody(t, rr)
-	result := body["result"].(map[string]any)
-	data := result["data"].(map[string]any)
-	message := data["message"].(map[string]any)
-	if got := message["kind"]; got != "story_state" {
+	body := decodeRoomAgileTestResponse[roomAgileStoryStateResult](t, rr, "story_state")
+	data := body.Result.Data
+	if got := data.Message.Kind; got != "story_state" {
 		t.Fatalf("message.kind=%v want story_state", got)
 	}
-	storyView := data["story"].(map[string]any)
-	if got := storyView["status"]; got != "in_progress" {
+	if got := data.Story.Status; got != "in_progress" {
 		t.Fatalf("story.status=%v want in_progress", got)
 	}
-	if got := storyView["previous"]; got != "accepted" {
+	if got := data.Story.Previous; got != "accepted" {
 		t.Fatalf("story.previous=%v want accepted", got)
 	}
 
@@ -2782,14 +2980,12 @@ func TestRoomDetailHandler_RoomAgileStoryState(t *testing.T) {
 	if rr2.Code != http.StatusOK {
 		t.Fatalf("story_state in_review status=%d body=%s", rr2.Code, rr2.Body.String())
 	}
-	body2 := decodeResponseBody(t, rr2)
-	result2 := body2["result"].(map[string]any)
-	data2 := result2["data"].(map[string]any)
-	story2 := data2["story"].(map[string]any)
-	if got := story2["status"]; got != "in_review" {
+	body2 := decodeRoomAgileTestResponse[roomAgileStoryStateResult](t, rr2, "story_state")
+	story2 := body2.Result.Data.Story
+	if got := story2.Status; got != "in_review" {
 		t.Fatalf("story.status=%v want in_review", got)
 	}
-	if got := story2["previous"]; got != "in_progress" {
+	if got := story2.Previous; got != "in_progress" {
 		t.Fatalf("story.previous=%v want in_progress", got)
 	}
 
@@ -2833,7 +3029,7 @@ func TestRoomDetailHandler_RoomAgileStoryState(t *testing.T) {
 }
 
 func TestRoomDetailHandler_RoomAgileStoryValidate(t *testing.T) {
-	h, cfg, _, _, storyID := setupRoomAgileTest(t)
+	h, _, _, _, storyID := setupRoomAgileTest(t)
 
 	// Move story to in_review first.
 	stateReq := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/agile", strings.NewReader(fmt.Sprintf(`{
@@ -2866,17 +3062,15 @@ func TestRoomDetailHandler_RoomAgileStoryValidate(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("story_validate status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	body := decodeResponseBody(t, rr)
-	result := body["result"].(map[string]any)
-	data := result["data"].(map[string]any)
-	message := data["message"].(map[string]any)
-	if got := message["kind"]; got != "story_validation" {
+	body := decodeRoomAgileTestResponse[roomAgileStoryValidationResult](t, rr, "story_validate")
+	data := body.Result.Data
+	if got := data.Message.Kind; got != "story_validation" {
 		t.Fatalf("message.kind=%v want story_validation", got)
 	}
-	if got := message["subject"]; got != "Story Validation: pass" {
+	if got := data.Message.Subject; got != "Story Validation: pass" {
 		t.Fatalf("message.subject=%v want Story Validation: pass", got)
 	}
-	msgBody := message["body"].(string)
+	msgBody := data.Message.Body
 	if !strings.Contains(msgBody, "Verdict: pass") {
 		t.Fatalf("message.body=%q want Verdict: pass", msgBody)
 	}
@@ -2892,12 +3086,11 @@ func TestRoomDetailHandler_RoomAgileStoryValidate(t *testing.T) {
 	if !strings.Contains(msgBody, "Notes: All tests pass") {
 		t.Fatalf("message.body=%q want Notes: All tests pass", msgBody)
 	}
-	if got := data["story_id"]; got != storyID {
+	if got := data.StoryID; got != storyID {
 		t.Fatalf("story_id=%v want %s", got, storyID)
 	}
 
 	// Verify the validation is visible via story_show
-	_ = cfg // used implicitly by the handler
 	showReq := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/agile", strings.NewReader(fmt.Sprintf(`{
 		"workspace":"ws1",
 		"action":"story_show",
@@ -2908,12 +3101,19 @@ func TestRoomDetailHandler_RoomAgileStoryValidate(t *testing.T) {
 	if showRR.Code != http.StatusOK {
 		t.Fatalf("story_show status=%d body=%s", showRR.Code, showRR.Body.String())
 	}
-	showBody := decodeResponseBody(t, showRR)
-	showResult := showBody["result"].(map[string]any)
-	showData := showResult["data"].(map[string]any)
-	showStory := showData["story"].(map[string]any)
-	if got := showStory["status"]; got != "in_review" {
+	showBody := decodeRoomAgileTestResponse[roomAgileStoryResult](t, showRR, "story_show")
+	showStory := showBody.Result.Data.Story
+	if showStory == nil {
+		t.Fatalf("story missing")
+	}
+	if got := showStory.Status; got != "in_review" {
 		t.Fatalf("story.status after validate=%v want in_review (validation does not change state)", got)
+	}
+	if got := showStory.ValidationCount; got != 1 {
+		t.Fatalf("story.validation_count=%d want 1", got)
+	}
+	if got := len(showStory.Validations); got != 1 {
+		t.Fatalf("story.validations=%d want 1", got)
 	}
 
 	// Test: missing verdict returns 400
@@ -2960,20 +3160,18 @@ func TestRoomDetailHandler_RoomAgileStoryPropose(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("story_propose status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	body := decodeResponseBody(t, rr)
-	result := body["result"].(map[string]any)
-	data := result["data"].(map[string]any)
-	message := data["message"].(map[string]any)
-	if got := message["kind"]; got != "story_proposal" {
+	body := decodeRoomAgileTestResponse[roomAgileStoryProposeResult](t, rr, "story_propose")
+	message := body.Result.Data.Message
+	if got := message.Kind; got != "story_proposal" {
 		t.Fatalf("message.kind=%v want story_proposal", got)
 	}
-	if got := message["subject"]; got != "Story Proposal: New story" {
+	if got := message.Subject; got != "Story Proposal: New story" {
 		t.Fatalf("message.subject=%v want Story Proposal: New story", got)
 	}
-	if got := message["related_message_id"]; got != milestoneID {
+	if got := message.RelatedMessageID; got != milestoneID {
 		t.Fatalf("message.related_message_id=%v want %s", got, milestoneID)
 	}
-	msgBody := message["body"].(string)
+	msgBody := message.Body
 	if !strings.Contains(msgBody, "Title: New story") {
 		t.Fatalf("message.body=%q want Title: New story", msgBody)
 	}
@@ -3048,21 +3246,20 @@ func TestRoomDetailHandler_RoomAgileStoryAccept(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("story_accept status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	body := decodeResponseBody(t, rr)
-	result := body["result"].(map[string]any)
-	data := result["data"].(map[string]any)
-	message := data["message"].(map[string]any)
-	if got := message["kind"]; got != "story" {
+	body := decodeRoomAgileTestResponse[roomAgileStoryAcceptResult](t, rr, "story_accept")
+	data := body.Result.Data
+	message := data.Message
+	if got := message.Kind; got != "story" {
 		t.Fatalf("message.kind=%v want story", got)
 	}
-	if got := message["subject"]; got != "Story: Proposed feature" {
+	if got := message.Subject; got != "Story: Proposed feature" {
 		t.Fatalf("message.subject=%v want Story: Proposed feature", got)
 	}
 	// The accepted story should point to the milestone (from proposal.related_message_id)
-	if got := message["related_message_id"]; got != milestoneID {
+	if got := message.RelatedMessageID; got != milestoneID {
 		t.Fatalf("message.related_message_id=%v want %s (milestone)", got, milestoneID)
 	}
-	if got := data["proposal_id"]; got != proposal.ID {
+	if got := data.ProposalID; got != proposal.ID {
 		t.Fatalf("proposal_id=%v want %s", got, proposal.ID)
 	}
 
@@ -3087,5 +3284,18 @@ func TestRoomDetailHandler_RoomAgileStoryAccept(t *testing.T) {
 	h.ServeHTTP(rrNoProposal, reqNoProposal)
 	if rrNoProposal.Code != http.StatusNotFound {
 		t.Fatalf("nonexistent proposal status=%d body=%s", rrNoProposal.Code, rrNoProposal.Body.String())
+	}
+}
+
+func TestAPIRoomParticipantTransportStatusPiExtensionIsViewerInbox(t *testing.T) {
+	got := apiRoomParticipantTransportStatus(agent.RoomMember{
+		ActorID: "actor:pi:local",
+		DeliveryBinding: &agent.RoomDeliveryBinding{
+			TransportEndpoint: "p_21",
+			TransportKind:     agent.PiExtensionTransportKind,
+		},
+	})
+	if got != "viewer_inbox" {
+		t.Fatalf("apiRoomParticipantTransportStatus() = %q, want viewer_inbox", got)
 	}
 }

@@ -5,12 +5,10 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"time"
 
-	"github.com/joshka0/foxctl/internal/domain/envelope"
 	plugin "github.com/joshka0/foxctl/internal/interfaces/openapi/plugin"
 )
 
@@ -22,26 +20,16 @@ func main() {
 			Commands:  []string{plugin.CommandAuth},
 			Protocols: []string{"core/v1"},
 		}
-		if err := json.NewEncoder(os.Stdout).Encode(handshake); err != nil {
+		if err := plugin.WriteHandshake(os.Stdout, handshake); err != nil {
 			safeStderr("write handshake: %v\n", err)
 			os.Exit(1)
 		}
 		return
 	}
 
-	var env envelope.Envelope
-	if err := json.NewDecoder(os.Stdin).Decode(&env); err != nil {
-		emitRuntimeError(fmt.Errorf("decode envelope: %w", err))
-		return
-	}
-	if env.Command != plugin.CommandAuth {
-		emitRuntimeError(fmt.Errorf("unexpected command %s", env.Command))
-		return
-	}
-
 	var payload plugin.AuthRequestPayload
-	if err := decodePayload(env.Data, &payload); err != nil {
-		emitRuntimeError(fmt.Errorf("decode payload: %w", err))
+	if err := plugin.ReadRequest(os.Stdin, plugin.CommandAuth, &payload); err != nil {
+		emitRuntimeError(err)
 		return
 	}
 
@@ -81,40 +69,26 @@ func main() {
 		"Authorization": fmt.Sprintf("HMAC %s:%s", key, signature),
 	}
 	result := plugin.AuthResult{Headers: headers}
-	out := envelope.OK(plugin.CommandAuth, result)
-	writeEnvelope(out)
+	if err := plugin.WriteOK(os.Stdout, plugin.CommandAuth, result); err != nil {
+		safeStderr("write envelope: %v\n", err)
+	}
 }
 
 func emitAuthError(message string) {
 	data := map[string]any{
 		"hint": "Provide both key and secret credentials",
 	}
-	env := envelope.Error(plugin.CommandAuth, "EAUTH", message, data)
-	writeEnvelope(env)
+	if err := plugin.WriteError(os.Stdout, plugin.CommandAuth, "EAUTH", message, data); err != nil {
+		safeStderr("write envelope: %v\n", err)
+	}
 }
 
 func emitRuntimeError(err error) {
-	env := envelope.Error(plugin.CommandAuth, "ERUNTIME", err.Error(), nil)
-	writeEnvelope(env)
-}
-
-func writeEnvelope(env envelope.Envelope) {
-	if err := envelope.Write(os.Stdout, env); err != nil {
+	if err := plugin.WriteError(os.Stdout, plugin.CommandAuth, "ERUNTIME", err.Error(), nil); err != nil {
 		safeStderr("write envelope: %v\n", err)
 	}
 }
 
 func safeStderr(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format, args...)
-}
-
-func decodePayload(data any, v any) error {
-	if data == nil {
-		return nil
-	}
-	raw, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(raw, v)
 }

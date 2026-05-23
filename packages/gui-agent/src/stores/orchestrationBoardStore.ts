@@ -5,14 +5,15 @@ import {
   getOrchestrationBoardCardRuntime,
   refreshOrchestration,
   type OrchestrationBoardGetParams,
-} from '@/api/client'
+} from '@foxctl/data/client'
 import type {
   OrchestrationBoard,
   OrchestrationBoardArtifactRef,
   OrchestrationCard,
   OrchestrationCardAction,
   OrchestrationRuntimeTree,
-} from '@/api/types'
+} from '@foxctl/data/types'
+import type { OrchestrationBoardPayload } from '@foxctl/data/orchestration'
 
 export const ORCHESTRATION_LANE_ORDER = [
   'Todo',
@@ -35,6 +36,15 @@ function requestID(prefix: string): string {
     return `${prefix}-${crypto.randomUUID()}`
   }
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+function boardStateFromPayload(payload: OrchestrationBoardPayload): Pick<OrchestrationBoardState, 'board' | 'artifact'> {
+  switch (payload.kind) {
+    case 'board':
+      return { board: payload.board, artifact: null }
+    case 'artifact':
+      return { board: null, artifact: payload.artifact }
+  }
 }
 
 interface OrchestrationBoardState {
@@ -82,10 +92,7 @@ export const useOrchestrationBoardStore = create<OrchestrationBoardState>((set) 
         ...params,
       })
       if (dataSeq !== boardDataSeq) return
-      set({
-        board: result.board,
-        artifact: result.artifact,
-      })
+      set(boardStateFromPayload(result))
     } catch (error) {
       if (dataSeq !== boardDataSeq) return
       set({
@@ -112,10 +119,7 @@ export const useOrchestrationBoardStore = create<OrchestrationBoardState>((set) 
         archived_only: params?.archivedOnly,
       })
       if (dataSeq !== boardDataSeq) return
-      set({
-        board: result.board,
-        artifact: result.artifact,
-      })
+      set(boardStateFromPayload(result))
     } catch (error) {
       if (dataSeq !== boardDataSeq) return
       set({
@@ -177,8 +181,7 @@ export const useOrchestrationBoardStore = create<OrchestrationBoardState>((set) 
       ])
       if (seq !== cardActionSeq) return
       set({
-        board: boardResult.board,
-        artifact: boardResult.artifact,
+        ...boardStateFromPayload(boardResult),
         selectedCard: runtimeResult?.card ?? result.card,
         selectedCardRuntime: runtimeResult?.runtime ?? null,
       })

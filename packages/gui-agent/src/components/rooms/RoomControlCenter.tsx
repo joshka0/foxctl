@@ -46,7 +46,7 @@ import { RoomChatView } from './RoomChatView'
 import { RoomPlanningView } from './RoomPlanningView'
 import { RoomTerminalView } from './RoomTerminalView'
 import { Hash, MessageSquare, ShieldAlert, Zap, X, RefreshCw, CheckCircle2, UserCircle, Users, Bell, Trash2, TerminalSquare } from 'lucide-react'
-import type { MailboxMessage, RoomMessageEvent } from '@/api/types'
+import type { MailboxMessage, RoomMessageEvent } from '@foxctl/data/types'
 
 interface AdminDispatchSummary {
   id: string
@@ -370,11 +370,6 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
   const terminalRebindMutation = useMutation({
     mutationFn: (params: {
       actorId: string
-      backend?: string
-      session?: string
-      pane_id?: string
-      transport_endpoint?: string
-      transport_kind?: string
       delivery_binding?: {
         mux_backend?: string
         mux_session?: string
@@ -383,16 +378,10 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
         transport_kind?: string
         submit_mode?: string
         health?: string
-        fallback_policy?: string
       }
     }) =>
       updateRoomMemberBinding(roomId, params.actorId, {
         workspace_id: workspaceId,
-        backend: params.backend,
-        session: params.session,
-        pane_id: params.pane_id,
-        transport_endpoint: params.transport_endpoint,
-        transport_kind: params.transport_kind,
         delivery_binding: params.delivery_binding,
       }),
     onSuccess: () => {

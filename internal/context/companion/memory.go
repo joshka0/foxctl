@@ -13,11 +13,11 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skilltest"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+	"github.com/joshka0/foxctl/internal/platform/observability"
+	"github.com/joshka0/foxctl/internal/platform/timeutil"
 	actormemory "github.com/joshka0/foxctl/internal/runtime/actor/memory"
 	"github.com/joshka0/foxctl/internal/runtime/engine"
-	"github.com/joshka0/foxctl/internal/runtime/observability"
 	"github.com/joshka0/foxctl/internal/storage"
 )
 
@@ -36,7 +36,7 @@ type ConversationMemory struct {
 	tokenCounter         TokenCounter
 	episodeSummaryRunner func(ctx context.Context, cfg engine.LLMChatConfig, input engine.EngineInput) (engine.EngineOutput, error)
 	config               MemoryConfig
-	clock                skilltest.Clock
+	clock                timeutil.Clock
 	idGenerator          func() string
 	idSeq                atomic.Uint64
 	mu                   sync.RWMutex
@@ -139,7 +139,7 @@ func NewConversationMemory(db *sql.DB, opts ...MemoryOption) (*ConversationMemor
 	m := &ConversationMemory{
 		db:           db,
 		config:       DefaultMemoryConfig(),
-		clock:        skilltest.RealClock{},
+		clock:        timeutil.RealClock{},
 		tokenCounter: NewTikTokenCounter(""),
 	}
 	m.idGenerator = func() string {
@@ -155,7 +155,7 @@ func NewConversationMemory(db *sql.DB, opts ...MemoryOption) (*ConversationMemor
 		m.episodeSummaryRunner = defaultEpisodeSummaryRunner
 	}
 	if m.clock == nil {
-		m.clock = skilltest.RealClock{}
+		m.clock = timeutil.RealClock{}
 	}
 	if m.idGenerator == nil {
 		m.idGenerator = func() string {
@@ -229,7 +229,7 @@ func WithTokenCounter(counter TokenCounter) MemoryOption {
 }
 
 // WithClock sets the clock used for time-based behavior (useful for deterministic tests).
-func WithClock(clock skilltest.Clock) MemoryOption {
+func WithClock(clock timeutil.Clock) MemoryOption {
 	return func(m *ConversationMemory) {
 		if clock != nil {
 			m.clock = clock

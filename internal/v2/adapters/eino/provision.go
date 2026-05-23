@@ -24,7 +24,7 @@ import (
 // Bedrock configs are rejected: the bridge uses Bearer-token auth only.
 func ProvisionFromLLMConfig(cfg engine.LLMChatConfig, executor engine.ToolExecutor, defs []engine.ToolDef) (*EinoEngineAdapter, error) {
 	if cfg.Provider == "bedrock" {
-		return nil, fmt.Errorf("eino gate-on: Bedrock provider is not supported by the spike bridge (use a standard OpenAI-compatible provider)")
+		return nil, fmt.Errorf("eino gate-on: Bedrock provider is not supported by the experimental bridge (use a standard OpenAI-compatible provider)")
 	}
 	if cfg.BaseURL == "" {
 		return nil, fmt.Errorf("eino gate-on: resolved BaseURL is empty — cannot provision bridge")

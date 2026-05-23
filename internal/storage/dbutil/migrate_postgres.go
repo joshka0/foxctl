@@ -3,13 +3,14 @@ package dbutil
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 )
 
 // AddColumnIfNotExists adds a column to a table if it doesn't already exist.
 // Works on both SQLite and PostgreSQL by attempting ALTER TABLE ADD COLUMN
-// and ignoring "duplicate column" / "already exists" errors.
+// and suppressing only duplicate-column/already-exists errors.
 //
 // All identifier arguments (table, column, colType) are sanitized to prevent
 // SQL injection. defaultVal is validated against a strict whitelist.
@@ -47,6 +48,51 @@ func AddColumnIfNotExists(ctx context.Context, db *sql.DB, table, column, colTyp
 		return fmt.Errorf("add column %s.%s: %w", table, column, err)
 	}
 	return nil
+}
+
+// ColumnExists reports whether table.column exists for the SQLite and
+// PostgreSQL-compatible stores foxctl migrates with raw *sql.DB handles.
+func ColumnExists(ctx context.Context, db *sql.DB, table, column string) (bool, error) {
+	if strings.TrimSpace(table) == "" {
+		return false, fmt.Errorf("table name is required")
+	}
+	if strings.TrimSpace(column) == "" {
+		return false, fmt.Errorf("column name is required")
+	}
+
+	exists, sqliteErr := queryColumnExists(
+		ctx, db,
+		`SELECT 1 FROM pragma_table_info(?) WHERE name = ?`,
+		table,
+		column,
+	)
+	if sqliteErr == nil {
+		return exists, nil
+	}
+
+	exists, postgresErr := queryColumnExists(
+		ctx, db,
+		`SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = $2 AND table_schema = current_schema()`,
+		table,
+		column,
+	)
+	if postgresErr == nil {
+		return exists, nil
+	}
+
+	return false, fmt.Errorf("check column %s.%s: sqlite: %v; postgres: %w", table, column, sqliteErr, postgresErr)
+}
+
+func queryColumnExists(ctx context.Context, db *sql.DB, query, table, column string) (bool, error) {
+	var exists int
+	err := db.QueryRowContext(ctx, query, table, column).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // sanitizeSQLIdentifier ensures a string is safe to use as a SQL identifier.

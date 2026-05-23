@@ -430,15 +430,12 @@ async function bindPiToRoom(pi: ExtensionAPI, room: string, signal?: AbortSignal
 	const member = {
 		actor_id: actor,
 		role: "participant",
-		backend: "pi",
-		session,
-		transport_kind: "pi-extension",
-		transport_endpoint: transportEndpoint,
 		delivery_binding: {
+			mux_backend: "pi",
+			mux_session: session,
 			transport_kind: "pi-extension",
 			transport_endpoint: transportEndpoint,
 			health: "unknown",
-			fallback_policy: "room-inbox",
 		},
 	};
 

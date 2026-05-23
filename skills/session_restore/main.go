@@ -15,6 +15,7 @@ import (
 	"github.com/joshka0/foxctl/internal/context/calibration"
 	"github.com/joshka0/foxctl/internal/context/memorycore"
 	"github.com/joshka0/foxctl/internal/context/sessionkit"
+	"github.com/joshka0/foxctl/internal/context/sessionkit/snapshot"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
 	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/runtime/observability"
@@ -34,42 +35,11 @@ type Input struct {
 	CheckPending        bool   `json:"check_pending,omitempty"`        // If true, only restore if pending_restore_at is set
 }
 
-// SessionSnapshot represents the captured session state (must match session_save) with comprehensive context.
-type SessionSnapshot struct {
-	SnapshotID   string            `json:"snapshot_id"`
-	SessionID    string            `json:"session_id,omitempty"`
-	Trigger      string            `json:"trigger"`
-	Workspace    string            `json:"workspace"`
-	Timestamp    time.Time         `json:"timestamp"`
-	ActiveTask   *TaskInfo         `json:"active_task,omitempty"`
-	ActivePlan   *PlanInfo         `json:"active_plan,omitempty"`
-	PendingTodos []TaskInfo        `json:"pending_todos,omitempty"`
-	Decisions    []string          `json:"decisions,omitempty"`
-	Insights     []string          `json:"insights,omitempty"`
-	Summary      string            `json:"summary,omitempty"`
-	Metadata     map[string]string `json:"metadata,omitempty"`
-}
-
-// PlanInfo represents a simplified plan for the snapshot with file metadata and linkage.
-type PlanInfo struct {
-	FilePath    string   `json:"file_path"`
-	FileName    string   `json:"file_name"`
-	Title       string   `json:"title"`
-	ContentHash string   `json:"content_hash"`
-	Sections    []string `json:"sections,omitempty"`
-	LinkedTasks int      `json:"linked_tasks,omitempty"`
-	ModTime     string   `json:"mod_time,omitempty"`
-}
-
-// TaskInfo represents a simplified task with status and notes for snapshot storage.
-type TaskInfo struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	Description string `json:"description,omitempty"`
-	Status      string `json:"status"`
-	Notes       string `json:"notes,omitempty"`
-	Gotchas     string `json:"gotchas,omitempty"`
-}
+type (
+	SessionSnapshot = snapshot.Snapshot
+	PlanInfo        = snapshot.PlanInfo
+	TaskInfo        = snapshot.TaskInfo
+)
 
 // HookOutput is the Claude Code hook output format with decision and context injection.
 type HookOutput struct {

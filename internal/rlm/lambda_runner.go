@@ -32,10 +32,7 @@ type LambdaRunner struct {
 
 // Run implements Runner.
 func (r LambdaRunner) Run(ctx context.Context, task Task, env Environment) (Result, error) {
-	if err := ValidateTask(task); err != nil {
-		return Result{}, err
-	}
-	if err := ValidateEnvironment(env); err != nil {
+	if err := ValidateRunRequest(task, env); err != nil {
 		return Result{}, err
 	}
 	if r.Tools == nil {

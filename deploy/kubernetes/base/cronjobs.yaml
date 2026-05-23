@@ -131,10 +131,12 @@ spec:
                 secretKeyRef:
                   name: foxctl-secrets
                   key: turso-token
-            - name: FOXCTL_CAS_BACKEND
+            - name: FOXCTL_CAS_DRIVER
               value: "s3"
-            - name: FOXCTL_CAS_BUCKET
+            - name: FOXCTL_CAS_S3_BUCKET
               value: "foxctl-cas"
+            - name: FOXCTL_CAS_S3_REGION
+              value: "us-west-2"
 
             resources:
               requests:

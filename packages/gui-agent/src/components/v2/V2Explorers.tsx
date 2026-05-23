@@ -9,7 +9,7 @@ import { formatRelativeTime } from '@/lib/utils'
 import { useActivityStore } from '@/stores/activityStore'
 import { useActivityFocusStore } from '@/stores/activityFocusStore'
 import { useViewStore } from '@/stores/viewStore'
-import type { ActivityEvent } from '@/api/types'
+import type { ActivityEvent } from '@/types/activity'
 import { Activity, ArrowRight, FileSearch, Layers, Workflow } from 'lucide-react'
 
 type ActivityData = Record<string, unknown>

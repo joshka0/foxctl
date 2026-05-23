@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/storage/sqlutil"
+	tursoadapter "github.com/joshka0/foxctl/internal/v2/adapters/turso"
 	coreevents "github.com/joshka0/foxctl/internal/v2/core/events"
 	coreorchestration "github.com/joshka0/foxctl/internal/v2/core/orchestration"
 )
@@ -30,13 +31,13 @@ type StoreOptions struct {
 
 // Store materializes orchestration cards and serves board/card reads.
 type Store struct {
-	db          *sql.DB
+	db          tursoadapter.StoreDB
 	now         func() time.Time
 	laneOptions coreorchestration.LaneOptions
 }
 
 // NewStore creates a new orchestration projection store.
-func NewStore(db *sql.DB, opts StoreOptions) *Store {
+func NewStore(db tursoadapter.StoreDB, opts StoreOptions) *Store {
 	return &Store{
 		db:          db,
 		now:         func() time.Time { return time.Now().UTC() },
@@ -421,7 +422,7 @@ func (s *Store) RestoreCards(ctx context.Context, workspaceID string, issueIDs [
 	return updateArchivedCards(ctx, s.db, workspaceID, issueIDs, "", "restore")
 }
 
-func updateArchivedCards(ctx context.Context, db *sql.DB, workspaceID string, issueIDs []string, archivedAt, verb string) (int, error) {
+func updateArchivedCards(ctx context.Context, db tursoadapter.StoreDB, workspaceID string, issueIDs []string, archivedAt, verb string) (int, error) {
 	issueSet := make(map[string]struct{}, len(issueIDs))
 	for _, issueID := range issueIDs {
 		if trimmed := strings.TrimSpace(issueID); trimmed != "" {

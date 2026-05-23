@@ -8,7 +8,7 @@ import {
   trashAgent,
   listAgentSessions,
 } from '@/api/client'
-import type { Agent } from '@/api/types'
+import type { Agent } from '@foxctl/data/types'
 
 /**
  * Extracts agent management logic (reconciliation, sessions, start/kill/trash)

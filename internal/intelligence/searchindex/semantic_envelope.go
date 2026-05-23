@@ -2,6 +2,7 @@ package searchindex
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -32,7 +33,7 @@ type SemanticEnvelopeBits struct {
 	ProviderVersion string
 	TextSections    []EnvelopeSection
 	Keywords        []string
-	Metadata        map[string]any
+	Metadata        SemanticEnvelopeProviderMetadata
 	DigestParts     []string
 
 	// CoChangeNeighbors are inspect-only metadata by default. They enter
@@ -43,6 +44,30 @@ type SemanticEnvelopeBits struct {
 type EnvelopeSection struct {
 	Name string `json:"name"`
 	Text string `json:"text"`
+}
+
+type SemanticEnvelopeProviderMetadata struct {
+	OwnerNodeID  string                           `json:"owner_node_id,omitempty"`
+	Anchors      []SemanticEnvelopeAnchorMetadata `json:"anchors,omitempty"`
+	WarningCount int                              `json:"warning_count,omitempty"`
+}
+
+type SemanticEnvelopeAnchorMetadata struct {
+	Relation         string `json:"relation,omitempty"`
+	TargetID         string `json:"target_id,omitempty"`
+	TargetDisplay    string `json:"target_display,omitempty"`
+	TargetType       string `json:"target_type,omitempty"`
+	ValidationStatus string `json:"validation_status,omitempty"`
+	Path             string `json:"path,omitempty"`
+}
+
+type SemanticEnvelopeMetadata struct {
+	Digest               string                            `json:"digest"`
+	ProviderVersion      string                            `json:"provider_version"`
+	IncludeCoChangeText  bool                              `json:"include_cochange_text"`
+	CoChangeMetadataOnly bool                              `json:"cochange_metadata_only"`
+	TextSections         []EnvelopeSection                 `json:"text_sections,omitempty"`
+	Metadata             *SemanticEnvelopeProviderMetadata `json:"metadata,omitempty"`
 }
 
 // [[protocol:semantic-envelope-retrieval-evidence]]
@@ -58,17 +83,16 @@ func applySemanticEnvelope(doc Document, bits SemanticEnvelopeBits, opts BuildCo
 		doc.Metadata = map[string]any{}
 	}
 	digest := buildSemanticEnvelopeDigest(bits, opts.IncludeCoChangeNeighborsInEnvelope)
-	envelope := map[string]any{
-		"digest":                 digest,
-		"provider_version":       bits.ProviderVersion,
-		"include_cochange_text":  opts.IncludeCoChangeNeighborsInEnvelope,
-		"cochange_metadata_only": !opts.IncludeCoChangeNeighborsInEnvelope,
+	metadata := bits.Metadata
+	envelope := SemanticEnvelopeMetadata{
+		Digest:               digest,
+		ProviderVersion:      bits.ProviderVersion,
+		IncludeCoChangeText:  opts.IncludeCoChangeNeighborsInEnvelope,
+		CoChangeMetadataOnly: !opts.IncludeCoChangeNeighborsInEnvelope,
+		TextSections:         bits.TextSections,
 	}
-	if len(bits.TextSections) > 0 {
-		envelope["text_sections"] = bits.TextSections
-	}
-	if len(bits.Metadata) > 0 {
-		envelope["metadata"] = bits.Metadata
+	if !metadata.IsZero() {
+		envelope.Metadata = &metadata
 	}
 	doc.Metadata[metadataKeySemanticEnvelope] = envelope
 	if len(bits.CoChangeNeighbors) > 0 {
@@ -84,10 +108,46 @@ func normalizeSemanticEnvelopeBits(bits SemanticEnvelopeBits) SemanticEnvelopeBi
 	bits.Keywords = normalizeKeywords(bits.Keywords)
 	bits.DigestParts = sortDedupTrimmed(bits.DigestParts)
 	bits.CoChangeNeighbors = sortDedupTrimmed(bits.CoChangeNeighbors)
-	if len(bits.Metadata) == 0 {
-		bits.Metadata = nil
-	}
+	bits.Metadata = normalizeSemanticEnvelopeProviderMetadata(bits.Metadata)
 	return bits
+}
+
+func normalizeSemanticEnvelopeProviderMetadata(metadata SemanticEnvelopeProviderMetadata) SemanticEnvelopeProviderMetadata {
+	metadata.OwnerNodeID = strings.TrimSpace(metadata.OwnerNodeID)
+	if metadata.WarningCount < 0 {
+		metadata.WarningCount = 0
+	}
+	metadata.Anchors = normalizeSemanticEnvelopeAnchorMetadata(metadata.Anchors)
+	return metadata
+}
+
+func normalizeSemanticEnvelopeAnchorMetadata(anchors []SemanticEnvelopeAnchorMetadata) []SemanticEnvelopeAnchorMetadata {
+	if len(anchors) == 0 {
+		return nil
+	}
+	out := make([]SemanticEnvelopeAnchorMetadata, 0, len(anchors))
+	for _, anchor := range anchors {
+		anchor.Relation = strings.TrimSpace(anchor.Relation)
+		anchor.TargetID = strings.TrimSpace(anchor.TargetID)
+		anchor.TargetDisplay = strings.TrimSpace(anchor.TargetDisplay)
+		anchor.TargetType = strings.TrimSpace(anchor.TargetType)
+		anchor.ValidationStatus = strings.TrimSpace(anchor.ValidationStatus)
+		anchor.Path = strings.TrimSpace(anchor.Path)
+		if anchor.IsZero() {
+			continue
+		}
+		out = append(out, anchor)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].TargetID != out[j].TargetID {
+			return out[i].TargetID < out[j].TargetID
+		}
+		if out[i].Relation != out[j].Relation {
+			return out[i].Relation < out[j].Relation
+		}
+		return out[i].Path < out[j].Path
+	})
+	return out
 }
 
 func normalizeEnvelopeSections(sections []EnvelopeSection) []EnvelopeSection {
@@ -116,7 +176,7 @@ func isEmptySemanticEnvelope(bits SemanticEnvelopeBits) bool {
 	return bits.ProviderVersion == "" &&
 		len(bits.TextSections) == 0 &&
 		len(bits.Keywords) == 0 &&
-		len(bits.Metadata) == 0 &&
+		bits.Metadata.IsZero() &&
 		len(bits.DigestParts) == 0 &&
 		len(bits.CoChangeNeighbors) == 0
 }
@@ -134,6 +194,21 @@ func buildSemanticEnvelopeDigest(bits SemanticEnvelopeBits, includeCoChangeText 
 		DigestParts:                    bits.DigestParts,
 		CoChangeNeighborPaths:          bits.CoChangeNeighbors,
 	})
+}
+
+func (metadata SemanticEnvelopeProviderMetadata) IsZero() bool {
+	return metadata.OwnerNodeID == "" &&
+		len(metadata.Anchors) == 0 &&
+		metadata.WarningCount == 0
+}
+
+func (anchor SemanticEnvelopeAnchorMetadata) IsZero() bool {
+	return anchor.Relation == "" &&
+		anchor.TargetID == "" &&
+		anchor.TargetDisplay == "" &&
+		anchor.TargetType == "" &&
+		anchor.ValidationStatus == "" &&
+		anchor.Path == ""
 }
 
 func enrichedSearchText(base string, bits SemanticEnvelopeBits, includeCoChangeText bool) string {
@@ -158,45 +233,44 @@ func envelopeTextSectionsFromMetadata(metadata map[string]any) []EnvelopeSection
 	if !ok {
 		return nil
 	}
-	envelope, ok := raw.(map[string]any)
+	envelope, ok := semanticEnvelopeMetadataFromValue(raw)
 	if !ok {
 		return nil
 	}
-	return envelopeSectionsFromValue(envelope["text_sections"])
-}
-
-func envelopeSectionsFromValue(raw any) []EnvelopeSection {
-	switch values := raw.(type) {
-	case []EnvelopeSection:
-		return normalizeEnvelopeSections(values)
-	case []any:
-		sections := make([]EnvelopeSection, 0, len(values))
-		for _, value := range values {
-			switch section := value.(type) {
-			case EnvelopeSection:
-				sections = append(sections, section)
-			case map[string]any:
-				sections = append(sections, EnvelopeSection{
-					Name: fmt.Sprint(section["name"]),
-					Text: fmt.Sprint(section["text"]),
-				})
-			}
-		}
-		return normalizeEnvelopeSections(sections)
-	default:
-		return nil
-	}
+	return normalizeEnvelopeSections(envelope.TextSections)
 }
 
 func coChangeTextFromMetadata(metadata map[string]any) string {
 	if len(metadata) == 0 {
 		return ""
 	}
-	envelope, ok := metadata[metadataKeySemanticEnvelope].(map[string]any)
-	if !ok || envelope["include_cochange_text"] != true {
+	envelope, ok := semanticEnvelopeMetadataFromValue(metadata[metadataKeySemanticEnvelope])
+	if !ok || !envelope.IncludeCoChangeText {
 		return ""
 	}
 	return strings.Join(stringsFromMetadataValue(metadata[metadataKeyCoChangeNeighbors]), ", ")
+}
+
+func semanticEnvelopeMetadataFromValue(raw any) (SemanticEnvelopeMetadata, bool) {
+	switch value := raw.(type) {
+	case SemanticEnvelopeMetadata:
+		return value, true
+	case *SemanticEnvelopeMetadata:
+		if value == nil {
+			return SemanticEnvelopeMetadata{}, false
+		}
+		return *value, true
+	default:
+		body, err := json.Marshal(raw)
+		if err != nil {
+			return SemanticEnvelopeMetadata{}, false
+		}
+		var envelope SemanticEnvelopeMetadata
+		if err := json.Unmarshal(body, &envelope); err != nil {
+			return SemanticEnvelopeMetadata{}, false
+		}
+		return envelope, true
+	}
 }
 
 func stringsFromMetadataValue(raw any) []string {

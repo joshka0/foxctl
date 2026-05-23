@@ -14,6 +14,7 @@ import (
 	v2orchestration "github.com/joshka0/foxctl/internal/v2/core/orchestration"
 	"github.com/joshka0/foxctl/internal/v2/core/spawn"
 	coreworker "github.com/joshka0/foxctl/internal/v2/core/worker"
+	v2runtimeorchestration "github.com/joshka0/foxctl/internal/v2/runtime/orchestration"
 )
 
 const (
@@ -24,8 +25,8 @@ const (
 )
 
 type (
-	EventAppender           = v2jido.EventAppender
-	ProjectionApplier       = v2jido.ProjectionApplier
+	EventAppender           = v2runtimeorchestration.EventAppender
+	ProjectionApplier       = v2runtimeorchestration.EventProjector
 	OrchestrationCardReader = v2jido.OrchestrationCardReader
 )
 
@@ -265,7 +266,7 @@ func (r *OrchestrationReconciler) RecordDispatchSpawned(ctx context.Context, req
 		Command:       commandDispatchIssue,
 		Payload:       v2events.MustMarshalPayload(issue),
 	}
-	if err := r.appendAndProject(ctx, evt); err != nil {
+	if err := v2runtimeorchestration.AppendAndProject(ctx, r.events, r.projections, evt); err != nil {
 		return v2events.Event{}, err
 	}
 	return evt, nil
@@ -322,7 +323,7 @@ func (r *OrchestrationReconciler) RecordDispatchFailed(ctx context.Context, req 
 		Command:       commandDispatchIssue,
 		Payload:       v2events.MustMarshalPayload(issue),
 	}
-	if err := r.appendAndProject(ctx, evt); err != nil {
+	if err := v2runtimeorchestration.AppendAndProject(ctx, r.events, r.projections, evt); err != nil {
 		return v2events.Event{}, err
 	}
 	return evt, nil
@@ -355,7 +356,7 @@ func (r *OrchestrationReconciler) RecordDispatchCompleted(ctx context.Context, w
 		Command:       commandDispatchIssue,
 		Payload:       v2events.MustMarshalPayload(payload),
 	}
-	if err := r.appendAndProject(ctx, evt); err != nil {
+	if err := v2runtimeorchestration.AppendAndProject(ctx, r.events, r.projections, evt); err != nil {
 		return v2events.Event{}, err
 	}
 	return evt, nil
@@ -407,22 +408,10 @@ func (r *OrchestrationReconciler) RecordDispatchRuntimeFailed(ctx context.Contex
 		Command:       commandDispatchIssue,
 		Payload:       v2events.MustMarshalPayload(payload),
 	}
-	if err := r.appendAndProject(ctx, evt); err != nil {
+	if err := v2runtimeorchestration.AppendAndProject(ctx, r.events, r.projections, evt); err != nil {
 		return v2events.Event{}, err
 	}
 	return evt, nil
-}
-
-func (r *OrchestrationReconciler) appendAndProject(ctx context.Context, evt v2events.Event) error {
-	if err := r.events.Append(ctx, evt); err != nil {
-		return err
-	}
-	if r.projections != nil {
-		if err := r.projections.Apply(ctx, evt); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func dispatchIssuePayload(req spawn.Request, resp spawn.Response) (map[string]any, bool) {
@@ -514,7 +503,7 @@ func retryPlanForMessage(message string, currentAttempt int, policy v2jido.Retry
 	if cfg.MaxAttempts > 0 && nextAttempt > cfg.MaxAttempts {
 		return retryPlan{}, false
 	}
-	dueAt := nowFn().UTC().Add(retryDelay(nextAttempt, cfg.BaseDelay, cfg.MaxDelay))
+	dueAt := nowFn().UTC().Add(v2runtimeorchestration.RetryDelay(nextAttempt, cfg.BaseDelay, cfg.MaxDelay))
 	return retryPlan{Attempt: nextAttempt, DueAt: dueAt.Format(time.RFC3339Nano), Suggestion: chooseNonEmpty(cfg.Suggestion, "retry scheduled after transient runtime failure")}, true
 }
 
@@ -541,29 +530,6 @@ func classifyRetryFailure(message string, policy v2jido.RetryPolicy) (v2jido.Ret
 		}
 	}
 	return "", v2jido.RetryClassPolicy{}, false
-}
-
-func retryDelay(attempt int, base, max time.Duration) time.Duration {
-	if attempt < 1 {
-		attempt = 1
-	}
-	if base <= 0 {
-		base = time.Second
-	}
-	if max <= 0 {
-		max = 5 * time.Minute
-	}
-	delay := base
-	for i := 1; i < attempt; i++ {
-		if delay >= max {
-			return max
-		}
-		delay *= 2
-		if delay > max {
-			return max
-		}
-	}
-	return delay
 }
 
 func resolveFailureSuggestion(meta map[string]any) string {

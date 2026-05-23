@@ -47,7 +47,7 @@ func (p *SemanticAnchorEnvelopeProvider) BuildCodeEnvelope(ctx context.Context, 
 		return searchindex.SemanticEnvelopeBits{}, nil
 	}
 
-	anchors := make([]semanticEnvelopeAnchor, 0, len(projection.Edges))
+	anchors := make([]searchindex.SemanticEnvelopeAnchorMetadata, 0, len(projection.Edges))
 	sections := make([]searchindex.EnvelopeSection, 0, len(projection.Edges))
 	var keywords []string
 	var digestParts []string
@@ -62,12 +62,12 @@ func (p *SemanticAnchorEnvelopeProvider) BuildCodeEnvelope(ctx context.Context, 
 			Name: "semantic_anchor",
 			Text: anchorEmbeddingText(anchor),
 		})
-		keywords = append(keywords, anchor.TargetDisplay, string(anchor.TargetID), anchor.TargetType, string(anchor.Relation))
+		keywords = append(keywords, anchor.TargetDisplay, anchor.TargetID, anchor.TargetType, anchor.Relation)
 		digestParts = append(digestParts, strings.Join([]string{
-			string(anchor.TargetID),
-			string(anchor.Relation),
+			anchor.TargetID,
+			anchor.Relation,
 			anchor.TargetType,
-			string(anchor.ValidationStatus),
+			anchor.ValidationStatus,
 		}, "|"))
 	}
 	if len(anchors) == 0 {
@@ -83,10 +83,10 @@ func (p *SemanticAnchorEnvelopeProvider) BuildCodeEnvelope(ctx context.Context, 
 		ProviderVersion: "repoindex-semantic-anchors-v1",
 		TextSections:    sections,
 		Keywords:        keywords,
-		Metadata: map[string]any{
-			"owner_node_id": owner.ID,
-			"anchors":       anchors,
-			"warning_count": len(projection.Warnings),
+		Metadata: searchindex.SemanticEnvelopeProviderMetadata{
+			OwnerNodeID:  owner.ID,
+			Anchors:      anchors,
+			WarningCount: len(projection.Warnings),
 		},
 		DigestParts: digestParts,
 	}, nil
@@ -155,30 +155,21 @@ func firstNodeBySortedID(candidates []repoindex.Node) (repoindex.Node, bool) {
 	return candidates[0], true
 }
 
-type semanticEnvelopeAnchor struct {
-	Relation         semanticanchors.SemanticAnchorRelation `json:"relation"`
-	TargetID         semanticanchors.AnchorTargetID         `json:"target_id"`
-	TargetDisplay    string                                 `json:"target_display,omitempty"`
-	TargetType       string                                 `json:"target_type,omitempty"`
-	ValidationStatus semanticanchors.AnchorValidationStatus `json:"validation_status"`
-	Path             string                                 `json:"path,omitempty"`
-}
-
-func semanticEnvelopeAnchorFromMeta(meta semanticanchors.SemanticAnchorEdgeMeta) semanticEnvelopeAnchor {
-	return semanticEnvelopeAnchor{
-		Relation:         meta.Relation,
-		TargetID:         meta.TargetID,
+func semanticEnvelopeAnchorFromMeta(meta semanticanchors.SemanticAnchorEdgeMeta) searchindex.SemanticEnvelopeAnchorMetadata {
+	return searchindex.SemanticEnvelopeAnchorMetadata{
+		Relation:         string(meta.Relation),
+		TargetID:         string(meta.TargetID),
 		TargetDisplay:    meta.TargetDisplay,
 		TargetType:       meta.TargetType,
-		ValidationStatus: meta.ValidationStatus,
+		ValidationStatus: string(meta.ValidationStatus),
 		Path:             meta.Path,
 	}
 }
 
-func anchorEmbeddingText(anchor semanticEnvelopeAnchor) string {
+func anchorEmbeddingText(anchor searchindex.SemanticEnvelopeAnchorMetadata) string {
 	target := anchor.TargetDisplay
 	if target == "" {
-		target = string(anchor.TargetID)
+		target = anchor.TargetID
 	}
 	return fmt.Sprintf("%s %s %s %s", anchor.Relation, anchor.TargetType, target, anchor.ValidationStatus)
 }

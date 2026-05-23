@@ -1234,9 +1234,10 @@ class FoxctlClient:
     ) -> Dict:
         """Store a knowledge record in the foxctl named memory store.
 
-        Uses the foxctl CLI binary to call ``foxctl memory put``, which
-        persists the record to the Turso store with optional embedding.
-        Falls back to the skill API if the CLI is unavailable.
+        Uses the foxctl CLI binary to call ``foxctl memory put``. If the CLI
+        path is unavailable, falls back to the companion memory import API as a
+        separate adapter. A successful return means one of those write adapters
+        actually accepted the record.
         """
         import json as _json
         import subprocess
@@ -1249,7 +1250,9 @@ class FoxctlClient:
         if file_refs:
             result_data["file_refs"] = file_refs
 
-        # Try foxctl CLI first (most reliable write path)
+        attempts = []
+
+        # Try foxctl CLI first (canonical named-memory write path)
         cli_paths = [
             "/home/dev/repos/foxctl/bin/foxctl",
             "foxctl",  # from PATH
@@ -1266,16 +1269,48 @@ class FoxctlClient:
                     capture_output=True, text=True, timeout=10,
                 )
                 if result.returncode == 0:
-                    # Parse the CLI envelope output
                     try:
-                        return _json.loads(result.stdout)
+                        parsed = _json.loads(result.stdout)
                     except _json.JSONDecodeError:
-                        return {"ok": True, "name": name, "method": "cli"}
-            except (FileNotFoundError, subprocess.TimeoutExpired):
+                        attempts.append({
+                            "method": "cli",
+                            "binary": cli,
+                            "status": "invalid_json",
+                            "stdout": (result.stdout or "").strip()[:500],
+                        })
+                        continue
+                    if isinstance(parsed, dict):
+                        if parsed.get("status") == "error" or parsed.get("ok") is False:
+                            attempts.append({
+                                "method": "cli",
+                                "binary": cli,
+                                "status": "error",
+                                "response": parsed,
+                            })
+                            continue
+                        return parsed
+                    attempts.append({
+                        "method": "cli",
+                        "binary": cli,
+                        "status": "invalid_response",
+                        "response_type": type(parsed).__name__,
+                    })
+                    continue
+                attempts.append({
+                    "method": "cli",
+                    "binary": cli,
+                    "status": "nonzero_exit",
+                    "exit_code": result.returncode,
+                    "stderr": (result.stderr or "").strip()[:500],
+                })
+            except FileNotFoundError:
+                attempts.append({"method": "cli", "binary": cli, "status": "not_found"})
+                continue
+            except subprocess.TimeoutExpired:
+                attempts.append({"method": "cli", "binary": cli, "status": "timeout"})
                 continue
 
-        # Fallback: use the companion memory import API
-        # This stores in the companion's per-conversation store
+        # Fallback: companion memory import is an explicit separate adapter.
         body = {
             "entries": [{
                 "role": "system",
@@ -1283,11 +1318,23 @@ class FoxctlClient:
             }]
         }
         try:
-            self._post(f"/api/companion/memory/hermes/import", body)
-        except Exception:
-            pass
+            resp = self._post("/api/companion/memory/hermes/import", body)
+            return {"ok": True, "name": name, "method": "companion_import", "response": resp}
+        except FoxctlError as exc:
+            attempts.append({
+                "method": "companion_import",
+                "status": "error",
+                "code": exc.status,
+                "message": exc.message,
+            })
+        except Exception as exc:
+            attempts.append({
+                "method": "companion_import",
+                "status": "error",
+                "message": str(exc),
+            })
 
-        return {"ok": True, "name": name, "method": "companion_fallback"}
+        raise FoxctlError(502, "memory_put failed through CLI and companion import", {"attempts": attempts})
 
     def memory_curator(self, mode: str = "dry_run", limit: int = 100) -> Dict:
         """Run a deterministic curator report on the memory store."""
@@ -1338,15 +1385,12 @@ class FoxctlClient:
             "members": [{
                 "actor_id": self.cfg.actor,
                 "role": "participant",
-                "backend": "herdr",
-                "session": self.cfg.session,
-                "transport_kind": "pi-extension",
-                "transport_endpoint": os.environ.get("HERDR_PANE_ID", ""),
                 "delivery_binding": {
+                    "mux_backend": "herdr",
+                    "mux_session": self.cfg.session,
                     "transport_kind": "pi-extension",
                     "transport_endpoint": os.environ.get("HERDR_PANE_ID", ""),
                     "health": "unknown",
-                    "fallback_policy": "room-inbox",
                 },
             }],
         }

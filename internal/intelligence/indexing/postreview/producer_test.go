@@ -113,7 +113,7 @@ func TestProducer_Produce(t *testing.T) {
 	}
 }
 
-func TestProducer_ProduceFromReview_Idempotent(t *testing.T) {
+func TestProducer_Produce_IdempotentWithNoFiles(t *testing.T) {
 	ctx := context.Background()
 	store, cleanup := openTestStore(t)
 	defer cleanup()
@@ -127,14 +127,14 @@ func TestProducer_ProduceFromReview_Idempotent(t *testing.T) {
 		Kind:        "auto",
 	}
 
-	first, err := producer.ProduceFromReview(ctx, artifact)
+	first, err := producer.Produce(ctx, artifact, nil)
 	if err != nil {
-		t.Fatalf("first ProduceFromReview error: %v", err)
+		t.Fatalf("first Produce error: %v", err)
 	}
 
-	second, err := producer.ProduceFromReview(ctx, artifact)
+	second, err := producer.Produce(ctx, artifact, nil)
 	if err != nil {
-		t.Fatalf("second ProduceFromReview error: %v", err)
+		t.Fatalf("second Produce error: %v", err)
 	}
 
 	if first.ID != second.ID {

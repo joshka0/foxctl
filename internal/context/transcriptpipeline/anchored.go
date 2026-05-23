@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/context/companion"
-	"github.com/joshka0/foxctl/internal/storage/dbdriver"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
 	"github.com/joshka0/foxctl/internal/v2/adapters/sourceimport"
 	"github.com/joshka0/foxctl/internal/v2/core/run"
 )
@@ -54,10 +54,10 @@ func buildConversationMemoryFromParsedSession(ctx context.Context, parsed source
 	tmpPath := tmpFile.Name()
 	_ = tmpFile.Close()
 
-	db, closeFn, err := dbdriver.OpenDBCompatWithCloser(ctx, dbdriver.DefaultSQLiteConfig(tmpPath), nil)
+	db, closeFn, err := dbutil.OpenSQLiteDBShared(ctx, tmpPath, nil)
 	if err != nil {
 		_ = os.Remove(tmpPath)
-		return nil, nil, "", fmt.Errorf("open in-memory sqlite: %w", err)
+		return nil, nil, "", fmt.Errorf("open temp sqlite: %w", err)
 	}
 	wrappedClose := func() error {
 		var firstErr error

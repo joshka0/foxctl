@@ -1361,7 +1361,8 @@ func muxGroupControlForMember(ctx context.Context, member agent.RoomMember, acti
 		return item
 	}
 
-	if endpoint := strings.TrimSpace(member.TransportEndpoint); endpoint != "" && (strings.EqualFold(member.TransportKind, agent.PaneSocketTransportKind) || strings.HasPrefix(endpoint, "/")) {
+	binding := agent.NormalizeRoomDeliveryBinding(member.ActorID, member.DeliveryBinding)
+	if endpoint := roomDeliveryTransportEndpoint(binding); endpoint != "" && (strings.EqualFold(roomDeliveryTransportKind(binding), agent.PaneSocketTransportKind) || strings.HasPrefix(endpoint, "/")) {
 		item.Backend = roomMemberRelayBackend(member)
 		item.Via = "participant_transport"
 		item.Target = endpoint
@@ -1384,7 +1385,7 @@ func muxGroupControlForMember(ctx context.Context, member agent.RoomMember, acti
 			item.Error = "member has no resolvable zellij session"
 			return item
 		}
-		pane := strings.TrimSpace(member.PaneID)
+		pane := roomMemberMuxPaneID(member)
 		if pane != "" && !isResolvableZellijPaneID(pane) {
 			item.Status = "skipped"
 			item.Error = "member stores zellij pane binding by title only"

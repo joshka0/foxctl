@@ -107,9 +107,10 @@ Large payloads may be artifactized through CAS, especially in orchestration and 
 - `GET /api/events` remains the global invalidation/event feed used by broad UI surfaces.
 - `GET /api/rooms/{id}/events?workspace_id=...` is the stable room-scoped SSE surface for room clients.
 - Room mutation routes are actor-authorized: room patch and full member replacement require coordinator access.
-- Member transport and binding updates are self-service only for the target participant unless the caller has coordinator access.
+- Member binding updates are self-service only for the target participant unless the caller has coordinator access.
 - Role-changing member binding updates are coordinator-only even when the caller is updating their own binding.
-- Room member payloads expose `delivery_binding` as the canonical binding/routing record. Legacy top-level fields (`backend`, `session`, `pane_id`, `transport_endpoint`, `transport_kind`) are still mirrored for compatibility.
+- Room member payloads expose `delivery_binding` as the canonical binding/routing record. Legacy top-level fields (`backend`, `session`, `pane_id`, `transport_endpoint`, `transport_kind`) are not emitted in room member API responses.
+- The legacy `/members/{actor_id}/transport` route has been removed; use `/members/{actor_id}/binding` with `delivery_binding`.
 - Room status responses expose `last_delivery_trace` from the persisted room-loop row. This trace records the chosen binding, transport endpoint/kind, fallback attempt, outcome, and cursor movement for the latest delivery decision.
 - Room reminder schedules are durable room-loop state. Acknowledging one emitted reminder does not cancel the schedule. Reminders can also stop automatically when linked `task_id`, `story_id`, or `milestone_id` work is satisfied.
 

@@ -3,10 +3,14 @@ package tasks
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 func TestStore_AddAndGet(t *testing.T) {
@@ -102,6 +106,43 @@ func TestStore_PersistsMilestoneLinkage(t *testing.T) {
 	}
 	if got.MilestoneID != "mile-1" {
 		t.Fatalf("MilestoneID=%q want mile-1", got.MilestoneID)
+	}
+}
+
+func TestMigrateIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if err := migrate(ctx, db); err != nil {
+		t.Fatalf("first migrate: %v", err)
+	}
+	if err := migrate(ctx, db); err != nil {
+		t.Fatalf("second migrate: %v", err)
+	}
+}
+
+func TestMigrateReturnsIndexCreationError(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if _, err := db.ExecContext(ctx, `CREATE TABLE idx_tasks_session (id TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+
+	err = migrate(ctx, db)
+	if err == nil {
+		t.Fatal("expected migration error")
+	}
+	if !strings.Contains(err.Error(), "idx_tasks_session") {
+		t.Fatalf("error=%q want idx_tasks_session context", err)
 	}
 }
 

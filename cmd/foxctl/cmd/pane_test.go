@@ -54,7 +54,14 @@ func TestRegisterParticipantTransportUpdatesExistingMember(t *testing.T) {
 	}
 	// Add member without transport.
 	members := []agent.RoomMember{
-		{ActorID: "claude-a", Backend: "tmux", Session: "collab", PaneID: "%42"},
+		{
+			ActorID: "claude-a",
+			DeliveryBinding: &agent.RoomDeliveryBinding{
+				MuxBackend: "tmux",
+				MuxSession: "collab",
+				MuxPaneID:  "%42",
+			},
+		},
 	}
 	if _, err := store.ReplaceRoomMembers(ctx, workspace, roomID, members); err != nil {
 		t.Fatalf("ReplaceRoomMembers: %v", err)
@@ -81,21 +88,23 @@ func TestRegisterParticipantTransportUpdatesExistingMember(t *testing.T) {
 	for _, m := range summary.Members {
 		if strings.TrimSpace(m.ActorID) == "claude-a" {
 			found = true
-			if m.TransportEndpoint != socketPath {
-				t.Errorf("TransportEndpoint=%q want %q", m.TransportEndpoint, socketPath)
-			}
-			if m.TransportKind != agent.PaneSocketTransportKind {
-				t.Errorf("TransportKind=%q want %q", m.TransportKind, agent.PaneSocketTransportKind)
-			}
 			if m.DeliveryBinding == nil {
-				t.Fatal("DeliveryBinding=nil want mirrored binding")
+				t.Fatal("DeliveryBinding=nil want canonical binding")
 			}
 			if m.DeliveryBinding.TransportEndpoint != socketPath {
 				t.Errorf("DeliveryBinding.TransportEndpoint=%q want %q", m.DeliveryBinding.TransportEndpoint, socketPath)
 			}
-			// Existing fields should be preserved.
-			if m.Backend != "tmux" {
-				t.Errorf("Backend=%q want tmux (preserved)", m.Backend)
+			if m.DeliveryBinding.TransportKind != agent.PaneSocketTransportKind {
+				t.Errorf("DeliveryBinding.TransportKind=%q want %q", m.DeliveryBinding.TransportKind, agent.PaneSocketTransportKind)
+			}
+			if m.DeliveryBinding.MuxBackend != "tmux" {
+				t.Errorf("DeliveryBinding.MuxBackend=%q want tmux", m.DeliveryBinding.MuxBackend)
+			}
+			if m.DeliveryBinding.MuxSession != "collab" {
+				t.Errorf("DeliveryBinding.MuxSession=%q want collab", m.DeliveryBinding.MuxSession)
+			}
+			if m.DeliveryBinding.MuxPaneID != "%42" {
+				t.Errorf("DeliveryBinding.MuxPaneID=%q want %%42", m.DeliveryBinding.MuxPaneID)
 			}
 		}
 	}
@@ -135,17 +144,14 @@ func TestRegisterParticipantTransportCreatesNewMember(t *testing.T) {
 	for _, m := range summary.Members {
 		if strings.TrimSpace(m.ActorID) == "droid-a" {
 			found = true
-			if m.TransportEndpoint != socketPath {
-				t.Errorf("TransportEndpoint=%q want %q", m.TransportEndpoint, socketPath)
-			}
-			if m.TransportKind != agent.PaneSocketTransportKind {
-				t.Errorf("TransportKind=%q want %q", m.TransportKind, agent.PaneSocketTransportKind)
-			}
 			if m.DeliveryBinding == nil {
-				t.Fatal("DeliveryBinding=nil want mirrored binding")
+				t.Fatal("DeliveryBinding=nil want canonical binding")
 			}
 			if m.DeliveryBinding.TransportEndpoint != socketPath {
 				t.Errorf("DeliveryBinding.TransportEndpoint=%q want %q", m.DeliveryBinding.TransportEndpoint, socketPath)
+			}
+			if m.DeliveryBinding.TransportKind != agent.PaneSocketTransportKind {
+				t.Errorf("DeliveryBinding.TransportKind=%q want %q", m.DeliveryBinding.TransportKind, agent.PaneSocketTransportKind)
 			}
 		}
 	}
@@ -170,8 +176,22 @@ func TestRegisterParticipantTransportConcurrentExistingMembersDoNotClobberEachOt
 		t.Fatalf("EnsureRoom: %v", err)
 	}
 	members := []agent.RoomMember{
-		{ActorID: "claude-a", Backend: "tmux", Session: "claude", PaneID: "%1"},
-		{ActorID: "gemini-a", Backend: "tmux", Session: "gemini", PaneID: "%2"},
+		{
+			ActorID: "claude-a",
+			DeliveryBinding: &agent.RoomDeliveryBinding{
+				MuxBackend: "tmux",
+				MuxSession: "claude",
+				MuxPaneID:  "%1",
+			},
+		},
+		{
+			ActorID: "gemini-a",
+			DeliveryBinding: &agent.RoomDeliveryBinding{
+				MuxBackend: "tmux",
+				MuxSession: "gemini",
+				MuxPaneID:  "%2",
+			},
+		},
 	}
 	if _, err := store.ReplaceRoomMembers(ctx, workspace, roomID, members); err != nil {
 		t.Fatalf("ReplaceRoomMembers: %v", err)
@@ -209,23 +229,17 @@ func TestRegisterParticipantTransportConcurrentExistingMembersDoNotClobberEachOt
 	for _, m := range summary.Members {
 		got[strings.TrimSpace(m.ActorID)] = m
 	}
-	if got["claude-a"].TransportEndpoint != socketA {
-		t.Fatalf("claude-a TransportEndpoint=%q want %q", got["claude-a"].TransportEndpoint, socketA)
-	}
-	if got["gemini-a"].TransportEndpoint != socketB {
-		t.Fatalf("gemini-a TransportEndpoint=%q want %q", got["gemini-a"].TransportEndpoint, socketB)
-	}
-	if got["claude-a"].TransportKind != agent.PaneSocketTransportKind {
-		t.Fatalf("claude-a TransportKind=%q want %q", got["claude-a"].TransportKind, agent.PaneSocketTransportKind)
-	}
-	if got["gemini-a"].TransportKind != agent.PaneSocketTransportKind {
-		t.Fatalf("gemini-a TransportKind=%q want %q", got["gemini-a"].TransportKind, agent.PaneSocketTransportKind)
-	}
 	if got["claude-a"].DeliveryBinding == nil || got["claude-a"].DeliveryBinding.TransportEndpoint != socketA {
 		t.Fatalf("claude-a DeliveryBinding=%+v want endpoint %q", got["claude-a"].DeliveryBinding, socketA)
 	}
 	if got["gemini-a"].DeliveryBinding == nil || got["gemini-a"].DeliveryBinding.TransportEndpoint != socketB {
 		t.Fatalf("gemini-a DeliveryBinding=%+v want endpoint %q", got["gemini-a"].DeliveryBinding, socketB)
+	}
+	if got["claude-a"].DeliveryBinding.TransportKind != agent.PaneSocketTransportKind {
+		t.Fatalf("claude-a TransportKind=%q want %q", got["claude-a"].DeliveryBinding.TransportKind, agent.PaneSocketTransportKind)
+	}
+	if got["gemini-a"].DeliveryBinding.TransportKind != agent.PaneSocketTransportKind {
+		t.Fatalf("gemini-a TransportKind=%q want %q", got["gemini-a"].DeliveryBinding.TransportKind, agent.PaneSocketTransportKind)
 	}
 }
 

@@ -30,6 +30,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func roomTestDeliveryBinding(t *testing.T, member map[string]any) map[string]any {
+	t.Helper()
+	binding, ok := member["delivery_binding"].(map[string]any)
+	if !ok {
+		t.Fatalf("delivery_binding=%T want object in member=%v", member["delivery_binding"], member)
+	}
+	return binding
+}
+
 func TestParseRoomMembers(t *testing.T) {
 	got, err := parseRoomMembers([]string{"agent-a=lead", "agent-b"})
 	if err != nil {
@@ -178,14 +187,18 @@ func TestRunRoomCreateDerivesCurrentParticipantAsCoordinator(t *testing.T) {
 			continue
 		}
 		if member["actor_id"] == "human-a" && member["role"] == "coordinator" {
-			if member["backend"] != "tmux" {
-				t.Fatalf("backend=%v want tmux", member["backend"])
+			binding, ok := member["delivery_binding"].(map[string]any)
+			if !ok {
+				t.Fatalf("delivery_binding=%T want object", member["delivery_binding"])
 			}
-			if member["session"] != "14" {
-				t.Fatalf("session=%v want 14", member["session"])
+			if binding["mux_backend"] != "tmux" {
+				t.Fatalf("mux_backend=%v want tmux", binding["mux_backend"])
 			}
-			if member["pane_id"] != "%18" {
-				t.Fatalf("pane_id=%v want %%18", member["pane_id"])
+			if binding["mux_session"] != "14" {
+				t.Fatalf("mux_session=%v want 14", binding["mux_session"])
+			}
+			if binding["mux_pane_id"] != "%18" {
+				t.Fatalf("mux_pane_id=%v want %%18", binding["mux_pane_id"])
 			}
 			foundCoordinator = true
 			break
@@ -1352,12 +1365,14 @@ func TestDeriveParticipantTransportState_PaneSocketReady(t *testing.T) {
 	f.Close()
 
 	m := agent.RoomMember{
-		ActorID:           "claude-a",
-		Backend:           "zellij",
-		Session:           "test-session",
-		PaneID:            "terminal_0",
-		TransportEndpoint: socketPath,
-		TransportKind:     agent.PaneSocketTransportKind,
+		ActorID: "claude-a",
+		DeliveryBinding: &agent.RoomDeliveryBinding{
+			MuxBackend:        "zellij",
+			MuxSession:        "test-session",
+			MuxPaneID:         "terminal_0",
+			TransportEndpoint: socketPath,
+			TransportKind:     agent.PaneSocketTransportKind,
+		},
 	}
 	s := deriveParticipantTransportState(m)
 
@@ -1383,9 +1398,11 @@ func TestDeriveParticipantTransportState_PaneSocketReady(t *testing.T) {
 
 func TestDeriveParticipantTransportState_PaneSocketUnavailable(t *testing.T) {
 	m := agent.RoomMember{
-		ActorID:           "claude-a",
-		TransportEndpoint: "/tmp/nonexistent-foxctl-sock/claude-a.sock",
-		TransportKind:     agent.PaneSocketTransportKind,
+		ActorID: "claude-a",
+		DeliveryBinding: &agent.RoomDeliveryBinding{
+			TransportEndpoint: "/tmp/nonexistent-foxctl-sock/claude-a.sock",
+			TransportKind:     agent.PaneSocketTransportKind,
+		},
 	}
 	s := deriveParticipantTransportState(m)
 
@@ -1403,14 +1420,15 @@ func TestDeriveParticipantTransportState_PaneSocketUnavailable(t *testing.T) {
 func TestDeriveParticipantTransportState_MuxPane(t *testing.T) {
 	m := agent.RoomMember{
 		ActorID: "droid-a",
-		Backend: "tmux",
-		Session: "test-session",
-		PaneID:  "%5",
+		DeliveryBinding: &agent.RoomDeliveryBinding{
+			MuxBackend: "tmux",
+			MuxSession: "test-session",
+			MuxPaneID:  "%5",
+		},
 	}
 	s := deriveParticipantTransportState(m)
 
-	// Legacy mux-pane: transport endpoint is derived from backend/session/pane,
-	// state is unknown (no live probe), presentation is detached.
+	// Mux-pane transport state is unknown without a live probe; presentation is detached.
 	if s.Membership != agent.MembershipActive {
 		t.Errorf("Membership=%q want active", s.Membership)
 	}
@@ -1457,20 +1475,24 @@ func TestBuildRoomStatusParticipantsIncludesTransport(t *testing.T) {
 		Title: "Transport Alpha",
 		Members: []agent.RoomMember{
 			{
-				ActorID:           "claude-a",
-				Role:              "worker",
-				Backend:           "zellij",
-				Session:           "test-session",
-				PaneID:            "terminal_0",
-				TransportEndpoint: socketPath,
-				TransportKind:     "pane_socket",
+				ActorID: "claude-a",
+				Role:    "worker",
+				DeliveryBinding: &agent.RoomDeliveryBinding{
+					MuxBackend:        "zellij",
+					MuxSession:        "test-session",
+					MuxPaneID:         "terminal_0",
+					TransportEndpoint: socketPath,
+					TransportKind:     "pane_socket",
+				},
 			},
 			{
 				ActorID: "gemini-a",
 				Role:    "reviewer",
-				Backend: "tmux",
-				Session: "test-session",
-				PaneID:  "%5",
+				DeliveryBinding: &agent.RoomDeliveryBinding{
+					MuxBackend: "tmux",
+					MuxSession: "test-session",
+					MuxPaneID:  "%5",
+				},
 			},
 		},
 		Participants: []string{"claude-a", "gemini-a"},
@@ -10473,22 +10495,6 @@ func TestDetectRoomCoordinatorPulseMessagesSkipsQuietChoresTaskDebt(t *testing.T
 	}
 }
 
-func TestCollectRoomRelayTargetsSkipsSender(t *testing.T) {
-	targets, skipped := collectRoomRelayTargets(agent.RoomSummary{
-		Members: []agent.RoomMember{
-			{ActorID: "agent-a"},
-			{ActorID: "agent-b"},
-			{ActorID: "agent-c"},
-		},
-	}, agent.BoardMessage{Sender: "agent-b"})
-	if len(targets) != 2 || targets[0] != "agent-a" || targets[1] != "agent-c" {
-		t.Fatalf("targets=%v want [agent-a agent-c]", targets)
-	}
-	if len(skipped) != 1 || skipped[0] != "agent-b" {
-		t.Fatalf("skipped=%v want [agent-b]", skipped)
-	}
-}
-
 func TestFormatRoomRelayContentIncludesSender(t *testing.T) {
 	room := agent.RoomSummary{ID: "alpha"}
 	msg := agent.BoardMessage{
@@ -10519,8 +10525,15 @@ func TestFindRoomMemberForMuxSubmit(t *testing.T) {
 	summary := agent.RoomSummary{
 		ID: "triad",
 		Members: []agent.RoomMember{
-			{ActorID: "cursor-c-a", Backend: "tmux", PaneID: "%15"},
-			{ActorID: "zellij:spark:terminal_2", Backend: "zellij", Session: "spark", PaneID: "2"},
+			relayTmuxMember("cursor-c-a", "triad", "%15"),
+			{
+				ActorID: "zellij:spark:terminal_2",
+				DeliveryBinding: &agent.RoomDeliveryBinding{
+					MuxBackend: "zellij",
+					MuxSession: "spark",
+					MuxPaneID:  "2",
+				},
+			},
 		},
 	}
 	if _, ok := findRoomMemberForMuxSubmit(summary, "missing"); ok {
@@ -10534,8 +10547,8 @@ func TestFindRoomMemberForMuxSubmit(t *testing.T) {
 	if !ok {
 		t.Fatal("expected match by canonical actor id")
 	}
-	if strings.TrimSpace(m.Session) != "spark" {
-		t.Fatalf("session=%q", m.Session)
+	if m.DeliveryBinding == nil || strings.TrimSpace(m.DeliveryBinding.MuxSession) != "spark" {
+		t.Fatalf("binding=%+v want session spark", m.DeliveryBinding)
 	}
 }
 
@@ -10600,12 +10613,11 @@ func TestMergeRoomMembersPreservesBindingOnlyFields(t *testing.T) {
 			{
 				ActorID: "codex-a",
 				DeliveryBinding: &agent.RoomDeliveryBinding{
-					MuxBackend:     "zellij",
-					MuxSession:     "dev",
-					MuxPaneID:      "terminal_1",
-					SubmitMode:     agent.RoomDeliverySubmitModeComposerCtrlEnter,
-					Health:         agent.RoomDeliveryHealthReady,
-					FallbackPolicy: agent.RoomDeliveryFallbackAllowLegacyMux,
+					MuxBackend: "zellij",
+					MuxSession: "dev",
+					MuxPaneID:  "terminal_1",
+					SubmitMode: agent.RoomDeliverySubmitModeComposerCtrlEnter,
+					Health:     agent.RoomDeliveryHealthReady,
 				},
 			},
 		},
@@ -10631,54 +10643,19 @@ func TestMergeRoomMembersPreservesBindingOnlyFields(t *testing.T) {
 	if got.DeliveryBinding.TransportEndpoint != "/tmp/foxctl-pane/dev/codex-a.sock" {
 		t.Fatalf("TransportEndpoint=%q", got.DeliveryBinding.TransportEndpoint)
 	}
-	if got.TransportEndpoint != "/tmp/foxctl-pane/dev/codex-a.sock" {
-		t.Fatalf("mirrored TransportEndpoint=%q", got.TransportEndpoint)
-	}
-}
-
-func TestCollectRoomRelayTargetsDirectRecipient(t *testing.T) {
-	targets, skipped := collectRoomRelayTargets(agent.RoomSummary{
-		Members: []agent.RoomMember{
-			{ActorID: "human-a"},
-			{ActorID: "claude-a"},
-			{ActorID: "gemini-a"},
-		},
-	}, agent.BoardMessage{
-		Sender:    "human-a",
-		Recipient: "claude-a",
-	})
-	if len(targets) != 1 || targets[0] != "claude-a" {
-		t.Fatalf("targets=%v want [claude-a]", targets)
-	}
-	if len(skipped) != 2 {
-		t.Fatalf("skipped=%v want 2 entries", skipped)
-	}
-}
-
-func TestCollectRoomRelayTargetsDirectRecipientUsesTmuxPaneID(t *testing.T) {
-	targets, skipped := collectRoomRelayTargets(agent.RoomSummary{
-		Members: []agent.RoomMember{
-			{ActorID: "human-a", Backend: "tmux", PaneID: "%3"},
-			{ActorID: "cursor-review", Backend: "tmux", PaneID: "%11"},
-			{ActorID: "gemini-a", Backend: "tmux", PaneID: "%10"},
-		},
-	}, agent.BoardMessage{
-		Sender:    "human-a",
-		Recipient: "cursor-review",
-	})
-	if len(targets) != 1 || targets[0] != "%11" {
-		t.Fatalf("targets=%v want [%%11]", targets)
-	}
-	if len(skipped) != 2 {
-		t.Fatalf("skipped=%v want 2 entries", skipped)
-	}
 }
 
 func TestCollectRoomRelayTargetsByBackendRoutesZellijBySession(t *testing.T) {
 	tmuxTargets, zellijTargets, failed, skipped := collectRoomRelayTargetsByBackend(agent.RoomSummary{
 		Members: []agent.RoomMember{
 			{ActorID: "human-a"},
-			{ActorID: "cursor-a", Backend: "zellij", Session: "fascinating-salamander"},
+			{
+				ActorID: "cursor-a",
+				DeliveryBinding: &agent.RoomDeliveryBinding{
+					MuxBackend: "zellij",
+					MuxSession: "fascinating-salamander",
+				},
+			},
 			{ActorID: "claude-a"},
 		},
 	}, agent.BoardMessage{
@@ -10703,9 +10680,9 @@ func TestCollectRoomRelayTargetsByBackendRoutesZellijBySession(t *testing.T) {
 func TestCollectRoomRelayTargetsByBackendRoutesTmuxByPaneID(t *testing.T) {
 	tmuxTargets, zellijTargets, failed, skipped := collectRoomRelayTargetsByBackend(agent.RoomSummary{
 		Members: []agent.RoomMember{
-			{ActorID: "codex-backend", Backend: "tmux", PaneID: "%3"},
-			{ActorID: "cursor-review", Backend: "tmux", PaneID: "%11"},
-			{ActorID: "block-gemini-a", Backend: "tmux", PaneID: "%10"},
+			relayTmuxMember("codex-backend", "room", "%3"),
+			relayTmuxMember("cursor-review", "room", "%11"),
+			relayTmuxMember("block-gemini-a", "room", "%10"),
 		},
 	}, agent.BoardMessage{
 		Sender:    "codex-backend",
@@ -10763,7 +10740,14 @@ func TestCollectRoomRelayTargetsByBackendRoutesZellijByPaneID(t *testing.T) {
 	_, zellijTargets, failed, skipped := collectRoomRelayTargetsByBackend(agent.RoomSummary{
 		Members: []agent.RoomMember{
 			{ActorID: "human-a"},
-			{ActorID: "cursor-a", Backend: "zellij", Session: "sparkling-apricot", PaneID: "3"},
+			{
+				ActorID: "cursor-a",
+				DeliveryBinding: &agent.RoomDeliveryBinding{
+					MuxBackend: "zellij",
+					MuxSession: "sparkling-apricot",
+					MuxPaneID:  "3",
+				},
+			},
 		},
 	}, agent.BoardMessage{
 		Sender:    "human-a",
@@ -10785,7 +10769,14 @@ func TestCollectRoomRelayTargetsByBackendRoutesZellijNamedPaneByTitle(t *testing
 	_, zellijTargets, failed, skipped := collectRoomRelayTargetsByBackend(agent.RoomSummary{
 		Members: []agent.RoomMember{
 			{ActorID: "human-a"},
-			{ActorID: "claude-a", Backend: "zellij", Session: "sparkling-apricot", PaneID: "claude-a"},
+			{
+				ActorID: "claude-a",
+				DeliveryBinding: &agent.RoomDeliveryBinding{
+					MuxBackend: "zellij",
+					MuxSession: "sparkling-apricot",
+					MuxPaneID:  "claude-a",
+				},
+			},
 		},
 	}, agent.BoardMessage{
 		Sender:    "human-a",
@@ -10834,7 +10825,7 @@ func TestCollectRoomRelayTargetsByBackendUsesBindingOnlyZellijTransport(t *testi
 	}
 }
 
-func TestCollectRoomRelayTargetsByBackendSkipsHerdrForLegacyMuxFallback(t *testing.T) {
+func TestCollectRoomRelayTargetsByBackendSkipsHerdrForParticipantTransport(t *testing.T) {
 	tmuxTargets, zellijTargets, failed, skipped := collectRoomRelayTargetsByBackend(agent.RoomSummary{
 		Members: []agent.RoomMember{
 			{ActorID: "human-a"},
@@ -10863,7 +10854,7 @@ func TestCollectRoomRelayTargetsByBackendSkipsHerdrForLegacyMuxFallback(t *testi
 		t.Fatalf("failed=%v want none", failed)
 	}
 	if len(skipped) != 2 {
-		t.Fatalf("skipped=%v want human plus herdr legacy skip", skipped)
+		t.Fatalf("skipped=%v want human plus herdr participant-transport skip", skipped)
 	}
 }
 
@@ -11024,11 +11015,10 @@ func TestRelayRoomMessageZellijTargetsPrefersPaneSocketForNamedTargets(t *testin
 			{
 				ActorID: "claude-a",
 				DeliveryBinding: &agent.RoomDeliveryBinding{
-					MuxBackend:     "zellij",
-					MuxSession:     "sparkling-apricot",
-					MuxPaneID:      "claude-a",
-					SubmitMode:     agentpane.SubmitModeComposerCtrlEnter,
-					FallbackPolicy: agent.RoomDeliveryFallbackAllowLegacyMux,
+					MuxBackend: "zellij",
+					MuxSession: "sparkling-apricot",
+					MuxPaneID:  "claude-a",
+					SubmitMode: agentpane.SubmitModeComposerCtrlEnter,
 				},
 			},
 		},
@@ -11053,9 +11043,11 @@ func TestRelayRoomMessageZellijTargetsPrefersPaneSocketForNamedTargets(t *testin
 func TestResolveRoomMemberZellijTargetPrefersTitleForNamedPane(t *testing.T) {
 	session, target, ok := resolveRoomMemberZellijTarget(agent.RoomMember{
 		ActorID: "claude-a",
-		Backend: "zellij",
-		Session: "sparkling-apricot",
-		PaneID:  "claude-a",
+		DeliveryBinding: &agent.RoomDeliveryBinding{
+			MuxBackend: "zellij",
+			MuxSession: "sparkling-apricot",
+			MuxPaneID:  "claude-a",
+		},
 	})
 	if !ok {
 		t.Fatal("expected target")
@@ -11084,12 +11076,9 @@ func TestResolveRoomMemberZellijTargetUsesBindingTransportEndpoint(t *testing.T)
 	}
 }
 
-func TestResolveRoomMemberZellijTargetPrefersBindingOverMirroredLegacyFields(t *testing.T) {
+func TestResolveRoomMemberZellijTargetUsesCanonicalBinding(t *testing.T) {
 	session, target, ok := resolveRoomMemberZellijTarget(agent.RoomMember{
 		ActorID: "cursor-a",
-		Backend: "tmux",
-		Session: "legacy-session",
-		PaneID:  "%7",
 		DeliveryBinding: &agent.RoomDeliveryBinding{
 			MuxBackend:        "zellij",
 			MuxSession:        "binding-session",
@@ -11120,12 +11109,9 @@ func TestRoomMemberTmuxTargetUsesBindingTransportEndpoint(t *testing.T) {
 	}
 }
 
-func TestRoomMemberRelayBackendPrefersBindingOverMirroredLegacyFields(t *testing.T) {
+func TestRoomMemberRelayBackendUsesCanonicalBinding(t *testing.T) {
 	backend := roomMemberRelayBackend(agent.RoomMember{
 		ActorID: "cursor-a",
-		Backend: "tmux",
-		Session: "legacy-session",
-		PaneID:  "%7",
 		DeliveryBinding: &agent.RoomDeliveryBinding{
 			MuxBackend:        "zellij",
 			MuxSession:        "binding-session",
@@ -11574,8 +11560,9 @@ func TestRunRoomJoinPersistsTransportBinding(t *testing.T) {
 		}
 		if member["actor_id"] == "cursor-a" {
 			found = true
-			if member["backend"] != "zellij" || member["session"] != "fascinating-salamander" {
-				t.Fatalf("cursor binding=%v want zellij/fascinating-salamander", member)
+			binding := roomTestDeliveryBinding(t, member)
+			if binding["mux_backend"] != "zellij" || binding["mux_session"] != "fascinating-salamander" {
+				t.Fatalf("cursor binding=%v want zellij/fascinating-salamander", binding)
 			}
 		}
 	}
@@ -11621,8 +11608,9 @@ func TestRunRoomRebindUpdatesTransportBindingWithoutChangingRole(t *testing.T) {
 		}
 		if member["actor_id"] == "claude-a" {
 			found = true
-			if member["backend"] != "tmux" || member["session"] != "13" || member["pane_id"] != "%27" {
-				t.Fatalf("claude binding=%v want tmux/13/%%27", member)
+			binding := roomTestDeliveryBinding(t, member)
+			if binding["mux_backend"] != "tmux" || binding["mux_session"] != "13" || binding["mux_pane_id"] != "%27" {
+				t.Fatalf("claude binding=%v want tmux/13/%%27", binding)
 			}
 			if member["role"] != "reviewer" {
 				t.Fatalf("claude role=%v want reviewer", member["role"])
@@ -11698,8 +11686,9 @@ func TestRunRoomJoinCurrentPersistsZellijPaneBinding(t *testing.T) {
 		}
 		if member["actor_id"] == "cursor-a" {
 			found = true
-			if member["backend"] != "zellij" || member["session"] != "sparkling-apricot" || member["pane_id"] != "7" {
-				t.Fatalf("cursor binding=%v want zellij/sparkling-apricot/7", member)
+			binding := roomTestDeliveryBinding(t, member)
+			if binding["mux_backend"] != "zellij" || binding["mux_session"] != "sparkling-apricot" || binding["mux_pane_id"] != "7" {
+				t.Fatalf("cursor binding=%v want zellij/sparkling-apricot/7", binding)
 			}
 		}
 	}
@@ -11744,11 +11733,12 @@ func TestRunRoomJoinPersistsTransportEndpoint(t *testing.T) {
 		}
 		if m["actor_id"] == "claude-a" {
 			found = true
-			if m["transport_endpoint"] != endpoint {
-				t.Errorf("transport_endpoint=%q want %q", m["transport_endpoint"], endpoint)
+			binding := roomTestDeliveryBinding(t, m)
+			if binding["transport_endpoint"] != endpoint {
+				t.Errorf("transport_endpoint=%q want %q", binding["transport_endpoint"], endpoint)
 			}
-			if m["transport_kind"] != "pane_socket" {
-				t.Errorf("transport_kind=%q want pane_socket", m["transport_kind"])
+			if binding["transport_kind"] != "pane_socket" {
+				t.Errorf("transport_kind=%q want pane_socket", binding["transport_kind"])
 			}
 		}
 	}
@@ -11798,15 +11788,15 @@ func TestRunRoomRebindPersistsTransportEndpoint(t *testing.T) {
 		}
 		if m["actor_id"] == "claude-a" {
 			found = true
-			if m["transport_endpoint"] != endpoint {
-				t.Errorf("transport_endpoint=%q want %q", m["transport_endpoint"], endpoint)
+			binding := roomTestDeliveryBinding(t, m)
+			if binding["transport_endpoint"] != endpoint {
+				t.Errorf("transport_endpoint=%q want %q", binding["transport_endpoint"], endpoint)
 			}
-			if m["transport_kind"] != "pane_socket" {
-				t.Errorf("transport_kind=%q want pane_socket", m["transport_kind"])
+			if binding["transport_kind"] != "pane_socket" {
+				t.Errorf("transport_kind=%q want pane_socket", binding["transport_kind"])
 			}
-			// Existing backend preserved.
-			if m["backend"] != "tmux" {
-				t.Errorf("backend=%q want tmux (must be preserved after rebind)", m["backend"])
+			if binding["mux_backend"] != "tmux" {
+				t.Errorf("mux_backend=%q want tmux", binding["mux_backend"])
 			}
 		}
 	}
@@ -11879,14 +11869,15 @@ func TestRunRoomRestoreLaunchesAndRebindsMember(t *testing.T) {
 		}
 		if member["actor_id"] == "codex-a" {
 			found = true
-			if member["backend"] != "tmux" || member["session"] != "room-alpha-codex" || member["pane_id"] != "%27" {
-				t.Fatalf("codex-a binding=%v want tmux/room-alpha-codex/%%27", member)
+			binding := roomTestDeliveryBinding(t, member)
+			if binding["mux_backend"] != "tmux" || binding["mux_session"] != "room-alpha-codex" || binding["mux_pane_id"] != "%27" {
+				t.Fatalf("codex-a binding=%v want tmux/room-alpha-codex/%%27", binding)
 			}
-			if member["transport_endpoint"] != "/tmp/foxctl-pane/room-alpha-codex/codex-a.sock" {
-				t.Fatalf("transport_endpoint=%v", member["transport_endpoint"])
+			if binding["transport_endpoint"] != "/tmp/foxctl-pane/room-alpha-codex/codex-a.sock" {
+				t.Fatalf("transport_endpoint=%v", binding["transport_endpoint"])
 			}
-			if member["transport_kind"] != "pane_socket" {
-				t.Fatalf("transport_kind=%v want pane_socket", member["transport_kind"])
+			if binding["transport_kind"] != "pane_socket" {
+				t.Fatalf("transport_kind=%v want pane_socket", binding["transport_kind"])
 			}
 		}
 	}

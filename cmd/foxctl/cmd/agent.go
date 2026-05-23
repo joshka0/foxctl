@@ -614,9 +614,11 @@ func maybeAutoJoinRoom(ctx context.Context, binding agent.TerminalBinding) (map[
 	member := agent.RoomMember{
 		ActorID: binding.ParticipantID,
 		Role:    strings.TrimSpace(spawnRole),
-		Backend: binding.Backend,
-		Session: binding.Session,
-		PaneID:  binding.PaneID,
+		DeliveryBinding: &agent.RoomDeliveryBinding{
+			MuxBackend: binding.Backend,
+			MuxSession: binding.Session,
+			MuxPaneID:  binding.PaneID,
+		},
 	}
 	if member.Role == "" {
 		member.Role = "worker"

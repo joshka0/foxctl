@@ -138,33 +138,6 @@ func (b *OutputBus) publish(nodeID string, out NodeOutput) {
 	}
 }
 
-// stop cancels the dispatch loop for the given node, waits for it to exit,
-// and closes all subscriber channels.
-func (b *OutputBus) _stop(nodeID string) { //nolint:unused // kept for future per-node stop support
-	b.mu.Lock()
-	cancel := b.cancelFuncs[nodeID]
-	delete(b.cancelFuncs, nodeID)
-	pub := b.publishChs[nodeID]
-	delete(b.publishChs, nodeID)
-	nodeSubs := b.channels[nodeID]
-	delete(b.channels, nodeID)
-	b.mu.Unlock()
-
-	// Cancel dispatch loop.
-	if cancel != nil {
-		cancel()
-	}
-	// Close publish channel so dispatch loop sees !ok.
-	if pub != nil {
-		close(pub)
-	}
-	// Wait for dispatch loop to finish before closing subscriber channels.
-	b.wg.Wait()
-	for _, sub := range nodeSubs {
-		close(sub)
-	}
-}
-
 // stopAll stops all dispatch loops, waits for them to exit, and closes all channels.
 func (b *OutputBus) stopAll() {
 	b.mu.Lock()
