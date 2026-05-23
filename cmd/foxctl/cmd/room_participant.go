@@ -141,24 +141,20 @@ func collectRelayParticipants(room agent.RoomSummary, msg agent.BoardMessage) ([
 			State:         state,
 			Target:        target,
 			Backend:       strings.ToLower(strings.TrimSpace(state.MuxBackend)),
-			TransportKind: m.TransportKind,
+			TransportKind: roomMemberTransportKind(m),
 			Member:        m,
 		})
 	}
 	return participants, skipped
 }
 
-// relayViaParticipants delivers a board message using the participant-state-aware
-// transport path. This is the mux-independent trigger delivery: it uses explicit
-// participant state to decide delivery targets.
+// relayViaParticipants delivers a board message using the canonical participant
+// transport path. It uses explicit participant state to decide delivery targets.
 //
 // When a participant has TransportKind=pane_socket, delivery goes through
 // deliverAgentPane (the foxctl-owned socket transport), not through mux
 // send-keys. When the participant has a mux transport (no pane_socket), delivery
 // falls through to tmux/zellij DeliverText as the transport mechanism.
-//
-// This function is additive -- when participants have no transport state, it
-// returns zero deliveries and the caller should fall back to the legacy relay path.
 func relayViaParticipants(ctx context.Context, client *tmuxbridge.Client, room agent.RoomSummary, msg agent.BoardMessage) roomRelayResult {
 	result := roomRelayResult{Backend: "participant_transport"}
 	participants, skipped := collectRelayParticipants(room, msg)

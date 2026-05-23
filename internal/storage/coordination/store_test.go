@@ -88,7 +88,6 @@ func TestStore_RoomLoopDeliveryRuntimeRoundTrip(t *testing.T) {
 			ChosenTransportEndpoint: "/tmp/gemini-a.sock",
 			ChosenTransportKind:     "pane_socket",
 			ChosenSubmitMode:        "composer_ctrl_enter",
-			FallbackAttempted:       true,
 			DeliveredCount:          1,
 			FailedCount:             0,
 			DeliveredTo:             []string{"gemini-a"},
@@ -140,7 +139,7 @@ func TestStore_RoomLoopDeliveryRuntimeRoundTrip(t *testing.T) {
 	if got.LastDeliveryTrace == nil {
 		t.Fatal("LastDeliveryTrace = nil, want trace")
 	}
-	if got.LastDeliveryTrace.MessageID != "msg-9" || !got.LastDeliveryTrace.FallbackAttempted {
+	if got.LastDeliveryTrace.MessageID != "msg-9" {
 		t.Fatalf("LastDeliveryTrace=%+v", got.LastDeliveryTrace)
 	}
 	if !got.LastDeliveryTrace.ObservedAt.Equal(observedAt) {

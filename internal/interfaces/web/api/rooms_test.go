@@ -942,8 +942,7 @@ func TestRoomDetailHandler_PutMemberBinding(t *testing.T) {
 			"transport_endpoint":"/tmp/droid-a.sock",
 			"transport_kind":"pane_socket",
 			"submit_mode":"composer_ctrl_enter",
-			"health":"ready",
-			"fallback_policy":"allow_legacy_mux"
+			"health":"ready"
 		}
 	}`))
 	putRR := httptest.NewRecorder()
@@ -1777,7 +1776,6 @@ func TestRoomDetailHandler_GetStatusReturnsPersistedLoopState(t *testing.T) {
 			ChosenTransportEndpoint: "/tmp/gemini-a.sock",
 			ChosenTransportKind:     "pane_socket",
 			ChosenSubmitMode:        "composer_ctrl_enter",
-			FallbackAttempted:       true,
 			DeliveredCount:          1,
 			Outcome:                 "delivered",
 			CursorBeforeMessageID:   "msg-8",
@@ -1827,9 +1825,6 @@ func TestRoomDetailHandler_GetStatusReturnsPersistedLoopState(t *testing.T) {
 	}
 	if got := strings.TrimSpace(fmt.Sprint(trace["message_id"])); got != "msg-9" {
 		t.Fatalf("last_delivery_trace.message_id=%q want msg-9", got)
-	}
-	if got := fmt.Sprint(trace["fallback_attempted"]); got != "true" {
-		t.Fatalf("last_delivery_trace.fallback_attempted=%q want true", got)
 	}
 	if got := strings.TrimSpace(fmt.Sprint(trace["chosen_transport_kind"])); got != "pane_socket" {
 		t.Fatalf("last_delivery_trace.chosen_transport_kind=%q want pane_socket", got)

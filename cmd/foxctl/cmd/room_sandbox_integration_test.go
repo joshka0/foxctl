@@ -49,8 +49,24 @@ func setupSandboxTestRoom(t *testing.T, roomID, worktreePath string) (string, bl
 		WorkspaceID: workspace,
 		Title:       "Sandbox Test Room",
 		Members: []agent.RoomMember{
-			{ActorID: "human-a", Role: "coordinator", Backend: "tmux", Session: "test-session", PaneID: "0"},
-			{ActorID: "agent-a", Role: "worker", Backend: "tmux", Session: "test-session", PaneID: "1"},
+			{
+				ActorID: "human-a",
+				Role:    "coordinator",
+				DeliveryBinding: &agent.RoomDeliveryBinding{
+					MuxBackend: "tmux",
+					MuxSession: "test-session",
+					MuxPaneID:  "0",
+				},
+			},
+			{
+				ActorID: "agent-a",
+				Role:    "worker",
+				DeliveryBinding: &agent.RoomDeliveryBinding{
+					MuxBackend: "tmux",
+					MuxSession: "test-session",
+					MuxPaneID:  "1",
+				},
+			},
 		},
 		SandboxConfig: &agent.SandboxConfig{
 			WorktreePath:   worktreePath,

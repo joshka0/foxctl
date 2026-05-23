@@ -378,7 +378,6 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
         transport_kind?: string
         submit_mode?: string
         health?: string
-        fallback_policy?: string
       }
     }) =>
       updateRoomMemberBinding(roomId, params.actorId, {

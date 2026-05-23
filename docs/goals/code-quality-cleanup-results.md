@@ -23,6 +23,8 @@ Current shape:
 - Hard-cut several API compatibility responses to canonical typed DTOs.
 - Hard-cut room member binding updates to the canonical `delivery_binding`
   request shape.
+- Hard-cut room delivery relay and trace output to the canonical
+  `delivery_binding` runtime contract, deleting live fallback relay behavior.
 - Isolated v2 Turso stores from the raw `*sql.DB` compatibility opener.
 - Added or tightened tests around the risky cleanup areas.
 
@@ -127,6 +129,16 @@ the full verification set has been rerun after the merge.
 - The canonical member binding route now accepts `delivery_binding` or
   explicit `unbound` updates and no longer maps legacy top-level transport
   fields into the binding.
+- Auto room relay now uses canonical participant delivery directly. The legacy
+  mux fallback relay path, fallback merge/deduplication helpers, fallback
+  policy field, fallback-attempt trace flag, and `legacy_mux`/`legacy_bound`
+  statuses were removed from live runtime/API/frontend surfaces.
+- Pi and Hermes room binding integrations now submit canonical
+  `delivery_binding` data instead of parallel top-level transport fields.
+- Persisted room-member mux/transport columns remain only as the SQLite storage
+  encoding for `delivery_binding`; the domain `RoomMember` type no longer has
+  top-level transport mirror fields. The old `delivery_fallback_policy` column
+  is schema-only and inert.
 - Pane transport registration now uses the canonical surgical
   `UpdateRoomMemberBinding` path, preserving existing mux presentation fields
   while updating the pane-socket delivery binding. The narrower
@@ -205,6 +217,21 @@ Final main-sync verification on 2026-05-23:
 - `make check-doc-links`
 - `git diff --check`
 
+Current room delivery hard-cut verification on 2026-05-23:
+
+- `go test ./internal/domain/agent ./internal/storage/blackboard ./internal/storage/coordination ./internal/interfaces/web/api ./cmd/foxctl/cmd -count=1`
+- `go test ./... -run 'TestNonExistent' -count=1`
+- `bun run --cwd packages/data typecheck`
+- `bun run --cwd packages/foxterm typecheck`
+- `bun run --cwd integrations/pi check`
+- `python3 -m unittest integrations.hermes.test_client`
+- `bun run --cwd packages/gui-agent build`
+- `make check-doc-links`
+- `git diff --check`
+- `foxctl index repo build` plus `code/dag_grep` over the `RoomMember` /
+  `DeliveryBinding` relay path
+- `make check`
+
 ## Outstanding Items
 
 ### Compatibility Layers
@@ -213,8 +240,10 @@ Final main-sync verification on 2026-05-23:
   params, response shape, or GUI auth behavior; keep them separate until the
   shared client owns an actually matching contract.
 - The room member binding route has been hard-cut to the canonical
-  `delivery_binding` request shape. Persisted mux/transport columns remain an
-  internal storage model used behind the binding seam.
+  `delivery_binding` request shape, and room delivery relay now uses
+  `delivery_binding` as the sole runtime/outward transport contract. Persisted
+  mux/transport columns remain an internal storage model used behind the
+  binding seam.
 
 ### Weak Types
 

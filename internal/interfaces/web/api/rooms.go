@@ -65,7 +65,6 @@ type RoomDeliveryBindingResponse struct {
 	TransportKind     string `json:"transport_kind,omitempty"`
 	SubmitMode        string `json:"submit_mode,omitempty"`
 	Health            string `json:"health,omitempty"`
-	FallbackPolicy    string `json:"fallback_policy,omitempty"`
 }
 
 type RoomCreateRequest struct {
@@ -101,7 +100,6 @@ type RoomDeliveryBindingRequest struct {
 	TransportKind     string `json:"transport_kind,omitempty"`
 	SubmitMode        string `json:"submit_mode,omitempty"`
 	Health            string `json:"health,omitempty"`
-	FallbackPolicy    string `json:"fallback_policy,omitempty"`
 }
 
 // RoomMessageSendRequest sends one message into a room-scoped stream.
@@ -2066,7 +2064,6 @@ func convertRoomDeliveryBinding(binding *agent.RoomDeliveryBinding) *RoomDeliver
 		TransportKind:     binding.TransportKind,
 		SubmitMode:        binding.SubmitMode,
 		Health:            binding.Health,
-		FallbackPolicy:    binding.FallbackPolicy,
 	}
 }
 
@@ -2099,7 +2096,6 @@ func toAgentRoomDeliveryBinding(binding *RoomDeliveryBindingRequest) *agent.Room
 		TransportKind:     strings.ToLower(strings.TrimSpace(binding.TransportKind)),
 		SubmitMode:        strings.TrimSpace(binding.SubmitMode),
 		Health:            strings.TrimSpace(binding.Health),
-		FallbackPolicy:    strings.TrimSpace(binding.FallbackPolicy),
 	}
 }
 

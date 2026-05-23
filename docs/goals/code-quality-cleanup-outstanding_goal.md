@@ -189,6 +189,23 @@ Done when:
   - `bun run --cwd packages/gui-agent build`
   - `bun run --cwd packages/foxterm typecheck`
 
+Current hard-cut follow-up:
+
+- Completed: room delivery relay now uses canonical participant delivery
+  directly, with no live legacy mux fallback merge path.
+- Completed: `fallback_policy`, `fallback_attempted`, `legacy_mux`, and
+  `legacy_bound` were removed from live API/type/runtime/UI surfaces.
+- Completed: Go request/update paths no longer synthesize canonical delivery
+  bindings from top-level transport mirror fields.
+- Completed: the domain `RoomMember` type no longer carries top-level transport
+  mirror fields, so stale mirror access fails at compile time.
+- Completed: Pi and Hermes room binding integrations submit canonical
+  `delivery_binding` payloads.
+- Intentionally retained: persisted mux/transport columns are the SQLite
+  storage encoding for `delivery_binding`. The `delivery_fallback_policy`
+  SQLite column remains schema-only residue; current writes keep it empty, and
+  reads do not publish it into the domain contract.
+
 ### 6. Hidden Fallback Honesty (Complete)
 
 Make OpenCode hook and Hermes memory fallback failures explicit.

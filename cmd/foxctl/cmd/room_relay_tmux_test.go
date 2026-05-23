@@ -16,6 +16,19 @@ const relayTestFieldSep = "\x1f"
 // relayTestTmuxListFormat matches internal/runtime/terminal/tmuxbridge listFormat (describePane metadata line).
 var relayTestTmuxListFormat = "#{pane_id}" + relayTestFieldSep + "#{session_name}" + relayTestFieldSep + "#{window_index}" + relayTestFieldSep + "#{pane_index}" + relayTestFieldSep + "#{window_name}" + relayTestFieldSep + "#{pane_pid}" + relayTestFieldSep + "#{pane_width}" + relayTestFieldSep + "#{pane_height}" + relayTestFieldSep + "#{@name}" + relayTestFieldSep + "#{pane_current_path}" + relayTestFieldSep + "#{pane_current_command}" + relayTestFieldSep + "#{pane_active}" + relayTestFieldSep + "#{@foxctl_participant}" + relayTestFieldSep + "#{@foxctl_provider}" + relayTestFieldSep + "#{@foxctl_room_id}" + relayTestFieldSep + "#{@foxctl_wrapped}"
 
+func relayTmuxMember(actorID, session, paneID string) agent.RoomMember {
+	return agent.RoomMember{
+		ActorID: actorID,
+		DeliveryBinding: &agent.RoomDeliveryBinding{
+			MuxBackend:        "tmux",
+			MuxSession:        session,
+			MuxPaneID:         paneID,
+			TransportEndpoint: "tmux:" + session + ":" + paneID,
+			TransportKind:     "mux_pane",
+		},
+	}
+}
+
 // relayTmuxRecordingRunner implements tmuxbridge.Runner for tests: repeats list-sessions for
 // detectSocket, exact matches for pane probes and send-keys (asserting text + Enter delivery).
 type relayTmuxRecordingRunner struct {
@@ -49,8 +62,8 @@ func TestRelayRoomMessageTmuxSendsPayloadThenEnter(t *testing.T) {
 	room := agent.RoomSummary{
 		ID: "alpha",
 		Members: []agent.RoomMember{
-			{ActorID: "agent-a", Backend: "tmux", PaneID: "%1"},
-			{ActorID: "agent-b", Backend: "tmux", PaneID: "%2"},
+			relayTmuxMember("agent-a", "collab", "%1"),
+			relayTmuxMember("agent-b", "collab", "%2"),
 		},
 	}
 	msg := agent.BoardMessage{
@@ -166,8 +179,12 @@ func TestRelayRoomMessageDirectToHumanADeliversToCoordinatorPane(t *testing.T) {
 	room := agent.RoomSummary{
 		ID: "triad",
 		Members: []agent.RoomMember{
-			{ActorID: "tmux:triad-cur0:%13", Role: "coordinator", Backend: "tmux", Session: "triad-cur0", PaneID: "%13"},
-			{ActorID: "cursor-c-a", Backend: "tmux", PaneID: "%15"},
+			func() agent.RoomMember {
+				m := relayTmuxMember("tmux:triad-cur0:%13", "triad-cur0", "%13")
+				m.Role = "coordinator"
+				return m
+			}(),
+			relayTmuxMember("cursor-c-a", "triad-cur0", "%15"),
 		},
 	}
 	msg := agent.BoardMessage{
@@ -206,17 +223,21 @@ func TestRelayRoomMessageDirectToHumanADeliversToCoordinatorPane(t *testing.T) {
 	}
 }
 
-// TestRelayRoomMessageDirectToHumanAPrefersCoordinatorWhenLegacyHumanARowExists asserts we do not
-// fan out to both a stale "human-a" member row and the coordinator row (which yields failed_count 1).
-func TestRelayRoomMessageDirectToHumanAPrefersCoordinatorWhenLegacyHumanARowExists(t *testing.T) {
+// TestRelayRoomMessageDirectToHumanAPrefersCoordinatorWhenHumanALabelRowExists asserts we do not
+// fan out to both a "human-a" label row and the coordinator row.
+func TestRelayRoomMessageDirectToHumanAPrefersCoordinatorWhenHumanALabelRowExists(t *testing.T) {
 	t.Parallel()
 
 	room := agent.RoomSummary{
 		ID: "triad",
 		Members: []agent.RoomMember{
-			{ActorID: "human-a", Backend: "tmux", PaneID: "%99"},
-			{ActorID: "tmux:triad-cur0:%13", Role: "coordinator", Backend: "tmux", Session: "triad-cur0", PaneID: "%13"},
-			{ActorID: "cursor-c-a", Backend: "tmux", PaneID: "%15"},
+			relayTmuxMember("human-a", "triad-cur0", "%99"),
+			func() agent.RoomMember {
+				m := relayTmuxMember("tmux:triad-cur0:%13", "triad-cur0", "%13")
+				m.Role = "coordinator"
+				return m
+			}(),
+			relayTmuxMember("cursor-c-a", "triad-cur0", "%15"),
 		},
 	}
 	msg := agent.BoardMessage{
@@ -258,9 +279,9 @@ func TestRelayRoomMessageDirectToHumanAPrefersCoordinatorWhenLegacyHumanARowExis
 func TestCollectRelayParticipantsSkipsSender(t *testing.T) {
 	participants, skipped := collectRelayParticipants(agent.RoomSummary{
 		Members: []agent.RoomMember{
-			{ActorID: "agent-a", Backend: "tmux", Session: "s", PaneID: "%1"},
-			{ActorID: "agent-b", Backend: "tmux", Session: "s", PaneID: "%2"},
-			{ActorID: "agent-c", Backend: "tmux", Session: "s", PaneID: "%3"},
+			relayTmuxMember("agent-a", "s", "%1"),
+			relayTmuxMember("agent-b", "s", "%2"),
+			relayTmuxMember("agent-c", "s", "%3"),
 		},
 	}, agent.BoardMessage{Sender: "agent-b"})
 	if len(participants) != 2 {
@@ -279,7 +300,7 @@ func TestCollectRelayParticipantsSkipsSender(t *testing.T) {
 func TestCollectRelayParticipantsSkipsUnbound(t *testing.T) {
 	participants, _ := collectRelayParticipants(agent.RoomSummary{
 		Members: []agent.RoomMember{
-			{ActorID: "bound-a", Backend: "tmux", Session: "s", PaneID: "%1"},
+			relayTmuxMember("bound-a", "s", "%1"),
 			{ActorID: "unbound-a", Unbound: true},
 		},
 	}, agent.BoardMessage{Sender: "sender"})
@@ -294,8 +315,8 @@ func TestCollectRelayParticipantsSkipsUnbound(t *testing.T) {
 func TestCollectRelayParticipantsDirectRecipient(t *testing.T) {
 	participants, skipped := collectRelayParticipants(agent.RoomSummary{
 		Members: []agent.RoomMember{
-			{ActorID: "agent-a", Backend: "tmux", Session: "s", PaneID: "%1"},
-			{ActorID: "agent-b", Backend: "tmux", Session: "s", PaneID: "%2"},
+			relayTmuxMember("agent-a", "s", "%1"),
+			relayTmuxMember("agent-b", "s", "%2"),
 		},
 	}, agent.BoardMessage{Sender: "sender", Recipient: "agent-a"})
 	if len(participants) != 1 || participants[0].ActorID != "agent-a" {
@@ -309,8 +330,8 @@ func TestCollectRelayParticipantsDirectRecipient(t *testing.T) {
 func TestCollectRelayParticipantsAllowsDirectSelfRecipient(t *testing.T) {
 	participants, skipped := collectRelayParticipants(agent.RoomSummary{
 		Members: []agent.RoomMember{
-			{ActorID: "codex-a", Backend: "tmux", Session: "s", PaneID: "%1"},
-			{ActorID: "agent-b", Backend: "tmux", Session: "s", PaneID: "%2"},
+			relayTmuxMember("codex-a", "s", "%1"),
+			relayTmuxMember("agent-b", "s", "%2"),
 		},
 	}, agent.BoardMessage{Sender: "codex-a", Recipient: "codex-a"})
 	if len(participants) != 1 || participants[0].ActorID != "codex-a" {
@@ -321,95 +342,12 @@ func TestCollectRelayParticipantsAllowsDirectSelfRecipient(t *testing.T) {
 	}
 }
 
-func TestMergeRelayResultsDeduplicates(t *testing.T) {
-	primary := roomRelayResult{
-		Backend:        "participant_transport",
-		DeliveredCount: 1,
-		DeliveredTo:    []string{"agent-a"},
-	}
-	legacy := roomRelayResult{
-		Backend:        "auto",
-		DeliveredCount: 2,
-		DeliveredTo:    []string{"agent-a", "agent-b"},
-		FailedMembers:  []string{"agent-c"},
-	}
-	members := []agent.RoomMember{
-		{ActorID: "agent-a", Backend: "tmux", PaneID: "%1"},
-		{ActorID: "agent-b", Backend: "tmux", PaneID: "%2"},
-		{ActorID: "agent-c", Backend: "tmux", PaneID: "%3"},
-	}
-	merged := mergeRelayResults(primary, legacy, members)
-	if merged.DeliveredCount != 2 {
-		t.Fatalf("DeliveredCount=%d want 2 (agent-a deduped)", merged.DeliveredCount)
-	}
-	if merged.FailedCount != 1 {
-		t.Fatalf("FailedCount=%d want 1", merged.FailedCount)
-	}
-}
-
-func TestMergeRelayResultsDedupesPaneTargetToActorID(t *testing.T) {
-	// Key test: participant path records "claude-a", legacy records "%42" (same participant).
-	// mergeRelayResults must dedupe them using the member list.
-	primary := roomRelayResult{
-		Backend:        "participant_transport",
-		DeliveredCount: 1,
-		DeliveredTo:    []string{"claude-a"},
-	}
-	legacy := roomRelayResult{
-		Backend:        "auto",
-		DeliveredCount: 1,
-		DeliveredTo:    []string{"%42"},
-	}
-	members := []agent.RoomMember{
-		{ActorID: "claude-a", Backend: "tmux", Session: "collab", PaneID: "%42"},
-	}
-	merged := mergeRelayResults(primary, legacy, members)
-	// Primary had 1, legacy added 0 (deduped via pane→actor mapping).
-	// merged.DeliveredCount = primary's 1 + 0 from legacy = 1.
-	if merged.DeliveredCount != 1 {
-		t.Fatalf("DeliveredCount=%d want 1 (legacy %%42 deduped against claude-a, no additions)", merged.DeliveredCount)
-	}
-	// DeliveredTo should have exactly 1 entry: claude-a.
-	if len(merged.DeliveredTo) != 1 || merged.DeliveredTo[0] != "claude-a" {
-		t.Fatalf("DeliveredTo=%v want only [claude-a]", merged.DeliveredTo)
-	}
-}
-
-func TestMergeRelayResultsAllowsLegacyFallbackAfterPrimaryFailure(t *testing.T) {
-	primary := roomRelayResult{
-		Backend:       "participant_transport",
-		FailedCount:   1,
-		FailedMembers: []string{"claude-a"},
-	}
-	legacy := roomRelayResult{
-		Backend:        "auto",
-		DeliveredCount: 1,
-		DeliveredTo:    []string{"%42"},
-	}
-	members := []agent.RoomMember{
-		{ActorID: "claude-a", Backend: "tmux", Session: "collab", PaneID: "%42"},
-	}
-	merged := mergeRelayResults(primary, legacy, members)
-	if merged.DeliveredCount != 1 {
-		t.Fatalf("DeliveredCount=%d want 1", merged.DeliveredCount)
-	}
-	if len(merged.DeliveredTo) != 1 || merged.DeliveredTo[0] != "claude-a" {
-		t.Fatalf("DeliveredTo=%v want [claude-a]", merged.DeliveredTo)
-	}
-	if merged.FailedCount != 0 {
-		t.Fatalf("FailedCount=%d want 0 after legacy fallback delivery", merged.FailedCount)
-	}
-	if len(merged.FailedMembers) != 0 {
-		t.Fatalf("FailedMembers=%v want empty after legacy fallback delivery", merged.FailedMembers)
-	}
-}
-
 func TestCollectRelayParticipantsUsesParticipantStateNotPresentation(t *testing.T) {
-	// Key test: a member with Backend/Session/PaneID (presentation=detached)
+	// Key test: a member with canonical mux binding (presentation=detached)
 	// should still be included because CanTriggerTurn=true via transport endpoint.
 	participants, _ := collectRelayParticipants(agent.RoomSummary{
 		Members: []agent.RoomMember{
-			{ActorID: "claude-a", Backend: "tmux", Session: "collab", PaneID: "%42"},
+			relayTmuxMember("claude-a", "collab", "%42"),
 		},
 	}, agent.BoardMessage{Sender: "sender"})
 	if len(participants) != 1 {
@@ -452,12 +390,14 @@ func TestRelayViaParticipantsUsesPaneSocket(t *testing.T) {
 		ID: "test-room",
 		Members: []agent.RoomMember{
 			{
-				ActorID:           "droid-a",
-				Backend:           "tmux",
-				Session:           "collab",
-				PaneID:            "%42",
-				TransportEndpoint: socketPath,
-				TransportKind:     agent.PaneSocketTransportKind,
+				ActorID: "droid-a",
+				DeliveryBinding: &agent.RoomDeliveryBinding{
+					MuxBackend:        "tmux",
+					MuxSession:        "collab",
+					MuxPaneID:         "%42",
+					TransportEndpoint: socketPath,
+					TransportKind:     agent.PaneSocketTransportKind,
+				},
 			},
 		},
 	}
@@ -502,9 +442,7 @@ func TestRelayViaParticipantsUsesBindingSubmitModeOverride(t *testing.T) {
 		ID: "test-room",
 		Members: []agent.RoomMember{
 			{
-				ActorID:           "codex-a",
-				TransportEndpoint: socketPath,
-				TransportKind:     agent.PaneSocketTransportKind,
+				ActorID: "codex-a",
 				DeliveryBinding: &agent.RoomDeliveryBinding{
 					TransportEndpoint: socketPath,
 					TransportKind:     agent.PaneSocketTransportKind,
@@ -566,9 +504,11 @@ func TestRelayViaParticipantsUsesPaneSocketWithoutBackend(t *testing.T) {
 		ID: "test-room",
 		Members: []agent.RoomMember{
 			{
-				ActorID:           "codex-a",
-				TransportEndpoint: socketPath,
-				TransportKind:     agent.PaneSocketTransportKind,
+				ActorID: "codex-a",
+				DeliveryBinding: &agent.RoomDeliveryBinding{
+					TransportEndpoint: socketPath,
+					TransportKind:     agent.PaneSocketTransportKind,
+				},
 			},
 		},
 	}
@@ -597,12 +537,14 @@ func TestCollectRelayParticipantsIncludesTransportKind(t *testing.T) {
 	participants, _ := collectRelayParticipants(agent.RoomSummary{
 		Members: []agent.RoomMember{
 			{
-				ActorID:           "claude-a",
-				Backend:           "zellij",
-				Session:           "dev",
-				PaneID:            "terminal_0",
-				TransportEndpoint: "/tmp/test.sock",
-				TransportKind:     agent.PaneSocketTransportKind,
+				ActorID: "claude-a",
+				DeliveryBinding: &agent.RoomDeliveryBinding{
+					MuxBackend:        "zellij",
+					MuxSession:        "dev",
+					MuxPaneID:         "terminal_0",
+					TransportEndpoint: "/tmp/test.sock",
+					TransportKind:     agent.PaneSocketTransportKind,
+				},
 			},
 		},
 	}, agent.BoardMessage{Sender: "sender"})

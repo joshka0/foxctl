@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -15,12 +16,14 @@ func TestParticipantStateFromRoomMember(t *testing.T) {
 		want   ParticipantState
 	}{
 		{
-			name: "tmux member with explicit backend",
+			name: "tmux member with delivery binding",
 			member: RoomMember{
-				ActorID:  "claude-a",
-				Backend:  "tmux",
-				Session:  "foxctl-collab",
-				PaneID:   "%42",
+				ActorID: "claude-a",
+				DeliveryBinding: &RoomDeliveryBinding{
+					MuxBackend: "tmux",
+					MuxSession: "foxctl-collab",
+					MuxPaneID:  "%42",
+				},
 				JoinedAt: now,
 			},
 			want: ParticipantState{
@@ -35,12 +38,14 @@ func TestParticipantStateFromRoomMember(t *testing.T) {
 			},
 		},
 		{
-			name: "zellij member with explicit backend",
+			name: "zellij member with delivery binding",
 			member: RoomMember{
-				ActorID:  "codex-a",
-				Backend:  "zellij",
-				Session:  "dev-session",
-				PaneID:   "terminal_1",
+				ActorID: "codex-a",
+				DeliveryBinding: &RoomDeliveryBinding{
+					MuxBackend: "zellij",
+					MuxSession: "dev-session",
+					MuxPaneID:  "terminal_1",
+				},
 				JoinedAt: now,
 			},
 			want: ParticipantState{
@@ -55,12 +60,14 @@ func TestParticipantStateFromRoomMember(t *testing.T) {
 			},
 		},
 		{
-			name: "herdr member with explicit backend",
+			name: "herdr member with delivery binding",
 			member: RoomMember{
-				ActorID:  "codex-a",
-				Backend:  "herdr",
-				Session:  "dev-session",
-				PaneID:   "w1-2",
+				ActorID: "codex-a",
+				DeliveryBinding: &RoomDeliveryBinding{
+					MuxBackend: "herdr",
+					MuxSession: "dev-session",
+					MuxPaneID:  "w1-2",
+				},
 				JoinedAt: now,
 			},
 			want: ParticipantState{
@@ -108,50 +115,14 @@ func TestParticipantStateFromRoomMember(t *testing.T) {
 			},
 		},
 		{
-			name: "legacy tmux participant id in actor id",
-			member: RoomMember{
-				ActorID:  "tmux:collab:%99",
-				Session:  "collab",
-				PaneID:   "%99",
-				JoinedAt: now,
-			},
-			want: ParticipantState{
-				ActorID:           "tmux:collab:%99",
-				Membership:        MembershipActive,
-				TransportEndpoint: "tmux:collab:%99",
-				Transport:         TransportUnknown,
-				Runtime:           RuntimeUnknown,
-				Presentation:      PresentationDetached,
-				MuxBackend:        "tmux",
-				CanTriggerTurn:    true,
-			},
-		},
-		{
-			name: "legacy zellij participant id in actor id",
-			member: RoomMember{
-				ActorID:  "zellij:dev:pane_2",
-				Session:  "dev",
-				PaneID:   "pane_2",
-				JoinedAt: now,
-			},
-			want: ParticipantState{
-				ActorID:           "zellij:dev:pane_2",
-				Membership:        MembershipActive,
-				TransportEndpoint: "zellij:dev:pane_2",
-				Transport:         TransportUnknown,
-				Runtime:           RuntimeUnknown,
-				Presentation:      PresentationDetached,
-				MuxBackend:        "zellij",
-				CanTriggerTurn:    true,
-			},
-		},
-		{
 			name: "whitespace is trimmed",
 			member: RoomMember{
-				ActorID:  "  claude-a  ",
-				Backend:  "  tmux  ",
-				Session:  "  session  ",
-				PaneID:   "  %1  ",
+				ActorID: "  claude-a  ",
+				DeliveryBinding: &RoomDeliveryBinding{
+					MuxBackend: "  tmux  ",
+					MuxSession: "  session  ",
+					MuxPaneID:  "  %1  ",
+				},
 				JoinedAt: now,
 			},
 			want: ParticipantState{
@@ -204,8 +175,8 @@ func TestParticipantStateFromRoomMember(t *testing.T) {
 func TestBuildParticipantStates(t *testing.T) {
 	now := time.Now().UTC()
 	members := []RoomMember{
-		{ActorID: "a", Backend: "tmux", Session: "s", PaneID: "%1", JoinedAt: now},
-		{ActorID: "b", Backend: "zellij", Session: "s", PaneID: "t1", JoinedAt: now},
+		{ActorID: "a", DeliveryBinding: &RoomDeliveryBinding{MuxBackend: "tmux", MuxSession: "s", MuxPaneID: "%1"}, JoinedAt: now},
+		{ActorID: "b", DeliveryBinding: &RoomDeliveryBinding{MuxBackend: "zellij", MuxSession: "s", MuxPaneID: "t1"}, JoinedAt: now},
 		{ActorID: "c", Unbound: true, JoinedAt: now},
 	}
 
@@ -260,7 +231,7 @@ func TestBuildParticipantStatesSkipsEmptyActorID(t *testing.T) {
 	now := time.Now().UTC()
 	members := []RoomMember{
 		{ActorID: "", JoinedAt: now},
-		{ActorID: "valid", Backend: "tmux", Session: "s", PaneID: "%1", JoinedAt: now},
+		{ActorID: "valid", DeliveryBinding: &RoomDeliveryBinding{MuxBackend: "tmux", MuxSession: "s", MuxPaneID: "%1"}, JoinedAt: now},
 	}
 	states := BuildParticipantStates(members)
 	if len(states) != 1 {
@@ -332,9 +303,6 @@ func TestNormalizeRoomMember(t *testing.T) {
 	m := RoomMember{
 		ActorID: "  a  ",
 		Role:    "  lead  ",
-		Backend: "  tmux  ",
-		Session: "  s  ",
-		PaneID:  "  %1  ",
 	}
 	got := NormalizeRoomMember(m)
 	if got.ActorID != "a" {
@@ -343,26 +311,8 @@ func TestNormalizeRoomMember(t *testing.T) {
 	if got.Role != "lead" {
 		t.Errorf("Role = %q, want %q", got.Role, "lead")
 	}
-	if got.Backend != "tmux" {
-		t.Errorf("Backend = %q, want %q", got.Backend, "tmux")
-	}
-	if got.Session != "s" {
-		t.Errorf("Session = %q, want %q", got.Session, "s")
-	}
-	if got.PaneID != "%1" {
-		t.Errorf("PaneID = %q, want %q", got.PaneID, "%1")
-	}
-	if got.DeliveryBinding == nil {
-		t.Fatal("DeliveryBinding = nil, want synthesized binding")
-	}
-	if got.DeliveryBinding.MuxBackend != "tmux" {
-		t.Errorf("DeliveryBinding.MuxBackend = %q, want %q", got.DeliveryBinding.MuxBackend, "tmux")
-	}
-	if got.DeliveryBinding.SubmitMode != RoomDeliverySubmitModeNewline {
-		t.Errorf("DeliveryBinding.SubmitMode = %q, want %q", got.DeliveryBinding.SubmitMode, RoomDeliverySubmitModeNewline)
-	}
-	if got.DeliveryBinding.Health != RoomDeliveryHealthUnknown {
-		t.Errorf("DeliveryBinding.Health = %q, want %q", got.DeliveryBinding.Health, RoomDeliveryHealthUnknown)
+	if got.DeliveryBinding != nil {
+		t.Fatalf("DeliveryBinding = %+v, want nil without canonical binding", got.DeliveryBinding)
 	}
 }
 
@@ -377,35 +327,64 @@ func TestNormalizeRoomMemberUsesExplicitDeliveryBinding(t *testing.T) {
 			TransportKind:     " pane_socket ",
 			SubmitMode:        RoomDeliverySubmitModeComposerCtrlEnter,
 			Health:            RoomDeliveryHealthReady,
-			FallbackPolicy:    RoomDeliveryFallbackAllowLegacyMux,
 		},
 	}
 
 	got := NormalizeRoomMember(m)
 
-	if got.Backend != "zellij" {
-		t.Fatalf("Backend = %q, want zellij", got.Backend)
-	}
-	if got.Session != "dev-session" {
-		t.Fatalf("Session = %q, want dev-session", got.Session)
-	}
-	if got.PaneID != "terminal_2" {
-		t.Fatalf("PaneID = %q, want terminal_2", got.PaneID)
-	}
-	if got.TransportEndpoint != "/tmp/foxctl-pane/dev-session/codex-a.sock" {
-		t.Fatalf("TransportEndpoint = %q", got.TransportEndpoint)
-	}
-	if got.TransportKind != PaneSocketTransportKind {
-		t.Fatalf("TransportKind = %q, want %q", got.TransportKind, PaneSocketTransportKind)
-	}
 	if got.DeliveryBinding == nil {
 		t.Fatal("DeliveryBinding = nil, want explicit binding")
+	}
+	if got.DeliveryBinding.MuxBackend != "zellij" {
+		t.Fatalf("DeliveryBinding.MuxBackend = %q, want zellij", got.DeliveryBinding.MuxBackend)
+	}
+	if got.DeliveryBinding.MuxSession != "dev-session" {
+		t.Fatalf("DeliveryBinding.MuxSession = %q, want dev-session", got.DeliveryBinding.MuxSession)
+	}
+	if got.DeliveryBinding.MuxPaneID != "terminal_2" {
+		t.Fatalf("DeliveryBinding.MuxPaneID = %q, want terminal_2", got.DeliveryBinding.MuxPaneID)
+	}
+	if got.DeliveryBinding.TransportEndpoint != "/tmp/foxctl-pane/dev-session/codex-a.sock" {
+		t.Fatalf("DeliveryBinding.TransportEndpoint = %q", got.DeliveryBinding.TransportEndpoint)
+	}
+	if got.DeliveryBinding.TransportKind != PaneSocketTransportKind {
+		t.Fatalf("DeliveryBinding.TransportKind = %q, want %q", got.DeliveryBinding.TransportKind, PaneSocketTransportKind)
 	}
 	if got.DeliveryBinding.SubmitMode != RoomDeliverySubmitModeComposerCtrlEnter {
 		t.Fatalf("DeliveryBinding.SubmitMode = %q, want %q", got.DeliveryBinding.SubmitMode, RoomDeliverySubmitModeComposerCtrlEnter)
 	}
 	if got.DeliveryBinding.Health != RoomDeliveryHealthReady {
 		t.Fatalf("DeliveryBinding.Health = %q, want %q", got.DeliveryBinding.Health, RoomDeliveryHealthReady)
+	}
+}
+
+func TestRoomMemberJSONUsesDeliveryBindingTransportOnly(t *testing.T) {
+	payload, err := json.Marshal(RoomMember{
+		ActorID: "codex-a",
+		Role:    "worker",
+		DeliveryBinding: &RoomDeliveryBinding{
+			MuxBackend:        "tmux",
+			MuxSession:        "dev",
+			MuxPaneID:         "%42",
+			TransportEndpoint: "tmux:dev:%42",
+			TransportKind:     "mux_pane",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &top); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	for _, field := range []string{"backend", "session", "pane_id", "transport_endpoint", "transport_kind"} {
+		if _, ok := top[field]; ok {
+			t.Fatalf("top-level %s present in RoomMember JSON: %s", field, payload)
+		}
+	}
+	if _, ok := top["delivery_binding"]; !ok {
+		t.Fatalf("delivery_binding missing from RoomMember JSON: %s", payload)
 	}
 }
 
@@ -425,13 +404,15 @@ func TestNormalizeRoomMemberMarksMemberUnboundWhenNoRouteExists(t *testing.T) {
 func TestParticipantStateFromRoomMember_PaneSocket(t *testing.T) {
 	now := time.Now().UTC()
 	m := RoomMember{
-		ActorID:           "claude-a",
-		Backend:           "zellij",
-		Session:           "dev-session",
-		PaneID:            "terminal_0",
-		TransportEndpoint: "/tmp/foxctl-pane/dev-session/claude-a.sock",
-		TransportKind:     PaneSocketTransportKind,
-		JoinedAt:          now,
+		ActorID: "claude-a",
+		DeliveryBinding: &RoomDeliveryBinding{
+			MuxBackend:        "zellij",
+			MuxSession:        "dev-session",
+			MuxPaneID:         "terminal_0",
+			TransportEndpoint: "/tmp/foxctl-pane/dev-session/claude-a.sock",
+			TransportKind:     PaneSocketTransportKind,
+		},
+		JoinedAt: now,
 	}
 
 	state := ParticipantStateFromRoomMember(m)
@@ -518,10 +499,12 @@ func TestParticipantStateCanTriggerTurnDecoupledFromPresentation(t *testing.T) {
 	// Key acceptance criteria: a participant with a transport endpoint
 	// can trigger turns even when presentation is detached.
 	member := RoomMember{
-		ActorID:  "claude-a",
-		Backend:  "tmux",
-		Session:  "foxctl-collab",
-		PaneID:   "%42",
+		ActorID: "claude-a",
+		DeliveryBinding: &RoomDeliveryBinding{
+			MuxBackend: "tmux",
+			MuxSession: "foxctl-collab",
+			MuxPaneID:  "%42",
+		},
 		JoinedAt: time.Now().UTC(),
 	}
 	state := ParticipantStateFromRoomMember(member)

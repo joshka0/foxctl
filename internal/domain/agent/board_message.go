@@ -273,7 +273,7 @@ func CompactRoomSummaryForInbox(s RoomSummary) CompactRoomSummary {
 	return out
 }
 
-// RoomMember is an explicit membership record for one room.
+// RoomDeliveryBinding is the canonical routing and transport record for one room member.
 type RoomDeliveryBinding struct {
 	MuxBackend        string `json:"mux_backend,omitempty"`
 	MuxSession        string `json:"mux_session,omitempty"`
@@ -282,28 +282,14 @@ type RoomDeliveryBinding struct {
 	TransportKind     string `json:"transport_kind,omitempty"`
 	SubmitMode        string `json:"submit_mode,omitempty"`
 	Health            string `json:"health,omitempty"`
-	FallbackPolicy    string `json:"fallback_policy,omitempty"`
 }
 
+// RoomMember is an explicit membership record for one room.
 type RoomMember struct {
-	ActorID  string    `json:"actor_id"`
-	Role     string    `json:"role,omitempty"`
-	Backend  string    `json:"backend,omitempty"`
-	Session  string    `json:"session,omitempty"`
-	PaneID   string    `json:"pane_id,omitempty"`
-	Unbound  bool      `json:"unbound,omitempty"`
-	JoinedAt time.Time `json:"joined_at"`
-	// TransportEndpoint is the unix socket path of an foxctl pane serve
-	// wrapper that owns this participant's child PTY. Empty means no pane
-	// wrapper is registered; use the legacy mux-pane path instead.
-	TransportEndpoint string `json:"transport_endpoint,omitempty"`
-	// TransportKind identifies the registered transport type:
-	// "pane_socket" when a pane wrapper is registered,
-	// "mux_pane" for legacy direct mux injection, or "" (unknown/none).
-	TransportKind string `json:"transport_kind,omitempty"`
-	// DeliveryBinding is the authoritative persisted routing/binding record for
-	// this member. Legacy top-level backend/session/pane/transport fields remain
-	// mirrored for compatibility with older call sites while the planner migrates.
+	ActorID         string               `json:"actor_id"`
+	Role            string               `json:"role,omitempty"`
+	Unbound         bool                 `json:"unbound,omitempty"`
+	JoinedAt        time.Time            `json:"joined_at"`
 	DeliveryBinding *RoomDeliveryBinding `json:"delivery_binding,omitempty"`
 }
 

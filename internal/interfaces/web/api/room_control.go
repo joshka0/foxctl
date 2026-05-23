@@ -137,7 +137,6 @@ type roomLoopDeliveryTraceResponse struct {
 	ChosenTransportEndpoint string     `json:"chosen_transport_endpoint,omitempty"`
 	ChosenTransportKind     string     `json:"chosen_transport_kind,omitempty"`
 	ChosenSubmitMode        string     `json:"chosen_submit_mode,omitempty"`
-	FallbackAttempted       bool       `json:"fallback_attempted,omitempty"`
 	DeliveredCount          int        `json:"delivered_count,omitempty"`
 	FailedCount             int        `json:"failed_count,omitempty"`
 	DeliveredTo             []string   `json:"delivered_to,omitempty"`
@@ -2051,7 +2050,6 @@ func apiConvertRoomLoopDeliveryTrace(trace *coordination.RoomLoopDeliveryTrace) 
 		ChosenTransportEndpoint: strings.TrimSpace(trace.ChosenTransportEndpoint),
 		ChosenTransportKind:     strings.TrimSpace(trace.ChosenTransportKind),
 		ChosenSubmitMode:        strings.TrimSpace(trace.ChosenSubmitMode),
-		FallbackAttempted:       trace.FallbackAttempted,
 		DeliveredCount:          trace.DeliveredCount,
 		FailedCount:             trace.FailedCount,
 		DeliveredTo:             append([]string(nil), trace.DeliveredTo...),
@@ -2734,24 +2732,11 @@ func apiRoomParticipantTransportStatus(member agent.RoomMember) string {
 	if member.Unbound {
 		return "unbound"
 	}
-	kind := strings.TrimSpace(firstNonEmpty(
-		member.TransportKind,
-		func() string {
-			if member.DeliveryBinding == nil {
-				return ""
-			}
-			return member.DeliveryBinding.TransportKind
-		}(),
-	))
-	endpoint := strings.TrimSpace(firstNonEmpty(
-		member.TransportEndpoint,
-		func() string {
-			if member.DeliveryBinding == nil {
-				return ""
-			}
-			return member.DeliveryBinding.TransportEndpoint
-		}(),
-	))
+	if member.DeliveryBinding == nil {
+		return "unregistered"
+	}
+	kind := strings.TrimSpace(member.DeliveryBinding.TransportKind)
+	endpoint := strings.TrimSpace(member.DeliveryBinding.TransportEndpoint)
 	if kind == "" && endpoint == "" {
 		return "unregistered"
 	}
@@ -2762,7 +2747,7 @@ func apiRoomParticipantTransportStatus(member agent.RoomMember) string {
 	case "pane_socket":
 		return "ready"
 	case "mux_pane":
-		return "legacy_mux"
+		return "ready"
 	default:
 		return "custom"
 	}
@@ -2781,9 +2766,6 @@ func apiRoomParticipantBindingStatus(member agent.RoomMember) string {
 			strings.TrimSpace(member.DeliveryBinding.TransportEndpoint) != "" {
 			return "bound"
 		}
-	}
-	if strings.TrimSpace(member.Backend) != "" || strings.TrimSpace(member.Session) != "" || strings.TrimSpace(member.PaneID) != "" {
-		return "legacy_bound"
 	}
 	return "unknown"
 }

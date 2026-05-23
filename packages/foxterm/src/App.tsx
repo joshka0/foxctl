@@ -5643,7 +5643,6 @@ function roomDeliveryTraceSummary(loop: RoomLoop): string {
     trace.outcome || "unknown",
     shortActorLabel(actor),
     transport,
-    trace.fallback_attempted ? "fallback" : "",
     counts,
   ]
     .filter(Boolean)

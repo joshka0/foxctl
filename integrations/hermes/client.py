@@ -1385,15 +1385,12 @@ class FoxctlClient:
             "members": [{
                 "actor_id": self.cfg.actor,
                 "role": "participant",
-                "backend": "herdr",
-                "session": self.cfg.session,
-                "transport_kind": "pi-extension",
-                "transport_endpoint": os.environ.get("HERDR_PANE_ID", ""),
                 "delivery_binding": {
+                    "mux_backend": "herdr",
+                    "mux_session": self.cfg.session,
                     "transport_kind": "pi-extension",
                     "transport_endpoint": os.environ.get("HERDR_PANE_ID", ""),
                     "health": "unknown",
-                    "fallback_policy": "room-inbox",
                 },
             }],
         }

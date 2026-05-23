@@ -900,7 +900,6 @@ export interface RoomDeliveryBinding {
   transport_kind?: string;
   submit_mode?: string;
   health?: string;
-  fallback_policy?: string;
 }
 
 export interface Room {
@@ -1190,7 +1189,6 @@ export interface RoomLoopDeliveryTrace {
   chosen_transport_endpoint?: string;
   chosen_transport_kind?: string;
   chosen_submit_mode?: string;
-  fallback_attempted?: boolean;
   outcome?: string;
   delivered_count?: number;
   failed_count?: number;

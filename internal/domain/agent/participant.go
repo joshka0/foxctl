@@ -16,8 +16,6 @@ const (
 
 	RoomDeliveryHealthUnknown = "unknown"
 	RoomDeliveryHealthReady   = "ready"
-
-	RoomDeliveryFallbackAllowLegacyMux = "allow_legacy_mux"
 )
 
 // ParticipantMembership describes whether a participant is a known room member.
@@ -157,7 +155,6 @@ func NormalizeRoomDeliveryBinding(actorID string, binding *RoomDeliveryBinding) 
 		TransportKind:     strings.ToLower(strings.TrimSpace(binding.TransportKind)),
 		SubmitMode:        strings.TrimSpace(binding.SubmitMode),
 		Health:            strings.TrimSpace(binding.Health),
-		FallbackPolicy:    strings.TrimSpace(binding.FallbackPolicy),
 	}
 	if normalized.SubmitMode == "" {
 		normalized.SubmitMode = DefaultRoomDeliverySubmitMode(actorID)
@@ -165,19 +162,16 @@ func NormalizeRoomDeliveryBinding(actorID string, binding *RoomDeliveryBinding) 
 	if normalized.Health == "" {
 		normalized.Health = RoomDeliveryHealthUnknown
 	}
-	if normalized.FallbackPolicy == "" {
-		normalized.FallbackPolicy = RoomDeliveryFallbackAllowLegacyMux
-	}
 	return normalized
 }
 
 // ParticipantStateFromRoomMember computes the initial ParticipantState from a RoomMember
 // record without performing live probes. Transport and Runtime are set to Unknown;
-// Presentation is derived from the member's Backend/Session/PaneID fields.
+// Presentation is derived from the member's canonical DeliveryBinding.
 //
-// When a member has TransportKind=PaneSocketTransportKind, the TransportEndpoint is
-// the unix socket path for an foxctl pane serve wrapper. Otherwise the endpoint is
-// derived from Backend/Session/PaneID.
+// When a member has TransportKind=PaneSocketTransportKind, the
+// TransportEndpoint is the unix socket path for an foxctl pane serve wrapper.
+// Otherwise the endpoint is derived from DeliveryBinding mux fields.
 //
 // This is a pure function (no IO) suitable for the functional core.
 func ParticipantStateFromRoomMember(member RoomMember) ParticipantState {
@@ -289,20 +283,6 @@ func participantStateForMuxBinding(state ParticipantState, actorID string, bindi
 		}
 		state.Transport = TransportUnknown
 		state.Presentation = PresentationDetached
-	default:
-		// Legacy members may have tmux-style actor IDs without explicit Backend.
-		if strings.HasPrefix(actorID, "tmux:") {
-			state.MuxBackend = "tmux"
-			state.TransportEndpoint = actorID
-		} else if strings.HasPrefix(actorID, "zellij:") {
-			state.MuxBackend = "zellij"
-			state.TransportEndpoint = actorID
-		} else if strings.HasPrefix(actorID, "herdr:") {
-			state.MuxBackend = "herdr"
-			state.TransportEndpoint = actorID
-		}
-		state.Transport = TransportUnknown
-		state.Presentation = PresentationDetached
 	}
 	return state
 }
@@ -338,28 +318,7 @@ func ApplySocketProbe(state ParticipantState, socketExists bool, sockErr error) 
 func NormalizeRoomMember(m RoomMember) RoomMember {
 	m.ActorID = strings.TrimSpace(m.ActorID)
 	m.Role = strings.TrimSpace(m.Role)
-	m.Backend = strings.TrimSpace(m.Backend)
-	m.Session = strings.TrimSpace(m.Session)
-	m.PaneID = strings.TrimSpace(m.PaneID)
-	m.TransportEndpoint = strings.TrimSpace(m.TransportEndpoint)
-	m.TransportKind = strings.TrimSpace(m.TransportKind)
-	if m.DeliveryBinding == nil {
-		m.DeliveryBinding = &RoomDeliveryBinding{
-			MuxBackend:        m.Backend,
-			MuxSession:        m.Session,
-			MuxPaneID:         m.PaneID,
-			TransportEndpoint: m.TransportEndpoint,
-			TransportKind:     m.TransportKind,
-		}
-	}
 	m.DeliveryBinding = NormalizeRoomDeliveryBinding(m.ActorID, m.DeliveryBinding)
-	if m.DeliveryBinding != nil {
-		m.Backend = m.DeliveryBinding.MuxBackend
-		m.Session = m.DeliveryBinding.MuxSession
-		m.PaneID = m.DeliveryBinding.MuxPaneID
-		m.TransportEndpoint = m.DeliveryBinding.TransportEndpoint
-		m.TransportKind = m.DeliveryBinding.TransportKind
-	}
 	if !m.Unbound && !roomMemberHasNormalizedTransportRoute(m) {
 		m.Unbound = true
 	}
@@ -378,8 +337,7 @@ func roomMemberHasNormalizedTransportRoute(m RoomMember) bool {
 			return true
 		}
 	}
-	actorID := strings.TrimSpace(m.ActorID)
-	return strings.HasPrefix(actorID, "tmux:") || strings.HasPrefix(actorID, "zellij:") || strings.HasPrefix(actorID, "herdr:")
+	return false
 }
 
 // BuildParticipantStates computes ParticipantState for every member in a room summary.
