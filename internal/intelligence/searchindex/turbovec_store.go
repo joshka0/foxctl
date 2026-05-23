@@ -95,9 +95,9 @@ func WrapWithTurboVec(store Store, workspaceID string, dim int, cfg TurboVecConf
 		BitWidth:   cfg.BitWidth,
 	})
 
-	// Probe the sidecar — if not running, warn and fall back gracefully.
-	if !turbovec.IsAvailable() {
-		fmt.Printf("turbovec: sidecar not reachable at %s, falling back to brute-force search\n", cfg.SocketPath)
+	// Probe the configured sidecar and fall back quietly; skill stdout must stay
+	// reserved for envelopes.
+	if !turbovecSocketAvailable(cfg.SocketPath) {
 		return store
 	}
 
@@ -109,6 +109,18 @@ func WrapWithTurboVec(store Store, workspaceID string, dim int, cfg TurboVecConf
 	}
 }
 
+func turbovecSocketAvailable(socketPath string) bool {
+	if socketPath == "" {
+		socketPath = turbovec.DefaultSocketPath()
+	}
+	client, err := turbovec.Dial(socketPath)
+	if err != nil {
+		return false
+	}
+	_ = client.Close()
+	return true
+}
+
 // Upsert stores the document in SQLite and adds its embedding to the turbovec index.
 func (s *turbovecStore) Upsert(ctx context.Context, doc Document) error {
 	// Always store in SQL (fallback + metadata).
@@ -118,11 +130,8 @@ func (s *turbovecStore) Upsert(ctx context.Context, doc Document) error {
 
 	// Add to turbovec index if we have an embedding.
 	if len(doc.Embedding) > 0 {
-		if err := s.vec.AddVector(doc.ID, doc.Embedding); err != nil {
-			// Log but don't fail — SQL is the source of truth.
-			// The turbovec index is a best-effort acceleration layer.
-			fmt.Printf("turbovec: add vector warning: %v\n", err)
-		}
+		// SQL remains the source of truth; the compressed sidecar is best-effort.
+		_ = s.vec.AddVector(doc.ID, doc.Embedding)
 	}
 
 	return nil

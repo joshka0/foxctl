@@ -1821,6 +1821,24 @@ const foxctlCodeSearchTool = defineFoxctlSkillFacade({
 	},
 });
 
+const FoxctlBranchImpactParams = Type.Object({
+	base_ref: Type.String({ description: "Base git ref to compare from, e.g. main" }),
+	head_ref: Type.Optional(Type.String({ description: "Head git ref to compare, e.g. current branch or HEAD", default: "HEAD" })),
+	limit: Type.Optional(Type.Number({ description: "Maximum ranked review candidates", default: 20 })),
+	depth: Type.Optional(Type.Number({ description: "Repo graph traversal depth", default: 2 })),
+	per_file_cap: Type.Optional(Type.Number({ description: "Maximum graph or semantic candidates per changed file" })),
+	max_changed: Type.Optional(Type.Number({ description: "Maximum changed units to analyze" })),
+	workspace: Type.Optional(Type.String({ description: "Workspace root; defaults to --foxctl-workspace" })),
+});
+
+const foxctlBranchImpactTool = defineFoxctlSkillFacade({
+	name: "foxctl_branch_impact",
+	label: "Foxctl Branch Impact",
+	description: "Inspect branch blast radius before review or editing by running foxctl's canonical code/branch_impact skill. Returns changed units plus ranked review candidates.",
+	skill: "code/branch_impact",
+	parameters: FoxctlBranchImpactParams,
+});
+
 const FoxctlCodeSemanticSearchParams = Type.Object({
 	query: Type.String({ description: "Natural-language query" }),
 	scope: Type.Optional(Type.Array(Type.String(), { description: "Search scopes, e.g. symbols, sessions, memories, tasks, codemaps, context" })),
@@ -3849,6 +3867,7 @@ export default function foxctlExtension(pi: ExtensionAPI) {
 		foxctlFSFindTool,
 		foxctlTextGrepTool,
 		foxctlCodeSearchTool,
+		foxctlBranchImpactTool,
 		foxctlCodeSemanticSearchTool,
 		foxctlCodeContextGrepTool,
 		foxctlRepoindexSearchTool,
@@ -3968,6 +3987,7 @@ export default function foxctlExtension(pi: ExtensionAPI) {
 		"foxctl_fs_find",
 		"foxctl_text_grep",
 		"foxctl_code_search",
+		"foxctl_branch_impact",
 		"foxctl_code_semantic_search",
 		"foxctl_code_context_grep",
 		"foxctl_repoindex_search",
