@@ -52,6 +52,9 @@ type Store interface {
 	// CountWorkspace returns the number of persisted documents for a workspace.
 	CountWorkspace(ctx context.Context, workspaceID string) (int, error)
 
+	// WorkspaceStats returns persisted retrieval corpus stats for a workspace.
+	WorkspaceStats(ctx context.Context, workspaceID string) (WorkspaceStats, error)
+
 	// GetEmbeddingMetadata returns the persisted embedding contract for a workspace.
 	GetEmbeddingMetadata(ctx context.Context, workspaceID string) (*EmbeddingMetadata, error)
 
@@ -70,4 +73,11 @@ type Store interface {
 	// GetEmbeddingsByIDs returns exact embeddings for the given document IDs.
 	// IDs without a stored embedding are silently omitted from the result map.
 	GetEmbeddingsByIDs(ctx context.Context, ids []string) (map[string][]float32, error)
+}
+
+type WorkspaceStats struct {
+	WorkspaceID       string
+	DocumentCount     int
+	EmbeddedCount     int
+	EmbeddingMetadata *EmbeddingMetadata
 }

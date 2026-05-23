@@ -938,7 +938,8 @@ func writeSemanticDryRun(cmd *cobra.Command, command string, files []string, wor
 		"files":         files,
 		"files_count":   len(files),
 		"files_skipped": filesSkipped,
-		"workspace_id":  workspace,
+		"workspace":     workspace,
+		"workspace_id":  workspaceutil.ID(workspace),
 	}
 
 	env := protocol.OK(command, data, protocol.WithSource("cli"))

@@ -169,6 +169,59 @@ func TestStoreVectorRecall(t *testing.T) {
 	}
 }
 
+func TestStoreWorkspaceStats(t *testing.T) {
+	testCtx := context.Background()
+
+	store, err := Open(testCtx, t.TempDir())
+	if err != nil {
+		t.Fatalf("open search index: %v", err)
+	}
+	defer func() {
+		_ = store.Close()
+	}()
+
+	workspace := "ws-stats"
+	if err := store.Upsert(testCtx, Document{
+		ID:             "search://ws-stats/symbol/a",
+		WorkspaceID:    workspace,
+		Scope:          ScopeCode,
+		Kind:           KindSymbol,
+		GroupKey:       "alpha.go",
+		Path:           "alpha.go",
+		Title:          "alpha",
+		Summary:        "alpha summary",
+		SearchText:     "alpha function",
+		Embedding:      []float32{0.20, 0.90, 0},
+		EmbeddingModel: "model-a",
+	}); err != nil {
+		t.Fatalf("upsert vector doc: %v", err)
+	}
+	if err := store.Upsert(testCtx, Document{
+		ID:          "search://ws-stats/file/beta.go",
+		WorkspaceID: workspace,
+		Scope:       ScopeCode,
+		Kind:        KindFile,
+		GroupKey:    "beta.go",
+		Path:        "beta.go",
+		Title:       "beta.go",
+		Summary:     "beta summary",
+		SearchText:  "beta file",
+	}); err != nil {
+		t.Fatalf("upsert file doc: %v", err)
+	}
+
+	stats, err := store.WorkspaceStats(testCtx, workspace)
+	if err != nil {
+		t.Fatalf("WorkspaceStats: %v", err)
+	}
+	if stats.WorkspaceID != workspace || stats.DocumentCount != 2 || stats.EmbeddedCount != 1 {
+		t.Fatalf("stats=%+v want workspace=%s docs=2 embedded=1", stats, workspace)
+	}
+	if stats.EmbeddingMetadata == nil || stats.EmbeddingMetadata.Model != "model-a" || stats.EmbeddingMetadata.Dimensions != 3 {
+		t.Fatalf("metadata=%+v want model-a/3", stats.EmbeddingMetadata)
+	}
+}
+
 func TestStoreEmbeddingMetadataValidation(t *testing.T) {
 	testCtx := context.Background()
 

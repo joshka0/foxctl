@@ -252,6 +252,27 @@ func (s *sqlStore) CountWorkspace(ctx context.Context, workspaceID string) (int,
 	return count, nil
 }
 
+// WorkspaceStats returns persisted retrieval corpus stats for a workspace.
+func (s *sqlStore) WorkspaceStats(ctx context.Context, workspaceID string) (WorkspaceStats, error) {
+	workspaceID = workspace.CanonicalID(workspaceID)
+	stats := WorkspaceStats{WorkspaceID: workspaceID}
+	if err := s.db.QueryRowContext(ctx, `
+SELECT
+	COUNT(*),
+	COALESCE(SUM(CASE WHEN embedding_json IS NOT NULL AND embedding_json != '' AND embedding_json != 'null' THEN 1 ELSE 0 END), 0)
+FROM search_documents
+WHERE workspace_id = $1
+`, workspaceID).Scan(&stats.DocumentCount, &stats.EmbeddedCount); err != nil {
+		return WorkspaceStats{}, fmt.Errorf("searchindex: workspace stats: %w", err)
+	}
+	meta, err := s.GetEmbeddingMetadata(ctx, workspaceID)
+	if err != nil {
+		return WorkspaceStats{}, err
+	}
+	stats.EmbeddingMetadata = meta
+	return stats, nil
+}
+
 // GetEmbeddingMetadata returns the persisted embedding contract for a workspace.
 func (s *sqlStore) GetEmbeddingMetadata(ctx context.Context, workspaceID string) (*EmbeddingMetadata, error) {
 	workspaceID = workspace.CanonicalID(workspaceID)
