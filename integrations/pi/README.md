@@ -126,6 +126,7 @@ require the ContextWiki review flow.
 
 ### Code & Repoindex
 - `foxctl_code_search` — Smart code search with repoindex-aware candidates
+- `foxctl_branch_impact` — Inspect branch blast radius before review or editing via `code/branch_impact`
 - `foxctl_code_semantic_search` — Semantic search across code and context scopes
 - `foxctl_code_context_grep` — Search code and return surrounding functions/classes
 - `foxctl_repoindex_search` — Search repoindex nodes and semantic anchors

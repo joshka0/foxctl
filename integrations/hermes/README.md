@@ -1,6 +1,6 @@
 # Foxctl Plugin for Hermes Agent
 
-Deep integration between foxctl's intelligence, coordination, and flow orchestration layers and hermes-agent, providing 72 tools spanning 11 categories.
+Deep integration between foxctl's intelligence, coordination, and flow orchestration layers and hermes-agent, providing 73 tools spanning 11 categories.
 
 ## Tool Categories
 
@@ -82,6 +82,7 @@ Deep integration between foxctl's intelligence, coordination, and flow orchestra
 | `foxctl_repo_open` | Open a repo index node by ID for full metadata |
 | `foxctl_code_grep` | Search code patterns with function/class block expansion |
 | `foxctl_semantic_search` | Unified semantic search across symbols, sessions, memory |
+| `foxctl_branch_impact` | Inspect branch blast radius before review or editing via `code/branch_impact` |
 | `foxctl_code_symbols` | Extract symbols from a file |
 | `foxctl_text_grep` | Fast regex search across the workspace |
 | `foxctl_fs_read` | Read file contents through CAS-backed storage |
@@ -186,7 +187,7 @@ Set `memory_drafts_auto: true` to let Hermes lifecycle hooks create Obsidian inb
 
 ```
 hermes agent
-  └── plugin: foxctl (72 tools, 11 categories)
+  └── plugin: foxctl (73 tools, 11 categories)
        ├── tools.py      → tool registrations + schemas
        ├── client.py     → HTTP + CLI client with envelope unwrapping
        ├── config.py     → config.yaml + env var reading

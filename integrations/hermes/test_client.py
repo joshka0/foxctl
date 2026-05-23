@@ -83,6 +83,23 @@ class HermesMemoryPutTest(unittest.TestCase):
         self.assertEqual(attempts[0]["status"], "invalid_json")
         self.assertEqual(attempts[0]["stdout"], "memory stored")
 
+    def test_branch_impact_uses_canonical_skill_facade(self) -> None:
+        client = self.client()
+
+        with patch.object(client, "_skill", return_value={"changed_units": [], "review_candidates": []}) as skill:
+            result = client.branch_impact("main", "HEAD", limit=7, depth=3, per_file_cap=11, max_changed=50)
+
+        self.assertEqual(result, {"changed_units": [], "review_candidates": []})
+        skill.assert_called_once_with(
+            "code/branch_impact",
+            base_ref="main",
+            head_ref="HEAD",
+            limit=7,
+            depth=3,
+            per_file_cap=11,
+            max_changed=50,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
