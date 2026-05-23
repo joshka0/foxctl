@@ -1029,12 +1029,7 @@ func TestRoomDetailHandler_PutMemberBindingRequiresDeliveryBinding(t *testing.T)
 	}
 
 	putReq := httptest.NewRequest(http.MethodPut, "/api/rooms/alpha/members/droid-a/binding?workspace_id=ws1", strings.NewReader(`{
-		"actor_id":"droid-a",
-		"backend":"tmux",
-		"session":"146",
-		"pane_id":"%159",
-		"transport_endpoint":"/tmp/droid-a.sock",
-		"transport_kind":"pane_socket"
+		"actor_id":"droid-a"
 	}`))
 	putRR := httptest.NewRecorder()
 	h.ServeHTTP(putRR, putReq)
