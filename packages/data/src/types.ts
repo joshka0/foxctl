@@ -937,16 +937,23 @@ export type TransportAvailability =
   | "none";
 export type RuntimeAvailability = "live" | "unknown" | "stopped" | "none";
 export type PresentationAttachment = "attached" | "detached" | "none";
+export type ParticipantDeliveryCapability =
+  | "push_relay"
+  | "viewer_inbox"
+  | "none"
+  | string;
 
 export interface ParticipantState {
   actor_id: string;
   membership: ParticipantMembership;
   transport_endpoint?: string;
+  transport_kind?: string;
   transport: TransportAvailability;
   runtime: RuntimeAvailability;
   presentation: PresentationAttachment;
   mux_backend?: string;
   reason?: string;
+  delivery_capability: ParticipantDeliveryCapability;
   can_trigger_turn: boolean;
 }
 

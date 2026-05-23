@@ -2744,10 +2744,12 @@ func apiRoomParticipantTransportStatus(member agent.RoomMember) string {
 		return "missing_endpoint"
 	}
 	switch strings.ToLower(kind) {
-	case "pane_socket":
+	case agent.PaneSocketTransportKind:
 		return "ready"
-	case "mux_pane":
+	case agent.MuxPaneTransportKind:
 		return "ready"
+	case agent.PiExtensionTransportKind:
+		return "viewer_inbox"
 	default:
 		return "custom"
 	}

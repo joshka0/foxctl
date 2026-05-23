@@ -62,6 +62,35 @@ func TestOpenAIClientChatAppliesQwenDefaults(t *testing.T) {
 	}
 }
 
+func TestOpenAIClientChatAllowsLocalNoAuth(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Fatalf("Authorization header = %q, want empty for local no-auth client", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	defer server.Close()
+
+	client, err := NewOpenAIClient(OpenAIConfig{
+		Provider: "lmstudio",
+		BaseURL:  server.URL,
+		Model:    "qwen3.5-4b-mlx",
+	})
+	if err != nil {
+		t.Fatalf("NewOpenAIClient: %v", err)
+	}
+	got, err := client.Chat(context.Background(), "Return JSON only.", "Question", LLMCallOptions{})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if got != "ok" {
+		t.Fatalf("content=%q want ok", got)
+	}
+}
+
 func TestOpenAIClientChatFallsBackToReasoningContent(t *testing.T) {
 	t.Parallel()
 

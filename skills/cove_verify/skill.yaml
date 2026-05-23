@@ -48,7 +48,7 @@ signature:
     - name: llm
       type: object
       required: false
-      description: "LLM override: provider, model (API key via env)"
+      description: "LLM override: provider, model, base_url, auth_mode (API key via env)"
   returns:
     - name: summary
       type: object
@@ -70,11 +70,14 @@ help:
         Note: this requires `skip_refine=false`.
 
     LLM configuration:
-      - FOXCTL_LLM_PROVIDER (gemini|groq|openrouter|openai|anthropic)
+      - FOXCTL_LLM_PROVIDER (lmstudio|groq|openrouter|openai|cerebras)
       - FOXCTL_LLM_MODEL
+      - FOXCTL_LLM_BASE_URL
+      - FOXCTL_LLM_AUTH_MODE (auto|none|bearer)
       - FOXCTL_LLM_API_KEY
     Provider-specific fallbacks:
-      - GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY
+      - LMSTUDIO_BASE_URL, LMSTUDIO_MODEL, LMSTUDIO_API_KEY
+      - CEREBRAS_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY, OPENAI_API_KEY
 
   workflows:
     - id: verify-draft-code-review

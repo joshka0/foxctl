@@ -3,6 +3,8 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
+const apiTarget = process.env.FOXCTL_GUI_API_TARGET || 'http://localhost:8090'
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -14,11 +16,11 @@ export default defineConfig({
   server: {
     port: 5174,
     proxy: {
-      '/api': 'http://localhost:8090',
-      '/terminal': 'http://localhost:8090',
-      '/static': 'http://localhost:8090',
+      '/api': apiTarget,
+      '/terminal': apiTarget,
+      '/static': apiTarget,
       '/ws': {
-        target: 'http://localhost:8090',
+        target: apiTarget,
         ws: true,
       },
     },

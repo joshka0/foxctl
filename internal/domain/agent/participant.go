@@ -4,9 +4,15 @@ import (
 	"strings"
 )
 
-// PaneSocketTransportKind is the TransportKind value used when a member has an
-// foxctl pane serve wrapper socket registered.
-const PaneSocketTransportKind = "pane_socket"
+const (
+	// PaneSocketTransportKind is the TransportKind value used when a member has an
+	// foxctl pane serve wrapper socket registered.
+	PaneSocketTransportKind = "pane_socket"
+	// MuxPaneTransportKind is the TransportKind value used for mux-backed pane delivery.
+	MuxPaneTransportKind = "mux_pane"
+	// PiExtensionTransportKind is the TransportKind value used by Pi viewer/inbox bindings.
+	PiExtensionTransportKind = "pi-extension"
+)
 
 const (
 	RoomDeliverySubmitModeNewline           = "newline"
@@ -42,6 +48,18 @@ const (
 	TransportUnavailable TransportAvailability = "unavailable"
 	// TransportNone means the participant has no transport endpoint configured.
 	TransportNone TransportAvailability = "none"
+)
+
+// ParticipantDeliveryCapability describes how foxctl can use a participant's delivery binding.
+type ParticipantDeliveryCapability string
+
+const (
+	// DeliveryCapabilityPushRelay means foxctl can push Room messages through its Relay path.
+	DeliveryCapabilityPushRelay ParticipantDeliveryCapability = "push_relay"
+	// DeliveryCapabilityViewerInbox means an Integration can observe Room state through an inbox/viewer path.
+	DeliveryCapabilityViewerInbox ParticipantDeliveryCapability = "viewer_inbox"
+	// DeliveryCapabilityNone means the participant has no usable delivery path.
+	DeliveryCapabilityNone ParticipantDeliveryCapability = "none"
 )
 
 // RuntimeAvailability describes whether the participant's provider runtime is live.
@@ -87,6 +105,9 @@ type ParticipantState struct {
 	// Empty when the participant has no transport binding.
 	TransportEndpoint string `json:"transport_endpoint,omitempty"`
 
+	// TransportKind is the canonical transport kind from the member delivery binding.
+	TransportKind string `json:"transport_kind,omitempty"`
+
 	// Transport is the transport endpoint reachability status.
 	Transport TransportAvailability `json:"transport"`
 
@@ -102,6 +123,9 @@ type ParticipantState struct {
 	// Reason is a human-readable explanation when the participant is not fully available.
 	// For example: "no transport endpoint", "tmux pane not found", "runtime not detected".
 	Reason string `json:"reason,omitempty"`
+
+	// DeliveryCapability explains whether the binding is push-relayable or viewer/inbox-only.
+	DeliveryCapability ParticipantDeliveryCapability `json:"delivery_capability"`
 
 	// CanTriggerTurn is true when this participant should be considered eligible for
 	// turn triggering through the foxctl-owned transport path. This is independent
@@ -179,9 +203,10 @@ func ParticipantStateFromRoomMember(member RoomMember) ParticipantState {
 	actorID := strings.TrimSpace(member.ActorID)
 	binding := NormalizeRoomDeliveryBinding(actorID, member.DeliveryBinding)
 	state := ParticipantState{
-		ActorID:    actorID,
-		Membership: MembershipActive,
-		Runtime:    RuntimeUnknown,
+		ActorID:            actorID,
+		Membership:         MembershipActive,
+		Runtime:            RuntimeUnknown,
+		DeliveryCapability: DeliveryCapabilityNone,
 	}
 
 	// Pane socket transport: the member registered an foxctl pane wrapper.
@@ -195,13 +220,17 @@ func ParticipantStateFromRoomMember(member RoomMember) ParticipantState {
 		return participantStateWithoutTransport(state, member.Unbound)
 	}
 
-	state = participantStateForMuxBinding(state, actorID, binding)
+	state = participantStateForDeliveryBinding(state, binding)
 
 	// A participant with a transport endpoint can be triggered even without
 	// a live presentation attachment — the trigger path is transport-first.
-	state.CanTriggerTurn = state.TransportEndpoint != ""
+	state.CanTriggerTurn = state.DeliveryCapability == DeliveryCapabilityPushRelay && state.TransportEndpoint != ""
 	if !state.CanTriggerTurn {
-		state.Reason = "no transport endpoint"
+		if state.TransportEndpoint == "" {
+			state.Reason = "no transport endpoint"
+		} else if state.Reason == "" {
+			state.Reason = "transport is not push-relayable"
+		}
 	}
 
 	return state
@@ -215,6 +244,7 @@ func isPaneSocketBinding(binding *RoomDeliveryBinding) bool {
 
 func participantStateForPaneSocket(state ParticipantState, binding *RoomDeliveryBinding) ParticipantState {
 	state.TransportEndpoint = binding.TransportEndpoint
+	state.TransportKind = PaneSocketTransportKind
 	state.Transport = TransportUnknown // caller should probe with ApplySocketProbe
 	state.MuxBackend = strings.ToLower(binding.MuxBackend)
 	if binding.MuxBackend != "" && binding.MuxPaneID != "" {
@@ -222,6 +252,7 @@ func participantStateForPaneSocket(state ParticipantState, binding *RoomDelivery
 	} else {
 		state.Presentation = PresentationNone
 	}
+	state.DeliveryCapability = DeliveryCapabilityPushRelay
 	state.CanTriggerTurn = true
 	return state
 }
@@ -239,6 +270,7 @@ func participantStateWithoutTransport(state ParticipantState, unbound bool) Part
 	state.Membership = MembershipUnbound
 	state.Transport = TransportNone
 	state.Presentation = PresentationNone
+	state.DeliveryCapability = DeliveryCapabilityNone
 	state.CanTriggerTurn = false
 	if unbound {
 		state.Reason = "member is unbound (no live transport binding)"
@@ -248,8 +280,9 @@ func participantStateWithoutTransport(state ParticipantState, unbound bool) Part
 	return state
 }
 
-func participantStateForMuxBinding(state ParticipantState, actorID string, binding *RoomDeliveryBinding) ParticipantState {
+func participantStateForDeliveryBinding(state ParticipantState, binding *RoomDeliveryBinding) ParticipantState {
 	state.MuxBackend = strings.ToLower(binding.MuxBackend)
+	state.TransportKind = roomDeliveryBindingTransportKind(binding)
 	switch state.MuxBackend {
 	case "tmux":
 		session := binding.MuxSession
@@ -261,6 +294,7 @@ func participantStateForMuxBinding(state ParticipantState, actorID string, bindi
 		}
 		state.Transport = TransportUnknown
 		state.Presentation = PresentationDetached
+		state.DeliveryCapability = DeliveryCapabilityPushRelay
 	case "zellij":
 		session := binding.MuxSession
 		paneID := binding.MuxPaneID
@@ -271,6 +305,7 @@ func participantStateForMuxBinding(state ParticipantState, actorID string, bindi
 		}
 		state.Transport = TransportUnknown
 		state.Presentation = PresentationDetached
+		state.DeliveryCapability = DeliveryCapabilityPushRelay
 	case "herdr":
 		session := binding.MuxSession
 		paneID := binding.MuxPaneID
@@ -283,8 +318,33 @@ func participantStateForMuxBinding(state ParticipantState, actorID string, bindi
 		}
 		state.Transport = TransportUnknown
 		state.Presentation = PresentationDetached
+		state.DeliveryCapability = DeliveryCapabilityPushRelay
+	default:
+		state.TransportEndpoint = strings.TrimSpace(binding.TransportEndpoint)
+		state.Transport = TransportUnknown
+		state.Presentation = PresentationNone
+		if state.TransportKind == PiExtensionTransportKind {
+			state.DeliveryCapability = DeliveryCapabilityViewerInbox
+			state.Reason = "viewer/inbox transport is not push-relayable"
+		}
 	}
 	return state
+}
+
+func roomDeliveryBindingTransportKind(binding *RoomDeliveryBinding) string {
+	if binding == nil {
+		return ""
+	}
+	kind := strings.ToLower(strings.TrimSpace(binding.TransportKind))
+	if kind != "" {
+		return kind
+	}
+	if strings.TrimSpace(binding.MuxBackend) != "" ||
+		strings.TrimSpace(binding.MuxSession) != "" ||
+		strings.TrimSpace(binding.MuxPaneID) != "" {
+		return MuxPaneTransportKind
+	}
+	return ""
 }
 
 // ApplySocketProbe updates Transport and Runtime on a ParticipantState based on
@@ -384,11 +444,12 @@ func ParticipantStateForActorID(states map[string]ParticipantState, actorID stri
 		return s
 	}
 	return ParticipantState{
-		ActorID:      actorID,
-		Membership:   MembershipNone,
-		Transport:    TransportNone,
-		Runtime:      RuntimeNone,
-		Presentation: PresentationNone,
-		Reason:       "not a room member",
+		ActorID:            actorID,
+		Membership:         MembershipNone,
+		Transport:          TransportNone,
+		Runtime:            RuntimeNone,
+		Presentation:       PresentationNone,
+		DeliveryCapability: DeliveryCapabilityNone,
+		Reason:             "not a room member",
 	}
 }

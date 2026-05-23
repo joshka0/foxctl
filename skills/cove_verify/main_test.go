@@ -32,6 +32,71 @@ func TestParseInputDefaults(t *testing.T) {
 	}
 }
 
+func TestResolveLLMAllowsExplicitLMStudioWithoutAPIKey(t *testing.T) {
+	t.Setenv("FOXCTL_LLM_API_KEY", "")
+	t.Setenv("LMSTUDIO_API_KEY", "")
+
+	client, provider, model, err := resolveLLM(&llmConfig{
+		Provider: "lmstudio",
+		Model:    "local-model",
+		BaseURL:  "http://localhost:1234/v1",
+	})
+	if err != nil {
+		t.Fatalf("resolveLLM: %v", err)
+	}
+	if client == nil {
+		t.Fatal("client=nil")
+	}
+	if provider != "lmstudio" {
+		t.Fatalf("provider=%q want lmstudio", provider)
+	}
+	if model != "local-model" {
+		t.Fatalf("model=%q want local-model", model)
+	}
+}
+
+func TestResolveLLMUsesLMStudioEnvAsLocalSignal(t *testing.T) {
+	t.Setenv("FOXCTL_LLM_PROVIDER", "")
+	t.Setenv("FOXCTL_LLM_API_KEY", "")
+	t.Setenv("LMSTUDIO_API_KEY", "")
+	t.Setenv("LMSTUDIO_BASE_URL", "http://localhost:1234/v1")
+	t.Setenv("LMSTUDIO_MODEL", "local-model")
+	t.Setenv("CEREBRAS_API_KEY", "")
+	t.Setenv("GROQ_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+
+	client, provider, model, err := resolveLLM(nil)
+	if err != nil {
+		t.Fatalf("resolveLLM: %v", err)
+	}
+	if client == nil {
+		t.Fatal("client=nil")
+	}
+	if provider != "lmstudio" {
+		t.Fatalf("provider=%q want lmstudio", provider)
+	}
+	if model != "local-model" {
+		t.Fatalf("model=%q want local-model", model)
+	}
+}
+
+func TestResolveLLMStillRequiresRemoteAPIKey(t *testing.T) {
+	t.Setenv("FOXCTL_LLM_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+
+	_, provider, _, err := resolveLLM(&llmConfig{Provider: "openai", Model: "gpt-test"})
+	if err == nil {
+		t.Fatal("expected missing API key error")
+	}
+	if provider != "openai" {
+		t.Fatalf("provider=%q want openai", provider)
+	}
+	if !strings.Contains(err.Error(), `LLM API key not configured for provider "openai"`) {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func TestConvertResultDurations(t *testing.T) {
 	resp := &verification.CoVeResponse{
 		Question:         "q",

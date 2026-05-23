@@ -361,6 +361,26 @@ func TestCollectRelayParticipantsUsesParticipantStateNotPresentation(t *testing.
 	}
 }
 
+func TestCollectRelayParticipantsSkipsViewerInboxTransports(t *testing.T) {
+	participants, skipped := collectRelayParticipants(agent.RoomSummary{
+		Members: []agent.RoomMember{
+			{
+				ActorID: "actor:pi:local",
+				DeliveryBinding: &agent.RoomDeliveryBinding{
+					TransportEndpoint: "p_21",
+					TransportKind:     agent.PiExtensionTransportKind,
+				},
+			},
+		},
+	}, agent.BoardMessage{Sender: "sender"})
+	if len(participants) != 0 {
+		t.Fatalf("participants=%v want none for viewer/inbox transport", participants)
+	}
+	if len(skipped) != 1 || skipped[0] != "actor:pi:local" {
+		t.Fatalf("skipped=%v want [actor:pi:local]", skipped)
+	}
+}
+
 func TestRelayViaParticipantsUsesPaneSocket(t *testing.T) {
 	// When a participant has TransportKind=pane_socket, relayViaParticipants
 	// should use deliverAgentPane, not tmux DeliverTextWithOptions.

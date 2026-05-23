@@ -440,6 +440,41 @@ func TestParticipantStateFromRoomMember_PaneSocket(t *testing.T) {
 	}
 }
 
+func TestParticipantStateFromRoomMember_PiExtensionViewer(t *testing.T) {
+	state := ParticipantStateFromRoomMember(RoomMember{
+		ActorID: "actor:pi:local",
+		DeliveryBinding: &RoomDeliveryBinding{
+			TransportEndpoint: "p_21",
+			TransportKind:     PiExtensionTransportKind,
+		},
+	})
+
+	if state.Membership != MembershipActive {
+		t.Errorf("Membership = %q, want active", state.Membership)
+	}
+	if state.TransportEndpoint != "p_21" {
+		t.Errorf("TransportEndpoint = %q, want p_21", state.TransportEndpoint)
+	}
+	if state.TransportKind != PiExtensionTransportKind {
+		t.Errorf("TransportKind = %q, want %q", state.TransportKind, PiExtensionTransportKind)
+	}
+	if state.Transport != TransportUnknown {
+		t.Errorf("Transport = %q, want unknown", state.Transport)
+	}
+	if state.Presentation != PresentationNone {
+		t.Errorf("Presentation = %q, want none", state.Presentation)
+	}
+	if state.DeliveryCapability != DeliveryCapabilityViewerInbox {
+		t.Errorf("DeliveryCapability = %q, want %q", state.DeliveryCapability, DeliveryCapabilityViewerInbox)
+	}
+	if state.CanTriggerTurn {
+		t.Error("CanTriggerTurn = true, want false for viewer/inbox transport")
+	}
+	if state.Reason != "viewer/inbox transport is not push-relayable" {
+		t.Errorf("Reason = %q, want viewer/inbox transport is not push-relayable", state.Reason)
+	}
+}
+
 func TestApplySocketProbe_SocketExists(t *testing.T) {
 	state := ParticipantState{
 		TransportEndpoint: "/tmp/foxctl-pane/s/claude-a.sock",

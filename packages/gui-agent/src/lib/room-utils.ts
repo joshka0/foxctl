@@ -86,7 +86,9 @@ export function roomMemberTransportKind(member: RoomMember | null | undefined): 
   return roomMemberDeliveryBinding(member)?.transport_kind?.trim() || ''
 }
 
-export function participantTransportKind(state?: ParticipantState): 'pane_socket' | 'mux_pane' | 'none' {
+export function participantTransportKind(state?: ParticipantState): string {
+  const explicitKind = state?.transport_kind?.trim()
+  if (explicitKind) return explicitKind
   const endpoint = state?.transport_endpoint
   if (!endpoint) return 'none'
   if (endpoint.startsWith('/')) return 'pane_socket'

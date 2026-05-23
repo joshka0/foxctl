@@ -3286,3 +3286,16 @@ func TestRoomDetailHandler_RoomAgileStoryAccept(t *testing.T) {
 		t.Fatalf("nonexistent proposal status=%d body=%s", rrNoProposal.Code, rrNoProposal.Body.String())
 	}
 }
+
+func TestAPIRoomParticipantTransportStatusPiExtensionIsViewerInbox(t *testing.T) {
+	got := apiRoomParticipantTransportStatus(agent.RoomMember{
+		ActorID: "actor:pi:local",
+		DeliveryBinding: &agent.RoomDeliveryBinding{
+			TransportEndpoint: "p_21",
+			TransportKind:     agent.PiExtensionTransportKind,
+		},
+	})
+	if got != "viewer_inbox" {
+		t.Fatalf("apiRoomParticipantTransportStatus() = %q, want viewer_inbox", got)
+	}
+}

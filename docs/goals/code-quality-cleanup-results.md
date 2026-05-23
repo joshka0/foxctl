@@ -31,6 +31,12 @@ Current shape:
 Integration note: current `main` was merged into this branch on 2026-05-23, and
 the full verification set has been rerun after the merge.
 
+Gap-fix note: after the initial MR 43 readiness pass, the branch also closed
+the stale Pi/Hermes installed-plugin evidence gap, made `pi-extension` room
+participants first-class viewer/inbox participants, added local no-auth
+CoVe/RLM model configuration tests, and added a real Chrome-based GUI browser
+smoke via `bun run smoke:gui-browser`.
+
 ## Completed Results
 
 ### Storage And Runtime Boundaries
@@ -308,6 +314,10 @@ Current room delivery hard-cut verification on 2026-05-23:
   `bun run check:frontend`.
 - Completed: project-level frontend dead-export gate `bun run dead:frontend`
   is wired without adding dependencies.
+- Completed: added `bun run smoke:gui-browser`, a dependency-free browser smoke
+  that starts an isolated foxctl backend, starts Vite against that backend, and
+  verifies `/`, `/#rooms`, and `/#orchestration` in headless Chrome with route
+  headings and browser runtime/console errors checked.
 
 ## Recommended Next Slices
 
