@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+)
 
 func TestParseNameStatusHandlesRename(t *testing.T) {
 	raw := "M\x00internal/a.go\x00R100\x00internal/old.go\x00internal/new.go\x00"
@@ -47,5 +51,53 @@ func TestDiffRangeArgsUsesCanonicalRefs(t *testing.T) {
 	got := diffRangeArgs(Input{BaseRef: "main", HeadRef: "HEAD"})
 	if len(got) != 1 || got[0] != "main...HEAD" {
 		t.Fatalf("range args=%v want main...HEAD", got)
+	}
+}
+
+func TestCandidatesFromContextSectionsIncludesCallers(t *testing.T) {
+	got := candidatesFromContextSections([]repoindex.ContextSection{
+		{
+			Name: "callers",
+			Nodes: []repoindex.Node{
+				{ID: "changed", Kind: repoindex.NodeSymbol, File: "internal/core.go", Name: "Plan", SpanStart: 10},
+				{ID: "caller", Kind: repoindex.NodeSymbol, File: "skills/tool/main.go", Name: "run", SpanStart: 20},
+			},
+			Edges: []repoindex.Edge{{Src: "caller", Dst: "changed", Type: repoindex.EdgeCalls}},
+		},
+		{
+			Name:  "contains_in",
+			Nodes: []repoindex.Node{{ID: "file", Kind: repoindex.NodeFile, File: "internal/core.go", Name: "core.go"}},
+		},
+	}, 1)
+
+	for _, candidate := range got {
+		if candidate.Path != "skills/tool/main.go" {
+			continue
+		}
+		if candidate.Symbol != "run" || candidate.LineHint != 20 || candidate.Depth != 1 {
+			t.Fatalf("caller candidate=%+v want run at depth 1", candidate)
+		}
+		if len(candidate.EdgeTypes) != 1 || candidate.EdgeTypes[0] != string(repoindex.EdgeCalls) {
+			t.Fatalf("caller edge types=%v want CALLS", candidate.EdgeTypes)
+		}
+		return
+	}
+	t.Fatalf("candidates=%+v missing caller file", got)
+}
+
+func TestChangedFileSymbolsSortsAndCaps(t *testing.T) {
+	blast := repoindex.BlastRadiusResult{
+		Origin: repoindex.Node{ID: "file", Kind: repoindex.NodeFile, File: "internal/core.go"},
+		Graph: repoindex.ExpandResult{Nodes: []repoindex.Node{
+			{ID: "file", Kind: repoindex.NodeFile, File: "internal/core.go", Name: "core.go"},
+			{ID: "later", Kind: repoindex.NodeSymbol, File: "internal/core.go", Name: "Later", SpanStart: 30},
+			{ID: "other", Kind: repoindex.NodeSymbol, File: "internal/other.go", Name: "Other", SpanStart: 1},
+			{ID: "earlier", Kind: repoindex.NodeSymbol, File: "internal/core.go", Name: "Earlier", SpanStart: 5},
+		}},
+	}
+
+	got := changedFileSymbols(blast, 1)
+	if len(got) != 1 || got[0].ID != "earlier" {
+		t.Fatalf("symbols=%+v want earliest changed-file symbol only", got)
 	}
 }

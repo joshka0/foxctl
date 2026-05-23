@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"sort"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/intelligence/branchimpact"
@@ -65,26 +66,21 @@ func (p *graphProvider) BlastRadius(ctx context.Context, changes []branchimpact.
 		if err != nil {
 			return branchimpact.GraphResult{}, err
 		}
-		edgeTypes := edgeTypesByNode(blast.Graph.Edges)
-		for _, graphNode := range blast.Graph.Nodes {
-			if graphNode.File == "" {
-				continue
+		addGraphCandidates(seen, candidatesFromBlast(blast))
+
+		for _, symbol := range changedFileSymbols(blast, opts.PerFileCap) {
+			contextResult, err := p.engine.SmartContext(ctx, repoindex.SmartContextOptions{
+				NodeID: symbol.ID,
+				Limit:  opts.PerFileCap,
+			})
+			if err != nil {
+				return branchimpact.GraphResult{}, err
 			}
-			depth := blast.Layers[graphNode.ID]
-			candidate := branchimpact.GraphCandidate{
-				Path:      graphNode.File,
-				Symbol:    graphNode.Name,
-				LineHint:  graphNode.SpanStart,
-				Depth:     depth,
-				EdgeTypes: edgeTypes[graphNode.ID],
-			}
-			key := candidate.Path + "|" + candidate.Symbol
-			if prev, ok := seen[key]; !ok || candidate.Depth < prev.Depth {
-				seen[key] = candidate
-			}
-			if opts.Limit > 0 && len(seen) >= opts.Limit {
-				break
-			}
+			addGraphCandidates(seen, candidatesFromContextSections(contextResult.Sections, 1))
+		}
+
+		if opts.Limit > 0 && len(seen) >= opts.Limit {
+			break
 		}
 	}
 	candidates := make([]branchimpact.GraphCandidate, 0, len(seen))
@@ -92,6 +88,92 @@ func (p *graphProvider) BlastRadius(ctx context.Context, changes []branchimpact.
 		candidates = append(candidates, candidate)
 	}
 	return branchimpact.GraphResult{Available: true, Candidates: candidates}, nil
+}
+
+func addGraphCandidates(seen map[string]branchimpact.GraphCandidate, candidates []branchimpact.GraphCandidate) {
+	for _, candidate := range candidates {
+		if candidate.Path == "" {
+			continue
+		}
+		key := candidate.Path + "|" + candidate.Symbol
+		if prev, ok := seen[key]; !ok || candidate.Depth < prev.Depth {
+			seen[key] = candidate
+		}
+	}
+}
+
+func candidatesFromBlast(blast repoindex.BlastRadiusResult) []branchimpact.GraphCandidate {
+	edgeTypes := edgeTypesByNode(blast.Graph.Edges)
+	candidates := make([]branchimpact.GraphCandidate, 0, len(blast.Graph.Nodes))
+	for _, graphNode := range blast.Graph.Nodes {
+		if graphNode.File == "" {
+			continue
+		}
+		candidates = append(candidates, branchimpact.GraphCandidate{
+			Path:      graphNode.File,
+			Symbol:    graphNode.Name,
+			LineHint:  graphNode.SpanStart,
+			Depth:     blast.Layers[graphNode.ID],
+			EdgeTypes: edgeTypes[graphNode.ID],
+		})
+	}
+	candidates = append(candidates, candidatesFromContextSections(blast.Sections, 1)...)
+	return candidates
+}
+
+func candidatesFromContextSections(sections []repoindex.ContextSection, depth int) []branchimpact.GraphCandidate {
+	var candidates []branchimpact.GraphCandidate
+	for _, section := range sections {
+		if !isImpactContextSection(section.Name) {
+			continue
+		}
+		edgeTypes := edgeTypesByNode(section.Edges)
+		for _, node := range section.Nodes {
+			if node.File == "" {
+				continue
+			}
+			candidates = append(candidates, branchimpact.GraphCandidate{
+				Path:      node.File,
+				Symbol:    node.Name,
+				LineHint:  node.SpanStart,
+				Depth:     depth,
+				EdgeTypes: edgeTypes[node.ID],
+			})
+		}
+	}
+	return candidates
+}
+
+func isImpactContextSection(name string) bool {
+	switch name {
+	case "incoming_call", "callers", "co_changes", "docs_concepts":
+		return true
+	default:
+		return false
+	}
+}
+
+func changedFileSymbols(blast repoindex.BlastRadiusResult, limit int) []repoindex.Node {
+	originFile := blast.Origin.File
+	if originFile == "" {
+		return nil
+	}
+	var symbols []repoindex.Node
+	for _, node := range blast.Graph.Nodes {
+		if node.Kind == repoindex.NodeSymbol && node.File == originFile {
+			symbols = append(symbols, node)
+		}
+	}
+	sort.Slice(symbols, func(i, j int) bool {
+		if symbols[i].SpanStart != symbols[j].SpanStart {
+			return symbols[i].SpanStart < symbols[j].SpanStart
+		}
+		return symbols[i].Name < symbols[j].Name
+	})
+	if limit > 0 && len(symbols) > limit {
+		return symbols[:limit]
+	}
+	return symbols
 }
 
 func edgeTypesByNode(edges []repoindex.Edge) map[string][]string {
