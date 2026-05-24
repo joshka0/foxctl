@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joshka0/foxctl/internal/intelligence/branchimpact"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+	"github.com/joshka0/foxctl/internal/intelligence/refactor/impact"
 	"github.com/joshka0/foxctl/internal/intelligence/searchindex"
 	"github.com/joshka0/foxctl/internal/intelligence/turbovec"
 	"github.com/joshka0/foxctl/internal/platform/config"
@@ -27,14 +27,14 @@ type semanticProvider struct {
 	store         searchindex.Store
 	embedder      semantic.EmbeddingProvider
 	model         string
-	source        string
+	source        impact.Source
 }
 
 type unavailableSemanticProvider struct {
 	reason string
 }
 
-func openSemanticProvider(ctx context.Context, cfg config.Config, workspaceRoot string) (branchimpact.SemanticProvider, func()) {
+func openSemanticProvider(ctx context.Context, cfg config.Config, workspaceRoot string) (impact.SemanticProvider, func()) {
 	workspaceID := workspace.ID(workspaceRoot)
 	store, err := searchindex.Open(ctx, cfg.Storage.Root)
 	if err != nil {
@@ -75,7 +75,7 @@ func openSemanticProvider(ctx context.Context, cfg config.Config, workspaceRoot 
 		return unavailableSemanticProvider{reason: fmt.Sprintf("create embedding provider: %v", err)}, func() {}
 	}
 
-	source := "searchindex_vector"
+	source := impact.SourceSearchIndex
 	if cfg.Turbovec.Enabled && turbovecAvailable(cfg.Turbovec.SocketPath) {
 		store = searchindex.WrapWithTurboVec(store, workspaceID, meta.Dimensions, searchindex.TurboVecConfig{
 			Enabled:    true,
@@ -83,7 +83,7 @@ func openSemanticProvider(ctx context.Context, cfg config.Config, workspaceRoot 
 			DataDir:    cfg.Storage.Root,
 			BitWidth:   cfg.Turbovec.BitWidth,
 		})
-		source = "turbovec_vector"
+		source = impact.SourceTurboVec
 	}
 
 	return &semanticProvider{
@@ -96,97 +96,91 @@ func openSemanticProvider(ctx context.Context, cfg config.Config, workspaceRoot 
 	}, closeStore
 }
 
-func (p unavailableSemanticProvider) Neighbors(context.Context, []branchimpact.Change, branchimpact.SemanticOptions) (branchimpact.SemanticResult, error) {
-	return branchimpact.SemanticResult{Available: false, Reason: p.reason}, nil
+func (p unavailableSemanticProvider) Neighbors(context.Context, impact.SemanticNeighborRequest) (impact.SemanticResult, error) {
+	return impact.SemanticResult{Available: false, Reason: p.reason}, nil
 }
 
-func (p *semanticProvider) Neighbors(ctx context.Context, changes []branchimpact.Change, opts branchimpact.SemanticOptions) (branchimpact.SemanticResult, error) {
+func (p *semanticProvider) Neighbors(ctx context.Context, req impact.SemanticNeighborRequest) (impact.SemanticResult, error) {
 	if p == nil || p.store == nil || p.embedder == nil {
-		return branchimpact.SemanticResult{Available: false, Reason: "semantic provider not configured"}, nil
+		return impact.SemanticResult{Available: false, Reason: "semantic provider not configured"}, nil
 	}
 	searchCtx, cancel := context.WithTimeout(ctx, semanticLaneTimeout)
 	defer cancel()
 
-	changedPaths := make(map[string]struct{}, len(changes))
-	for _, change := range changes {
-		changedPaths[filepath.ToSlash(change.Path)] = struct{}{}
+	excluded := make(map[string]struct{}, len(req.ExcludePaths))
+	for _, path := range req.ExcludePaths {
+		path = filepath.ToSlash(strings.TrimSpace(path))
+		if path != "" {
+			excluded[path] = struct{}{}
+		}
 	}
 
-	perChangeLimit := opts.PerFileCap
-	if perChangeLimit <= 0 {
-		perChangeLimit = branchimpact.DefaultPerFileCap
-	}
-	limit := opts.Limit
-	if limit <= 0 {
-		limit = branchimpact.DefaultLimit
-	}
-
-	queries := make([]string, 0, len(changes))
-	for _, change := range changes {
-		if change.IsDeleted {
-			continue
-		}
-		query := p.queryForChange(change)
-		if strings.TrimSpace(query) == "" {
-			continue
-		}
-		queries = append(queries, query)
-	}
+	queries, labels := p.queriesForTargets(req.Targets)
 	if len(queries) == 0 {
-		return branchimpact.SemanticResult{Available: false, Reason: "no semantic queries built"}, nil
+		return impact.SemanticResult{Available: false, Reason: "no semantic queries built"}, nil
 	}
-
 	embeddings, err := p.embedder.EmbedBatch(searchCtx, queries)
 	if err != nil {
-		return branchimpact.SemanticResult{Available: false, Reason: fmt.Sprintf("embed semantic queries: %v", err)}, nil
+		return impact.SemanticResult{Available: false, Reason: fmt.Sprintf("embed semantic queries: %v", err)}, nil
 	}
 	if len(embeddings) != len(queries) {
-		return branchimpact.SemanticResult{Available: false, Reason: fmt.Sprintf("embed semantic queries: got %d embeddings for %d queries", len(embeddings), len(queries))}, nil
+		return impact.SemanticResult{Available: false, Reason: fmt.Sprintf("embed semantic queries: got %d embeddings for %d queries", len(embeddings), len(queries))}, nil
 	}
 
-	searchLimit := semanticVectorRecallLimit(perChangeLimit, len(changedPaths))
-	seen := make(map[string]branchimpact.SemanticCandidate)
-	for idx := range queries {
-		embedding := embeddings[idx]
+	perTargetCap := req.PerTargetCap
+	if perTargetCap <= 0 {
+		perTargetCap = impact.DefaultPerTargetCap
+	}
+	limit := req.Limit
+	if limit <= 0 {
+		limit = impact.DefaultLimit
+	}
+
+	searchLimit := semanticVectorRecallLimit(perTargetCap, len(excluded))
+	seen := make(map[string]impact.SemanticCandidate)
+	for idx, embedding := range embeddings {
 		if len(embedding) == 0 {
 			continue
 		}
 		hits, err := p.store.VectorRecall(searchCtx, p.workspaceID, embedding, searchindex.VectorRecallOptions{
 			Limit:          searchLimit,
+			MinScore:       req.MinScore,
 			EmbeddingModel: p.model,
 		})
 		if err != nil {
-			return branchimpact.SemanticResult{Available: false, Reason: fmt.Sprintf("search semantic neighbors: %v", err)}, nil
+			return impact.SemanticResult{Available: false, Reason: fmt.Sprintf("search semantic neighbors: %v", err)}, nil
 		}
-		acceptedForChange := 0
+		accepted := 0
 		for _, hit := range hits {
 			doc := hit.Doc
 			path := filepath.ToSlash(strings.TrimSpace(doc.Path))
 			if path == "" {
 				continue
 			}
-			if _, changed := changedPaths[path]; changed {
+			if _, changed := excluded[path]; changed {
 				continue
 			}
-			candidate := branchimpact.SemanticCandidate{
-				Path:       path,
-				Symbol:     firstNonEmpty(doc.SymbolName, doc.Title),
-				LineHint:   firstPositive(doc.Anchor.Line, doc.Anchor.StartLine, doc.Anchor.EndLine),
-				Similarity: hit.Score,
-				Summary:    doc.Summary,
-				Source:     p.source,
+			candidate := impact.SemanticCandidate{
+				Path:        path,
+				Symbol:      firstNonEmpty(doc.SymbolName, doc.Title),
+				LineHint:    firstPositive(doc.Anchor.Line, doc.Anchor.StartLine, doc.Anchor.EndLine),
+				Similarity:  hit.Score,
+				Summary:     doc.Summary,
+				Source:      p.source,
+				TargetKey:   labels[idx].key,
+				TargetLabel: labels[idx].label,
 			}
 			key := path + "|" + candidate.Symbol
-			if prev, ok := seen[key]; !ok || candidate.Similarity > prev.Similarity {
+			if prev, ok := seen[key]; !ok || semanticCandidateLess(prev, candidate) {
 				seen[key] = candidate
 			}
-			acceptedForChange++
-			if acceptedForChange >= perChangeLimit {
+			accepted++
+			if accepted >= perTargetCap {
 				break
 			}
 		}
 	}
-	candidates := make([]branchimpact.SemanticCandidate, 0, len(seen))
+	candidates := make([]impact.SemanticCandidate, 0, len(seen))
 	for _, candidate := range seen {
 		candidates = append(candidates, candidate)
 	}
@@ -197,46 +191,48 @@ func (p *semanticProvider) Neighbors(ctx context.Context, changes []branchimpact
 		if candidates[i].Path != candidates[j].Path {
 			return candidates[i].Path < candidates[j].Path
 		}
-		return candidates[i].Symbol < candidates[j].Symbol
+		if candidates[i].Symbol != candidates[j].Symbol {
+			return candidates[i].Symbol < candidates[j].Symbol
+		}
+		return candidates[i].LineHint < candidates[j].LineHint
 	})
 	if len(candidates) > limit {
 		candidates = candidates[:limit]
 	}
 	if len(candidates) == 0 {
-		return branchimpact.SemanticResult{Available: false, Reason: "no semantic neighbors found"}, nil
+		return impact.SemanticResult{Available: false, Reason: "no semantic neighbors found"}, nil
 	}
-	return branchimpact.SemanticResult{Available: true, Reason: p.source, Candidates: candidates}, nil
+	return impact.SemanticResult{Available: true, Reason: string(p.source), Source: p.source, Candidates: candidates}, nil
 }
 
-func semanticVectorRecallLimit(perChangeLimit, changedPathCount int) int {
-	if perChangeLimit <= 0 {
-		perChangeLimit = branchimpact.DefaultPerFileCap
-	}
-	limit := perChangeLimit * 20
-	if limit < 100 {
-		limit = 100
-	}
-	if minForChangedPaths := perChangeLimit + changedPathCount; limit < minForChangedPaths {
-		limit = minForChangedPaths
-	}
-	if limit > 200 {
-		return 200
-	}
-	return limit
+type semanticTargetLabel struct {
+	key   string
+	label string
 }
 
-func (p *semanticProvider) queryForChange(change branchimpact.Change) string {
-	parts := []string{change.Path}
-	if change.OldPath != "" {
-		parts = append(parts, change.OldPath)
+func (p *semanticProvider) queriesForTargets(targets []impact.Target) ([]string, []semanticTargetLabel) {
+	queries := make([]string, 0, len(targets))
+	labels := make([]semanticTargetLabel, 0, len(targets))
+	for _, target := range targets {
+		query := p.queryForTarget(target)
+		if strings.TrimSpace(query) == "" {
+			continue
+		}
+		queries = append(queries, query)
+		labels = append(labels, semanticTargetLabel{key: impact.TargetKey(target), label: impact.TargetLabel(target)})
 	}
-	if content := p.readChangedFilePrefix(change.Path); content != "" {
-		parts = append(parts, content)
-	}
-	return strings.Join(parts, "\n\n")
+	return queries, labels
 }
 
-func (p *semanticProvider) readChangedFilePrefix(path string) string {
+func (p *semanticProvider) queryForTarget(target impact.Target) string {
+	parts := []string{string(target.Kind), target.Path, target.OldPath, target.Symbol, target.Package, target.Contract, target.Description}
+	if target.Path != "" && !target.IsDeleted {
+		parts = append(parts, p.readTargetFilePrefix(target.Path))
+	}
+	return strings.Join(nonEmpty(parts), "\n\n")
+}
+
+func (p *semanticProvider) readTargetFilePrefix(path string) string {
 	fullPath := filepath.Join(p.workspaceRoot, filepath.FromSlash(path))
 	rel, err := filepath.Rel(p.workspaceRoot, fullPath)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
@@ -254,6 +250,36 @@ func (p *semanticProvider) readChangedFilePrefix(path string) string {
 	return strings.TrimSpace(string(data))
 }
 
+func semanticVectorRecallLimit(perTargetCap, excludedPathCount int) int {
+	if perTargetCap <= 0 {
+		perTargetCap = impact.DefaultPerTargetCap
+	}
+	limit := perTargetCap * 20
+	if limit < 100 {
+		limit = 100
+	}
+	if minForExcludedPaths := perTargetCap + excludedPathCount; limit < minForExcludedPaths {
+		limit = minForExcludedPaths
+	}
+	if limit > 200 {
+		return 200
+	}
+	return limit
+}
+
+func semanticCandidateLess(left, right impact.SemanticCandidate) bool {
+	if left.Similarity != right.Similarity {
+		return left.Similarity < right.Similarity
+	}
+	if left.Path != right.Path {
+		return left.Path > right.Path
+	}
+	if left.Symbol != right.Symbol {
+		return left.Symbol > right.Symbol
+	}
+	return left.LineHint > right.LineHint
+}
+
 func turbovecAvailable(socketPath string) bool {
 	if strings.TrimSpace(socketPath) == "" {
 		socketPath = turbovec.DefaultSocketPath()
@@ -267,6 +293,17 @@ func turbovecAvailable(socketPath string) bool {
 	}
 	_ = client.Close()
 	return true
+}
+
+func nonEmpty(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func firstNonEmpty(values ...string) string {

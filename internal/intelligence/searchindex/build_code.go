@@ -108,15 +108,10 @@ func BuildCodeDocuments(ctx context.Context, source BootstrapSource, index Store
 		symbolPending = append(symbolPending, doc)
 	}
 
-	result.Errors += embedDocuments(ctx, opts, "symbols", symbolPending)
-	for _, doc := range symbolPending {
-		if err := index.Upsert(ctx, doc); err != nil {
-			result.Errors++
-			continue
-		}
-		result.SymbolBuilt++
-		result.Upserted++
-	}
+	built, errors := embedAndUpsertDocuments(ctx, index, opts, "symbols", symbolPending)
+	result.SymbolBuilt += built
+	result.Upserted += built
+	result.Errors += errors
 
 	var filePending []Document
 	for _, entry := range fileDocs {
@@ -138,15 +133,10 @@ func BuildCodeDocuments(ctx context.Context, source BootstrapSource, index Store
 		filePending = append(filePending, doc)
 	}
 
-	result.Errors += embedDocuments(ctx, opts, "files", filePending)
-	for _, doc := range filePending {
-		if err := index.Upsert(ctx, doc); err != nil {
-			result.Errors++
-			continue
-		}
-		result.FileBuilt++
-		result.Upserted++
-	}
+	built, errors = embedAndUpsertDocuments(ctx, index, opts, "files", filePending)
+	result.FileBuilt += built
+	result.Upserted += built
+	result.Errors += errors
 
 	if result.Upserted == 0 && result.Errors > 0 {
 		return result, fmt.Errorf("searchindex: bootstrap completed with errors")
@@ -319,35 +309,23 @@ func normString(value string) string {
 	return strings.TrimSpace(value)
 }
 
-func embedDocuments(ctx context.Context, opts BuildCodeOptions, stage string, docs []Document) int {
-	provider := opts.EmbedProvider
-	if provider == nil || len(docs) == 0 {
-		return 0
+type embeddingItem struct {
+	docIndex int
+	text     string
+}
+
+func embedAndUpsertDocuments(ctx context.Context, index Store, opts BuildCodeOptions, stage string, docs []Document) (built int, errors int) {
+	items := embeddingItemsForDocuments(docs)
+	if opts.EmbedProvider == nil || len(items) == 0 {
+		return upsertDocuments(ctx, index, docs)
 	}
 
-	type item struct {
-		docIndex int
-		text     string
-	}
-	items := make([]item, 0, len(docs))
-	for i := range docs {
-		text := embeddingTextForDocument(docs[i])
-		if text == "" {
-			continue
-		}
-		items = append(items, item{docIndex: i, text: text})
-	}
-	if len(items) == 0 {
-		return 0
-	}
-
+	indexed := make([]bool, len(docs))
 	batchSize := opts.EmbedBatchSize
 	if batchSize <= 0 {
 		batchSize = 32
 	}
 	totalBatches := (len(items) + batchSize - 1) / batchSize
-	errors := 0
-	model := provider.Model()
 
 	for batch := 0; batch < totalBatches; batch++ {
 		start := batch * batchSize
@@ -356,61 +334,113 @@ func embedDocuments(ctx context.Context, opts BuildCodeOptions, stage string, do
 			end = len(items)
 		}
 		chunk := items[start:end]
-		texts := make([]string, len(chunk))
-		for i := range chunk {
-			texts[i] = chunk[i].text
-		}
-		if opts.Progress != nil {
-			opts.Progress(BuildProgress{
-				Stage:        stage,
-				Batch:        batch + 1,
-				TotalBatches: totalBatches,
-				Docs:         len(chunk),
-			})
-		}
+		errors += embedDocumentChunk(ctx, opts, stage, batch+1, totalBatches, chunk, docs)
 
-		if embeddings, err := provider.EmbedBatch(ctx, texts); err == nil && len(embeddings) == len(chunk) {
-			for i, embedding := range embeddings {
-				docs[chunk[i].docIndex].Embedding = embedding
-				docs[chunk[i].docIndex].EmbeddingModel = model
-			}
-			if opts.Progress != nil {
-				opts.Progress(BuildProgress{
-					Stage:        stage,
-					Batch:        batch + 1,
-					TotalBatches: totalBatches,
-					Docs:         len(chunk),
-					Embedded:     len(chunk),
-				})
-			}
-			continue
-		}
-
-		batchErrors := 0
-		embedded := 0
+		batchDocs := make([]Document, 0, len(chunk))
 		for _, item := range chunk {
-			embedding, err := provider.Embed(ctx, item.text)
-			if err != nil {
-				errors++
-				batchErrors++
-				continue
-			}
-			docs[item.docIndex].Embedding = embedding
-			docs[item.docIndex].EmbeddingModel = model
-			embedded++
+			batchDocs = append(batchDocs, docs[item.docIndex])
+			indexed[item.docIndex] = true
 		}
-		if opts.Progress != nil {
-			opts.Progress(BuildProgress{
-				Stage:        stage,
-				Batch:        batch + 1,
-				TotalBatches: totalBatches,
-				Docs:         len(chunk),
-				Embedded:     embedded,
-				Errors:       batchErrors,
-			})
+		batchBuilt, batchErrors := upsertDocuments(ctx, index, batchDocs)
+		built += batchBuilt
+		errors += batchErrors
+	}
+
+	var unembedded []Document
+	for i, doc := range docs {
+		if !indexed[i] {
+			unembedded = append(unembedded, doc)
 		}
 	}
+	unembeddedBuilt, unembeddedErrors := upsertDocuments(ctx, index, unembedded)
+	built += unembeddedBuilt
+	errors += unembeddedErrors
+	return built, errors
+}
+
+func embeddingItemsForDocuments(docs []Document) []embeddingItem {
+	items := make([]embeddingItem, 0, len(docs))
+	for i := range docs {
+		text := embeddingTextForDocument(docs[i])
+		if text == "" {
+			continue
+		}
+		items = append(items, embeddingItem{docIndex: i, text: text})
+	}
+	return items
+}
+
+func embedDocumentChunk(ctx context.Context, opts BuildCodeOptions, stage string, batch int, totalBatches int, chunk []embeddingItem, docs []Document) int {
+	provider := opts.EmbedProvider
+	if provider == nil || len(chunk) == 0 {
+		return 0
+	}
+
+	texts := make([]string, len(chunk))
+	for i := range chunk {
+		texts[i] = chunk[i].text
+	}
+	model := provider.Model()
+	if opts.Progress != nil {
+		opts.Progress(BuildProgress{
+			Stage:        stage,
+			Batch:        batch,
+			TotalBatches: totalBatches,
+			Docs:         len(chunk),
+		})
+	}
+
+	if embeddings, err := provider.EmbedBatch(ctx, texts); err == nil && len(embeddings) == len(chunk) {
+		for i, embedding := range embeddings {
+			docs[chunk[i].docIndex].Embedding = embedding
+			docs[chunk[i].docIndex].EmbeddingModel = model
+		}
+		if opts.Progress != nil {
+			opts.Progress(BuildProgress{
+				Stage:        stage,
+				Batch:        batch,
+				TotalBatches: totalBatches,
+				Docs:         len(chunk),
+				Embedded:     len(chunk),
+			})
+		}
+		return 0
+	}
+
+	errors := 0
+	embedded := 0
+	for _, item := range chunk {
+		embedding, err := provider.Embed(ctx, item.text)
+		if err != nil {
+			errors++
+			continue
+		}
+		docs[item.docIndex].Embedding = embedding
+		docs[item.docIndex].EmbeddingModel = model
+		embedded++
+	}
+	if opts.Progress != nil {
+		opts.Progress(BuildProgress{
+			Stage:        stage,
+			Batch:        batch,
+			TotalBatches: totalBatches,
+			Docs:         len(chunk),
+			Embedded:     embedded,
+			Errors:       errors,
+		})
+	}
 	return errors
+}
+
+func upsertDocuments(ctx context.Context, index Store, docs []Document) (built int, errors int) {
+	for _, doc := range docs {
+		if err := index.Upsert(ctx, doc); err != nil {
+			errors++
+			continue
+		}
+		built++
+	}
+	return built, errors
 }
 
 func embeddingTextForDocument(doc Document) string {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
 	"github.com/joshka0/foxctl/internal/platform/fsutil"
+	"github.com/joshka0/foxctl/internal/platform/workspace"
 )
 
 func TestSemanticIndexCommand_Init(t *testing.T) {
@@ -219,6 +220,9 @@ func TestSemanticIndexInit_DryRun(t *testing.T) {
 	filesCount, ok := data["files_count"].(float64)
 	if !ok || filesCount < 1 {
 		t.Errorf("expected files_count to be at least 1, got %v", data["files_count"])
+	}
+	if data["workspace_id"] != workspace.ID(tmpDir) {
+		t.Errorf("workspace_id=%v want %s", data["workspace_id"], workspace.ID(tmpDir))
 	}
 }
 

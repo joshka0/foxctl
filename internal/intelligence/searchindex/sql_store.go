@@ -252,6 +252,27 @@ func (s *sqlStore) CountWorkspace(ctx context.Context, workspaceID string) (int,
 	return count, nil
 }
 
+// WorkspaceStats returns persisted retrieval corpus stats for a workspace.
+func (s *sqlStore) WorkspaceStats(ctx context.Context, workspaceID string) (WorkspaceStats, error) {
+	workspaceID = workspace.CanonicalID(workspaceID)
+	stats := WorkspaceStats{WorkspaceID: workspaceID}
+	if err := s.db.QueryRowContext(ctx, `
+SELECT
+	COUNT(*),
+	COALESCE(SUM(CASE WHEN embedding_json IS NOT NULL AND embedding_json != '' AND embedding_json != 'null' THEN 1 ELSE 0 END), 0)
+FROM search_documents
+WHERE workspace_id = $1
+`, workspaceID).Scan(&stats.DocumentCount, &stats.EmbeddedCount); err != nil {
+		return WorkspaceStats{}, fmt.Errorf("searchindex: workspace stats: %w", err)
+	}
+	meta, err := s.GetEmbeddingMetadata(ctx, workspaceID)
+	if err != nil {
+		return WorkspaceStats{}, err
+	}
+	stats.EmbeddingMetadata = meta
+	return stats, nil
+}
+
 // GetEmbeddingMetadata returns the persisted embedding contract for a workspace.
 func (s *sqlStore) GetEmbeddingMetadata(ctx context.Context, workspaceID string) (*EmbeddingMetadata, error) {
 	workspaceID = workspace.CanonicalID(workspaceID)
@@ -493,6 +514,46 @@ func (s *sqlStore) GetEmbeddingsByIDs(ctx context.Context, ids []string) (map[st
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("searchindex: get embeddings rows: %w", err)
+	}
+	return result, nil
+}
+
+// GetDocumentsByIDs returns complete documents for the given document IDs.
+// IDs without a row are silently omitted.
+func (s *sqlStore) GetDocumentsByIDs(ctx context.Context, ids []string) (map[string]Document, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	args := make([]any, len(ids))
+	placeholders := make([]string, len(ids))
+	for i, id := range ids {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(`
+SELECT id, workspace_id, scope, kind, group_key, path, symbol_id, symbol_name, title, summary,
+       search_text, keywords_json, anchor_json, metadata_json, embedding_json, embedding_model, updated_at
+FROM search_documents
+WHERE id IN (%s)`, strings.Join(placeholders, ", "))
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("searchindex: get documents by ids: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string]Document, len(ids))
+	for rows.Next() {
+		doc, _, err := scanDocRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		result[doc.ID] = doc
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("searchindex: get documents rows: %w", err)
 	}
 	return result, nil
 }
