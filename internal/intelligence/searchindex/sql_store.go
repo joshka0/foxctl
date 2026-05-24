@@ -518,6 +518,46 @@ func (s *sqlStore) GetEmbeddingsByIDs(ctx context.Context, ids []string) (map[st
 	return result, nil
 }
 
+// GetDocumentsByIDs returns complete documents for the given document IDs.
+// IDs without a row are silently omitted.
+func (s *sqlStore) GetDocumentsByIDs(ctx context.Context, ids []string) (map[string]Document, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	args := make([]any, len(ids))
+	placeholders := make([]string, len(ids))
+	for i, id := range ids {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(`
+SELECT id, workspace_id, scope, kind, group_key, path, symbol_id, symbol_name, title, summary,
+       search_text, keywords_json, anchor_json, metadata_json, embedding_json, embedding_model, updated_at
+FROM search_documents
+WHERE id IN (%s)`, strings.Join(placeholders, ", "))
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("searchindex: get documents by ids: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string]Document, len(ids))
+	for rows.Next() {
+		doc, _, err := scanDocRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		result[doc.ID] = doc
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("searchindex: get documents rows: %w", err)
+	}
+	return result, nil
+}
+
 type scoredHit struct {
 	Doc       Document
 	Score     float64

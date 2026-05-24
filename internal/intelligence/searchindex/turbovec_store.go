@@ -172,9 +172,12 @@ func (s *turbovecStore) VectorRecall(ctx context.Context, workspaceID string, em
 	} else {
 		results, err = s.vec.Search(embedding, k)
 	}
-	if err != nil || len(results) == 0 {
+	if err != nil {
 		// Fall back to brute-force SQL.
 		return s.Store.VectorRecall(ctx, workspaceID, embedding, opts)
+	}
+	if len(results) == 0 {
+		return nil, nil
 	}
 
 	// Collect candidate doc IDs.
@@ -186,21 +189,7 @@ func (s *turbovecStore) VectorRecall(ctx context.Context, workspaceID string, em
 	// Fetch exact embeddings for the candidate set from SQL.
 	exactEmbeddings, err := s.GetEmbeddingsByIDs(ctx, candidateIDs)
 	if err != nil {
-		// Rerank failed — return approximate results as-is.
-		hits := make([]SearchHit, 0, len(results))
-		for _, r := range results {
-			hits = append(hits, SearchHit{
-				Doc: Document{
-					ID:          r.DocID,
-					WorkspaceID: workspaceID,
-				},
-				Score: r.Score,
-			})
-		}
-		if len(hits) > opts.Limit {
-			hits = hits[:opts.Limit]
-		}
-		return hits, nil
+		return nil, fmt.Errorf("searchindex: turbovec rerank embeddings: %w", err)
 	}
 
 	// Rerank with exact cosine similarity.
@@ -234,13 +223,23 @@ func (s *turbovecStore) VectorRecall(ctx context.Context, workspaceID string, em
 		reranked = reranked[:opts.Limit]
 	}
 
+	rerankedIDs := make([]string, 0, len(reranked))
+	for _, r := range reranked {
+		rerankedIDs = append(rerankedIDs, r.docID)
+	}
+	docs, err := s.GetDocumentsByIDs(ctx, rerankedIDs)
+	if err != nil {
+		return nil, fmt.Errorf("searchindex: turbovec hydrate documents: %w", err)
+	}
+
 	hits := make([]SearchHit, 0, len(reranked))
 	for _, r := range reranked {
+		doc, ok := docs[r.docID]
+		if !ok {
+			continue
+		}
 		hits = append(hits, SearchHit{
-			Doc: Document{
-				ID:          r.docID,
-				WorkspaceID: workspaceID,
-			},
+			Doc:   doc,
 			Score: r.score,
 		})
 	}

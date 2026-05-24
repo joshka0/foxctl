@@ -60,7 +60,16 @@ func main() {
 	}
 	defer memStore.Close()
 
-	indexStore, err := searchindex.OpenWithTurboVec(ctx, cfg.Storage.Root, workspaceID, cfg.Database.Vector.Dimensions, searchindex.TurboVecConfig{
+	embedder, err := semantic.NewProviderForScope(
+		semantic.ScopeSymbols,
+		cfg,
+		semantic.WithGeminiKey(os.Getenv("GEMINI_API_KEY")),
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	indexStore, err := searchindex.OpenWithTurboVec(ctx, cfg.Storage.Root, workspaceID, embedder.Dimensions(), searchindex.TurboVecConfig{
 		Enabled:    cfg.Turbovec.Enabled,
 		SocketPath: cfg.Turbovec.SocketPath,
 		DataDir:    cfg.Storage.Root,
@@ -70,15 +79,6 @@ func main() {
 		panic(err)
 	}
 	defer indexStore.Close()
-
-	embedder, err := semantic.NewProviderForScope(
-		semantic.ScopeSymbols,
-		cfg,
-		semantic.WithGeminiKey(os.Getenv("GEMINI_API_KEY")),
-	)
-	if err != nil {
-		panic(err)
-	}
 
 	if err := indexStore.DeleteWorkspace(ctx, workspaceID); err != nil {
 		panic(err)

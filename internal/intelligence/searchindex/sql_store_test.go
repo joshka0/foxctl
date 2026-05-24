@@ -222,6 +222,49 @@ func TestStoreWorkspaceStats(t *testing.T) {
 	}
 }
 
+func TestStoreGetDocumentsByIDsHydratesMetadata(t *testing.T) {
+	testCtx := context.Background()
+
+	store, err := Open(testCtx, t.TempDir())
+	if err != nil {
+		t.Fatalf("open search index: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	if err := store.Upsert(testCtx, Document{
+		ID:             "search://ws-docs/symbol/a",
+		WorkspaceID:    "ws-docs",
+		Scope:          ScopeCode,
+		Kind:           KindSymbol,
+		GroupKey:       "alpha.go",
+		Path:           "alpha.go",
+		SymbolName:     "Alpha",
+		Title:          "alpha",
+		Summary:        "alpha document",
+		SearchText:     "alpha function",
+		Keywords:       []string{"alpha"},
+		Embedding:      []float32{0.1, 0.2, 0.3},
+		EmbeddingModel: "model-a",
+	}); err != nil {
+		t.Fatalf("upsert vector doc: %v", err)
+	}
+
+	docs, err := store.GetDocumentsByIDs(testCtx, []string{"missing", "search://ws-docs/symbol/a"})
+	if err != nil {
+		t.Fatalf("GetDocumentsByIDs: %v", err)
+	}
+	doc, ok := docs["search://ws-docs/symbol/a"]
+	if !ok {
+		t.Fatalf("docs=%+v missing stored document", docs)
+	}
+	if doc.Path != "alpha.go" || doc.SymbolName != "Alpha" || doc.EmbeddingModel != "model-a" || len(doc.Embedding) != 3 {
+		t.Fatalf("doc=%+v missing hydrated metadata", doc)
+	}
+	if _, ok := docs["missing"]; ok {
+		t.Fatalf("docs=%+v should omit missing id", docs)
+	}
+}
+
 func TestStoreEmbeddingMetadataValidation(t *testing.T) {
 	testCtx := context.Background()
 

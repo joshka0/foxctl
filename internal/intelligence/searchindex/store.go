@@ -73,6 +73,10 @@ type Store interface {
 	// GetEmbeddingsByIDs returns exact embeddings for the given document IDs.
 	// IDs without a stored embedding are silently omitted from the result map.
 	GetEmbeddingsByIDs(ctx context.Context, ids []string) (map[string][]float32, error)
+
+	// GetDocumentsByIDs returns complete documents for the given document IDs.
+	// Missing IDs are silently omitted from the result map.
+	GetDocumentsByIDs(ctx context.Context, ids []string) (map[string]Document, error)
 }
 
 type WorkspaceStats struct {

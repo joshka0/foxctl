@@ -19,7 +19,7 @@ import (
 	"github.com/joshka0/foxctl/internal/platform/workspace"
 )
 
-const semanticLaneTimeout = 20 * time.Second
+const semanticLaneTimeout = 60 * time.Second
 
 type semanticProvider struct {
 	workspaceRoot string
@@ -121,7 +121,7 @@ func (p *semanticProvider) Neighbors(ctx context.Context, changes []branchimpact
 		limit = branchimpact.DefaultLimit
 	}
 
-	seen := make(map[string]branchimpact.SemanticCandidate)
+	queries := make([]string, 0, len(changes))
 	for _, change := range changes {
 		if change.IsDeleted {
 			continue
@@ -130,18 +130,35 @@ func (p *semanticProvider) Neighbors(ctx context.Context, changes []branchimpact
 		if strings.TrimSpace(query) == "" {
 			continue
 		}
-		embedding, err := p.embedder.Embed(searchCtx, query)
-		if err != nil {
-			return branchimpact.SemanticResult{Available: false, Reason: fmt.Sprintf("embed semantic query: %v", err)}, nil
+		queries = append(queries, query)
+	}
+	if len(queries) == 0 {
+		return branchimpact.SemanticResult{Available: false, Reason: "no semantic queries built"}, nil
+	}
+
+	embeddings, err := p.embedder.EmbedBatch(searchCtx, queries)
+	if err != nil {
+		return branchimpact.SemanticResult{Available: false, Reason: fmt.Sprintf("embed semantic queries: %v", err)}, nil
+	}
+	if len(embeddings) != len(queries) {
+		return branchimpact.SemanticResult{Available: false, Reason: fmt.Sprintf("embed semantic queries: got %d embeddings for %d queries", len(embeddings), len(queries))}, nil
+	}
+
+	searchLimit := semanticVectorRecallLimit(perChangeLimit, len(changedPaths))
+	seen := make(map[string]branchimpact.SemanticCandidate)
+	for idx := range queries {
+		embedding := embeddings[idx]
+		if len(embedding) == 0 {
+			continue
 		}
 		hits, err := p.store.VectorRecall(searchCtx, p.workspaceID, embedding, searchindex.VectorRecallOptions{
-			Limit:          perChangeLimit,
-			MinScore:       0.45,
+			Limit:          searchLimit,
 			EmbeddingModel: p.model,
 		})
 		if err != nil {
 			return branchimpact.SemanticResult{Available: false, Reason: fmt.Sprintf("search semantic neighbors: %v", err)}, nil
 		}
+		acceptedForChange := 0
 		for _, hit := range hits {
 			doc := hit.Doc
 			path := filepath.ToSlash(strings.TrimSpace(doc.Path))
@@ -162,6 +179,10 @@ func (p *semanticProvider) Neighbors(ctx context.Context, changes []branchimpact
 			key := path + "|" + candidate.Symbol
 			if prev, ok := seen[key]; !ok || candidate.Similarity > prev.Similarity {
 				seen[key] = candidate
+			}
+			acceptedForChange++
+			if acceptedForChange >= perChangeLimit {
+				break
 			}
 		}
 	}
@@ -185,6 +206,23 @@ func (p *semanticProvider) Neighbors(ctx context.Context, changes []branchimpact
 		return branchimpact.SemanticResult{Available: false, Reason: "no semantic neighbors found"}, nil
 	}
 	return branchimpact.SemanticResult{Available: true, Reason: p.source, Candidates: candidates}, nil
+}
+
+func semanticVectorRecallLimit(perChangeLimit, changedPathCount int) int {
+	if perChangeLimit <= 0 {
+		perChangeLimit = branchimpact.DefaultPerFileCap
+	}
+	limit := perChangeLimit * 20
+	if limit < 100 {
+		limit = 100
+	}
+	if minForChangedPaths := perChangeLimit + changedPathCount; limit < minForChangedPaths {
+		limit = minForChangedPaths
+	}
+	if limit > 200 {
+		return 200
+	}
+	return limit
 }
 
 func (p *semanticProvider) queryForChange(change branchimpact.Change) string {

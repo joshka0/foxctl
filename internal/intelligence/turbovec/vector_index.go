@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/joshka0/foxctl/internal/platform/workspace"
 )
 
 const (
@@ -56,6 +58,7 @@ type IndexConfig struct {
 // NewVectorIndex creates a new VectorIndex for the given workspace.
 // The sidecar connection is established lazily on first use.
 func NewVectorIndex(workspaceID string, dim int, cfg IndexConfig) *VectorIndex {
+	workspaceID = workspace.CanonicalID(workspaceID)
 	socketPath := cfg.SocketPath
 	if socketPath == "" {
 		socketPath = DefaultSocketPath()
