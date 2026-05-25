@@ -14,7 +14,6 @@ import (
 
 	"github.com/joshka0/foxctl/internal/domain/envelope"
 	"github.com/joshka0/foxctl/internal/domain/skill"
-	"github.com/joshka0/foxctl/internal/platform/logging"
 	"github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/runtime/execution"
 	"github.com/joshka0/foxctl/internal/runtime/observability"
@@ -127,15 +126,16 @@ func TestExecutorFindOrPrepareSkillJobDedupes(t *testing.T) {
 	}
 }
 
-func TestExecutorLogsProgressFailures(t *testing.T) {
+func TestExecutorEmitsProgressFailureEvents(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	persist := newFakePersistence()
-	var logBuf bytes.Buffer
-	logger := logging.New(logging.Config{
-		Level:  logging.LevelWarn,
-		Format: logging.FormatText,
-		Writer: &logBuf,
+	obsDir := t.TempDir()
+	observability.SetObsDirForTesting(obsDir)
+	observability.SetSamplerForTesting(observability.SampleAll{})
+	t.Cleanup(func() {
+		observability.SetObsDirForTesting("")
+		observability.SetSamplerForTesting(nil)
 	})
 	runner := func(_ context.Context, _ skill.Manifest, _ string, _ []byte) ([]byte, []byte, error) {
 		env := envelope.OK("test", map[string]string{"message": "ok"})
@@ -148,7 +148,6 @@ func TestExecutorLogsProgressFailures(t *testing.T) {
 	exec := New(
 		root, persist,
 		WithRunner(runner),
-		WithLogger(logger),
 		withProgressWriterFactory(func(string) (*progressWriter, error) {
 			return &progressWriter{
 				writeOverride: func(ProgressEvent) error { return errors.New("boom") },
@@ -166,9 +165,24 @@ func TestExecutorLogsProgressFailures(t *testing.T) {
 	if _, _, err := exec.RunSkill(ctx, manifest, "", []byte(`{"foo":"bar"}`)); err != nil {
 		t.Fatalf("run skill: %v", err)
 	}
-	if !bytes.Contains(logBuf.Bytes(), []byte("progress write failed")) {
-		t.Fatalf("expected progress warning, got %q", logBuf.String())
+
+	events, err := observability.QueryEventRecords(ctx, observability.EventQueryOptions{
+		ObsDir:          obsDir,
+		OperationPrefix: "job.executor.warning",
+		ErrorsOnly:      true,
+	})
+	if err != nil {
+		t.Fatalf("query warning events: %v", err)
 	}
+	for _, event := range events {
+		if event.JobID == "" {
+			t.Fatalf("warning event missing job id: %+v", event)
+		}
+		if event.Data["warning"] == "progress write failed" {
+			return
+		}
+	}
+	t.Fatalf("expected progress warning event, got %+v", events)
 }
 
 func TestExecutorStartExecutionInitializesProgress(t *testing.T) {

@@ -4,7 +4,6 @@ import (
 	"context"
 
 	errs "github.com/joshka0/foxctl/internal/platform/errors"
-	"github.com/joshka0/foxctl/internal/platform/logging"
 	"github.com/joshka0/foxctl/internal/runtime/jobs/executor"
 	jobstore "github.com/joshka0/foxctl/internal/storage/jobs"
 	"github.com/joshka0/foxctl/internal/storage/jobs/persist"
@@ -55,8 +54,8 @@ func newSkillStoreConfig(opts ...SkillStoreOption) skillStoreConfig {
 	return cfg
 }
 
-func newSkillExecutor(ctx context.Context, root string, p executor.Persistence, cfg skillStoreConfig) jobstore.SkillExecutor {
-	opts := []executor.Option{executor.WithLogger(logging.FromContext(ctx))}
+func newSkillExecutor(_ context.Context, root string, p executor.Persistence, cfg skillStoreConfig) jobstore.SkillExecutor {
+	opts := []executor.Option{}
 	if cfg.casPath != "" {
 		opts = append(opts, executor.WithCASPath(cfg.casPath))
 	}

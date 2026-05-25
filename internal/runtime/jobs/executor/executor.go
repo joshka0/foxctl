@@ -13,7 +13,6 @@ import (
 	"github.com/joshka0/foxctl/internal/domain/envelope"
 	"github.com/joshka0/foxctl/internal/domain/skill"
 	errs "github.com/joshka0/foxctl/internal/platform/errors"
-	"github.com/joshka0/foxctl/internal/platform/logging"
 	"github.com/joshka0/foxctl/internal/platform/metrics"
 	"github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/runtime/execution"
@@ -22,7 +21,6 @@ import (
 	"github.com/joshka0/foxctl/internal/storage/cas"
 	"github.com/joshka0/foxctl/internal/storage/jobs/types"
 	"github.com/oklog/ulid/v2"
-	"github.com/rs/zerolog"
 )
 
 // RunnerFunc executes a skill manifest and returns stdout, stderr, and an error.
@@ -50,7 +48,6 @@ type Executor struct {
 	root            string
 	persist         Persistence
 	skillExecutor   execution.SkillExecutor
-	logger          zerolog.Logger
 	progressFactory func(jobDir string) (*progressWriter, error)
 	casPath         string
 }
@@ -74,13 +71,6 @@ func WithSkillExecutor(executor execution.SkillExecutor) Option {
 	}
 }
 
-// WithLogger injects a logger used for best-effort warnings.
-func WithLogger(logger zerolog.Logger) Option {
-	return func(e *Executor) {
-		e.logger = logger
-	}
-}
-
 // WithCASPath configures the CAS root path for stderr artifact capture.
 func WithCASPath(path string) Option {
 	return func(e *Executor) {
@@ -101,7 +91,6 @@ func New(root string, persist Persistence, opts ...Option) *Executor {
 		root:            root,
 		persist:         persist,
 		skillExecutor:   execution.NewRunnerExecutor(),
-		logger:          logging.Default(),
 		progressFactory: newProgressWriter,
 	}
 	for _, opt := range opts {
@@ -238,8 +227,8 @@ func (e *Executor) executeSkill(ctx context.Context, opts executeOptions) ([]byt
 	stdout, stderr, runErr := e.runSkill(ctx, opts.Manifest, opts.ArtifactPath, opts.Input)
 	duration := time.Since(start)
 	metrics.Global().RecordExecutionTime(duration)
-	e.writeStderrLog(opts.JobID, stderr)
-	stderrDigest := e.persistStderrArtifact(opts.JobID, stderr)
+	e.writeStderrLog(ctx, opts.JobID, stderr)
+	stderrDigest := e.persistStderrArtifact(ctx, opts.JobID, stderr)
 
 	// Wait for enrichment to complete (runs in parallel with skill execution)
 	eventBuilder := baseBuilder
@@ -306,23 +295,17 @@ func (e *Executor) startExecution(ctx context.Context, jobID string) (context.Co
 
 	writer, err := e.progressFactory(e.jobDir(jobID))
 	if err != nil {
-		e.logger.Warn().
-			Str("job_id", jobID).
-			Err(err).
-			Msg("progress writer init failed")
+		emitExecutorWarning(ctx, jobID, "progress_writer_init", err, nil)
 		return ctx, nil, nil, start, nil
 	}
 
 	cleanup := func() {
 		if closeErr := writer.Close(); closeErr != nil {
-			e.logger.Warn().
-				Str("job_id", jobID).
-				Err(closeErr).
-				Msg("progress close failed")
+			emitExecutorWarning(ctx, jobID, "progress_close", closeErr, nil)
 		}
 	}
 	if err := writer.WriteMessage("skill execution started"); err != nil {
-		e.warnProgress(jobID, "execution_start", err)
+		e.warnProgress(ctx, jobID, "execution_start", err)
 	}
 	return ctx, writer, cleanup, start, nil
 }
@@ -354,11 +337,11 @@ func (e *Executor) runSkill(ctx context.Context, manifest skill.Manifest, artifa
 	})
 }
 
-func (e *Executor) handleFailure(_ context.Context, jobID string, stdout, stderr []byte, runErr error, pw *progressWriter) ([]byte, error) {
+func (e *Executor) handleFailure(ctx context.Context, jobID string, stdout, stderr []byte, runErr error, pw *progressWriter) ([]byte, error) {
 	err := augmentError(runErr, stdout, stderr)
 	if pw != nil {
 		if pwErr := pw.WriteMessage(fmt.Sprintf("skill failed: %s", err)); pwErr != nil {
-			e.warnProgress(jobID, "execution_error", pwErr)
+			e.warnProgress(ctx, jobID, "execution_error", pwErr)
 		}
 	}
 	// Use background context for final state update to ensure it completes
@@ -371,7 +354,7 @@ func (e *Executor) handleFailure(_ context.Context, jobID string, stdout, stderr
 	return stdout, fmt.Errorf("skill run failed: %w", err)
 }
 
-func (e *Executor) handleSuccess(_ context.Context, jobID string, stdout []byte, pw *progressWriter) ([]byte, error) {
+func (e *Executor) handleSuccess(ctx context.Context, jobID string, stdout []byte, pw *progressWriter) ([]byte, error) {
 	// Use background context for final state updates to ensure they complete
 	// even if the CLI's context was cancelled (e.g., timeout).
 	stateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -380,7 +363,7 @@ func (e *Executor) handleSuccess(_ context.Context, jobID string, stdout []byte,
 	var resultEnv envelope.Envelope
 	if unmarshalErr := json.Unmarshal(stdout, &resultEnv); unmarshalErr != nil {
 		validationErr := fmt.Errorf("invalid result envelope: %w", unmarshalErr)
-		e.recordProgressFailure(jobID, pw, "decode_error", validationErr)
+		e.recordProgressFailure(ctx, jobID, pw, "decode_error", validationErr)
 		if stateErr := e.persist.UpdateState(stateCtx, jobID, types.StateError, validationErr.Error(), ""); stateErr != nil {
 			return nil, fmt.Errorf("%w (state update also failed: %v)", validationErr, stateErr)
 		}
@@ -389,7 +372,7 @@ func (e *Executor) handleSuccess(_ context.Context, jobID string, stdout []byte,
 
 	if validationErr := envelope.Validate(resultEnv); validationErr != nil {
 		wrapped := fmt.Errorf("envelope validation failed: %w", validationErr)
-		e.recordProgressFailure(jobID, pw, "validation_error", wrapped)
+		e.recordProgressFailure(ctx, jobID, pw, "validation_error", wrapped)
 		if stateErr := e.persist.UpdateState(stateCtx, jobID, types.StateError, wrapped.Error(), ""); stateErr != nil {
 			return nil, fmt.Errorf("%w (state update also failed: %v)", wrapped, stateErr)
 		}
@@ -398,7 +381,7 @@ func (e *Executor) handleSuccess(_ context.Context, jobID string, stdout []byte,
 
 	resultPath := filepath.Join(e.jobDir(jobID), "result.json")
 	if err := os.WriteFile(resultPath, stdout, 0o644); err != nil {
-		e.recordProgressFailure(jobID, pw, "result_error", fmt.Errorf("skill failed to write result: %w", err))
+		e.recordProgressFailure(ctx, jobID, pw, "result_error", fmt.Errorf("skill failed to write result: %w", err))
 		if stateErr := e.persist.UpdateState(stateCtx, jobID, types.StateError, err.Error(), ""); stateErr != nil {
 			return nil, fmt.Errorf("jobs: write result: %w (state update also failed: %v)", err, stateErr)
 		}
@@ -411,19 +394,19 @@ func (e *Executor) handleSuccess(_ context.Context, jobID string, stdout []byte,
 
 	if pw != nil {
 		if err := pw.Write(ProgressEvent{Percent: 100, Message: "skill completed"}); err != nil {
-			e.warnProgress(jobID, "execution_complete", err)
+			e.warnProgress(ctx, jobID, "execution_complete", err)
 		}
 	}
 
 	return stdout, nil
 }
 
-func (e *Executor) recordProgressFailure(jobID string, pw *progressWriter, phase string, err error) {
+func (e *Executor) recordProgressFailure(ctx context.Context, jobID string, pw *progressWriter, phase string, err error) {
 	if pw == nil {
 		return
 	}
 	if pwErr := pw.WriteMessage(fmt.Sprintf("skill failed: %s", err)); pwErr != nil {
-		e.warnProgress(jobID, phase, pwErr)
+		e.warnProgress(ctx, jobID, phase, pwErr)
 	}
 }
 
@@ -444,18 +427,14 @@ func augmentError(runErr error, stdout, stderr []byte) error {
 	return runErr
 }
 
-func (e *Executor) writeStderrLog(jobID string, stderr []byte) {
+func (e *Executor) writeStderrLog(ctx context.Context, jobID string, stderr []byte) {
 	stderrPath := filepath.Join(e.jobDir(jobID), "stderr.log")
 	if writeErr := os.WriteFile(stderrPath, append(stderr, '\n'), 0o644); writeErr != nil {
-		e.logger.Warn().
-			Str("job_id", jobID).
-			Str("path", stderrPath).
-			Err(writeErr).
-			Msg("stderr log write failed")
+		emitExecutorWarning(ctx, jobID, "stderr_log_write", writeErr, map[string]any{"path": stderrPath})
 	}
 }
 
-func (e *Executor) persistStderrArtifact(jobID string, stderr []byte) string {
+func (e *Executor) persistStderrArtifact(ctx context.Context, jobID string, stderr []byte) string {
 	if len(stderr) == 0 {
 		return ""
 	}
@@ -463,33 +442,44 @@ func (e *Executor) persistStderrArtifact(jobID string, stderr []byte) string {
 		return ""
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	casCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	store, err := cas.NewStore(e.casPath)
 	if err != nil {
-		e.logger.Warn().Err(err).Str("job_id", jobID).Msg("stderr cas open failed")
+		emitExecutorWarning(ctx, jobID, "stderr_cas_open", err, nil)
 		return ""
 	}
 	defer func() { errs.Ignore(store.Close(), "close cas store") }()
 
-	obj, err := store.Put(ctx, bytes.NewReader(stderr), "text/plain", []string{"stderr", "job:" + jobID})
+	obj, err := store.Put(casCtx, bytes.NewReader(stderr), "text/plain", []string{"stderr", "job:" + jobID})
 	if err != nil {
-		e.logger.Warn().Err(err).Str("job_id", jobID).Msg("stderr cas put failed")
+		emitExecutorWarning(ctx, jobID, "stderr_cas_put", err, nil)
 		return ""
 	}
 	return obj.Digest
 }
 
-func (e *Executor) warnProgress(jobID, phase string, err error) {
+func (e *Executor) warnProgress(ctx context.Context, jobID, phase string, err error) {
 	if err == nil {
 		return
 	}
-	e.logger.Warn().
-		Str("job_id", jobID).
-		Str("phase", phase).
-		Err(err).
-		Msg("progress write failed")
+	emitExecutorWarning(ctx, jobID, phase, err, map[string]any{"warning": "progress write failed"})
+}
+
+func emitExecutorWarning(ctx context.Context, jobID, phase string, err error, data map[string]any) {
+	if err == nil {
+		return
+	}
+	event := observability.NewEvent("job.executor.warning").
+		EnrichFromContext(ctx).
+		WithComponent(observability.ComponentJob).
+		WithJobID(jobID).
+		WithData("phase", phase)
+	for key, value := range data {
+		event.WithData(key, value)
+	}
+	observability.Emit(ctx, event.Error(err, 0))
 }
 
 func (e *Executor) jobDir(id string) string {
