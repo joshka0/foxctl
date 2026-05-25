@@ -194,6 +194,84 @@ func TestApplyEditPropertyInvalidEmptySearchNeverMutatesContent(t *testing.T) {
 	}
 }
 
+func FuzzApplyEditMaintainsResultInvariants(f *testing.F) {
+	seeds := []struct {
+		content  string
+		search   string
+		replace  string
+		modeSeed uint8
+		lineHint int
+		global   bool
+	}{
+		{content: "alpha\nbeta\n", search: "alpha", replace: "ALPHA", modeSeed: 0},
+		{content: "func A() {\n\treturn nil\n}\n", search: "return nil", replace: "return nil, err", modeSeed: 1, lineHint: 2},
+		{content: "func A() {\n\treturn    nil\n}\n", search: "return nil", replace: "return nil, err", modeSeed: 1, lineHint: 2},
+		{content: "var foo123 = 1\nvar bar456 = 2\n", search: `var \w+\d+`, replace: "const x", modeSeed: 2, global: true},
+		{content: "unchanged", search: "", replace: "x", modeSeed: 3},
+		{content: "not regex", search: "[", replace: "x", modeSeed: 2},
+	}
+	for _, seed := range seeds {
+		f.Add(seed.content, seed.search, seed.replace, seed.modeSeed, seed.lineHint, seed.global)
+	}
+
+	f.Fuzz(func(t *testing.T, content, search, replace string, modeSeed uint8, lineHint int, global bool) {
+		if len(content) > 4096 || len(search) > 256 || len(replace) > 256 {
+			t.Skip()
+		}
+		modes := []MatchMode{MatchExact, MatchFuzzy, MatchRegex, MatchMode("unknown")}
+		edit := Edit{
+			Search:    search,
+			Replace:   replace,
+			MatchMode: modes[int(modeSeed)%len(modes)],
+			LineHint:  boundedLineHint(lineHint),
+			Global:    global,
+		}
+
+		result, modified, err := applyEdit(content, edit)
+		if err != nil {
+			if modified != content {
+				t.Fatalf("errored edit mutated content: err=%v content=%q modified=%q", err, content, modified)
+			}
+			if result.Replacements != 0 || len(result.Lines) != 0 {
+				t.Fatalf("errored edit recorded replacement metadata: err=%v result=%+v", err, result)
+			}
+			return
+		}
+
+		if result.Replacements < 0 {
+			t.Fatalf("negative replacement count: %+v", result)
+		}
+		if result.Replacements == 0 {
+			if modified != content {
+				t.Fatalf("zero-replacement edit mutated content: content=%q modified=%q result=%+v", content, modified, result)
+			}
+			if len(result.Lines) != 0 {
+				t.Fatalf("zero-replacement edit recorded lines: %+v", result)
+			}
+			return
+		}
+		if len(result.Lines) == 0 {
+			t.Fatalf("replacement missing line metadata: %+v", result)
+		}
+		lineCount := strings.Count(content, "\n") + 1
+		for _, line := range result.Lines {
+			if line < 1 || line > lineCount {
+				t.Fatalf("line %d outside content line range 1..%d for result %+v", line, lineCount, result)
+			}
+		}
+	})
+}
+
+func boundedLineHint(lineHint int) int {
+	if lineHint < 0 {
+		return 0
+	}
+	if lineHint > 10_000 {
+		return 10_000
+	}
+	return lineHint
+}
+
 func TestGenerateUnifiedDiff(t *testing.T) {
 	original := `line1
 line2
