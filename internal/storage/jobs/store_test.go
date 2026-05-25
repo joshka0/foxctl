@@ -89,6 +89,39 @@ func TestCancelRequiresPendingState(t *testing.T) {
 	}
 }
 
+func TestCancelMarksQueuedAndRunningJobsCanceled(t *testing.T) {
+	testEnv := newStoreTestEnv(t)
+
+	tests := []struct {
+		name  string
+		state State
+	}{
+		{name: "queued", state: StateQueued},
+		{name: "running", state: StateRunning},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			job := insertStoreJobInState(t, testEnv, "job-cancel-"+tt.name, tt.state)
+
+			if err := testEnv.store.Cancel(testEnv.ctx, job.ID); err != nil {
+				t.Fatalf("cancel %s job: %v", tt.state, err)
+			}
+
+			stored, err := testEnv.store.Get(testEnv.ctx, job.ID)
+			if err != nil {
+				t.Fatalf("get canceled job: %v", err)
+			}
+			if stored.State != StateCanceled {
+				t.Fatalf("state=%s want %s", stored.State, StateCanceled)
+			}
+			if err := testEnv.store.Cancel(testEnv.ctx, job.ID); !errors.Is(err, ErrInvalidState) {
+				t.Fatalf("cancel terminal job error=%v want ErrInvalidState", err)
+			}
+		})
+	}
+}
+
 func TestResultReadsFile(t *testing.T) {
 	testEnv := newStoreTestEnv(t)
 
@@ -141,6 +174,61 @@ func TestWaitForCompletion(t *testing.T) {
 	}
 	if finalJob.State != StateOK {
 		t.Fatalf("expected ok state, got %s", finalJob.State)
+	}
+}
+
+func TestWaitForCompletionReturnsEveryTerminalState(t *testing.T) {
+	testEnv := newStoreTestEnv(t)
+
+	for _, state := range []State{StateOK, StateError, StateCanceled} {
+		t.Run(string(state), func(t *testing.T) {
+			job := insertStoreJobInState(t, testEnv, "job-wait-"+string(state), state)
+			ctx, cancel := context.WithTimeout(testEnv.ctx, 250*time.Millisecond)
+			defer cancel()
+
+			finalJob, err := testEnv.store.WaitForCompletion(ctx, job.ID, time.Hour)
+			if err != nil {
+				t.Fatalf("wait for %s job: %v", state, err)
+			}
+			if finalJob.State != state {
+				t.Fatalf("state=%s want %s", finalJob.State, state)
+			}
+		})
+	}
+}
+
+func TestWaitForCompletionReturnsWhenContextCanceledDuringPoll(t *testing.T) {
+	testEnv := newStoreTestEnv(t)
+	job := insertStoreJobInState(t, testEnv, "job-wait-cancel-context", StateRunning)
+	notifyPersist := &getNotifyingPersistence{
+		Persistence: testEnv.store.persist,
+		targetID:    job.ID,
+		seenRunning: make(chan struct{}),
+	}
+	store := New(testEnv.root, notifyPersist, nil)
+
+	ctx, cancel := context.WithCancel(testEnv.ctx)
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := store.WaitForCompletion(ctx, job.ID, time.Hour)
+		errCh <- err
+	}()
+
+	select {
+	case <-notifyPersist.seenRunning:
+	case <-time.After(500 * time.Millisecond):
+		cancel()
+		t.Fatal("wait did not read running job before polling")
+	}
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("wait error=%v want context.Canceled", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("wait did not return after context cancellation")
 	}
 }
 
@@ -299,6 +387,53 @@ func newStoreTestEnv(t *testing.T) storeTestEnv {
 	return storeTestEnv{ctx: ctx, root: root, store: store}
 }
 
+func insertStoreJobInState(t testing.TB, env storeTestEnv, id string, state State) Job {
+	t.Helper()
+	now := time.Now().UTC()
+	job := Job{
+		ID:        id,
+		Command:   "skill:test",
+		ArgsJSON:  "{}",
+		ArgsHash:  types.HashArgs(id, []byte("{}")),
+		State:     StateQueued,
+		CreatedAt: now,
+		UpdatedAt: now,
+		ExpiresAt: now.Add(types.DefaultMaxJobAge),
+	}
+	if err := env.store.persist.InsertJob(env.ctx, job); err != nil {
+		t.Fatalf("insert job: %v", err)
+	}
+	switch state {
+	case StateQueued:
+	case StateRunning:
+		if err := env.store.persist.UpdateState(env.ctx, job.ID, StateRunning, "", ""); err != nil {
+			t.Fatalf("set running: %v", err)
+		}
+	case StateOK:
+		if err := env.store.persist.UpdateState(env.ctx, job.ID, StateRunning, "", ""); err != nil {
+			t.Fatalf("set running: %v", err)
+		}
+		if err := env.store.persist.UpdateState(env.ctx, job.ID, StateOK, "", filepath.Join(env.root, id, "result.json")); err != nil {
+			t.Fatalf("set ok: %v", err)
+		}
+	case StateError:
+		if err := env.store.persist.UpdateState(env.ctx, job.ID, StateError, "failed", ""); err != nil {
+			t.Fatalf("set error: %v", err)
+		}
+	case StateCanceled:
+		if err := env.store.persist.UpdateState(env.ctx, job.ID, StateCanceled, "", ""); err != nil {
+			t.Fatalf("set canceled: %v", err)
+		}
+	default:
+		t.Fatalf("unsupported state %q", state)
+	}
+	stored, err := env.store.Get(env.ctx, job.ID)
+	if err != nil {
+		t.Fatalf("get inserted job: %v", err)
+	}
+	return stored
+}
+
 func openStoreForTest(ctx context.Context, t testing.TB, root string) *Store {
 	t.Helper()
 	store, err := Open(ctx, root)
@@ -317,6 +452,23 @@ type tailWatcher struct {
 	buf    *bytes.Buffer
 	errCh  <-chan error
 	waitFn func()
+}
+
+type getNotifyingPersistence struct {
+	Persistence
+	targetID    string
+	seenRunning chan struct{}
+	once        sync.Once
+}
+
+func (p *getNotifyingPersistence) Get(ctx context.Context, id string) (Job, error) {
+	job, err := p.Persistence.Get(ctx, id)
+	if err == nil && id == p.targetID && job.State == StateRunning {
+		p.once.Do(func() {
+			close(p.seenRunning)
+		})
+	}
+	return job, err
 }
 
 func startTailWatcher(ctx context.Context, t testing.TB, store *Store, jobID string, follow bool) tailWatcher {
