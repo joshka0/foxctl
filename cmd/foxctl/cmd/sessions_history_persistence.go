@@ -2,13 +2,11 @@ package cmd
 
 import (
 	"context"
-	"strings"
 
 	"github.com/joshka0/foxctl/internal/context/transcriptpipeline"
 	historypkg "github.com/joshka0/foxctl/internal/context/transcriptpipeline/history"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
 	"github.com/joshka0/foxctl/internal/platform/config"
-	workspaceutil "github.com/joshka0/foxctl/internal/platform/workspace"
 	memorystore "github.com/joshka0/foxctl/internal/storage/memory"
 )
 
@@ -30,21 +28,17 @@ func persistSingleHistoryRecords(ctx context.Context, store *memorystore.Store, 
 	if store == nil || result == nil {
 		return nil
 	}
-	workspaceID := normalizeTranscriptHistoryWorkspace(result.Parsed.WorkspacePath)
-	ownerID := strings.TrimSpace(result.Parsed.SessionID)
-	if ownerID == "" {
-		ownerID = strings.TrimSpace(result.ConversationID)
-	}
-	persisted, err := historypkg.PersistHistoryRecords(ctx, store, workspaceID, ownerID, result.Parsed.SessionID, result.HistoryRecords, embed)
+	persisted, err := historypkg.PersistSingleInsightHistory(ctx, store, historypkg.SingleInsightHistory{
+		WorkspacePath:  result.Parsed.WorkspacePath,
+		SessionID:      result.Parsed.SessionID,
+		ConversationID: result.ConversationID,
+		Records:        result.HistoryRecords,
+	}, embed)
 	if err != nil {
 		return err
 	}
-	removed, err := historypkg.ReconcileHistoryRecordPrefix(ctx, store, workspaceID, historypkg.TranscriptHistoryPrefix(ownerID), persisted)
-	if err != nil {
-		return err
-	}
-	result.PersistedHistory = persisted
-	result.RemovedHistory = removed
+	result.PersistedHistory = persisted.Persisted
+	result.RemovedHistory = persisted.Removed
 	return nil
 }
 
@@ -52,39 +46,24 @@ func persistGroupedHistoryRecords(ctx context.Context, store *memorystore.Store,
 	if store == nil || result == nil {
 		return nil
 	}
+	input := historypkg.GroupedInsightHistory{Groups: make([]historypkg.GroupedInsightHistoryItem, 0, len(result.Groups))}
 	for idx := range result.Groups {
 		item := &result.Groups[idx]
-		workspaceID := normalizeTranscriptHistoryWorkspace(item.WorkspacePath)
-		ownerID := strings.TrimSpace(item.GroupID)
-		if ownerID == "" && len(item.SessionIDs) > 0 {
-			ownerID = strings.TrimSpace(item.SessionIDs[0])
-		}
-		sessionID := ""
-		if len(item.MainlineSessionIDs) > 0 {
-			sessionID = strings.TrimSpace(item.MainlineSessionIDs[0])
-		} else if len(item.SessionIDs) > 0 {
-			sessionID = strings.TrimSpace(item.SessionIDs[0])
-		}
-		persisted, err := historypkg.PersistHistoryRecords(ctx, store, workspaceID, ownerID, sessionID, item.HistoryRecords, embed)
-		if err != nil {
-			return err
-		}
-		removed, err := historypkg.ReconcileHistoryRecordPrefix(ctx, store, workspaceID, historypkg.TranscriptHistoryPrefix(ownerID), persisted)
-		if err != nil {
-			return err
-		}
-		item.PersistedHistory = persisted
-		item.RemovedHistory = removed
+		input.Groups = append(input.Groups, historypkg.GroupedInsightHistoryItem{
+			GroupID:            item.GroupID,
+			WorkspacePath:      item.WorkspacePath,
+			SessionIDs:         item.SessionIDs,
+			MainlineSessionIDs: item.MainlineSessionIDs,
+			Records:            item.HistoryRecords,
+		})
+	}
+	persisted, err := historypkg.PersistGroupedInsightHistory(ctx, store, input, embed)
+	if err != nil {
+		return err
+	}
+	for idx := range persisted {
+		result.Groups[idx].PersistedHistory = persisted[idx].Persisted
+		result.Groups[idx].RemovedHistory = persisted[idx].Removed
 	}
 	return nil
-}
-
-func normalizeTranscriptHistoryWorkspace(workspacePath string) string {
-	target := strings.TrimSpace(workspacePath)
-	if target == "" {
-		target = workspaceutil.Detect("")
-	} else {
-		target = workspaceutil.Detect(target)
-	}
-	return workspaceutil.Normalize(target)
 }
