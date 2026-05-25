@@ -267,8 +267,19 @@ func TestBuildCodeDocumentsBatchesEmbeddings(t *testing.T) {
 		},
 	}
 	provider := &fakeEmbeddingProvider{}
+	firstBatchPersistedBeforeSecondBatch := false
 	result, err := BuildCodeDocuments(testCtx, source, store, "workspace", BuildCodeOptions{
-		EmbedProvider: provider,
+		EmbedProvider:  provider,
+		EmbedBatchSize: 1,
+		Progress: func(p BuildProgress) {
+			if p.Stage == "symbols" && p.Batch == 2 && p.Embedded == 0 {
+				count, err := store.CountWorkspace(testCtx, "workspace")
+				if err != nil {
+					t.Fatalf("count workspace during progress: %v", err)
+				}
+				firstBatchPersistedBeforeSecondBatch = count == 1
+			}
+		},
 	})
 	if err != nil {
 		t.Fatalf("build code documents: %v", err)
@@ -278,6 +289,9 @@ func TestBuildCodeDocumentsBatchesEmbeddings(t *testing.T) {
 	}
 	if provider.batchCalls == 0 {
 		t.Fatalf("expected EmbedBatch to be used")
+	}
+	if !firstBatchPersistedBeforeSecondBatch {
+		t.Fatalf("expected first embedded batch to be persisted before second batch starts")
 	}
 	if provider.singleCalls != 0 {
 		t.Fatalf("expected no per-document fallback embeds, got %d", provider.singleCalls)

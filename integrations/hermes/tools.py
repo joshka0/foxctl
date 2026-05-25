@@ -643,6 +643,40 @@ def register_tools(ctx, client: FoxctlClient, cfg: FoxctlConfig) -> None:
         check_fn=check_foxctl_available,
     )
 
+    ctx.register_tool(
+        name="foxctl_branch_impact",
+        toolset=TOOLSET,
+        schema={
+            "name": "foxctl_branch_impact",
+            "description": (
+                "Inspect branch blast radius before review or editing. "
+                "Calls foxctl's canonical code/branch_impact skill and returns "
+                "changed units plus ranked review candidates."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "base_ref": {"type": "string", "description": "Base git ref to compare from, e.g. main"},
+                    "head_ref": {"type": "string", "description": "Head git ref to compare, e.g. current branch or HEAD", "default": "HEAD"},
+                    "limit": {"type": "integer", "description": "Maximum ranked review candidates (default 20)", "default": 20},
+                    "depth": {"type": "integer", "description": "Repo graph traversal depth (default 2)", "default": 2},
+                    "per_file_cap": {"type": "integer", "description": "Maximum graph or semantic candidates per changed file"},
+                    "max_changed": {"type": "integer", "description": "Maximum changed units to analyze"},
+                },
+                "required": ["base_ref"],
+            },
+        },
+        handler=_wrap(lambda args, **kw: client.branch_impact(
+            base_ref=args["base_ref"],
+            head_ref=args.get("head_ref", "HEAD"),
+            limit=args.get("limit", 20),
+            depth=args.get("depth", 2),
+            per_file_cap=args.get("per_file_cap"),
+            max_changed=args.get("max_changed"),
+        )),
+        check_fn=check_foxctl_available,
+    )
+
     # -- Text search --------------------------------------------------------
 
     ctx.register_tool(

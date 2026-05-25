@@ -398,6 +398,52 @@ func (s *Store) ReplaceAll(ctx context.Context, nodes []Node, edges []Edge) erro
 	return tx.Commit()
 }
 
+type graphPatch struct {
+	RemoveNodeIDs       []string
+	UpsertNodes         []Node
+	UpsertEdges         []Edge
+	RemoveFilePaths     []string
+	UpsertFileStates    []FileState
+	RemoveLocatorFiles  []string
+	UpsertLocatorValues []LocatorEntry
+}
+
+func (s *Store) replaceGraphPatch(ctx context.Context, patch graphPatch) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = tx.Rollback() //nolint:errcheck
+	}()
+
+	if err := deleteEdgesTouchingNodes(ctx, tx, s.repoKey, patch.RemoveNodeIDs); err != nil {
+		return err
+	}
+	if err := deleteNodesByID(ctx, tx, s.repoKey, patch.RemoveNodeIDs); err != nil {
+		return err
+	}
+	if err := deleteFileStatesByPath(ctx, tx, s.repoKey, patch.RemoveFilePaths); err != nil {
+		return err
+	}
+	if err := deleteLocatorsByFile(ctx, tx, patch.RemoveLocatorFiles); err != nil {
+		return err
+	}
+	if err := upsertNodes(ctx, tx, s.repoKey, patch.UpsertNodes); err != nil {
+		return err
+	}
+	if err := upsertEdges(ctx, tx, s.repoKey, patch.UpsertEdges); err != nil {
+		return err
+	}
+	if err := upsertFileStates(ctx, tx, s.repoKey, patch.UpsertFileStates); err != nil {
+		return err
+	}
+	if err := upsertLocators(ctx, tx, patch.UpsertLocatorValues); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // ReplaceFileStates replaces the indexed file-state table for this repository.
 func (s *Store) ReplaceFileStates(ctx context.Context, states []FileState) error {
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -449,6 +495,258 @@ func (s *Store) ReplaceFileStates(ctx context.Context, states []FileState) error
 		}
 	}
 	return tx.Commit()
+}
+
+func upsertNodes(ctx context.Context, tx *sql.Tx, repoKey string, nodes []Node) error {
+	if len(nodes) == 0 {
+		return nil
+	}
+	stmtNode, err := tx.PrepareContext(ctx, `
+		INSERT INTO nodes (
+			id, repo_key, kind, pkg, file, name, signature, span_start, span_end,
+			exported, doc, summary, meta_json, hash, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			kind=excluded.kind,
+			pkg=excluded.pkg,
+			file=excluded.file,
+			name=excluded.name,
+			signature=excluded.signature,
+			span_start=excluded.span_start,
+			span_end=excluded.span_end,
+			exported=excluded.exported,
+			doc=excluded.doc,
+			summary=excluded.summary,
+			meta_json=excluded.meta_json,
+			hash=excluded.hash,
+			updated_at=excluded.updated_at
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmtNode.Close()
+
+	now := time.Now().UTC()
+	for _, node := range nodes {
+		updated := node.UpdatedAt
+		if updated.IsZero() {
+			updated = now
+		}
+		if _, err := stmtNode.ExecContext(
+			ctx,
+			node.ID,
+			repoKey,
+			string(node.Kind),
+			nullIfEmpty(node.Pkg),
+			nullIfEmpty(node.File),
+			nullIfEmpty(node.Name),
+			nullIfEmpty(node.Signature),
+			nullIfZero(node.SpanStart),
+			nullIfZero(node.SpanEnd),
+			boolToInt(node.Exported),
+			nullIfEmpty(node.Doc),
+			nullIfEmpty(node.Summary),
+			nullIfEmpty(string(node.Meta)),
+			nullIfEmpty(node.Hash),
+			updated.Unix(),
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func upsertEdges(ctx context.Context, tx *sql.Tx, repoKey string, edges []Edge) error {
+	if len(edges) == 0 {
+		return nil
+	}
+	stmtEdge, err := tx.PrepareContext(ctx, `
+		INSERT INTO edges (src, dst, type, weight, meta_json, repo_key)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(src, dst, type, repo_key) DO UPDATE SET
+			weight=excluded.weight,
+			meta_json=excluded.meta_json
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmtEdge.Close()
+	for _, edge := range edges {
+		if _, err := stmtEdge.ExecContext(ctx, edge.Src, edge.Dst, string(edge.Type), edge.Weight, nullIfEmpty(string(edge.Meta)), repoKey); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func upsertFileStates(ctx context.Context, tx *sql.Tx, repoKey string, states []FileState) error {
+	if len(states) == 0 {
+		return nil
+	}
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO file_state (
+			repo_key, path, content_hash, size_bytes, mtime_unix, language,
+			indexed_at_unix, git_status, last_seen_head_sha
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(repo_key, path) DO UPDATE SET
+			content_hash=excluded.content_hash,
+			size_bytes=excluded.size_bytes,
+			mtime_unix=excluded.mtime_unix,
+			language=excluded.language,
+			indexed_at_unix=excluded.indexed_at_unix,
+			git_status=excluded.git_status,
+			last_seen_head_sha=excluded.last_seen_head_sha
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	now := time.Now().UTC()
+	for _, state := range states {
+		pathValue := filepath.ToSlash(strings.TrimSpace(state.Path))
+		if pathValue == "" {
+			continue
+		}
+		indexedAt := state.IndexedAt
+		if indexedAt.IsZero() {
+			indexedAt = now
+		}
+		if _, err := stmt.ExecContext(
+			ctx,
+			repoKey,
+			pathValue,
+			state.ContentHash,
+			state.SizeBytes,
+			state.MTimeUnix,
+			nullIfEmpty(state.Language),
+			indexedAt.Unix(),
+			nullIfEmpty(state.GitStatus),
+			nullIfEmpty(state.LastSeenHeadSHA),
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func upsertLocators(ctx context.Context, tx *sql.Tx, locators []LocatorEntry) error {
+	if len(locators) == 0 {
+		return nil
+	}
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO symbol_locator (symbol_key, pkg, file_path, name, kind, exported, span_start, span_end, body_hash, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(symbol_key, pkg) DO UPDATE SET
+			file_path=excluded.file_path,
+			name=excluded.name,
+			kind=excluded.kind,
+			exported=excluded.exported,
+			span_start=excluded.span_start,
+			span_end=excluded.span_end,
+			body_hash=excluded.body_hash,
+			updated_at=excluded.updated_at
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, loc := range locators {
+		if _, err := stmt.ExecContext(ctx, loc.SymbolKey, loc.Pkg, loc.FilePath, loc.Name, loc.Kind,
+			boolToInt(loc.Exported), nullIfZero(loc.SpanStart), nullIfZero(loc.SpanEnd),
+			nullIfEmpty(loc.BodyHash), loc.UpdatedAt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func deleteEdgesTouchingNodes(ctx context.Context, tx *sql.Tx, repoKey string, ids []string) error {
+	return execStringChunks(ctx, ids, func(chunk []string) error {
+		placeholders := strings.TrimRight(strings.Repeat("?,", len(chunk)), ",")
+		args := make([]any, 0, 1+len(chunk)*2)
+		args = append(args, repoKey)
+		for _, id := range chunk {
+			args = append(args, id)
+		}
+		for _, id := range chunk {
+			args = append(args, id)
+		}
+		_, err := tx.ExecContext(ctx, `DELETE FROM edges WHERE repo_key = ? AND (src IN (`+placeholders+`) OR dst IN (`+placeholders+`))`, args...)
+		return err
+	})
+}
+
+func deleteNodesByID(ctx context.Context, tx *sql.Tx, repoKey string, ids []string) error {
+	return execStringChunks(ctx, ids, func(chunk []string) error {
+		placeholders := strings.TrimRight(strings.Repeat("?,", len(chunk)), ",")
+		args := make([]any, 0, 1+len(chunk))
+		args = append(args, repoKey)
+		for _, id := range chunk {
+			args = append(args, id)
+		}
+		_, err := tx.ExecContext(ctx, `DELETE FROM nodes WHERE repo_key = ? AND id IN (`+placeholders+`)`, args...)
+		return err
+	})
+}
+
+func deleteFileStatesByPath(ctx context.Context, tx *sql.Tx, repoKey string, paths []string) error {
+	return execStringChunks(ctx, paths, func(chunk []string) error {
+		placeholders := strings.TrimRight(strings.Repeat("?,", len(chunk)), ",")
+		args := make([]any, 0, 1+len(chunk))
+		args = append(args, repoKey)
+		for _, path := range chunk {
+			args = append(args, path)
+		}
+		_, err := tx.ExecContext(ctx, `DELETE FROM file_state WHERE repo_key = ? AND path IN (`+placeholders+`)`, args...)
+		return err
+	})
+}
+
+func deleteLocatorsByFile(ctx context.Context, tx *sql.Tx, paths []string) error {
+	return execStringChunks(ctx, paths, func(chunk []string) error {
+		placeholders := strings.TrimRight(strings.Repeat("?,", len(chunk)), ",")
+		args := make([]any, 0, len(chunk))
+		for _, path := range chunk {
+			args = append(args, path)
+		}
+		_, err := tx.ExecContext(ctx, `DELETE FROM symbol_locator WHERE file_path IN (`+placeholders+`)`, args...)
+		return err
+	})
+}
+
+func execStringChunks(ctx context.Context, values []string, fn func([]string) error) error {
+	values = uniqueNonEmptyStrings(values)
+	const chunkSize = 250
+	for start := 0; start < len(values); start += chunkSize {
+		end := start + chunkSize
+		if end > len(values) {
+			end = len(values)
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := fn(values[start:end]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func uniqueNonEmptyStrings(values []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 // ListFileStates returns the stored per-file index state for this repository.
@@ -684,6 +982,41 @@ func (s *Store) ResolveFileNodes(ctx context.Context, paths []string) ([]Node, e
 		ORDER BY file ASC, id ASC
 	`, clause)
 	args = append([]any{s.repoKey, string(NodeFile)}, args...)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanNodes(rows)
+}
+
+// ListNodesByFiles returns all indexed nodes owned by the given repo-relative file paths.
+func (s *Store) ListNodesByFiles(ctx context.Context, paths []string) ([]Node, error) {
+	normalized := make([]string, 0, len(paths))
+	seen := map[string]struct{}{}
+	for _, path := range paths {
+		path = filepath.ToSlash(strings.TrimSpace(path))
+		path = strings.TrimPrefix(path, "./")
+		if path == "" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		normalized = append(normalized, path)
+	}
+	if len(normalized) == 0 {
+		return nil, nil
+	}
+	clause, args := buildInClause(normalized)
+	query := fmt.Sprintf(`
+		SELECT id, kind, pkg, file, name, signature, span_start, span_end, exported, doc, summary, meta_json, hash, updated_at
+		FROM nodes
+		WHERE repo_key = ? AND file IN (%s)
+		ORDER BY file ASC, kind ASC, id ASC
+	`, clause)
+	args = append([]any{s.repoKey}, args...)
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err

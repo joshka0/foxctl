@@ -210,33 +210,30 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_transcript_prederived_kind_hash
 			ON transcript_prederived(artifact_kind, normalized_hash);
 
-		CREATE TABLE IF NOT EXISTS transcript_source_ledger (
+		CREATE TABLE IF NOT EXISTS transcript_processed_sources (
 			provider TEXT NOT NULL,
 			source_path TEXT NOT NULL,
-			session_id TEXT NOT NULL,
-			workspace_path TEXT NOT NULL,
-			size_bytes INTEGER NOT NULL,
-			mod_time TEXT NOT NULL,
-			source_digest TEXT NOT NULL,
+			session_id TEXT,
+			workspace_hint TEXT,
+			source_size INTEGER NOT NULL,
+			source_mtime TEXT NOT NULL,
+			fingerprint TEXT NOT NULL,
 			state TEXT NOT NULL,
 			attempts INTEGER NOT NULL DEFAULT 0,
 			max_attempts INTEGER NOT NULL DEFAULT 3,
 			last_error TEXT,
-			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL,
+			next_attempt_at TEXT,
+			discovered_at TEXT NOT NULL,
 			queued_at TEXT,
 			processing_at TEXT,
 			processed_at TEXT,
 			failed_at TEXT,
-			PRIMARY KEY (provider, source_path),
-			CHECK (state IN ('discovered', 'queued', 'processing', 'processed', 'failed')),
-			CHECK (attempts >= 0),
-			CHECK (max_attempts > 0),
-			CHECK (attempts <= max_attempts)
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (provider, source_path)
 		);
 
-		CREATE INDEX IF NOT EXISTS idx_transcript_source_ledger_work
-			ON transcript_source_ledger(state, attempts, max_attempts, updated_at, provider, source_path);
+		CREATE INDEX IF NOT EXISTS idx_transcript_processed_sources_work
+			ON transcript_processed_sources(state, next_attempt_at, provider, source_path);
 	`)
 	return err
 }

@@ -28,7 +28,7 @@ func persistSingleHistoryRecords(ctx context.Context, store *memorystore.Store, 
 	if store == nil || result == nil {
 		return nil
 	}
-	report, err := historypkg.PersistSingleRunHistory(ctx, store, historypkg.SingleRunHistoryInput{
+	persisted, err := historypkg.PersistSingleInsightHistory(ctx, store, historypkg.SingleInsightHistory{
 		WorkspacePath:  result.Parsed.WorkspacePath,
 		SessionID:      result.Parsed.SessionID,
 		ConversationID: result.ConversationID,
@@ -37,8 +37,8 @@ func persistSingleHistoryRecords(ctx context.Context, store *memorystore.Store, 
 	if err != nil {
 		return err
 	}
-	result.PersistedHistory = report.Persisted
-	result.RemovedHistory = report.Removed
+	result.PersistedHistory = persisted.Persisted
+	result.RemovedHistory = persisted.Removed
 	return nil
 }
 
@@ -46,24 +46,24 @@ func persistGroupedHistoryRecords(ctx context.Context, store *memorystore.Store,
 	if store == nil || result == nil {
 		return nil
 	}
-	groups := make([]historypkg.GroupRunHistoryInput, len(result.Groups))
+	input := historypkg.GroupedInsightHistory{Groups: make([]historypkg.GroupedInsightHistoryItem, 0, len(result.Groups))}
 	for idx := range result.Groups {
 		item := &result.Groups[idx]
-		groups[idx] = historypkg.GroupRunHistoryInput{
-			WorkspacePath:      item.WorkspacePath,
+		input.Groups = append(input.Groups, historypkg.GroupedInsightHistoryItem{
 			GroupID:            item.GroupID,
+			WorkspacePath:      item.WorkspacePath,
 			SessionIDs:         item.SessionIDs,
 			MainlineSessionIDs: item.MainlineSessionIDs,
 			Records:            item.HistoryRecords,
-		}
+		})
 	}
-	reports, err := historypkg.PersistGroupedRunHistory(ctx, store, groups, embed)
+	persisted, err := historypkg.PersistGroupedInsightHistory(ctx, store, input, embed)
 	if err != nil {
 		return err
 	}
-	for idx := range reports {
-		result.Groups[idx].PersistedHistory = reports[idx].Persisted
-		result.Groups[idx].RemovedHistory = reports[idx].Removed
+	for idx := range persisted {
+		result.Groups[idx].PersistedHistory = persisted[idx].Persisted
+		result.Groups[idx].RemovedHistory = persisted[idx].Removed
 	}
 	return nil
 }

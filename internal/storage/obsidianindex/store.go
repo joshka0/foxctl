@@ -32,13 +32,21 @@ const (
 type Store interface {
 	Close() error
 	Rebuild(ctx context.Context, vaultRoot string) (*BuildResult, error)
+	IndexPath(ctx context.Context, vaultRoot, notePath string) (*BuildResult, error)
 	SearchNotes(ctx context.Context, query string, limit int) ([]SearchHit, error)
 	SearchNotesSemantic(ctx context.Context, query string, provider semantic.EmbeddingProvider, limit int) ([]SearchHit, error)
+	SearchDreams(ctx context.Context, query string, opts DreamSearchOptions) ([]SearchHit, error)
+	SearchDreamsSemantic(ctx context.Context, query string, provider semantic.EmbeddingProvider, opts DreamSearchOptions) ([]SearchHit, error)
 	EnsureSemanticEmbeddings(ctx context.Context, provider semantic.EmbeddingProvider) (int, error)
 	EnsureChunkSemanticEmbeddings(ctx context.Context, provider semantic.EmbeddingProvider) (int, error)
 	RelatedNotes(ctx context.Context, notePath string, limit int) ([]RelatedHit, error)
 	Stats(ctx context.Context) (Stats, error)
 	Health(ctx context.Context) (HealthReport, error)
+}
+
+type DreamSearchOptions struct {
+	Limit       int
+	BlurredOnly bool
 }
 
 type Note struct {
@@ -360,113 +368,13 @@ func (s *sqlStore) Rebuild(ctx context.Context, vaultRoot string) (*BuildResult,
 		if err != nil {
 			return err
 		}
+		relPath := filepath.ToSlash(rel)
 		body, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		hash := sha256.Sum256(body)
-		parsed := obsidiantool.ParseNoteLinks(rel, body)
-		fm := parseFrontmatter(body)
-		title := parsed.Title
-		if strings.TrimSpace(fm.Values["title"]) != "" {
-			title = strings.TrimSpace(fm.Values["title"])
-		}
-		tags := uniqueStrings(append(fm.Tags, extractInlineTags(string(body))...))
-		repoPaths := uniqueStrings(fm.Paths)
-		anchorPaths := uniqueStrings(fm.AnchorPaths)
-		primaryAnchorPath := strings.TrimSpace(fm.Values["primary_anchor_path"])
-		if primaryAnchorPath == "" && len(anchorPaths) > 0 {
-			primaryAnchorPath = anchorPaths[0]
-		}
-		anchorRoles := normalizeAnchorRoles(fm.AnchorRoles)
-		anchorRolesJSON := ""
-		if len(anchorRoles) > 0 {
-			if body, err := json.Marshal(anchorRoles); err == nil {
-				anchorRolesJSON = string(body)
-			}
-		}
-		repoSymbols := uniqueStrings(fm.Symbols)
-		noteID := ulid.Make().String()
-		now := timeutil.NowUTC()
-		if _, err := tx.ExecContext(ctx, `
-INSERT INTO obsidian_notes (id, vault_root, path, title, search_text, type, project, status, trust, primary_anchor_path, anchor_roles_json, updated_at, hash)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`, noteID, vaultRoot, filepath.ToSlash(rel), title, buildSearchText(parsed, tags), nullable(fm.Values["type"]), nullable(fm.Values["project"]), nullable(fm.Values["status"]), nullable(fm.Values["trust"]), nullable(filepath.ToSlash(primaryAnchorPath)), anchorRolesJSON, timeutil.FormatRFC3339Nano(now), "sha256:"+hex.EncodeToString(hash[:])); err != nil {
-			return fmt.Errorf("insert note %s: %w", rel, err)
-		}
-		result.Notes++
-		for _, heading := range parsed.Headings {
-			if _, err := tx.ExecContext(ctx, `
-INSERT INTO obsidian_headings (note_id, heading, level, anchor, line)
-VALUES (?, ?, ?, ?, ?)
-`, noteID, heading.Text, heading.Level, heading.Anchor, heading.Line); err != nil {
-				return err
-			}
-			result.Headings++
-		}
-		for _, alias := range parsed.Aliases {
-			if _, err := tx.ExecContext(ctx, `
-INSERT INTO obsidian_aliases (note_id, alias)
-VALUES (?, ?)
-`, noteID, alias); err != nil {
-				return err
-			}
-			result.Aliases++
-		}
-		for _, tag := range tags {
-			if _, err := tx.ExecContext(ctx, `
-INSERT INTO obsidian_tags (note_id, tag)
-VALUES (?, ?)
-`, noteID, tag); err != nil {
-				return err
-			}
-			result.Tags++
-		}
-		for _, link := range parsed.Outgoing {
-			if _, err := tx.ExecContext(ctx, `
-INSERT INTO obsidian_links (note_id, raw, target, alias, subpath, is_embed, line)
-VALUES (?, ?, ?, ?, ?, ?, ?)
-`, noteID, link.Raw, strings.ToLower(strings.TrimSpace(link.Target)), nullable(link.Alias), nullable(link.Subpath), boolToInt(link.IsEmbed), link.Line); err != nil {
-				return err
-			}
-			result.Links++
-		}
-		for _, chunk := range buildChunks(parsed, string(body)) {
-			if _, err := tx.ExecContext(ctx, `
-INSERT INTO obsidian_chunks (note_id, heading, text)
-VALUES (?, ?, ?)
-`, noteID, nullable(chunk.Heading), chunk.Text); err != nil {
-				return err
-			}
-			result.Chunks++
-		}
-		for _, p := range repoPaths {
-			if _, err := tx.ExecContext(ctx, `
-INSERT INTO obsidian_repo_paths (note_id, path)
-VALUES (?, ?)
-`, noteID, p); err != nil {
-				return err
-			}
-			result.RepoPaths++
-		}
-		for _, p := range anchorPaths {
-			if _, err := tx.ExecContext(ctx, `
-INSERT INTO obsidian_anchor_paths (note_id, path)
-VALUES (?, ?)
-`, noteID, p); err != nil {
-				return err
-			}
-		}
-		for _, sym := range repoSymbols {
-			if _, err := tx.ExecContext(ctx, `
-INSERT INTO obsidian_repo_symbols (note_id, symbol)
-VALUES (?, ?)
-`, noteID, sym); err != nil {
-				return err
-			}
-			result.Symbols++
-		}
-		return nil
+		note := buildIndexedNote(vaultRoot, relPath, body, timeutil.NowUTC())
+		return insertIndexedNote(ctx, tx, note, result)
 	})
 	if err != nil {
 		return nil, err
@@ -502,6 +410,242 @@ VALUES (?, ?)
 		return nil, fmt.Errorf("obsidianindex: count chunk embeddings: %w", err)
 	}
 	return result, nil
+}
+
+func (s *sqlStore) IndexPath(ctx context.Context, vaultRoot, notePath string) (*BuildResult, error) {
+	vaultRoot = filepath.Clean(vaultRoot)
+	relPath, err := normalizeIndexNotePath(notePath)
+	if err != nil {
+		return nil, err
+	}
+	absPath := filepath.Join(vaultRoot, filepath.FromSlash(relPath))
+	body, readErr := os.ReadFile(absPath)
+	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+		return nil, fmt.Errorf("obsidianindex: read note %s: %w", relPath, readErr)
+	}
+
+	var tx *sql.Tx
+	err = retryObsidianBusy(ctx, func() error {
+		var beginErr error
+		tx, beginErr = s.db.BeginTx(ctx, nil)
+		if beginErr != nil {
+			return fmt.Errorf("obsidianindex: begin tx: %w", beginErr)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := deleteIndexedNotePath(ctx, tx, relPath); err != nil {
+		return nil, err
+	}
+	result := &BuildResult{VaultRoot: vaultRoot}
+	if readErr == nil {
+		note := buildIndexedNote(vaultRoot, relPath, body, timeutil.NowUTC())
+		if err := insertIndexedNote(ctx, tx, note, result); err != nil {
+			return nil, err
+		}
+	}
+	if err := retryObsidianBusy(ctx, func() error {
+		if commitErr := tx.Commit(); commitErr != nil {
+			return fmt.Errorf("obsidianindex: commit path index: %w", commitErr)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM obsidian_note_embeddings WHERE path = ?`, relPath).Scan(&result.SemanticEmbeddings); err != nil {
+		return nil, fmt.Errorf("obsidianindex: count path embeddings: %w", err)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM obsidian_chunk_embeddings WHERE path = ?`, relPath).Scan(&result.ChunkSemanticEmbeddings); err != nil {
+		return nil, fmt.Errorf("obsidianindex: count path chunk embeddings: %w", err)
+	}
+	return result, nil
+}
+
+type indexedNote struct {
+	ID                string
+	VaultRoot         string
+	RelPath           string
+	Title             string
+	SearchText        string
+	Type              string
+	Project           string
+	Status            string
+	Trust             string
+	PrimaryAnchorPath string
+	AnchorRolesJSON   string
+	UpdatedAt         time.Time
+	Hash              string
+	Parsed            obsidiantool.LinkParseResult
+	Tags              []string
+	Chunks            []chunk
+	RepoPaths         []string
+	AnchorPaths       []string
+	RepoSymbols       []string
+}
+
+func buildIndexedNote(vaultRoot, relPath string, body []byte, now time.Time) indexedNote {
+	hash := sha256.Sum256(body)
+	parsed := obsidiantool.ParseNoteLinks(relPath, body)
+	fm := parseFrontmatter(body)
+	title := parsed.Title
+	if strings.TrimSpace(fm.Values["title"]) != "" {
+		title = strings.TrimSpace(fm.Values["title"])
+	}
+	tags := uniqueStrings(append(fm.Tags, extractInlineTags(string(body))...))
+	anchorPaths := uniqueStrings(fm.AnchorPaths)
+	primaryAnchorPath := strings.TrimSpace(fm.Values["primary_anchor_path"])
+	if primaryAnchorPath == "" && len(anchorPaths) > 0 {
+		primaryAnchorPath = anchorPaths[0]
+	}
+	anchorRolesJSON := ""
+	if anchorRoles := normalizeAnchorRoles(fm.AnchorRoles); len(anchorRoles) > 0 {
+		if body, err := json.Marshal(anchorRoles); err == nil {
+			anchorRolesJSON = string(body)
+		}
+	}
+	return indexedNote{
+		ID:                ulid.Make().String(),
+		VaultRoot:         vaultRoot,
+		RelPath:           filepath.ToSlash(relPath),
+		Title:             title,
+		SearchText:        buildSearchText(parsed, tags),
+		Type:              fm.Values["type"],
+		Project:           fm.Values["project"],
+		Status:            fm.Values["status"],
+		Trust:             fm.Values["trust"],
+		PrimaryAnchorPath: filepath.ToSlash(primaryAnchorPath),
+		AnchorRolesJSON:   anchorRolesJSON,
+		UpdatedAt:         now,
+		Hash:              "sha256:" + hex.EncodeToString(hash[:]),
+		Parsed:            parsed,
+		Tags:              tags,
+		Chunks:            buildChunks(parsed, string(body)),
+		RepoPaths:         uniqueStrings(fm.Paths),
+		AnchorPaths:       anchorPaths,
+		RepoSymbols:       uniqueStrings(fm.Symbols),
+	}
+}
+
+func insertIndexedNote(ctx context.Context, tx *sql.Tx, note indexedNote, result *BuildResult) error {
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO obsidian_notes (id, vault_root, path, title, search_text, type, project, status, trust, primary_anchor_path, anchor_roles_json, updated_at, hash)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`, note.ID, note.VaultRoot, note.RelPath, note.Title, note.SearchText, nullable(note.Type), nullable(note.Project), nullable(note.Status), nullable(note.Trust), nullable(note.PrimaryAnchorPath), note.AnchorRolesJSON, timeutil.FormatRFC3339Nano(note.UpdatedAt), note.Hash); err != nil {
+		return fmt.Errorf("insert note %s: %w", note.RelPath, err)
+	}
+	result.Notes++
+	for _, heading := range note.Parsed.Headings {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO obsidian_headings (note_id, heading, level, anchor, line)
+VALUES (?, ?, ?, ?, ?)
+`, note.ID, heading.Text, heading.Level, heading.Anchor, heading.Line); err != nil {
+			return err
+		}
+		result.Headings++
+	}
+	for _, alias := range note.Parsed.Aliases {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO obsidian_aliases (note_id, alias)
+VALUES (?, ?)
+`, note.ID, alias); err != nil {
+			return err
+		}
+		result.Aliases++
+	}
+	for _, tag := range note.Tags {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO obsidian_tags (note_id, tag)
+VALUES (?, ?)
+`, note.ID, tag); err != nil {
+			return err
+		}
+		result.Tags++
+	}
+	for _, link := range note.Parsed.Outgoing {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO obsidian_links (note_id, raw, target, alias, subpath, is_embed, line)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+`, note.ID, link.Raw, strings.ToLower(strings.TrimSpace(link.Target)), nullable(link.Alias), nullable(link.Subpath), boolToInt(link.IsEmbed), link.Line); err != nil {
+			return err
+		}
+		result.Links++
+	}
+	for _, chunk := range note.Chunks {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO obsidian_chunks (note_id, heading, text)
+VALUES (?, ?, ?)
+`, note.ID, nullable(chunk.Heading), chunk.Text); err != nil {
+			return err
+		}
+		result.Chunks++
+	}
+	for _, p := range note.RepoPaths {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO obsidian_repo_paths (note_id, path)
+VALUES (?, ?)
+`, note.ID, p); err != nil {
+			return err
+		}
+		result.RepoPaths++
+	}
+	for _, p := range note.AnchorPaths {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO obsidian_anchor_paths (note_id, path)
+VALUES (?, ?)
+`, note.ID, p); err != nil {
+			return err
+		}
+	}
+	for _, sym := range note.RepoSymbols {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO obsidian_repo_symbols (note_id, symbol)
+VALUES (?, ?)
+`, note.ID, sym); err != nil {
+			return err
+		}
+		result.Symbols++
+	}
+	return nil
+}
+
+func deleteIndexedNotePath(ctx context.Context, tx *sql.Tx, relPath string) error {
+	for _, table := range []string{"obsidian_repo_symbols", "obsidian_anchor_paths", "obsidian_repo_paths", "obsidian_chunks", "obsidian_tags", "obsidian_aliases", "obsidian_links", "obsidian_headings"} {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE note_id IN (SELECT id FROM obsidian_notes WHERE path = ?)", relPath); err != nil {
+			return fmt.Errorf("obsidianindex: delete %s for %s: %w", table, relPath, err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM obsidian_note_embeddings WHERE path = ?`, relPath); err != nil {
+		return fmt.Errorf("obsidianindex: delete note embeddings for %s: %w", relPath, err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM obsidian_chunk_embeddings WHERE path = ?`, relPath); err != nil {
+		return fmt.Errorf("obsidianindex: delete chunk embeddings for %s: %w", relPath, err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM obsidian_notes WHERE path = ?`, relPath); err != nil {
+		return fmt.Errorf("obsidianindex: delete note %s: %w", relPath, err)
+	}
+	return nil
+}
+
+func normalizeIndexNotePath(notePath string) (string, error) {
+	notePath = filepath.ToSlash(strings.TrimSpace(notePath))
+	if notePath == "" {
+		return "", fmt.Errorf("obsidianindex: note path required")
+	}
+	if filepath.IsAbs(notePath) {
+		return "", fmt.Errorf("obsidianindex: note path must be vault-relative")
+	}
+	clean := filepath.Clean(filepath.FromSlash(notePath))
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("obsidianindex: note path must stay inside vault")
+	}
+	if filepath.Ext(clean) != ".md" {
+		return "", fmt.Errorf("obsidianindex: note path must be markdown")
+	}
+	return filepath.ToSlash(clean), nil
 }
 
 func (s *sqlStore) SearchNotes(ctx context.Context, query string, limit int) ([]SearchHit, error) {
@@ -597,18 +741,29 @@ LIMIT ?
 }
 
 func (s *sqlStore) searchNotesByTerms(ctx context.Context, query string, limit int) ([]SearchHit, error) {
+	return s.searchNotesByTermsFiltered(ctx, query, limit, noteSearchFilter{})
+}
+
+type noteSearchFilter struct {
+	Dreams      bool
+	BlurredOnly bool
+}
+
+func (s *sqlStore) searchNotesByTermsFiltered(ctx context.Context, query string, limit int, filter noteSearchFilter) ([]SearchHit, error) {
 	terms := noteSearchTerms(query)
 	if len(terms) == 0 {
 		return nil, nil
 	}
+	whereClause := noteSearchFilterWhereClause(filter)
 	rows, err := s.db.QueryContext(ctx, `
 SELECT path, title, COALESCE(type,''), COALESCE(project,''), COALESCE(status,''), COALESCE(trust,''), COALESCE(primary_anchor_path,''), COALESCE(anchor_roles_json,''),
        COALESCE(search_text, ''),
-       COALESCE((SELECT c.text FROM obsidian_chunks c WHERE c.note_id = obsidian_notes.id ORDER BY length(c.text) ASC LIMIT 1), ''),
+       COALESCE((SELECT GROUP_CONCAT(c.text, char(30)) FROM obsidian_chunks c WHERE c.note_id = obsidian_notes.id), ''),
        COALESCE((SELECT GROUP_CONCAT(DISTINCT rp.path) FROM obsidian_repo_paths rp WHERE rp.note_id = obsidian_notes.id), ''),
        COALESCE((SELECT GROUP_CONCAT(DISTINCT ap.path) FROM obsidian_anchor_paths ap WHERE ap.note_id = obsidian_notes.id), ''),
        COALESCE((SELECT GROUP_CONCAT(DISTINCT rs.symbol) FROM obsidian_repo_symbols rs WHERE rs.note_id = obsidian_notes.id), '')
 FROM obsidian_notes
+`+whereClause+`
 ORDER BY path ASC
 `)
 	if err != nil {
@@ -630,8 +785,8 @@ ORDER BY path ASC
 		}
 		hit.AnchorRoles = anchorRoles
 		hit.Symbols = splitCSV(symbolsCSV)
-		hit.Snippet = compactSnippet(hit.Snippet)
-		hit.Score = scoreTokenizedNoteHit(hit, searchText, terms)
+		hit.Snippet = compactSnippet(bestSnippetForTerms(hit.Snippet, terms))
+		hit.Score = scoreTokenizedNoteHit(hit, strings.TrimSpace(searchText+" "+hit.Snippet), terms)
 		if hit.Score <= 0 {
 			continue
 		}
@@ -650,6 +805,104 @@ ORDER BY path ASC
 		hits = hits[:limit]
 	}
 	return hits, nil
+}
+
+func noteSearchFilterWhereClause(filter noteSearchFilter) string {
+	if !filter.Dreams {
+		return ""
+	}
+	clauses := []string{
+		`EXISTS (
+  SELECT 1 FROM obsidian_tags t
+  WHERE t.note_id = obsidian_notes.id AND lower(t.tag) = 'foxctl/dream'
+)`,
+	}
+	if filter.BlurredOnly {
+		clauses = append(clauses, `EXISTS (
+  SELECT 1 FROM obsidian_tags t
+  WHERE t.note_id = obsidian_notes.id AND lower(t.tag) = 'foxctl/agent-blurred'
+)`)
+	}
+	return "WHERE " + strings.Join(clauses, " AND ")
+}
+
+func (s *sqlStore) SearchDreams(ctx context.Context, query string, opts DreamSearchOptions) ([]SearchHit, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, fmt.Errorf("obsidianindex: query required")
+	}
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	return s.searchNotesByTermsFiltered(ctx, query, limit, noteSearchFilter{
+		Dreams:      true,
+		BlurredOnly: opts.BlurredOnly,
+	})
+}
+
+func (s *sqlStore) SearchDreamsSemantic(ctx context.Context, query string, provider semantic.EmbeddingProvider, opts DreamSearchOptions) ([]SearchHit, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, fmt.Errorf("obsidianindex: query required")
+	}
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	dreamPaths, err := s.dreamPathSet(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	if len(dreamPaths) == 0 {
+		return nil, nil
+	}
+	fetchLimit := limit * 5
+	if fetchLimit < 50 {
+		fetchLimit = 50
+	}
+	hits, err := s.SearchNotesSemantic(ctx, query, provider, fetchLimit)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]SearchHit, 0, minInt(limit, len(hits)))
+	for _, hit := range hits {
+		if _, ok := dreamPaths[hit.Path]; !ok {
+			continue
+		}
+		filtered = append(filtered, hit)
+		if len(filtered) >= limit {
+			break
+		}
+	}
+	return filtered, nil
+}
+
+func (s *sqlStore) dreamPathSet(ctx context.Context, opts DreamSearchOptions) (map[string]struct{}, error) {
+	filter := noteSearchFilter{Dreams: true, BlurredOnly: opts.BlurredOnly}
+	whereClause := noteSearchFilterWhereClause(filter)
+	rows, err := s.db.QueryContext(ctx, `
+SELECT path
+FROM obsidian_notes
+`+whereClause+`
+ORDER BY path ASC
+`)
+	if err != nil {
+		return nil, fmt.Errorf("obsidianindex: dream path query: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]struct{}{}
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return nil, fmt.Errorf("obsidianindex: scan dream path: %w", err)
+		}
+		out[path] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func scoreTokenizedNoteHit(hit SearchHit, searchText string, terms []string) int {
@@ -1521,6 +1774,13 @@ func boolToInt(v bool) int {
 	return 0
 }
 
+func minInt(left, right int) int {
+	if left < right {
+		return left
+	}
+	return right
+}
+
 func buildSearchText(parsed obsidiantool.LinkParseResult, tags []string) string {
 	parts := []string{parsed.Title}
 	parts = append(parts, parsed.Aliases...)
@@ -1540,6 +1800,33 @@ func compactSnippet(text string) string {
 		return text[:177] + "..."
 	}
 	return text
+}
+
+func bestSnippetForTerms(text string, terms []string) string {
+	text = strings.TrimSpace(text)
+	if text == "" || len(terms) == 0 {
+		return text
+	}
+	best := text
+	bestScore := -1
+	for _, chunk := range strings.Split(text, "\x1e") {
+		chunk = strings.TrimSpace(chunk)
+		if chunk == "" {
+			continue
+		}
+		lower := strings.ToLower(chunk)
+		score := 0
+		for _, term := range terms {
+			if strings.Contains(lower, term) {
+				score++
+			}
+		}
+		if score > bestScore || score == bestScore && len(chunk) < len(best) {
+			best = chunk
+			bestScore = score
+		}
+	}
+	return best
 }
 
 type chunk struct {

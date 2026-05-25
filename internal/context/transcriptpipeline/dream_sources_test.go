@@ -1,229 +1,185 @@
 package transcriptpipeline
 
 import (
-	"errors"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 )
 
-func TestBuildDreamSourceCandidatesReturnsStableSortedCandidates(t *testing.T) {
-	now := time.Date(2026, 5, 25, 10, 0, 0, 0, time.UTC)
-	root := DreamSourceRoot{
-		Provider:      DreamSourceProviderCodex,
-		RootPath:      "/home/dev/.codex",
-		WorkspacePath: "/repo/foxctl",
-	}
-	files := []DreamSourceFile{
-		{
-			Provider:   DreamSourceProviderCodex,
-			RootPath:   "/home/dev/.codex",
-			SourcePath: "/home/dev/.codex/sessions/2026/05/24/rollout-bbb.jsonl",
-			Size:       20,
-			ModTime:    now.Add(-2 * time.Hour),
-		},
-		{
-			Provider:   DreamSourceProviderCodex,
-			RootPath:   "/home/dev/.codex",
-			SourcePath: "/home/dev/.codex/sessions/2026/05/24/rollout-aaa.jsonl",
-			Size:       10,
-			ModTime:    now.Add(-3 * time.Hour),
-		},
+func TestDiscoverDreamSourceCandidates_CodexStableFile(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "sessions", "2026", "05", "25", "test-session.jsonl")
+	writeDreamTestFile(t, path, `{"type":"session_meta","payload":{"id":"test-session","cwd":"/repo"}}`+"\n")
+	mtime := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(path, mtime, mtime); err != nil {
+		t.Fatalf("chtimes: %v", err)
 	}
 
-	got, err := BuildDreamSourceCandidates([]DreamSourceRoot{root}, files, now, time.Hour)
-	if err != nil {
-		t.Fatalf("BuildDreamSourceCandidates() error = %v", err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("candidates=%d want 2", len(got))
-	}
-	if got[0].SessionID != "rollout-aaa" || got[1].SessionID != "rollout-bbb" {
-		t.Fatalf("session order=%v want [rollout-aaa rollout-bbb]", []string{got[0].SessionID, got[1].SessionID})
-	}
-	for _, candidate := range got {
-		if !candidate.Stable() {
-			t.Fatalf("candidate %s stability=%q want stable", candidate.SourcePath, candidate.Stability)
-		}
-		if candidate.WorkspacePath != "/repo/foxctl" {
-			t.Fatalf("workspace=%q want root workspace", candidate.WorkspacePath)
-		}
-		if !strings.HasPrefix(candidate.Fingerprint, "sha256:") {
-			t.Fatalf("fingerprint=%q want sha256 prefix", candidate.Fingerprint)
-		}
-	}
-}
-
-func TestBuildDreamSourceCandidatesMarksUnstableFutureInvalidAndOutsideRoot(t *testing.T) {
-	now := time.Date(2026, 5, 25, 10, 0, 0, 0, time.UTC)
-	root := DreamSourceRoot{Provider: DreamSourceProviderClaude, RootPath: "/home/dev/.claude", WorkspacePath: "/repo/foxctl"}
-	files := []DreamSourceFile{
-		{
-			Provider:   DreamSourceProviderClaude,
-			RootPath:   root.RootPath,
-			SourcePath: "/home/dev/.claude/projects/ws/changing.jsonl",
-			Size:       10,
-			ModTime:    now.Add(-10 * time.Second),
-		},
-		{
-			Provider:   DreamSourceProviderClaude,
-			RootPath:   root.RootPath,
-			SourcePath: "/home/dev/.claude/projects/ws/future.jsonl",
-			Size:       10,
-			ModTime:    now.Add(time.Minute),
-		},
-		{
-			Provider:   DreamSourceProviderClaude,
-			RootPath:   root.RootPath,
-			SourcePath: "/home/dev/.claude/projects/ws/invalid.jsonl",
-			Size:       -1,
-			ModTime:    now.Add(-time.Hour),
-		},
-		{
-			Provider:   DreamSourceProviderClaude,
-			RootPath:   root.RootPath,
-			SourcePath: "/home/dev/elsewhere/outside.jsonl",
-			Size:       10,
-			ModTime:    now.Add(-time.Hour),
-		},
-	}
-
-	got, err := BuildDreamSourceCandidates([]DreamSourceRoot{root}, files, now, time.Minute)
-	if err != nil {
-		t.Fatalf("BuildDreamSourceCandidates() error = %v", err)
-	}
-	stabilityBySession := map[string]DreamSourceStability{}
-	for _, candidate := range got {
-		stabilityBySession[candidate.SessionID] = candidate.Stability
-	}
-	want := map[string]DreamSourceStability{
-		"changing": DreamSourceChanging,
-		"future":   DreamSourceFutureMTime,
-		"invalid":  DreamSourceInvalidStat,
-		"outside":  DreamSourceOutsideRoot,
-	}
-	if !reflect.DeepEqual(stabilityBySession, want) {
-		t.Fatalf("stability=%v want %v", stabilityBySession, want)
-	}
-}
-
-func TestBuildDreamSourceCandidatesDedupeAndFingerprintReflectStatChanges(t *testing.T) {
-	now := time.Date(2026, 5, 25, 10, 0, 0, 0, time.UTC)
-	root := DreamSourceRoot{Provider: DreamSourceProviderPi, RootPath: "/home/dev/.pi/transcripts"}
-	file := DreamSourceFile{
-		Provider:   DreamSourceProviderPi,
-		RootPath:   root.RootPath,
-		SourcePath: "/home/dev/.pi/transcripts/session-1.jsonl",
-		SessionID:  "session-1",
-		Size:       10,
-		ModTime:    now.Add(-time.Hour),
-	}
-
-	first, err := BuildDreamSourceCandidates([]DreamSourceRoot{root}, []DreamSourceFile{file, file}, now, time.Minute)
-	if err != nil {
-		t.Fatalf("BuildDreamSourceCandidates() error = %v", err)
-	}
-	if len(first) != 1 {
-		t.Fatalf("deduped candidates=%d want 1", len(first))
-	}
-
-	changed := file
-	changed.Size = 11
-	second, err := BuildDreamSourceCandidates([]DreamSourceRoot{root}, []DreamSourceFile{changed}, now, time.Minute)
-	if err != nil {
-		t.Fatalf("BuildDreamSourceCandidates() changed error = %v", err)
-	}
-	if first[0].Fingerprint == second[0].Fingerprint {
-		t.Fatalf("fingerprint did not change after stat change: %s", first[0].Fingerprint)
-	}
-}
-
-func TestBuildDreamSourceCandidatesRejectsInvalidRootsAndUnconfiguredFiles(t *testing.T) {
-	now := time.Date(2026, 5, 25, 10, 0, 0, 0, time.UTC)
-	_, err := BuildDreamSourceCandidates([]DreamSourceRoot{{Provider: "auto", RootPath: "/tmp"}}, nil, now, time.Minute)
-	if !errors.Is(err, ErrDreamSourceInvalidRoot) {
-		t.Fatalf("invalid root error=%v want ErrDreamSourceInvalidRoot", err)
-	}
-
-	_, err = BuildDreamSourceCandidates(
-		[]DreamSourceRoot{{Provider: DreamSourceProviderHermes, RootPath: "/tmp/hermes"}},
-		[]DreamSourceFile{{
-			Provider:   DreamSourceProviderHermes,
-			RootPath:   "/tmp/other",
-			SourcePath: "/tmp/other/session.jsonl",
-			Size:       1,
-			ModTime:    now,
-		}},
-		now,
-		time.Minute,
-	)
-	if !errors.Is(err, ErrDreamSourceInvalidFile) {
-		t.Fatalf("unconfigured file error=%v want ErrDreamSourceInvalidFile", err)
-	}
-}
-
-func TestBuildDreamSourceCandidatesSupportsConfiguredPiAndHermesRoots(t *testing.T) {
-	now := time.Date(2026, 5, 25, 10, 0, 0, 0, time.UTC)
-	roots := []DreamSourceRoot{
-		{Provider: DreamSourceProviderPi, RootPath: "/home/dev/.pi/transcripts"},
-		{Provider: DreamSourceProviderHermes, RootPath: "/home/dev/.hermes/transcripts"},
-	}
-	files := []DreamSourceFile{
-		{
-			Provider:   DreamSourceProviderHermes,
-			RootPath:   "/home/dev/.hermes/transcripts",
-			SourcePath: "/home/dev/.hermes/transcripts/hermes-1.jsonl",
-			Size:       1,
-			ModTime:    now.Add(-time.Hour),
-		},
-		{
-			Provider:   DreamSourceProviderPi,
-			RootPath:   "/home/dev/.pi/transcripts",
-			SourcePath: "/home/dev/.pi/transcripts/pi-1.jsonl",
-			Size:       1,
-			ModTime:    now.Add(-time.Hour),
-		},
-	}
-
-	got, err := BuildDreamSourceCandidates(roots, files, now, time.Minute)
-	if err != nil {
-		t.Fatalf("BuildDreamSourceCandidates() error = %v", err)
-	}
-	if providers := []DreamSourceProvider{got[0].Provider, got[1].Provider}; !reflect.DeepEqual(providers, []DreamSourceProvider{DreamSourceProviderHermes, DreamSourceProviderPi}) {
-		t.Fatalf("providers=%v want [hermes pi]", providers)
-	}
-	if got[0].SessionID != "hermes-1" || got[1].SessionID != "pi-1" {
-		t.Fatalf("session IDs=%q/%q want hermes-1/pi-1", got[0].SessionID, got[1].SessionID)
-	}
-}
-
-func TestCodexDreamSourceFilesUsesExistingSessionLocatorShape(t *testing.T) {
-	tmp := t.TempDir()
-	root := filepath.Join(tmp, ".codex")
-	sessionDir := filepath.Join(root, "sessions", "2026", "05", "25")
-	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
-		t.Fatalf("mkdir session dir: %v", err)
-	}
-	path := filepath.Join(sessionDir, "rollout-codex-1.jsonl")
-	if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
-		t.Fatalf("write codex source: %v", err)
-	}
-
-	files, err := CodexDreamSourceFiles(DreamSourceRoot{
+	got := DiscoverDreamSourceCandidates([]DreamSourceRoot{{
 		Provider:      DreamSourceProviderCodex,
 		RootPath:      root,
-		WorkspacePath: "/repo/foxctl",
+		WorkspaceHint: "/repo",
+	}})
+
+	if len(got) != 1 {
+		t.Fatalf("len(candidates)=%d want 1: %#v", len(got), got)
+	}
+	candidate := got[0]
+	if candidate.Provider != DreamSourceProviderCodex {
+		t.Fatalf("provider=%q want codex", candidate.Provider)
+	}
+	if candidate.Path != path {
+		t.Fatalf("path=%q want %q", candidate.Path, path)
+	}
+	if candidate.SessionID != "test-session" {
+		t.Fatalf("session_id=%q want test-session", candidate.SessionID)
+	}
+	if candidate.WorkspaceHint != "/repo" || candidate.WorkspacePath != "/repo" {
+		t.Fatalf("workspace hint/path=%q/%q want /repo", candidate.WorkspaceHint, candidate.WorkspacePath)
+	}
+	if candidate.StabilityStatus != DreamSourceStable {
+		t.Fatalf("stability=%q want stable", candidate.StabilityStatus)
+	}
+	if candidate.Size <= 0 {
+		t.Fatalf("size=%d want positive", candidate.Size)
+	}
+	if !candidate.ModTime.Equal(mtime) {
+		t.Fatalf("mtime=%s want %s", candidate.ModTime, mtime)
+	}
+	wantDigest := "sha256:" + sha256Hex([]byte(`{"type":"session_meta","payload":{"id":"test-session","cwd":"/repo"}}`+"\n"))
+	if candidate.Digest != wantDigest {
+		t.Fatalf("digest=%q want %q", candidate.Digest, wantDigest)
+	}
+	if candidate.Fingerprint == "" || candidate.Fingerprint == candidate.Digest {
+		t.Fatalf("fingerprint=%q should be populated independently from digest %q", candidate.Fingerprint, candidate.Digest)
+	}
+}
+
+func TestDiscoverDreamSourceCandidates_InvalidRoot(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+
+	got := DiscoverDreamSourceCandidates([]DreamSourceRoot{{
+		Provider:      DreamSourceProviderClaude,
+		RootPath:      missing,
+		WorkspaceHint: "/repo",
+	}})
+
+	if len(got) != 1 {
+		t.Fatalf("len(candidates)=%d want 1", len(got))
+	}
+	if got[0].StabilityStatus != DreamSourceInvalidRoot {
+		t.Fatalf("stability=%q want invalid_root", got[0].StabilityStatus)
+	}
+	if got[0].Root.Provider != DreamSourceProviderClaude || got[0].Root.RootPath != missing {
+		t.Fatalf("root=%#v does not preserve configured root", got[0].Root)
+	}
+	if got[0].Path != "" || got[0].Digest != "" || got[0].Fingerprint != "" {
+		t.Fatalf("invalid root should not have file identity: %#v", got[0])
+	}
+}
+
+func TestDiscoverDreamSourceCandidates_DeterministicOrdering(t *testing.T) {
+	codexRoot := t.TempDir()
+	claudeRoot := t.TempDir()
+	writeDreamTestFile(t, filepath.Join(codexRoot, "sessions", "2026", "05", "25", "b-session.jsonl"), "{}\n")
+	writeDreamTestFile(t, filepath.Join(codexRoot, "sessions", "2026", "05", "25", "a-session.jsonl"), "{}\n")
+	writeDreamTestFile(t, filepath.Join(claudeRoot, "z", "claude-z.jsonl"), "{}\n")
+	writeDreamTestFile(t, filepath.Join(claudeRoot, "a", "claude-a.jsonl"), "{}\n")
+
+	got := DiscoverDreamSourceCandidates([]DreamSourceRoot{
+		{Provider: DreamSourceProviderCodex, RootPath: codexRoot},
+		{Provider: DreamSourceProviderClaude, RootPath: claudeRoot},
 	})
-	if err != nil {
-		t.Fatalf("CodexDreamSourceFiles() error = %v", err)
+
+	var order []string
+	for _, candidate := range got {
+		order = append(order, string(candidate.Provider)+":"+candidate.SessionID)
 	}
-	if len(files) != 1 {
-		t.Fatalf("files=%d want 1", len(files))
+	want := []string{
+		"claude:claude-a",
+		"claude:claude-z",
+		"codex:a-session",
+		"codex:b-session",
 	}
-	if files[0].SessionID != "rollout-codex-1" || files[0].SourcePath != path {
-		t.Fatalf("file=%+v want session/source from codex locator", files[0])
+	if !reflect.DeepEqual(order, want) {
+		t.Fatalf("order=%v want %v", order, want)
 	}
+}
+
+func TestDiscoverDreamSourceCandidates_RootProviderShape(t *testing.T) {
+	piRoot := t.TempDir()
+	hermesRoot := t.TempDir()
+
+	got := DiscoverDreamSourceCandidates([]DreamSourceRoot{
+		{Provider: DreamSourceProviderPi, RootPath: piRoot, WorkspaceHint: "/pi/ws"},
+		{Provider: DreamSourceProviderHermes, RootPath: hermesRoot, WorkspaceHint: "/hermes/ws"},
+	})
+
+	if len(got) != 2 {
+		t.Fatalf("len(candidates)=%d want 2", len(got))
+	}
+	byProvider := map[DreamSourceProvider]DreamSourceCandidate{}
+	for _, candidate := range got {
+		byProvider[candidate.Provider] = candidate
+	}
+	for _, provider := range []DreamSourceProvider{DreamSourceProviderHermes, DreamSourceProviderPi} {
+		candidate, ok := byProvider[provider]
+		if !ok {
+			t.Fatalf("missing provider %q in %#v", provider, got)
+		}
+		if candidate.StabilityStatus != DreamSourceRootOnly {
+			t.Fatalf("%s stability=%q want root_only", provider, candidate.StabilityStatus)
+		}
+		if candidate.Root.Provider != provider || candidate.Root.RootPath == "" {
+			t.Fatalf("%s root shape lost provider/path: %#v", provider, candidate.Root)
+		}
+		if candidate.Path != "" || candidate.SessionID != "" || candidate.Digest != "" || candidate.Fingerprint != "" {
+			t.Fatalf("%s root-only source should not invent parser file fields: %#v", provider, candidate)
+		}
+	}
+}
+
+func TestDiscoverDreamSourceCandidates_FingerprintChangesWithContent(t *testing.T) {
+	root := t.TempDir()
+	first := filepath.Join(root, "sessions", "2026", "05", "25", "rollout-first.jsonl")
+	second := filepath.Join(root, "sessions", "2026", "05", "25", "rollout-second.jsonl")
+	writeDreamTestFile(t, first, "first\n")
+	writeDreamTestFile(t, second, "second\n")
+	mtime := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+	for _, path := range []string{first, second} {
+		if err := os.Chtimes(path, mtime, mtime); err != nil {
+			t.Fatalf("chtimes %s: %v", path, err)
+		}
+	}
+
+	got := DiscoverDreamSourceCandidates([]DreamSourceRoot{{Provider: DreamSourceProviderCodex, RootPath: root}})
+
+	if len(got) != 2 {
+		t.Fatalf("len(candidates)=%d want 2", len(got))
+	}
+	if got[0].Digest == got[1].Digest {
+		t.Fatalf("digests should differ for different content: %#v", got)
+	}
+	if got[0].Fingerprint == got[1].Fingerprint {
+		t.Fatalf("fingerprints should differ for different content: %#v", got)
+	}
+}
+
+func writeDreamTestFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+}
+
+func sha256Hex(content []byte) string {
+	sum := sha256.Sum256(content)
+	return hex.EncodeToString(sum[:])
 }

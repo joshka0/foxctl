@@ -9,6 +9,7 @@ import (
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
 	"github.com/joshka0/foxctl/internal/intelligence/searchindex"
 	"github.com/joshka0/foxctl/internal/platform/config"
+	workspaceutil "github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/storage"
 	"github.com/joshka0/foxctl/internal/storage/memory"
 )
@@ -42,10 +43,11 @@ func main() {
 	ctx := context.Background()
 	config.LoadDotEnv()
 
-	workspace, err := filepath.Abs(".")
+	workspaceRoot, err := filepath.Abs(".")
 	if err != nil {
 		panic(err)
 	}
+	workspaceID := workspaceutil.ID(workspaceRoot)
 
 	cfg, err := config.Load(ctx)
 	if err != nil {
@@ -58,7 +60,16 @@ func main() {
 	}
 	defer memStore.Close()
 
-	indexStore, err := searchindex.OpenWithTurboVec(ctx, cfg.Storage.Root, workspace, cfg.Database.Vector.Dimensions, searchindex.TurboVecConfig{
+	embedder, err := semantic.NewProviderForScope(
+		semantic.ScopeSymbols,
+		cfg,
+		semantic.WithGeminiKey(os.Getenv("GEMINI_API_KEY")),
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	indexStore, err := searchindex.OpenWithTurboVec(ctx, cfg.Storage.Root, workspaceID, embedder.Dimensions(), searchindex.TurboVecConfig{
 		Enabled:    cfg.Turbovec.Enabled,
 		SocketPath: cfg.Turbovec.SocketPath,
 		DataDir:    cfg.Storage.Root,
@@ -69,19 +80,10 @@ func main() {
 	}
 	defer indexStore.Close()
 
-	embedder, err := semantic.NewProviderForScope(
-		semantic.ScopeSymbols,
-		cfg,
-		semantic.WithGeminiKey(os.Getenv("GEMINI_API_KEY")),
-	)
-	if err != nil {
+	if err := indexStore.DeleteWorkspace(ctx, workspaceID); err != nil {
 		panic(err)
 	}
-
-	if err := indexStore.DeleteWorkspace(ctx, workspace); err != nil {
-		panic(err)
-	}
-	result, err := searchindex.BuildCodeDocuments(ctx, memoryListByTypeSource{store: memStore}, indexStore, workspace, searchindex.BuildCodeOptions{
+	result, err := searchindex.BuildCodeDocuments(ctx, memoryListByTypeSource{store: memStore}, indexStore, workspaceID, searchindex.BuildCodeOptions{
 		Limit:          0,
 		EmbedProvider:  embedder,
 		EmbedBatchSize: 32,
@@ -93,14 +95,14 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	persisted, err := indexStore.CountWorkspace(ctx, workspace)
+	persisted, err := indexStore.CountWorkspace(ctx, workspaceID)
 	if err != nil {
 		panic(err)
 	}
 	if result.Upserted > 0 && persisted == 0 {
-		panic(fmt.Sprintf("searchindex verification failed: upserted=%d but persisted rows=0 for workspace %s", result.Upserted, workspace))
+		panic(fmt.Sprintf("searchindex verification failed: upserted=%d but persisted rows=0 for workspace %s", result.Upserted, workspaceID))
 	}
 
-	fmt.Printf("workspace=%s symbols=%d files=%d upserted=%d persisted=%d skipped=%d errors=%d model=%s\n",
-		workspace, result.SymbolBuilt, result.FileBuilt, result.Upserted, persisted, result.Skipped, result.Errors, embedder.Model())
+	fmt.Printf("workspace=%s workspace_id=%s symbols=%d files=%d upserted=%d persisted=%d skipped=%d errors=%d model=%s\n",
+		workspaceRoot, workspaceID, result.SymbolBuilt, result.FileBuilt, result.Upserted, persisted, result.Skipped, result.Errors, embedder.Model())
 }

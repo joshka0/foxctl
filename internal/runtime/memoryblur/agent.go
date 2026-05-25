@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -233,6 +234,10 @@ func defaultPiSDKBlurScript() string {
 	candidates := []string{
 		filepath.Join("integrations", "pi", "memory-blur-agent.ts"),
 		filepath.Join(".", "integrations", "pi", "memory-blur-agent.ts"),
+	}
+	if _, file, _, ok := runtime.Caller(0); ok {
+		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", ".."))
+		candidates = append(candidates, filepath.Join(repoRoot, "integrations", "pi", "memory-blur-agent.ts"))
 	}
 	for _, candidate := range candidates {
 		if _, err := os.Stat(candidate); err == nil {

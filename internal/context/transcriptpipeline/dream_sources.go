@@ -1,20 +1,22 @@
 package transcriptpipeline
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
+	"io"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/joshka0/foxctl/internal/context/sessionkit/claudejsonl"
 	"github.com/joshka0/foxctl/internal/context/sessionkit/codexjsonl"
 )
 
-// DreamSourceProvider identifies a configured transcript source root.
+// DreamSourceProvider identifies a configured transcript source family.
 type DreamSourceProvider string
 
 const (
@@ -24,293 +26,301 @@ const (
 	DreamSourceProviderHermes DreamSourceProvider = "hermes"
 )
 
-// DreamSourceStability describes whether a transcript file is quiet enough to process.
-type DreamSourceStability string
+// DreamSourceStabilityStatus describes whether a file stayed unchanged while inspected.
+type DreamSourceStabilityStatus string
 
 const (
-	DreamSourceStable        DreamSourceStability = "stable"
-	DreamSourceChanging      DreamSourceStability = "changing"
-	DreamSourceFutureMTime   DreamSourceStability = "future_mtime"
-	DreamSourceInvalidStat   DreamSourceStability = "invalid_stat"
-	DreamSourceOutsideRoot   DreamSourceStability = "outside_root"
-	DreamSourceInvalidSource DreamSourceStability = "invalid_source"
+	DreamSourceStable      DreamSourceStabilityStatus = "stable"
+	DreamSourceUnstable    DreamSourceStabilityStatus = "unstable"
+	DreamSourceRootOnly    DreamSourceStabilityStatus = "root_only"
+	DreamSourceInvalidRoot DreamSourceStabilityStatus = "invalid_root"
 )
 
-var (
-	ErrDreamSourceInvalidRoot = errors.New("transcriptpipeline: invalid dream source root")
-	ErrDreamSourceInvalidFile = errors.New("transcriptpipeline: invalid dream source file")
-)
-
-// DreamSourceRoot is one explicitly configured source root. Pi and Hermes roots are
-// represented here even though transcript parsing can land later.
+// DreamSourceRoot is one explicit transcript source root from configuration.
 type DreamSourceRoot struct {
-	Provider      DreamSourceProvider
-	RootPath      string
-	WorkspacePath string
+	Provider      DreamSourceProvider `json:"provider"`
+	RootPath      string              `json:"root_path"`
+	WorkspaceHint string              `json:"workspace_hint,omitempty"`
 }
 
-// DreamSourceFile is observed filesystem metadata for one candidate transcript.
-type DreamSourceFile struct {
-	Provider      DreamSourceProvider
-	RootPath      string
-	SourcePath    string
-	SessionID     string
-	WorkspacePath string
-	Size          int64
-	ModTime       time.Time
-}
-
-// DreamSourceCandidate is the deterministic source model consumed by dream workers.
+// DreamSourceCandidate is the typed discovery model for transcript dream sources.
 type DreamSourceCandidate struct {
-	Provider      DreamSourceProvider
-	RootPath      string
-	SourcePath    string
-	SessionID     string
-	WorkspacePath string
-	Size          int64
-	ModTime       time.Time
-	Fingerprint   string
-	Stability     DreamSourceStability
+	Provider        DreamSourceProvider        `json:"provider"`
+	Path            string                     `json:"path,omitempty"`
+	SessionID       string                     `json:"session_id,omitempty"`
+	WorkspaceHint   string                     `json:"workspace_hint,omitempty"`
+	WorkspacePath   string                     `json:"workspace_path,omitempty"`
+	Size            int64                      `json:"size,omitempty"`
+	ModTime         time.Time                  `json:"mtime,omitempty"`
+	Fingerprint     string                     `json:"fingerprint,omitempty"`
+	Digest          string                     `json:"digest,omitempty"`
+	StabilityStatus DreamSourceStabilityStatus `json:"stability_status"`
+	Root            DreamSourceRoot            `json:"root"`
+	Error           string                     `json:"error,omitempty"`
 }
 
-// Stable reports whether the source has passed the configured quiet period.
-func (c DreamSourceCandidate) Stable() bool {
-	return c.Stability == DreamSourceStable
+// DiscoverDreamSourceCandidates discovers transcript source candidates from explicit roots.
+func DiscoverDreamSourceCandidates(roots []DreamSourceRoot) []DreamSourceCandidate {
+	candidates, _ := DiscoverDreamSourceCandidatesContext(context.Background(), roots)
+	return candidates
 }
 
-// BuildDreamSourceCandidates turns configured roots plus stat metadata into a
-// deduped, sorted candidate list without reading files or touching storage.
-func BuildDreamSourceCandidates(roots []DreamSourceRoot, files []DreamSourceFile, now time.Time, quietPeriod time.Duration) ([]DreamSourceCandidate, error) {
-	rootByKey := make(map[dreamSourceRootKey]DreamSourceRoot, len(roots))
+func DiscoverDreamSourceCandidatesContext(ctx context.Context, roots []DreamSourceRoot) ([]DreamSourceCandidate, error) {
+	candidates := make([]DreamSourceCandidate, 0, len(roots))
 	for _, root := range roots {
-		normalized, err := normalizeDreamSourceRoot(root)
-		if err != nil {
-			return nil, err
+		if err := ctx.Err(); err != nil {
+			return candidates, err
 		}
-		rootByKey[dreamSourceRootKey{Provider: normalized.Provider, RootPath: normalized.RootPath}] = normalized
-	}
-
-	byIdentity := make(map[string]DreamSourceCandidate, len(files))
-	for _, file := range files {
-		candidate, err := buildDreamSourceCandidate(rootByKey, file, now, quietPeriod)
-		if err != nil {
-			return nil, err
-		}
-		key := dreamSourceIdentity(candidate)
-		if existing, ok := byIdentity[key]; ok {
-			byIdentity[key] = pickDeterministicDreamSource(existing, candidate)
+		root = normalizeDreamSourceRoot(root)
+		if root.RootPath == "" || !dirExists(root.RootPath) {
+			candidates = append(candidates, invalidDreamSourceRoot(root))
 			continue
 		}
-		byIdentity[key] = candidate
-	}
 
-	out := make([]DreamSourceCandidate, 0, len(byIdentity))
-	for _, candidate := range byIdentity {
+		switch root.Provider {
+		case DreamSourceProviderCodex:
+			found, err := discoverCodexDreamSources(ctx, root)
+			candidates = append(candidates, found...)
+			if err != nil {
+				return candidates, err
+			}
+		case DreamSourceProviderClaude:
+			found, err := discoverClaudeDreamSources(ctx, root)
+			candidates = append(candidates, found...)
+			if err != nil {
+				return candidates, err
+			}
+		case DreamSourceProviderPi, DreamSourceProviderHermes:
+			candidates = append(candidates, rootOnlyDreamSource(root))
+		default:
+			candidates = append(candidates, invalidDreamSourceRoot(root))
+		}
+	}
+	sortDreamSourceCandidates(candidates)
+	return candidates, nil
+}
+
+func discoverCodexDreamSources(ctx context.Context, root DreamSourceRoot) ([]DreamSourceCandidate, error) {
+	files, err := codexjsonl.ListSessionFiles(root.RootPath)
+	if err != nil {
+		return []DreamSourceCandidate{invalidDreamSourceRootWithError(root, err)}, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]DreamSourceCandidate, 0, len(files))
+	for _, file := range files {
+		if err := ctx.Err(); err != nil {
+			return out, err
+		}
+		candidate := dreamSourceCandidateFromFile(ctx, root, file.Path, file.ID, root.WorkspaceHint)
+		if candidate.Size == 0 && file.Size != 0 {
+			candidate.Size = file.Size
+		}
+		if candidate.ModTime.IsZero() && !file.ModTime.IsZero() {
+			candidate.ModTime = file.ModTime.UTC()
+		}
 		out = append(out, candidate)
 	}
-	sortDreamSourceCandidates(out)
 	return out, nil
 }
 
-// CodexDreamSourceFiles adapts the existing Codex session locator into the pure
-// dream source model.
-func CodexDreamSourceFiles(root DreamSourceRoot) ([]DreamSourceFile, error) {
-	normalized, err := normalizeDreamSourceRoot(root)
+func discoverClaudeDreamSources(ctx context.Context, root DreamSourceRoot) ([]DreamSourceCandidate, error) {
+	files, err := listClaudeDreamSessionFiles(ctx, root.RootPath)
 	if err != nil {
-		return nil, err
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return []DreamSourceCandidate{invalidDreamSourceRootWithError(root, err)}, nil
 	}
-	if normalized.Provider != DreamSourceProviderCodex {
-		return nil, fmt.Errorf("%w: codex adapter requires provider %q", ErrDreamSourceInvalidRoot, DreamSourceProviderCodex)
+	out := make([]DreamSourceCandidate, 0, len(files))
+	for _, file := range files {
+		if err := ctx.Err(); err != nil {
+			return out, err
+		}
+		out = append(out, dreamSourceCandidateFromFile(ctx, root, file.Path, file.SessionID, root.WorkspaceHint))
 	}
-	sessions, err := codexjsonl.ListSessionFiles(normalized.RootPath)
-	if err != nil {
-		return nil, err
-	}
-	files := make([]DreamSourceFile, 0, len(sessions))
-	for _, session := range sessions {
-		files = append(files, DreamSourceFile{
-			Provider:      normalized.Provider,
-			RootPath:      normalized.RootPath,
-			SourcePath:    session.Path,
-			SessionID:     session.ID,
-			WorkspacePath: normalized.WorkspacePath,
-			Size:          session.Size,
-			ModTime:       session.ModTime,
+	return out, nil
+}
+
+type claudeDreamSessionFile struct {
+	Path      string
+	SessionID string
+}
+
+func listClaudeDreamSessionFiles(ctx context.Context, root string) ([]claudeDreamSessionFile, error) {
+	files := make([]claudeDreamSessionFile, 0)
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".jsonl" {
+			return nil
+		}
+		files = append(files, claudeDreamSessionFile{
+			Path:      path,
+			SessionID: strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
 		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
+	sort.SliceStable(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	return files, nil
 }
 
-// ClaudeDreamSourceFiles adapts the existing Claude workspace locator into the
-// pure dream source model.
-func ClaudeDreamSourceFiles(root DreamSourceRoot) ([]DreamSourceFile, error) {
-	normalized, err := normalizeDreamSourceRoot(root)
+func dreamSourceCandidateFromFile(ctx context.Context, root DreamSourceRoot, path, sessionID, workspaceHint string) DreamSourceCandidate {
+	before, err := os.Stat(path)
 	if err != nil {
-		return nil, err
+		return DreamSourceCandidate{
+			Provider:        root.Provider,
+			Path:            path,
+			SessionID:       strings.TrimSpace(sessionID),
+			WorkspaceHint:   strings.TrimSpace(workspaceHint),
+			StabilityStatus: DreamSourceUnstable,
+			Root:            root,
+			Error:           err.Error(),
+		}
 	}
-	if normalized.Provider != DreamSourceProviderClaude {
-		return nil, fmt.Errorf("%w: claude adapter requires provider %q", ErrDreamSourceInvalidRoot, DreamSourceProviderClaude)
+
+	digest, readErr := fileSHA256Context(ctx, path)
+	after, statErr := os.Stat(path)
+	status := DreamSourceStable
+	if readErr != nil || statErr != nil || before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
+		status = DreamSourceUnstable
 	}
-	pairs := claudejsonl.LocateAllSessionJSONLs(normalized.WorkspacePath)
-	files := make([]DreamSourceFile, 0, len(pairs))
-	for _, pair := range pairs {
-		files = append(files, DreamSourceFile{
-			Provider:      normalized.Provider,
-			RootPath:      normalized.RootPath,
-			SourcePath:    pair.Path,
-			SessionID:     pair.SessionID,
-			WorkspacePath: normalized.WorkspacePath,
-		})
+	errText := ""
+	if readErr != nil {
+		errText = readErr.Error()
+	} else if statErr != nil {
+		errText = statErr.Error()
 	}
-	return files, nil
+
+	size := before.Size()
+	mtime := before.ModTime().UTC()
+	if statErr == nil {
+		size = after.Size()
+		mtime = after.ModTime().UTC()
+	}
+
+	return DreamSourceCandidate{
+		Provider:        root.Provider,
+		Path:            path,
+		SessionID:       strings.TrimSpace(sessionID),
+		WorkspaceHint:   strings.TrimSpace(workspaceHint),
+		WorkspacePath:   strings.TrimSpace(workspaceHint),
+		Size:            size,
+		ModTime:         mtime,
+		Fingerprint:     dreamSourceFingerprint(root.Provider, path, size, mtime, digest),
+		Digest:          digest,
+		StabilityStatus: status,
+		Root:            root,
+		Error:           errText,
+	}
 }
 
-type dreamSourceRootKey struct {
-	Provider DreamSourceProvider
-	RootPath string
-}
-
-func normalizeDreamSourceRoot(root DreamSourceRoot) (DreamSourceRoot, error) {
-	provider := DreamSourceProvider(strings.ToLower(strings.TrimSpace(string(root.Provider))))
-	switch provider {
-	case DreamSourceProviderClaude, DreamSourceProviderCodex, DreamSourceProviderPi, DreamSourceProviderHermes:
-	default:
-		return DreamSourceRoot{}, fmt.Errorf("%w: unsupported provider %q", ErrDreamSourceInvalidRoot, root.Provider)
-	}
-	rootPath := cleanDreamPath(root.RootPath)
-	if rootPath == "" {
-		return DreamSourceRoot{}, fmt.Errorf("%w: root path is required for provider %q", ErrDreamSourceInvalidRoot, provider)
-	}
-	return DreamSourceRoot{
-		Provider:      provider,
-		RootPath:      rootPath,
-		WorkspacePath: cleanDreamPath(root.WorkspacePath),
-	}, nil
-}
-
-func buildDreamSourceCandidate(roots map[dreamSourceRootKey]DreamSourceRoot, file DreamSourceFile, now time.Time, quietPeriod time.Duration) (DreamSourceCandidate, error) {
-	provider := DreamSourceProvider(strings.ToLower(strings.TrimSpace(string(file.Provider))))
-	rootPath := cleanDreamPath(file.RootPath)
-	sourcePath := cleanDreamPath(file.SourcePath)
-	if provider == "" || rootPath == "" || sourcePath == "" {
-		return DreamSourceCandidate{}, fmt.Errorf("%w: provider, root_path, and source_path are required", ErrDreamSourceInvalidFile)
-	}
-	root, ok := roots[dreamSourceRootKey{Provider: provider, RootPath: rootPath}]
-	if !ok {
-		return DreamSourceCandidate{}, fmt.Errorf("%w: unconfigured root %s:%s", ErrDreamSourceInvalidFile, provider, rootPath)
-	}
-	sessionID := strings.TrimSpace(file.SessionID)
-	if sessionID == "" {
-		sessionID = dreamSessionIDFromPath(provider, sourcePath)
-	}
-	candidate := DreamSourceCandidate{
-		Provider:      provider,
-		RootPath:      root.RootPath,
-		SourcePath:    sourcePath,
-		SessionID:     sessionID,
-		WorkspacePath: firstNonEmpty(cleanDreamPath(file.WorkspacePath), root.WorkspacePath),
-		Size:          file.Size,
-		ModTime:       file.ModTime.UTC(),
-		Stability:     dreamSourceStability(root.RootPath, sourcePath, file.Size, file.ModTime.UTC(), now.UTC(), quietPeriod),
-	}
-	if strings.TrimSpace(candidate.SessionID) == "" {
-		candidate.Stability = DreamSourceInvalidSource
-	}
-	candidate.Fingerprint = dreamSourceFingerprint(candidate)
-	return candidate, nil
-}
-
-func dreamSourceStability(rootPath, sourcePath string, size int64, modTime, now time.Time, quietPeriod time.Duration) DreamSourceStability {
-	if !dreamPathInsideRoot(rootPath, sourcePath) {
-		return DreamSourceOutsideRoot
-	}
-	if size < 0 || modTime.IsZero() {
-		return DreamSourceInvalidStat
-	}
-	if modTime.After(now) {
-		return DreamSourceFutureMTime
-	}
-	if quietPeriod < 0 {
-		quietPeriod = 0
-	}
-	if now.Sub(modTime) < quietPeriod {
-		return DreamSourceChanging
-	}
-	return DreamSourceStable
-}
-
-func dreamPathInsideRoot(rootPath, sourcePath string) bool {
-	rel, err := filepath.Rel(rootPath, sourcePath)
+func fileSHA256Context(ctx context.Context, path string) (string, error) {
+	f, err := os.Open(path)
 	if err != nil {
-		return false
+		return "", err
 	}
-	return rel == "." || (rel != "" && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+	defer func() { _ = f.Close() }()
+
+	hash := sha256.New()
+	buf := make([]byte, 32*1024)
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		n, readErr := f.Read(buf)
+		if n > 0 {
+			if _, err := hash.Write(buf[:n]); err != nil {
+				return "", err
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return "", readErr
+		}
+	}
+	return "sha256:" + hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-func dreamSessionIDFromPath(provider DreamSourceProvider, path string) string {
-	switch provider {
-	case DreamSourceProviderCodex:
-		return strings.TrimSpace(codexjsonl.SessionIDFromFilename(path))
-	case DreamSourceProviderClaude, DreamSourceProviderPi, DreamSourceProviderHermes:
-		return strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-	default:
-		return ""
+func dreamSourceFingerprint(provider DreamSourceProvider, path string, size int64, mtime time.Time, digest string) string {
+	hash := sha256.Sum256([]byte(strings.Join([]string{
+		string(provider),
+		filepath.Clean(path),
+		fmt.Sprintf("%d", size),
+		mtime.UTC().Format(time.RFC3339Nano),
+		digest,
+	}, "\x00")))
+	return "sha256:" + hex.EncodeToString(hash[:])
+}
+
+func rootOnlyDreamSource(root DreamSourceRoot) DreamSourceCandidate {
+	return DreamSourceCandidate{
+		Provider:        root.Provider,
+		WorkspaceHint:   root.WorkspaceHint,
+		WorkspacePath:   root.WorkspaceHint,
+		StabilityStatus: DreamSourceRootOnly,
+		Root:            root,
 	}
 }
 
-func dreamSourceFingerprint(candidate DreamSourceCandidate) string {
-	h := sha256.New()
-	fields := []string{
-		string(candidate.Provider),
-		candidate.RootPath,
-		candidate.SourcePath,
-		candidate.SessionID,
-		candidate.WorkspacePath,
-		fmt.Sprintf("%d", candidate.Size),
-		fmt.Sprintf("%d", candidate.ModTime.UnixNano()),
-	}
-	for _, field := range fields {
-		_, _ = h.Write([]byte(field))
-		_, _ = h.Write([]byte{0})
-	}
-	return "sha256:" + hex.EncodeToString(h.Sum(nil))
+func invalidDreamSourceRoot(root DreamSourceRoot) DreamSourceCandidate {
+	return invalidDreamSourceRootWithError(root, nil)
 }
 
-func dreamSourceIdentity(candidate DreamSourceCandidate) string {
-	return strings.Join([]string{
-		string(candidate.Provider),
-		candidate.SourcePath,
-	}, "\x00")
+func invalidDreamSourceRootWithError(root DreamSourceRoot, err error) DreamSourceCandidate {
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+	}
+	return DreamSourceCandidate{
+		Provider:        root.Provider,
+		WorkspaceHint:   root.WorkspaceHint,
+		WorkspacePath:   root.WorkspaceHint,
+		StabilityStatus: DreamSourceInvalidRoot,
+		Root:            root,
+		Error:           msg,
+	}
 }
 
-func pickDeterministicDreamSource(a, b DreamSourceCandidate) DreamSourceCandidate {
-	if dreamSourceSortKey(b) < dreamSourceSortKey(a) {
-		return b
-	}
-	return a
+func normalizeDreamSourceRoot(root DreamSourceRoot) DreamSourceRoot {
+	root.Provider = DreamSourceProvider(strings.ToLower(strings.TrimSpace(string(root.Provider))))
+	root.RootPath = strings.TrimSpace(root.RootPath)
+	root.WorkspaceHint = strings.TrimSpace(root.WorkspaceHint)
+	return root
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 func sortDreamSourceCandidates(candidates []DreamSourceCandidate) {
 	sort.SliceStable(candidates, func(i, j int) bool {
-		return dreamSourceSortKey(candidates[i]) < dreamSourceSortKey(candidates[j])
+		left := candidates[i]
+		right := candidates[j]
+		keys := [][2]string{
+			{string(left.Provider), string(right.Provider)},
+			{left.Root.RootPath, right.Root.RootPath},
+			{left.WorkspaceHint, right.WorkspaceHint},
+			{left.Path, right.Path},
+			{left.SessionID, right.SessionID},
+		}
+		for _, key := range keys {
+			if key[0] == key[1] {
+				continue
+			}
+			return key[0] < key[1]
+		}
+		return left.Fingerprint < right.Fingerprint
 	})
-}
-
-func dreamSourceSortKey(candidate DreamSourceCandidate) string {
-	return strings.Join([]string{
-		string(candidate.Provider),
-		candidate.WorkspacePath,
-		candidate.SessionID,
-		candidate.SourcePath,
-		fmt.Sprintf("%020d", candidate.Size),
-		fmt.Sprintf("%020d", candidate.ModTime.UnixNano()),
-	}, "\x00")
-}
-
-func cleanDreamPath(path string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return ""
-	}
-	return filepath.Clean(path)
 }

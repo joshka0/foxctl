@@ -13,6 +13,7 @@ import (
 	retrievalv2 "github.com/joshka0/foxctl/internal/intelligence/retrieval/v2"
 	"github.com/joshka0/foxctl/internal/intelligence/searchindex"
 	"github.com/joshka0/foxctl/internal/platform/config"
+	workspaceutil "github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/storage"
 	"github.com/joshka0/foxctl/internal/storage/memory"
 )
@@ -78,10 +79,11 @@ func (a repoQueryAdapter) DAGGrep(ctx context.Context, req retrievalv2.RepoDAGGr
 func main() {
 	ctx := context.Background()
 	config.LoadDotEnv()
-	workspace, err := filepath.Abs(".")
+	workspaceRoot, err := filepath.Abs(".")
 	if err != nil {
 		panic(err)
 	}
+	workspaceID := workspaceutil.ID(workspaceRoot)
 	query := "searchSymbolsWithRetrieval"
 	if len(os.Args) > 1 && strings.TrimSpace(os.Args[1]) != "" {
 		query = os.Args[1]
@@ -98,7 +100,16 @@ func main() {
 	}
 	defer memStore.Close()
 
-	indexStore, err := searchindex.OpenWithTurboVec(ctx, cfg.Storage.Root, workspace, cfg.Database.Vector.Dimensions, searchindex.TurboVecConfig{
+	embedder, err := semantic.NewProviderForScope(
+		semantic.ScopeSymbols,
+		cfg,
+		semantic.WithGeminiKey(os.Getenv("GEMINI_API_KEY")),
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	indexStore, err := searchindex.OpenWithTurboVec(ctx, cfg.Storage.Root, workspaceID, embedder.Dimensions(), searchindex.TurboVecConfig{
 		Enabled:    cfg.Turbovec.Enabled,
 		SocketPath: cfg.Turbovec.SocketPath,
 		DataDir:    cfg.Storage.Root,
@@ -109,17 +120,11 @@ func main() {
 	}
 	defer indexStore.Close()
 
-	embedder, _ := semantic.NewProviderForScope(
-		semantic.ScopeSymbols,
-		cfg,
-		semantic.WithGeminiKey(os.Getenv("GEMINI_API_KEY")),
-	)
-
 	if os.Getenv("SEARCHINDEX_SKIP_REINDEX") != "1" {
-		if err := indexStore.DeleteWorkspace(ctx, workspace); err != nil {
+		if err := indexStore.DeleteWorkspace(ctx, workspaceID); err != nil {
 			panic(err)
 		}
-		if _, err := searchindex.BuildCodeDocuments(ctx, memoryListByTypeSource{store: memStore}, indexStore, workspace, searchindex.BuildCodeOptions{
+		if _, err := searchindex.BuildCodeDocuments(ctx, memoryListByTypeSource{store: memStore}, indexStore, workspaceID, searchindex.BuildCodeOptions{
 			Limit:         0,
 			EmbedProvider: embedder,
 		}); err != nil {
@@ -128,7 +133,7 @@ func main() {
 	}
 
 	var repoSvc *repoquery.QueryService
-	if repoStore, err := repoindex.Open(ctx, cfg.Storage.Root, workspace); err == nil {
+	if repoStore, err := repoindex.Open(ctx, cfg.Storage.Root, workspaceRoot); err == nil {
 		defer repoStore.Close()
 		repoSvc = repoquery.NewQueryService(repoindex.NewQueryEngine(repoStore))
 	}
@@ -139,7 +144,7 @@ func main() {
 			engine = engine.WithRepoQueryService(repoQueryAdapter{service: repoSvc})
 		}
 
-		req := retrievalv2.DefaultSearchRequest(workspace, query)
+		req := retrievalv2.DefaultSearchRequest(workspaceID, query)
 		req.MaxResults = 8
 		req.Sources.EnableLexical = true
 		req.Sources.EnableVector = embedder != nil

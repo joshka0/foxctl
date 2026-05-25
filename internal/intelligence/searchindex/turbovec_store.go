@@ -95,9 +95,9 @@ func WrapWithTurboVec(store Store, workspaceID string, dim int, cfg TurboVecConf
 		BitWidth:   cfg.BitWidth,
 	})
 
-	// Probe the sidecar — if not running, warn and fall back gracefully.
-	if !turbovec.IsAvailable() {
-		fmt.Printf("turbovec: sidecar not reachable at %s, falling back to brute-force search\n", cfg.SocketPath)
+	// Probe the configured sidecar and fall back quietly; skill stdout must stay
+	// reserved for envelopes.
+	if !turbovecSocketAvailable(cfg.SocketPath) {
 		return store
 	}
 
@@ -109,6 +109,18 @@ func WrapWithTurboVec(store Store, workspaceID string, dim int, cfg TurboVecConf
 	}
 }
 
+func turbovecSocketAvailable(socketPath string) bool {
+	if socketPath == "" {
+		socketPath = turbovec.DefaultSocketPath()
+	}
+	client, err := turbovec.Dial(socketPath)
+	if err != nil {
+		return false
+	}
+	_ = client.Close()
+	return true
+}
+
 // Upsert stores the document in SQLite and adds its embedding to the turbovec index.
 func (s *turbovecStore) Upsert(ctx context.Context, doc Document) error {
 	// Always store in SQL (fallback + metadata).
@@ -118,11 +130,8 @@ func (s *turbovecStore) Upsert(ctx context.Context, doc Document) error {
 
 	// Add to turbovec index if we have an embedding.
 	if len(doc.Embedding) > 0 {
-		if err := s.vec.AddVector(doc.ID, doc.Embedding); err != nil {
-			// Log but don't fail — SQL is the source of truth.
-			// The turbovec index is a best-effort acceleration layer.
-			fmt.Printf("turbovec: add vector warning: %v\n", err)
-		}
+		// SQL remains the source of truth; the compressed sidecar is best-effort.
+		_ = s.vec.AddVector(doc.ID, doc.Embedding)
 	}
 
 	return nil
@@ -163,9 +172,12 @@ func (s *turbovecStore) VectorRecall(ctx context.Context, workspaceID string, em
 	} else {
 		results, err = s.vec.Search(embedding, k)
 	}
-	if err != nil || len(results) == 0 {
+	if err != nil {
 		// Fall back to brute-force SQL.
 		return s.Store.VectorRecall(ctx, workspaceID, embedding, opts)
+	}
+	if len(results) == 0 {
+		return nil, nil
 	}
 
 	// Collect candidate doc IDs.
@@ -177,21 +189,7 @@ func (s *turbovecStore) VectorRecall(ctx context.Context, workspaceID string, em
 	// Fetch exact embeddings for the candidate set from SQL.
 	exactEmbeddings, err := s.GetEmbeddingsByIDs(ctx, candidateIDs)
 	if err != nil {
-		// Rerank failed — return approximate results as-is.
-		hits := make([]SearchHit, 0, len(results))
-		for _, r := range results {
-			hits = append(hits, SearchHit{
-				Doc: Document{
-					ID:          r.DocID,
-					WorkspaceID: workspaceID,
-				},
-				Score: r.Score,
-			})
-		}
-		if len(hits) > opts.Limit {
-			hits = hits[:opts.Limit]
-		}
-		return hits, nil
+		return nil, fmt.Errorf("searchindex: turbovec rerank embeddings: %w", err)
 	}
 
 	// Rerank with exact cosine similarity.
@@ -225,13 +223,23 @@ func (s *turbovecStore) VectorRecall(ctx context.Context, workspaceID string, em
 		reranked = reranked[:opts.Limit]
 	}
 
+	rerankedIDs := make([]string, 0, len(reranked))
+	for _, r := range reranked {
+		rerankedIDs = append(rerankedIDs, r.docID)
+	}
+	docs, err := s.GetDocumentsByIDs(ctx, rerankedIDs)
+	if err != nil {
+		return nil, fmt.Errorf("searchindex: turbovec hydrate documents: %w", err)
+	}
+
 	hits := make([]SearchHit, 0, len(reranked))
 	for _, r := range reranked {
+		doc, ok := docs[r.docID]
+		if !ok {
+			continue
+		}
 		hits = append(hits, SearchHit{
-			Doc: Document{
-				ID:          r.docID,
-				WorkspaceID: workspaceID,
-			},
+			Doc:   doc,
 			Score: r.score,
 		})
 	}

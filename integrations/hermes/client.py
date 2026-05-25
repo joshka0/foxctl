@@ -1142,6 +1142,26 @@ class FoxctlClient:
         resp = self._post("/api/skills/code/smart_search", body)
         return self._unwrap_skill(resp)
 
+    def branch_impact(
+        self,
+        base_ref: str,
+        head_ref: str = "HEAD",
+        limit: int = 20,
+        depth: int = 2,
+        per_file_cap: Optional[int] = None,
+        max_changed: Optional[int] = None,
+    ) -> Dict:
+        """Inspect changed units and ranked review candidates for a branch."""
+        return self._skill(
+            "code/branch_impact",
+            base_ref=base_ref,
+            head_ref=head_ref,
+            limit=limit,
+            depth=depth,
+            per_file_cap=per_file_cap,
+            max_changed=max_changed,
+        )
+
     def code_symbols(self, path: str) -> Dict:
         """Extract code symbols from a file."""
         body = {"workspace": self.cfg.workspace, "path": path}

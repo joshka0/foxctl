@@ -3,6 +3,7 @@ package obsidianindex
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -334,6 +335,237 @@ func TestNormalizeAnchorRolesProperty(t *testing.T) {
 	}
 }
 
+func TestSearchDreamsReturnsOnlyAgentBlurredDreamNotes(t *testing.T) {
+	ctx := context.Background()
+	storageRoot := t.TempDir()
+	vaultRoot := t.TempDir()
+	writeVaultNote(t, vaultRoot, "inbox/drafted-from-foxctl/dreams/foxctl/2026-05-25/blurred.md", `---
+title: "Blurred edge coordination"
+type: "memory"
+status: "draft"
+trust: "raw"
+source_lane: "transcript_dream"
+agent_blurred: "true"
+tags:
+  - foxctl/transcript-dream
+  - foxctl/dream
+  - foxctl/agent-blurred
+---
+
+# Blurred edge coordination
+
+## Distilled Summary
+Details were reduced into a reviewable dream.
+
+## Agent Blurred Mechanism
+A decentralized edge response shifts control from a brittle central queue to local bounded actors.
+
+Mechanism tags: decentralized_edge_response, bounded_actor
+`)
+	writeVaultNote(t, vaultRoot, "inbox/drafted-from-foxctl/dreams/foxctl/2026-05-25/unblurred.md", `---
+title: "Unblurred edge coordination"
+type: "memory"
+status: "draft"
+trust: "raw"
+source_lane: "transcript_dream"
+tags:
+  - foxctl/transcript-dream
+  - foxctl/dream
+---
+
+# Unblurred edge coordination
+
+## Blurred Mechanisms
+- central queue detail should not be enough for blurred-only search.
+`)
+	writeVaultNote(t, vaultRoot, "notes/ordinary.md", `---
+title: "Ordinary memory"
+type: "memory"
+tags:
+  - foxctl/memory
+---
+
+# Ordinary memory
+
+A decentralized edge response exists here too, but this is not a dream note.
+`)
+
+	store, err := Open(ctx, storageRoot, vaultRoot)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+	if _, err := store.Rebuild(ctx, vaultRoot); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+
+	hits, err := store.SearchDreams(ctx, "decentralized edge response", DreamSearchOptions{Limit: 10, BlurredOnly: true})
+	if err != nil {
+		t.Fatalf("SearchDreams: %v", err)
+	}
+	if len(hits) != 1 {
+		t.Fatalf("len(hits)=%d want 1: %#v", len(hits), hits)
+	}
+	if hits[0].Path != "inbox/drafted-from-foxctl/dreams/foxctl/2026-05-25/blurred.md" {
+		t.Fatalf("path=%q", hits[0].Path)
+	}
+	if !strings.Contains(hits[0].Snippet, "decentralized edge response") {
+		t.Fatalf("snippet=%q", hits[0].Snippet)
+	}
+
+	allDreamHits, err := store.SearchDreams(ctx, "central queue", DreamSearchOptions{Limit: 10})
+	if err != nil {
+		t.Fatalf("SearchDreams all dreams: %v", err)
+	}
+	if len(allDreamHits) != 2 {
+		t.Fatalf("len(allDreamHits)=%d want 2: %#v", len(allDreamHits), allDreamHits)
+	}
+}
+
+func TestSearchDreamsSemanticFiltersToAgentBlurredDreamNotes(t *testing.T) {
+	ctx := context.Background()
+	storageRoot := t.TempDir()
+	vaultRoot := t.TempDir()
+	writeVaultNote(t, vaultRoot, "dreams/blurred.md", `---
+title: "Bounded ownership"
+type: "memory"
+tags:
+  - foxctl/dream
+  - foxctl/agent-blurred
+---
+
+# Bounded ownership
+
+## Agent Blurred Mechanism
+A compact handoff pattern gives exactly one actor ownership of a bounded next action.
+`)
+	writeVaultNote(t, vaultRoot, "notes/ordinary.md", `---
+title: "Compact handoff ordinary note"
+type: "memory"
+tags:
+  - foxctl/memory
+---
+
+# Compact handoff ordinary note
+
+This note is semantically close but should not appear in dream search.
+`)
+
+	store, err := Open(ctx, storageRoot, vaultRoot)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+	if _, err := store.Rebuild(ctx, vaultRoot); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+
+	hits, err := store.SearchDreamsSemantic(ctx, "compact handoff pattern", fakeEmbeddingProvider{}, DreamSearchOptions{Limit: 5, BlurredOnly: true})
+	if err != nil {
+		t.Fatalf("SearchDreamsSemantic: %v", err)
+	}
+	if len(hits) != 1 {
+		t.Fatalf("len(hits)=%d want 1: %#v", len(hits), hits)
+	}
+	if hits[0].Path != "dreams/blurred.md" {
+		t.Fatalf("path=%q", hits[0].Path)
+	}
+}
+
+func TestIndexPathUpdatesOneNoteAndPreservesOtherNotes(t *testing.T) {
+	ctx := context.Background()
+	storageRoot := t.TempDir()
+	vaultRoot := t.TempDir()
+	dreamPath := "dreams/blurred.md"
+	writeVaultNote(t, vaultRoot, dreamPath, `---
+title: "Old central queue"
+type: "memory"
+tags:
+  - foxctl/dream
+  - foxctl/agent-blurred
+---
+
+# Old central queue
+
+An obsolete central queue pattern is waiting to be replaced.
+`)
+	writeVaultNote(t, vaultRoot, "notes/ordinary.md", `---
+title: "Persistent ordinary note"
+type: "memory"
+tags:
+  - foxctl/memory
+---
+
+# Persistent ordinary note
+
+This ordinary note should survive a single-path dream reindex.
+`)
+
+	store, err := Open(ctx, storageRoot, vaultRoot)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+	if _, err := store.Rebuild(ctx, vaultRoot); err != nil {
+		t.Fatalf("Rebuild: %v", err)
+	}
+	if embedded, err := store.EnsureSemanticEmbeddings(ctx, fakeEmbeddingProvider{}); err != nil || embedded == 0 {
+		t.Fatalf("EnsureSemanticEmbeddings embedded=%d err=%v", embedded, err)
+	}
+
+	writeVaultNote(t, vaultRoot, dreamPath, `---
+title: "Bounded local actor"
+type: "memory"
+tags:
+  - foxctl/dream
+  - foxctl/agent-blurred
+---
+
+# Bounded local actor
+
+A bounded local actor accepts one scoped work item and publishes a reusable mechanism.
+`)
+
+	result, err := store.IndexPath(ctx, vaultRoot, dreamPath)
+	if err != nil {
+		t.Fatalf("IndexPath: %v", err)
+	}
+	if result.Notes != 1 || result.Chunks == 0 || result.Tags == 0 {
+		t.Fatalf("unexpected path index result: %#v", result)
+	}
+	newHits, err := store.SearchDreams(ctx, "bounded local actor", DreamSearchOptions{Limit: 5, BlurredOnly: true})
+	if err != nil {
+		t.Fatalf("SearchDreams new: %v", err)
+	}
+	if len(newHits) != 1 || newHits[0].Path != dreamPath {
+		t.Fatalf("newHits=%#v", newHits)
+	}
+	oldHits, err := store.SearchDreams(ctx, "obsolete central queue", DreamSearchOptions{Limit: 5, BlurredOnly: true})
+	if err != nil {
+		t.Fatalf("SearchDreams old: %v", err)
+	}
+	if len(oldHits) != 0 {
+		t.Fatalf("oldHits=%#v", oldHits)
+	}
+	ordinaryHits, err := store.SearchNotes(ctx, "persistent ordinary note", 5)
+	if err != nil {
+		t.Fatalf("SearchNotes ordinary: %v", err)
+	}
+	if len(ordinaryHits) != 1 || ordinaryHits[0].Path != "notes/ordinary.md" {
+		t.Fatalf("ordinaryHits=%#v", ordinaryHits)
+	}
+	stats, err := store.Stats(ctx)
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+	if stats.Notes != 2 {
+		t.Fatalf("stats notes=%d want 2", stats.Notes)
+	}
+	if stats.SemanticEmbeddings != 1 {
+		t.Fatalf("semantic embeddings=%d want only unaffected note embedding", stats.SemanticEmbeddings)
+	}
+}
+
 func TestRetryObsidianBusyRetriesLockedErrors(t *testing.T) {
 	t.Parallel()
 
@@ -374,6 +606,17 @@ func fixtureVaultRoot(t *testing.T) string {
 		t.Fatalf("runtime caller unavailable")
 	}
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "tooling", "tools", "obsidian", "testdata", "vaults", "basic"))
+}
+
+func writeVaultNote(t *testing.T, vaultRoot, relPath, body string) {
+	t.Helper()
+	path := filepath.Join(vaultRoot, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir note dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write note: %v", err)
+	}
 }
 
 type fakeEmbeddingProvider struct{}

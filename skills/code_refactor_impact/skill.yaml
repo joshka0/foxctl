@@ -1,0 +1,126 @@
+apiVersion: foxctl/v1
+kind: Skill
+metadata:
+  name: code/refactor_impact
+  version: 0.1.0
+  description: "Build a refactor blast-radius packet from explicit targets, git diff, repoindex, and semantic neighbors"
+  tags: ["code", "refactor", "impact", "repoindex", "semantic-search"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/code_refactor_impact/code_refactor_impact
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: code/refactor_impact
+  parameters:
+    - name: workspace
+      type: string
+      required: false
+      description: "Workspace root (default: current workspace)"
+    - name: targets
+      type: array
+      required: false
+      description: "Explicit refactor targets with kind file, symbol, package, contract, or diff"
+    - name: diff
+      type: object
+      required: false
+      description: "Optional git diff selector with base_ref and head_ref"
+    - name: intent
+      type: string
+      required: false
+      enum: ["rename", "move", "delete", "consolidate", "type_tighten", "api_contract_change", "behavior_preserving_cleanup"]
+      default: "behavior_preserving_cleanup"
+      description: "Refactor intent used to rank structural evidence"
+    - name: depth
+      type: integer
+      required: false
+      default: 2
+      description: "Repoindex blast-radius depth"
+    - name: limit
+      type: integer
+      required: false
+      default: 80
+      description: "Maximum grouped candidates to return"
+    - name: per_target_cap
+      type: integer
+      required: false
+      default: 20
+      description: "Maximum graph or semantic candidates to collect per target"
+    - name: max_targets
+      type: integer
+      required: false
+      default: 100
+      description: "Maximum normalized targets to analyze"
+    - name: include_tests
+      type: boolean
+      required: false
+      default: false
+      description: "Place repoindex test evidence in tests_to_run"
+    - name: include_docs
+      type: boolean
+      required: false
+      default: false
+      description: "Place repoindex doc evidence in docs_to_update"
+  returns:
+    - name: summary
+      type: object
+      description: "Counts for normalized targets and packet groups"
+    - name: targets
+      type: array
+      description: "Normalized explicit and diff-derived refactor targets"
+    - name: lanes
+      type: array
+      description: "Availability for explicit, git diff, repoindex, and semantic lanes"
+    - name: must_update
+      type: array
+      description: "Targets and structurally critical affected files"
+    - name: should_inspect
+      type: array
+      description: "Likely affected implementation neighbors"
+    - name: likely_duplicate
+      type: array
+      description: "High-similarity candidates for consolidate intent"
+    - name: contract_boundary
+      type: array
+      description: "Interface, protocol, implementation, and embedding boundaries"
+    - name: tests_to_run
+      type: array
+      description: "Repoindex-backed test candidates"
+    - name: docs_to_update
+      type: array
+      description: "Repoindex-backed documentation candidates"
+    - name: context_only
+      type: array
+      description: "Lower-confidence context for review"
+  help:
+    short: "Refactor blast-radius packet"
+    long: |
+      code/refactor_impact answers: if this file, symbol, package, contract,
+      or branch diff changes, what else should be inspected or updated?
+
+      The skill is read-only. It combines:
+      - explicit refactor targets and optional git diff targets
+      - repoindex structural evidence for callers, callees, tests, docs, and
+        related code locations
+      - searchindex/turbovec semantic neighbors for conceptually related code
+
+      Example:
+        foxctl run code/refactor_impact --input '{
+          "targets":[{"kind":"file","path":"internal/intelligence/searchindex/store.go"}],
+          "intent":"api_contract_change",
+          "include_tests":true,
+          "include_docs":true,
+          "limit":20
+        }'
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"
