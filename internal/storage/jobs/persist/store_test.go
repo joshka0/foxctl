@@ -610,6 +610,102 @@ func TestRecoverOrphanedJobs(t *testing.T) {
 	}
 }
 
+func TestRecoverOrphanedJobsBeforeOnlyRecoversStaleRunningJobs(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, ctx)
+	sqlStore := store.(*sqlStore)
+
+	now := time.Now().UTC()
+	cutoff := now.Add(-1 * time.Hour)
+	recoveryJob := func(id string, state types.State, timestamp, expires time.Time) types.Job {
+		return types.Job{
+			ID:        id,
+			Command:   "test",
+			ArgsJSON:  "{}",
+			ArgsHash:  "hash-" + id,
+			State:     state,
+			CreatedAt: timestamp,
+			UpdatedAt: timestamp,
+			ExpiresAt: expires,
+		}
+	}
+	recoveredJobs := []types.Job{
+		recoveryJob("job-running-expired", types.StateRunning, now.Add(-3*time.Hour), now.Add(-1*time.Minute)),
+		recoveryJob("job-running-empty-expires-stale", types.StateRunning, cutoff.Add(-10*time.Minute), now.Add(24*time.Hour)),
+	}
+	untouchedJobs := []types.Job{
+		recoveryJob("job-running-active", types.StateRunning, now, now.Add(1*time.Hour)),
+		recoveryJob("job-queued-expired", types.StateQueued, now.Add(-3*time.Hour), now.Add(-1*time.Minute)),
+		recoveryJob("job-ok-expired", types.StateOK, now.Add(-3*time.Hour), now.Add(-1*time.Minute)),
+		recoveryJob("job-running-empty-expires-fresh", types.StateRunning, cutoff.Add(10*time.Minute), now.Add(24*time.Hour)),
+	}
+	terminalJobs := []types.Job{
+		recoveryJob("job-error-expired", types.StateQueued, now.Add(-3*time.Hour), now.Add(-1*time.Minute)),
+		recoveryJob("job-canceled-expired", types.StateQueued, now.Add(-3*time.Hour), now.Add(-1*time.Minute)),
+	}
+
+	allJobs := make([]types.Job, 0, len(recoveredJobs)+len(untouchedJobs)+len(terminalJobs))
+	allJobs = append(allJobs, recoveredJobs...)
+	allJobs = append(allJobs, untouchedJobs...)
+	allJobs = append(allJobs, terminalJobs...)
+	for _, job := range allJobs {
+		if err := store.InsertJob(ctx, job); err != nil {
+			t.Fatalf("insert %s: %v", job.ID, err)
+		}
+	}
+	if err := store.UpdateState(ctx, "job-error-expired", types.StateError, "previous failure", "/tmp/previous-result.json"); err != nil {
+		t.Fatalf("mark terminal error job: %v", err)
+	}
+	if err := store.UpdateState(ctx, "job-canceled-expired", types.StateCanceled, "", ""); err != nil {
+		t.Fatalf("mark terminal canceled job: %v", err)
+	}
+	for _, id := range []string{"job-running-empty-expires-stale", "job-running-empty-expires-fresh"} {
+		if _, err := sqlStore.db.ExecContext(ctx, `UPDATE jobs SET expires_at = '' WHERE id = $1`, id); err != nil {
+			t.Fatalf("clear expires_at for %s: %v", id, err)
+		}
+	}
+	untouchedBefore := make(map[string]types.Job)
+	for _, job := range append(untouchedJobs, terminalJobs...) {
+		stored, err := store.Get(ctx, job.ID)
+		if err != nil {
+			t.Fatalf("get untouched before recovery %s: %v", job.ID, err)
+		}
+		untouchedBefore[job.ID] = stored
+	}
+
+	recovered, err := sqlStore.RecoverOrphanedJobsBefore(ctx, cutoff)
+	if err != nil {
+		t.Fatalf("recover stale orphans: %v", err)
+	}
+	if recovered != int64(len(recoveredJobs)) {
+		t.Fatalf("recovered=%d want %d", recovered, len(recoveredJobs))
+	}
+	for _, job := range recoveredJobs {
+		stored, err := store.Get(ctx, job.ID)
+		if err != nil {
+			t.Fatalf("get recovered %s: %v", job.ID, err)
+		}
+		if stored.State != types.StateError {
+			t.Fatalf("%s state=%s want %s", job.ID, stored.State, types.StateError)
+		}
+		if !strings.Contains(stored.Error, "stale running job") {
+			t.Fatalf("%s error=%q want stale recovery message", job.ID, stored.Error)
+		}
+	}
+	for id, before := range untouchedBefore {
+		stored, err := store.Get(ctx, id)
+		if err != nil {
+			t.Fatalf("get untouched %s: %v", id, err)
+		}
+		if stored.State != before.State ||
+			stored.Error != before.Error ||
+			stored.ResultPath != before.ResultPath ||
+			!stored.UpdatedAt.Equal(before.UpdatedAt) {
+			t.Fatalf("%s mutated by stale recovery: before=%+v after=%+v", id, before, stored)
+		}
+	}
+}
+
 func TestIsFilesystemAccessError(t *testing.T) {
 	tests := []struct {
 		name string
