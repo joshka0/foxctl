@@ -1,7 +1,11 @@
 package builder
 
 import (
+	"net/url"
+	"reflect"
+	"strconv"
 	"testing"
+	"testing/quick"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/joshka0/foxctl/internal/interfaces/openapi/loader"
@@ -140,5 +144,69 @@ func TestResolvePath(t *testing.T) {
 				t.Errorf("resolvePath() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAddQueryParamsSerializesArrayValuesAsRepeatedParameters(t *testing.T) {
+	u, err := url.Parse("https://api.example.com/search?existing=true")
+	if err != nil {
+		t.Fatalf("parse url: %v", err)
+	}
+	b := New(&loader.Spec{})
+
+	err = b.addQueryParams(u, map[string]any{
+		"tag":   []string{"go", "tests"},
+		"ids":   []int{1, 2},
+		"empty": []string{},
+		"q":     "hello world",
+	}, nil)
+	if err != nil {
+		t.Fatalf("addQueryParams: %v", err)
+	}
+
+	values := u.Query()
+	if got := values["tag"]; !reflect.DeepEqual(got, []string{"go", "tests"}) {
+		t.Fatalf("tag params=%v want repeated values", got)
+	}
+	if got := values["ids"]; !reflect.DeepEqual(got, []string{"1", "2"}) {
+		t.Fatalf("ids params=%v want repeated values", got)
+	}
+	if got := values.Get("empty"); got != "" {
+		t.Fatalf("empty array should not add a value, got %q", got)
+	}
+	if got := values.Get("q"); got != "hello world" {
+		t.Fatalf("q=%q want original decoded query value", got)
+	}
+	if got := values.Get("existing"); got != "true" {
+		t.Fatalf("existing query param was not preserved: %q", got)
+	}
+}
+
+func TestAddQueryParamsGeneratedStringValuesRoundTrip(t *testing.T) {
+	cfg := &quick.Config{MaxCount: 100}
+	b := New(&loader.Spec{})
+
+	err := quick.Check(func(rawA uint16, rawB uint16) bool {
+		a := "value " + strconv.Itoa(int(rawA))
+		bv := "punctuation/%2C?" + strconv.Itoa(int(rawB))
+		u, err := url.Parse("https://api.example.com/search")
+		if err != nil {
+			t.Logf("parse url: %v", err)
+			return false
+		}
+		err = b.addQueryParams(u, map[string]any{"a": a, "b": bv}, nil)
+		if err != nil {
+			t.Logf("addQueryParams: %v", err)
+			return false
+		}
+		values := u.Query()
+		if values.Get("a") != a || values.Get("b") != bv {
+			t.Logf("query values=%v want a=%q b=%q raw=%q", values, a, bv, u.RawQuery)
+			return false
+		}
+		return true
+	}, cfg)
+	if err != nil {
+		t.Fatalf("query string round-trip property failed: %v", err)
 	}
 }

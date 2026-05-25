@@ -44,7 +44,8 @@ func (s *Store) TodosDir() string {
 // FilePathForSession returns the expected file path for a session's todos
 func (s *Store) FilePathForSession(sessionID string) string {
 	// Claude Code uses format: <session-uuid>-agent-<session-uuid>.json
-	filename := fmt.Sprintf("%s-agent-%s.json", sessionID, sessionID)
+	sessionFileComponent := safeSessionFileComponent(sessionID)
+	filename := fmt.Sprintf("%s-agent-%s.json", sessionFileComponent, sessionFileComponent)
 	return filepath.Join(s.TodosDir(), filename)
 }
 
@@ -67,11 +68,12 @@ func (s *Store) FindSessionFile(sessionID string) (string, error) {
 			return "", fmt.Errorf("read todos dir: %w", err)
 		}
 
+		sessionFileComponent := safeSessionFileComponent(sessionID)
 		for _, entry := range entries {
 			if entry.IsDir() {
 				continue
 			}
-			if strings.Contains(entry.Name(), sessionID) {
+			if strings.Contains(entry.Name(), sessionFileComponent) {
 				return filepath.Join(todosDir, entry.Name()), nil
 			}
 		}
@@ -249,6 +251,20 @@ func hashFile(path string) (string, error) {
 func hashBytes(data []byte) string {
 	h := sha256.Sum256(data)
 	return hex.EncodeToString(h[:])
+}
+
+func safeSessionFileComponent(sessionID string) string {
+	var b strings.Builder
+	b.Grow(len(sessionID))
+	for _, r := range sessionID {
+		switch r {
+		case '/', '\\', 0:
+			b.WriteByte('_')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // ExtractSessionFromPath extracts the session ID from a Claude todo file path.

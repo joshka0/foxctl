@@ -36,6 +36,13 @@ const (
 	TriggerContent TriggerKind = "content"
 )
 
+const (
+	priorityCritical = "critical"
+	priorityHigh     = "high"
+	priorityMedium   = "medium"
+	priorityLow      = "low"
+)
+
 // Item represents a knowledge item (pack, agent, or command).
 type Item struct {
 	ID          string
@@ -55,6 +62,46 @@ type Trigger struct {
 	TriggerKind TriggerKind
 	Pattern     string
 }
+
+func validateItemKind(kind ItemKind) error {
+	switch kind {
+	case KindPack, KindAgent, KindCommand:
+		return nil
+	default:
+		return fmt.Errorf("knowledge: invalid item kind %q", kind)
+	}
+}
+
+func validateTriggerKind(kind TriggerKind) error {
+	switch kind {
+	case TriggerKeyword, TriggerIntent, TriggerPath, TriggerContent:
+		return nil
+	default:
+		return fmt.Errorf("knowledge: invalid trigger_kind %q", kind)
+	}
+}
+
+func normalizeItemPriority(priority string) (string, error) {
+	priority = strings.ToLower(strings.TrimSpace(priority))
+	if priority == "" {
+		return priorityMedium, nil
+	}
+	switch priority {
+	case priorityCritical, priorityHigh, priorityMedium, priorityLow:
+		return priority, nil
+	default:
+		return "", fmt.Errorf("knowledge: invalid item priority %q", priority)
+	}
+}
+
+const itemPriorityOrderSQL = `
+CASE i.priority
+	WHEN 'critical' THEN 4
+	WHEN 'high' THEN 3
+	WHEN 'medium' THEN 2
+	WHEN 'low' THEN 1
+	ELSE 0
+END`
 
 // Document represents a text chunk associated with a knowledge item.
 type Document struct {
@@ -170,6 +217,14 @@ CREATE INDEX IF NOT EXISTS idx_documents_item ON knowledge_documents(item_id);
 
 // UpsertItem inserts or updates a knowledge item.
 func (s *sqlStore) UpsertItem(ctx context.Context, item Item) (Item, error) {
+	if err := validateItemKind(item.Kind); err != nil {
+		return Item{}, err
+	}
+	priority, err := normalizeItemPriority(item.Priority)
+	if err != nil {
+		return Item{}, err
+	}
+	item.Priority = priority
 	now := timeutil.NowUTC()
 	if item.ID == "" {
 		item.ID = ulid.Make().String()
@@ -178,11 +233,8 @@ func (s *sqlStore) UpsertItem(ctx context.Context, item Item) (Item, error) {
 		item.CreatedAt = now
 	}
 	item.UpdatedAt = now
-	if item.Priority == "" {
-		item.Priority = "medium"
-	}
 
-	_, err := s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(ctx, `
 INSERT INTO knowledge_items (id, name, kind, description, source_path, priority, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(name) DO UPDATE SET
@@ -230,6 +282,9 @@ func (s *sqlStore) GetItemByName(ctx context.Context, name string) (Item, bool, 
 
 // ListItems returns all items of a given kind.
 func (s *sqlStore) ListItems(ctx context.Context, kind ItemKind) ([]Item, error) {
+	if err := validateItemKind(kind); err != nil {
+		return nil, err
+	}
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, name, kind, description, source_path, priority, created_at, updated_at
 FROM knowledge_items WHERE kind = ? ORDER BY name`, string(kind))
@@ -269,6 +324,9 @@ func (s *sqlStore) DeleteItem(ctx context.Context, id string) error {
 
 // AddTrigger adds a trigger for a knowledge item.
 func (s *sqlStore) AddTrigger(ctx context.Context, t Trigger) (Trigger, error) {
+	if err := validateTriggerKind(t.TriggerKind); err != nil {
+		return Trigger{}, err
+	}
 	if t.ID == "" {
 		t.ID = ulid.Make().String()
 	}
@@ -389,7 +447,7 @@ WHERE t.trigger_kind = 'keyword' AND LOWER(t.pattern) IN (`
 		query += "?"
 		args[i] = strings.ToLower(kw)
 	}
-	query += `) ORDER BY i.priority DESC, i.name`
+	query += `) ORDER BY ` + itemPriorityOrderSQL + ` DESC, i.name`
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -405,12 +463,13 @@ WHERE t.trigger_kind = 'keyword' AND LOWER(t.pattern) IN (`
 // MatchByPath returns items that have path triggers matching the given path.
 func (s *sqlStore) MatchByPath(ctx context.Context, path string) ([]Item, error) {
 	// For now, do simple LIKE matching. Could use glob in the future.
-	rows, err := s.db.QueryContext(ctx, `
-SELECT DISTINCT i.id, i.name, i.kind, i.description, i.source_path, i.priority, i.created_at, i.updated_at
-FROM knowledge_items i
-JOIN knowledge_triggers t ON i.id = t.item_id
-WHERE t.trigger_kind = 'path' AND ? LIKE REPLACE(REPLACE(t.pattern, '**', '%'), '*', '%')
-ORDER BY i.priority DESC, i.name`, path)
+	query := `
+	SELECT DISTINCT i.id, i.name, i.kind, i.description, i.source_path, i.priority, i.created_at, i.updated_at
+	FROM knowledge_items i
+	JOIN knowledge_triggers t ON i.id = t.item_id
+	WHERE t.trigger_kind = 'path' AND ? LIKE REPLACE(REPLACE(t.pattern, '**', '%'), '*', '%')
+	ORDER BY ` + itemPriorityOrderSQL + ` DESC, i.name`
+	rows, err := s.db.QueryContext(ctx, query, path)
 	if err != nil {
 		return nil, fmt.Errorf("knowledge: match by path: %w", err)
 	}
@@ -431,6 +490,14 @@ func scanItem(row *sql.Row) (Item, error) {
 	if err != nil {
 		return Item{}, fmt.Errorf("knowledge: scan item: %w", err)
 	}
+	if err := validateItemKind(item.Kind); err != nil {
+		return Item{}, fmt.Errorf("knowledge: decode item %q kind: %w", item.ID, err)
+	}
+	priority, err := normalizeItemPriority(item.Priority)
+	if err != nil {
+		return Item{}, fmt.Errorf("knowledge: decode item %q priority: %w", item.ID, err)
+	}
+	item.Priority = priority
 	times := dbutil.ScanTimestampsMust(createdAt, updatedAt)
 	item.CreatedAt = times[0]
 	item.UpdatedAt = times[1]
@@ -447,6 +514,14 @@ func scanItems(rows *sql.Rows) ([]Item, error) {
 		if err != nil {
 			return nil, fmt.Errorf("knowledge: scan items: %w", err)
 		}
+		if err := validateItemKind(item.Kind); err != nil {
+			return nil, fmt.Errorf("knowledge: decode item %q kind: %w", item.ID, err)
+		}
+		priority, err := normalizeItemPriority(item.Priority)
+		if err != nil {
+			return nil, fmt.Errorf("knowledge: decode item %q priority: %w", item.ID, err)
+		}
+		item.Priority = priority
 		times := dbutil.ScanTimestampsMust(createdAt, updatedAt)
 		item.CreatedAt = times[0]
 		item.UpdatedAt = times[1]
@@ -462,6 +537,9 @@ func scanTriggers(rows *sql.Rows) ([]Trigger, error) {
 		err := rows.Scan(&t.ID, &t.ItemID, &t.TriggerKind, &t.Pattern)
 		if err != nil {
 			return nil, fmt.Errorf("knowledge: scan triggers: %w", err)
+		}
+		if err := validateTriggerKind(t.TriggerKind); err != nil {
+			return nil, fmt.Errorf("knowledge: decode trigger %q trigger_kind: %w", t.ID, err)
 		}
 		triggers = append(triggers, t)
 	}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/oputil"
@@ -137,8 +138,8 @@ func extractPath(data any, path string) any {
 				return nil
 			}
 
-			var idx int
-			if _, err := fmt.Sscanf(indexPart, "%d", &idx); err != nil {
+			idx, ok := parseArrayIndex(indexPart)
+			if !ok {
 				return nil
 			}
 
@@ -165,6 +166,22 @@ func extractPath(data any, path string) any {
 	}
 
 	return current
+}
+
+func parseArrayIndex(raw string) (int, bool) {
+	if raw == "" {
+		return 0, false
+	}
+	for _, r := range raw {
+		if r < '0' || r > '9' {
+			return 0, false
+		}
+	}
+	idx, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, false
+	}
+	return idx, true
 }
 
 // mergeOperation performs deep merging of JSON objects with recursive conflict resolution and validation.
@@ -344,6 +361,7 @@ func collectAllKeys(data any, prefix string) []string {
 		}
 	}
 
+	sort.Strings(keys)
 	return keys
 }
 

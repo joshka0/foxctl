@@ -21,17 +21,25 @@ func Canonical(name string) string {
 	var b strings.Builder
 	b.Grow(len(n))
 	prevUnderscore := false
-	for _, r := range n {
-		if r == '_' {
+	for i := 0; i < len(n); i++ {
+		c := n[i]
+		if c == '_' {
 			if prevUnderscore {
 				continue
 			}
 			prevUnderscore = true
-			b.WriteRune(r)
+			b.WriteByte(c)
 			continue
 		}
+		if !isToolNameChar(c) {
+			return ""
+		}
 		prevUnderscore = false
-		b.WriteRune(r)
+		b.WriteByte(c)
 	}
 	return b.String()
+}
+
+func isToolNameChar(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
 }

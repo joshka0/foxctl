@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"path/filepath"
 	"strings"
 	"time"
@@ -64,6 +65,78 @@ type SQLiteStore struct {
 	db    *sql.DB
 	path  string
 	close func() error
+}
+
+var ErrNodeNotFound = errors.New("graph: node not found")
+
+func validateNodeType(field string, nodeType NodeType) error {
+	switch nodeType {
+	case NodeTypeSession, NodeTypeTask, NodeTypeSymbol, NodeTypeMemory, NodeTypeFile:
+		return nil
+	default:
+		return fmt.Errorf("graph: invalid %s %q", field, nodeType)
+	}
+}
+
+func validateEdgeType(edgeType EdgeType) error {
+	switch edgeType {
+	case EdgeTypeTouched,
+		EdgeTypeModified,
+		EdgeTypeWorkedOn,
+		EdgeTypeCalls,
+		EdgeTypeImports,
+		EdgeTypeDependsOn,
+		EdgeTypeParentOf,
+		EdgeTypeAbout,
+		EdgeTypeRelatesTo:
+		return nil
+	default:
+		return fmt.Errorf("graph: invalid edge_type %q", edgeType)
+	}
+}
+
+func validateEdgeTypes(edge Edge) error {
+	if err := validateNodeType("from_type", edge.FromType); err != nil {
+		return err
+	}
+	if err := validateNodeType("to_type", edge.ToType); err != nil {
+		return err
+	}
+	return validateEdgeType(edge.EdgeType)
+}
+
+func validateNonNegativeFinite(field string, value float64) error {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+		return fmt.Errorf("graph: invalid %s %v", field, value)
+	}
+	return nil
+}
+
+func validateNonNegativeInt(field string, value int) error {
+	if value < 0 {
+		return fmt.Errorf("graph: invalid %s %d", field, value)
+	}
+	return nil
+}
+
+func validateNodeMetrics(node Node) error {
+	if err := validateNonNegativeFinite("pagerank", node.PageRank); err != nil {
+		return err
+	}
+	if err := validateNonNegativeInt("in_degree", node.InDegree); err != nil {
+		return err
+	}
+	return validateNonNegativeInt("out_degree", node.OutDegree)
+}
+
+func validateEdgeMetrics(edge Edge) error {
+	if err := validateNonNegativeFinite("weight", edge.Weight); err != nil {
+		return err
+	}
+	if edge.TTLDays != nil {
+		return validateNonNegativeInt("ttl_days", *edge.TTLDays)
+	}
+	return nil
 }
 
 // Open opens or creates a SQLite-backed graph store at dataDir/graph.db.
@@ -151,12 +224,18 @@ func (s *SQLiteStore) migrate(ctx context.Context) error {
 // UpsertNode inserts or updates a node.
 func (s *SQLiteStore) UpsertNode(ctx context.Context, node Node) error {
 	node.Workspace = ws.CanonicalID(node.Workspace)
+	if err := validateNodeType("node_type", node.NodeType); err != nil {
+		return err
+	}
+	if err := validateNodeMetrics(node); err != nil {
+		return err
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	if node.LastSeen.IsZero() {
 		node.LastSeen = time.Now().UTC()
 	}
 
-	metadata, err := json.Marshal(node.Metadata)
+	metadata, err := encodeGraphMetadata(node.Metadata)
 	if err != nil {
 		return fmt.Errorf("marshal metadata: %w", err)
 	}
@@ -187,7 +266,7 @@ func (s *SQLiteStore) UpsertNode(ctx context.Context, node Node) error {
 		node.InDegree,
 		node.OutDegree,
 		node.LastSeen.UTC().Format(time.RFC3339),
-		string(metadata),
+		metadata,
 		now,
 		now,
 	)
@@ -222,13 +301,19 @@ func (s *SQLiteStore) GetNode(ctx context.Context, workspace, nodeID string) (No
 		&updatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Node{}, fmt.Errorf("node not found: %s", nodeID)
+		return Node{}, fmt.Errorf("%w: %s", ErrNodeNotFound, nodeID)
 	}
 	if err != nil {
 		return Node{}, err
 	}
 
 	node.NodeType = NodeType(nodeType)
+	if err := validateNodeType("node_type", node.NodeType); err != nil {
+		return Node{}, err
+	}
+	if err := validateNodeMetrics(node); err != nil {
+		return Node{}, err
+	}
 	if title.Valid {
 		node.Title = title.String
 	}
@@ -239,8 +324,9 @@ func (s *SQLiteStore) GetNode(ctx context.Context, workspace, nodeID string) (No
 	node.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 	node.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
 
-	if metadata != "" {
-		_ = json.Unmarshal([]byte(metadata), &node.Metadata)
+	node.Metadata, err = decodeGraphMetadata("node metadata", metadata)
+	if err != nil {
+		return Node{}, err
 	}
 
 	return node, nil
@@ -305,6 +391,9 @@ func (s *SQLiteStore) TopNodes(ctx context.Context, opts TopNodesOptions) ([]Nod
 // UpdatePageRank updates a node's PageRank score.
 func (s *SQLiteStore) UpdatePageRank(ctx context.Context, workspace, nodeID string, pagerank float64) error {
 	workspace = ws.CanonicalID(workspace)
+	if err := validateNonNegativeFinite("pagerank", pagerank); err != nil {
+		return err
+	}
 	_, err := s.db.ExecContext(
 		ctx,
 		"UPDATE graph_nodes SET pagerank = $1, updated_at = $2 WHERE workspace = $3 AND node_id = $4",
@@ -316,6 +405,12 @@ func (s *SQLiteStore) UpdatePageRank(ctx context.Context, workspace, nodeID stri
 // UpdateDegrees updates a node's in/out degree counts.
 func (s *SQLiteStore) UpdateDegrees(ctx context.Context, workspace, nodeID string, inDegree, outDegree int) error {
 	workspace = ws.CanonicalID(workspace)
+	if err := validateNonNegativeInt("in_degree", inDegree); err != nil {
+		return err
+	}
+	if err := validateNonNegativeInt("out_degree", outDegree); err != nil {
+		return err
+	}
 	_, err := s.db.ExecContext(
 		ctx,
 		"UPDATE graph_nodes SET in_degree = $1, out_degree = $2, updated_at = $3 WHERE workspace = $4 AND node_id = $5",
@@ -327,6 +422,12 @@ func (s *SQLiteStore) UpdateDegrees(ctx context.Context, workspace, nodeID strin
 // UpsertEdge inserts or updates an edge.
 func (s *SQLiteStore) UpsertEdge(ctx context.Context, edge Edge) error {
 	edge.Workspace = ws.CanonicalID(edge.Workspace)
+	if err := validateEdgeTypes(edge); err != nil {
+		return err
+	}
+	if err := validateEdgeMetrics(edge); err != nil {
+		return err
+	}
 	if edge.ID == "" {
 		edge.ID = ulid.Make().String()
 	}
@@ -337,7 +438,7 @@ func (s *SQLiteStore) UpsertEdge(ctx context.Context, edge Edge) error {
 		edge.CreatedAt = time.Now().UTC()
 	}
 
-	metadata, err := json.Marshal(edge.Metadata)
+	metadata, err := encodeGraphMetadata(edge.Metadata)
 	if err != nil {
 		return fmt.Errorf("marshal metadata: %w", err)
 	}
@@ -367,7 +468,7 @@ func (s *SQLiteStore) UpsertEdge(ctx context.Context, edge Edge) error {
 		edge.Weight,
 		edge.CreatedAt.UTC().Format(time.RFC3339),
 		edge.TTLDays,
-		string(metadata),
+		metadata,
 	)
 	return err
 }
@@ -407,13 +508,20 @@ func (s *SQLiteStore) GetEdge(ctx context.Context, id string) (Edge, error) {
 	edge.FromType = NodeType(fromType)
 	edge.ToType = NodeType(toType)
 	edge.EdgeType = EdgeType(edgeType)
-	edge.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+	if err := validateEdgeTypes(edge); err != nil {
+		return Edge{}, err
+	}
 	if ttlDays.Valid {
 		days := int(ttlDays.Int64)
 		edge.TTLDays = &days
 	}
-	if metadata != "" {
-		_ = json.Unmarshal([]byte(metadata), &edge.Metadata)
+	if err := validateEdgeMetrics(edge); err != nil {
+		return Edge{}, err
+	}
+	edge.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+	edge.Metadata, err = decodeGraphMetadata("edge metadata", metadata)
+	if err != nil {
+		return Edge{}, err
 	}
 
 	return edge, nil
@@ -477,7 +585,10 @@ func (s *SQLiteStore) GetNeighbors(ctx context.Context, workspace, nodeID string
 		for _, edge := range edges {
 			node, err := s.GetNode(ctx, workspace, edge.ToID)
 			if err != nil {
-				continue // Skip if node not found
+				if errors.Is(err, ErrNodeNotFound) {
+					continue
+				}
+				return nil, err
 			}
 			neighbors = append(neighbors, Neighbor{Node: node, Edge: edge, Distance: 1})
 		}
@@ -492,7 +603,10 @@ func (s *SQLiteStore) GetNeighbors(ctx context.Context, workspace, nodeID string
 		for _, edge := range edges {
 			node, err := s.GetNode(ctx, workspace, edge.FromID)
 			if err != nil {
-				continue // Skip if node not found
+				if errors.Is(err, ErrNodeNotFound) {
+					continue
+				}
+				return nil, err
 			}
 			neighbors = append(neighbors, Neighbor{Node: node, Edge: edge, Distance: 1})
 		}
@@ -521,6 +635,15 @@ func (s *SQLiteStore) GetNeighbors(ctx context.Context, workspace, nodeID string
 // [[invariant:workspace-canonicalized-before-upsert]]
 // [[test-contract:node-batch-atomicity]]
 func (s *SQLiteStore) UpsertNodes(ctx context.Context, nodes []Node) error {
+	for i := range nodes {
+		if err := validateNodeType("node_type", nodes[i].NodeType); err != nil {
+			return fmt.Errorf("graph: node %d: %w", i, err)
+		}
+		if err := validateNodeMetrics(nodes[i]); err != nil {
+			return fmt.Errorf("graph: node %d: %w", i, err)
+		}
+	}
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -549,7 +672,10 @@ func (s *SQLiteStore) UpsertNodes(ctx context.Context, nodes []Node) error {
 		if node.LastSeen.IsZero() {
 			node.LastSeen = time.Now().UTC()
 		}
-		metadata, _ := json.Marshal(node.Metadata)
+		metadata, err := encodeGraphMetadata(node.Metadata)
+		if err != nil {
+			return fmt.Errorf("graph: marshal node metadata: %w", err)
+		}
 
 		_, err = stmt.ExecContext(
 			ctx,
@@ -562,7 +688,7 @@ func (s *SQLiteStore) UpsertNodes(ctx context.Context, nodes []Node) error {
 			node.InDegree,
 			node.OutDegree,
 			node.LastSeen.UTC().Format(time.RFC3339),
-			string(metadata),
+			metadata,
 			now,
 			now,
 		)
@@ -589,6 +715,15 @@ func (s *SQLiteStore) UpsertNodes(ctx context.Context, nodes []Node) error {
 // [[invariant:sliding-ttl-on-edge-upsert]]
 // [[test-contract:edge-batch-atomicity]]
 func (s *SQLiteStore) UpsertEdges(ctx context.Context, edges []Edge) error {
+	for i := range edges {
+		if err := validateEdgeTypes(edges[i]); err != nil {
+			return fmt.Errorf("graph: edge %d: %w", i, err)
+		}
+		if err := validateEdgeMetrics(edges[i]); err != nil {
+			return fmt.Errorf("graph: edge %d: %w", i, err)
+		}
+	}
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -623,7 +758,10 @@ func (s *SQLiteStore) UpsertEdges(ctx context.Context, edges []Edge) error {
 		if edge.CreatedAt.IsZero() {
 			edge.CreatedAt = time.Now().UTC()
 		}
-		metadata, _ := json.Marshal(edge.Metadata)
+		metadata, err := encodeGraphMetadata(edge.Metadata)
+		if err != nil {
+			return fmt.Errorf("graph: marshal edge metadata: %w", err)
+		}
 
 		_, err = stmt.ExecContext(
 			ctx,
@@ -637,7 +775,7 @@ func (s *SQLiteStore) UpsertEdges(ctx context.Context, edges []Edge) error {
 			edge.Weight,
 			edge.CreatedAt.UTC().Format(time.RFC3339),
 			edge.TTLDays,
-			string(metadata),
+			metadata,
 		)
 		if err != nil {
 			return err
@@ -802,6 +940,11 @@ func (s *SQLiteStore) GetAllNodes(ctx context.Context, workspace string) ([]Node
 // [[test-contract:pagerank-batch-atomicity]]
 func (s *SQLiteStore) BulkUpdatePageRank(ctx context.Context, workspace string, ranks map[string]float64) error {
 	workspace = ws.CanonicalID(workspace)
+	for nodeID, rank := range ranks {
+		if err := validateNonNegativeFinite("pagerank", rank); err != nil {
+			return fmt.Errorf("graph: pagerank %s: %w", nodeID, err)
+		}
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -851,6 +994,12 @@ func (s *SQLiteStore) scanNodes(rows *sql.Rows) ([]Node, error) {
 		}
 
 		node.NodeType = NodeType(nodeType)
+		if err := validateNodeType("node_type", node.NodeType); err != nil {
+			return nil, err
+		}
+		if err := validateNodeMetrics(node); err != nil {
+			return nil, err
+		}
 		if title.Valid {
 			node.Title = title.String
 		}
@@ -860,9 +1009,11 @@ func (s *SQLiteStore) scanNodes(rows *sql.Rows) ([]Node, error) {
 		node.LastSeen, _ = time.Parse(time.RFC3339, lastSeen)
 		node.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 		node.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
-		if metadata != "" {
-			_ = json.Unmarshal([]byte(metadata), &node.Metadata)
+		decodedMetadata, err := decodeGraphMetadata("node metadata", metadata)
+		if err != nil {
+			return nil, err
 		}
+		node.Metadata = decodedMetadata
 
 		nodes = append(nodes, node)
 	}
@@ -895,18 +1046,51 @@ func (s *SQLiteStore) scanEdges(rows *sql.Rows) ([]Edge, error) {
 		edge.FromType = NodeType(fromType)
 		edge.ToType = NodeType(toType)
 		edge.EdgeType = EdgeType(edgeType)
-		edge.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		if err := validateEdgeTypes(edge); err != nil {
+			return nil, err
+		}
 		if ttlDays.Valid {
 			days := int(ttlDays.Int64)
 			edge.TTLDays = &days
 		}
-		if metadata != "" {
-			_ = json.Unmarshal([]byte(metadata), &edge.Metadata)
+		if err := validateEdgeMetrics(edge); err != nil {
+			return nil, err
 		}
+		edge.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		decodedMetadata, err := decodeGraphMetadata("edge metadata", metadata)
+		if err != nil {
+			return nil, err
+		}
+		edge.Metadata = decodedMetadata
 
 		edges = append(edges, edge)
 	}
 	return edges, rows.Err()
+}
+
+func decodeGraphMetadata(field, raw string) (map[string]string, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	var metadata map[string]string
+	if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
+		return nil, fmt.Errorf("graph: scan %s: %w", field, err)
+	}
+	if metadata == nil {
+		return nil, fmt.Errorf("graph: scan %s: metadata must be a JSON object", field)
+	}
+	return metadata, nil
+}
+
+func encodeGraphMetadata(metadata map[string]string) (string, error) {
+	if len(metadata) == 0 {
+		return "", nil
+	}
+	encoded, err := json.Marshal(metadata)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
 }
 
 // SearchNodes finds nodes matching a term in node_id, title, or current_path.

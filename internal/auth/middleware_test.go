@@ -3,7 +3,9 @@ package auth
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
+	"testing/quick"
 
 	"github.com/joshka0/foxctl/internal/domain/identity"
 )
@@ -112,5 +114,42 @@ p, viewer, tenant-a, api:/api/conversations, write, deny
 	handler.ServeHTTP(postResp, postReq)
 	if postResp.Code != http.StatusForbidden {
 		t.Fatalf("POST status=%d, want %d", postResp.Code, http.StatusForbidden)
+	}
+}
+
+func TestMiddlewarePropertyAuthorizesPathIndependentOfQuery(t *testing.T) {
+	t.Parallel()
+
+	enforcer := mustNewEnforcer(t, `
+g, user:web:alice, viewer, tenant-a
+p, viewer, tenant-a, api:/api/conversations, read, allow
+`)
+
+	handler := Middleware(enforcer)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	principal := identity.Principal{Platform: "web", UserID: "alice", TenantID: "tenant-a"}
+
+	property := func(rawQuery string) bool {
+		if len(rawQuery) > 160 {
+			rawQuery = rawQuery[:160]
+		}
+		query := url.QueryEscape(rawQuery)
+		if query == "" {
+			query = "empty"
+		}
+		req := httptest.NewRequest(http.MethodGet, "/api/conversations?q="+query, http.NoBody)
+		req = req.WithContext(identity.WithPrincipal(req.Context(), principal))
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusNoContent {
+			t.Logf("query=%q status=%d want %d", rawQuery, rr.Code, http.StatusNoContent)
+			return false
+		}
+		return true
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 200}); err != nil {
+		t.Fatal(err)
 	}
 }

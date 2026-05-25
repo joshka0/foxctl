@@ -27,7 +27,10 @@ func planYouTube(baseURL string, in Input) (callPlan, error) {
 		addIf(q, "order", in.Sort)
 		quotaUnits = 100
 	case "videos":
-		videoIDs := ids(in, in.VideoID)
+		videoIDs, err := ids(in, in.VideoID)
+		if err != nil {
+			return callPlan{}, err
+		}
 		if len(videoIDs) == 0 {
 			return callPlan{}, require("", "video_id or ids are required for videos", "Pass video_id or ids for videos.list.")
 		}

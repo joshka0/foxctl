@@ -166,6 +166,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 // applyEdit applies a single edit operation to content.
 func applyEdit(content string, edit Edit) (EditResult, string, error) {
+	if edit.Search == "" {
+		return EditResult{Search: edit.Search}, content, fmt.Errorf("search must not be empty")
+	}
+
 	switch edit.MatchMode {
 	case MatchExact:
 		return applyExactMatch(content, edit)

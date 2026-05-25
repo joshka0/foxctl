@@ -169,9 +169,9 @@ func (s *TursoStore) mergeTagsAndReturn(ctx context.Context, digest string, newT
 		return Object{}, fmt.Errorf("cas: read existing: %w", err)
 	}
 
-	var existingTags []string
-	if tagsJSON.Valid && tagsJSON.String != "" {
-		_ = json.Unmarshal([]byte(tagsJSON.String), &existingTags)
+	existingTags, err := decodeCASTags(tagsJSON)
+	if err != nil {
+		return Object{}, err
 	}
 
 	merged := mergeTags(existingTags, newTags)
@@ -231,9 +231,9 @@ func (s *TursoStore) Get(ctx context.Context, digest string) (io.ReadCloser, Met
 		return nil, Metadata{}, fmt.Errorf("cas: get: %w", err)
 	}
 
-	var tags []string
-	if tagsJSON.Valid && tagsJSON.String != "" {
-		_ = json.Unmarshal([]byte(tagsJSON.String), &tags)
+	tags, err := decodeCASTags(tagsJSON)
+	if err != nil {
+		return nil, Metadata{}, err
 	}
 
 	createdAt, _ := time.Parse(time.RFC3339Nano, createdAtStr)
@@ -278,9 +278,9 @@ func (s *TursoStore) Head(ctx context.Context, digest string) (Object, error) {
 		return Object{}, fmt.Errorf("cas: head: %w", err)
 	}
 
-	var tags []string
-	if tagsJSON.Valid && tagsJSON.String != "" {
-		_ = json.Unmarshal([]byte(tagsJSON.String), &tags)
+	tags, err := decodeCASTags(tagsJSON)
+	if err != nil {
+		return Object{}, err
 	}
 
 	createdAt, _ := time.Parse(time.RFC3339Nano, createdAtStr)
@@ -324,9 +324,9 @@ func (s *TursoStore) List(ctx context.Context) ([]Object, error) {
 			continue
 		}
 
-		var tags []string
-		if tagsJSON.Valid && tagsJSON.String != "" {
-			_ = json.Unmarshal([]byte(tagsJSON.String), &tags)
+		tags, err := decodeCASTags(tagsJSON)
+		if err != nil {
+			return nil, err
 		}
 
 		createdAt, _ := time.Parse(time.RFC3339Nano, createdAtStr)
@@ -452,9 +452,9 @@ func (s *TursoStore) AddTags(ctx context.Context, digest string, tags []string) 
 		return fmt.Errorf("cas: get tags: %w", err)
 	}
 
-	var existingTags []string
-	if tagsJSON.Valid && tagsJSON.String != "" {
-		_ = json.Unmarshal([]byte(tagsJSON.String), &existingTags)
+	existingTags, err := decodeCASTags(tagsJSON)
+	if err != nil {
+		return err
 	}
 
 	merged := mergeTags(existingTags, tags)

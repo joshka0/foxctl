@@ -2,6 +2,7 @@ package loader
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -405,8 +406,13 @@ func isHTTPURL(ref string) bool {
 }
 
 func looksLikeEnvelope(data []byte) bool {
-	trimmed := strings.TrimSpace(string(data))
-	return strings.HasPrefix(trimmed, "{") && strings.Contains(trimmed, "\"status\"") && strings.Contains(trimmed, "\"command\"")
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return false
+	}
+	_, hasStatus := envelope["status"]
+	_, hasCommand := envelope["command"]
+	return hasStatus && hasCommand
 }
 
 func firstDigest(digests []string) string {

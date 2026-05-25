@@ -4,6 +4,8 @@ import (
 	"context"
 	"math"
 	"testing"
+	"testing/quick"
+	"time"
 
 	"github.com/joshka0/foxctl/internal/agent/optimization"
 	"github.com/joshka0/foxctl/internal/storage/trajectory"
@@ -72,6 +74,28 @@ func TestScorerWeights_Validate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "nan critical path weight",
+			weights: optimization.ScorerWeights{
+				CriticalPath: math.NaN(),
+				PageRank:     0.20,
+				AdminMail:    0.25,
+				OverseerMail: 0.15,
+				Recency:      0.10,
+			},
+			wantErr: true,
+		},
+		{
+			name: "infinite pagerank weight",
+			weights: optimization.ScorerWeights{
+				CriticalPath: 0.30,
+				PageRank:     math.Inf(1),
+				AdminMail:    0.25,
+				OverseerMail: 0.15,
+				Recency:      0.10,
+			},
+			wantErr: true,
+		},
+		{
 			name: "sum not 1.0",
 			weights: optimization.ScorerWeights{
 				CriticalPath: 0.5,
@@ -116,6 +140,45 @@ func TestScorerWeights_Normalize(t *testing.T) {
 	if math.Abs(weights.CriticalPath-0.2) > 0.01 {
 		t.Errorf("CriticalPath should be 0.2, got %.3f", weights.CriticalPath)
 	}
+}
+
+func TestScorerWeightsNormalizePropertyProducesValidWeights(t *testing.T) {
+	lastUpdated := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+
+	property := func(criticalPath, pageRank, adminMail, overseerMail, recency uint16) bool {
+		weights := optimization.ScorerWeights{
+			CriticalPath: float64(criticalPath) + 1,
+			PageRank:     float64(pageRank) + 1,
+			AdminMail:    float64(adminMail) + 1,
+			OverseerMail: float64(overseerMail) + 1,
+			Recency:      float64(recency) + 1,
+			LastUpdated:  lastUpdated,
+			Version:      42,
+		}
+
+		weights.Normalize()
+
+		sum := weights.CriticalPath + weights.PageRank + weights.AdminMail +
+			weights.OverseerMail + weights.Recency
+
+		return weights.Validate() == nil &&
+			math.Abs(sum-1.0) <= 1e-12 &&
+			finiteNonNegative(weights.CriticalPath) &&
+			finiteNonNegative(weights.PageRank) &&
+			finiteNonNegative(weights.AdminMail) &&
+			finiteNonNegative(weights.OverseerMail) &&
+			finiteNonNegative(weights.Recency) &&
+			weights.LastUpdated.Equal(lastUpdated) &&
+			weights.Version == 42
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 1000}); err != nil {
+		t.Fatalf("Normalize property failed: %v", err)
+	}
+}
+
+func finiteNonNegative(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0
 }
 
 func TestInMemoryWeightStore(t *testing.T) {
@@ -351,6 +414,7 @@ func TestLearnableScorer_LearnInsufficientSamples(t *testing.T) {
 		traj := trajectory.Trajectory{
 			WorkspaceID: "ws-test",
 			AgentRole:   "coder",
+			Status:      trajectory.StatusOK,
 			Outcome:     &trajectory.Outcome{Success: true},
 		}
 		if _, err := trajStore.InsertTrajectory(ctx, traj); err != nil {

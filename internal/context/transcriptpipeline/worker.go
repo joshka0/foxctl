@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	actormemory "github.com/joshka0/foxctl/internal/runtime/actor/memory"
 	"github.com/joshka0/foxctl/internal/runtime/engine"
@@ -168,13 +169,17 @@ func BoundArtifactText(text string, maxContextTokens int) string {
 
 func truncateInline(text string, max int) string {
 	text = strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
-	if max <= 0 || len(text) <= max {
+	if max <= 0 {
 		return text
 	}
-	if max <= 1 {
-		return text[:max]
+	if utf8.RuneCountInString(text) <= max {
+		return text
 	}
-	return text[:max-1] + "…"
+	runes := []rune(text)
+	if max <= 1 {
+		return string(runes[:max])
+	}
+	return string(runes[:max-1]) + "…"
 }
 
 func sameWorkerTarget(a, b WorkerConfig) bool {

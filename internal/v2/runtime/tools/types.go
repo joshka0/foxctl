@@ -72,27 +72,55 @@ func compileSchema(raw json.RawMessage) (*toolSchema, error) {
 		propTypes: map[string]JSONSchemaType{},
 	}
 
-	for i, s := range schema.Required {
-		s = strings.TrimSpace(s)
-		if s == "" {
-			return nil, fmt.Errorf("invalid required entry at index %d: empty string", i)
-		}
-		out.required = append(out.required, s)
-	}
-
 	for name, prop := range schema.Properties {
 		key := strings.TrimSpace(name)
 		if key == "" {
 			return nil, fmt.Errorf("invalid property name %q: empty string", name)
 		}
+		if _, exists := out.propTypes[key]; exists {
+			return nil, fmt.Errorf("duplicate property name %q after trimming", key)
+		}
 		propType := JSONSchemaType(strings.TrimSpace(strings.ToLower(string(prop.Type))))
 		if propType == "" {
 			continue
 		}
+		if !isKnownSchemaType(propType) {
+			return nil, fmt.Errorf("property %q has unsupported type %q", key, prop.Type)
+		}
 		out.propTypes[key] = propType
 	}
 
+	seenRequired := map[string]struct{}{}
+	for i, s := range schema.Required {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return nil, fmt.Errorf("invalid required entry at index %d: empty string", i)
+		}
+		if _, duplicate := seenRequired[s]; duplicate {
+			return nil, fmt.Errorf("duplicate required field %q", s)
+		}
+		if _, ok := out.propTypes[s]; !ok {
+			return nil, fmt.Errorf("required field %q is not declared in properties", s)
+		}
+		seenRequired[s] = struct{}{}
+		out.required = append(out.required, s)
+	}
+
 	return out, nil
+}
+
+func isKnownSchemaType(typ JSONSchemaType) bool {
+	switch typ {
+	case JSONSchemaTypeString,
+		JSONSchemaTypeBoolean,
+		JSONSchemaTypeNumber,
+		JSONSchemaTypeInteger,
+		JSONSchemaTypeObject,
+		JSONSchemaTypeArray:
+		return true
+	default:
+		return false
+	}
 }
 
 func validateArgs(schema *toolSchema, args json.RawMessage) error {

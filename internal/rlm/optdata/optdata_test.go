@@ -1,6 +1,7 @@
 package optdata
 
 import (
+	"math"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -253,4 +254,50 @@ func TestWriteTrajectoryRecordsJSONLRejectsInvalidRecord(t *testing.T) {
 	if !strings.Contains(err.Error(), "record type is required") {
 		t.Fatalf("BuildTrajectoryRecordsJSONL() error = %v, want record type validation", err)
 	}
+}
+
+func TestTrajectoryRecordValidateRejectsNonFiniteMetrics(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		metric MetricFeedback
+	}{
+		{name: "nan value", metric: MetricFeedback{Name: "accuracy", Value: math.NaN()}},
+		{name: "infinite value", metric: MetricFeedback{Name: "accuracy", Value: math.Inf(1)}},
+		{name: "nan weight", metric: MetricFeedback{Name: "accuracy", Value: 0.8, Weight: math.NaN()}},
+		{name: "infinite weight", metric: MetricFeedback{Name: "accuracy", Value: 0.8, Weight: math.Inf(1)}},
+		{name: "nan target", metric: metricWithTarget("accuracy", 0.8, math.NaN())},
+		{name: "infinite target", metric: metricWithTarget("accuracy", 0.8, math.Inf(1))},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			record := validTrajectoryRecordForTest()
+			record.Metrics = []MetricFeedback{tt.metric}
+
+			if err := record.Validate(); err == nil {
+				t.Fatalf("expected non-finite metric %s to be rejected", tt.name)
+			}
+		})
+	}
+}
+
+func validTrajectoryRecordForTest() TrajectoryRecord {
+	return TrajectoryRecord{
+		RecordType:    RecordTypeTrajectoryV1,
+		SchemaVersion: 1,
+		CreatedAt:     time.Date(2026, time.April, 12, 10, 0, 0, 0, time.UTC),
+		Execution: ExecutionMetadata{
+			Runtime: "rlm",
+			Model:   "model-a",
+			Success: true,
+		},
+	}
+}
+
+func metricWithTarget(name string, value, target float64) MetricFeedback {
+	return MetricFeedback{Name: name, Value: value, Target: &target}
 }

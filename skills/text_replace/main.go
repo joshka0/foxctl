@@ -327,6 +327,10 @@ func buildOperations(in input) []operation {
 
 // buildReplacer creates a replacer instance based on operation type and regex options.
 func buildReplacer(op operation, caseInsensitive, wordBoundary, multiline bool) (replacer, error) {
+	if err := textmatch.RequirePattern(op.Pattern); err != nil {
+		return nil, err
+	}
+
 	if op.Literal {
 		return &literalReplacer{
 			pattern:     op.Pattern,

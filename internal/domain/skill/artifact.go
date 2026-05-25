@@ -44,7 +44,7 @@ func resolveExecArtifact(dir string, manifest Manifest, opts ArtifactOptions) st
 	candidates = append(candidates, filepath.Join(dir, "bin"))
 
 	for _, c := range candidates {
-		if isFile(c) {
+		if isFileWithinRoot(c, dir) {
 			return c
 		}
 	}
@@ -57,23 +57,61 @@ func resolveExecArtifact(dir string, manifest Manifest, opts ArtifactOptions) st
 		return ""
 	}
 
-	entryCandidates := []string{}
 	if filepath.IsAbs(entry) {
-		entryCandidates = append(entryCandidates, entry)
-	} else {
-		if opts.EntryRoot != "" {
-			entryCandidates = append(entryCandidates, filepath.Join(opts.EntryRoot, entry))
-		}
-		entryCandidates = append(entryCandidates, filepath.Join(dir, entry))
+		return ""
 	}
+	type entryCandidate struct {
+		path string
+		root string
+	}
+	entryCandidates := []entryCandidate{}
+	if opts.EntryRoot != "" {
+		entryCandidates = append(entryCandidates, entryCandidate{
+			path: filepath.Join(opts.EntryRoot, entry),
+			root: opts.EntryRoot,
+		})
+	}
+	entryCandidates = append(entryCandidates, entryCandidate{
+		path: filepath.Join(dir, entry),
+		root: dir,
+	})
 
 	for _, c := range entryCandidates {
-		if isFile(c) {
-			return c
+		if isFileWithinRoot(c.path, c.root) {
+			return c.path
 		}
 	}
 
 	return ""
+}
+
+func isFileWithinRoot(path, root string) bool {
+	if !isFile(path) {
+		return false
+	}
+	return isPathWithinRoot(path, root)
+}
+
+func isPathWithinRoot(path, root string) bool {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	if resolvedRoot, err := filepath.EvalSymlinks(absRoot); err == nil {
+		absRoot = resolvedRoot
+	}
+	if resolvedPath, err := filepath.EvalSymlinks(absPath); err == nil {
+		absPath = resolvedPath
+	}
+	rel, err := filepath.Rel(absRoot, absPath)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
 func isFile(path string) bool {

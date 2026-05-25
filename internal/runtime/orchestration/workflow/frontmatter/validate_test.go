@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"testing/quick"
 )
 
 func TestDefaultConfig(t *testing.T) {
@@ -253,6 +254,63 @@ func TestValidateDispatch_Errors(t *testing.T) {
 	cfg.Tracker.ProjectSlug = ""
 	if err := ValidateDispatch(cfg); !errors.Is(err, errMissingProjectSlug) {
 		t.Fatalf("error = %v, want errMissingProjectSlug", err)
+	}
+}
+
+func TestValidateConfigServerPortBounds(t *testing.T) {
+	tests := []struct {
+		name    string
+		port    int
+		wantErr bool
+	}{
+		{name: "ephemeral", port: 0},
+		{name: "lowest explicit", port: 1},
+		{name: "highest tcp", port: 65535},
+		{name: "negative", port: -1, wantErr: true},
+		{name: "overflow", port: 65536, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.Server.Port = &tt.port
+			err := ValidateConfig(cfg)
+			if tt.wantErr && err == nil {
+				t.Fatal("ValidateConfig() error = nil, want server port error")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("ValidateConfig() error = %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateConfigPropertyServerPortBounds(t *testing.T) {
+	t.Parallel()
+
+	property := func(raw int) bool {
+		port := raw
+		if port >= 0 && port <= 65535 {
+			cfg := DefaultConfig()
+			cfg.Server.Port = &port
+			if err := ValidateConfig(cfg); err != nil {
+				t.Logf("valid port %d rejected: %v", port, err)
+				return false
+			}
+			return true
+		}
+
+		cfg := DefaultConfig()
+		cfg.Server.Port = &port
+		if err := ValidateConfig(cfg); err == nil {
+			t.Logf("invalid port %d accepted", port)
+			return false
+		}
+		return true
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatal(err)
 	}
 }
 

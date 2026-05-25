@@ -6,6 +6,7 @@
 package flow
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -14,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	envelopepkg "github.com/joshka0/foxctl/internal/domain/envelope"
 	flow "github.com/joshka0/foxctl/internal/runtime/flow"
 	"github.com/joshka0/foxctl/internal/storage/dbutil"
 	"github.com/joshka0/foxctl/internal/storage/sqlutil"
@@ -138,6 +140,10 @@ func isNoRows(err error) bool {
 // ---------------------------------------------------------------------------
 
 func (s *sqlStore) CreateFlow(ctx context.Context, f flow.Flow) (flow.Flow, error) {
+	if err := validateFlowState(f.State); err != nil {
+		return flow.Flow{}, err
+	}
+
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO flows (id, name, workspace, state, description, room_id, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
@@ -188,6 +194,10 @@ func (s *sqlStore) ListFlows(ctx context.Context, workspace string) ([]flow.Flow
 }
 
 func (s *sqlStore) UpdateFlow(ctx context.Context, f flow.Flow) (flow.Flow, error) {
+	if err := validateFlowState(f.State); err != nil {
+		return flow.Flow{}, err
+	}
+
 	now := sqlutil.FormatTimestamp(time.Now().UTC())
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE flows SET state = $1, description = $2, room_id = $3, updated_at = $4
@@ -204,6 +214,13 @@ func (s *sqlStore) UpdateFlow(ctx context.Context, f flow.Flow) (flow.Flow, erro
 		return flow.Flow{}, flow.ErrNotFound
 	}
 	return s.GetFlow(ctx, f.ID)
+}
+
+func validateFlowState(state flow.FlowState) error {
+	if !state.IsValid() {
+		return fmt.Errorf("flow: invalid flow state %q", state)
+	}
+	return nil
 }
 
 func (s *sqlStore) DeleteFlow(ctx context.Context, id string) error {
@@ -236,8 +253,12 @@ func scanFlow(row *sql.Row) (flow.Flow, error) {
 		return flow.Flow{}, fmt.Errorf("flow: scan flow: %w", err)
 	}
 	f.State = flow.FlowState(state)
-	f.CreatedAt, _ = sqlutil.ScanTimestamp(created)
-	f.UpdatedAt, _ = sqlutil.ScanTimestamp(updated)
+	if err := validateFlowState(f.State); err != nil {
+		return flow.Flow{}, err
+	}
+	if err := parseFlowTimestamps(&f, created, updated); err != nil {
+		return flow.Flow{}, err
+	}
 	return f, nil
 }
 
@@ -250,9 +271,26 @@ func scanFlowRow(rows *sql.Rows) (flow.Flow, error) {
 		return flow.Flow{}, fmt.Errorf("flow: scan flow row: %w", err)
 	}
 	f.State = flow.FlowState(state)
-	f.CreatedAt, _ = sqlutil.ScanTimestamp(created)
-	f.UpdatedAt, _ = sqlutil.ScanTimestamp(updated)
+	if err := validateFlowState(f.State); err != nil {
+		return flow.Flow{}, err
+	}
+	if err := parseFlowTimestamps(&f, created, updated); err != nil {
+		return flow.Flow{}, err
+	}
 	return f, nil
+}
+
+func parseFlowTimestamps(f *flow.Flow, created, updated string) error {
+	var err error
+	f.CreatedAt, err = sqlutil.ScanTimestamp(created)
+	if err != nil {
+		return fmt.Errorf("flow: scan flow created_at: %w", err)
+	}
+	f.UpdatedAt, err = sqlutil.ScanTimestamp(updated)
+	if err != nil {
+		return fmt.Errorf("flow: scan flow updated_at: %w", err)
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -260,14 +298,21 @@ func scanFlowRow(rows *sql.Rows) (flow.Flow, error) {
 // ---------------------------------------------------------------------------
 
 func (s *sqlStore) AddNode(ctx context.Context, n flow.FlowNode) (flow.FlowNode, error) {
-	configStr := string(n.Config)
-	positionStr := ""
-	if n.Position != nil {
-		posBytes, _ := json.Marshal(n.Position)
-		positionStr = string(posBytes)
+	if err := validateNodeKind(n.Kind); err != nil {
+		return flow.FlowNode{}, err
 	}
 
-	_, err := s.db.ExecContext(ctx, `
+	configStr, err := normalizeNodeConfig(n.Config)
+	if err != nil {
+		return flow.FlowNode{}, err
+	}
+
+	positionStr, err := encodeNodePosition(n.Position)
+	if err != nil {
+		return flow.FlowNode{}, err
+	}
+
+	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO flow_nodes (id, flow_id, kind, label, config, position)
 		VALUES ($1, $2, $3, $4, $5, $6)`,
 		n.ID, n.FlowID, string(n.Kind), n.Label, configStr, positionStr)
@@ -275,6 +320,39 @@ func (s *sqlStore) AddNode(ctx context.Context, n flow.FlowNode) (flow.FlowNode,
 		return flow.FlowNode{}, fmt.Errorf("flow: add node: %w", err)
 	}
 	return s.GetNode(ctx, n.ID)
+}
+
+func validateNodeKind(kind flow.NodeKind) error {
+	if !kind.IsValid() {
+		return fmt.Errorf("flow: invalid node kind %q", kind)
+	}
+	return nil
+}
+
+func normalizeNodeConfig(config json.RawMessage) (string, error) {
+	trimmed := bytes.TrimSpace(config)
+	if len(trimmed) == 0 {
+		return "{}", nil
+	}
+	if !json.Valid(trimmed) {
+		return "", fmt.Errorf("flow: invalid node config JSON")
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &obj); err != nil || obj == nil {
+		return "", fmt.Errorf("flow: node config must be a JSON object")
+	}
+	return string(trimmed), nil
+}
+
+func encodeNodePosition(position *flow.Position) (string, error) {
+	if position == nil {
+		return "", nil
+	}
+	posBytes, err := json.Marshal(position)
+	if err != nil {
+		return "", fmt.Errorf("flow: invalid node position: %w", err)
+	}
+	return string(posBytes), nil
 }
 
 func (s *sqlStore) GetNode(ctx context.Context, id string) (flow.FlowNode, error) {
@@ -292,13 +370,19 @@ func (s *sqlStore) GetNode(ctx context.Context, id string) (flow.FlowNode, error
 		return flow.FlowNode{}, fmt.Errorf("flow: get node: %w", err)
 	}
 	n.Kind = flow.NodeKind(kind)
-	n.Config = json.RawMessage(configStr)
-	if positionStr != "" {
-		var pos flow.Position
-		if jsonErr := json.Unmarshal([]byte(positionStr), &pos); jsonErr == nil {
-			n.Position = &pos
-		}
+	if err := validateNodeKind(n.Kind); err != nil {
+		return flow.FlowNode{}, err
 	}
+	config, err := parseNodeConfig(configStr)
+	if err != nil {
+		return flow.FlowNode{}, err
+	}
+	n.Config = config
+	position, err := parseNodePosition(positionStr)
+	if err != nil {
+		return flow.FlowNode{}, err
+	}
+	n.Position = position
 	return n, nil
 }
 
@@ -339,13 +423,19 @@ func (s *sqlStore) ListNodesByFlow(ctx context.Context, flowID string) ([]flow.F
 			return nil, fmt.Errorf("flow: scan node: %w", err)
 		}
 		n.Kind = flow.NodeKind(kind)
-		n.Config = json.RawMessage(configStr)
-		if positionStr != "" {
-			var pos flow.Position
-			if jsonErr := json.Unmarshal([]byte(positionStr), &pos); jsonErr == nil {
-				n.Position = &pos
-			}
+		if err := validateNodeKind(n.Kind); err != nil {
+			return nil, err
 		}
+		config, err := parseNodeConfig(configStr)
+		if err != nil {
+			return nil, err
+		}
+		n.Config = config
+		position, err := parseNodePosition(positionStr)
+		if err != nil {
+			return nil, err
+		}
+		n.Position = position
 		nodes = append(nodes, n)
 	}
 	if nodes == nil {
@@ -354,11 +444,40 @@ func (s *sqlStore) ListNodesByFlow(ctx context.Context, flowID string) ([]flow.F
 	return nodes, rows.Err()
 }
 
+func parseNodeConfig(raw string) (json.RawMessage, error) {
+	normalized, err := normalizeNodeConfig(json.RawMessage(raw))
+	if err != nil {
+		return nil, fmt.Errorf("flow: scan node config: %w", err)
+	}
+	return json.RawMessage(normalized), nil
+}
+
+func parseNodePosition(raw string) (*flow.Position, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	var position flow.Position
+	if err := json.Unmarshal([]byte(raw), &position); err != nil {
+		return nil, fmt.Errorf("flow: scan node position: %w", err)
+	}
+	return &position, nil
+}
+
 // ---------------------------------------------------------------------------
 // Edge CRUD
 // ---------------------------------------------------------------------------
 
 func (s *sqlStore) AddEdge(ctx context.Context, e flow.FlowEdge) (flow.FlowEdge, error) {
+	if err := validateEdgeKinds(e); err != nil {
+		return flow.FlowEdge{}, err
+	}
+	if err := validateRetryPolicy(e.RetryPolicy); err != nil {
+		return flow.FlowEdge{}, err
+	}
+	if err := s.validateEdgeEndpoints(ctx, e); err != nil {
+		return flow.FlowEdge{}, err
+	}
+
 	retryPolicyStr := ""
 	if e.RetryPolicy != nil {
 		rpBytes, _ := json.Marshal(e.RetryPolicy)
@@ -377,6 +496,48 @@ func (s *sqlStore) AddEdge(ctx context.Context, e flow.FlowEdge) (flow.FlowEdge,
 		return flow.FlowEdge{}, fmt.Errorf("flow: add edge: %w", err)
 	}
 	return s.GetEdge(ctx, e.ID)
+}
+
+func validateEdgeKinds(e flow.FlowEdge) error {
+	if !e.Transform.IsValid() {
+		return fmt.Errorf("flow: invalid edge transform %q", e.Transform)
+	}
+	if !e.Trigger.IsValid() {
+		return fmt.Errorf("flow: invalid edge trigger %q", e.Trigger)
+	}
+	return nil
+}
+
+func validateRetryPolicy(policy *flow.RetryPolicy) error {
+	if policy == nil {
+		return nil
+	}
+	if policy.MaxAttempts < 0 {
+		return fmt.Errorf("flow: retry max_attempts must be non-negative")
+	}
+	if policy.DelayMS < 0 {
+		return fmt.Errorf("flow: retry delay_ms must be non-negative")
+	}
+	return nil
+}
+
+func (s *sqlStore) validateEdgeEndpoints(ctx context.Context, e flow.FlowEdge) error {
+	from, err := s.GetNode(ctx, e.FromNodeID)
+	if err != nil {
+		return fmt.Errorf("flow: edge source node: %w", err)
+	}
+	if from.FlowID != e.FlowID {
+		return fmt.Errorf("flow: edge source node %q belongs to flow %q, not %q", e.FromNodeID, from.FlowID, e.FlowID)
+	}
+
+	to, err := s.GetNode(ctx, e.ToNodeID)
+	if err != nil {
+		return fmt.Errorf("flow: edge target node: %w", err)
+	}
+	if to.FlowID != e.FlowID {
+		return fmt.Errorf("flow: edge target node %q belongs to flow %q, not %q", e.ToNodeID, to.FlowID, e.FlowID)
+	}
+	return nil
 }
 
 func (s *sqlStore) GetEdge(ctx context.Context, id string) (flow.FlowEdge, error) {
@@ -430,12 +591,14 @@ func (s *sqlStore) ListEdgesByFlow(ctx context.Context, flowID string) ([]flow.F
 		}
 		e.Transform = flow.TransformKind(transform)
 		e.Trigger = flow.TriggerKind(trigger)
-		if retryPolicyStr != "" {
-			var rp flow.RetryPolicy
-			if jsonErr := json.Unmarshal([]byte(retryPolicyStr), &rp); jsonErr == nil {
-				e.RetryPolicy = &rp
-			}
+		if err := validateEdgeKinds(e); err != nil {
+			return nil, err
 		}
+		retryPolicy, err := parseEdgeRetryPolicy(retryPolicyStr)
+		if err != nil {
+			return nil, err
+		}
+		e.RetryPolicy = retryPolicy
 		edges = append(edges, e)
 	}
 	if edges == nil {
@@ -460,13 +623,29 @@ func scanEdge(row *sql.Row) (flow.FlowEdge, error) {
 	}
 	e.Transform = flow.TransformKind(transform)
 	e.Trigger = flow.TriggerKind(trigger)
-	if retryPolicyStr != "" {
-		var rp flow.RetryPolicy
-		if jsonErr := json.Unmarshal([]byte(retryPolicyStr), &rp); jsonErr == nil {
-			e.RetryPolicy = &rp
-		}
+	if err := validateEdgeKinds(e); err != nil {
+		return flow.FlowEdge{}, err
 	}
+	retryPolicy, err := parseEdgeRetryPolicy(retryPolicyStr)
+	if err != nil {
+		return flow.FlowEdge{}, err
+	}
+	e.RetryPolicy = retryPolicy
 	return e, nil
+}
+
+func parseEdgeRetryPolicy(raw string) (*flow.RetryPolicy, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	var retryPolicy flow.RetryPolicy
+	if err := json.Unmarshal([]byte(raw), &retryPolicy); err != nil {
+		return nil, fmt.Errorf("flow: scan edge retry_policy: %w", err)
+	}
+	if err := validateRetryPolicy(&retryPolicy); err != nil {
+		return nil, fmt.Errorf("flow: scan edge retry_policy: %w", err)
+	}
+	return &retryPolicy, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -474,6 +653,13 @@ func scanEdge(row *sql.Row) (flow.FlowEdge, error) {
 // ---------------------------------------------------------------------------
 
 func (s *sqlStore) CreateRun(ctx context.Context, r flow.FlowRun) (flow.FlowRun, error) {
+	if err := validateRunState(r.State); err != nil {
+		return flow.FlowRun{}, err
+	}
+	if err := validateRunCompletion(r.State, r.StartedAt, r.CompletedAt); err != nil {
+		return flow.FlowRun{}, err
+	}
+
 	completedAt := ""
 	if r.CompletedAt != nil {
 		completedAt = sqlutil.FormatTimestamp(*r.CompletedAt)
@@ -491,6 +677,20 @@ func (s *sqlStore) CreateRun(ctx context.Context, r flow.FlowRun) (flow.FlowRun,
 }
 
 func (s *sqlStore) UpdateRun(ctx context.Context, r flow.FlowRun) (flow.FlowRun, error) {
+	if err := validateRunState(r.State); err != nil {
+		return flow.FlowRun{}, err
+	}
+	existing, err := s.getRun(ctx, r.ID)
+	if err != nil {
+		return flow.FlowRun{}, err
+	}
+	if isFinalizedTerminalRun(existing, r) {
+		return flow.FlowRun{}, fmt.Errorf("flow: run %q is terminal in state %q", r.ID, existing.State)
+	}
+	if err := validateRunCompletion(r.State, existing.StartedAt, r.CompletedAt); err != nil {
+		return flow.FlowRun{}, err
+	}
+
 	completedAt := ""
 	if r.CompletedAt != nil {
 		completedAt = sqlutil.FormatTimestamp(*r.CompletedAt)
@@ -511,6 +711,36 @@ func (s *sqlStore) UpdateRun(ctx context.Context, r flow.FlowRun) (flow.FlowRun,
 		return flow.FlowRun{}, flow.ErrNotFound
 	}
 	return s.getRun(ctx, r.ID)
+}
+
+func isTerminalRunState(state flow.RunState) bool {
+	return state == flow.RunCompleted || state == flow.RunFailed
+}
+
+func validateRunCompletion(state flow.RunState, startedAt time.Time, completedAt *time.Time) error {
+	if state == flow.RunRunning && completedAt != nil {
+		return fmt.Errorf("flow: running run cannot have completed_at")
+	}
+	if completedAt != nil && completedAt.Before(startedAt) {
+		return fmt.Errorf("flow: completed_at %s precedes started_at %s",
+			completedAt.UTC().Format(time.RFC3339Nano),
+			startedAt.UTC().Format(time.RFC3339Nano))
+	}
+	return nil
+}
+
+func isFinalizedTerminalRun(existing, next flow.FlowRun) bool {
+	if !isTerminalRunState(existing.State) {
+		return false
+	}
+	return existing.CompletedAt != nil || next.State != existing.State || next.CompletedAt == nil
+}
+
+func validateRunState(state flow.RunState) error {
+	if !state.IsValid() {
+		return fmt.Errorf("flow: invalid run state %q", state)
+	}
+	return nil
 }
 
 // GetRun returns the run with the given ID.
@@ -534,12 +764,25 @@ func (s *sqlStore) getRun(ctx context.Context, id string) (flow.FlowRun, error) 
 		return flow.FlowRun{}, fmt.Errorf("flow: get run: %w", err)
 	}
 	r.State = flow.RunState(state)
-	r.StartedAt, _ = sqlutil.ScanTimestamp(startedAt)
+	if err := validateRunState(r.State); err != nil {
+		return flow.FlowRun{}, err
+	}
+	var parseErr error
+	r.StartedAt, parseErr = sqlutil.ScanTimestamp(startedAt)
+	if parseErr != nil {
+		return flow.FlowRun{}, fmt.Errorf("flow: scan run started_at: %w", parseErr)
+	}
 	if completedAt != "" {
-		t, _ := sqlutil.ScanTimestamp(completedAt)
+		t, parseErr := sqlutil.ScanTimestamp(completedAt)
+		if parseErr != nil {
+			return flow.FlowRun{}, fmt.Errorf("flow: scan run completed_at: %w", parseErr)
+		}
 		if !t.IsZero() {
 			r.CompletedAt = &t
 		}
+	}
+	if err := validateRunCompletion(r.State, r.StartedAt, r.CompletedAt); err != nil {
+		return flow.FlowRun{}, err
 	}
 	return r, nil
 }
@@ -556,6 +799,10 @@ func (s *sqlStore) WriteRunLog(ctx context.Context, log flow.RunLog) (flow.RunLo
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
+	if err := validateRunLogEnvelope(log.Envelope); err != nil {
+		return flow.RunLog{}, err
+	}
+
 	// Generate ID if not provided.
 	if log.ID == "" {
 		log.ID = ulid.Make().String()
@@ -565,10 +812,17 @@ func (s *sqlStore) WriteRunLog(ctx context.Context, log flow.RunLog) (flow.RunLo
 	if log.CreatedAt.IsZero() {
 		log.CreatedAt = time.Now().UTC()
 	}
+	run, err := s.getRun(ctx, log.RunID)
+	if err != nil {
+		return flow.RunLog{}, err
+	}
+	if err := validateRunLogCreatedAt(log.CreatedAt, run.StartedAt); err != nil {
+		return flow.RunLog{}, err
+	}
 
 	// Auto-assign seq as next per-run monotonic value.
 	var maxSeq sql.NullInt64
-	err := s.db.QueryRowContext(ctx,
+	err = s.db.QueryRowContext(ctx,
 		`SELECT MAX(seq) FROM flow_run_logs WHERE run_id = $1`, log.RunID).Scan(&maxSeq)
 	if err != nil && !isNoRows(err) {
 		return flow.RunLog{}, fmt.Errorf("flow: write log seq: %w", err)
@@ -595,6 +849,26 @@ func (s *sqlStore) WriteRunLog(ctx context.Context, log flow.RunLog) (flow.RunLo
 	s.broadcastLog(log)
 
 	return log, nil
+}
+
+func validateRunLogEnvelope(raw json.RawMessage) error {
+	var env envelopepkg.Envelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return fmt.Errorf("flow: invalid run log envelope JSON: %w", err)
+	}
+	if err := envelopepkg.Validate(env); err != nil {
+		return fmt.Errorf("flow: invalid run log envelope: %w", err)
+	}
+	return nil
+}
+
+func validateRunLogCreatedAt(createdAt, runStartedAt time.Time) error {
+	if createdAt.Before(runStartedAt) {
+		return fmt.Errorf("flow: run log created_at %s precedes run started_at %s",
+			createdAt.UTC().Format(time.RFC3339Nano),
+			runStartedAt.UTC().Format(time.RFC3339Nano))
+	}
+	return nil
 }
 
 // ListRunLogs returns log entries for the given run, ordered by seq ascending.
@@ -644,7 +918,34 @@ func (s *sqlStore) ListRunLogs(ctx context.Context, runID string, opts ...flow.R
 	if logs == nil {
 		logs = []flow.RunLog{}
 	}
-	return logs, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := s.validateListedRunLogs(ctx, runID, logs); err != nil {
+		return nil, err
+	}
+	return logs, nil
+}
+
+func (s *sqlStore) validateListedRunLogs(ctx context.Context, runID string, logs []flow.RunLog) error {
+	if len(logs) == 0 {
+		return nil
+	}
+	run, err := s.getRun(ctx, runID)
+	if err != nil {
+		return fmt.Errorf("flow: list run logs run: %w", err)
+	}
+	prevSeq := 0
+	for _, log := range logs {
+		if log.Seq <= prevSeq {
+			return fmt.Errorf("flow: list run logs seq: seq values must be strictly increasing")
+		}
+		prevSeq = log.Seq
+		if err := validateRunLogCreatedAt(log.CreatedAt, run.StartedAt); err != nil {
+			return fmt.Errorf("flow: list run logs created_at: %w", err)
+		}
+	}
+	return nil
 }
 
 // StreamRunLogs yields existing logs for the given run in order, then
@@ -737,7 +1038,24 @@ func scanRunLog(rows *sql.Rows) (flow.RunLog, error) {
 	if err != nil {
 		return flow.RunLog{}, fmt.Errorf("flow: scan run log: %w", err)
 	}
+	if err := validateRunLogSeq(l.Seq); err != nil {
+		return flow.RunLog{}, fmt.Errorf("flow: scan run log seq: %w", err)
+	}
 	l.Envelope = json.RawMessage(envStr)
-	l.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt)
+	if err := validateRunLogEnvelope(l.Envelope); err != nil {
+		return flow.RunLog{}, fmt.Errorf("flow: scan run log envelope: %w", err)
+	}
+	var parseErr error
+	l.CreatedAt, parseErr = sqlutil.ScanTimestamp(createdAt)
+	if parseErr != nil {
+		return flow.RunLog{}, fmt.Errorf("flow: scan run log created_at: %w", parseErr)
+	}
 	return l, nil
+}
+
+func validateRunLogSeq(seq int) error {
+	if seq < 1 {
+		return fmt.Errorf("seq must be positive")
+	}
+	return nil
 }

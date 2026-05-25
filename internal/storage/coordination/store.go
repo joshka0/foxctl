@@ -409,6 +409,9 @@ func (s *Store) UpsertRoomReminder(ctx context.Context, reminder RoomReminder) (
 	if reminder.MaxIterations <= 0 {
 		return RoomReminder{}, fmt.Errorf("coordination: max_iterations must be positive")
 	}
+	if reminder.SentCount < 0 {
+		return RoomReminder{}, fmt.Errorf("coordination: sent_count must be non-negative")
+	}
 	now := time.Now().UTC()
 	if reminder.CreatedAt.IsZero() {
 		reminder.CreatedAt = now
@@ -582,6 +585,9 @@ func (s *Store) UpsertRoomLoop(ctx context.Context, loop RoomLoop) (RoomLoop, er
 	if loop.WorkspaceID == "" || loop.RoomID == "" {
 		return RoomLoop{}, fmt.Errorf("coordination: workspace_id and room_id are required")
 	}
+	if err := validateRoomLoopScheduling(loop); err != nil {
+		return RoomLoop{}, err
+	}
 	now := time.Now().UTC()
 	loop.UpdatedAt = now
 
@@ -681,6 +687,31 @@ func (s *Store) UpsertRoomLoop(ctx context.Context, loop RoomLoop) (RoomLoop, er
 	return loop, nil
 }
 
+func validateRoomLoopScheduling(loop RoomLoop) error {
+	if loop.PulseInterval < 0 {
+		return fmt.Errorf("coordination: pulse_interval must be non-negative")
+	}
+	if loop.TaskFollowupInterval < 0 {
+		return fmt.Errorf("coordination: task_followup_interval must be non-negative")
+	}
+	if loop.ReplyStaleAfter < 0 {
+		return fmt.Errorf("coordination: reply_stale_after must be non-negative")
+	}
+	if loop.TaskStaleAfter < 0 {
+		return fmt.Errorf("coordination: task_stale_after must be non-negative")
+	}
+	if loop.MinPulseFloor < 0 {
+		return fmt.Errorf("coordination: min_pulse_floor must be non-negative")
+	}
+	if loop.InterruptAttemptLimit < 0 {
+		return fmt.Errorf("coordination: interrupt_attempt_limit must be non-negative")
+	}
+	if loop.ReminderBackoffCap < 0 {
+		return fmt.Errorf("coordination: reminder_backoff_cap must be non-negative")
+	}
+	return nil
+}
+
 type durationMillis time.Duration
 
 func (d *durationMillis) Scan(src any) error {
@@ -723,9 +754,12 @@ func decodeRoomLoopPulseStateMap(raw string, target *map[string]RoomLoopPulseSta
 		*target = map[string]RoomLoopPulseState{}
 		return nil
 	}
-	out := make(map[string]RoomLoopPulseState)
+	var out map[string]RoomLoopPulseState
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
 		return err
+	}
+	if out == nil {
+		return fmt.Errorf("pulse state map must be a JSON object")
 	}
 	*target = out
 	return nil
@@ -751,11 +785,14 @@ func decodeRoomLoopDeliveryTrace(raw string, target **RoomLoopDeliveryTrace) err
 		*target = nil
 		return nil
 	}
-	var trace RoomLoopDeliveryTrace
+	var trace *RoomLoopDeliveryTrace
 	if err := json.Unmarshal([]byte(raw), &trace); err != nil {
 		return err
 	}
-	*target = &trace
+	if trace == nil {
+		return fmt.Errorf("delivery trace must be a JSON object")
+	}
+	*target = trace
 	return nil
 }
 
@@ -790,9 +827,12 @@ func decodeRoomLoopTimeMap(raw string, target *map[string]time.Time) error {
 		*target = map[string]time.Time{}
 		return nil
 	}
-	decoded := make(map[string]string)
+	var decoded map[string]string
 	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
 		return err
+	}
+	if decoded == nil {
+		return fmt.Errorf("time map must be a JSON object")
 	}
 	out := make(map[string]time.Time, len(decoded))
 	for key, value := range decoded {

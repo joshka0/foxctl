@@ -61,6 +61,9 @@ func (v *Vector) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &floats); err != nil {
 		return err
 	}
+	if floats == nil {
+		return fmt.Errorf("vector must be a JSON array")
+	}
 	*v = floats
 	return nil
 }

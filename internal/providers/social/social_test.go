@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"testing/quick"
 	"time"
 )
 
@@ -250,6 +251,239 @@ func TestCollectFacebookDryRunKeepsPagesProviderSeparate(t *testing.T) {
 	}
 	if len(out.Warnings) == 0 {
 		t.Fatal("expected permission warning")
+	}
+}
+
+func TestCollectDryRunRejectsRouteShapingPathInputs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		platform Platform
+		input    Input
+	}{
+		{
+			name:     "reddit subreddit",
+			platform: PlatformReddit,
+			input: Input{
+				Operation: "subreddit_listing",
+				Subreddit: "golang/about",
+				DryRun:    true,
+			},
+		},
+		{
+			name:     "reddit username",
+			platform: PlatformReddit,
+			input: Input{
+				Operation: "user_submitted",
+				Username:  "alice/comments",
+				DryRun:    true,
+			},
+		},
+		{
+			name:     "x username",
+			platform: PlatformX,
+			input: Input{
+				Operation: "user_lookup",
+				Username:  "alice/followers",
+				DryRun:    true,
+			},
+		},
+		{
+			name:     "facebook page id",
+			platform: PlatformFacebook,
+			input: Input{
+				Operation: "page_posts",
+				PageID:    "page-id/feed",
+				DryRun:    true,
+			},
+		},
+		{
+			name:     "instagram media id",
+			platform: PlatformInstagram,
+			input: Input{
+				Operation: "media_details",
+				MediaID:   "media-id/comments",
+				DryRun:    true,
+			},
+		},
+		{
+			name:     "meta api version",
+			platform: PlatformFacebook,
+			input: Input{
+				Operation:  "page_info",
+				PageID:     "page-id",
+				APIVersion: "v25.0/debug",
+				DryRun:     true,
+			},
+		},
+		{
+			name:     "empty meta api version segment",
+			platform: PlatformFacebook,
+			input: Input{
+				Operation:  "page_info",
+				PageID:     "page-id",
+				APIVersion: "/",
+				DryRun:     true,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if _, err := Collect(context.Background(), testSocialClient(nil), tt.platform, tt.input); err == nil {
+				t.Fatal("expected route-shaping path input to be rejected")
+			}
+		})
+	}
+}
+
+func TestCollectDryRunAcceptsLeadingSlashMetaAPIVersion(t *testing.T) {
+	t.Parallel()
+
+	out, err := Collect(context.Background(), testSocialClient(nil), PlatformFacebook, Input{
+		Operation:  "page_info",
+		PageID:     "page-id",
+		APIVersion: "/v25.0",
+		DryRun:     true,
+	})
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if out.Request.Route != "/v25.0/page-id" {
+		t.Fatalf("route = %q, want /v25.0/page-id", out.Request.Route)
+	}
+}
+
+func TestCollectDryRunRejectsCommaDelimitedIDTokens(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		platform Platform
+		input    Input
+	}{
+		{
+			name:     "x fallback id",
+			platform: PlatformX,
+			input: Input{
+				Operation: "posts_lookup",
+				ID:        "111,222",
+				DryRun:    true,
+			},
+		},
+		{
+			name:     "x ids element",
+			platform: PlatformX,
+			input: Input{
+				Operation: "posts_lookup",
+				IDs:       []string{"111,222"},
+				DryRun:    true,
+			},
+		},
+		{
+			name:     "youtube video id",
+			platform: PlatformYouTube,
+			input: Input{
+				Operation: "videos",
+				VideoID:   "vid1,vid2",
+				DryRun:    true,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if _, err := Collect(context.Background(), testSocialClient(nil), tt.platform, tt.input); err == nil {
+				t.Fatal("expected comma-delimited ID token to be rejected")
+			}
+		})
+	}
+}
+
+func TestCollectDryRunKeepsExplicitIDListElements(t *testing.T) {
+	t.Parallel()
+
+	out, err := Collect(context.Background(), testSocialClient(nil), PlatformX, Input{
+		Operation: "posts_lookup",
+		IDs:       []string{"111", "222"},
+		DryRun:    true,
+	})
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if got := out.Request.Query["ids"]; got != "111,222" {
+		t.Fatalf("ids query = %q, want 111,222", got)
+	}
+}
+
+func TestCollectDryRunPropertyRejectsGeneratedRedditSubredditPathSegments(t *testing.T) {
+	t.Parallel()
+
+	prop := func(prefix, suffix string) bool {
+		in := Input{
+			Operation: "subreddit_listing",
+			Subreddit: prefix + "/" + suffix,
+			DryRun:    true,
+		}
+		_, err := Collect(context.Background(), testSocialClient(nil), PlatformReddit, in)
+		return err != nil
+	}
+	if err := quick.Check(prop, &quick.Config{MaxCount: 300}); err != nil {
+		t.Fatalf("generated subreddit path segment was accepted: %v", err)
+	}
+}
+
+func TestCollectDryRunRejectsBusinessDiscoveryFieldExpressionUsername(t *testing.T) {
+	t.Parallel()
+
+	for _, username := range []string{
+		"target)",
+		"target){id,media{comments}}",
+		"target,media",
+		"target{media}",
+		"target media",
+		"target\nmedia",
+	} {
+		username := username
+		t.Run(username, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := Collect(context.Background(), testSocialClient(nil), PlatformInstagram, Input{
+				Operation:  "business_discovery",
+				IGUserID:   "ig123",
+				Username:   username,
+				APIVersion: "v25.0",
+				DryRun:     true,
+			})
+			if err == nil {
+				t.Fatal("expected field-expression username to be rejected")
+			}
+		})
+	}
+}
+
+func TestCollectDryRunBusinessDiscoveryKeepsUsernameAsSingleFieldArgument(t *testing.T) {
+	t.Parallel()
+
+	out, err := Collect(context.Background(), testSocialClient(nil), PlatformInstagram, Input{
+		Operation:  "business_discovery",
+		IGUserID:   "ig123",
+		Username:   "target.account_1",
+		APIVersion: "v25.0",
+		DryRun:     true,
+	})
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if got := out.Request.Query["fields"]; got != "business_discovery.username(target.account_1){id,username,name,biography,website,followers_count,follows_count,media_count,profile_picture_url,media.limit(25){id,caption,media_type,permalink,timestamp,like_count,comments_count}}" {
+		t.Fatalf("fields = %q", got)
 	}
 }
 

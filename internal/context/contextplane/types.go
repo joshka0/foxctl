@@ -2,6 +2,7 @@ package contextplane
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/context/contextengine"
@@ -769,10 +770,13 @@ func EvidenceRefsToStrings(refs []contextengine.EvidenceRef) []string {
 	}
 	out := make([]string, 0, len(refs))
 	for _, ref := range refs {
+		ref = contextengine.NormalizeEvidenceRef(ref, "")
 		if s := contextengine.FormatEvidenceRef(ref); s != "" {
 			out = append(out, s)
-		} else {
-			out = append(out, ref.Ref)
+			continue
+		}
+		if s := strings.TrimSpace(ref.Ref); s != "" {
+			out = append(out, s)
 		}
 	}
 	return out
@@ -786,6 +790,7 @@ func StringsToEvidenceRefs(items []string) []contextengine.EvidenceRef {
 	}
 	out := make([]contextengine.EvidenceRef, 0, len(items))
 	for _, s := range items {
+		s = strings.TrimSpace(s)
 		if s == "" {
 			continue
 		}
@@ -807,6 +812,7 @@ func UniqueEvidenceRefs(refs []contextengine.EvidenceRef) []contextengine.Eviden
 	seen := make(map[string]struct{}, len(refs))
 	out := make([]contextengine.EvidenceRef, 0, len(refs))
 	for _, ref := range refs {
+		ref = contextengine.NormalizeEvidenceRef(ref, "")
 		key := string(ref.Type) + ":" + ref.Ref
 		if _, ok := seen[key]; ok {
 			continue

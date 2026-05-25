@@ -352,6 +352,9 @@ func queryAuthors(ctx context.Context, gitPath, workspace, path string, in input
 
 // parseRecentChanges parses git log output into structured recent change results.
 func parseRecentChanges(output []byte, _ string, maxResults int) []gitResult {
+	if maxResults <= 0 {
+		return nil
+	}
 	var results []gitResult
 	lines := strings.Split(string(output), "\n")
 
@@ -364,27 +367,19 @@ func parseRecentChanges(output []byte, _ string, maxResults int) []gitResult {
 			continue
 		}
 
-		if strings.Contains(line, "|") {
-			// Commit header: %H|%an|%ae|%ad|%s
-			parts := strings.SplitN(line, "|", 5)
-			if len(parts) == 5 {
-				currentCommit = map[string]string{
-					"hash":    parts[0],
-					"author":  parts[1],
-					"email":   parts[2],
-					"date":    parts[3],
-					"subject": parts[4],
-				}
-				filesSeen = make(map[string]bool)
-			}
-		} else if currentCommit != nil && line != "" {
+		if commit, ok := parseGitLogHeader(line); ok {
+			currentCommit = commit
+			filesSeen = make(map[string]bool)
+			continue
+		}
+		if currentCommit != nil && line != "" {
 			// File name
 			if !filesSeen[line] {
 				filesSeen[line] = true
 				results = append(results, gitResult{
 					Type:    "recent_change",
 					File:    line,
-					Commit:  currentCommit["hash"][:7],
+					Commit:  shortGitHash(currentCommit["hash"]),
 					Author:  currentCommit["author"],
 					Email:   currentCommit["email"],
 					Date:    currentCommit["date"],
@@ -401,8 +396,44 @@ func parseRecentChanges(output []byte, _ string, maxResults int) []gitResult {
 	return results
 }
 
+func parseGitLogHeader(line string) (map[string]string, bool) {
+	parts := strings.SplitN(line, "|", 5)
+	if len(parts) != 5 || !isFullGitHash(parts[0]) {
+		return nil, false
+	}
+	return map[string]string{
+		"hash":    parts[0],
+		"author":  parts[1],
+		"email":   parts[2],
+		"date":    parts[3],
+		"subject": parts[4],
+	}, true
+}
+
+func isFullGitHash(hash string) bool {
+	if len(hash) != 40 && len(hash) != 64 {
+		return false
+	}
+	for _, c := range hash {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+func shortGitHash(hash string) string {
+	if len(hash) <= 7 {
+		return hash
+	}
+	return hash[:7]
+}
+
 // parseHotspots converts file change counts into hotspot results.
 func parseHotspots(output []byte, _ string, maxResults int) []gitResult {
+	if maxResults <= 0 {
+		return nil
+	}
 	lines := strings.Split(string(output), "\n")
 	fileCounts := make(map[string]int)
 
@@ -424,6 +455,9 @@ func parseHotspots(output []byte, _ string, maxResults int) []gitResult {
 
 	// Sort by count descending
 	sort.Slice(results, func(i, j int) bool {
+		if results[i].Count == results[j].Count {
+			return results[i].File < results[j].File
+		}
 		return results[i].Count > results[j].Count
 	})
 
@@ -436,6 +470,9 @@ func parseHotspots(output []byte, _ string, maxResults int) []gitResult {
 
 // parseBlame parses git blame porcelain output into structured blame results.
 func parseBlame(output []byte, file string, maxResults int) []gitResult {
+	if maxResults <= 0 {
+		return nil
+	}
 	var results []gitResult
 	lines := strings.Split(string(output), "\n")
 
@@ -488,6 +525,9 @@ func parseBlame(output []byte, file string, maxResults int) []gitResult {
 
 // parseAuthors converts git log author output into structured author statistics.
 func parseAuthors(output []byte, maxResults int) []gitResult {
+	if maxResults <= 0 {
+		return nil
+	}
 	lines := strings.Split(string(output), "\n")
 	authorCounts := make(map[string]map[string]any)
 
@@ -528,6 +568,12 @@ func parseAuthors(output []byte, maxResults int) []gitResult {
 
 	// Sort by count descending
 	sort.Slice(results, func(i, j int) bool {
+		if results[i].Count == results[j].Count {
+			if results[i].Author == results[j].Author {
+				return results[i].Email < results[j].Email
+			}
+			return results[i].Author < results[j].Author
+		}
 		return results[i].Count > results[j].Count
 	})
 

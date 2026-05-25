@@ -159,6 +159,35 @@ func TestFsReadMarksBinaryContent(t *testing.T) {
 	}
 }
 
+func TestFsReadRejectsSymlinkEscape(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("outside"), 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	link := filepath.Join(workspace, "secret-link.txt")
+	if err := os.Symlink(outsideFile, link); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	buf := &bytes.Buffer{}
+	rc := newTestRunContext(t, buf, workspace)
+	t.Cleanup(func() {
+		if err := rc.Close(); err != nil {
+			t.Fatalf("close run context: %v", err)
+		}
+	})
+
+	if err := run(ctx, rc, Input{Path: link}); err == nil {
+		t.Fatal("expected symlink escape to be rejected")
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no success envelope, got %s", buf.String())
+	}
+}
+
 func newTestRunContext(t *testing.T, stdout *bytes.Buffer, workspace string) *skillmain.RunContext {
 	t.Helper()
 	oldwd, err := os.Getwd()

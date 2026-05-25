@@ -150,9 +150,15 @@ func getContent(ctx context.Context, rc *skillmain.RunContext, in Input) ([]byte
 func parsePermissions(perm string) (fs.FileMode, error) {
 	// Remove leading 0 if present for parsing
 	perm = strings.TrimPrefix(perm, "0")
+	if perm == "" {
+		perm = "0"
+	}
 	mode, err := strconv.ParseUint(perm, 8, 32)
 	if err != nil {
 		return 0, skillerr.WrapValidation("invalid permissions", err, skillerr.WithHint("Use an octal string like \"0644\"."))
+	}
+	if mode > 0o777 {
+		return 0, skillerr.Validation("invalid permissions: special mode bits are not allowed")
 	}
 	return fs.FileMode(mode), nil
 }

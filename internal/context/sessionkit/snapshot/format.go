@@ -4,10 +4,20 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
+)
+
+const (
+	windowSessionIDLimit = 8
+	windowSummaryLimit   = 150
 )
 
 // FormatForRestore formats a snapshot and related context for injection into a session.
 func FormatForRestore(snap *Snapshot, windows []WindowMatch, gitChanges string) string {
+	if snap == nil {
+		snap = &Snapshot{}
+	}
+
 	var sb strings.Builder
 
 	sb.WriteString("<session-restore>\n")
@@ -32,12 +42,9 @@ func FormatForRestore(snap *Snapshot, windows []WindowMatch, gitChanges string) 
 		sb.WriteString("### Related Past Sessions\n")
 		sb.WriteString("*Similar work from previous sessions:*\n\n")
 		for _, w := range windows {
-			summary := w.Summary
-			if len(summary) > 150 {
-				summary = summary[:147] + "..."
-			}
+			summary := truncateRunes(w.Summary, windowSummaryLimit)
 			sb.WriteString(fmt.Sprintf("- **[%.0f%% match]** `session:%s` | %s\n",
-				w.Similarity*100, w.SessionID[:8], summary))
+				w.Similarity*100, shortSessionID(w.SessionID), summary))
 		}
 		sb.WriteString("\n")
 	}
@@ -109,6 +116,10 @@ func FormatForRestore(snap *Snapshot, windows []WindowMatch, gitChanges string) 
 
 // FormatMinimal creates a minimal restore context (for quick restarts).
 func FormatMinimal(snap *Snapshot) string {
+	if snap == nil {
+		snap = &Snapshot{}
+	}
+
 	var sb strings.Builder
 
 	sb.WriteString("<session-restore>\n")
@@ -124,6 +135,31 @@ func FormatMinimal(snap *Snapshot) string {
 	sb.WriteString("</session-restore>\n")
 
 	return sb.String()
+}
+
+func shortSessionID(sessionID string) string {
+	if sessionID == "" {
+		return "unknown"
+	}
+	runes := []rune(sessionID)
+	if len(runes) <= windowSessionIDLimit {
+		return sessionID
+	}
+	return string(runes[:windowSessionIDLimit])
+}
+
+func truncateRunes(value string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	if utf8.RuneCountInString(value) <= limit {
+		return value
+	}
+	runes := []rune(value)
+	if limit <= len("...") {
+		return string(runes[:limit])
+	}
+	return string(runes[:limit-len("...")]) + "..."
 }
 
 func statusIcon(status string) string {

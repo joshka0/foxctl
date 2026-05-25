@@ -1,7 +1,9 @@
 package dbdriver
 
 import (
+	"strings"
 	"testing"
+	"testing/quick"
 )
 
 func TestRebindToPositional(t *testing.T) {
@@ -41,6 +43,41 @@ func TestRebindToPositional(t *testing.T) {
 			expect: `SELECT * FROM "table?" WHERE id = $1`,
 		},
 		{
+			name:   "line comment placeholder ignored",
+			input:  "SELECT ? -- ? is only a comment\nWHERE id = ?",
+			expect: "SELECT $1 -- ? is only a comment\nWHERE id = $2",
+		},
+		{
+			name:   "line comment at EOF",
+			input:  "SELECT ? -- ? is only a comment",
+			expect: "SELECT $1 -- ? is only a comment",
+		},
+		{
+			name:   "block comment placeholder ignored",
+			input:  "SELECT ? /* ? is only a comment */ WHERE id = ?",
+			expect: "SELECT $1 /* ? is only a comment */ WHERE id = $2",
+		},
+		{
+			name:   "dollar-quoted string placeholder ignored",
+			input:  "SELECT $$? is literal$$, ?",
+			expect: "SELECT $$? is literal$$, $1",
+		},
+		{
+			name:   "tagged dollar-quoted function body ignored",
+			input:  "DO $body$ BEGIN RAISE NOTICE '?'; END $body$; SELECT ?",
+			expect: "DO $body$ BEGIN RAISE NOTICE '?'; END $body$; SELECT $1",
+		},
+		{
+			name:   "unterminated dollar quote",
+			input:  "SELECT $tag$ ? is literal AND id = ?",
+			expect: "SELECT $tag$ ? is literal AND id = ?",
+		},
+		{
+			name:   "unterminated block comment",
+			input:  "SELECT ? /* ? is only a comment",
+			expect: "SELECT $1 /* ? is only a comment",
+		},
+		{
 			name:   "complex query",
 			input:  "INSERT INTO t (a, b) VALUES (?, ?) ON CONFLICT(a) DO UPDATE SET b = ?",
 			expect: "INSERT INTO t (a, b) VALUES ($1, $2) ON CONFLICT(a) DO UPDATE SET b = $3",
@@ -65,6 +102,119 @@ func TestRebindToPositional(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRebindToPositionalPropertyIgnoresDollarQuotedPlaceholders(t *testing.T) {
+	t.Parallel()
+
+	property := func(raw []byte, tagSeed uint8) bool {
+		delimiter := sqlDollarQuoteDelimiter(tagSeed)
+		body := sqlDollarQuoteText(raw, delimiter)
+		query := "SELECT ? AS before, " + delimiter + body + delimiter + " AS body WHERE after = ?"
+		want := "SELECT $1 AS before, " + delimiter + body + delimiter + " AS body WHERE after = $2"
+		got := rebindToPositional(query)
+		if got != want {
+			t.Logf("rebindToPositional(%q)\n got: %q\nwant: %q", query, got, want)
+			return false
+		}
+		return true
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 1000}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRebindToPositionalPropertyIgnoresLineCommentPlaceholders(t *testing.T) {
+	t.Parallel()
+
+	property := func(raw []byte) bool {
+		comment := sqlLineCommentText(raw)
+		query := "SELECT ? AS first -- " + comment + "\nWHERE second = ?"
+		want := "SELECT $1 AS first -- " + comment + "\nWHERE second = $2"
+		got := rebindToPositional(query)
+		if got != want {
+			t.Logf("rebindToPositional(%q)\n got: %q\nwant: %q", query, got, want)
+			return false
+		}
+		return true
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 1000}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRebindToPositionalPropertyIgnoresBlockCommentPlaceholders(t *testing.T) {
+	t.Parallel()
+
+	property := func(raw []byte) bool {
+		comment := sqlBlockCommentText(raw)
+		query := "SELECT ? AS first /* " + comment + " */ WHERE second = ?"
+		want := "SELECT $1 AS first /* " + comment + " */ WHERE second = $2"
+		got := rebindToPositional(query)
+		if got != want {
+			t.Logf("rebindToPositional(%q)\n got: %q\nwant: %q", query, got, want)
+			return false
+		}
+		return true
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 1000}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func sqlLineCommentText(raw []byte) string {
+	if len(raw) > 96 {
+		raw = raw[:96]
+	}
+	var b strings.Builder
+	b.Grow(len(raw))
+	for _, c := range raw {
+		if c == '\n' || c == '\r' {
+			c = ' '
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
+func sqlBlockCommentText(raw []byte) string {
+	if len(raw) > 96 {
+		raw = raw[:96]
+	}
+	var b strings.Builder
+	b.Grow(len(raw))
+	var prev byte
+	for _, c := range raw {
+		if prev == '*' && c == '/' {
+			c = 'x'
+		}
+		b.WriteByte(c)
+		prev = c
+	}
+	return b.String()
+}
+
+func sqlDollarQuoteDelimiter(seed uint8) string {
+	if seed%5 == 0 {
+		return "$$"
+	}
+	return "$tag" + string(rune('a'+seed%26)) + "$"
+}
+
+func sqlDollarQuoteText(raw []byte, delimiter string) string {
+	if len(raw) > 96 {
+		raw = raw[:96]
+	}
+	var b strings.Builder
+	b.Grow(len(raw))
+	for _, c := range raw {
+		b.WriteByte(c)
+	}
+	replacement := strings.TrimSuffix(delimiter, "$") + "x"
+	return strings.ReplaceAll(b.String(), delimiter, replacement)
 }
 
 func TestSQLiteDialect(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/joshka0/foxctl/internal/domain/skill"
 	"github.com/joshka0/foxctl/internal/platform/buildinfo"
@@ -42,12 +43,26 @@ func NewDefaultResolver(skillsDir string) *DefaultResolver {
 
 // Resolve finds a skill's manifest and binary path.
 func (r *DefaultResolver) Resolve(skillName string) (skill.Manifest, string, error) {
-	paths := []string{filepath.Join(r.SkillsDir, skillName)}
+	skillName = strings.TrimSpace(skillName)
+	if err := validateResolverSkillName(skillName); err != nil {
+		return skill.Manifest{}, "", err
+	}
+
+	absSkillsDir, err := filepath.Abs(r.SkillsDir)
+	if err != nil {
+		return skill.Manifest{}, "", fmt.Errorf("resolve skills dir: %w", err)
+	}
+
+	paths := []string{filepath.Join(r.SkillsDir, filepath.FromSlash(skillName))}
 	if normalized := skill.NormalizeSkillName(skillName); normalized != skillName {
-		paths = append(paths, filepath.Join(r.SkillsDir, normalized))
+		paths = append(paths, filepath.Join(r.SkillsDir, filepath.FromSlash(normalized)))
 	}
 
 	for _, skillPath := range paths {
+		if !isWithinResolverRoot(skillPath, absSkillsDir) {
+			continue
+		}
+
 		manifestPath := filepath.Join(skillPath, "skill.yaml")
 		if _, err := os.Stat(manifestPath); err != nil {
 			continue
@@ -67,6 +82,41 @@ func (r *DefaultResolver) Resolve(skillName string) (skill.Manifest, string, err
 	}
 
 	return skill.Manifest{}, "", fmt.Errorf("no artifact found for %s", skillName)
+}
+
+func validateResolverSkillName(skillName string) error {
+	if skillName == "" {
+		return fmt.Errorf("skill name is required")
+	}
+	if filepath.IsAbs(skillName) {
+		return fmt.Errorf("invalid skill name %q: absolute paths are not allowed", skillName)
+	}
+	for _, part := range strings.FieldsFunc(skillName, func(r rune) bool {
+		return r == '/' || r == '\\'
+	}) {
+		if part == "." || part == ".." {
+			return fmt.Errorf("invalid skill name %q: path traversal is not allowed", skillName)
+		}
+	}
+	return nil
+}
+
+func isWithinResolverRoot(path, absRoot string) bool {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	if resolvedRoot, err := filepath.EvalSymlinks(absRoot); err == nil {
+		absRoot = resolvedRoot
+	}
+	if resolvedPath, err := filepath.EvalSymlinks(absPath); err == nil {
+		absPath = resolvedPath
+	}
+	rel, err := filepath.Rel(absRoot, absPath)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
 // ResolverFunc is a function adapter for SkillResolver.

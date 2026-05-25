@@ -2,6 +2,7 @@ package sessions
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -30,6 +31,20 @@ func TestSessionDecodeRejectsCorruptFields(t *testing.T) {
 
 		_, err := store.Get(ctx, "sess-decode")
 		requireDecodeError(t, err, "started_at")
+	})
+
+	t.Run("session status", func(t *testing.T) {
+		store := openDecodeStore(t)
+		defer store.Close()
+
+		saveDecodeSession(t, ctx, store)
+		mustExecDecodeTest(t, store, `UPDATE sessions SET status = ? WHERE id = ?`, "paused", "sess-decode")
+
+		_, err := store.Get(ctx, "sess-decode")
+		if !errors.Is(err, ErrInvalidStatus) {
+			t.Fatalf("Get() error = %v, want ErrInvalidStatus", err)
+		}
+		requireDecodeError(t, err, "paused")
 	})
 
 	t.Run("turn json", func(t *testing.T) {

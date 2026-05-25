@@ -3,7 +3,11 @@ package blackboard
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/domain/agent"
@@ -168,6 +172,267 @@ func TestBlackboardStore(t *testing.T) {
 	})
 }
 
+func TestBlackboardClaimAllowsExpiredLeaseTakeover(t *testing.T) {
+	ctx := context.Background()
+	store := openTestBlackboardStore(t)
+	now := time.Now().UTC()
+
+	record := agent.BlackboardRecord{
+		ID:      "expired-lease",
+		NS:      "org/test",
+		Topic:   "/tasks/todo",
+		TS:      now.Unix(),
+		TTLSec:  3600,
+		Payload: json.RawMessage(`{"task_id":"expired"}`),
+		Lease: &agent.Lease{
+			Holder: "agent-old",
+			Until:  now.Add(-time.Minute).Unix(),
+		},
+	}
+	if err := store.Post(ctx, record); err != nil {
+		t.Fatalf("post expired lease record: %v", err)
+	}
+
+	claimed, err := store.Claim(ctx, record.ID, "agent-new", 5*time.Minute)
+	if err != nil {
+		t.Fatalf("claim expired lease: %v", err)
+	}
+	if claimed.Lease == nil {
+		t.Fatal("claimed record should have a lease")
+	}
+	if claimed.Lease.Holder != "agent-new" {
+		t.Fatalf("lease holder = %q, want %q", claimed.Lease.Holder, "agent-new")
+	}
+	if !claimed.IsLeased() {
+		t.Fatal("new lease should be active")
+	}
+
+	persisted, err := store.Get(ctx, record.ID)
+	if err != nil {
+		t.Fatalf("get claimed record: %v", err)
+	}
+	if persisted.Lease == nil || persisted.Lease.Holder != "agent-new" {
+		t.Fatalf("persisted lease = %+v, want holder agent-new", persisted.Lease)
+	}
+}
+
+func TestBlackboardClaimRejectsActiveLeaseAndPreservesHolder(t *testing.T) {
+	ctx := context.Background()
+	store := openTestBlackboardStore(t)
+	now := time.Now().UTC()
+
+	record := agent.BlackboardRecord{
+		ID:      "active-lease",
+		NS:      "org/test",
+		Topic:   "/tasks/todo",
+		TS:      now.Unix(),
+		TTLSec:  3600,
+		Payload: json.RawMessage(`{"task_id":"active"}`),
+		Lease: &agent.Lease{
+			Holder: "agent-owner",
+			Until:  now.Add(time.Hour).Unix(),
+		},
+	}
+	if err := store.Post(ctx, record); err != nil {
+		t.Fatalf("post active lease record: %v", err)
+	}
+
+	_, err := store.Claim(ctx, record.ID, "agent-contender", 5*time.Minute)
+	if !errors.Is(err, ErrAlreadyLeased) {
+		t.Fatalf("claim active lease error = %v, want %v", err, ErrAlreadyLeased)
+	}
+
+	persisted, err := store.Get(ctx, record.ID)
+	if err != nil {
+		t.Fatalf("get active lease record: %v", err)
+	}
+	if persisted.Lease == nil {
+		t.Fatal("active lease should remain present")
+	}
+	if persisted.Lease.Holder != "agent-owner" {
+		t.Fatalf("lease holder = %q, want %q", persisted.Lease.Holder, "agent-owner")
+	}
+	if !persisted.IsLeased() {
+		t.Fatal("active lease should remain active")
+	}
+}
+
+func TestBlackboardClaimRejectsNonPositiveLeaseDuration(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name     string
+		duration time.Duration
+	}{
+		{name: "zero duration", duration: 0},
+		{name: "negative duration", duration: -time.Second},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := openTestBlackboardStore(t)
+			record := agent.BlackboardRecord{
+				ID:      "invalid-duration",
+				NS:      "org/test",
+				Topic:   "/tasks/todo",
+				TS:      time.Now().UTC().Unix(),
+				TTLSec:  3600,
+				Payload: json.RawMessage(`{"task_id":"invalid-duration"}`),
+			}
+			if err := store.Post(ctx, record); err != nil {
+				t.Fatalf("post record: %v", err)
+			}
+
+			_, err := store.Claim(ctx, record.ID, "agent-new", tt.duration)
+			if !errors.Is(err, ErrInvalidLeaseDuration) {
+				t.Fatalf("claim duration %s error = %v, want %v", tt.duration, err, ErrInvalidLeaseDuration)
+			}
+
+			persisted, err := store.Get(ctx, record.ID)
+			if err != nil {
+				t.Fatalf("get record after rejected claim: %v", err)
+			}
+			if persisted.Lease != nil {
+				t.Fatalf("rejected claim persisted lease %+v", persisted.Lease)
+			}
+		})
+	}
+}
+
+func TestBlackboardClaimLeaseExpiryProperty(t *testing.T) {
+	ctx := context.Background()
+	store := openTestBlackboardStore(t)
+	caseNum := 0
+
+	property := func(pastOffsetSeconds, futureOffsetSeconds uint16) bool {
+		caseNum++
+		now := time.Now().UTC()
+		pastOffset := time.Duration(pastOffsetSeconds%3600+60) * time.Second
+		futureOffset := time.Duration(futureOffsetSeconds%3600+60) * time.Second
+
+		expired := agent.BlackboardRecord{
+			ID:      fmt.Sprintf("expired-%d", caseNum),
+			NS:      "org/test",
+			Topic:   "/tasks/property",
+			TS:      now.Unix(),
+			TTLSec:  3600,
+			Payload: json.RawMessage(`{"kind":"expired"}`),
+			Lease: &agent.Lease{
+				Holder: "agent-old",
+				Until:  now.Add(-pastOffset).Unix(),
+			},
+		}
+		active := agent.BlackboardRecord{
+			ID:      fmt.Sprintf("active-%d", caseNum),
+			NS:      "org/test",
+			Topic:   "/tasks/property",
+			TS:      now.Unix(),
+			TTLSec:  3600,
+			Payload: json.RawMessage(`{"kind":"active"}`),
+			Lease: &agent.Lease{
+				Holder: "agent-owner",
+				Until:  now.Add(futureOffset).Unix(),
+			},
+		}
+
+		if err := store.Post(ctx, expired); err != nil {
+			t.Logf("post expired lease record: %v", err)
+			return false
+		}
+		if err := store.Post(ctx, active); err != nil {
+			t.Logf("post active lease record: %v", err)
+			return false
+		}
+
+		claimed, err := store.Claim(ctx, expired.ID, "agent-new", time.Minute)
+		if err != nil {
+			t.Logf("claim expired lease: %v", err)
+			return false
+		}
+		if claimed.Lease == nil || claimed.Lease.Holder != "agent-new" || !claimed.IsLeased() {
+			t.Logf("expired lease claim produced lease %+v", claimed.Lease)
+			return false
+		}
+
+		if _, err := store.Claim(ctx, active.ID, "agent-contender", time.Minute); !errors.Is(err, ErrAlreadyLeased) {
+			t.Logf("claim active lease error = %v, want %v", err, ErrAlreadyLeased)
+			return false
+		}
+		persistedActive, err := store.Get(ctx, active.ID)
+		if err != nil {
+			t.Logf("get active lease record: %v", err)
+			return false
+		}
+		if persistedActive.Lease == nil || persistedActive.Lease.Holder != "agent-owner" || !persistedActive.IsLeased() {
+			t.Logf("active lease after rejected claim = %+v", persistedActive.Lease)
+			return false
+		}
+		return true
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 50}); err != nil {
+		t.Fatalf("blackboard lease expiry invariant failed: %v", err)
+	}
+}
+
+func TestBlackboardPostRejectsInvalidPayloadJSON(t *testing.T) {
+	ctx := context.Background()
+	store := openTestBlackboardStore(t)
+
+	err := store.Post(ctx, agent.BlackboardRecord{
+		ID:      "invalid-payload",
+		NS:      "org/test",
+		Topic:   "/tasks/todo",
+		TS:      time.Now().Unix(),
+		TTLSec:  3600,
+		Payload: json.RawMessage(`{`),
+	})
+	requireBlackboardErrorContains(t, "Post", err, "payload")
+
+	records, err := store.Search(ctx, "org/test", "/tasks/todo", 10)
+	if err != nil {
+		t.Fatalf("search after rejected post: %v", err)
+	}
+	if len(records) != 0 {
+		t.Fatalf("rejected invalid payload persisted %d records", len(records))
+	}
+}
+
+func TestBlackboardRejectsCorruptStoredPayloadJSON(t *testing.T) {
+	ctx := context.Background()
+	store := openTestBlackboardStore(t)
+
+	record := agent.BlackboardRecord{
+		ID:      "corrupt-payload",
+		NS:      "org/test",
+		Topic:   "/tasks/todo",
+		TS:      time.Now().Unix(),
+		TTLSec:  3600,
+		Payload: json.RawMessage(`{"task_id":"valid"}`),
+	}
+	if err := store.Post(ctx, record); err != nil {
+		t.Fatalf("post valid record: %v", err)
+	}
+	sqlStore, ok := store.(*sqlStore)
+	if !ok {
+		t.Fatalf("store type = %T, want *sqlStore", store)
+	}
+	if _, err := sqlStore.db.ExecContext(ctx, `
+		UPDATE blackboard SET payload = ? WHERE id = ?
+	`, "{", record.ID); err != nil {
+		t.Fatalf("corrupt payload: %v", err)
+	}
+
+	_, err := store.Get(ctx, record.ID)
+	requireBlackboardErrorContains(t, "Get", err, "payload")
+	_, err = store.Search(ctx, "org/test", "/tasks/todo", 10)
+	requireBlackboardErrorContains(t, "Search", err, "payload")
+	_, err = store.ListByTopic(ctx, "org/test", "/tasks/todo", 10)
+	requireBlackboardErrorContains(t, "ListByTopic", err, "payload")
+	_, err = store.Claim(ctx, record.ID, "agent-new", time.Minute)
+	requireBlackboardErrorContains(t, "Claim", err, "payload")
+}
+
 func TestBlackboardRecordExpiry(t *testing.T) {
 	now := time.Now().Unix()
 
@@ -208,6 +473,31 @@ func TestBlackboardRecordExpiry(t *testing.T) {
 				t.Errorf("IsExpired() = %v, want %v", got, tt.expected)
 			}
 		})
+	}
+}
+
+func openTestBlackboardStore(t *testing.T) Store {
+	t.Helper()
+
+	store, err := Open(context.Background(), t.TempDir())
+	if err != nil {
+		t.Fatalf("open blackboard store: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("close blackboard store: %v", err)
+		}
+	})
+	return store
+}
+
+func requireBlackboardErrorContains(t *testing.T, operation string, err error, want string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("%s error = nil, want error containing %q", operation, want)
+	}
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("%s error = %v, want it to contain %q", operation, err, want)
 	}
 }
 

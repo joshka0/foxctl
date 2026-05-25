@@ -2,9 +2,11 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/quick"
 	"time"
 )
 
@@ -197,6 +199,125 @@ func TestWFQSchedulerVirtualTime(t *testing.T) {
 	}
 }
 
+func TestWFQSchedulerPropertyHigherWeightDispatchesFirst(t *testing.T) {
+	property := func(rawLowWeight, rawDelta uint8) bool {
+		lowWeight := int(rawLowWeight%20) + 1
+		highWeight := lowWeight + int(rawDelta%20) + 1
+		scheduler := NewWFQScheduler(Config{DefaultWeight: 1, WorkerCount: 1})
+		scheduler.SetWeight("low", lowWeight)
+		scheduler.SetWeight("high", highWeight)
+
+		if err := scheduler.Enqueue(&Job{ID: "low-job", Namespace: "low", Execute: func(context.Context) error { return nil }}); err != nil {
+			t.Logf("enqueue low: %v", err)
+			return false
+		}
+		if err := scheduler.Enqueue(&Job{ID: "high-job", Namespace: "high", Execute: func(context.Context) error { return nil }}); err != nil {
+			t.Logf("enqueue high: %v", err)
+			return false
+		}
+
+		scheduler.dispatchNext()
+		select {
+		case job := <-scheduler.workCh:
+			if job.ID != "high-job" {
+				t.Logf(
+					"dispatched %q first with lowWeight=%d highWeight=%d lowFinish=%f highFinish=%f",
+					job.ID,
+					lowWeight,
+					highWeight,
+					scheduler.queues["low"].virtualTime,
+					scheduler.queues["high"].virtualTime,
+				)
+				return false
+			}
+			return true
+		default:
+			t.Log("dispatchNext did not enqueue work")
+			return false
+		}
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("higher weight dispatch property failed: %v", err)
+	}
+}
+
+func TestWFQSchedulerPropertyDispatchPreservesEnqueuedJobs(t *testing.T) {
+	property := func(rawJobs []uint8) bool {
+		if len(rawJobs) == 0 {
+			rawJobs = []uint8{0}
+		}
+		if len(rawJobs) > 40 {
+			rawJobs = rawJobs[:40]
+		}
+
+		scheduler := NewWFQScheduler(Config{DefaultWeight: 1, WorkerCount: len(rawJobs)})
+		for i, namespace := range generatedSchedulerNamespaces() {
+			scheduler.SetWeight(namespace, i+1)
+		}
+
+		wantIDs := make(map[string]struct{}, len(rawJobs))
+		for i, raw := range rawJobs {
+			id := schedulerGeneratedJobID(i, raw)
+			namespace := generatedSchedulerNamespace(raw)
+			wantIDs[id] = struct{}{}
+			if err := scheduler.Enqueue(&Job{
+				ID:        id,
+				Namespace: namespace,
+				Execute:   func(context.Context) error { return nil },
+			}); err != nil {
+				t.Logf("enqueue %s/%s: %v", namespace, id, err)
+				return false
+			}
+		}
+
+		if scheduler.Stats().QueuedJobs != len(rawJobs) {
+			t.Logf("queued jobs=%d want %d", scheduler.Stats().QueuedJobs, len(rawJobs))
+			return false
+		}
+
+		gotIDs := make(map[string]struct{}, len(rawJobs))
+		for range rawJobs {
+			scheduler.dispatchNext()
+			select {
+			case job := <-scheduler.workCh:
+				if _, duplicate := gotIDs[job.ID]; duplicate {
+					t.Logf("duplicate dispatch for %s", job.ID)
+					return false
+				}
+				if _, expected := wantIDs[job.ID]; !expected {
+					t.Logf("unexpected dispatch for %s", job.ID)
+					return false
+				}
+				gotIDs[job.ID] = struct{}{}
+			default:
+				t.Log("dispatchNext did not emit a queued job")
+				return false
+			}
+		}
+
+		if scheduler.Stats().QueuedJobs != 0 {
+			t.Logf("queued jobs after drain=%d want 0", scheduler.Stats().QueuedJobs)
+			return false
+		}
+		if len(gotIDs) != len(wantIDs) {
+			t.Logf("dispatched %d jobs, want %d", len(gotIDs), len(wantIDs))
+			return false
+		}
+		for id := range wantIDs {
+			if _, ok := gotIDs[id]; !ok {
+				t.Logf("missing dispatched job %s", id)
+				return false
+			}
+		}
+		return true
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 200}); err != nil {
+		t.Fatalf("dispatch preservation property failed: %v", err)
+	}
+}
+
 func TestWFQSchedulerMultipleNamespaces(t *testing.T) {
 	config := Config{
 		DefaultWeight: 1,
@@ -360,6 +481,30 @@ func TestWFQSchedulerStopAndStart(t *testing.T) {
 	}
 }
 
+func TestWFQSchedulerCanRestartAfterStop(t *testing.T) {
+	scheduler := NewWFQScheduler(Config{DefaultWeight: 1, WorkerCount: 1})
+	ctx := context.Background()
+	var executed atomic.Int32
+	execute := func(_ context.Context) error {
+		executed.Add(1)
+		return nil
+	}
+
+	scheduler.Start(ctx)
+	if err := scheduler.Enqueue(&Job{ID: "job1", Namespace: "ns1", Execute: execute}); err != nil {
+		t.Fatalf("enqueue first job: %v", err)
+	}
+	waitForExecutedCount(t, &executed, 1)
+	scheduler.Stop()
+
+	scheduler.Start(ctx)
+	if err := scheduler.Enqueue(&Job{ID: "job2", Namespace: "ns1", Execute: execute}); err != nil {
+		t.Fatalf("enqueue second job: %v", err)
+	}
+	waitForExecutedCount(t, &executed, 2)
+	scheduler.Stop()
+}
+
 func TestWFQSchedulerInvalidJobs(t *testing.T) {
 	scheduler := NewWFQScheduler(DefaultConfig())
 
@@ -379,4 +524,30 @@ func TestWFQSchedulerInvalidJobs(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for job without execute function")
 	}
+}
+
+func waitForExecutedCount(t *testing.T, executed *atomic.Int32, want int32) {
+	t.Helper()
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if executed.Load() >= want {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("executed count=%d want at least %d", executed.Load(), want)
+}
+
+func generatedSchedulerNamespace(raw uint8) string {
+	namespaces := generatedSchedulerNamespaces()
+	return namespaces[int(raw)%len(namespaces)]
+}
+
+func generatedSchedulerNamespaces() []string {
+	return []string{"alpha", "beta", "gamma", "delta"}
+}
+
+func schedulerGeneratedJobID(index int, raw uint8) string {
+	return fmt.Sprintf("job-%02d-%03d", index, raw)
 }

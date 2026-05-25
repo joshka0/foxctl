@@ -3,7 +3,6 @@ package vector
 import (
 	"context"
 	"fmt"
-	"sort"
 	"sync"
 
 	"github.com/joshka0/foxctl/internal/intelligence/turbovec"
@@ -64,7 +63,7 @@ func (ts *TurbovecSearcher) search(ctx context.Context, query []float32, candida
 	// Ensure index is populated.
 	if err := ts.ensureIndex(indexName, candidates); err != nil {
 		// Fallback to brute force if sidecar is unreachable.
-		return ts.fallback.Search(ctx, query, candidates, k)
+		return ts.fallbackSearch(ctx, query, candidates, k, allowlist)
 	}
 
 	// Oversample for better recall, then exact rerank.
@@ -98,7 +97,7 @@ func (ts *TurbovecSearcher) search(ctx context.Context, query []float32, candida
 
 	if err != nil {
 		// Fallback to brute force on error.
-		return ts.fallback.Search(ctx, query, candidates, k)
+		return ts.fallbackSearch(ctx, query, candidates, k, allowlist)
 	}
 
 	// Translate hits back to string IDs and exact-rerank using cosine.
@@ -126,14 +125,23 @@ func (ts *TurbovecSearcher) search(ctx context.Context, query []float32, candida
 		})
 	}
 
-	sort.Slice(rerankCandidates, func(i, j int) bool {
-		return rerankCandidates[i].Score > rerankCandidates[j].Score
-	})
+	sortScoredIDs(rerankCandidates)
 
 	if len(rerankCandidates) > k {
 		rerankCandidates = rerankCandidates[:k]
 	}
 	return rerankCandidates, nil
+}
+
+func (ts *TurbovecSearcher) fallbackSearch(ctx context.Context, query []float32, candidates []IDEmbedding, k int, allowlist map[string]bool) ([]ScoredID, error) {
+	fallback := ts.fallback
+	if fallback == nil {
+		fallback = &BruteForceSearcher{}
+	}
+	if allowlist != nil {
+		return fallback.SearchFiltered(ctx, query, candidates, k, allowlist)
+	}
+	return fallback.Search(ctx, query, candidates, k)
 }
 
 // ensureIndex creates and populates the turbovec index if not already done.

@@ -3,8 +3,18 @@ package workspace
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
+	"testing/quick"
 )
+
+func workspaceQuickConfig() *quick.Config {
+	return &quick.Config{MaxCount: 200}
+}
+
+func workspaceToken(prefix string, seed uint64) string {
+	return prefix + strconv.FormatUint(seed, 36)
+}
 
 func TestDetectWithGitDirectory(t *testing.T) {
 	// Create temp dir with .git directory (normal repo)
@@ -196,6 +206,34 @@ func TestNormalizeGitURLConsistency(t *testing.T) {
 	}
 }
 
+func TestNormalizeGitURLPropertyCanonicalizesTransportVariants(t *testing.T) {
+	property := func(ownerSeed, repoSeed uint64) bool {
+		owner := workspaceToken("owner-", ownerSeed)
+		repo := workspaceToken("repo-", repoSeed)
+		want := "github.com/" + owner + "/" + repo
+		variants := []string{
+			"git@github.com:" + owner + "/" + repo + ".git",
+			"ssh://git@github.com/" + owner + "/" + repo + ".git",
+			"ssh://git@github.com:2222/" + owner + "/" + repo + ".git",
+			"git://github.com/" + owner + "/" + repo + ".git",
+			"https://github.com/" + owner + "/" + repo,
+			"https://github.com/" + owner + "/" + repo + ".git/",
+		}
+
+		for _, raw := range variants {
+			if got := normalizeGitURL(raw); got != want {
+				t.Logf("normalizeGitURL(%q) = %q, want %q", raw, got, want)
+				return false
+			}
+		}
+		return true
+	}
+
+	if err := quick.Check(property, workspaceQuickConfig()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLooksLikeID(t *testing.T) {
 	tests := []struct {
 		input string
@@ -223,6 +261,27 @@ func TestLooksLikeID(t *testing.T) {
 	}
 }
 
+func TestLooksLikeIDPropertyRejectsPathShapedWSPrefixes(t *testing.T) {
+	property := func(seed uint64) bool {
+		token := workspaceToken("opaque-", seed)
+		inputs := []string{
+			"ws-" + token + "/child",
+			"ws-" + token + `\child`,
+		}
+		for _, input := range inputs {
+			if LooksLikeID(input) {
+				t.Logf("LooksLikeID(%q) = true, want false", input)
+				return false
+			}
+		}
+		return true
+	}
+
+	if err := quick.Check(property, workspaceQuickConfig()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCanonicalIDPassesThroughIDs(t *testing.T) {
 	for _, id := range []string{
 		"default",
@@ -233,6 +292,33 @@ func TestCanonicalIDPassesThroughIDs(t *testing.T) {
 		if got != id {
 			t.Errorf("CanonicalID(%q) = %q, want %q", id, got, id)
 		}
+	}
+}
+
+func TestCanonicalIDPropertyPreservesOpaqueWorkspaceIDs(t *testing.T) {
+	property := func(seed uint64) bool {
+		token := workspaceToken("case-", seed)
+		ids := []string{
+			"workflow-" + token,
+			"room_" + token,
+			"ws-" + token,
+		}
+
+		for _, id := range ids {
+			if got := CanonicalID(id); got != id {
+				t.Logf("CanonicalID(%q) = %q, want %q", id, got, id)
+				return false
+			}
+			if got := CanonicalWorkspaceKey(id); got != id {
+				t.Logf("CanonicalWorkspaceKey(%q) = %q, want %q", id, got, id)
+				return false
+			}
+		}
+		return true
+	}
+
+	if err := quick.Check(property, workspaceQuickConfig()); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -355,5 +441,46 @@ func TestCanonicalWorkspaceKeyNormalizesPathSelectors(t *testing.T) {
 
 	if got := CanonicalWorkspaceKey(messy); got != root {
 		t.Fatalf("CanonicalWorkspaceKey(%q) = %q, want %q", messy, got, root)
+	}
+}
+
+func TestCanonicalWorkspaceKeyPropertyNormalizesEquivalentPathSelectors(t *testing.T) {
+	root := t.TempDir()
+	property := func(seed uint64) bool {
+		repo := filepath.Join(root, workspaceToken("repo-", seed))
+		if err := os.MkdirAll(repo, 0o755); err != nil {
+			t.Logf("mkdir %q: %v", repo, err)
+			return false
+		}
+
+		abs, err := filepath.Abs(repo)
+		if err != nil {
+			t.Logf("abs %q: %v", repo, err)
+			return false
+		}
+		wantKey := Normalize(abs)
+		wantID := PathIdentity(wantKey)
+		sep := string(filepath.Separator)
+		selectors := []string{
+			repo,
+			repo + sep + ".",
+			repo + sep + "child" + sep + "..",
+		}
+
+		for _, selector := range selectors {
+			if got := CanonicalWorkspaceKey(selector); got != wantKey {
+				t.Logf("CanonicalWorkspaceKey(%q) = %q, want %q", selector, got, wantKey)
+				return false
+			}
+			if got := CanonicalID(selector); got != wantID {
+				t.Logf("CanonicalID(%q) = %q, want %q", selector, got, wantID)
+				return false
+			}
+		}
+		return true
+	}
+
+	if err := quick.Check(property, workspaceQuickConfig()); err != nil {
+		t.Fatal(err)
 	}
 }

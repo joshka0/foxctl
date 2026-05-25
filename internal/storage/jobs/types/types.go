@@ -2,6 +2,7 @@ package types
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -51,15 +52,32 @@ var (
 	ErrInvalidState = errors.New("jobs: invalid state transition")
 )
 
+// ValidateState rejects states outside the persisted job lifecycle.
+func ValidateState(state State) error {
+	switch state {
+	case StateQueued, StateRunning, StateOK, StateError, StateCanceled:
+		return nil
+	default:
+		return fmt.Errorf("%w: unknown state %q", ErrInvalidState, state)
+	}
+}
+
 // HashArgs deterministically hashes a command and its JSON arguments payload.
 func HashArgs(command string, argsJSON []byte) string {
 	h := sha256.New()
-	if _, err := h.Write([]byte(command)); err != nil {
-		panic(fmt.Sprintf("hash command write: %v", err))
+	var length [8]byte
+	writeField := func(label string, value []byte) {
+		binary.BigEndian.PutUint64(length[:], uint64(len(value)))
+		if _, err := h.Write(length[:]); err != nil {
+			panic(fmt.Sprintf("hash %s length write: %v", label, err))
+		}
+		if _, err := h.Write(value); err != nil {
+			panic(fmt.Sprintf("hash %s write: %v", label, err))
+		}
 	}
-	if _, err := h.Write(argsJSON); err != nil {
-		panic(fmt.Sprintf("hash args write: %v", err))
-	}
+
+	writeField("command", []byte(command))
+	writeField("args", argsJSON)
 	return hex.EncodeToString(h.Sum(nil))
 }
 

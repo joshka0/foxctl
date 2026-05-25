@@ -3,11 +3,15 @@ package blackboard
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/quick"
 	"time"
+	"unicode/utf8"
 
 	"github.com/joshka0/foxctl/internal/domain/agent"
 	"github.com/joshka0/foxctl/internal/storage/sqliteutil"
@@ -188,6 +192,461 @@ func TestBoardStore_AckMessages(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("expected 1 acked, got %d", count)
+	}
+}
+
+func TestBoardStoreStatusTransitionsScopeDirectMessagesToActor(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name       string
+		transition func(context.Context, BoardStore, string, string, []string) (int, error)
+		wantStatus agent.BoardMessageStatus
+	}{
+		{
+			name: "mark surfaced",
+			transition: func(ctx context.Context, store BoardStore, workspaceID, actorID string, ids []string) (int, error) {
+				return store.MarkSurfaced(ctx, workspaceID, actorID, ids)
+			},
+			wantStatus: agent.BoardMessageStatusSurfaced,
+		},
+		{
+			name: "mark read",
+			transition: func(ctx context.Context, store BoardStore, workspaceID, actorID string, ids []string) (int, error) {
+				return store.MarkRead(ctx, workspaceID, actorID, ids)
+			},
+			wantStatus: agent.BoardMessageStatusRead,
+		},
+		{
+			name: "ack",
+			transition: func(ctx context.Context, store BoardStore, workspaceID, actorID string, ids []string) (int, error) {
+				return store.AckMessages(ctx, workspaceID, actorID, ids)
+			},
+			wantStatus: agent.BoardMessageStatusAcked,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			store, err := OpenBoardStore(ctx, dir)
+			if err != nil {
+				t.Fatalf("OpenBoardStore: %v", err)
+			}
+			defer store.Close()
+
+			workspaceID := "ws1"
+			actorID := "actor:agent:coder"
+			otherActorID := "actor:agent:reviewer"
+			actorMsg := agent.BoardMessage{
+				WorkspaceID: workspaceID,
+				Sender:      "admin",
+				Recipient:   actorID,
+				Subject:     "mine",
+			}
+			otherMsg := agent.BoardMessage{
+				WorkspaceID: workspaceID,
+				Sender:      "admin",
+				Recipient:   otherActorID,
+				Subject:     "theirs",
+			}
+			if err := store.SendMessage(ctx, &actorMsg); err != nil {
+				t.Fatalf("SendMessage actorMsg: %v", err)
+			}
+			if err := store.SendMessage(ctx, &otherMsg); err != nil {
+				t.Fatalf("SendMessage otherMsg: %v", err)
+			}
+
+			count, err := tt.transition(ctx, store, workspaceID, actorID, []string{actorMsg.ID, otherMsg.ID})
+			if err != nil {
+				t.Fatalf("transition: %v", err)
+			}
+			if count != 1 {
+				t.Fatalf("updated %d messages, want 1", count)
+			}
+
+			got, err := store.Inbox(ctx, agent.InboxFilter{WorkspaceID: workspaceID, ActorID: actorID})
+			if err != nil {
+				t.Fatalf("Inbox actor: %v", err)
+			}
+			if len(got) != 1 {
+				t.Fatalf("actor inbox has %d messages, want 1", len(got))
+			}
+			if got[0].ID != actorMsg.ID {
+				t.Fatalf("actor inbox message ID=%q, want %q", got[0].ID, actorMsg.ID)
+			}
+			if got[0].Status != tt.wantStatus {
+				t.Fatalf("actor message status=%q, want %q", got[0].Status, tt.wantStatus)
+			}
+
+			got, err = store.Inbox(ctx, agent.InboxFilter{WorkspaceID: workspaceID, ActorID: otherActorID})
+			if err != nil {
+				t.Fatalf("Inbox other actor: %v", err)
+			}
+			if len(got) != 1 {
+				t.Fatalf("other actor inbox has %d messages, want 1", len(got))
+			}
+			if got[0].ID != otherMsg.ID {
+				t.Fatalf("other actor inbox message ID=%q, want %q", got[0].ID, otherMsg.ID)
+			}
+			if got[0].Status != agent.BoardMessageStatusUnread {
+				t.Fatalf("other actor message status=%q, want %q", got[0].Status, agent.BoardMessageStatusUnread)
+			}
+		})
+	}
+}
+
+func TestBoardStoreStatusTransitionsRequireActor(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	tests := []struct {
+		name       string
+		transition func(context.Context, BoardStore, string, string, []string) (int, error)
+	}{
+		{
+			name: "mark surfaced",
+			transition: func(ctx context.Context, store BoardStore, workspaceID, actorID string, ids []string) (int, error) {
+				return store.MarkSurfaced(ctx, workspaceID, actorID, ids)
+			},
+		},
+		{
+			name: "mark read",
+			transition: func(ctx context.Context, store BoardStore, workspaceID, actorID string, ids []string) (int, error) {
+				return store.MarkRead(ctx, workspaceID, actorID, ids)
+			},
+		},
+		{
+			name: "ack",
+			transition: func(ctx context.Context, store BoardStore, workspaceID, actorID string, ids []string) (int, error) {
+				return store.AckMessages(ctx, workspaceID, actorID, ids)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			count, err := tt.transition(ctx, store, "ws1", " \t ", []string{"missing"})
+			if err == nil {
+				t.Fatal("expected missing actor error")
+			}
+			if count != 0 {
+				t.Fatalf("updated %d messages, want 0", count)
+			}
+		})
+	}
+}
+
+func TestBoardStoreSendMessageRejectsInvalidStatus(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	err = store.SendMessage(ctx, &agent.BoardMessage{
+		WorkspaceID: "ws1",
+		Stream:      agent.RoomStreamName("status-room"),
+		Sender:      "admin",
+		Recipient:   "actor:agent:coder",
+		Subject:     "bad status",
+		Body:        "do not persist",
+		Status:      agent.BoardMessageStatus("lost"),
+	})
+	if !errors.Is(err, agent.ErrInvalidBoardMessageStatus) {
+		t.Fatalf("SendMessage() error=%v, want ErrInvalidBoardMessageStatus", err)
+	}
+
+	messages, err := store.Inbox(ctx, agent.InboxFilter{WorkspaceID: "ws1", ActorID: "actor:agent:coder"})
+	if err != nil {
+		t.Fatalf("Inbox: %v", err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("invalid status message persisted: %+v", messages)
+	}
+}
+
+func TestBoardStoreReadsRejectCorruptMessageStatus(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	msg := &agent.BoardMessage{
+		WorkspaceID: "ws1",
+		Stream:      agent.RoomStreamName("status-room"),
+		Sender:      "admin",
+		Recipient:   "actor:agent:coder",
+		Subject:     "corrupt status",
+		Body:        "this row is corrupted after write",
+	}
+	if err := store.SendMessage(ctx, msg); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+
+	sqlStore, ok := store.(*boardSQLStore)
+	if !ok {
+		t.Fatalf("store type %T, want *boardSQLStore", store)
+	}
+	if _, err := sqlStore.db.ExecContext(ctx, `
+		UPDATE board_messages SET status = ?
+		WHERE workspace_id = ? AND id = ?`,
+		"lost", "ws1", msg.ID); err != nil {
+		t.Fatalf("corrupt status: %v", err)
+	}
+
+	if _, err := store.Inbox(ctx, agent.InboxFilter{WorkspaceID: "ws1", ActorID: "actor:agent:coder"}); !errors.Is(err, agent.ErrInvalidBoardMessageStatus) {
+		t.Fatalf("Inbox() error=%v, want ErrInvalidBoardMessageStatus", err)
+	}
+	if _, err := store.ListRoomMessages(ctx, "ws1", "status-room", 10); !errors.Is(err, agent.ErrInvalidBoardMessageStatus) {
+		t.Fatalf("ListRoomMessages() error=%v, want ErrInvalidBoardMessageStatus", err)
+	}
+	if _, err := store.GetRoom(ctx, "ws1", "status-room", ""); !errors.Is(err, agent.ErrInvalidBoardMessageStatus) {
+		t.Fatalf("GetRoom() error=%v, want ErrInvalidBoardMessageStatus", err)
+	}
+}
+
+func TestBoardStoreSendMessageDefaultsEmptyKindToInfo(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	msg := &agent.BoardMessage{
+		WorkspaceID: "ws1",
+		Stream:      agent.RoomStreamName("kind-room"),
+		Sender:      "admin",
+		Recipient:   "actor:agent:coder",
+		Subject:     "default kind",
+		Body:        "empty kind should become info",
+	}
+	if err := store.SendMessage(ctx, msg); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if msg.Kind != agent.BoardMessageKindInfo {
+		t.Fatalf("sent message kind=%q want %q", msg.Kind, agent.BoardMessageKindInfo)
+	}
+
+	messages, err := store.Inbox(ctx, agent.InboxFilter{WorkspaceID: "ws1", ActorID: "actor:agent:coder"})
+	if err != nil {
+		t.Fatalf("Inbox: %v", err)
+	}
+	if len(messages) != 1 || messages[0].Kind != agent.BoardMessageKindInfo {
+		t.Fatalf("messages=%+v want one info message", messages)
+	}
+}
+
+func TestBoardStoreSendMessageRejectsInvalidKind(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	err = store.SendMessage(ctx, &agent.BoardMessage{
+		WorkspaceID: "ws1",
+		Stream:      agent.RoomStreamName("kind-room"),
+		Sender:      "admin",
+		Recipient:   "actor:agent:coder",
+		Subject:     "bad kind",
+		Body:        "do not persist",
+		Kind:        agent.BoardMessageKind("custom"),
+	})
+	if !errors.Is(err, agent.ErrInvalidBoardMessageKind) {
+		t.Fatalf("SendMessage() error=%v, want ErrInvalidBoardMessageKind", err)
+	}
+
+	messages, err := store.Inbox(ctx, agent.InboxFilter{WorkspaceID: "ws1", ActorID: "actor:agent:coder"})
+	if err != nil {
+		t.Fatalf("Inbox: %v", err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("invalid kind message persisted: %+v", messages)
+	}
+}
+
+func TestBoardStoreReadsRejectCorruptMessageKind(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	msg := &agent.BoardMessage{
+		WorkspaceID: "ws1",
+		Stream:      agent.RoomStreamName("kind-room"),
+		Sender:      "admin",
+		Recipient:   "actor:agent:coder",
+		Subject:     "corrupt kind",
+		Body:        "this row is corrupted after write",
+		Kind:        agent.BoardMessageKindInfo,
+	}
+	if err := store.SendMessage(ctx, msg); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+
+	sqlStore, ok := store.(*boardSQLStore)
+	if !ok {
+		t.Fatalf("store type %T, want *boardSQLStore", store)
+	}
+	if _, err := sqlStore.db.ExecContext(ctx, `
+		UPDATE board_messages SET kind = ?
+		WHERE workspace_id = ? AND id = ?`,
+		"custom", "ws1", msg.ID); err != nil {
+		t.Fatalf("corrupt kind: %v", err)
+	}
+
+	if _, err := store.Inbox(ctx, agent.InboxFilter{WorkspaceID: "ws1", ActorID: "actor:agent:coder"}); !errors.Is(err, agent.ErrInvalidBoardMessageKind) {
+		t.Fatalf("Inbox() error=%v, want ErrInvalidBoardMessageKind", err)
+	}
+	if _, err := store.ListRoomMessages(ctx, "ws1", "kind-room", 10); !errors.Is(err, agent.ErrInvalidBoardMessageKind) {
+		t.Fatalf("ListRoomMessages() error=%v, want ErrInvalidBoardMessageKind", err)
+	}
+	if _, err := store.GetRoom(ctx, "ws1", "kind-room", ""); !errors.Is(err, agent.ErrInvalidBoardMessageKind) {
+		t.Fatalf("GetRoom() error=%v, want ErrInvalidBoardMessageKind", err)
+	}
+}
+
+func TestBoardStoreSendMessageDefaultsZeroPriority(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	msg := &agent.BoardMessage{
+		WorkspaceID: "ws1",
+		Stream:      agent.RoomStreamName("priority-room"),
+		Sender:      "admin",
+		Recipient:   "actor:agent:coder",
+		Subject:     "default priority",
+		Body:        "zero priority should become default",
+		Priority:    0,
+	}
+	if err := store.SendMessage(ctx, msg); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if msg.Priority != agent.DefaultPriority {
+		t.Fatalf("sent message priority=%d want %d", msg.Priority, agent.DefaultPriority)
+	}
+
+	messages, err := store.Inbox(ctx, agent.InboxFilter{WorkspaceID: "ws1", ActorID: "actor:agent:coder"})
+	if err != nil {
+		t.Fatalf("Inbox: %v", err)
+	}
+	if len(messages) != 1 || messages[0].Priority != agent.DefaultPriority {
+		t.Fatalf("messages=%+v want one default-priority message", messages)
+	}
+}
+
+func TestBoardStoreSendMessageRejectsInvalidPriority(t *testing.T) {
+	ctx := context.Background()
+
+	for _, priority := range []int{-1, 6} {
+		t.Run(fmt.Sprintf("priority_%d", priority), func(t *testing.T) {
+			dir := t.TempDir()
+			store, err := OpenBoardStore(ctx, dir)
+			if err != nil {
+				t.Fatalf("OpenBoardStore: %v", err)
+			}
+			defer store.Close()
+
+			err = store.SendMessage(ctx, &agent.BoardMessage{
+				WorkspaceID: "ws1",
+				Stream:      agent.RoomStreamName("priority-room"),
+				Sender:      "admin",
+				Recipient:   "actor:agent:coder",
+				Subject:     "bad priority",
+				Body:        "do not persist",
+				Priority:    priority,
+			})
+			if !errors.Is(err, agent.ErrInvalidBoardMessagePriority) {
+				t.Fatalf("SendMessage() error=%v, want ErrInvalidBoardMessagePriority", err)
+			}
+
+			messages, err := store.Inbox(ctx, agent.InboxFilter{WorkspaceID: "ws1", ActorID: "actor:agent:coder"})
+			if err != nil {
+				t.Fatalf("Inbox: %v", err)
+			}
+			if len(messages) != 0 {
+				t.Fatalf("invalid priority message persisted: %+v", messages)
+			}
+		})
+	}
+}
+
+func TestBoardStoreReadsRejectCorruptMessagePriority(t *testing.T) {
+	ctx := context.Background()
+
+	for _, priority := range []int{0, 6} {
+		t.Run(fmt.Sprintf("priority_%d", priority), func(t *testing.T) {
+			dir := t.TempDir()
+			store, err := OpenBoardStore(ctx, dir)
+			if err != nil {
+				t.Fatalf("OpenBoardStore: %v", err)
+			}
+			defer store.Close()
+
+			msg := &agent.BoardMessage{
+				WorkspaceID: "ws1",
+				Stream:      agent.RoomStreamName("priority-room"),
+				Sender:      "admin",
+				Recipient:   "actor:agent:coder",
+				Subject:     "corrupt priority",
+				Body:        "this row is corrupted after write",
+				Priority:    agent.DefaultPriority,
+			}
+			if err := store.SendMessage(ctx, msg); err != nil {
+				t.Fatalf("SendMessage: %v", err)
+			}
+
+			sqlStore, ok := store.(*boardSQLStore)
+			if !ok {
+				t.Fatalf("store type %T, want *boardSQLStore", store)
+			}
+			if _, err := sqlStore.db.ExecContext(ctx, `
+				UPDATE board_messages SET priority = ?
+				WHERE workspace_id = ? AND id = ?`,
+				priority, "ws1", msg.ID); err != nil {
+				t.Fatalf("corrupt priority: %v", err)
+			}
+
+			if _, err := store.Inbox(ctx, agent.InboxFilter{WorkspaceID: "ws1", ActorID: "actor:agent:coder"}); !errors.Is(err, agent.ErrInvalidBoardMessagePriority) {
+				t.Fatalf("Inbox() error=%v, want ErrInvalidBoardMessagePriority", err)
+			}
+			if _, err := store.ListRoomMessages(ctx, "ws1", "priority-room", 10); !errors.Is(err, agent.ErrInvalidBoardMessagePriority) {
+				t.Fatalf("ListRoomMessages() error=%v, want ErrInvalidBoardMessagePriority", err)
+			}
+			if _, err := store.GetRoom(ctx, "ws1", "priority-room", ""); !errors.Is(err, agent.ErrInvalidBoardMessagePriority) {
+				t.Fatalf("GetRoom() error=%v, want ErrInvalidBoardMessagePriority", err)
+			}
+		})
 	}
 }
 
@@ -510,6 +969,54 @@ func TestBoardStore_ListRoomsAndRoomMessages(t *testing.T) {
 	}
 }
 
+func TestBoardStoreRoomPreviewPreservesUTF8WhenTruncatingUnicode(t *testing.T) {
+	t.Parallel()
+
+	body := strings.Repeat("界", 141)
+	preview := summarizeRoomPreview(body)
+	if !utf8.ValidString(preview) {
+		t.Fatalf("preview is not valid UTF-8: %q", preview)
+	}
+	if !strings.HasSuffix(preview, "...") {
+		t.Fatalf("preview = %q, want truncation suffix", preview)
+	}
+	if utf8.RuneCountInString(strings.TrimSuffix(preview, "...")) != 140 {
+		t.Fatalf("preview body rune count = %d, want 140", utf8.RuneCountInString(strings.TrimSuffix(preview, "...")))
+	}
+}
+
+func TestBoardStoreRoomPreviewPropertyPreservesUTF8AndLimit(t *testing.T) {
+	t.Parallel()
+
+	property := func(body string) bool {
+		if !utf8.ValidString(body) {
+			return true
+		}
+		preview := summarizeRoomPreview(body)
+		if !utf8.ValidString(preview) {
+			t.Logf("summarizeRoomPreview(%q) produced invalid UTF-8: %q", body, preview)
+			return false
+		}
+		if strings.TrimSpace(preview) != preview {
+			t.Logf("summarizeRoomPreview(%q) kept leading/trailing whitespace: %q", body, preview)
+			return false
+		}
+		trimmed := strings.TrimSpace(body)
+		if utf8.RuneCountInString(trimmed) <= 140 {
+			return preview == trimmed
+		}
+		if !strings.HasSuffix(preview, "...") {
+			t.Logf("summarizeRoomPreview(%q) omitted truncation suffix: %q", body, preview)
+			return false
+		}
+		return utf8.RuneCountInString(strings.TrimSuffix(preview, "...")) == 140
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatalf("room preview property failed: %v", err)
+	}
+}
+
 func TestBoardStore_DeleteRoomRemovesMetadataMembersAndMessages(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -620,6 +1127,52 @@ func TestBoardStore_ArchiveAndRestoreRoom(t *testing.T) {
 	}
 	if len(restoredRooms) != 1 || restoredRooms[0].ArchivedAt != nil {
 		t.Fatalf("restored rooms=%+v want one active room", restoredRooms)
+	}
+}
+
+func TestBoardStoreRejectsCorruptArchivedAt(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	if _, err := store.UpsertRoom(ctx, agent.Room{
+		ID:          "corrupt-archive-room",
+		WorkspaceID: "ws1",
+		Title:       "Corrupt Archive Room",
+	}); err != nil {
+		t.Fatalf("UpsertRoom: %v", err)
+	}
+
+	sqlStore, ok := store.(*boardSQLStore)
+	if !ok {
+		t.Fatalf("store type %T, want *boardSQLStore", store)
+	}
+	if _, err := sqlStore.db.ExecContext(ctx, `
+		UPDATE room_metadata SET archived_at = ?
+		WHERE workspace_id = ? AND room_id = ?`,
+		"not-a-timestamp", "ws1", "corrupt-archive-room"); err != nil {
+		t.Fatalf("corrupt archived_at: %v", err)
+	}
+
+	if _, err := store.GetRoom(ctx, "ws1", "corrupt-archive-room", ""); err == nil {
+		t.Fatal("GetRoom accepted corrupt archived_at")
+	} else if !strings.Contains(err.Error(), "archived_at") {
+		t.Fatalf("GetRoom error=%v, want it to name archived_at", err)
+	}
+	if _, err := store.ListRooms(ctx, "ws1", "", 10, false); err == nil {
+		t.Fatal("ListRooms(active) accepted corrupt archived_at")
+	} else if !strings.Contains(err.Error(), "archived_at") {
+		t.Fatalf("ListRooms(active) error=%v, want it to name archived_at", err)
+	}
+	if _, err := store.ListRooms(ctx, "ws1", "", 10, true); err == nil {
+		t.Fatal("ListRooms(archived) accepted corrupt archived_at")
+	} else if !strings.Contains(err.Error(), "archived_at") {
+		t.Fatalf("ListRooms(archived) error=%v, want it to name archived_at", err)
 	}
 }
 
@@ -982,6 +1535,83 @@ func TestBoardStore_SharedReservations(t *testing.T) {
 
 	if len(conflicts) != 0 {
 		t.Errorf("expected 0 conflicts for shared+shared, got %d", len(conflicts))
+	}
+}
+
+func TestBoardStoreRejectsInvalidReservationMode(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	err = store.Reserve(ctx, &agent.FileReservation{
+		WorkspaceID: "ws1",
+		Path:        "src/main.go",
+		Holder:      "actor:agent:coder",
+		Mode:        agent.ReservationMode("optimistic"),
+		ExpiresAt:   time.Now().Add(10 * time.Minute),
+	})
+	if !errors.Is(err, agent.ErrInvalidReservationMode) {
+		t.Fatalf("Reserve() error=%v, want ErrInvalidReservationMode", err)
+	}
+
+	reservations, err := store.ListReservations(ctx, "ws1")
+	if err != nil {
+		t.Fatalf("ListReservations: %v", err)
+	}
+	if len(reservations) != 0 {
+		t.Fatalf("invalid reservation mode persisted: %+v", reservations)
+	}
+
+	if _, err := store.CheckConflicts(ctx, "ws1", []string{"src/main.go"}, "actor:agent:coder2", agent.ReservationMode("optimistic")); !errors.Is(err, agent.ErrInvalidReservationMode) {
+		t.Fatalf("CheckConflicts() error=%v, want ErrInvalidReservationMode", err)
+	}
+}
+
+func TestBoardStoreReadsRejectCorruptReservationMode(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	res := agent.FileReservation{
+		WorkspaceID: "ws1",
+		Path:        "src/main.go",
+		Holder:      "actor:agent:coder1",
+		Mode:        agent.ReservationModeExclusive,
+		ExpiresAt:   time.Now().Add(10 * time.Minute),
+	}
+	if err := store.Reserve(ctx, &res); err != nil {
+		t.Fatalf("Reserve: %v", err)
+	}
+
+	sqlStore, ok := store.(*boardSQLStore)
+	if !ok {
+		t.Fatalf("store type %T, want *boardSQLStore", store)
+	}
+	if _, err := sqlStore.db.ExecContext(ctx, `
+		UPDATE file_reservations SET mode = ?
+		WHERE workspace_id = ? AND path = ?`,
+		"optimistic", "ws1", "src/main.go"); err != nil {
+		t.Fatalf("corrupt reservation mode: %v", err)
+	}
+
+	if _, err := store.ListReservations(ctx, "ws1"); !errors.Is(err, agent.ErrInvalidReservationMode) {
+		t.Fatalf("ListReservations() error=%v, want ErrInvalidReservationMode", err)
+	}
+	if _, err := store.CheckConflicts(ctx, "ws1", []string{"src/main.go"}, "actor:agent:coder2", agent.ReservationModeExclusive); !errors.Is(err, agent.ErrInvalidReservationMode) {
+		t.Fatalf("CheckConflicts(exclusive) error=%v, want ErrInvalidReservationMode", err)
+	}
+	if _, err := store.CheckConflicts(ctx, "ws1", []string{"src/main.go"}, "actor:agent:coder2", agent.ReservationModeShared); !errors.Is(err, agent.ErrInvalidReservationMode) {
+		t.Fatalf("CheckConflicts(shared) error=%v, want ErrInvalidReservationMode", err)
 	}
 }
 

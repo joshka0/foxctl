@@ -1,11 +1,13 @@
 package policy_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"testing/quick"
 
 	"github.com/joshka0/foxctl/internal/domain/policy"
 	"github.com/stretchr/testify/assert"
@@ -112,6 +114,17 @@ func TestPathValidator_EdgeCases(t *testing.T) {
 	}
 }
 
+func TestPathValidator_AllowsWorkspaceChildStartingWithDots(t *testing.T) {
+	tmpDir := t.TempDir()
+	validator, err := policy.NewPathValidator(tmpDir, nil)
+	require.NoError(t, err)
+
+	resolved, err := validator.ValidatePath(filepath.Join("..cache", "state.json"))
+	require.NoError(t, err)
+	assertPathWithin(t, validator.Workspace(), resolved)
+	assert.Equal(t, filepath.Join(validator.Workspace(), "..cache", "state.json"), resolved)
+}
+
 func TestPathValidator_AllowedRoots(t *testing.T) {
 	workspace := t.TempDir()
 	shared := t.TempDir()
@@ -146,6 +159,127 @@ func TestPathValidator_PartialMatchPrevention(t *testing.T) {
 
 	_, err = validator.ValidatePath(filepath.Join(evilWorkspace, "evil.txt"))
 	assert.ErrorIs(t, err, policy.ErrPathEscape)
+}
+
+func TestPathValidator_GeneratedSiblingPrefixPathsRejected(t *testing.T) {
+	base := t.TempDir()
+	workspace := filepath.Join(base, "workspace")
+	require.NoError(t, os.MkdirAll(workspace, 0o755))
+
+	validator, err := policy.NewPathValidator(workspace, nil)
+	require.NoError(t, err)
+
+	prop := func(rawSuffix, rawLeaf string) bool {
+		suffix := safePathName(rawSuffix)
+		leaf := safePathName(rawLeaf)
+		sibling := filepath.Join(base, "workspace-"+suffix)
+		if err := os.MkdirAll(sibling, 0o755); err != nil {
+			t.Logf("mkdir sibling: %v", err)
+			return false
+		}
+		candidate := filepath.Join(sibling, leaf)
+		if err := os.WriteFile(candidate, []byte("outside"), 0o644); err != nil {
+			t.Logf("write candidate: %v", err)
+			return false
+		}
+
+		_, err := validator.ValidatePath(candidate)
+		if !errors.Is(err, policy.ErrPathEscape) {
+			t.Logf("sibling path %q was not rejected as escaping workspace", candidate)
+			return false
+		}
+		return true
+	}
+
+	require.NoError(t, quick.Check(prop, &quick.Config{MaxCount: 100}))
+}
+
+func TestPathValidator_SymlinkDescendantsCannotEscape(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privileges on Windows")
+	}
+
+	workspace := t.TempDir()
+	outside := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(outside, "nested"), 0o755))
+
+	link := filepath.Join(workspace, "outside-link")
+	require.NoError(t, os.Symlink(outside, link))
+
+	validator, err := policy.NewPathValidator(workspace, nil)
+	require.NoError(t, err)
+
+	prop := func(rawLeaf string) bool {
+		leaf := safePathName(rawLeaf)
+		candidate := filepath.Join("outside-link", "nested", leaf)
+		_, err := validator.ValidatePath(candidate)
+		if !errors.Is(err, policy.ErrSymlinkEscape) {
+			t.Logf("symlink descendant %q error = %v, want ErrSymlinkEscape", candidate, err)
+			return false
+		}
+		return true
+	}
+
+	require.NoError(t, quick.Check(prop, &quick.Config{MaxCount: 100}))
+}
+
+func TestPathValidator_AllowedRootSymlinkDescendantsCannotEscape(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privileges on Windows")
+	}
+
+	workspace := t.TempDir()
+	shared := t.TempDir()
+	outside := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(outside, "nested"), 0o755))
+
+	link := filepath.Join(shared, "outside-link")
+	require.NoError(t, os.Symlink(outside, link))
+
+	validator, err := policy.NewPathValidator(workspace, []string{shared})
+	require.NoError(t, err)
+
+	prop := func(rawLeaf string) bool {
+		leaf := safePathName(rawLeaf)
+		candidate := filepath.Join(shared, "outside-link", "nested", leaf)
+		_, err := validator.ValidatePath(candidate)
+		if !errors.Is(err, policy.ErrSymlinkEscape) {
+			t.Logf("allowed-root symlink descendant %q error = %v, want ErrSymlinkEscape", candidate, err)
+			return false
+		}
+		return true
+	}
+
+	require.NoError(t, quick.Check(prop, &quick.Config{MaxCount: 100}))
+}
+
+func TestPathValidator_GeneratedSuccessfulPathsStayInsideAuthorizedRoots(t *testing.T) {
+	workspace := t.TempDir()
+	shared := t.TempDir()
+	validator, err := policy.NewPathValidator(workspace, []string{shared})
+	require.NoError(t, err)
+
+	prop := func(useShared bool, rawDir, rawLeaf string) bool {
+		dir := safePathName(rawDir)
+		leaf := safePathName(rawLeaf)
+		root := workspace
+		if useShared {
+			root = shared
+		}
+		candidate := filepath.Join(root, dir, leaf)
+		resolved, err := validator.ValidatePath(candidate)
+		if err != nil {
+			t.Logf("valid path %q rejected: %v", candidate, err)
+			return false
+		}
+		if pathWithinAny(resolved, append([]string{validator.Workspace()}, validator.AllowedRoots()...)) {
+			return true
+		}
+		t.Logf("resolved path %q not under authorized roots", resolved)
+		return false
+	}
+
+	require.NoError(t, quick.Check(prop, &quick.Config{MaxCount: 100}))
 }
 
 func TestPathValidator_InvalidWorkspace(t *testing.T) {
@@ -183,10 +317,7 @@ func assertPathWithin(t *testing.T, root, candidate string) {
 	t.Helper()
 	rel, err := filepath.Rel(root, candidate)
 	require.NoError(t, err)
-	if rel == "." {
-		return
-	}
-	assert.False(t, strings.HasPrefix(rel, ".."), "expected %q to be within %q", candidate, root)
+	assert.True(t, relInsideRoot(rel), "expected %q to be within %q", candidate, root)
 }
 
 func assertPathWithinAllowedRoots(t *testing.T, roots []string, candidate string) {
@@ -194,9 +325,43 @@ func assertPathWithinAllowedRoots(t *testing.T, roots []string, candidate string
 	for _, root := range roots {
 		rel, err := filepath.Rel(root, candidate)
 		require.NoError(t, err)
-		if rel == "." || !strings.HasPrefix(rel, "..") {
+		if relInsideRoot(rel) {
 			return
 		}
 	}
 	t.Fatalf("candidate %q was not within allowed roots %v", candidate, roots)
+}
+
+func pathWithinAny(candidate string, roots []string) bool {
+	for _, root := range roots {
+		rel, err := filepath.Rel(root, candidate)
+		if err == nil && relInsideRoot(rel) {
+			return true
+		}
+	}
+	return false
+}
+
+func relInsideRoot(rel string) bool {
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)))
+}
+
+func safePathName(raw string) string {
+	name := strings.Map(func(r rune) rune {
+		switch r {
+		case 0, '/', '\\':
+			return '-'
+		default:
+			return r
+		}
+	}, strings.TrimSpace(raw))
+	name = strings.Trim(name, ". ")
+	if name == "" {
+		return "x"
+	}
+	runes := []rune(name)
+	if len(runes) > 32 {
+		name = string(runes[:32])
+	}
+	return name
 }

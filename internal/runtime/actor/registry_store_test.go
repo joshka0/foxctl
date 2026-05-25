@@ -4,7 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"math/rand"
+	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -93,6 +97,58 @@ func TestRegistryStore_RegisterActor(t *testing.T) {
 	}
 	if got.Config.ID != "actor-1" {
 		t.Errorf("Config.ID = %q, want actor-1", got.Config.ID)
+	}
+}
+
+func TestRegistryStore_RegisterActorDefaultsEmptyStatus(t *testing.T) {
+	db := setupTestRegistryDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	store, err := NewRegistryStore(ctx, db)
+	if err != nil {
+		t.Fatalf("NewRegistryStore() error = %v", err)
+	}
+
+	if err := store.RegisterActor(ctx, ActorRecord{
+		Namespace:  "test-ns",
+		Role:       "coder",
+		ConfigJSON: `{"id":"actor-1","namespace":"test-ns","role":"coder"}`,
+	}); err != nil {
+		t.Fatalf("RegisterActor() error = %v", err)
+	}
+
+	got, err := store.GetActor(ctx, "test-ns")
+	if err != nil {
+		t.Fatalf("GetActor() error = %v", err)
+	}
+	if got.Status != ActorStatusRegistered {
+		t.Fatalf("Status = %q, want %q", got.Status, ActorStatusRegistered)
+	}
+}
+
+func TestRegistryStore_RegisterActorRejectsInvalidStatus(t *testing.T) {
+	db := setupTestRegistryDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	store, err := NewRegistryStore(ctx, db)
+	if err != nil {
+		t.Fatalf("NewRegistryStore() error = %v", err)
+	}
+
+	err = store.RegisterActor(ctx, ActorRecord{
+		Namespace:  "test-ns",
+		Role:       "coder",
+		ConfigJSON: `{"id":"actor-1","namespace":"test-ns","role":"coder"}`,
+		Status:     ActorStatus("paused"),
+	})
+	if !errors.Is(err, ErrInvalidActorStatus) {
+		t.Fatalf("RegisterActor() error = %v, want ErrInvalidActorStatus", err)
+	}
+
+	if _, err := store.GetActor(ctx, "test-ns"); !errors.Is(err, ErrActorNotFound) {
+		t.Fatalf("GetActor() error = %v, want ErrActorNotFound", err)
 	}
 }
 
@@ -319,6 +375,39 @@ func TestRegistryStore_UpdateStatus_NotFound(t *testing.T) {
 	}
 }
 
+func TestRegistryStore_UpdateStatusRejectsInvalidStatusWithoutMutatingActor(t *testing.T) {
+	db := setupTestRegistryDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	store, err := NewRegistryStore(ctx, db)
+	if err != nil {
+		t.Fatalf("NewRegistryStore() error = %v", err)
+	}
+
+	rec := ActorRecord{
+		Namespace:  "test-ns",
+		Role:       "coder",
+		ConfigJSON: `{"id":"actor-1","namespace":"test-ns","role":"coder"}`,
+		Status:     ActorStatusRegistered,
+	}
+	if err := store.RegisterActor(ctx, rec); err != nil {
+		t.Fatalf("RegisterActor() error = %v", err)
+	}
+
+	if err := store.UpdateStatus(ctx, rec.Namespace, ActorStatus("paused")); !errors.Is(err, ErrInvalidActorStatus) {
+		t.Fatalf("UpdateStatus() error = %v, want ErrInvalidActorStatus", err)
+	}
+
+	got, err := store.GetActor(ctx, rec.Namespace)
+	if err != nil {
+		t.Fatalf("GetActor() error = %v", err)
+	}
+	if got.Status != ActorStatusRegistered {
+		t.Fatalf("Status = %q, want %q", got.Status, ActorStatusRegistered)
+	}
+}
+
 func TestRegistryStore_ListActorsByStatus(t *testing.T) {
 	db := setupTestRegistryDB(t)
 	defer db.Close()
@@ -359,6 +448,139 @@ func TestRegistryStore_ListActorsByStatus(t *testing.T) {
 	if len(stopped) != 1 {
 		t.Errorf("ListActorsByStatus(stopped) returned %d, want 1", len(stopped))
 	}
+}
+
+func TestRegistryStore_ListActorsByStatusRejectsInvalidStatus(t *testing.T) {
+	db := setupTestRegistryDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	store, err := NewRegistryStore(ctx, db)
+	if err != nil {
+		t.Fatalf("NewRegistryStore() error = %v", err)
+	}
+
+	if _, err := store.ListActorsByStatus(ctx, ActorStatus("paused")); !errors.Is(err, ErrInvalidActorStatus) {
+		t.Fatalf("ListActorsByStatus() error = %v, want ErrInvalidActorStatus", err)
+	}
+}
+
+func TestRegistryStore_ListActorsByStatusRejectsUnknownStatusProperty(t *testing.T) {
+	db := setupTestRegistryDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	store, err := NewRegistryStore(ctx, db)
+	if err != nil {
+		t.Fatalf("NewRegistryStore() error = %v", err)
+	}
+
+	err = quick.Check(func(raw string) bool {
+		switch ActorStatus(strings.TrimSpace(raw)) {
+		case ActorStatusRegistered, ActorStatusRunning, ActorStatusStopped, ActorStatusError:
+			return true
+		}
+
+		_, err := store.ListActorsByStatus(ctx, ActorStatus(raw))
+		return errors.Is(err, ErrInvalidActorStatus)
+	}, &quick.Config{
+		MaxCount: 200,
+		Rand:     rand.New(rand.NewSource(1)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRegistryStore_ReadsRejectCorruptPersistedStatus(t *testing.T) {
+	db := setupTestRegistryDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE actor_registry (
+			namespace    TEXT PRIMARY KEY,
+			role         TEXT NOT NULL,
+			config_json  TEXT NOT NULL,
+			status       TEXT NOT NULL DEFAULT 'registered',
+			created_at   TEXT NOT NULL,
+			updated_at   TEXT NOT NULL
+		);
+	`); err != nil {
+		t.Fatalf("create legacy registry table: %v", err)
+	}
+
+	store, err := NewRegistryStore(ctx, db)
+	if err != nil {
+		t.Fatalf("NewRegistryStore() error = %v", err)
+	}
+
+	rec := ActorRecord{
+		Namespace:  "legacy-ns",
+		Role:       "coder",
+		ConfigJSON: `{"id":"actor-1","namespace":"legacy-ns","role":"coder"}`,
+		Status:     ActorStatusRegistered,
+	}
+	if err := store.RegisterActor(ctx, rec); err != nil {
+		t.Fatalf("RegisterActor() error = %v", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `UPDATE actor_registry SET status = ? WHERE namespace = ?`, "paused", rec.Namespace); err != nil {
+		t.Fatalf("corrupt status: %v", err)
+	}
+
+	if _, err := store.GetActor(ctx, rec.Namespace); !errors.Is(err, ErrInvalidActorStatus) {
+		t.Fatalf("GetActor() error = %v, want ErrInvalidActorStatus", err)
+	}
+	if _, err := store.ListActors(ctx); !errors.Is(err, ErrInvalidActorStatus) {
+		t.Fatalf("ListActors() error = %v, want ErrInvalidActorStatus", err)
+	}
+}
+
+func TestRegistryStore_ReadsRejectCorruptPersistedTimestamps(t *testing.T) {
+	ctx := context.Background()
+
+	for _, column := range []string{"created_at", "updated_at"} {
+		t.Run(column, func(t *testing.T) {
+			db := setupTestRegistryDB(t)
+			defer db.Close()
+
+			store, err := NewRegistryStore(ctx, db)
+			if err != nil {
+				t.Fatalf("NewRegistryStore() error = %v", err)
+			}
+
+			rec := ActorRecord{
+				Namespace:  "corrupt-ts",
+				Role:       "coder",
+				ConfigJSON: `{"id":"corrupt-ts","namespace":"corrupt-ts","role":"coder"}`,
+				Status:     ActorStatusRegistered,
+			}
+			if err := store.RegisterActor(ctx, rec); err != nil {
+				t.Fatalf("RegisterActor() error = %v", err)
+			}
+
+			if _, err := db.ExecContext(ctx, fmt.Sprintf(`
+				UPDATE actor_registry SET %s = ? WHERE namespace = ?
+			`, column), "not-a-timestamp", rec.Namespace); err != nil {
+				t.Fatalf("corrupt %s: %v", column, err)
+			}
+
+			if _, err := store.GetActor(ctx, rec.Namespace); !errorNamesColumn(err, column) {
+				t.Fatalf("GetActor() error = %v, want it to name corrupt %s", err, column)
+			}
+			if _, err := store.ListActors(ctx); !errorNamesColumn(err, column) {
+				t.Fatalf("ListActors() error = %v, want it to name corrupt %s", err, column)
+			}
+			if _, err := store.ListActorsByStatus(ctx, ActorStatusRegistered); !errorNamesColumn(err, column) {
+				t.Fatalf("ListActorsByStatus() error = %v, want it to name corrupt %s", err, column)
+			}
+		})
+	}
+}
+
+func errorNamesColumn(err error, column string) bool {
+	return err != nil && strings.Contains(err.Error(), column)
 }
 
 func TestMarshalConfig(t *testing.T) {

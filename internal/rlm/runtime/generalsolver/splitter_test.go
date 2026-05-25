@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"testing/quick"
 )
 
 func TestAnalyzeForSplit_BelowThreshold(t *testing.T) {
@@ -341,6 +342,119 @@ func TestApplySplit_RespectsMaxSubItems(t *testing.T) {
 	expected := 1 + SplitMaxSubItems + 1 // parse + solves + merge
 	if len(subIDs) != expected {
 		t.Fatalf("expected %d sub-items (capped), got %d", expected, len(subIDs))
+	}
+}
+
+func TestApplySplitRejectsInvalidChunkCounts(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		chunkCount int
+	}{
+		{name: "zero", chunkCount: 0},
+		{name: "negative", chunkCount: -1},
+		{name: "over max", chunkCount: SplitMaxSubItems + 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := NewSolverState()
+			if err := AddWorkItem(state, WorkItem{
+				ID:        "parent",
+				Goal:      "solve explicit split",
+				Archetype: ArchetypeExplicitDAG,
+				Status:    StatusReady,
+				Payload:   map[string]any{"queries": []any{"a", "b"}},
+			}); err != nil {
+				t.Fatalf("AddWorkItem: %v", err)
+			}
+
+			_, err := ApplySplit(state, "parent", SplitPlan{
+				Strategy:   SplitStrategyQueryDecomposition,
+				ParentID:   "parent",
+				ChunkCount: tt.chunkCount,
+			})
+			if err == nil {
+				t.Fatal("expected invalid chunk count error")
+			}
+			if !strings.Contains(err.Error(), "chunk count") {
+				t.Fatalf("error=%v want chunk count", err)
+			}
+			if _, ok := state.Items["parent"]; !ok {
+				t.Fatal("parent should remain after rejected split plan")
+			}
+			if _, ok := state.Items["parent__parse"]; ok {
+				t.Fatal("parse item should not be created for rejected split plan")
+			}
+		})
+	}
+}
+
+func TestApplySplitRejectsGeneratedInvalidChunkCounts(t *testing.T) {
+	t.Parallel()
+
+	invalidChunkCountsFailClosed := func(raw uint8) bool {
+		chunkCount := int(raw)
+		if chunkCount >= 1 && chunkCount <= SplitMaxSubItems {
+			chunkCount = SplitMaxSubItems + 1 + chunkCount
+		}
+
+		state := NewSolverState()
+		if err := AddWorkItem(state, WorkItem{
+			ID:        "parent",
+			Goal:      "solve explicit split",
+			Archetype: ArchetypeExplicitDAG,
+			Status:    StatusReady,
+			Payload:   map[string]any{"queries": []any{"a", "b"}},
+		}); err != nil {
+			return false
+		}
+
+		_, err := ApplySplit(state, "parent", SplitPlan{
+			Strategy:   SplitStrategyQueryDecomposition,
+			ParentID:   "parent",
+			ChunkCount: chunkCount,
+		})
+		_, parentExists := state.Items["parent"]
+		_, parseExists := state.Items["parent__parse"]
+		return err != nil && strings.Contains(err.Error(), "chunk count") && parentExists && !parseExists
+	}
+
+	if err := quick.Check(invalidChunkCountsFailClosed, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatalf("generated invalid chunk count was accepted: %v", err)
+	}
+}
+
+func TestApplySplitRejectsNilParentPayload(t *testing.T) {
+	t.Parallel()
+
+	state := NewSolverState()
+	if err := AddWorkItem(state, WorkItem{
+		ID:        "parent",
+		Goal:      "solve explicit split",
+		Archetype: ArchetypeExplicitDAG,
+		Status:    StatusReady,
+	}); err != nil {
+		t.Fatalf("AddWorkItem: %v", err)
+	}
+
+	_, err := ApplySplit(state, "parent", SplitPlan{
+		Strategy:   SplitStrategyQueryDecomposition,
+		ParentID:   "parent",
+		ChunkCount: 2,
+	})
+	if err == nil {
+		t.Fatal("expected nil parent payload error")
+	}
+	if !strings.Contains(err.Error(), "payload") {
+		t.Fatalf("error=%v want payload", err)
+	}
+	if _, ok := state.Items["parent"]; !ok {
+		t.Fatal("parent should remain after rejected split plan")
+	}
+	if _, ok := state.Items["parent__parse"]; ok {
+		t.Fatal("parse item should not be created for rejected split plan")
 	}
 }
 

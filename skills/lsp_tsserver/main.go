@@ -151,7 +151,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 
 	// Open the file if needed
 	if in.File != "" {
-		filePath := lsphelpers.ResolvePath(workspace, in.File)
+		filePath, err := resolveInputFile(workspace, in.File)
+		if err != nil {
+			return err
+		}
 		if err := client.openFile(ctx, filePath); err != nil {
 			return err
 		}
@@ -321,7 +324,10 @@ func (c *LSPClient) definition(ctx context.Context, workspace string, in input) 
 		return nil, skillerr.Arg("definition requires file and line")
 	}
 
-	filePath := lsphelpers.ResolvePath(workspace, in.File)
+	filePath, err := resolveInputFile(workspace, in.File)
+	if err != nil {
+		return nil, err
+	}
 	params := map[string]any{
 		"textDocument": map[string]any{
 			"uri": "file://" + filePath,
@@ -365,7 +371,10 @@ func (c *LSPClient) references(ctx context.Context, workspace string, in input) 
 		return nil, skillerr.Arg("references requires file and line")
 	}
 
-	filePath := lsphelpers.ResolvePath(workspace, in.File)
+	filePath, err := resolveInputFile(workspace, in.File)
+	if err != nil {
+		return nil, err
+	}
 	params := map[string]any{
 		"textDocument": map[string]any{
 			"uri": "file://" + filePath,
@@ -407,7 +416,10 @@ func (c *LSPClient) documentSymbols(ctx context.Context, workspace string, in in
 		return nil, skillerr.Arg("symbols requires file")
 	}
 
-	filePath := lsphelpers.ResolvePath(workspace, in.File)
+	filePath, err := resolveInputFile(workspace, in.File)
+	if err != nil {
+		return nil, err
+	}
 	params := map[string]any{
 		"textDocument": map[string]any{
 			"uri": "file://" + filePath,
@@ -453,6 +465,18 @@ func (c *LSPClient) documentSymbols(ctx context.Context, workspace string, in in
 	}
 
 	return syms, nil
+}
+
+func resolveInputFile(workspace, file string) (string, error) {
+	filePath, err := lsphelpers.ResolvePath(workspace, file)
+	if err != nil {
+		return "", skillerr.Arg(
+			"file path must stay within the workspace",
+			skillerr.WithCause(err),
+			skillerr.WithHint("Provide a relative file path or an absolute path under the workspace."),
+		)
+	}
+	return filePath, nil
 }
 
 // workspaceSymbols searches workspace symbols using LSP workspace/symbol request with query matching.

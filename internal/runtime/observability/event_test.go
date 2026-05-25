@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/quick"
 	"time"
 )
 
@@ -301,6 +303,49 @@ func TestTailSampler_RandomSampling(t *testing.T) {
 	fastEvent := &Event{Status: StatusOK, Duration: 100 * time.Millisecond}
 	if sampler.ShouldSample(fastEvent) == Drop {
 		t.Error("With 100% rate, fast events should be sampled")
+	}
+}
+
+func TestTailSamplerRandomRateBounds(t *testing.T) {
+	tests := []struct {
+		name string
+		rate float64
+		want float64
+	}{
+		{name: "negative", rate: -0.1, want: 0},
+		{name: "nan", rate: math.NaN(), want: 0},
+		{name: "positive infinity", rate: math.Inf(1), want: 1},
+		{name: "above one", rate: 1.1, want: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sampler := NewTailSampler(true, 1000, tt.rate)
+			if sampler.randomRate != tt.want {
+				t.Fatalf("randomRate = %v, want %v", sampler.randomRate, tt.want)
+			}
+		})
+	}
+}
+
+func TestTailSamplerRandomRatePropertyStaysBounded(t *testing.T) {
+	property := func(raw int16) bool {
+		rate := float64(raw) / 100
+		sampler := NewTailSampler(true, 1000, rate)
+		return sampler.randomRate >= 0 && sampler.randomRate <= 1
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 1000}); err != nil {
+		t.Fatalf("random rate bound property failed: %v", err)
+	}
+}
+
+func TestTailSamplerFromEnvRejectsNaNSampleRate(t *testing.T) {
+	t.Setenv(EnvSampleRate, "NaN")
+
+	sampler := NewTailSamplerFromEnv()
+	if sampler.randomRate != 0 {
+		t.Fatalf("randomRate = %v, want 0 for NaN env sample rate", sampler.randomRate)
 	}
 }
 

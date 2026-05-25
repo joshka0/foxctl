@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	ws "github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/storage"
@@ -252,10 +253,11 @@ func summarizeRecordSummary(text string) string {
 	if text == "" {
 		return ""
 	}
-	if len(text) <= 200 {
+	if utf8.RuneCountInString(text) <= 200 {
 		return text
 	}
-	return text[:199] + "…"
+	runes := []rune(text)
+	return string(runes[:199]) + "…"
 }
 
 func firstNonEmpty(values ...string) string {

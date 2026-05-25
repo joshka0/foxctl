@@ -181,7 +181,7 @@ func buildSQLiteDSN(path string, busyTimeoutMs int, enableForeignKeys bool) (str
 			return "", fmt.Errorf("sqliteutil: generate unique name: %w", err)
 		}
 		uniqueName := "foxctl_mem_" + hex.EncodeToString(randBytes[:])
-		u = &url.URL{Scheme: "file", Path: uniqueName}
+		u = &url.URL{Scheme: "file", Opaque: uniqueName}
 		q := u.Query()
 		q.Set("mode", "memory")
 		q.Set("cache", "shared")

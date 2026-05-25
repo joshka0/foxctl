@@ -53,6 +53,7 @@ type EvidenceRef struct {
 
 // ParseEvidenceRef parses a string of the form "type:value" into an EvidenceRef.
 func ParseEvidenceRef(s string) (EvidenceRef, error) {
+	s = strings.TrimSpace(s)
 	if s == "" {
 		return EvidenceRef{}, fmt.Errorf("cannot parse empty evidence ref")
 	}
@@ -60,8 +61,8 @@ func ParseEvidenceRef(s string) (EvidenceRef, error) {
 	if colonIdx <= 0 {
 		return EvidenceRef{}, fmt.Errorf("missing type prefix in %q", s)
 	}
-	rawType := s[:colonIdx]
-	ref := s[colonIdx+1:]
+	rawType := strings.TrimSpace(s[:colonIdx])
+	ref := strings.TrimSpace(s[colonIdx+1:])
 	if ref == "" {
 		return EvidenceRef{}, fmt.Errorf("empty ref value in %q", s)
 	}
@@ -74,14 +75,20 @@ func ParseEvidenceRef(s string) (EvidenceRef, error) {
 
 // FormatEvidenceRef formats an EvidenceRef as a "type:value" string.
 func FormatEvidenceRef(ref EvidenceRef) string {
-	if ref.Type == "" || ref.Ref == "" {
+	rawType := strings.TrimSpace(string(ref.Type))
+	rawRef := strings.TrimSpace(ref.Ref)
+	if rawType == "" || rawRef == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s:%s", ref.Type, ref.Ref)
+	return fmt.Sprintf("%s:%s", rawType, rawRef)
 }
 
-// NormalizeEvidenceRef fills in the WorkspaceID if missing.
+// NormalizeEvidenceRef canonicalizes the identity fields and fills in the WorkspaceID if missing.
 func NormalizeEvidenceRef(ref EvidenceRef, workspaceID string) EvidenceRef {
+	ref.Type = RefType(strings.TrimSpace(string(ref.Type)))
+	ref.Ref = strings.TrimSpace(ref.Ref)
+	ref.WorkspaceID = strings.TrimSpace(ref.WorkspaceID)
+	workspaceID = strings.TrimSpace(workspaceID)
 	if ref.WorkspaceID == "" && workspaceID != "" {
 		ref.WorkspaceID = workspaceID
 	}
@@ -90,6 +97,7 @@ func NormalizeEvidenceRef(ref EvidenceRef, workspaceID string) EvidenceRef {
 
 // ValidateEvidenceRef checks that the ref has a valid type and non-empty ref value.
 func ValidateEvidenceRef(ref EvidenceRef) error {
+	ref = NormalizeEvidenceRef(ref, "")
 	if !ref.Type.IsValid() {
 		return fmt.Errorf("invalid ref type: %q", ref.Type)
 	}

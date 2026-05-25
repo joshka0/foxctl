@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/quick"
 )
 
 // ---------------------------------------------------------------------------
@@ -80,6 +81,12 @@ func TestRegexExtract(t *testing.T) {
 			input:  "123-abc",
 			config: `{"pattern":"(\\d+)-(\\w+)","group":2}`,
 			want:   "abc",
+		},
+		{
+			name:    "fractional numeric group returns error",
+			input:   "123-abc",
+			config:  `{"pattern":"(\\d+)-(\\w+)","group":1.5}`,
+			wantErr: true,
 		},
 		{
 			name:   "full match group 0",
@@ -651,6 +658,13 @@ func TestTransformErrorProducesGoError(t *testing.T) {
 		}
 	})
 
+	t.Run("unsupported jq recursive descent is rejected even when field exists", func(t *testing.T) {
+		_, err := jqFilterTransform(context.Background(), map[string]any{"invalid": "present"}, `{"filter":"..invalid"}`)
+		if err == nil {
+			t.Fatal("expected recursive descent path to be rejected")
+		}
+	})
+
 	t.Run("template bad syntax is error not panic", func(t *testing.T) {
 		_, err := templateTransform(context.Background(), map[string]any{"a": 1.0}, `{"template":"{{.a"}`)
 		if err == nil {
@@ -671,6 +685,30 @@ func TestTransformErrorProducesGoError(t *testing.T) {
 			t.Fatal("expected error for non-string input")
 		}
 	})
+}
+
+func TestJQFilterPropertyRejectsEmptyPathSegments(t *testing.T) {
+	t.Parallel()
+
+	cfg := &quick.Config{MaxCount: 250}
+	err := quick.Check(func(leftRaw, rightRaw uint8) bool {
+		left := fmt.Sprintf("a%d", leftRaw%32)
+		right := fmt.Sprintf("b%d", rightRaw%32)
+		filters := []string{
+			"." + left + ".." + right,
+			".." + right,
+			"." + left + ".",
+		}
+		for _, filter := range filters {
+			if _, err := parseJQPath(filter); err == nil {
+				return false
+			}
+		}
+		return true
+	}, cfg)
+	if err != nil {
+		t.Fatalf("empty jq path segment property failed: %v", err)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1141,6 +1179,25 @@ func TestFileWrite(t *testing.T) {
 		result := out.(fileWriteResult)
 		if result.Path != path {
 			t.Errorf("path: got %q, want %q", result.Path, path)
+		}
+	})
+
+	t.Run("unresolved path template with non-object input fails before writing", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "{{.topic}}.txt")
+		config := fmt.Sprintf(`{"path":%q}`, path)
+
+		_, err := fileWriteTransform(context.Background(), "string input", config)
+		if err == nil {
+			t.Fatal("expected unresolved path template to fail")
+		}
+
+		matches, globErr := filepath.Glob(filepath.Join(tmpDir, "*"))
+		if globErr != nil {
+			t.Fatalf("glob temp dir: %v", globErr)
+		}
+		if len(matches) != 0 {
+			t.Fatalf("unresolved path template wrote files: %v", matches)
 		}
 	})
 

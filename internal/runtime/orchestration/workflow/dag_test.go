@@ -1,7 +1,11 @@
 package workflow
 
 import (
+	"fmt"
+	"reflect"
+	"slices"
 	"testing"
+	"testing/quick"
 )
 
 func TestNewDAG_Simple(t *testing.T) {
@@ -150,6 +154,89 @@ func TestDAG_InferDependencies(t *testing.T) {
 	}
 }
 
+func TestDAGPropertyTopologicalOrderAndBatchesRespectDependencies(t *testing.T) {
+	t.Parallel()
+
+	property := func(raw []uint8) bool {
+		steps := generatedAcyclicWorkflowSteps(raw)
+		dag, err := NewDAG(steps)
+		if err != nil {
+			t.Logf("NewDAG(%+v) error = %v", steps, err)
+			return false
+		}
+
+		order := dag.Order()
+		if len(order) != len(steps) {
+			t.Logf("order length = %d, want %d: %v", len(order), len(steps), order)
+			return false
+		}
+		positions := positionsByID(order)
+		batchByID := batchIndexByID(dag.Batches())
+
+		for _, step := range steps {
+			stepPos, ok := positions[step.ID]
+			if !ok {
+				t.Logf("step %q missing from order %v", step.ID, order)
+				return false
+			}
+			if dag.Step(step.ID) == nil {
+				t.Logf("Step(%q) = nil", step.ID)
+				return false
+			}
+			for _, dep := range dag.Dependencies(step.ID) {
+				depPos, ok := positions[dep]
+				if !ok {
+					t.Logf("dependency %q missing from order %v", dep, order)
+					return false
+				}
+				if depPos >= stepPos {
+					t.Logf("dependency order violated: dep %q at %d, step %q at %d, order %v", dep, depPos, step.ID, stepPos, order)
+					return false
+				}
+				if batchByID[dep] >= batchByID[step.ID] {
+					t.Logf("dependency batch violated: dep %q batch %d, step %q batch %d, batches %v", dep, batchByID[dep], step.ID, batchByID[step.ID], dag.Batches())
+					return false
+				}
+			}
+		}
+
+		completed := map[string]bool{}
+		for _, id := range order {
+			ready := dag.Ready(completed)
+			if !slices.Contains(ready, id) {
+				t.Logf("step %q not ready after completed=%v; ready=%v order=%v", id, completed, ready, order)
+				return false
+			}
+			completed[id] = true
+		}
+		return len(dag.Ready(completed)) == 0
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 300}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDAGReadyReturnsSortedSteps(t *testing.T) {
+	t.Parallel()
+
+	steps := []Step{
+		{ID: "z", Skill: "test/z"},
+		{ID: "a", Skill: "test/a"},
+		{ID: "m", Skill: "test/m"},
+	}
+	dag, err := NewDAG(steps)
+	if err != nil {
+		t.Fatalf("NewDAG failed: %v", err)
+	}
+
+	got := dag.Ready(nil)
+	want := []string{"a", "m", "z"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Ready(nil) = %v, want %v", got, want)
+	}
+}
+
 func TestParseTemplateRefs(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -174,6 +261,44 @@ func TestParseTemplateRefs(t *testing.T) {
 			}
 		}
 	}
+}
+
+func generatedAcyclicWorkflowSteps(raw []uint8) []Step {
+	count := len(raw)%8 + 1
+	steps := make([]Step, count)
+	for i := range steps {
+		steps[i] = Step{
+			ID:    fmt.Sprintf("step%d", i),
+			Skill: "test/noop",
+		}
+	}
+	for i := 1; i < count; i++ {
+		bits := raw[(i-1)%len(raw)]
+		for dep := 0; dep < i; dep++ {
+			if bits&(1<<uint(dep%8)) != 0 {
+				steps[i].DependsOn = append(steps[i].DependsOn, steps[dep].ID)
+			}
+		}
+	}
+	return steps
+}
+
+func positionsByID(ids []string) map[string]int {
+	positions := make(map[string]int, len(ids))
+	for i, id := range ids {
+		positions[id] = i
+	}
+	return positions
+}
+
+func batchIndexByID(batches [][]string) map[string]int {
+	index := make(map[string]int)
+	for i, batch := range batches {
+		for _, id := range batch {
+			index[id] = i
+		}
+	}
+	return index
 }
 
 func sliceIndexOf(slice []string, item string) int {

@@ -25,6 +25,9 @@ func RequireGit() (string, error) {
 
 // ResolveRepoPath validates and resolves a repo path using the run context.
 func ResolveRepoPath(rc *skillmain.RunContext, path string) (string, error) {
+	if rc == nil || rc.PathValidator == nil {
+		return "", skillerr.Arg("path validator not configured")
+	}
 	if path == "" {
 		path = "."
 	}

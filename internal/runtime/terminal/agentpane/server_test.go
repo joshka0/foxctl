@@ -12,6 +12,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"testing/quick"
 	"time"
 )
 
@@ -133,6 +134,54 @@ func TestDefaultReadyPath(t *testing.T) {
 	got := DefaultReadyPath("room/alpha", "claude-a")
 	if !strings.HasSuffix(got, filepath.Join("foxctl-pane", "room_alpha", "claude-a.ready")) {
 		t.Fatalf("DefaultReadyPath() = %q", got)
+	}
+}
+
+func TestDefaultPanePathsSanitizeTraversalComponents(t *testing.T) {
+	t.Parallel()
+
+	root := socketBaseDir()
+	paths := []struct {
+		name string
+		path string
+		ext  string
+	}{
+		{name: "socket", path: DefaultSocketPath("../room/../../escape", "../agent/../../x"), ext: ".sock"},
+		{name: "ready", path: DefaultReadyPath("../room/../../escape", "../agent/../../x"), ext: ".ready"},
+		{name: "meta", path: DefaultMetaPath("../room/../../escape", "../agent/../../x"), ext: ".json"},
+	}
+
+	for _, tt := range paths {
+		t.Run(tt.name, func(t *testing.T) {
+			assertPanePathUnderSocketRoot(t, root, tt.path, tt.ext)
+		})
+	}
+}
+
+func TestDefaultPanePathsPropertyStayUnderSocketRoot(t *testing.T) {
+	t.Parallel()
+
+	root := socketBaseDir()
+	property := func(rawScope, rawParticipant string) bool {
+		paths := []struct {
+			path string
+			ext  string
+		}{
+			{path: DefaultSocketPath(rawScope, rawParticipant), ext: ".sock"},
+			{path: DefaultReadyPath(rawScope, rawParticipant), ext: ".ready"},
+			{path: DefaultMetaPath(rawScope, rawParticipant), ext: ".json"},
+		}
+		for _, tt := range paths {
+			if !panePathUnderSocketRoot(root, tt.path, tt.ext) {
+				t.Logf("path %q escaped root %q or failed %s shape", tt.path, root, tt.ext)
+				return false
+			}
+		}
+		return true
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 250}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -362,4 +411,32 @@ func waitForFileContent(t *testing.T, path, want string) {
 	}
 	data, _ := os.ReadFile(path)
 	t.Fatalf("file %q = %q, want %q", path, string(data), want)
+}
+
+func assertPanePathUnderSocketRoot(t *testing.T, root, candidate, ext string) {
+	t.Helper()
+	if !panePathUnderSocketRoot(root, candidate, ext) {
+		t.Fatalf("path %q escaped root %q or failed %s shape", candidate, root, ext)
+	}
+}
+
+func panePathUnderSocketRoot(root, candidate, ext string) bool {
+	rel, err := filepath.Rel(root, candidate)
+	if err != nil {
+		return false
+	}
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return false
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	if len(parts) != 2 {
+		return false
+	}
+	if parts[0] == "" || parts[1] == "" || parts[0] == "." || parts[0] == ".." || parts[1] == "." || parts[1] == ".." {
+		return false
+	}
+	if filepath.Ext(parts[1]) != ext {
+		return false
+	}
+	return len(parts[0]) <= 24 && len(strings.TrimSuffix(parts[1], ext)) <= 24
 }

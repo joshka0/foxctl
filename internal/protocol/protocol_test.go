@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/domain/envelope"
@@ -788,6 +789,87 @@ func TestValidateCASDigest(t *testing.T) {
 			t.Fatal("validation should fail when map[string]string artifact mismatches cas_digest")
 		}
 	})
+
+	t.Run("artifact map string raw message", func(t *testing.T) {
+		digest := "sha256:raw456"
+		rawDigest, err := json.Marshal(digest)
+		if err != nil {
+			t.Fatalf("marshal digest: %v", err)
+		}
+		env := OK("test", map[string]json.RawMessage{
+			"artifact": rawDigest,
+		}, WithCASDigest(digest))
+
+		if err := Validate(env); err != nil {
+			t.Fatalf("validation should pass for map[string]json.RawMessage artifact: %v", err)
+		}
+	})
+}
+
+func TestCASDigestArtifactShapeContract(t *testing.T) {
+	prop := func(input string) bool {
+		digest := testCASDigest(input)
+		rawDigest, err := json.Marshal(digest)
+		if err != nil {
+			t.Logf("marshal digest: %v", err)
+			return false
+		}
+		rawObject, err := json.Marshal(map[string]string{"artifact": digest})
+		if err != nil {
+			t.Logf("marshal object: %v", err)
+			return false
+		}
+
+		shapes := []any{
+			map[string]any{"artifact": digest},
+			map[string]string{"artifact": digest},
+			map[string]json.RawMessage{"artifact": rawDigest},
+			json.RawMessage(rawObject),
+			struct {
+				Artifact string
+			}{Artifact: digest},
+			&struct {
+				Artifact string
+			}{Artifact: digest},
+		}
+		for _, data := range shapes {
+			if err := Validate(OK("test.cas", data, WithCASDigest(digest))); err != nil {
+				t.Logf("shape=%T validation error=%v", data, err)
+				return false
+			}
+		}
+
+		mismatched := OK("test.cas", map[string]json.RawMessage{
+			"artifact": rawDigest,
+		}, WithCASDigest(digest+"-mismatch"))
+		if err := Validate(mismatched); err == nil {
+			t.Logf("mismatched CAS digest validated for digest=%q", digest)
+			return false
+		}
+		return true
+	}
+
+	if err := quick.Check(prop, &quick.Config{MaxCount: 200}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testCASDigest(input string) string {
+	var b strings.Builder
+	for _, r := range strings.ToValidUTF8(input, "") {
+		switch {
+		case r >= 'a' && r <= 'f':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'F':
+			b.WriteRune(r + ('a' - 'A'))
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		}
+	}
+	if b.Len() == 0 {
+		b.WriteString("0")
+	}
+	return "sha256:" + b.String()
 }
 
 func TestValidateCacheMetadata(t *testing.T) {
@@ -960,6 +1042,18 @@ func TestValidateErrorStatusCode(t *testing.T) {
 			t.Fatalf("validation should pass for summary map[string]string: %v", err)
 		}
 	})
+
+	t.Run("summary map raw message scalar", func(t *testing.T) {
+		env := Error("test", ErrorCodeERuntime, "unexpected success", map[string]any{
+			"summary": map[string]json.RawMessage{
+				"status_code": json.RawMessage(`200`),
+			},
+		})
+
+		if err := Validate(env); err == nil {
+			t.Fatal("validation should fail when raw status_code scalar is below error range")
+		}
+	})
 }
 
 // Tests for typed error helpers
@@ -1044,6 +1138,53 @@ func TestHTTPStatusToErrorCode(t *testing.T) {
 				t.Fatalf("expected %s for status %d, got %s", tt.expected, tt.statusCode, code)
 			}
 		})
+	}
+}
+
+func TestHTTPErrorGeneratedStatusCodeContract(t *testing.T) {
+	prop := func(raw uint16) bool {
+		statusCode := int(raw % 700)
+		env := HTTPError("http.get", "request failed", HTTPErrorData{
+			Summary: HTTPSummary{StatusCode: statusCode},
+		})
+
+		wantCode := expectedHTTPErrorCode(statusCode)
+		if ErrorCode(env.Error.Code) != wantCode {
+			t.Logf("status=%d code=%s want %s", statusCode, env.Error.Code, wantCode)
+			return false
+		}
+
+		err := Validate(env)
+		if statusCode >= 400 && statusCode < 600 {
+			if err != nil {
+				t.Logf("status=%d validation error=%v, want valid error envelope", statusCode, err)
+				return false
+			}
+		} else if err == nil {
+			t.Logf("status=%d validation succeeded, want invalid error envelope", statusCode)
+			return false
+		}
+		return true
+	}
+	if err := quick.Check(prop, &quick.Config{MaxCount: 1000}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func expectedHTTPErrorCode(statusCode int) ErrorCode {
+	switch {
+	case statusCode == 401 || statusCode == 403:
+		return ErrorCodeEAuth
+	case statusCode == 404:
+		return ErrorCodeENotFound
+	case statusCode == 408:
+		return ErrorCodeETimeout
+	case statusCode == 429:
+		return ErrorCodeERateLimit
+	case statusCode >= 400 && statusCode < 500:
+		return ErrorCodeEARG
+	default:
+		return ErrorCodeERuntime
 	}
 }
 

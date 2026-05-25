@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 )
 
@@ -126,6 +128,93 @@ func TestCanonicalDigest(t *testing.T) {
 	}
 	if digest != other {
 		t.Fatalf("expected canonical digest determinism")
+	}
+}
+
+func TestCanonicalDigestPropertyOrderIndependentForNestedData(t *testing.T) {
+	check := func(nameInput, detailInput string, count uint16, final bool) bool {
+		name := strings.ToValidUTF8(nameInput, "?")
+		detail := strings.ToValidUTF8(detailInput, "?")
+
+		left := map[string]any{
+			"name":  name,
+			"count": int(count),
+			"items": []any{detail, int(count), final},
+			"nested": map[string]any{
+				"detail": detail,
+				"final":  final,
+			},
+		}
+		right := map[string]any{
+			"nested": map[string]any{
+				"final":  final,
+				"detail": detail,
+			},
+			"items": []any{detail, int(count), final},
+			"count": int(count),
+			"name":  name,
+		}
+
+		leftDigest, err := CanonicalDigest(left)
+		if err != nil {
+			return false
+		}
+		rightDigest, err := CanonicalDigest(right)
+		if err != nil {
+			return false
+		}
+		return leftDigest == rightDigest
+	}
+
+	if err := quick.Check(check, &quick.Config{MaxCount: 200}); err != nil {
+		t.Fatalf("canonical digest should be independent of object insertion order: %v", err)
+	}
+}
+
+func TestEnvelopeJSONRoundTripPropertyPreservesValidityAndDigest(t *testing.T) {
+	fixed := time.Date(2025, 11, 8, 13, 0, 0, 0, time.UTC)
+	check := func(payloadInput string, errorCase bool) bool {
+		payload := strings.ToValidUTF8(payloadInput, "?")
+		data := map[string]any{"payload": payload}
+
+		var env Envelope
+		if errorCase {
+			env = Error("foxctl.test", "TEST_ERROR", "message: "+payload, data, WithTimestamp(fixed))
+		} else {
+			env = OK("foxctl.test", data, WithTimestamp(fixed))
+		}
+
+		if err := Validate(env); err != nil {
+			return false
+		}
+		originalDigest, err := CanonicalDigest(env)
+		if err != nil {
+			return false
+		}
+
+		encoded, err := json.Marshal(env)
+		if err != nil {
+			return false
+		}
+		var decoded Envelope
+		if err := json.Unmarshal(encoded, &decoded); err != nil {
+			return false
+		}
+		if err := Validate(decoded); err != nil {
+			return false
+		}
+		if err := coreEnvelopeInvariantError(decoded); err != nil {
+			return false
+		}
+		decodedDigest, err := CanonicalDigest(decoded)
+		if err != nil {
+			return false
+		}
+		return originalDigest == decodedDigest
+	}
+
+	if err := quick.Check(check, &quick.Config{MaxCount: 200}); err != nil {
+		t.Fatalf("valid envelopes should survive JSON round trip with stable canonical digest: %v", err)
 	}
 }
 
@@ -410,4 +499,88 @@ func TestMultipleOptions(t *testing.T) {
 	if !ok || data["num"] != 42 {
 		t.Fatalf("expected data to be set correctly")
 	}
+}
+
+func FuzzValidateEnvelopeJSONMaintainsCoreInvariants(f *testing.F) {
+	validOK, err := json.Marshal(OK(
+		"foxctl.test",
+		map[string]any{"value": "ok"},
+		WithTimestamp(time.Date(2025, 11, 8, 13, 0, 0, 0, time.UTC)),
+	))
+	if err != nil {
+		f.Fatalf("marshal ok seed: %v", err)
+	}
+	validError, err := json.Marshal(Error(
+		"foxctl.test",
+		"TEST_ERROR",
+		"something went wrong",
+		map[string]any{"value": "error"},
+		WithTimestamp(time.Date(2025, 11, 8, 13, 0, 0, 0, time.UTC)),
+	))
+	if err != nil {
+		f.Fatalf("marshal error seed: %v", err)
+	}
+
+	f.Add(string(validOK))
+	f.Add(string(validError))
+	f.Add(`{"version":1,"status":"ok","command":"foxctl.test","meta":{"ts":"2025-11-08T13:00:00Z"},"error":{"code":"UNEXPECTED"}}`)
+	f.Add(`{"version":1,"status":"error","command":"foxctl.test","meta":{"ts":"2025-11-08T13:00:00Z"},"error":{"code":"TEST_ERROR","message":""}}`)
+	f.Add(`{"version":2,"status":"progress","command":"","meta":{"ts":"not-a-time"},"error":{}}`)
+
+	f.Fuzz(func(t *testing.T, raw string) {
+		var env Envelope
+		if err := json.Unmarshal([]byte(raw), &env); err != nil {
+			return
+		}
+		if err := Validate(env); err != nil {
+			return
+		}
+		if err := coreEnvelopeInvariantError(env); err != nil {
+			t.Fatalf("valid envelope violated core invariant: %v", err)
+		}
+		canonical, err := Canonicalize(env)
+		if err != nil {
+			t.Fatalf("valid envelope should canonicalize: %v", err)
+		}
+		if !json.Valid(canonical) {
+			t.Fatalf("canonical envelope is not valid json: %s", canonical)
+		}
+	})
+}
+
+func coreEnvelopeInvariantError(env Envelope) error {
+	if env.Version != Version {
+		return fmt.Errorf("version = %d, want %d", env.Version, Version)
+	}
+	if strings.TrimSpace(env.Command) == "" {
+		return fmt.Errorf("command must be non-empty")
+	}
+	switch env.Status {
+	case StatusOK:
+		if env.Error.Code != "" || env.Error.Message != "" {
+			return fmt.Errorf("ok envelope must not contain error fields: %+v", env.Error)
+		}
+	case StatusError:
+		if env.Error.Code == "" {
+			return fmt.Errorf("error envelope must contain error code")
+		}
+		if strings.TrimSpace(env.Error.Message) == "" {
+			return fmt.Errorf("error envelope must contain error message")
+		}
+	default:
+		return fmt.Errorf("status = %q, want %q or %q", env.Status, StatusOK, StatusError)
+	}
+
+	ts := strings.TrimSpace(env.Meta.TS)
+	if ts == "" {
+		return fmt.Errorf("timestamp must be non-empty")
+	}
+	parsed, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return fmt.Errorf("timestamp must parse as RFC3339: %w", err)
+	}
+	if parsed.Location() != time.UTC {
+		return fmt.Errorf("timestamp must be UTC")
+	}
+	return nil
 }

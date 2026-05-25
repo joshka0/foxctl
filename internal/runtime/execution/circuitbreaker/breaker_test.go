@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"testing/quick"
 	"time"
 )
 
@@ -56,8 +57,7 @@ func TestCircuitBreakerOpenToHalfOpen(t *testing.T) {
 		t.Fatalf("expected open state, got %s", breaker.State())
 	}
 
-	// Wait for reset timeout
-	time.Sleep(60 * time.Millisecond)
+	forceResetTimeoutElapsed(breaker)
 
 	// Next request should transition to half-open
 	if !breaker.Allow() {
@@ -83,8 +83,7 @@ func TestCircuitBreakerHalfOpenToClosed(t *testing.T) {
 	breaker.RecordFailure()
 	breaker.RecordFailure()
 
-	// Wait and transition to half-open
-	time.Sleep(60 * time.Millisecond)
+	forceResetTimeoutElapsed(breaker)
 	breaker.Allow()
 
 	if breaker.State() != StateHalfOpen {
@@ -114,8 +113,7 @@ func TestCircuitBreakerHalfOpenToOpen(t *testing.T) {
 	breaker.RecordFailure()
 	breaker.RecordFailure()
 
-	// Transition to half-open
-	time.Sleep(60 * time.Millisecond)
+	forceResetTimeoutElapsed(breaker)
 	breaker.Allow()
 
 	if breaker.State() != StateHalfOpen {
@@ -127,6 +125,260 @@ func TestCircuitBreakerHalfOpenToOpen(t *testing.T) {
 
 	if breaker.State() != StateOpen {
 		t.Errorf("expected open state after failure in half-open, got %s", breaker.State())
+	}
+}
+
+func TestCircuitBreakerDisabledResetTimeoutNeverAutoTransitions(t *testing.T) {
+	breaker := New("manual-recovery", Config{
+		MaxFailures:         1,
+		ResetTimeout:        0,
+		MaxHalfOpenRequests: 1,
+		SuccessThreshold:    1,
+	})
+
+	breaker.RecordFailure()
+	if breaker.State() != StateOpen {
+		t.Fatalf("state after threshold failure=%s want open", breaker.State())
+	}
+
+	forceElapsedSinceStateChange(breaker, time.Hour)
+	if breaker.Allow() {
+		t.Fatal("Allow()=true with disabled reset timeout; want open circuit to require manual reset")
+	}
+	if breaker.State() != StateOpen {
+		t.Fatalf("state after disabled-timeout Allow()=%s want open", breaker.State())
+	}
+
+	breaker.Reset()
+	if !breaker.Allow() {
+		t.Fatal("Allow()=false after manual reset; want closed circuit to allow requests")
+	}
+	if breaker.State() != StateClosed {
+		t.Fatalf("state after manual reset=%s want closed", breaker.State())
+	}
+}
+
+func TestCircuitBreakerNegativeResetTimeoutUsesDefaultRecoveryWindow(t *testing.T) {
+	defaults := DefaultConfig()
+	breaker := New("negative-timeout", Config{
+		MaxFailures:         1,
+		ResetTimeout:        -time.Second,
+		MaxHalfOpenRequests: 1,
+		SuccessThreshold:    1,
+	})
+
+	breaker.RecordFailure()
+	if breaker.State() != StateOpen {
+		t.Fatalf("state after threshold failure=%s want open", breaker.State())
+	}
+
+	forceElapsedSinceStateChange(breaker, defaults.ResetTimeout/2)
+	if breaker.Allow() {
+		t.Fatal("Allow()=true before default recovery window elapsed; want open circuit")
+	}
+	if breaker.State() != StateOpen {
+		t.Fatalf("state before default recovery window=%s want open", breaker.State())
+	}
+
+	forceResetTimeoutElapsed(breaker)
+	if !breaker.Allow() {
+		t.Fatal("Allow()=false after default recovery window elapsed; want half-open probe")
+	}
+	if breaker.State() != StateHalfOpen {
+		t.Fatalf("state after default recovery window=%s want half-open", breaker.State())
+	}
+}
+
+func TestCircuitBreakerNonPositiveCountConfigUsesSafeDefaults(t *testing.T) {
+	defaults := DefaultConfig()
+	breaker := New("partial-config", Config{
+		ResetTimeout: time.Second,
+	})
+
+	for i := 0; i < defaults.MaxFailures-1; i++ {
+		breaker.RecordFailure()
+		if breaker.State() != StateClosed {
+			t.Fatalf("failure %d opened breaker with partial config; want closed until default threshold %d", i+1, defaults.MaxFailures)
+		}
+	}
+	breaker.RecordFailure()
+	if breaker.State() != StateOpen {
+		t.Fatalf("state after default failure threshold=%s want open", breaker.State())
+	}
+
+	forceResetTimeoutElapsed(breaker)
+	for i := 0; i < defaults.MaxHalfOpenRequests; i++ {
+		if !breaker.Allow() {
+			t.Fatalf("half-open probe %d rejected; want default allowance %d", i+1, defaults.MaxHalfOpenRequests)
+		}
+	}
+	if breaker.Allow() {
+		t.Fatalf("half-open probe beyond default allowance was allowed")
+	}
+
+	breaker.RecordFailure()
+	if breaker.State() != StateOpen {
+		t.Fatalf("state after half-open failure=%s want open", breaker.State())
+	}
+
+	forceResetTimeoutElapsed(breaker)
+	if !breaker.Allow() {
+		t.Fatal("expected first recovery probe to be allowed")
+	}
+	breaker.RecordSuccess()
+	if breaker.State() != StateHalfOpen {
+		t.Fatalf("state after one default-threshold success=%s want half-open", breaker.State())
+	}
+	breaker.RecordSuccess()
+	if breaker.State() != StateClosed {
+		t.Fatalf("state after default success threshold=%s want closed", breaker.State())
+	}
+}
+
+func TestCircuitBreakerHalfOpenAllowanceCannotMakeRecoveryImpossible(t *testing.T) {
+	breaker := New("impossible-recovery", Config{
+		MaxFailures:         1,
+		ResetTimeout:        time.Second,
+		MaxHalfOpenRequests: 1,
+		SuccessThreshold:    2,
+	})
+	ctx := context.Background()
+	probeErr := errors.New("probe failed")
+
+	if err := breaker.Execute(ctx, func(_ context.Context) error {
+		return probeErr
+	}); !errors.Is(err, probeErr) {
+		t.Fatalf("initial Execute() error=%v want probeErr", err)
+	}
+	if breaker.State() != StateOpen {
+		t.Fatalf("state after initial failure=%s want open", breaker.State())
+	}
+
+	forceResetTimeoutElapsed(breaker)
+	for i := 0; i < 2; i++ {
+		if err := breaker.Execute(ctx, func(_ context.Context) error { return nil }); err != nil {
+			t.Fatalf("recovery success %d returned %v; want enough half-open allowance to satisfy success threshold", i+1, err)
+		}
+	}
+	if breaker.State() != StateClosed {
+		t.Fatalf("state after success threshold=%s want closed", breaker.State())
+	}
+}
+
+func TestCircuitBreakerExecuteHalfOpenFailureReopensAndBlocksNextCall(t *testing.T) {
+	config := Config{
+		MaxFailures:         1,
+		ResetTimeout:        10 * time.Millisecond,
+		MaxHalfOpenRequests: 2,
+		SuccessThreshold:    2,
+	}
+	breaker := New("test-service", config)
+	ctx := context.Background()
+	probeErr := errors.New("probe failed")
+
+	if err := breaker.Execute(ctx, func(_ context.Context) error {
+		return probeErr
+	}); !errors.Is(err, probeErr) {
+		t.Fatalf("initial Execute() error=%v want probeErr", err)
+	}
+	if breaker.State() != StateOpen {
+		t.Fatalf("state after initial failure=%s want open", breaker.State())
+	}
+
+	forceResetTimeoutElapsed(breaker)
+	if err := breaker.Execute(ctx, func(_ context.Context) error {
+		return probeErr
+	}); !errors.Is(err, probeErr) {
+		t.Fatalf("half-open probe Execute() error=%v want probeErr", err)
+	}
+	if breaker.State() != StateOpen {
+		t.Fatalf("state after half-open probe failure=%s want open", breaker.State())
+	}
+
+	executed := false
+	err := breaker.Execute(ctx, func(_ context.Context) error {
+		executed = true
+		return nil
+	})
+	if !IsCircuitOpen(err) {
+		t.Fatalf("next Execute() error=%v want ErrCircuitOpen", err)
+	}
+	if executed {
+		t.Fatal("next call executed while breaker should be reopened")
+	}
+}
+
+func TestCircuitBreakerExecuteSequenceOpensAtConsecutiveFailureThreshold(t *testing.T) {
+	ctx := context.Background()
+	operationErr := errors.New("operation failed")
+
+	property := func(rawThreshold uint8, outcomes []bool) bool {
+		maxFailures := int(rawThreshold%5) + 1
+		if len(outcomes) > 50 {
+			outcomes = outcomes[:50]
+		}
+		breaker := New("generated-sequence", Config{
+			MaxFailures:         maxFailures,
+			ResetTimeout:        0,
+			MaxHalfOpenRequests: 1,
+			SuccessThreshold:    1,
+		})
+
+		consecutiveFailures := 0
+		opened := false
+
+		for _, succeeds := range outcomes {
+			executed := false
+			err := breaker.Execute(ctx, func(_ context.Context) error {
+				executed = true
+				if succeeds {
+					return nil
+				}
+				return operationErr
+			})
+
+			if opened {
+				if executed || !IsCircuitOpen(err) || breaker.State() != StateOpen {
+					return false
+				}
+				continue
+			}
+
+			if !executed {
+				return false
+			}
+			if succeeds {
+				if err != nil {
+					return false
+				}
+				consecutiveFailures = 0
+				if breaker.State() != StateClosed {
+					return false
+				}
+				continue
+			}
+
+			if !errors.Is(err, operationErr) {
+				return false
+			}
+			consecutiveFailures++
+			if consecutiveFailures >= maxFailures {
+				opened = true
+				if breaker.State() != StateOpen {
+					return false
+				}
+				continue
+			}
+			if breaker.State() != StateClosed {
+				return false
+			}
+		}
+
+		return true
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatalf("generated execute sequence violated circuit breaker threshold invariant: %v", err)
 	}
 }
 
@@ -277,8 +529,7 @@ func TestCircuitBreakerHalfOpenLimit(t *testing.T) {
 	breaker.RecordFailure()
 	breaker.RecordFailure()
 
-	// Wait and transition to half-open
-	time.Sleep(60 * time.Millisecond)
+	forceResetTimeoutElapsed(breaker)
 
 	// First two requests should be allowed
 	if !breaker.Allow() {
@@ -324,4 +575,14 @@ func TestCircuitBreakerSuccessResetsFailures(t *testing.T) {
 	if breaker.State() != StateClosed {
 		t.Errorf("expected closed state, got %s", breaker.State())
 	}
+}
+
+func forceResetTimeoutElapsed(breaker *Breaker) {
+	forceElapsedSinceStateChange(breaker, breaker.config.ResetTimeout+time.Millisecond)
+}
+
+func forceElapsedSinceStateChange(breaker *Breaker, elapsed time.Duration) {
+	breaker.mu.Lock()
+	defer breaker.mu.Unlock()
+	breaker.lastStateChange = time.Now().Add(-elapsed)
 }

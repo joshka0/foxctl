@@ -16,6 +16,9 @@ var collapseHyphens = regexp.MustCompile(`-{2,}`)
 // collapseSlashes matches consecutive forward slashes.
 var collapseSlashes = regexp.MustCompile(`/{2,}`)
 
+// collapseDots matches consecutive dots, which are not valid in git ref names.
+var collapseDots = regexp.MustCompile(`\.{2,}`)
+
 // SanitizeBranchName cleans a proposed branch name by replacing unsafe characters
 // with hyphens and collapsing consecutive unsafe characters. Returns an error if
 // the result would be empty or invalid.
@@ -35,6 +38,9 @@ func SanitizeBranchName(name string) (string, error) {
 	// Collapse consecutive slashes
 	result = collapseSlashes.ReplaceAllString(result, "/")
 
+	// Collapse consecutive dots so the result cannot contain git's parent-ref marker.
+	result = collapseDots.ReplaceAllString(result, ".")
+
 	// Strip leading/trailing hyphens, dots, and slashes from the whole name
 	result = strings.Trim(result, "-./ ")
 
@@ -42,8 +48,7 @@ func SanitizeBranchName(name string) (string, error) {
 	parts := strings.Split(result, "/")
 	cleaned := make([]string, 0, len(parts))
 	for _, part := range parts {
-		// Strip leading/trailing dots and hyphens from each component
-		part = strings.Trim(part, "-. ")
+		part = cleanBranchComponent(part)
 		if part == "" {
 			continue
 		}
@@ -72,4 +77,14 @@ func SanitizeBranchName(name string) (string, error) {
 	}
 
 	return result, nil
+}
+
+func cleanBranchComponent(part string) string {
+	// Strip leading/trailing dots and hyphens from each component.
+	part = strings.Trim(part, "-. ")
+	for strings.HasSuffix(part, ".lock") {
+		part = strings.TrimSuffix(part, ".lock")
+		part = strings.TrimRight(part, "-. ")
+	}
+	return part
 }

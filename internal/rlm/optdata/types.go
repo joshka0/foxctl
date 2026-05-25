@@ -2,6 +2,7 @@ package optdata
 
 import (
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -135,8 +136,28 @@ func (record TrajectoryRecord) Validate() error {
 		if record.Metrics[i].Name == "" {
 			return fmt.Errorf("metric[%d] name is required", i)
 		}
+		if err := validateMetricFinite(i, record.Metrics[i]); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func validateMetricFinite(index int, metric MetricFeedback) error {
+	if !finiteMetricNumber(metric.Value) {
+		return fmt.Errorf("metric[%d] value must be finite", index)
+	}
+	if !finiteMetricNumber(metric.Weight) {
+		return fmt.Errorf("metric[%d] weight must be finite", index)
+	}
+	if metric.Target != nil && !finiteMetricNumber(*metric.Target) {
+		return fmt.Errorf("metric[%d] target must be finite", index)
+	}
+	return nil
+}
+
+func finiteMetricNumber(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
 }
 
 // BuildInput is the input payload for a RecordBuilder.

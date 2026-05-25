@@ -1,7 +1,10 @@
 package policy
 
 import (
+	"path/filepath"
+	"strings"
 	"testing"
+	"testing/quick"
 
 	"github.com/joshka0/foxctl/internal/domain/skill"
 )
@@ -47,6 +50,18 @@ func TestValidateNetworkAccess_AllowsEgressPatterns(t *testing.T) {
 			name:     "CIDR match allows IP in range",
 			manifest: manifestWithNetwork("egress", "10.0.0.0/8:*"),
 			host:     "10.5.10.20",
+			port:     443,
+		},
+		{
+			name:     "IPv6 CIDR match allows IP in range",
+			manifest: manifestWithNetwork("egress", "2001:db8::/32:*"),
+			host:     "2001:db8::1",
+			port:     443,
+		},
+		{
+			name:     "DNS host match is case insensitive",
+			manifest: manifestWithNetwork("egress", "api.github.com:443"),
+			host:     "API.GITHUB.COM",
 			port:     443,
 		},
 		{
@@ -97,6 +112,12 @@ func TestValidateNetworkAccess_BlocksDisallowedAccess(t *testing.T) {
 			port:     443,
 		},
 		{
+			name:     "unknown network capability blocks even with matching allowlist",
+			manifest: manifestWithNetwork("proxy", "api.github.com:443"),
+			host:     "api.github.com",
+			port:     443,
+		},
+		{
 			name:     "exact match blocks different port",
 			manifest: manifestWithNetwork("egress", "api.github.com:443"),
 			host:     "api.github.com",
@@ -130,6 +151,127 @@ func TestValidateNetworkAccess_BlocksDisallowedAccess(t *testing.T) {
 	}
 }
 
+func TestValidateNetworkAccessPropertyOnlyExplicitEgressCanAllowNetwork(t *testing.T) {
+	t.Parallel()
+
+	err := quick.Check(func(rawNetwork string) bool {
+		network := nonEgressNetwork(rawNetwork)
+		v := NewValidator(manifestWithNetwork(network, "api.github.com:443"))
+		if err := v.ValidateNetworkAccess("api.github.com", 443); err == nil {
+			t.Logf("network capability %q allowed matching egress target", network)
+			return false
+		}
+		return true
+	}, &quick.Config{MaxCount: 200})
+	if err != nil {
+		t.Fatalf("non-egress network capability property failed: %v", err)
+	}
+}
+
+func TestValidateNetworkAccessBlocksInvalidPorts(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		manifest skill.Manifest
+	}{
+		{
+			name:     "empty egress allowlist",
+			manifest: manifestWithNetwork("egress"),
+		},
+		{
+			name:     "wildcard egress port",
+			manifest: manifestWithNetwork("egress", "api.github.com:*"),
+		},
+		{
+			name:     "exact egress port",
+			manifest: manifestWithNetwork("egress", "api.github.com:443"),
+		},
+	}
+	invalidPorts := []int{-1, 0, 65536, 100000}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := NewValidator(tt.manifest)
+			for _, port := range invalidPorts {
+				if err := v.ValidateNetworkAccess("api.github.com", port); err == nil {
+					t.Fatalf("ValidateNetworkAccess allowed invalid port %d", port)
+				}
+			}
+		})
+	}
+}
+
+func TestValidateNetworkAccessPropertyDNSPatternsAreCaseInsensitive(t *testing.T) {
+	t.Parallel()
+
+	v := NewValidator(manifestWithNetwork("egress", "api.github.com:443", "*.amazonaws.com:443"))
+	err := quick.Check(func(seed uint64) bool {
+		exactHost := mixedCaseASCII("api.github.com", seed)
+		wildcardHost := mixedCaseASCII("s3.us-east-1.amazonaws.com", seed>>16)
+		return v.ValidateNetworkAccess(exactHost, 443) == nil &&
+			v.ValidateNetworkAccess(wildcardHost, 443) == nil
+	}, &quick.Config{MaxCount: 100})
+	if err != nil {
+		t.Fatalf("DNS egress case-insensitivity property failed: %v", err)
+	}
+}
+
+func TestValidateNetworkAccessPropertyWildcardDNSRequiresSubdomainBoundary(t *testing.T) {
+	t.Parallel()
+
+	err := quick.Check(func(baseSeed, subdomainSeed uint64) bool {
+		base := dnsLabel("base", baseSeed) + "." + dnsLabel("zone", baseSeed>>16) + ".test"
+		subdomain := dnsLabel("sub", subdomainSeed)
+		pattern := "*." + base + ":443"
+		v := NewValidator(manifestWithNetwork("egress", pattern))
+
+		if err := v.ValidateNetworkAccess(subdomain+"."+base, 443); err != nil {
+			t.Logf("wildcard pattern %q rejected valid subdomain: %v", pattern, err)
+			return false
+		}
+		blockedHosts := []string{
+			base,
+			subdomain + base,
+			subdomain + "-" + strings.ReplaceAll(base, ".", "-"),
+			base + ".evil.test",
+		}
+		for _, host := range blockedHosts {
+			if err := v.ValidateNetworkAccess(host, 443); err == nil {
+				t.Logf("wildcard pattern %q allowed boundary-violating host %q", pattern, host)
+				return false
+			}
+		}
+		return true
+	}, &quick.Config{MaxCount: 150})
+	if err != nil {
+		t.Fatalf("wildcard DNS boundary property failed: %v", err)
+	}
+}
+
+func TestValidateNetworkAccessPropertyInvalidPortsAreAlwaysDenied(t *testing.T) {
+	t.Parallel()
+
+	manifests := []skill.Manifest{
+		manifestWithNetwork("egress"),
+		manifestWithNetwork("egress", "api.github.com:*"),
+		manifestWithNetwork("egress", "api.github.com:443"),
+	}
+
+	err := quick.Check(func(rawPort int, manifestSeed uint8) bool {
+		port := rawPort
+		if port >= 1 && port <= 65535 {
+			port = 65536 + port
+		}
+		v := NewValidator(manifests[int(manifestSeed)%len(manifests)])
+		return v.ValidateNetworkAccess("api.github.com", port) != nil &&
+			!matchesEgressPattern("api.github.com", port, "api.github.com:*")
+	}, &quick.Config{MaxCount: 200})
+	if err != nil {
+		t.Fatalf("invalid network port property failed: %v", err)
+	}
+}
+
 func manifestWithNetwork(network string, allow ...string) skill.Manifest {
 	return skill.Manifest{
 		Capabilities: skill.Capabilities{
@@ -149,6 +291,40 @@ func manifestWithFilesystem(types ...string) skill.Manifest {
 			Filesystem: accesses,
 		},
 	}
+}
+
+func mixedCaseASCII(value string, seed uint64) string {
+	out := []byte(value)
+	for i, ch := range out {
+		if ch < 'a' || ch > 'z' {
+			continue
+		}
+		if seed&1 == 1 {
+			out[i] = ch - 'a' + 'A'
+		}
+		seed >>= 1
+	}
+	return string(out)
+}
+
+func nonEgressNetwork(raw string) string {
+	network := strings.TrimSpace(strings.ToLower(raw))
+	if network == "" || network == "egress" {
+		return "proxy"
+	}
+	return network
+}
+
+func dnsLabel(prefix string, seed uint64) string {
+	const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+	var b strings.Builder
+	b.WriteString(prefix)
+	b.WriteByte('-')
+	for i := 0; i < 8; i++ {
+		b.WriteByte(alphabet[int(seed%uint64(len(alphabet)))])
+		seed /= uint64(len(alphabet))
+	}
+	return b.String()
 }
 
 func TestValidateWASIPolicy(t *testing.T) {
@@ -215,7 +391,11 @@ func TestMatchesEgressPattern(t *testing.T) {
 		{"CIDR match", "10.5.10.20", 443, "10.0.0.0/8:*", true},
 		{"CIDR match any port", "10.5.10.20", 8080, "10.0.0.0/8:*", true},
 		{"CIDR no match", "192.168.1.1", 443, "10.0.0.0/8:*", false},
+		{"IPv6 CIDR match", "2001:db8::1", 443, "2001:db8::/32:*", true},
+		{"IPv6 CIDR wrong port", "2001:db8::1", 80, "2001:db8::/32:443", false},
 		{"localhost CIDR", "127.0.0.1", 8080, "127.0.0.0/8:*", true},
+		{"case-insensitive exact DNS", "API.GITHUB.COM", 443, "api.github.com:443", true},
+		{"case-insensitive wildcard DNS", "S3.AMAZONAWS.COM", 443, "*.amazonaws.com:443", true},
 	}
 
 	for _, tt := range tests {
@@ -364,6 +544,9 @@ func TestIsWithinWorkdir(t *testing.T) {
 		{"path traversal attempt", "/tmp/work/../../../etc/passwd", "/tmp/work", false},
 		{"relative path within", "file.txt", "/tmp/work", true},
 		{"relative subdir", "sub/file.txt", "/tmp/work", true},
+		{"dot-prefixed child path", "/tmp/work/..cache/file.txt", "/tmp/work", true},
+		{"relative dot-prefixed child path", "..cache/file.txt", "/tmp/work", true},
+		{"sibling with workdir prefix", "/tmp/work-evil/file.txt", "/tmp/work", false},
 	}
 
 	for _, tt := range tests {
@@ -375,4 +558,55 @@ func TestIsWithinWorkdir(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIsWithinWorkdirPropertyAllowsAllDirectChildren(t *testing.T) {
+	t.Parallel()
+
+	workDir := filepath.Join(string(filepath.Separator), "tmp", "work")
+	cfg := &quick.Config{MaxCount: 250}
+	err := quick.Check(func(raw string) bool {
+		child := validWorkdirChildSegment(raw)
+		absoluteChild := filepath.Join(workDir, child, "file.txt")
+		relativeChild := filepath.Join(child, "file.txt")
+		return isWithinWorkdir(absoluteChild, workDir) &&
+			isWithinWorkdir(relativeChild, workDir)
+	}, cfg)
+	if err != nil {
+		t.Fatalf("workdir child property failed: %v", err)
+	}
+}
+
+func TestIsWithinWorkdirPropertyBlocksSiblingPrefixes(t *testing.T) {
+	t.Parallel()
+
+	base := filepath.Join(string(filepath.Separator), "tmp")
+	workDir := filepath.Join(base, "work")
+	cfg := &quick.Config{MaxCount: 250}
+	err := quick.Check(func(raw string) bool {
+		suffix := validWorkdirChildSegment(raw)
+		sibling := filepath.Join(base, "work-"+suffix, "file.txt")
+		return !isWithinWorkdir(sibling, workDir)
+	}, cfg)
+	if err != nil {
+		t.Fatalf("workdir sibling-prefix property failed: %v", err)
+	}
+}
+
+func validWorkdirChildSegment(raw string) string {
+	cleaned := strings.Map(func(r rune) rune {
+		if r == filepath.Separator || r == '/' || r == '\\' || r == 0 {
+			return '-'
+		}
+		return r
+	}, raw)
+	cleaned = strings.TrimSpace(cleaned)
+	if cleaned == "" || cleaned == "." || cleaned == ".." {
+		return "..cache"
+	}
+	base := strings.TrimLeft(cleaned, ".")
+	if base == "" {
+		return "..cache"
+	}
+	return ".." + base
 }

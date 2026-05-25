@@ -51,6 +51,10 @@ func (s *sqlStore) Close() error {
 }
 
 func (s *sqlStore) Post(ctx context.Context, record agent.BlackboardRecord) error {
+	if err := validatePayloadJSON(record.Payload); err != nil {
+		return err
+	}
+
 	leaseJSON := "null"
 	if record.Lease != nil {
 		b, err := json.Marshal(record.Lease)
@@ -157,9 +161,13 @@ func (s *sqlStore) Search(ctx context.Context, ns, topic string, limit int) ([]a
 //	Events: none
 //	OutputFields: agent.BlackboardRecord
 //
-// [[invariant:lease-only-if-null-or-empty]]
+// [[invariant:lease-only-if-inactive]]
 // [[protocol:blackboard-lease-semantics]]
 func (s *sqlStore) Claim(ctx context.Context, id, agentID string, leaseDuration time.Duration) (agent.BlackboardRecord, error) {
+	if leaseDuration <= 0 {
+		return agent.BlackboardRecord{}, ErrInvalidLeaseDuration
+	}
+
 	// Begin transaction
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -174,12 +182,15 @@ func (s *sqlStore) Claim(ctx context.Context, id, agentID string, leaseDuration 
 		SELECT id, ns, topic, ts, ttl_sec, payload, cas_ref, lease
 		FROM blackboard WHERE id = ?`, id)
 
-	record, err := scanRecord(row)
+	record, rawLease, err := scanRecordWithRawLease(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return agent.BlackboardRecord{}, ErrNotFound
 		}
 		return agent.BlackboardRecord{}, err
+	}
+	if record.IsLeased() {
+		return agent.BlackboardRecord{}, ErrAlreadyLeased
 	}
 
 	// Create new lease
@@ -193,13 +204,23 @@ func (s *sqlStore) Claim(ctx context.Context, id, agentID string, leaseDuration 
 		return agent.BlackboardRecord{}, fmt.Errorf("blackboard: marshal lease: %w", err)
 	}
 
-	// Update the lease only if still unleased (covers both SQL NULL and textual "null")
-	// This makes the claim operation atomic and prevents concurrent leasing
-	res, err := tx.ExecContext(ctx, `
-		UPDATE blackboard
-		SET lease = ?
-		WHERE id = ? AND (lease IS NULL OR lease = '' OR lease = 'null')
-	`, string(leaseJSON), id)
+	// Update only if the row is still claimable. For an expired lease, require
+	// the stored JSON to match the value we just read so concurrent claimers
+	// cannot overwrite one another.
+	var res sql.Result
+	if rawLease.Valid && rawLease.String != "" && rawLease.String != "null" {
+		res, err = tx.ExecContext(ctx, `
+			UPDATE blackboard
+			SET lease = ?
+			WHERE id = ? AND (lease IS NULL OR lease = '' OR lease = 'null' OR lease = ?)
+		`, string(leaseJSON), id, rawLease.String)
+	} else {
+		res, err = tx.ExecContext(ctx, `
+			UPDATE blackboard
+			SET lease = ?
+			WHERE id = ? AND (lease IS NULL OR lease = '' OR lease = 'null')
+		`, string(leaseJSON), id)
+	}
 	if err != nil {
 		return agent.BlackboardRecord{}, fmt.Errorf("blackboard: update lease: %w", err)
 	}
@@ -390,16 +411,30 @@ type scanner interface {
 }
 
 func scanRecord(s scanner) (agent.BlackboardRecord, error) {
+	record, _, err := scanRecordWithRawLease(s)
+	return record, err
+}
+
+func scanRecordFromRows(rows *sql.Rows) (agent.BlackboardRecord, error) {
+	record, _, err := scanRecordWithRawLease(rows)
+	return record, err
+}
+
+func scanRecordWithRawLease(s scanner) (agent.BlackboardRecord, sql.NullString, error) {
 	var record agent.BlackboardRecord
 	var payloadJSON string
 	var casRef sql.NullString
 	var leaseJSON sql.NullString
 	if err := s.Scan(&record.ID, &record.NS, &record.Topic, &record.TS, &record.TTLSec, &payloadJSON, &casRef, &leaseJSON); err != nil {
-		return agent.BlackboardRecord{}, fmt.Errorf("blackboard: scan: %w", err)
+		return agent.BlackboardRecord{}, sql.NullString{}, fmt.Errorf("blackboard: scan: %w", err)
 	}
 
 	// Set payload as RawMessage
-	record.Payload = json.RawMessage(payloadJSON)
+	payload := json.RawMessage(payloadJSON)
+	if err := validatePayloadJSON(payload); err != nil {
+		return agent.BlackboardRecord{}, sql.NullString{}, err
+	}
+	record.Payload = payload
 
 	// Set CAS ref if present
 	if casRef.Valid {
@@ -410,41 +445,19 @@ func scanRecord(s scanner) (agent.BlackboardRecord, error) {
 	if leaseJSON.Valid && leaseJSON.String != "null" && leaseJSON.String != "" {
 		var lease agent.Lease
 		if err := json.Unmarshal([]byte(leaseJSON.String), &lease); err != nil {
-			return agent.BlackboardRecord{}, fmt.Errorf("blackboard: unmarshal lease: %w", err)
+			return agent.BlackboardRecord{}, sql.NullString{}, fmt.Errorf("blackboard: unmarshal lease: %w", err)
 		}
 		record.Lease = &lease
 	}
 
-	return record, nil
+	return record, leaseJSON, nil
 }
 
-func scanRecordFromRows(rows *sql.Rows) (agent.BlackboardRecord, error) {
-	var record agent.BlackboardRecord
-	var payloadJSON string
-	var casRef sql.NullString
-	var leaseJSON sql.NullString
-	if err := rows.Scan(&record.ID, &record.NS, &record.Topic, &record.TS, &record.TTLSec, &payloadJSON, &casRef, &leaseJSON); err != nil {
-		return agent.BlackboardRecord{}, fmt.Errorf("blackboard: scan: %w", err)
+func validatePayloadJSON(payload json.RawMessage) error {
+	if !json.Valid(payload) {
+		return fmt.Errorf("blackboard: invalid payload JSON")
 	}
-
-	// Set payload as RawMessage
-	record.Payload = json.RawMessage(payloadJSON)
-
-	// Set CAS ref if present
-	if casRef.Valid {
-		record.CASRef = casRef.String
-	}
-
-	// Parse lease if present
-	if leaseJSON.Valid && leaseJSON.String != "null" && leaseJSON.String != "" {
-		var lease agent.Lease
-		if err := json.Unmarshal([]byte(leaseJSON.String), &lease); err != nil {
-			return agent.BlackboardRecord{}, fmt.Errorf("blackboard: unmarshal lease: %w", err)
-		}
-		record.Lease = &lease
-	}
-
-	return record, nil
+	return nil
 }
 
 // ErrNotFound indicates the record was not found.
@@ -452,3 +465,6 @@ var ErrNotFound = errors.New("blackboard: not found")
 
 // ErrAlreadyLeased indicates the record is already leased.
 var ErrAlreadyLeased = errors.New("blackboard: already leased")
+
+// ErrInvalidLeaseDuration indicates a claim used a non-positive lease duration.
+var ErrInvalidLeaseDuration = errors.New("blackboard: invalid lease duration")

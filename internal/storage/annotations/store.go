@@ -111,6 +111,9 @@ func (s *Store) Save(ctx context.Context, ann *TurnAnnotation) error {
 	if strings.TrimSpace(ann.ContentHash) == "" {
 		return fmt.Errorf("annotations: save: missing content_hash")
 	}
+	if err := validateAnnotationInvariants(ann); err != nil {
+		return fmt.Errorf("annotations: save: %w", err)
+	}
 
 	now := timeutil.NowUTC()
 	if ann.CreatedAt.IsZero() {
@@ -497,15 +500,17 @@ WHERE EXISTS (SELECT 1 FROM json_each(turn_annotations.file_paths) WHERE value =
 		}
 		if firstSeen.Valid {
 			ts, err := sqlutil.ScanTimestamp(firstSeen.String)
-			if err == nil {
-				summary.FirstSeen = ts
+			if err != nil {
+				return nil, fmt.Errorf("annotations: summarize by file path first_seen: %w", err)
 			}
+			summary.FirstSeen = ts
 		}
 		if lastSeen.Valid {
 			ts, err := sqlutil.ScanTimestamp(lastSeen.String)
-			if err == nil {
-				summary.LastSeen = ts
+			if err != nil {
+				return nil, fmt.Errorf("annotations: summarize by file path last_seen: %w", err)
 			}
+			summary.LastSeen = ts
 		}
 		out = append(out, summary)
 	}
@@ -682,8 +687,14 @@ func scanAnnotation(row scannable) (*TurnAnnotation, error) {
 		return nil, fmt.Errorf("annotations: scan: %w", err)
 	}
 
-	ann.HasError = hasError == 1
-	ann.IsCompactBoundary = isCompactBoundary == 1
+	ann.HasError, err = scanBoolInt(hasError, "has_error")
+	if err != nil {
+		return nil, err
+	}
+	ann.IsCompactBoundary, err = scanBoolInt(isCompactBoundary, "is_compact_boundary")
+	if err != nil {
+		return nil, err
+	}
 	if contextWindowIndex.Valid {
 		ann.ContextWindowIndex = int(contextWindowIndex.Int64)
 	}
@@ -692,18 +703,27 @@ func scanAnnotation(row scannable) (*TurnAnnotation, error) {
 	}
 	if timestamp.Valid {
 		ts, err := sqlutil.ScanTimestamp(timestamp.String)
-		errs.Ignore(err, "parse annotations timestamp")
+		if err != nil {
+			return nil, fmt.Errorf("annotations: scan timestamp: %w", err)
+		}
 		ann.Timestamp = ts
 	}
-	if createdAt.Valid {
-		ts, err := sqlutil.ScanTimestamp(createdAt.String)
-		errs.Ignore(err, "parse annotations created_at")
-		ann.CreatedAt = ts
+	if !createdAt.Valid || strings.TrimSpace(createdAt.String) == "" {
+		return nil, fmt.Errorf("annotations: scan created_at: missing timestamp")
 	}
-	if updatedAt.Valid {
-		ts, err := sqlutil.ScanTimestamp(updatedAt.String)
-		errs.Ignore(err, "parse annotations updated_at")
-		ann.UpdatedAt = ts
+	ann.CreatedAt, err = sqlutil.ScanTimestamp(createdAt.String)
+	if err != nil {
+		return nil, fmt.Errorf("annotations: scan created_at: %w", err)
+	}
+	if !updatedAt.Valid || strings.TrimSpace(updatedAt.String) == "" {
+		return nil, fmt.Errorf("annotations: scan updated_at: missing timestamp")
+	}
+	ann.UpdatedAt, err = sqlutil.ScanTimestamp(updatedAt.String)
+	if err != nil {
+		return nil, fmt.Errorf("annotations: scan updated_at: %w", err)
+	}
+	if err := validateAnnotationInvariants(&ann); err != nil {
+		return nil, fmt.Errorf("annotations: scan invariant: %w", err)
 	}
 	if contentPreview.Valid {
 		ann.ContentPreview = contentPreview.String
@@ -730,25 +750,70 @@ func scanAnnotation(row scannable) (*TurnAnnotation, error) {
 		ann.EmbeddingText = embeddingText.String
 	}
 	if codeBlocks.Valid {
-		errs.Ignore(sqlutil.ScanJSON(codeBlocks.String, &ann.CodeBlocks), "parse code_blocks JSON")
+		if err := sqlutil.ScanJSON(codeBlocks.String, &ann.CodeBlocks); err != nil {
+			return nil, fmt.Errorf("annotations: scan code_blocks: %w", err)
+		}
 	}
 	if commands.Valid {
-		errs.Ignore(sqlutil.ScanJSON(commands.String, &ann.Commands), "parse commands JSON")
+		if err := sqlutil.ScanJSON(commands.String, &ann.Commands); err != nil {
+			return nil, fmt.Errorf("annotations: scan commands: %w", err)
+		}
 	}
 	if errorsJSON.Valid {
-		errs.Ignore(sqlutil.ScanJSON(errorsJSON.String, &ann.Errors), "parse errors JSON")
+		if err := sqlutil.ScanJSON(errorsJSON.String, &ann.Errors); err != nil {
+			return nil, fmt.Errorf("annotations: scan errors: %w", err)
+		}
 	}
 	if filePaths.Valid {
-		errs.Ignore(sqlutil.ScanJSON(filePaths.String, &ann.FilePaths), "parse file_paths JSON")
+		if err := sqlutil.ScanJSON(filePaths.String, &ann.FilePaths); err != nil {
+			return nil, fmt.Errorf("annotations: scan file_paths: %w", err)
+		}
 	}
 	if symbols.Valid {
-		errs.Ignore(sqlutil.ScanJSON(symbols.String, &ann.Symbols), "parse symbols JSON")
+		if err := sqlutil.ScanJSON(symbols.String, &ann.Symbols); err != nil {
+			return nil, fmt.Errorf("annotations: scan symbols: %w", err)
+		}
 	}
 	if toolsUsed.Valid {
-		errs.Ignore(sqlutil.ScanJSON(toolsUsed.String, &ann.ToolsUsed), "parse tools_used JSON")
+		if err := sqlutil.ScanJSON(toolsUsed.String, &ann.ToolsUsed); err != nil {
+			return nil, fmt.Errorf("annotations: scan tools_used: %w", err)
+		}
 	}
 
 	return &ann, nil
+}
+
+func validateAnnotationInvariants(ann *TurnAnnotation) error {
+	if ann.TurnIndex < 0 {
+		return fmt.Errorf("turn_index must be non-negative")
+	}
+	if ann.ContextWindowIndex < 0 {
+		return fmt.Errorf("context_window_index must be non-negative")
+	}
+	if ann.ByteOffset < 0 {
+		return fmt.Errorf("byte_offset must be non-negative")
+	}
+	if ann.ByteLength < 0 {
+		return fmt.Errorf("byte_length must be non-negative")
+	}
+	if ann.LineNum < 0 {
+		return fmt.Errorf("line_num must be non-negative")
+	}
+	if ann.PreCompactTokens < 0 {
+		return fmt.Errorf("pre_compact_tokens must be non-negative")
+	}
+	return nil
+}
+
+func scanBoolInt(value int, field string) (bool, error) {
+	switch value {
+	case 0:
+		return false, nil
+	case 1:
+		return true, nil
+	default:
+		return false, fmt.Errorf("annotations: scan %s: expected 0 or 1, got %d", field, value)
+	}
 }
 
 func scanAnnotations(rows *sql.Rows) ([]*TurnAnnotation, error) {

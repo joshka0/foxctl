@@ -306,11 +306,15 @@ func (s *TursoStore) SaveWithEmbedding(ctx context.Context, entry NamedEntry, em
 	if entry.Type == "" {
 		entry.Type = "result"
 	}
-	if strings.TrimSpace(entry.LifecycleState) == "" {
-		entry.LifecycleState = "active"
+	var err error
+	if entry.LifecycleState, err = normalizeMemoryLifecycleState(entry.LifecycleState); err != nil {
+		return NamedEntry{}, err
 	}
-	if strings.TrimSpace(entry.ReviewStatus) == "" {
-		entry.ReviewStatus = "unreviewed"
+	if entry.ReviewStatus, err = normalizeMemoryReviewStatus(entry.ReviewStatus); err != nil {
+		return NamedEntry{}, err
+	}
+	if err := validateMemoryTelemetryCounters(entry); err != nil {
+		return NamedEntry{}, err
 	}
 
 	// Validate embedding dimensions
@@ -497,11 +501,15 @@ func (s *TursoStore) Save(ctx context.Context, entry NamedEntry) (NamedEntry, er
 	if entry.Type == "" {
 		entry.Type = "result"
 	}
-	if strings.TrimSpace(entry.LifecycleState) == "" {
-		entry.LifecycleState = "active"
+	var err error
+	if entry.LifecycleState, err = normalizeMemoryLifecycleState(entry.LifecycleState); err != nil {
+		return NamedEntry{}, err
 	}
-	if strings.TrimSpace(entry.ReviewStatus) == "" {
-		entry.ReviewStatus = "unreviewed"
+	if entry.ReviewStatus, err = normalizeMemoryReviewStatus(entry.ReviewStatus); err != nil {
+		return NamedEntry{}, err
+	}
+	if err := validateMemoryTelemetryCounters(entry); err != nil {
+		return NamedEntry{}, err
 	}
 
 	digestsJSON, err := sqlutil.FormatJSON(entry.Digests)
@@ -1039,17 +1047,21 @@ func (s *TursoStore) UpdateLifecycle(ctx context.Context, name, workspace string
 	if err != nil {
 		return NamedEntry{}, err
 	}
-	if strings.TrimSpace(entry.LifecycleState) == "" {
-		entry.LifecycleState = "active"
-	}
-	if strings.TrimSpace(entry.ReviewStatus) == "" {
-		entry.ReviewStatus = "unreviewed"
-	}
 	if state := strings.TrimSpace(update.LifecycleState); state != "" {
-		entry.LifecycleState = state
+		entry.LifecycleState, err = normalizeMemoryLifecycleState(state)
+	} else {
+		entry.LifecycleState, err = normalizeMemoryLifecycleState(entry.LifecycleState)
+	}
+	if err != nil {
+		return NamedEntry{}, err
 	}
 	if status := strings.TrimSpace(update.ReviewStatus); status != "" {
-		entry.ReviewStatus = status
+		entry.ReviewStatus, err = normalizeMemoryReviewStatus(status)
+	} else {
+		entry.ReviewStatus, err = normalizeMemoryReviewStatus(entry.ReviewStatus)
+	}
+	if err != nil {
+		return NamedEntry{}, err
 	}
 	entry.SupersededBy = strings.TrimSpace(update.SupersededBy)
 	entry.ReviewNotes = strings.TrimSpace(update.ReviewNotes)

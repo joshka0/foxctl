@@ -1,6 +1,10 @@
 package toolutil
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"testing/quick"
+)
 
 func TestIsWriteOperation(t *testing.T) {
 	tests := []struct {
@@ -67,6 +71,30 @@ func TestIsReadOperation(t *testing.T) {
 				t.Errorf("expected %v, got %v", tt.expected, result)
 			}
 		})
+	}
+}
+
+func TestFSWriteCanonicalOperationsNeverClassifyAsReadProperty(t *testing.T) {
+	t.Parallel()
+
+	property := func(rawSuffix string) bool {
+		suffix := strings.TrimSpace(rawSuffix)
+		for _, prefix := range []string{"fs.write", "fs.create"} {
+			canonical := prefix + suffix
+			if !IsWriteOperation("", canonical, "") {
+				return false
+			}
+			if IsReadOperation("", canonical, "") {
+				return false
+			}
+			if ClassifyTool("", canonical, "") != KindWrite {
+				return false
+			}
+		}
+		return true
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatal(err)
 	}
 }
 

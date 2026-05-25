@@ -127,7 +127,7 @@ func SendMessage(ctx context.Context, store BoardStore, input SendMessageInput) 
 	if msg.Kind == "" {
 		msg.Kind = agent.BoardMessageKindInfo
 	}
-	if msg.Priority <= 0 {
+	if msg.Priority == 0 {
 		msg.Priority = agent.DefaultPriority
 	}
 	if err := store.SendMessage(ctx, msg); err != nil {

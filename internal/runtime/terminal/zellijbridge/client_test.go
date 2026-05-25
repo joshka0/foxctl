@@ -3,8 +3,11 @@ package zellijbridge
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"testing/quick"
 )
 
 type fakeRunner struct {
@@ -64,6 +67,60 @@ func TestCreatePaneBuildsNamedZellijNewPaneCommand(t *testing.T) {
 	}
 	if strings.Contains(cmd, "FOXCTL_ROOM_ID=") {
 		t.Fatalf("command %q unexpectedly contains FOXCTL_ROOM_ID", cmd)
+	}
+}
+
+func TestTTYRegistryFileSanitizesPathComponents(t *testing.T) {
+	got := TTYRegistryFile("../session", "agent/../../x")
+	root := filepath.Join(os.TempDir(), "foxctl-zellij-tty")
+	assertPathInsideRegistryRoot(t, root, got)
+
+	rel, err := filepath.Rel(root, got)
+	if err != nil {
+		t.Fatalf("Rel(%q, %q): %v", root, got, err)
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	if len(parts) != 2 {
+		t.Fatalf("registry path %q has %d relative components, want 2", got, len(parts))
+	}
+	if parts[0] == "." || parts[0] == ".." || parts[1] == "." || parts[1] == ".." {
+		t.Fatalf("registry path %q retained traversal segments", got)
+	}
+}
+
+func TestTTYRegistryFilePropertyStaysUnderRegistryRoot(t *testing.T) {
+	t.Parallel()
+
+	root := filepath.Join(os.TempDir(), "foxctl-zellij-tty")
+	property := func(rawSession, rawParticipant string) bool {
+		got := TTYRegistryFile(rawSession, rawParticipant)
+		if !assertPathInsideRegistryRootProperty(root, got) {
+			t.Logf("registry path %q escaped root %q", got, root)
+			return false
+		}
+		if filepath.Ext(got) != ".tty" {
+			t.Logf("registry path %q missing .tty extension", got)
+			return false
+		}
+		rel, err := filepath.Rel(root, got)
+		if err != nil {
+			t.Logf("Rel(%q, %q): %v", root, got, err)
+			return false
+		}
+		parts := strings.Split(rel, string(filepath.Separator))
+		if len(parts) != 2 {
+			t.Logf("registry path %q has %d relative components, want 2", got, len(parts))
+			return false
+		}
+		if parts[0] == "" || parts[1] == "" || parts[0] == "." || parts[0] == ".." {
+			t.Logf("registry path %q has unsafe relative components %v", got, parts)
+			return false
+		}
+		return true
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 250}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -242,4 +299,19 @@ func TestInterruptWritesEscape(t *testing.T) {
 	if runner.calls[0] != want {
 		t.Fatalf("call=%q want %q", runner.calls[0], want)
 	}
+}
+
+func assertPathInsideRegistryRoot(t *testing.T, root, candidate string) {
+	t.Helper()
+	if !assertPathInsideRegistryRootProperty(root, candidate) {
+		t.Fatalf("path %q escaped registry root %q", candidate, root)
+	}
+}
+
+func assertPathInsideRegistryRootProperty(root, candidate string) bool {
+	rel, err := filepath.Rel(root, candidate)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel))
 }

@@ -49,6 +49,10 @@ func DefaultScorerWeights() ScorerWeights {
 
 // Validate ensures weights sum to approximately 1.0 and are non-negative.
 func (w ScorerWeights) Validate() error {
+	if !finiteWeight(w.CriticalPath) || !finiteWeight(w.PageRank) || !finiteWeight(w.AdminMail) ||
+		!finiteWeight(w.OverseerMail) || !finiteWeight(w.Recency) {
+		return fmt.Errorf("weights must be finite")
+	}
 	if w.CriticalPath < 0 || w.PageRank < 0 || w.AdminMail < 0 ||
 		w.OverseerMail < 0 || w.Recency < 0 {
 		return fmt.Errorf("weights must be non-negative")
@@ -60,6 +64,10 @@ func (w ScorerWeights) Validate() error {
 	}
 
 	return nil
+}
+
+func finiteWeight(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
 }
 
 // Normalize adjusts weights to sum to 1.0.

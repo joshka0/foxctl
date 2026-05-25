@@ -2,9 +2,11 @@ package annotations
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/storage"
@@ -142,6 +144,181 @@ func TestListAndSummarizeByFilePath(t *testing.T) {
 	assert.Equal(t, t2, summaries[0].LastSeen)
 	assert.True(t, strings.Contains(summaries[0].Categories, "decision"))
 	assert.True(t, strings.Contains(summaries[0].Categories, "debug"))
+}
+
+func TestAnnotationReadsRejectCorruptTimestamps(t *testing.T) {
+	ctx := context.Background()
+
+	for _, column := range []string{"timestamp", "created_at", "updated_at"} {
+		t.Run(column, func(t *testing.T) {
+			store := openTestStore(t, ctx)
+			ann := testTurn("corrupt-"+column, "s1", 1, "decision", []string{"a.go"}, nil)
+			ann.Timestamp = time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+			require.NoError(t, store.Save(ctx, ann))
+
+			_, err := store.db.ExecContext(ctx, fmt.Sprintf(`
+				UPDATE turn_annotations SET %s = ? WHERE id = ?`, column),
+				"not-a-timestamp", ann.ID)
+			require.NoError(t, err)
+
+			_, err = store.Get(ctx, ann.ID)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), column)
+		})
+	}
+}
+
+func TestAnnotationReadsRejectCorruptJSONColumns(t *testing.T) {
+	ctx := context.Background()
+
+	for _, column := range []string{"code_blocks", "commands", "errors", "file_paths", "symbols", "tools_used"} {
+		t.Run(column, func(t *testing.T) {
+			store := openTestStore(t, ctx)
+			ann := testTurn("corrupt-"+column, "s1", 1, "decision", []string{"a.go"}, []any{"error"})
+			ann.CodeBlocks = []any{map[string]any{"language": "go"}}
+			ann.Commands = []any{map[string]any{"tool": "bash"}}
+			ann.Symbols = []any{map[string]any{"name": "main"}}
+			ann.ToolsUsed = []string{"bash"}
+			require.NoError(t, store.Save(ctx, ann))
+
+			_, err := store.db.ExecContext(ctx, fmt.Sprintf(`
+				UPDATE turn_annotations SET %s = ? WHERE id = ?`, column),
+				"{", ann.ID)
+			require.NoError(t, err)
+
+			_, err = store.Get(ctx, ann.ID)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), column)
+		})
+	}
+}
+
+func TestAnnotationSaveRejectsNegativeSourceCoordinates(t *testing.T) {
+	ctx := context.Background()
+
+	for _, tt := range []struct {
+		name   string
+		mutate func(*storage.TurnAnnotation)
+		want   string
+	}{
+		{name: "turn index", mutate: func(ann *storage.TurnAnnotation) { ann.TurnIndex = -1 }, want: "turn_index"},
+		{name: "context window index", mutate: func(ann *storage.TurnAnnotation) { ann.ContextWindowIndex = -1 }, want: "context_window_index"},
+		{name: "byte offset", mutate: func(ann *storage.TurnAnnotation) { ann.ByteOffset = -1 }, want: "byte_offset"},
+		{name: "byte length", mutate: func(ann *storage.TurnAnnotation) { ann.ByteLength = -1 }, want: "byte_length"},
+		{name: "line number", mutate: func(ann *storage.TurnAnnotation) { ann.LineNum = -1 }, want: "line_num"},
+		{name: "pre compact tokens", mutate: func(ann *storage.TurnAnnotation) { ann.PreCompactTokens = -1 }, want: "pre_compact_tokens"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			store := openTestStore(t, ctx)
+			ann := testTurn("invalid-"+strings.ReplaceAll(tt.want, "_", "-"), "s1", 1, "decision", []string{"a.go"}, nil)
+			tt.mutate(ann)
+
+			err := store.Save(ctx, ann)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.want)
+
+			count, err := store.Count(ctx)
+			require.NoError(t, err)
+			require.Equal(t, 0, count)
+		})
+	}
+}
+
+func TestAnnotationReadsRejectCorruptInvariants(t *testing.T) {
+	ctx := context.Background()
+
+	for _, tt := range []struct {
+		column string
+		value  any
+		want   string
+	}{
+		{column: "turn_index", value: -1, want: "turn_index"},
+		{column: "context_window_index", value: -1, want: "context_window_index"},
+		{column: "byte_offset", value: -1, want: "byte_offset"},
+		{column: "byte_length", value: -1, want: "byte_length"},
+		{column: "line_num", value: -1, want: "line_num"},
+		{column: "pre_compact_tokens", value: -1, want: "pre_compact_tokens"},
+		{column: "has_error", value: 2, want: "has_error"},
+		{column: "is_compact_boundary", value: 2, want: "is_compact_boundary"},
+		{column: "created_at", value: "", want: "created_at"},
+		{column: "updated_at", value: "", want: "updated_at"},
+	} {
+		t.Run(tt.column, func(t *testing.T) {
+			store := openTestStore(t, ctx)
+			ann := testTurn("corrupt-"+tt.column, "s1", 1, "decision", []string{"a.go"}, nil)
+			require.NoError(t, store.Save(ctx, ann))
+
+			_, err := store.db.ExecContext(ctx, fmt.Sprintf(`
+				UPDATE turn_annotations SET %s = ? WHERE id = ?`, tt.column),
+				tt.value, ann.ID)
+			require.NoError(t, err)
+
+			_, err = store.Get(ctx, ann.ID)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.want)
+
+			_, err = store.ListBySession(ctx, "s1")
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.want)
+		})
+	}
+}
+
+func TestValidateAnnotationInvariantsProperty(t *testing.T) {
+	rejectsGeneratedNegativeCoordinates := func(raw uint16, selector uint8) bool {
+		ann := testTurn("generated", "s1", 1, "decision", nil, nil)
+		negative := -int(raw) - 1
+		switch selector % 6 {
+		case 0:
+			ann.TurnIndex = negative
+		case 1:
+			ann.ContextWindowIndex = negative
+		case 2:
+			ann.ByteOffset = int64(negative)
+		case 3:
+			ann.ByteLength = int64(negative)
+		case 4:
+			ann.LineNum = negative
+		default:
+			ann.PreCompactTokens = negative
+		}
+		return validateAnnotationInvariants(ann) != nil
+	}
+	if err := quick.Check(rejectsGeneratedNegativeCoordinates, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("negative annotation coordinate property failed: %v", err)
+	}
+
+	acceptsGeneratedNonNegativeCoordinates := func(raw uint16) bool {
+		value := int(raw)
+		ann := testTurn("generated", "s1", value, "decision", nil, nil)
+		ann.ContextWindowIndex = value
+		ann.ByteOffset = int64(value)
+		ann.ByteLength = int64(value)
+		ann.LineNum = value
+		ann.PreCompactTokens = value
+		return validateAnnotationInvariants(ann) == nil
+	}
+	if err := quick.Check(acceptsGeneratedNonNegativeCoordinates, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("nonnegative annotation coordinate property failed: %v", err)
+	}
+}
+
+func TestSummarizeByFilePathRejectsCorruptTimestamps(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, ctx)
+
+	ann := testTurn("summary-corrupt-time", "s1", 1, "decision", []string{"a.go"}, nil)
+	ann.Timestamp = time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	require.NoError(t, store.Save(ctx, ann))
+
+	_, err := store.db.ExecContext(ctx, `
+		UPDATE turn_annotations SET timestamp = ? WHERE id = ?`,
+		"not-a-timestamp", ann.ID)
+	require.NoError(t, err)
+
+	_, err = store.SummarizeByFilePath(ctx, "a.go", nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "first_seen")
 }
 
 func TestCountByCategory(t *testing.T) {

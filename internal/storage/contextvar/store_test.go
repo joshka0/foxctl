@@ -3,7 +3,10 @@ package contextvar
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 )
 
@@ -186,6 +189,102 @@ func TestStore_Query(t *testing.T) {
 	}
 }
 
+func TestStore_KeyPrefixTreatsSQLWildcardsAsLiteralCharacters(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+	tests := []struct {
+		name   string
+		prefix string
+		hit    string
+		miss   string
+	}{
+		{name: "percent", prefix: "literal%", hit: "literal%/hit", miss: "literalX/miss"},
+		{name: "underscore", prefix: "literal_", hit: "literal_/hit", miss: "literalX/miss"},
+		{name: "backslash", prefix: `literal\`, hit: `literal\hit`, miss: "literalXmiss"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			convID := "test-conv-prefix-" + tt.name
+			for _, key := range []string{tt.hit, tt.miss} {
+				if _, err := store.Put(ctx, PutParams{
+					ConversationID: convID,
+					Scope:          ScopeConversation,
+					Key:            key,
+					Value:          key,
+					Source:         "test",
+				}); err != nil {
+					t.Fatalf("Put %q failed: %v", key, err)
+				}
+			}
+
+			result, err := store.Query(ctx, QueryParams{
+				ConversationID: convID,
+				KeyPrefix:      tt.prefix,
+			})
+			if err != nil {
+				t.Fatalf("Query failed: %v", err)
+			}
+			if len(result.Variables) != 1 || result.Variables[0].Key != tt.hit {
+				t.Fatalf("KeyPrefix %q matched %v, want only %q", tt.prefix, variableKeys(result.Variables), tt.hit)
+			}
+		})
+	}
+}
+
+func TestStorePropertyKeyPrefixEscapesSQLWildcards(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+	caseID := 0
+	wildcards := []byte{'%', '_', '\\'}
+
+	property := func(rawStem, rawSuffix string, wildcardSeed uint8) bool {
+		stem := "key" + safeContextKeyToken(rawStem)
+		suffix := safeContextKeyToken(rawSuffix)
+		wildcard := string([]byte{wildcards[int(wildcardSeed)%len(wildcards)]})
+		convID := fmt.Sprintf("test-conv-prefix-property-%d", caseID)
+		caseID++
+
+		prefix := stem + wildcard
+		hit := prefix + suffix
+		miss := stem + "x" + suffix
+		for _, key := range []string{hit, miss} {
+			if _, err := store.Put(ctx, PutParams{
+				ConversationID: convID,
+				Scope:          ScopeConversation,
+				Key:            key,
+				Value:          key,
+				Source:         "test",
+			}); err != nil {
+				t.Logf("Put %q failed: %v", key, err)
+				return false
+			}
+		}
+
+		result, err := store.Query(ctx, QueryParams{
+			ConversationID: convID,
+			KeyPrefix:      prefix,
+		})
+		if err != nil {
+			t.Logf("Query prefix %q failed: %v", prefix, err)
+			return false
+		}
+		if len(result.Variables) != 1 || result.Variables[0].Key != hit {
+			t.Logf("KeyPrefix %q matched %v, want only %q", prefix, variableKeys(result.Variables), hit)
+			return false
+		}
+		return true
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("KeyPrefix wildcard escaping property failed: %v", err)
+	}
+}
+
 func TestStore_Scopes(t *testing.T) {
 	store := setupTestStore(t)
 	defer store.Close()
@@ -351,6 +450,81 @@ func TestStore_TTLExpiration(t *testing.T) {
 	}
 }
 
+func TestStore_PutRejectsNegativeTTL(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+	convID := "test-conv-negative-ttl"
+	if _, err := store.Put(ctx, PutParams{
+		ConversationID: convID,
+		Scope:          ScopeConversation,
+		Key:            "negative_ttl",
+		Value:          "should not persist",
+		Source:         "test",
+		TTL:            -time.Second,
+	}); err == nil {
+		t.Fatal("Put accepted negative TTL")
+	}
+
+	if _, err := store.GetByKey(ctx, convID, ScopeConversation, "negative_ttl"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetByKey after rejected negative TTL error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestStore_PutZeroTTLDoesNotExpire(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+	convID := "test-conv-zero-ttl"
+	v, err := store.Put(ctx, PutParams{
+		ConversationID: convID,
+		Scope:          ScopeConversation,
+		Key:            "zero_ttl",
+		Value:          "persistent",
+		Source:         "test",
+		TTL:            0,
+	})
+	if err != nil {
+		t.Fatalf("Put zero TTL failed: %v", err)
+	}
+	if v.ExpiresAt != nil {
+		t.Fatalf("ExpiresAt=%v want nil for zero TTL", v.ExpiresAt)
+	}
+}
+
+func TestStore_RejectsCorruptStoredValueJSON(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+
+	ctx := context.Background()
+	convID := "test-conv-corrupt-json"
+	v, err := store.Put(ctx, PutParams{
+		ConversationID: convID,
+		Scope:          ScopeConversation,
+		Key:            "corrupt_value",
+		Value:          map[string]string{"ok": "true"},
+		Source:         "test",
+	})
+	if err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	if _, err := store.DB().ExecContext(ctx, `
+		UPDATE context_variables SET value_json = $1 WHERE id = $2
+	`, "{", v.ID); err != nil {
+		t.Fatalf("corrupt value_json: %v", err)
+	}
+
+	_, err = store.Get(ctx, v.ID)
+	requireErrorContains(t, "Get", err, "value_json")
+	_, err = store.GetByKey(ctx, convID, ScopeConversation, "corrupt_value")
+	requireErrorContains(t, "GetByKey", err, "value_json")
+	_, err = store.Query(ctx, QueryParams{ConversationID: convID, Key: "corrupt_value"})
+	requireErrorContains(t, "Query", err, "value_json")
+}
+
 func TestStore_ListKeys(t *testing.T) {
 	store := setupTestStore(t)
 	defer store.Close()
@@ -486,4 +660,43 @@ func setupTestStore(t *testing.T) Store {
 	}
 
 	return store
+}
+
+func variableKeys(vars []Variable) []string {
+	keys := make([]string, len(vars))
+	for i, v := range vars {
+		keys[i] = v.Key
+	}
+	return keys
+}
+
+func safeContextKeyToken(raw string) string {
+	var b strings.Builder
+	for _, r := range raw {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		}
+		if b.Len() >= 16 {
+			break
+		}
+	}
+	if b.Len() == 0 {
+		return "x"
+	}
+	return b.String()
+}
+
+func requireErrorContains(t *testing.T, operation string, err error, want string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("%s error = nil, want error containing %q", operation, want)
+	}
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("%s error = %v, want it to contain %q", operation, err, want)
+	}
 }

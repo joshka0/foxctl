@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"math"
 	"math/rand"
 	"os"
 	"strconv"
@@ -90,7 +91,7 @@ func DefaultSampler() *TailSampler {
 // [[invariant:rate-clamped-0-to-1]]
 // [[domain:observability-sampling]]
 func NewTailSampler(sampleErrors bool, slowThresholdMS int64, randomRate float64) *TailSampler {
-	if randomRate < 0 {
+	if math.IsNaN(randomRate) || randomRate < 0 {
 		randomRate = 0
 	}
 	if randomRate > 1 {

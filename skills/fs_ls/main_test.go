@@ -57,6 +57,33 @@ func TestFsLsListsEntries(t *testing.T) {
 	}
 }
 
+func TestReadDirSkipsSymlinkEntries(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "outside.txt")
+	if err := os.WriteFile(outsideFile, []byte("secret"), 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	if err := os.Symlink(outsideFile, filepath.Join(dir, "outside-link.txt")); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	entries, err := readDir(dir, Input{ShowHidden: true})
+	if err != nil {
+		t.Fatalf("readDir: %v", err)
+	}
+
+	if len(entries) != 1 {
+		t.Fatalf("entry count=%d want 1: %#v", len(entries), entries)
+	}
+	if entries[0].Name != "file.txt" {
+		t.Fatalf("entry=%q want file.txt", entries[0].Name)
+	}
+}
+
 func newTestRunContext(t *testing.T, stdout *bytes.Buffer, workspace string) *skillmain.RunContext {
 	t.Helper()
 	state := t.TempDir()

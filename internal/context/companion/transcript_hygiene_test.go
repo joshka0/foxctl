@@ -3,6 +3,7 @@ package companion
 import (
 	"strings"
 	"testing"
+	"testing/quick"
 )
 
 func TestNormalizeTranscriptTurnText_DropsControlArtifacts(t *testing.T) {
@@ -14,6 +15,39 @@ func TestNormalizeTranscriptTurnText_DropsControlArtifacts(t *testing.T) {
 		if got := NormalizeTranscriptTurnText(input); got != "" {
 			t.Fatalf("NormalizeTranscriptTurnText(%q) = %q, want empty", input, got)
 		}
+	}
+}
+
+func TestTranscriptControlTextPropertyDropsGeneratedPrefixedArtifacts(t *testing.T) {
+	t.Parallel()
+
+	prefixes := []string{
+		"<subagent_notification>",
+		"<turn_aborted>",
+		"# AGENTS.md instructions for ",
+		"{\"status\":{",
+		"{\"agent_id\":",
+	}
+	property := func(raw string, prefixSeed uint8) bool {
+		prefix := prefixes[int(prefixSeed)%len(prefixes)]
+		payload := "payload-" + strings.ToValidUTF8(raw, "\uFFFD")
+		if len(payload) > 160 {
+			payload = payload[:160]
+			payload = strings.ToValidUTF8(payload, "\uFFFD")
+		}
+		input := " \n\t" + prefix + payload
+		if !IsTranscriptControlText(input) {
+			t.Logf("IsTranscriptControlText(%q)=false", input)
+			return false
+		}
+		if got := NormalizeTranscriptTurnText(input); got != "" {
+			t.Logf("NormalizeTranscriptTurnText(%q)=%q want empty", input, got)
+			return false
+		}
+		return true
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatal(err)
 	}
 }
 

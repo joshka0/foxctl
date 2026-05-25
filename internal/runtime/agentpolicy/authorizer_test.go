@@ -1,7 +1,9 @@
 package agentpolicy
 
 import (
+	"fmt"
 	"testing"
+	"testing/quick"
 )
 
 func TestParseCommand(t *testing.T) {
@@ -23,6 +25,18 @@ func TestParseCommand(t *testing.T) {
 			command:    "/usr/local/bin/foxctl run code/semantic_search",
 			wantFoxctl: true,
 			wantSkill:  "code/semantic_search",
+		},
+		{
+			name:       "relative foxctl path is not trusted",
+			command:    "./foxctl run code/symbols",
+			wantFoxctl: false,
+			wantSkill:  "",
+		},
+		{
+			name:       "workspace foxctl path is not trusted",
+			command:    "tools/foxctl run code/symbols",
+			wantFoxctl: false,
+			wantSkill:  "",
 		},
 		{
 			name:        "foxctl with env vars",
@@ -275,6 +289,260 @@ func TestAuthorizeBash(t *testing.T) {
 	}
 }
 
+func TestAuthorizeBashRestrictedProfilesBlockShellControlOperators(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{
+			name:    "semicolon chain",
+			command: "foxctl run code/symbols ; rm -rf /tmp/workspace",
+		},
+		{
+			name:    "and chain",
+			command: "foxctl run code/symbols && rm -rf /tmp/workspace",
+		},
+		{
+			name:    "or chain",
+			command: "foxctl run code/symbols || rm -rf /tmp/workspace",
+		},
+		{
+			name:    "pipe",
+			command: "foxctl run code/symbols | sh",
+		},
+		{
+			name:    "background command",
+			command: "foxctl run code/symbols & rm -rf /tmp/workspace",
+		},
+		{
+			name:    "newline chain",
+			command: "foxctl run code/symbols\nrm -rf /tmp/workspace",
+		},
+		{
+			name:    "stdout redirect",
+			command: "foxctl run code/symbols > /tmp/out",
+		},
+		{
+			name:    "stdin redirect",
+			command: "foxctl run code/symbols < /etc/passwd",
+		},
+		{
+			name:    "command substitution",
+			command: "FOXCTL_WORKSPACE=$(rm -rf /tmp/workspace) foxctl run code/symbols",
+		},
+		{
+			name:    "backtick substitution",
+			command: "FOXCTL_WORKSPACE=`rm -rf /tmp/workspace` foxctl run code/symbols",
+		},
+		{
+			name:    "command substitution inside double quotes",
+			command: `foxctl run code/symbols --input "$(rm -rf /tmp/workspace)"`,
+		},
+	}
+
+	for _, profile := range []Profile{ProfileExplorer, ProfileReviewer, ProfileImplementer, Profile("unknown")} {
+		for _, tt := range tests {
+			t.Run(fmt.Sprintf("%s/%s", profile, tt.name), func(t *testing.T) {
+				result := AuthorizeBash(profile, tt.command)
+				if result.Decision != DecisionBlock {
+					t.Fatalf("AuthorizeBash(%q, %q) = %s, want block", profile, tt.command, result.Decision)
+				}
+			})
+		}
+	}
+}
+
+func TestAuthorizeBashRestrictedProfilesBlockUnsafeEnvAssignments(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{
+			name:    "path can change command resolution",
+			command: "PATH=/tmp/malicious foxctl run code/symbols",
+		},
+		{
+			name:    "bash_env can source arbitrary shell code",
+			command: "BASH_ENV=/tmp/payload foxctl run code/symbols",
+		},
+		{
+			name:    "ld_preload can inject code",
+			command: "LD_PRELOAD=/tmp/libpayload.so foxctl run code/symbols",
+		},
+		{
+			name:    "arbitrary env var is outside the restricted contract",
+			command: "FOO=bar foxctl run code/symbols",
+		},
+		{
+			name:    "mixed allowed and unsafe env vars",
+			command: "FOXCTL_WORKSPACE=/repo PATH=/tmp/malicious foxctl run code/symbols",
+		},
+	}
+
+	for _, profile := range []Profile{ProfileExplorer, ProfileReviewer, ProfileImplementer, Profile("unknown")} {
+		for _, tt := range tests {
+			t.Run(fmt.Sprintf("%s/%s", profile, tt.name), func(t *testing.T) {
+				result := AuthorizeBash(profile, tt.command)
+				if result.Decision != DecisionBlock {
+					t.Fatalf("AuthorizeBash(%q, %q) = %s, want block", profile, tt.command, result.Decision)
+				}
+			})
+		}
+	}
+}
+
+func TestAuthorizeBashRestrictedProfilesAllowFoxctlWorkspaceEnvAssignment(t *testing.T) {
+	t.Parallel()
+
+	command := "FOXCTL_WORKSPACE=/repo foxctl run code/symbols"
+	result := AuthorizeBash(ProfileExplorer, command)
+	if result.Decision != DecisionAllow {
+		t.Fatalf("AuthorizeBash(%q) = %s (%s), want allow", command, result.Decision, result.Reason)
+	}
+	if result.ParsedSkill != "code/symbols" {
+		t.Fatalf("ParsedSkill = %q, want %q", result.ParsedSkill, "code/symbols")
+	}
+}
+
+func TestAuthorizeBashRestrictedProfilesBlockWorkspaceLocalFoxctlPath(t *testing.T) {
+	t.Parallel()
+
+	for _, command := range []string{
+		"./foxctl run code/symbols",
+		"tools/foxctl run code/symbols",
+		"../bin/foxctl run code/symbols",
+	} {
+		result := AuthorizeBash(ProfileExplorer, command)
+		if result.Decision != DecisionBlock {
+			t.Fatalf("AuthorizeBash(%q) = %s, want block for workspace-local foxctl path", command, result.Decision)
+		}
+	}
+}
+
+func TestAuthorizeBashPropertyRestrictedProfilesBlockNonAllowlistedEnv(t *testing.T) {
+	t.Parallel()
+
+	profiles := []Profile{ProfileExplorer, ProfileReviewer, ProfileImplementer, Profile("unknown")}
+	cfg := &quick.Config{MaxCount: 200}
+	err := quick.Check(func(raw string, profileSeed uint8) bool {
+		envName := nonAllowlistedEnvName(raw)
+		profile := profiles[int(profileSeed)%len(profiles)]
+		command := fmt.Sprintf("%s=value foxctl run code/symbols", envName)
+		result := AuthorizeBash(profile, command)
+		if result.Decision != DecisionBlock {
+			t.Logf("AuthorizeBash(%q, %q) = %s, want block", profile, command, result.Decision)
+			return false
+		}
+		return true
+	}, cfg)
+	if err != nil {
+		t.Fatalf("restricted env allowlist property failed: %v", err)
+	}
+}
+
+func TestAuthorizeBashRestrictedProfilesAllowShellPunctuationInsideSingleQuotedInput(t *testing.T) {
+	t.Parallel()
+
+	command := `foxctl run code/symbols --input '{"pattern":"a;b && c || d | e > f < g $(literal) ` + "`literal`" + `"}'`
+	result := AuthorizeBash(ProfileExplorer, command)
+	if result.Decision != DecisionAllow {
+		t.Fatalf("AuthorizeBash(%q) = %s (%s), want allow", command, result.Decision, result.Reason)
+	}
+	if result.ParsedSkill != "code/symbols" {
+		t.Fatalf("ParsedSkill = %q, want %q", result.ParsedSkill, "code/symbols")
+	}
+}
+
+func nonAllowlistedEnvName(raw string) string {
+	cleaned := make([]rune, 0, len(raw))
+	for _, r := range raw {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			cleaned = append(cleaned, r)
+		case r >= 'a' && r <= 'z':
+			cleaned = append(cleaned, r-'a'+'A')
+		case r >= '0' && r <= '9':
+			cleaned = append(cleaned, r)
+		case r == '_':
+			cleaned = append(cleaned, r)
+		}
+	}
+	if len(cleaned) == 0 || (cleaned[0] >= '0' && cleaned[0] <= '9') {
+		cleaned = append([]rune{'F'}, cleaned...)
+	}
+	name := string(cleaned)
+	if name == "FOXCTL_WORKSPACE" {
+		return "FOXCTL_WORKSPACE_"
+	}
+	return name
+}
+
+func TestAuthorizeBashRestrictedProfilesBlockIncompleteShellSyntax(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{
+			name:    "unclosed double quote hides chain operator",
+			command: `foxctl run code/symbols " ; rm -rf /tmp/workspace`,
+		},
+		{
+			name:    "unclosed single quote hides chain operator",
+			command: `foxctl run code/symbols ' ; rm -rf /tmp/workspace`,
+		},
+		{
+			name:    "unclosed quoted allowed skill",
+			command: `foxctl run "code/symbols`,
+		},
+		{
+			name:    "unclosed env assignment",
+			command: `FOXCTL_WORKSPACE="/tmp foxctl run code/symbols`,
+		},
+		{
+			name:    "trailing escape",
+			command: "foxctl run code/symbols \\",
+		},
+	}
+
+	for _, profile := range []Profile{ProfileExplorer, ProfileReviewer, ProfileImplementer, Profile("unknown")} {
+		for _, tt := range tests {
+			t.Run(fmt.Sprintf("%s/%s", profile, tt.name), func(t *testing.T) {
+				result := AuthorizeBash(profile, tt.command)
+				if result.Decision != DecisionBlock {
+					t.Fatalf("AuthorizeBash(%q, %q) = %s, want block", profile, tt.command, result.Decision)
+				}
+			})
+		}
+	}
+}
+
+func TestAuthorizeBashPropertyRestrictedProfilesNeverAllowUnquotedShellControl(t *testing.T) {
+	t.Parallel()
+
+	operators := []string{";", "&&", "||", "|", "&", "\n", "\r", ">", "<", "$(echo x)", "`echo x`"}
+	profiles := []Profile{ProfileExplorer, ProfileReviewer, ProfileImplementer, Profile("unknown")}
+	skills := []string{"code/symbols", "code/semantic_search", "test/run"}
+
+	cfg := &quick.Config{MaxCount: 200}
+	err := quick.Check(func(profileSeed, skillSeed, operatorSeed uint8) bool {
+		profile := profiles[int(profileSeed)%len(profiles)]
+		skill := skills[int(skillSeed)%len(skills)]
+		operator := operators[int(operatorSeed)%len(operators)]
+
+		command := fmt.Sprintf("foxctl run %s %s echo escaped", skill, operator)
+		return AuthorizeBash(profile, command).Decision == DecisionBlock
+	}, cfg)
+	if err != nil {
+		t.Fatalf("restricted shell-control property failed: %v", err)
+	}
+}
+
 func TestIsSkillAllowed(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -303,6 +571,35 @@ func TestIsSkillAllowed(t *testing.T) {
 				t.Errorf("IsSkillAllowed(%q, %q) = %v, want %v", tt.profile, tt.skill, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestIsSkillAllowedDomainProfileHierarchy(t *testing.T) {
+	t.Parallel()
+
+	explorerSkills := GetAllowedSkillNames(ProfileExplorer)
+	reviewerSkills := GetAllowedSkillNames(ProfileReviewer)
+	implementerSkills := GetAllowedSkillNames(ProfileImplementer)
+
+	for _, skill := range explorerSkills {
+		if !IsSkillAllowed(ProfileReviewer, skill) {
+			t.Fatalf("reviewer must include explorer skill %q", skill)
+		}
+		if !IsSkillAllowed(ProfileImplementer, skill) {
+			t.Fatalf("implementer must include explorer skill %q", skill)
+		}
+	}
+
+	for _, skill := range reviewerSkills {
+		if !IsSkillAllowed(ProfileImplementer, skill) {
+			t.Fatalf("implementer must include reviewer skill %q", skill)
+		}
+	}
+
+	for _, skill := range implementerSkills {
+		if IsSkillAllowed(Profile("unknown"), skill) {
+			t.Fatalf("unknown restricted profile must not allow known skill %q", skill)
+		}
 	}
 }
 

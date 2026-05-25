@@ -159,6 +159,12 @@ func ApplySplit(state *SolverState, parentID string, plan SplitPlan) ([]string, 
 	if plan.Strategy == SplitStrategyNone {
 		return nil, nil
 	}
+	if plan.ChunkCount < 1 || plan.ChunkCount > SplitMaxSubItems {
+		return nil, fmt.Errorf("generalsolver: split chunk count %d outside allowed range 1..%d", plan.ChunkCount, SplitMaxSubItems)
+	}
+	if parent.Payload == nil {
+		return nil, fmt.Errorf("generalsolver: parent item %q has no payload to split", parentID)
+	}
 
 	// Generate sub-item IDs.
 	parseID := parentID + "__parse"

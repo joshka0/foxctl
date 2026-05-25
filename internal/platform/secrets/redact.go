@@ -14,6 +14,8 @@ var (
 	apiKeyPattern        = regexp.MustCompile(`(?i)(["']?(?:api[_-]?key|apikey)["']?\s*[:=]\s*["']?)([A-Za-z0-9\-._~+/]{20,})`)
 	secretPattern        = regexp.MustCompile(`(?i)(["']?secret["']?\s*[:=]\s*["']?)([A-Za-z0-9\-._~+/]{16,})`)
 	tokenPattern         = regexp.MustCompile(`(?i)(["']?token["']?\s*[:=]\s*["']?)([A-Za-z0-9\-._~+/]{20,})`)
+	authValuePattern     = regexp.MustCompile(`(?i)(["']?(?:auth|authorization)["']?\s*[:=]\s*(?:(?:Bearer|Basic)\s+)?["']?)([^"'\s,}]+)`)
+	sensitiveKeyPattern  = regexp.MustCompile(`(?i)(["']?(?:[a-z0-9_-]*credential[a-z0-9_-]*|[a-z0-9_-]*secret[a-z0-9_-]*|(?:access|refresh)[_-]?token|private[_-]?key|encryption[_-]?key|signing[_-]?key|ssh[_-]?key|ssl[_-]?key)["']?\s*[:=]\s*["']?)([^"'\s,}]+)`)
 	jwtPattern           = regexp.MustCompile(`eyJ[A-Za-z0-9\-_]+\.eyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+`)
 	slackTokenPattern    = regexp.MustCompile(`xox[baprs]-[0-9]{10,13}-[0-9]{10,13}-[A-Za-z0-9]{24,32}`)
 	stripeKeyPattern     = regexp.MustCompile(`(?:r|s)k_(live|test)_[0-9a-zA-Z]{24,99}`)
@@ -36,11 +38,13 @@ func Redact(text string) string {
 	result = passwordPattern.ReplaceAllString(result, `${1}***`)
 	result = apiKeyPattern.ReplaceAllString(result, `${1}***`)
 	result = secretPattern.ReplaceAllString(result, `${1}***`)
+	result = authValuePattern.ReplaceAllString(result, `${1}***`)
+	result = sensitiveKeyPattern.ReplaceAllString(result, `${1}***`)
 	result = jwtPattern.ReplaceAllString(result, "eyJ***.eyJ***.***")
 	result = slackTokenPattern.ReplaceAllString(result, "xox*-***")
 	result = tokenPattern.ReplaceAllString(result, `${1}***`)
 	result = stripeKeyPattern.ReplaceAllString(result, "*k_***_***")
-	result = dockerAuthPattern.ReplaceAllString(result, `${1}***"`)
+	result = dockerAuthPattern.ReplaceAllString(result, `${1}***`)
 	return result
 }
 
@@ -128,6 +132,7 @@ func RedactHeaders(headers map[string]string) map[string]string {
 }
 
 func isAuthHeader(header string) bool {
+	header = strings.ToLower(strings.TrimSpace(header))
 	authHeaders := []string{
 		"authorization",
 		"x-api-key",
@@ -139,6 +144,33 @@ func isAuthHeader(header string) bool {
 	}
 	for _, ah := range authHeaders {
 		if header == ah {
+			return true
+		}
+	}
+	sensitiveFragments := []string{
+		"api-key",
+		"api_key",
+		"apikey",
+		"api-token",
+		"api_token",
+		"access-token",
+		"access_token",
+		"auth-token",
+		"auth_token",
+		"security-token",
+		"security_token",
+		"session-token",
+		"session_token",
+		"csrf-token",
+		"csrf_token",
+		"xsrf-token",
+		"xsrf_token",
+		"client-secret",
+		"client_secret",
+		"credential",
+	}
+	for _, fragment := range sensitiveFragments {
+		if strings.Contains(header, fragment) {
 			return true
 		}
 	}

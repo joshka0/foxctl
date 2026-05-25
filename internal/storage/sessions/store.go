@@ -176,6 +176,11 @@ func (s *Store) Save(ctx context.Context, session Session) (Session, error) {
 	if session.Status == "" {
 		session.Status = StatusOK
 	}
+	if normalizedStatus, err := normalizeSessionStatus(session.Status, true); err != nil {
+		return Session{}, err
+	} else {
+		session.Status = normalizedStatus
+	}
 
 	// Ensure workspace_id is populated for stable cross-machine lookups.
 	// WorkspacePath remains for display and local tooling.
@@ -770,6 +775,12 @@ func (s *Store) GetActive(ctx context.Context, workspace, agentID string) (*Sess
 // SetStatus updates a session's status.
 // If the status is terminal (ok, error, canceled), also sets ended_at.
 func (s *Store) SetStatus(ctx context.Context, id, status string) error {
+	normalizedStatus, err := normalizeSessionStatus(status, false)
+	if err != nil {
+		return err
+	}
+	status = normalizedStatus
+
 	now := sqlutil.FormatTimestamp(timeutil.NowUTC())
 
 	var query string
@@ -802,6 +813,12 @@ func (s *Store) SetStatus(ctx context.Context, id, status string) error {
 // SetStatusWithError updates a session's status and error message.
 // If the status is terminal (ok, error, canceled), also sets ended_at.
 func (s *Store) SetStatusWithError(ctx context.Context, id, status, errorMessage string) error {
+	normalizedStatus, err := normalizeSessionStatus(status, false)
+	if err != nil {
+		return err
+	}
+	status = normalizedStatus
+
 	now := sqlutil.FormatTimestamp(timeutil.NowUTC())
 
 	var query string
@@ -2645,8 +2662,29 @@ func scanTurns(rows *sql.Rows) ([]SessionTurn, error) {
 	return turns, nil
 }
 
-// ErrNotFound indicates a session was not found.
-var ErrNotFound = fmt.Errorf("sessions: not found")
+var (
+	// ErrNotFound indicates a session was not found.
+	ErrNotFound = fmt.Errorf("sessions: not found")
+	// ErrInvalidStatus indicates a session lifecycle status is not recognized.
+	ErrInvalidStatus = fmt.Errorf("sessions: invalid status")
+)
+
+func normalizeSessionStatus(status string, defaultEmpty bool) (string, error) {
+	status = strings.TrimSpace(status)
+	if status == "" {
+		if defaultEmpty {
+			return StatusOK, nil
+		}
+		return "", fmt.Errorf("sessions.status: %w: empty", ErrInvalidStatus)
+	}
+
+	switch status {
+	case StatusRunning, StatusOK, StatusError, StatusCanceled:
+		return status, nil
+	default:
+		return "", fmt.Errorf("sessions.status: %w: %q", ErrInvalidStatus, status)
+	}
+}
 
 // MigrateSchema runs the sessions store DDL migrations against the given database.
 // This is exported so the CLI db migrate command can create PostgreSQL tables.
@@ -3216,9 +3254,12 @@ func scanSession(row scannable) (Session, error) {
 	}
 	if status.Valid {
 		session.Status = status.String
-	} else {
-		session.Status = StatusOK // default
 	}
+	normalizedStatus, err := normalizeSessionStatus(session.Status, true)
+	if err != nil {
+		return Session{}, err
+	}
+	session.Status = normalizedStatus
 
 	// Agent execution context
 	if prompt.Valid {

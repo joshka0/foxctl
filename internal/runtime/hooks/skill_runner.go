@@ -107,7 +107,14 @@ func parseSkillOutput(data []byte) (Output, error) {
 		}
 		if payload, ok := maputil.AsStringMap(env.Data); ok {
 			if hookRaw, ok := payload["hook_output"]; ok {
-				if hookOutput, ok := decodeHookOutput(hookRaw); ok && hookOutput.Decision != "" {
+				hookOutput, err := decodeHookOutput(hookRaw)
+				if err != nil {
+					return Output{}, fmt.Errorf("invalid hook_output: %w", err)
+				}
+				if hookOutput.Decision != "" {
+					if !hookOutput.Decision.IsValid() {
+						return Output{}, fmt.Errorf("invalid hook decision %q", hookOutput.Decision)
+					}
 					return hookOutput, nil
 				}
 			}
@@ -125,6 +132,9 @@ func parseSkillOutput(data []byte) (Output, error) {
 
 	// If it has a decision, it's a valid hook output
 	if out.Decision != "" {
+		if !out.Decision.IsValid() {
+			return Output{}, fmt.Errorf("invalid hook decision %q", out.Decision)
+		}
 		return out, nil
 	}
 
@@ -132,22 +142,22 @@ func parseSkillOutput(data []byte) (Output, error) {
 	return NewApprove("skill completed", nil), nil
 }
 
-func decodeHookOutput(value any) (Output, bool) {
+func decodeHookOutput(value any) (Output, error) {
 	switch v := value.(type) {
 	case Output:
-		return v, v.Decision != ""
+		return v, nil
 	case map[string]any:
 		payload, err := json.Marshal(v)
 		if err != nil {
-			return Output{}, false
+			return Output{}, err
 		}
 		var out Output
 		if err := json.Unmarshal(payload, &out); err != nil {
-			return Output{}, false
+			return Output{}, err
 		}
-		return out, out.Decision != ""
+		return out, nil
 	default:
-		return Output{}, false
+		return Output{}, fmt.Errorf("expected object, got %T", value)
 	}
 }
 

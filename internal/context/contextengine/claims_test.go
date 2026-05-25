@@ -373,6 +373,80 @@ func TestValidateClaimTransition(t *testing.T) {
 	}
 }
 
+func TestClaimTransitionStateMachineInvariants(t *testing.T) {
+	t.Parallel()
+
+	statuses := []ClaimStatus{
+		ClaimStatusCandidate,
+		ClaimStatusCurrent,
+		ClaimStatusNeedsRevalidation,
+		ClaimStatusStale,
+		ClaimStatusSuperseded,
+		ClaimStatusRejected,
+	}
+	terminal := map[ClaimStatus]bool{
+		ClaimStatusSuperseded: true,
+		ClaimStatusRejected:   true,
+	}
+	requiresReason := func(from, to ClaimStatus) bool {
+		if from == to {
+			return false
+		}
+		switch from {
+		case ClaimStatusCurrent, ClaimStatusNeedsRevalidation, ClaimStatusStale:
+			return to != ClaimStatusCurrent
+		default:
+			return false
+		}
+	}
+
+	for _, from := range statuses {
+		for _, to := range statuses {
+			canTransition := CanTransitionClaimStatus(from, to)
+			errWithoutReason := ValidateClaimTransition(from, to, "")
+			errWithReason := ValidateClaimTransition(from, to, "verified state change")
+
+			if from == to {
+				if !canTransition {
+					t.Fatalf("%s -> %s no-op transition should be allowed", from, to)
+				}
+				if errWithoutReason != nil || errWithReason != nil {
+					t.Fatalf("%s -> %s no-op validation failed without=%v with=%v", from, to, errWithoutReason, errWithReason)
+				}
+				continue
+			}
+
+			if terminal[from] {
+				if canTransition || !errors.Is(errWithReason, ErrInvalidTransition) {
+					t.Fatalf("terminal status %s should not transition to %s: can=%v err=%v", from, to, canTransition, errWithReason)
+				}
+				continue
+			}
+
+			if !canTransition {
+				if !errors.Is(errWithReason, ErrInvalidTransition) {
+					t.Fatalf("forbidden transition %s -> %s should return ErrInvalidTransition, got %v", from, to, errWithReason)
+				}
+				continue
+			}
+
+			if requiresReason(from, to) {
+				if errWithoutReason == nil {
+					t.Fatalf("transition %s -> %s should require a reason", from, to)
+				}
+				if errWithReason != nil {
+					t.Fatalf("transition %s -> %s with reason should pass: %v", from, to, errWithReason)
+				}
+				continue
+			}
+
+			if errWithoutReason != nil || errWithReason != nil {
+				t.Fatalf("transition %s -> %s should pass without=%v with=%v", from, to, errWithoutReason, errWithReason)
+			}
+		}
+	}
+}
+
 func TestValidateClaimTransition_ErrorsAreClaimTransitionErrors(t *testing.T) {
 	t.Parallel()
 	// Invalid transition should return ClaimTransitionError

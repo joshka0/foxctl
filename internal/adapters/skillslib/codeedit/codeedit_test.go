@@ -1,8 +1,10 @@
 package codeedit_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"testing/quick"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/codeedit"
 )
@@ -285,6 +287,101 @@ func goodbye() {
 	}
 }
 
+func TestApplySymbolEditGoTypeAliasDoesNotDeleteFollowingSymbol(t *testing.T) {
+	code := `package main
+
+type UserID = string
+
+func keep() string {
+	return "keep"
+}`
+
+	lines := strings.Split(code, "\n")
+	e := edit{
+		Type:    "symbol",
+		Symbol:  "UserID",
+		NewCode: "type UserID = int64",
+	}
+
+	result, _, applied, err := codeedit.ApplySymbolEdit(lines, codeedit.LangGo, e)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !applied {
+		t.Fatal("expected edit to be applied")
+	}
+
+	resultStr := strings.Join(result, "\n")
+	if !strings.Contains(resultStr, "type UserID = int64") {
+		t.Fatalf("expected alias replacement, got:\n%s", resultStr)
+	}
+	if !strings.Contains(resultStr, "func keep() string") {
+		t.Fatalf("following function was deleted:\n%s", resultStr)
+	}
+}
+
+func TestApplySymbolEditTypeScriptAliasDoesNotDeleteFollowingSymbol(t *testing.T) {
+	code := `export type UserID = string;
+
+export function keep(): string {
+  return "keep";
+}`
+
+	lines := strings.Split(code, "\n")
+	e := edit{
+		Type:    "symbol",
+		Symbol:  "UserID",
+		NewCode: "export type UserID = number;",
+	}
+
+	result, _, applied, err := codeedit.ApplySymbolEdit(lines, codeedit.LangTS, e)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !applied {
+		t.Fatal("expected edit to be applied")
+	}
+
+	resultStr := strings.Join(result, "\n")
+	if !strings.Contains(resultStr, "export type UserID = number;") {
+		t.Fatalf("expected alias replacement, got:\n%s", resultStr)
+	}
+	if !strings.Contains(resultStr, "export function keep") {
+		t.Fatalf("following function was deleted:\n%s", resultStr)
+	}
+}
+
+func TestApplySymbolEditJavaScriptExpressionArrowDoesNotDeleteFollowingSymbol(t *testing.T) {
+	code := `const normalize = (value) => value.trim();
+
+function keep() {
+  return "keep";
+}`
+
+	lines := strings.Split(code, "\n")
+	e := edit{
+		Type:    "symbol",
+		Symbol:  "normalize",
+		NewCode: "const normalize = (value) => value.toLowerCase();",
+	}
+
+	result, _, applied, err := codeedit.ApplySymbolEdit(lines, codeedit.LangJS, e)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !applied {
+		t.Fatal("expected edit to be applied")
+	}
+
+	resultStr := strings.Join(result, "\n")
+	if !strings.Contains(resultStr, "value.toLowerCase()") {
+		t.Fatalf("expected arrow replacement, got:\n%s", resultStr)
+	}
+	if !strings.Contains(resultStr, "function keep()") {
+		t.Fatalf("following function was deleted:\n%s", resultStr)
+	}
+}
+
 func TestApplySymbolEditNotFound(t *testing.T) {
 	code := `package main
 
@@ -374,6 +471,46 @@ func TestApplyLinesEditInvalidRange(t *testing.T) {
 				t.Error("expected error for invalid range")
 			}
 		})
+	}
+}
+
+func TestApplyLinesEditPropertyPreservesUntouchedPrefixAndSuffix(t *testing.T) {
+	property := func(rawLineCount, rawStart, rawSpan uint8) bool {
+		lineCount := int(rawLineCount%20) + 1
+		startLine := int(rawStart%uint8(lineCount)) + 1
+		endLine := startLine + int(rawSpan%8)
+
+		lines := make([]string, lineCount)
+		for i := range lines {
+			lines[i] = fmt.Sprintf("line-%02d", i+1)
+		}
+
+		replacement := []string{"new-a", "new-b"}
+		result, _, applied, err := codeedit.ApplyLinesEdit(lines, edit{
+			Type:      "lines",
+			StartLine: startLine,
+			EndLine:   endLine,
+			NewCode:   strings.Join(replacement, "\n"),
+		})
+		if err != nil || !applied {
+			t.Logf("valid edit failed for lineCount=%d start=%d end=%d: applied=%v err=%v", lineCount, startLine, endLine, applied, err)
+			return false
+		}
+
+		start := startLine - 1
+		end := endLine - 1
+		if end >= len(lines) {
+			end = len(lines) - 1
+		}
+		want := append([]string{}, lines[:start]...)
+		want = append(want, replacement...)
+		want = append(want, lines[end+1:]...)
+
+		return strings.Join(result, "\n") == strings.Join(want, "\n")
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 200}); err != nil {
+		t.Fatal(err)
 	}
 }
 

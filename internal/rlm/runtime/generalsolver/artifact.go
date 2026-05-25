@@ -51,25 +51,12 @@ func ParseWorkArtifactFromText(text string) (WorkArtifact, error) {
 	if start < 0 {
 		return WorkArtifact{}, fmt.Errorf("generalsolver: no JSON object found in artifact text")
 	}
-	depth := 0
-	end := -1
-	for i := start; i < len(text); i++ {
-		switch text[i] {
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				end = i + 1
-				goto found
-			}
-		}
+	decoder := json.NewDecoder(strings.NewReader(text[start:]))
+	var artifact WorkArtifact
+	if err := decoder.Decode(&artifact); err != nil {
+		return WorkArtifact{}, fmt.Errorf("generalsolver: parse artifact JSON: %w", err)
 	}
-found:
-	if end < 0 {
-		return WorkArtifact{}, fmt.Errorf("generalsolver: incomplete JSON object in artifact text")
-	}
-	return ParseWorkArtifact([]byte(text[start:end]))
+	return artifact, nil
 }
 
 // ValidateWorkArtifact checks the structural validity of a WorkArtifact.

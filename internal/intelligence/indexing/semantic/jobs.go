@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -82,14 +83,14 @@ type JobArgs struct {
 
 // Validate checks that the job arguments are valid.
 func (a *JobArgs) Validate() error {
-	if a.WorkspaceID == "" {
+	if strings.TrimSpace(a.WorkspaceID) == "" {
 		return errors.New("workspace_id is required")
 	}
 	if len(a.Files) == 0 {
 		return errors.New("files list cannot be empty")
 	}
 	for i, f := range a.Files {
-		if f.Path == "" {
+		if strings.TrimSpace(f.Path) == "" {
 			return errors.New("file path is required at index " + itoa(i))
 		}
 	}

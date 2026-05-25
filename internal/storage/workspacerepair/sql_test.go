@@ -56,11 +56,24 @@ func TestWorkspaceColumnRejectsInvalidIdentifiers(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = closeFn() })
 
-	column := WorkspaceColumn{Table: "one; DROP TABLE one", Column: "workspace"}
-	if AnyPathWorkspace(ctx, db, column) {
-		t.Fatal("AnyPathWorkspace() = true for invalid identifier")
+	columns := []WorkspaceColumn{
+		{Table: "one; DROP TABLE one", Column: "workspace"},
+		{Table: "main.one", Column: "workspace"},
+		{Table: "one", Column: "workspace.id"},
+		{Table: "one--comment", Column: "workspace"},
+		{Table: "1one", Column: "workspace"},
 	}
-	if got := CollectPathWorkspaces(ctx, db, column); len(got) != 0 {
-		t.Fatalf("CollectPathWorkspaces()=%v want empty", got)
+	for _, column := range columns {
+		t.Run(column.Table+"/"+column.Column, func(t *testing.T) {
+			if table, name, ok := column.normalized(); ok {
+				t.Fatalf("normalized() = (%q, %q, true), want false", table, name)
+			}
+			if AnyPathWorkspace(ctx, db, column) {
+				t.Fatal("AnyPathWorkspace() = true for invalid identifier")
+			}
+			if got := CollectPathWorkspaces(ctx, db, column); len(got) != 0 {
+				t.Fatalf("CollectPathWorkspaces()=%v want empty", got)
+			}
+		})
 	}
 }

@@ -2,12 +2,99 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 )
 
 func TestBoardMessageKind_Constants(t *testing.T) {
+	for _, tt := range boardMessageKindConstantCases() {
+		t.Run(string(tt.kind), func(t *testing.T) {
+			if string(tt.kind) != tt.want {
+				t.Errorf("BoardMessageKind = %q, want %q", tt.kind, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeBoardMessageKindDefaultsEmptyAndAllowsDocumentedKinds(t *testing.T) {
+	for _, raw := range []BoardMessageKind{"", "   "} {
+		got, err := NormalizeBoardMessageKind(raw)
+		if err != nil {
+			t.Fatalf("NormalizeBoardMessageKind(%q) error=%v, want nil", raw, err)
+		}
+		if got != BoardMessageKindInfo {
+			t.Fatalf("NormalizeBoardMessageKind(%q)=%q, want %q", raw, got, BoardMessageKindInfo)
+		}
+	}
+
+	for _, tt := range boardMessageKindConstantCases() {
+		t.Run(string(tt.kind), func(t *testing.T) {
+			got, err := NormalizeBoardMessageKind(tt.kind)
+			if err != nil {
+				t.Fatalf("NormalizeBoardMessageKind(%q) error=%v, want nil", tt.kind, err)
+			}
+			if got != tt.kind {
+				t.Fatalf("NormalizeBoardMessageKind(%q)=%q, want %q", tt.kind, got, tt.kind)
+			}
+		})
+	}
+
+	errKind, err := NormalizeBoardMessageKind("custom")
+	if !errors.Is(err, ErrInvalidBoardMessageKind) {
+		t.Fatalf("NormalizeBoardMessageKind(custom)=(%q,%v), want ErrInvalidBoardMessageKind", errKind, err)
+	}
+}
+
+func TestNormalizeBoardMessageKindPropertyUnknownKindsFailClosed(t *testing.T) {
+	valid := make(map[BoardMessageKind]bool)
+	for _, tt := range boardMessageKindConstantCases() {
+		valid[tt.kind] = true
+	}
+
+	prop := func(raw string) bool {
+		got, err := NormalizeBoardMessageKind(BoardMessageKind(raw))
+		trimmed := BoardMessageKind(strings.TrimSpace(raw))
+		if trimmed == "" {
+			return err == nil && got == BoardMessageKindInfo
+		}
+		if valid[trimmed] {
+			return err == nil && got == trimmed
+		}
+		return errors.Is(err, ErrInvalidBoardMessageKind)
+	}
+	if err := quick.Check(prop, &quick.Config{MaxCount: 200}); err != nil {
+		t.Fatalf("board message kind property failed: %v", err)
+	}
+}
+
+func TestBoardMessageStatus_Constants(t *testing.T) {
 	tests := []struct {
+		status BoardMessageStatus
+		want   string
+	}{
+		{BoardMessageStatusUnread, "unread"},
+		{BoardMessageStatusSurfaced, "surfaced"},
+		{BoardMessageStatusRead, "read"},
+		{BoardMessageStatusAcked, "acked"},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.status), func(t *testing.T) {
+			if string(tt.status) != tt.want {
+				t.Errorf("BoardMessageStatus = %q, want %q", tt.status, tt.want)
+			}
+		})
+	}
+}
+
+func boardMessageKindConstantCases() []struct {
+	kind BoardMessageKind
+	want string
+} {
+	return []struct {
 		kind BoardMessageKind
 		want string
 	}{
@@ -28,33 +115,125 @@ func TestBoardMessageKind_Constants(t *testing.T) {
 		{BoardMessageKindInterviewQuestion, "interview_question"},
 		{BoardMessageKindInterviewAnswer, "interview_answer"},
 		{BoardMessageKindInterviewVerify, "interview_verify"},
-	}
-
-	for _, tt := range tests {
-		t.Run(string(tt.kind), func(t *testing.T) {
-			if string(tt.kind) != tt.want {
-				t.Errorf("BoardMessageKind = %q, want %q", tt.kind, tt.want)
-			}
-		})
+		{BoardMessageKindEpic, "epic"},
+		{BoardMessageKindEpicQuestion, "epic_question"},
+		{BoardMessageKindEpicAnswer, "epic_answer"},
+		{BoardMessageKindEpicFinalize, "epic_finalize"},
+		{BoardMessageKindEpicUpdate, "epic_update"},
+		{BoardMessageKindEpicClose, "epic_close"},
+		{BoardMessageKindEpicCheckpoint, "epic_checkpoint"},
+		{BoardMessageKindMilestoneProposal, "milestone_proposal"},
+		{BoardMessageKindMilestone, "milestone"},
+		{BoardMessageKindMilestoneContract, "milestone_contract"},
+		{BoardMessageKindStory, "story"},
+		{BoardMessageKindAcceptanceCriteria, "acceptance_criteria"},
+		{BoardMessageKindMilestoneReview, "milestone_review"},
+		{BoardMessageKindMilestoneSummary, "milestone_summary"},
+		{BoardMessageKindStoryProposal, "story_proposal"},
+		{BoardMessageKindStoryState, "story_state"},
+		{BoardMessageKindStoryUpdate, "story_update"},
+		{BoardMessageKindStoryValidation, "story_validation"},
+		{BoardMessageKindDeliveryLog, "delivery_log"},
+		{BoardMessageKindGuidanceUpdate, "guidance_update"},
 	}
 }
 
-func TestBoardMessageStatus_Constants(t *testing.T) {
-	tests := []struct {
-		status BoardMessageStatus
-		want   string
-	}{
-		{BoardMessageStatusUnread, "unread"},
-		{BoardMessageStatusRead, "read"},
-		{BoardMessageStatusAcked, "acked"},
+func TestValidateBoardMessageStatusAllowsOnlyDocumentedStatuses(t *testing.T) {
+	validStatuses := []BoardMessageStatus{
+		BoardMessageStatusUnread,
+		BoardMessageStatusSurfaced,
+		BoardMessageStatusRead,
+		BoardMessageStatusAcked,
 	}
-
-	for _, tt := range tests {
-		t.Run(string(tt.status), func(t *testing.T) {
-			if string(tt.status) != tt.want {
-				t.Errorf("BoardMessageStatus = %q, want %q", tt.status, tt.want)
+	for _, status := range validStatuses {
+		t.Run(string(status), func(t *testing.T) {
+			if err := ValidateBoardMessageStatus(status); err != nil {
+				t.Fatalf("ValidateBoardMessageStatus(%q) = %v, want nil", status, err)
 			}
 		})
+	}
+
+	err := ValidateBoardMessageStatus("lost")
+	if !errors.Is(err, ErrInvalidBoardMessageStatus) {
+		t.Fatalf("ValidateBoardMessageStatus(lost) = %v, want ErrInvalidBoardMessageStatus", err)
+	}
+}
+
+func TestValidateBoardMessageStatusPropertyUnknownStatusesFailClosed(t *testing.T) {
+	valid := map[BoardMessageStatus]bool{
+		BoardMessageStatusUnread:   true,
+		BoardMessageStatusSurfaced: true,
+		BoardMessageStatusRead:     true,
+		BoardMessageStatusAcked:    true,
+	}
+	prop := func(raw string) bool {
+		status := BoardMessageStatus(raw)
+		err := ValidateBoardMessageStatus(status)
+		if valid[status] {
+			return err == nil
+		}
+		return errors.Is(err, ErrInvalidBoardMessageStatus)
+	}
+	if err := quick.Check(prop, &quick.Config{MaxCount: 200}); err != nil {
+		t.Fatalf("board message status property failed: %v", err)
+	}
+}
+
+func TestNormalizeBoardMessagePriorityDefaultsZeroAndRejectsInvalidExplicitValues(t *testing.T) {
+	got, err := NormalizeBoardMessagePriority(0)
+	if err != nil {
+		t.Fatalf("NormalizeBoardMessagePriority(0) error=%v, want nil", err)
+	}
+	if got != DefaultPriority {
+		t.Fatalf("NormalizeBoardMessagePriority(0)=%d, want %d", got, DefaultPriority)
+	}
+
+	for priority := 1; priority <= 5; priority++ {
+		got, err := NormalizeBoardMessagePriority(priority)
+		if err != nil {
+			t.Fatalf("NormalizeBoardMessagePriority(%d) error=%v, want nil", priority, err)
+		}
+		if got != priority {
+			t.Fatalf("NormalizeBoardMessagePriority(%d)=%d, want %d", priority, got, priority)
+		}
+	}
+
+	for _, priority := range []int{-1, 6} {
+		_, err := NormalizeBoardMessagePriority(priority)
+		if !errors.Is(err, ErrInvalidBoardMessagePriority) {
+			t.Fatalf("NormalizeBoardMessagePriority(%d) error=%v, want ErrInvalidBoardMessagePriority", priority, err)
+		}
+	}
+}
+
+func TestValidateBoardMessagePriorityAllowsOnlyPersistedRange(t *testing.T) {
+	for priority := 1; priority <= 5; priority++ {
+		if err := ValidateBoardMessagePriority(priority); err != nil {
+			t.Fatalf("ValidateBoardMessagePriority(%d) error=%v, want nil", priority, err)
+		}
+	}
+	for _, priority := range []int{-1, 0, 6} {
+		err := ValidateBoardMessagePriority(priority)
+		if !errors.Is(err, ErrInvalidBoardMessagePriority) {
+			t.Fatalf("ValidateBoardMessagePriority(%d) error=%v, want ErrInvalidBoardMessagePriority", priority, err)
+		}
+	}
+}
+
+func TestNormalizeBoardMessagePriorityProperty(t *testing.T) {
+	prop := func(priority int) bool {
+		got, err := NormalizeBoardMessagePriority(priority)
+		switch {
+		case priority == 0:
+			return err == nil && got == DefaultPriority
+		case priority >= 1 && priority <= 5:
+			return err == nil && got == priority
+		default:
+			return errors.Is(err, ErrInvalidBoardMessagePriority)
+		}
+	}
+	if err := quick.Check(prop, &quick.Config{MaxCount: 200}); err != nil {
+		t.Fatalf("board message priority property failed: %v", err)
 	}
 }
 
@@ -73,6 +252,40 @@ func TestReservationMode_Constants(t *testing.T) {
 				t.Errorf("ReservationMode = %q, want %q", tt.mode, tt.want)
 			}
 		})
+	}
+}
+
+func TestValidateReservationModeAllowsOnlyDocumentedModes(t *testing.T) {
+	validModes := []ReservationMode{ReservationModeExclusive, ReservationModeShared}
+	for _, mode := range validModes {
+		t.Run(string(mode), func(t *testing.T) {
+			if err := ValidateReservationMode(mode); err != nil {
+				t.Fatalf("ValidateReservationMode(%q) = %v, want nil", mode, err)
+			}
+		})
+	}
+
+	err := ValidateReservationMode("optimistic")
+	if !errors.Is(err, ErrInvalidReservationMode) {
+		t.Fatalf("ValidateReservationMode(optimistic) = %v, want ErrInvalidReservationMode", err)
+	}
+}
+
+func TestValidateReservationModePropertyUnknownModesFailClosed(t *testing.T) {
+	valid := map[ReservationMode]bool{
+		ReservationModeExclusive: true,
+		ReservationModeShared:    true,
+	}
+	prop := func(raw string) bool {
+		mode := ReservationMode(raw)
+		err := ValidateReservationMode(mode)
+		if valid[mode] {
+			return err == nil
+		}
+		return errors.Is(err, ErrInvalidReservationMode)
+	}
+	if err := quick.Check(prop, &quick.Config{MaxCount: 200}); err != nil {
+		t.Fatalf("reservation mode property failed: %v", err)
 	}
 }
 

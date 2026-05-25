@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/gitutil"
@@ -157,6 +158,9 @@ func getDiff(ctx context.Context, rc *skillmain.RunContext, gitPath, repoPath st
 		args = append(args, "--staged")
 	}
 	if in.Commit != "" {
+		if err := validateGitRevisionArg(in.Commit); err != nil {
+			return nil, err
+		}
 		args = append(args, in.Commit)
 	}
 	if in.Stat {
@@ -220,6 +224,9 @@ func getLog(ctx context.Context, gitPath, repoPath string, in input) (map[string
 	args := []string{"-C", repoPath, "log", format, fmt.Sprintf("-%d", in.Limit)}
 
 	if in.Commit != "" {
+		if err := validateGitRevisionArg(in.Commit); err != nil {
+			return nil, err
+		}
 		args = append(args, in.Commit)
 	}
 
@@ -238,6 +245,21 @@ func getLog(ctx context.Context, gitPath, repoPath string, in input) (map[string
 	}
 
 	return data, nil
+}
+
+func validateGitRevisionArg(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return skillerr.Arg("commit must not be blank")
+	}
+	if strings.HasPrefix(value, "-") {
+		return skillerr.Arg("commit must be a revision, not a git option")
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return skillerr.Arg("commit contains invalid control characters")
+		}
+	}
+	return nil
 }
 
 // parseStatusOutput parses git porcelain status output into structured data.

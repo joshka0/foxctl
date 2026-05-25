@@ -585,7 +585,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		return err
 	}
 
-	files, err := collectFiles(searchPath, workspace, in)
+	validatePath := func(path string) (string, error) {
+		return skillmain.ValidatePath(rc, path, skillmain.WithPathMessage("collect greenlight file"))
+	}
+	files, err := collectFiles(searchPath, workspace, validatePath, in)
 	if err != nil {
 		return err
 	}
@@ -686,7 +689,7 @@ func selectRules(in input) ([]Rule, []string, error) {
 	return selected, categories, nil
 }
 
-func collectFiles(root, workspace string, in input) ([]fileContext, error) {
+func collectFiles(root, workspace string, validatePath func(string) (string, error), in input) ([]fileContext, error) {
 	excludes := []string{
 		"Pods",
 		"build",
@@ -706,6 +709,7 @@ func collectFiles(root, workspace string, in input) ([]fileContext, error) {
 		Paths:         []string{root},
 		Exclude:       excludes,
 		IncludeHidden: false,
+		ValidatePath:  validatePath,
 	})
 	if err != nil {
 		return nil, err

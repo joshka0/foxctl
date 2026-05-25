@@ -163,7 +163,7 @@ func ProcessFile(
 
 	if !opts.DryRun && modified {
 		if opts.Backup {
-			backupPath := path + opts.BackupSuffix
+			backupPath := path + backupSuffix(opts.BackupSuffix)
 			if err := os.WriteFile(backupPath, content, 0o644); err != nil {
 				return FileChange{}, skillerr.WrapIO(fmt.Sprintf("create backup %s", backupPath), err)
 			}
@@ -187,6 +187,13 @@ func ProcessFile(
 	}
 
 	return result, nil
+}
+
+func backupSuffix(suffix string) string {
+	if suffix == "" {
+		return ".bak"
+	}
+	return suffix
 }
 
 func determineLineRange(lines []string, lr *LineRange, startRe, endRe *regexp.Regexp) map[int]bool {

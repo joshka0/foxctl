@@ -37,7 +37,7 @@ func ExpectedPackArtifactsForMode(outputPath string, singleFile bool) (PackArtif
 		return PackArtifacts{}, ErrInvalidPackOutput
 	}
 	output = filepath.Clean(output)
-	if output == "." {
+	if output == "." || output == string(filepath.Separator) {
 		return PackArtifacts{}, ErrInvalidPackOutput
 	}
 	if strings.HasSuffix(output, ".smolmachine") {

@@ -233,12 +233,40 @@ func RelativePath(path, workspaceRoot string) string {
 		return path
 	}
 
-	// If relative path starts with .., it's not under workspace
-	if strings.HasPrefix(rel, "..") {
+	if isParentRelativePath(rel) {
 		return path
 	}
 
 	return rel
+}
+
+// ContainedRelativePath returns a slash-separated path relative to workspaceRoot.
+// It returns an empty string when path is empty, points at the workspace root
+// itself, or resolves outside the workspace.
+func ContainedRelativePath(path, workspaceRoot string) string {
+	path = strings.TrimSpace(path)
+	workspaceRoot = strings.TrimSpace(workspaceRoot)
+	if path == "" || workspaceRoot == "" {
+		return ""
+	}
+
+	root, err := filepath.Abs(workspaceRoot)
+	if err != nil {
+		return ""
+	}
+	root = filepath.Clean(root)
+
+	candidate := path
+	if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(root, candidate)
+	}
+	candidate = filepath.Clean(candidate)
+
+	rel, err := filepath.Rel(root, candidate)
+	if err != nil || rel == "." || isParentRelativePath(rel) {
+		return ""
+	}
+	return filepath.ToSlash(rel)
 }
 
 // IsUnderWorkspace checks if a path is under the workspace root.
@@ -257,7 +285,11 @@ func IsUnderWorkspace(path, workspaceRoot string) bool {
 		return false
 	}
 
-	return !strings.HasPrefix(rel, "..")
+	return !isParentRelativePath(rel)
+}
+
+func isParentRelativePath(rel string) bool {
+	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // Extension returns the file extension without the dot.

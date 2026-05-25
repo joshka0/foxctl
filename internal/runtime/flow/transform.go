@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -104,10 +105,13 @@ func regexExtractTransform(_ context.Context, input any, configStr string) (any,
 		// Default to full match (group 0).
 		return matches[0], nil
 	case float64:
-		idx := int(g)
-		if idx < 0 || idx >= len(matches) {
-			return nil, fmt.Errorf("transform regex_extract: group %d out of range (0..%d)", idx, len(matches)-1)
+		if g != math.Trunc(g) {
+			return nil, fmt.Errorf("transform regex_extract: group must be an integer, got %v", g)
 		}
+		if g < 0 || g > float64(len(matches)-1) {
+			return nil, fmt.Errorf("transform regex_extract: group %.0f out of range (0..%d)", g, len(matches)-1)
+		}
+		idx := int(g)
 		return matches[idx], nil
 	case string:
 		// Named group: look up in subexp names.
@@ -236,11 +240,9 @@ func parseJQPath(filter string) ([]jqSegment, error) {
 
 	for i, part := range parts {
 		if part == "" {
-			// ".." is not supported.
-			if i > 0 && parts[i-1] == "" {
-				return nil, fmt.Errorf("unsupported path expression %q (double dot)", filter)
-			}
-			continue
+			// Recursive descent (".."), repeated separators, and trailing dots
+			// are intentionally outside this small jq-like path subset.
+			return nil, fmt.Errorf("unsupported path expression %q (empty segment at position %d)", filter, i)
 		}
 
 		if strings.HasSuffix(part, "[]") {
@@ -480,9 +482,7 @@ func resolvePathTemplate(path string, input any) (string, error) {
 	// Convert input to a map for navigation.
 	m, ok := toMap(input)
 	if !ok {
-		// If input is not a map, we can't resolve templates but can still
-		// use the path as-is if it has no templates.
-		return path, nil
+		return "", fmt.Errorf("path template %q requires object input, got %T", path, input)
 	}
 
 	// Use Go text/template for resolution.

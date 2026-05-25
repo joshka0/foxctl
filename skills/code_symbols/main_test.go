@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/go-playground/validator/v10"
@@ -210,6 +212,106 @@ func MyFunc() {}
 	}
 }
 
+func TestExprToStringRendersModernGoTypes(t *testing.T) {
+	tests := []struct {
+		name string
+		expr string
+		want string
+	}{
+		{name: "generic instantiation", expr: "Box[T]", want: "Box[T]"},
+		{name: "generic instantiation with multiple args", expr: "Pair[K, V]", want: "Pair[K, V]"},
+		{name: "qualified generic instantiation", expr: "pkg.Option[T]", want: "pkg.Option[T]"},
+		{name: "map of generic values", expr: "map[string]Box[T]", want: "map[string]Box[T]"},
+		{name: "fixed array of generic values", expr: "[3]Box[T]", want: "[3]Box[T]"},
+		{name: "parenthesized channel", expr: "chan (Box[T])", want: "chan Box[T]"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := exprToString(parseGoExpr(t, tt.expr))
+			if got != tt.want {
+				t.Fatalf("exprToString(%q)=%q want %q", tt.expr, got, tt.want)
+			}
+			if strings.Contains(got, "*ast.") {
+				t.Fatalf("exprToString(%q) leaked AST type name: %q", tt.expr, got)
+			}
+		})
+	}
+}
+
+func TestExprToStringGeneratedGenericInstantiationRoundTrip(t *testing.T) {
+	cfg := &quick.Config{MaxCount: 100}
+
+	err := quick.Check(func(rawType uint8, rawArg uint8) bool {
+		expr := fmt.Sprintf("Type%d[Arg%d]", rawType%20, rawArg%20)
+		got := exprToString(parseGoExpr(t, expr))
+		if got != expr {
+			t.Logf("generic type should render source-like: expr=%q got=%q", expr, got)
+			return false
+		}
+		return true
+	}, cfg)
+	if err != nil {
+		t.Fatalf("generic instantiation property failed: %v", err)
+	}
+}
+
+func TestExtractGoSymbolsRendersGenericSignatures(t *testing.T) {
+	work := t.TempDir()
+	path := filepath.Join(work, "generic.go")
+	code := `package main
+
+type Box[T any] struct {
+	Items [2]T
+	Options map[string]Option[T]
+}
+
+type Option[T any] struct {
+	Value T
+}
+
+func Convert[T any](input []T, lookup map[string]Box[T]) (Option[T], error) {
+	return Option[T]{}, nil
+}
+
+func (b *Box[T]) First() T {
+	return b.Items[0]
+}
+`
+	if err := os.WriteFile(path, []byte(code), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	syms, err := extractGoSymbols(path, work, Input{IncludePrivate: true})
+	if err != nil {
+		t.Fatalf("extractGoSymbols: %v", err)
+	}
+
+	box := findSymbol(t, syms, "Box")
+	if !containsString(box.Fields, "Items:[2]T") {
+		t.Fatalf("Box fields=%v want Items:[2]T", box.Fields)
+	}
+	if !containsString(box.Fields, "Options:map[string]Option[T]") {
+		t.Fatalf("Box fields=%v want Options:map[string]Option[T]", box.Fields)
+	}
+
+	convert := findSymbol(t, syms, "Convert")
+	if strings.Contains(convert.Signature, "*ast.") {
+		t.Fatalf("Convert signature leaked AST type name: %q", convert.Signature)
+	}
+	if !containsString(convert.Parameters, "lookup:map[string]Box[T]") {
+		t.Fatalf("Convert parameters=%v want lookup:map[string]Box[T]", convert.Parameters)
+	}
+	if !containsString(convert.Returns, "Option[T]") {
+		t.Fatalf("Convert returns=%v want Option[T]", convert.Returns)
+	}
+
+	first := findSymbol(t, syms, "First")
+	if first.Receiver != "*Box[T]" {
+		t.Fatalf("First receiver=%q want *Box[T]", first.Receiver)
+	}
+}
+
 func TestExtractElixirSymbols(t *testing.T) {
 	work := t.TempDir()
 	path := filepath.Join(work, "sample.ex")
@@ -251,4 +353,33 @@ end
 	if !foundHidden {
 		t.Fatal("expected private hidden/0 symbol")
 	}
+}
+
+func parseGoExpr(t *testing.T, src string) ast.Expr {
+	t.Helper()
+	expr, err := parser.ParseExpr(src)
+	if err != nil {
+		t.Fatalf("parse expr %q: %v", src, err)
+	}
+	return expr
+}
+
+func findSymbol(t *testing.T, symbols []symbol, name string) symbol {
+	t.Helper()
+	for _, sym := range symbols {
+		if sym.Name == name {
+			return sym
+		}
+	}
+	t.Fatalf("symbol %q not found in %+v", name, symbols)
+	return symbol{}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

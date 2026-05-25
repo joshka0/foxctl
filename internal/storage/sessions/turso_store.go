@@ -371,6 +371,11 @@ func (s *TursoStore) Save(ctx context.Context, session Session) (Session, error)
 	if session.Status == "" {
 		session.Status = storage.SessionStatusOK
 	}
+	if normalizedStatus, err := normalizeSessionStatus(session.Status, true); err != nil {
+		return Session{}, err
+	} else {
+		session.Status = normalizedStatus
+	}
 
 	// Ensure workspace_id is populated for stable cross-machine lookups.
 	session.WorkspaceID = strings.TrimSpace(session.WorkspaceID)
@@ -743,10 +748,11 @@ func (s *TursoStore) SearchSimilar(ctx context.Context, workspace string, queryE
 		if session.AgentType == "" {
 			session.AgentType = "claude"
 		}
-		session.Status = status.String
-		if session.Status == "" {
-			session.Status = storage.SessionStatusOK
+		normalizedStatus, err := normalizeSessionStatus(status.String, true)
+		if err != nil {
+			return nil, err
 		}
+		session.Status = normalizedStatus
 
 		if err := decodeTimestampInto(&session.StartedAt, startedAtStr, "sessions.started_at"); err != nil {
 			return nil, err
@@ -1967,9 +1973,12 @@ func scanSessionRow(row *sql.Row) (Session, error) {
 	}
 	if status.Valid && status.String != "" {
 		session.Status = status.String
-	} else {
-		session.Status = storage.SessionStatusOK
 	}
+	normalizedStatus, err := normalizeSessionStatus(session.Status, true)
+	if err != nil {
+		return Session{}, err
+	}
+	session.Status = normalizedStatus
 
 	// Assign nullable integers
 	if messageCount.Valid {
@@ -2084,9 +2093,12 @@ func scanSessionRows(rows *sql.Rows) (Session, error) {
 	}
 	if status.Valid && status.String != "" {
 		session.Status = status.String
-	} else {
-		session.Status = storage.SessionStatusOK
 	}
+	normalizedStatus, err := normalizeSessionStatus(session.Status, true)
+	if err != nil {
+		return Session{}, err
+	}
+	session.Status = normalizedStatus
 
 	// Assign nullable integers
 	if messageCount.Valid {
@@ -2177,6 +2189,12 @@ func (s *TursoStore) GetActive(ctx context.Context, workspace, agentID string) (
 // SetStatus updates the status of a session.
 // If the status is terminal (ok, error, canceled), also sets ended_at.
 func (s *TursoStore) SetStatus(ctx context.Context, id, status string) error {
+	normalizedStatus, err := normalizeSessionStatus(status, false)
+	if err != nil {
+		return err
+	}
+	status = normalizedStatus
+
 	now := sqlutil.FormatTimestamp(timeutil.NowUTC())
 
 	var query string
@@ -2206,6 +2224,12 @@ func (s *TursoStore) SetStatus(ctx context.Context, id, status string) error {
 // SetStatusWithError updates a session's status and error message.
 // If the status is terminal (ok, error, canceled), also sets ended_at.
 func (s *TursoStore) SetStatusWithError(ctx context.Context, id, status, errorMessage string) error {
+	normalizedStatus, err := normalizeSessionStatus(status, false)
+	if err != nil {
+		return err
+	}
+	status = normalizedStatus
+
 	now := sqlutil.FormatTimestamp(timeutil.NowUTC())
 
 	var query string
@@ -2502,10 +2526,11 @@ func (s *TursoStore) SearchSimilarGlobal(ctx context.Context, queryEmbedding []f
 		if session.AgentType == "" {
 			session.AgentType = "claude"
 		}
-		session.Status = status.String
-		if session.Status == "" {
-			session.Status = storage.SessionStatusOK
+		normalizedStatus, err := normalizeSessionStatus(status.String, true)
+		if err != nil {
+			return nil, err
 		}
+		session.Status = normalizedStatus
 
 		if err := decodeTimestampInto(&session.StartedAt, startedAtStr, "sessions.started_at"); err != nil {
 			return nil, err
@@ -2687,10 +2712,11 @@ func (s *TursoStore) SearchSimilarMultiWorkspace(ctx context.Context, workspaces
 		if session.AgentType == "" {
 			session.AgentType = "claude"
 		}
-		session.Status = status.String
-		if session.Status == "" {
-			session.Status = storage.SessionStatusOK
+		normalizedStatus, err := normalizeSessionStatus(status.String, true)
+		if err != nil {
+			return nil, err
 		}
+		session.Status = normalizedStatus
 
 		if err := decodeTimestampInto(&session.StartedAt, startedAtStr, "sessions.started_at"); err != nil {
 			return nil, err

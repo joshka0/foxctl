@@ -4,10 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"testing/quick"
 
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/domain/envelope"
 	"github.com/joshka0/foxctl/internal/platform/config"
@@ -141,6 +145,94 @@ func TestCodeStatsMultipleLanguages(t *testing.T) {
 	}
 }
 
+func TestCodeStatsRejectsInvalidBreakdownBy(t *testing.T) {
+	ctx := context.Background()
+	buf := &bytes.Buffer{}
+	work := t.TempDir()
+	rc := newTestRunnerContext(t, buf, work)
+	t.Cleanup(func() {
+		if err := rc.Close(); err != nil {
+			t.Fatalf("close runner context: %v", err)
+		}
+	})
+
+	err := run(ctx, rc, input{
+		Path:        work,
+		BreakdownBy: "owner",
+	})
+	if err == nil {
+		t.Fatalf("expected invalid breakdown_by to fail")
+	}
+	if !skillerr.IsCode(err, skillerr.CodeArg) {
+		t.Fatalf("expected EARG, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "breakdown_by") {
+		t.Fatalf("expected breakdown_by in error, got %v", err)
+	}
+}
+
+func TestCountLinesSingleLineBlockCommentDoesNotLeakToNextLine(t *testing.T) {
+	path := writeStatsTestFile(t, "main.go", "package main\n/* package comment */\nfunc main() {}\n")
+
+	total, code, blank, comments, err := countLines(path, "Go")
+	if err != nil {
+		t.Fatalf("count lines: %v", err)
+	}
+
+	if total != 3 || code != 2 || blank != 0 || comments != 1 {
+		t.Fatalf("expected total=3 code=2 blank=0 comments=1, got total=%d code=%d blank=%d comments=%d", total, code, blank, comments)
+	}
+}
+
+func TestCountLinesMultilineBlockCommentDoesNotLeakAfterEnd(t *testing.T) {
+	path := writeStatsTestFile(t, "main.go", "package main\n/*\npackage comment\n*/\nfunc main() {}\n")
+
+	total, code, blank, comments, err := countLines(path, "Go")
+	if err != nil {
+		t.Fatalf("count lines: %v", err)
+	}
+
+	if total != 5 || code != 2 || blank != 0 || comments != 3 {
+		t.Fatalf("expected total=5 code=2 blank=0 comments=3, got total=%d code=%d blank=%d comments=%d", total, code, blank, comments)
+	}
+}
+
+func TestCountLinesInlineBlockCommentOnCodeLineCountsAsCode(t *testing.T) {
+	path := writeStatsTestFile(t, "main.go", "package main\nconst before = 1 /* units */\n/* package comment */ const after = 2\n")
+
+	total, code, blank, comments, err := countLines(path, "Go")
+	if err != nil {
+		t.Fatalf("count lines: %v", err)
+	}
+
+	if total != 3 || code != 3 || blank != 0 || comments != 0 {
+		t.Fatalf("expected total=3 code=3 blank=0 comments=0, got total=%d code=%d blank=%d comments=%d", total, code, blank, comments)
+	}
+}
+
+func TestCountLinesGeneratedClosedBlockCommentsPreserveFollowingCode(t *testing.T) {
+	cfg := &quick.Config{MaxCount: 100}
+
+	err := quick.Check(func(commentID uint16, valueID uint16) bool {
+		content := fmt.Sprintf("package main\n/* generated comment %d */\nconst value%d = 1\n", commentID, valueID)
+		path := writeStatsTestFile(t, "generated.go", content)
+
+		total, code, blank, comments, err := countLines(path, "Go")
+		if err != nil {
+			t.Logf("count lines: %v", err)
+			return false
+		}
+		if total != 3 || code != 2 || blank != 0 || comments != 1 {
+			t.Logf("closed block comment should not affect following code: total=%d code=%d blank=%d comments=%d content=%q", total, code, blank, comments, content)
+			return false
+		}
+		return true
+	}, cfg)
+	if err != nil {
+		t.Fatalf("closed block comment property failed: %v", err)
+	}
+}
+
 func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, _ string) *skillmain.RunContext {
 	t.Helper()
 	state := t.TempDir()
@@ -159,4 +251,13 @@ func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, _ string) *skillma
 		t.Fatalf("runner context: %v", err)
 	}
 	return rc
+}
+
+func writeStatsTestFile(t *testing.T, name, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	return path
 }

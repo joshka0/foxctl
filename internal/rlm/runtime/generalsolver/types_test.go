@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"testing/quick"
 )
 
 func TestValidProblemArchetype(t *testing.T) {
@@ -89,6 +90,46 @@ func TestAddWorkItemInvalidArchetype(t *testing.T) {
 	err := AddWorkItem(state, WorkItem{ID: "n1", Goal: "g", Archetype: "unknown"})
 	if err == nil {
 		t.Fatal("expected error for invalid archetype")
+	}
+}
+
+func TestAddWorkItemRejectsInvalidInitialStatus(t *testing.T) {
+	t.Parallel()
+
+	state := NewSolverState()
+	err := AddWorkItem(state, WorkItem{
+		ID:        "n1",
+		Goal:      "g",
+		Archetype: ArchetypeExplicitDAG,
+		Status:    "done",
+	})
+	if err == nil {
+		t.Fatal("expected invalid status error")
+	}
+	if !strings.Contains(err.Error(), "invalid status") {
+		t.Fatalf("error=%v want invalid status", err)
+	}
+	if _, exists := state.Items["n1"]; exists {
+		t.Fatalf("invalid status item was inserted: %+v", state.Items["n1"])
+	}
+}
+
+func TestAddWorkItemRejectsGeneratedUnknownInitialStatuses(t *testing.T) {
+	t.Parallel()
+
+	unknownStatusesFailClosed := func(raw string) bool {
+		state := NewSolverState()
+		err := AddWorkItem(state, WorkItem{
+			ID:        "n1",
+			Goal:      "g",
+			Archetype: ArchetypeExplicitDAG,
+			Status:    WorkItemStatus("unknown:" + raw),
+		})
+		return err != nil && strings.Contains(err.Error(), "invalid status") && len(state.Items) == 0
+	}
+
+	if err := quick.Check(unknownStatusesFailClosed, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatalf("generated unknown status was accepted: %v", err)
 	}
 }
 
@@ -217,6 +258,57 @@ func TestComputeReadyQueue(t *testing.T) {
 	}
 }
 
+func TestComputeReadyQueueOrdersByPriorityRiskThenID(t *testing.T) {
+	t.Parallel()
+
+	state := NewSolverState()
+	for _, item := range []WorkItem{
+		{ID: "low-risk", Goal: "g", Archetype: ArchetypeExplicitDAG, Priority: 2.0, Risk: 0.1},
+		{ID: "risk-b", Goal: "g", Archetype: ArchetypeExplicitDAG, Priority: 2.0, Risk: 0.9},
+		{ID: "risk-a", Goal: "g", Archetype: ArchetypeExplicitDAG, Priority: 2.0, Risk: 0.9},
+		{ID: "high", Goal: "g", Archetype: ArchetypeExplicitDAG, Priority: 3.0, Risk: 0.0},
+	} {
+		if err := AddWorkItem(state, item); err != nil {
+			t.Fatalf("AddWorkItem(%s): %v", item.ID, err)
+		}
+	}
+
+	want := []string{"high", "risk-a", "risk-b", "low-risk"}
+	if got := ComputeReadyQueue(state); !sameStringIDs(got, want) {
+		t.Fatalf("ready queue=%v want %v", got, want)
+	}
+	if !sameStringIDs(state.ReadyQueue, want) {
+		t.Fatalf("state ready queue=%v want %v", state.ReadyQueue, want)
+	}
+}
+
+func TestComputeReadyQueueExcludesNonRunnableItems(t *testing.T) {
+	t.Parallel()
+
+	state := NewSolverState()
+	items := []WorkItem{
+		{ID: "ready-root", Goal: "g", Archetype: ArchetypeExplicitDAG, Priority: 1.0},
+		{ID: "solved-dep", Goal: "g", Archetype: ArchetypeExplicitDAG, Status: StatusSolved},
+		{ID: "waiting-on-solved", Goal: "g", Archetype: ArchetypeExplicitDAG, DependsOn: []string{"solved-dep"}, Priority: 2.0},
+		{ID: "unsolved-dep", Goal: "g", Archetype: ArchetypeExplicitDAG},
+		{ID: "waiting-on-unsolved", Goal: "g", Archetype: ArchetypeExplicitDAG, DependsOn: []string{"unsolved-dep"}, Priority: 9.0},
+		{ID: "currently-solving", Goal: "g", Archetype: ArchetypeExplicitDAG, Status: StatusSolving, Priority: 10.0},
+		{ID: "already-solved", Goal: "g", Archetype: ArchetypeExplicitDAG, Status: StatusSolved, Priority: 10.0},
+		{ID: "blocked", Goal: "g", Archetype: ArchetypeExplicitDAG, Status: StatusBlocked, Priority: 10.0},
+		{ID: "failed", Goal: "g", Archetype: ArchetypeExplicitDAG, Status: StatusFailed, Priority: 10.0},
+	}
+	for _, item := range items {
+		if err := AddWorkItem(state, item); err != nil {
+			t.Fatalf("AddWorkItem(%s): %v", item.ID, err)
+		}
+	}
+
+	want := []string{"waiting-on-solved", "ready-root", "unsolved-dep"}
+	if got := ComputeReadyQueue(state); !sameStringIDs(got, want) {
+		t.Fatalf("ready queue=%v want %v", got, want)
+	}
+}
+
 func TestCompactFailureDigest(t *testing.T) {
 	state := NewSolverState()
 	_ = AddWorkItem(state, WorkItem{ID: "n1", Goal: "g", Archetype: ArchetypeExplicitDAG, MaxAttempts: 5})
@@ -280,8 +372,8 @@ func TestValidateSolverState(t *testing.T) {
 
 func TestValidateSolverStateCycle(t *testing.T) {
 	state := NewSolverState()
-	state.Items["n1"] = WorkItem{ID: "n1", Goal: "g1", Archetype: ArchetypeExplicitDAG, DependsOn: []string{"n2"}}
-	state.Items["n2"] = WorkItem{ID: "n2", Goal: "g2", Archetype: ArchetypeExplicitDAG, DependsOn: []string{"n1"}}
+	state.Items["n1"] = WorkItem{ID: "n1", Goal: "g1", Archetype: ArchetypeExplicitDAG, Status: StatusPending, DependsOn: []string{"n2"}}
+	state.Items["n2"] = WorkItem{ID: "n2", Goal: "g2", Archetype: ArchetypeExplicitDAG, Status: StatusPending, DependsOn: []string{"n1"}}
 	err := ValidateSolverState(state)
 	if err == nil {
 		t.Fatal("expected cycle error")
@@ -293,9 +385,21 @@ func TestValidateSolverStateCycle(t *testing.T) {
 
 func TestValidateSolverStateUnknownDep(t *testing.T) {
 	state := NewSolverState()
-	state.Items["n1"] = WorkItem{ID: "n1", Goal: "g1", Archetype: ArchetypeExplicitDAG, DependsOn: []string{"n99"}}
+	state.Items["n1"] = WorkItem{ID: "n1", Goal: "g1", Archetype: ArchetypeExplicitDAG, Status: StatusPending, DependsOn: []string{"n99"}}
 	err := ValidateSolverState(state)
 	if err == nil {
 		t.Fatal("expected unknown dep error")
 	}
+}
+
+func sameStringIDs(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }

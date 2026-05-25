@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -64,6 +65,36 @@ func TestIndexEditedFileBuildsContext(t *testing.T) {
 	}
 }
 
+func TestIndexEditedFileRejectsEscapingPath(t *testing.T) {
+	called := false
+	deps := Dependencies{
+		RunSkill: func(ctx context.Context, skill string, input any, workspace string, out any) error {
+			called = true
+			return nil
+		},
+	}
+	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
+
+	resp, err := IndexEditedFile(context.Background(), deps, LiveIndexRequest{
+		Workspace: workspaceRoot,
+		Payload: LiveIndexPayload{
+			ToolInput: struct {
+				FilePath string `json:"file_path,omitempty"`
+				Path     string `json:"path,omitempty"`
+			}{FilePath: filepath.Join("..", "outside.go")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("IndexEditedFile: %v", err)
+	}
+	if called {
+		t.Fatalf("IndexEditedFile called incremental index for escaping path")
+	}
+	if resp.FilePath != "" || resp.Context != "" {
+		t.Fatalf("escaping index response = %#v, want no file or context", resp)
+	}
+}
+
 func TestDiagnoseEditedFileFormatsGoDiagnostics(t *testing.T) {
 	tmp := t.TempDir()
 	filePath := tmp + "/main.go"
@@ -96,6 +127,46 @@ func TestDiagnoseEditedFileFormatsGoDiagnostics(t *testing.T) {
 	}
 	if len(resp.Diagnostics) != 1 || !strings.Contains(resp.Diagnostics[0], "undefined: os") {
 		t.Fatalf("unexpected diagnostics: %#v", resp.Diagnostics)
+	}
+}
+
+func TestDiagnoseEditedFileRejectsEscapingPath(t *testing.T) {
+	parent := t.TempDir()
+	workspaceRoot := filepath.Join(parent, "workspace")
+	if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	outsidePath := filepath.Join(parent, "outside.go")
+	if err := osWriteFile(outsidePath, "package main\n"); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	deps := Dependencies{
+		LookPath: func(name string) (string, error) {
+			if name == "gopls" {
+				return "/usr/bin/gopls", nil
+			}
+			return "", errors.New("missing")
+		},
+		ExecCmd: func(ctx context.Context, dir, name string, args ...string) (string, error) {
+			t.Fatalf("diagnostics command called for escaping path: %s %v", name, args)
+			return "", nil
+		},
+	}
+
+	resp, err := DiagnoseEditedFile(context.Background(), deps, LSPDiagnosticsRequest{
+		Workspace: workspaceRoot,
+		Payload: LSPDiagnosticsPayload{
+			ToolInput: struct {
+				FilePath string `json:"file_path,omitempty"`
+				Path     string `json:"path,omitempty"`
+			}{FilePath: filepath.Join("..", "outside.go")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("DiagnoseEditedFile: %v", err)
+	}
+	if resp.FilePath != "" || len(resp.Diagnostics) != 0 || resp.Context != "" {
+		t.Fatalf("escaping diagnostics response = %#v, want no file, diagnostics, or context", resp)
 	}
 }
 

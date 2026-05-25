@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
@@ -353,7 +355,7 @@ func aggregateResponses(bodies []any) any {
 
 	// Concatenate all arrays
 	if len(allArrays) == len(bodies) {
-		var combined []any
+		combined := make([]any, 0)
 		for _, arr := range allArrays {
 			combined = append(combined, arr...)
 		}
@@ -370,7 +372,7 @@ func emitDryRun(rc *skillmain.RunContext, req *builder.Request, in Input) error 
 
 	plan := map[string]any{
 		"method":  req.Method,
-		"url":     req.URL,
+		"url":     redactDryRunURL(req.URL, in.Auth),
 		"headers": headers,
 		"body":    nil,
 	}
@@ -412,6 +414,45 @@ func emitDryRun(rc *skillmain.RunContext, req *builder.Request, in Input) error 
 	}
 
 	return skillout.Emit(rc, command, data)
+}
+
+func redactDryRunURL(rawURL string, auth openapiauth.Config) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return secrets.Redact(rawURL)
+	}
+
+	query := u.Query()
+	if len(query) == 0 {
+		return secrets.Redact(rawURL)
+	}
+
+	for name, values := range query {
+		if isSensitiveQueryParam(name, auth) {
+			query[name] = []string{"***"}
+			continue
+		}
+		for i, value := range values {
+			values[i] = secrets.Redact(value)
+		}
+		query[name] = values
+	}
+	u.RawQuery = query.Encode()
+	return u.String()
+}
+
+func isSensitiveQueryParam(name string, auth openapiauth.Config) bool {
+	if auth.Type == "apiKey" && auth.Query != "" && name == auth.Query {
+		return true
+	}
+
+	normalized := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(name, "-", "_"), ".", "_"))
+	switch normalized {
+	case "api_key", "apikey", "access_token", "refresh_token", "token", "auth", "authorization", "client_secret":
+		return true
+	default:
+		return strings.Contains(normalized, "secret") || strings.Contains(normalized, "credential")
+	}
 }
 
 // emitResponse outputs the HTTP response with optional pagination summary.
@@ -533,6 +574,7 @@ func suggestOperations(spec *loader.Spec, attempted string) string {
 	for id := range spec.Operations {
 		ids = append(ids, id)
 	}
+	sort.Strings(ids)
 
 	// If there are many operations, just show first few
 	if len(ids) > 5 {

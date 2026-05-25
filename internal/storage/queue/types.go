@@ -26,8 +26,11 @@ const (
 type JobPriority int
 
 const (
+	// PriorityUnset is the zero-value sentinel; enqueue normalizes it to PriorityNormal.
+	PriorityUnset JobPriority = 0
+
 	// PriorityLow for background batch processing.
-	PriorityLow JobPriority = 0
+	PriorityLow JobPriority = 10
 
 	// PriorityNormal for standard requests.
 	PriorityNormal JobPriority = 50

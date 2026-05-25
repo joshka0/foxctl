@@ -70,9 +70,7 @@ func FormatContent(title, status, taskID string, unresolvedDeps int, cfg Project
 
 	// Main title content (truncate if needed)
 	content := title
-	if cfg.MaxContentLength > 0 && len(content) > cfg.MaxContentLength {
-		content = content[:cfg.MaxContentLength-3] + "..."
-	}
+	content = truncateProjectedContent(content, cfg.MaxContentLength)
 	parts = append(parts, content)
 
 	// Dependency hint suffix
@@ -83,6 +81,17 @@ func FormatContent(title, status, taskID string, unresolvedDeps int, cfg Project
 	// Join parts and append task ID tag
 	result := strings.Join(parts, " ")
 	return AppendTaskID(result, taskID)
+}
+
+func truncateProjectedContent(content string, maxLen int) string {
+	runes := []rune(content)
+	if maxLen <= 0 || len(runes) <= maxLen {
+		return content
+	}
+	if maxLen <= 3 {
+		return strings.Repeat(".", maxLen)
+	}
+	return string(runes[:maxLen-3]) + "..."
 }
 
 // ParseProjectedContent extracts the original title from projected content.

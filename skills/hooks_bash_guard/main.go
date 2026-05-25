@@ -178,9 +178,15 @@ type sedRange struct {
 //
 // [[domain:command-rewriting]]
 func rewriteSedToContextGrep(command string) (string, sedRange, bool) {
-	segments := strings.Split(command, "|")
+	segments, ok := splitRewritePipes(command)
+	if !ok {
+		return "", sedRange{}, false
+	}
 	for idx, segment := range segments {
 		segment = strings.TrimSpace(segment)
+		if !isSimpleCommand(segment, "sed") {
+			continue
+		}
 		lineStart, lineEnd, ok := parseSedRange(segment)
 		if !ok {
 			continue
@@ -188,7 +194,11 @@ func rewriteSedToContextGrep(command string) (string, sedRange, bool) {
 
 		filePath := extractSedFile(segment)
 		if filePath == "" && idx > 0 {
-			filePath = extractCatFile(strings.TrimSpace(segments[idx-1]))
+			previous := strings.TrimSpace(segments[idx-1])
+			if !isSimpleCommand(previous, "cat") {
+				return "", sedRange{}, false
+			}
+			filePath = extractCatFile(previous)
 		}
 		if filePath == "" || filePath == "-" {
 			return "", sedRange{}, false
@@ -211,6 +221,78 @@ func rewriteSedToContextGrep(command string) (string, sedRange, bool) {
 		return rewritten, info, true
 	}
 	return "", sedRange{}, false
+}
+
+func splitRewritePipes(command string) ([]string, bool) {
+	var segments []string
+	var buf strings.Builder
+	var quote rune
+	escaped := false
+	runes := []rune(command)
+
+	for i, r := range runes {
+		if escaped {
+			buf.WriteRune(r)
+			escaped = false
+			continue
+		}
+		if r == '\\' && quote != '\'' {
+			buf.WriteRune(r)
+			escaped = true
+			continue
+		}
+		if quote != 0 {
+			if r == quote {
+				quote = 0
+			}
+			buf.WriteRune(r)
+			continue
+		}
+
+		switch r {
+		case '\n', '\r', ';', '&', '>', '`':
+			return nil, false
+		case '$':
+			if i+1 < len(runes) && runes[i+1] == '(' {
+				return nil, false
+			}
+		case '\'', '"':
+			quote = r
+		case '|':
+			if i+1 < len(runes) && runes[i+1] == '|' {
+				return nil, false
+			}
+			segments = append(segments, buf.String())
+			buf.Reset()
+			continue
+		}
+		buf.WriteRune(r)
+	}
+	if escaped || quote != 0 {
+		return nil, false
+	}
+	segments = append(segments, buf.String())
+	if len(segments) > 2 {
+		return nil, false
+	}
+	for _, segment := range segments {
+		if strings.TrimSpace(segment) == "" {
+			return nil, false
+		}
+	}
+	return segments, true
+}
+
+func isSimpleCommand(segment, name string) bool {
+	tokens := tokenizeCommand(segment)
+	if len(tokens) == 0 {
+		return false
+	}
+	return isCommandToken(tokens[0], name)
+}
+
+func isCommandToken(token, name string) bool {
+	return token == name || strings.HasSuffix(token, "/"+name)
 }
 
 // parseSedRange extracts line range from sed command segment.

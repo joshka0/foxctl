@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"testing/quick"
 
 	"github.com/joshka0/foxctl/internal/domain/skill"
 	"github.com/joshka0/foxctl/internal/runtime/execution"
@@ -315,6 +316,21 @@ func TestParseSkillOutput_Formats(t *testing.T) {
 			want:  DecisionApprove,
 		},
 		{
+			name:    "direct output with invalid decision",
+			input:   []byte(`{"decision":"deny","reason":"typo should not fail open"}`),
+			wantErr: true,
+		},
+		{
+			name:    "envelope hook_output with invalid decision",
+			input:   []byte(`{"version":1,"status":"ok","command":"test","data":{"hook_output":{"decision":"deny"}},"meta":{"ts":"2024-01-01T00:00:00Z"}}`),
+			wantErr: true,
+		},
+		{
+			name:    "envelope hook_output with invalid shape",
+			input:   []byte(`{"version":1,"status":"ok","command":"test","data":{"hook_output":"not-an-object"},"meta":{"ts":"2024-01-01T00:00:00Z"}}`),
+			wantErr: true,
+		},
+		{
 			name:    "envelope with error",
 			input:   []byte(`{"version":1,"status":"error","command":"test","error":{"code":"ERR","message":"failed"},"meta":{"ts":"2024-01-01T00:00:00Z"}}`),
 			wantErr: true,
@@ -337,5 +353,48 @@ func TestParseSkillOutput_Formats(t *testing.T) {
 				t.Errorf("expected %s, got %s", tt.want, output.Decision)
 			}
 		})
+	}
+}
+
+func TestParseSkillOutputRejectsUnknownDecisionStrings(t *testing.T) {
+	prop := func(candidate string) bool {
+		decision := Decision(candidate)
+		if candidate == "" || decision.IsValid() {
+			return true
+		}
+
+		direct, err := json.Marshal(Output{Decision: decision})
+		if err != nil {
+			t.Logf("marshal direct decision %q: %v", candidate, err)
+			return false
+		}
+		if _, err := parseSkillOutput(direct); err == nil {
+			t.Logf("accepted invalid direct decision %q", candidate)
+			return false
+		}
+
+		envelope := map[string]any{
+			"version": 1,
+			"status":  "ok",
+			"command": "test/hook",
+			"data": map[string]any{
+				"hook_output": map[string]any{"decision": candidate},
+			},
+			"meta": map[string]any{"ts": "2024-01-01T00:00:00Z"},
+		}
+		wrapped, err := json.Marshal(envelope)
+		if err != nil {
+			t.Logf("marshal envelope decision %q: %v", candidate, err)
+			return false
+		}
+		if _, err := parseSkillOutput(wrapped); err == nil {
+			t.Logf("accepted invalid envelope decision %q", candidate)
+			return false
+		}
+		return true
+	}
+
+	if err := quick.Check(prop, &quick.Config{MaxCount: 200}); err != nil {
+		t.Fatal(err)
 	}
 }

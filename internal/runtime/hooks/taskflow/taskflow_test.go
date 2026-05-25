@@ -6,9 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/runtime/hooks/sessionmode"
+	"github.com/joshka0/foxctl/internal/storage/graph"
 	"github.com/joshka0/foxctl/internal/storage/tasks"
 )
 
@@ -167,5 +169,119 @@ func TestLinkTaskFileSyncModeAddsContext(t *testing.T) {
 	}
 	if !strings.Contains(response.Context, "Linked") {
 		t.Fatalf("context = %q", response.Context)
+	}
+}
+
+func TestLinkTaskFileRejectsEscapingPath(t *testing.T) {
+	storageRoot := t.TempDir()
+	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
+	if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	store, err := tasks.Open(context.Background(), storageRoot)
+	if err != nil {
+		t.Fatalf("open tasks: %v", err)
+	}
+	task, err := store.Add(context.Background(), tasks.Task{
+		WorkspaceID: workspaceRoot,
+		Title:       "Ship hook cleanup",
+		Status:      tasks.StatusInProgress,
+	})
+	if err != nil {
+		t.Fatalf("add task: %v", err)
+	}
+	if _, err := store.SetActive(context.Background(), workspaceRoot, task.ID); err != nil {
+		t.Fatalf("set active: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close tasks: %v", err)
+	}
+
+	outsidePath := filepath.Join(filepath.Dir(workspaceRoot), "outside.go")
+	response, err := LinkTaskFile(context.Background(), Dependencies{
+		StorageRoot: storageRoot,
+	}, TaskFileLinkRequest{
+		Workspace: workspaceRoot,
+		Payload: TaskFileLinkPayload{
+			ToolInput: struct {
+				FilePath string `json:"file_path,omitempty"`
+			}{
+				FilePath: outsidePath,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("LinkTaskFile: %v", err)
+	}
+	if response.Decision != "approve" {
+		t.Fatalf("decision = %q", response.Decision)
+	}
+	if response.TaskID != "" || response.FilePath != "" {
+		t.Fatalf("escaping link response = %#v, want no task or file link", response)
+	}
+
+	graphStore, err := graph.Open(context.Background(), storageRoot)
+	if err != nil {
+		t.Fatalf("open graph: %v", err)
+	}
+	defer graphStore.Close()
+	if _, err := graphStore.GetNode(context.Background(), workspaceRoot, "file:outside.go"); err == nil {
+		t.Fatalf("escaping path was linked into the task graph")
+	}
+}
+
+func TestTaskflowRelPathRejectsEscapesAndAllowsDotDotNames(t *testing.T) {
+	t.Parallel()
+
+	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
+	if got := taskflowRelPath(workspaceRoot, filepath.Join(workspaceRoot, "internal", "auth.go")); got != "internal/auth.go" {
+		t.Fatalf("absolute workspace path = %q, want internal/auth.go", got)
+	}
+	if got := taskflowRelPath(workspaceRoot, filepath.Join("internal", "auth.go")); got != "internal/auth.go" {
+		t.Fatalf("relative workspace path = %q, want internal/auth.go", got)
+	}
+	if got := taskflowRelPath(workspaceRoot, filepath.Join("..", "outside.go")); got != "" {
+		t.Fatalf("parent-relative escape = %q, want empty", got)
+	}
+	if got := taskflowRelPath(workspaceRoot, filepath.Join(filepath.Dir(workspaceRoot), "outside.go")); got != "" {
+		t.Fatalf("absolute sibling escape = %q, want empty", got)
+	}
+	if got := taskflowRelPath(workspaceRoot, filepath.Join(workspaceRoot, "..cache", "demo.go")); got != "..cache/demo.go" {
+		t.Fatalf("dot-dot-prefixed child = %q, want ..cache/demo.go", got)
+	}
+}
+
+func TestTaskflowRelPathPropertyRejectsGeneratedEscapes(t *testing.T) {
+	t.Parallel()
+
+	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
+	parent := filepath.Dir(workspaceRoot)
+	property := func(rawName string) bool {
+		name := strings.TrimSpace(rawName)
+		name = strings.NewReplacer("/", "_", "\\", "_").Replace(name)
+		if name == "" {
+			name = "file.go"
+		}
+
+		if got := taskflowRelPath(workspaceRoot, filepath.Join("..", name)); got != "" {
+			t.Logf("relative escape %q normalized to %q", name, got)
+			return false
+		}
+		if got := taskflowRelPath(workspaceRoot, filepath.Join(parent, name)); got != "" {
+			t.Logf("absolute sibling escape %q normalized to %q", name, got)
+			return false
+		}
+
+		childName := "..cache-" + name
+		want := filepath.ToSlash(childName)
+		if got := taskflowRelPath(workspaceRoot, filepath.Join(workspaceRoot, childName)); got != want {
+			t.Logf("dot-dot-prefixed child %q normalized to %q, want %q", childName, got, want)
+			return false
+		}
+		return true
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 300}); err != nil {
+		t.Fatalf("taskflow path property failed: %v", err)
 	}
 }

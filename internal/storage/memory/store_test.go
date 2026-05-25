@@ -2,9 +2,12 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/context/memorycore"
@@ -130,6 +133,96 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 	}
 }
 
+func TestSyncSymbolEmbeddingsRejectsCorruptQueuedEmbeddings(t *testing.T) {
+	ctx := context.Background()
+	workspace := "ws"
+	pkg := "go:pkg/a"
+	key := "helper.go/Helper"
+	symbolID := symbolutil.ScopedSymbolID(pkg, key)
+	entryName := symbolutil.KeyEntryName(workspace, pkg, key)
+
+	tests := []struct {
+		name        string
+		embedding   []byte
+		dimensions  int
+		wantMessage string
+	}{
+		{name: "null", embedding: []byte(`null`), dimensions: 3, wantMessage: "JSON array"},
+		{name: "empty", embedding: []byte(`[]`), dimensions: 0, wantMessage: "must not be empty"},
+		{name: "malformed", embedding: []byte(`[0.1,`), dimensions: 3, wantMessage: "unexpected end of JSON input"},
+		{name: "wrong dimension", embedding: []byte(`[0.1,0.2]`), dimensions: 3, wantMessage: "dimensions=2 expected=3"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			memoryStore, err := Open(ctx, t.TempDir(), "")
+			if err != nil {
+				t.Fatalf("open memory store: %v", err)
+			}
+			t.Cleanup(func() {
+				if err := memoryStore.Close(); err != nil {
+					t.Fatalf("close memory store: %v", err)
+				}
+			})
+
+			result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
+			if _, err := memoryStore.SaveFromResult(ctx, entryName, "code_symbol", workspace, "helper", result); err != nil {
+				t.Fatalf("save symbol memory: %v", err)
+			}
+
+			embeddingDBPath := filepath.Join(t.TempDir(), "embedding_queue.db")
+			embeddingDB, err := sqliteutil.OpenDB(ctx, embeddingDBPath, nil)
+			if err != nil {
+				t.Fatalf("open embedding fixture db: %v", err)
+			}
+			if _, err := embeddingDB.ExecContext(ctx, `
+CREATE TABLE symbol_embeddings (
+	symbol_id TEXT NOT NULL,
+	workspace_id TEXT NOT NULL,
+	file_path TEXT NOT NULL,
+	embedding BLOB NOT NULL,
+	content_digest TEXT NOT NULL,
+	model TEXT NOT NULL,
+	dimensions INTEGER NOT NULL,
+	created_at TEXT NOT NULL,
+	PRIMARY KEY (workspace_id, symbol_id)
+)`); err != nil {
+				t.Fatalf("create embedding fixture table: %v", err)
+			}
+			if _, err := embeddingDB.ExecContext(ctx, `
+INSERT INTO symbol_embeddings
+	(symbol_id, workspace_id, file_path, embedding, content_digest, model, dimensions, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+				symbolID, workspace, "pkg/a/helper.go", tt.embedding, "digest", "test-model", tt.dimensions, "2026-05-07T00:00:00Z"); err != nil {
+				t.Fatalf("insert embedding fixture: %v", err)
+			}
+			if err := embeddingDB.Close(); err != nil {
+				t.Fatalf("close embedding fixture db: %v", err)
+			}
+
+			synced, err := memoryStore.SyncSymbolEmbeddings(ctx, embeddingDBPath, SyncSymbolEmbeddingsOptions{
+				WorkspaceID: workspace,
+				SymbolIDs:   []string{symbolID},
+				OnlyMissing: true,
+			})
+			if err == nil || !strings.Contains(err.Error(), tt.wantMessage) {
+				t.Fatalf("SyncSymbolEmbeddings() synced=%d error=%v, want %s", synced, err, tt.wantMessage)
+			}
+			if synced != 0 {
+				t.Fatalf("corrupt queued embedding synced %d rows, want 0", synced)
+			}
+
+			got, err := memoryStore.GetEmbedding(ctx, entryName, workspace)
+			if err != nil {
+				t.Fatalf("get embedding after rejected sync: %v", err)
+			}
+			if got != nil {
+				t.Fatalf("rejected queued embedding was persisted: %#v", got)
+			}
+		})
+	}
+}
+
 func TestListFiltersWorkspace(t *testing.T) {
 	ctx := context.Background()
 	store, err := Open(ctx, t.TempDir(), "")
@@ -243,6 +336,294 @@ func TestUpdateLifecyclePersistsNamedMemoryState(t *testing.T) {
 	}
 	if len(listed) != 1 || listed[0].LifecycleState != "stale" {
 		t.Fatalf("list did not include lifecycle state: %#v", listed)
+	}
+}
+
+func TestUpdateLifecycleRejectsInvalidMemoryLifecycleStateWithoutMutatingEntry(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
+
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
+	if _, err := store.SaveFromResult(ctx, "alpha", "result", "ws", "alpha summary", result); err != nil {
+		t.Fatalf("save alpha: %v", err)
+	}
+
+	_, err = store.UpdateLifecycle(ctx, "alpha", "ws", LifecycleUpdate{
+		LifecycleState: "trusted",
+		ReviewStatus:   "reviewed",
+		SupersededBy:   "beta",
+		ReviewNotes:    "should not persist",
+	})
+	if err == nil {
+		t.Fatal("expected invalid lifecycle state error")
+	}
+	if !strings.Contains(err.Error(), "invalid memory lifecycle state") {
+		t.Fatalf("error=%v want invalid memory lifecycle state", err)
+	}
+
+	got, err := store.Get(ctx, "alpha", "ws")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.LifecycleState != "active" || got.ReviewStatus != "unreviewed" || got.SupersededBy != "" || got.ReviewNotes != "" {
+		t.Fatalf("invalid lifecycle update mutated entry: %#v", got)
+	}
+}
+
+func TestUpdateLifecycleRejectsInvalidMemoryReviewStatusWithoutMutatingEntry(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
+
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
+	if _, err := store.SaveFromResult(ctx, "alpha", "result", "ws", "alpha summary", result); err != nil {
+		t.Fatalf("save alpha: %v", err)
+	}
+
+	_, err = store.UpdateLifecycle(ctx, "alpha", "ws", LifecycleUpdate{
+		LifecycleState: "stale",
+		ReviewStatus:   "trusted",
+		SupersededBy:   "beta",
+		ReviewNotes:    "should not persist",
+	})
+	if err == nil {
+		t.Fatal("expected invalid review status error")
+	}
+	if !strings.Contains(err.Error(), "invalid memory review status") {
+		t.Fatalf("error=%v want invalid memory review status", err)
+	}
+
+	got, err := store.Get(ctx, "alpha", "ws")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.LifecycleState != "active" || got.ReviewStatus != "unreviewed" || got.SupersededBy != "" || got.ReviewNotes != "" {
+		t.Fatalf("invalid review update mutated entry: %#v", got)
+	}
+}
+
+func TestSaveRejectsGeneratedUnknownMemoryLifecycleStates(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
+
+	rejectsUnknownLifecycleState := func(raw string) bool {
+		_, err := store.Save(ctx, NamedEntry{
+			Name:           "generated-invalid-lifecycle",
+			Type:           "result",
+			Workspace:      "ws",
+			Summary:        "invalid lifecycle should fail closed",
+			Result:         []byte(`{"ok":true}`),
+			LifecycleState: "unknown:" + raw,
+		})
+		entries, listErr := store.List(ctx, "ws", 10)
+		return err != nil &&
+			strings.Contains(err.Error(), "invalid memory lifecycle state") &&
+			listErr == nil &&
+			len(entries) == 0
+	}
+
+	if err := quick.Check(rejectsUnknownLifecycleState, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("generated unknown lifecycle state was accepted: %v", err)
+	}
+}
+
+func TestSaveRejectsGeneratedUnknownMemoryReviewStatuses(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
+
+	rejectsUnknownReviewStatus := func(raw string) bool {
+		_, err := store.Save(ctx, NamedEntry{
+			Name:         "generated-invalid-review",
+			Type:         "result",
+			Workspace:    "ws",
+			Summary:      "invalid review should fail closed",
+			Result:       []byte(`{"ok":true}`),
+			ReviewStatus: "unknown:" + raw,
+		})
+		entries, listErr := store.List(ctx, "ws", 10)
+		return err != nil &&
+			strings.Contains(err.Error(), "invalid memory review status") &&
+			listErr == nil &&
+			len(entries) == 0
+	}
+
+	if err := quick.Check(rejectsUnknownReviewStatus, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("generated unknown review status was accepted: %v", err)
+	}
+}
+
+func TestNamedMemoryReadsRejectCorruptPersistedLifecycleMetadata(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name        string
+		column      string
+		value       string
+		wantMessage string
+	}{
+		{
+			name:        "lifecycle state",
+			column:      "lifecycle_state",
+			value:       "trusted",
+			wantMessage: "invalid memory lifecycle state",
+		},
+		{
+			name:        "review status",
+			column:      "review_status",
+			value:       "trusted",
+			wantMessage: "invalid memory review status",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store, err := Open(ctx, t.TempDir(), "")
+			if err != nil {
+				t.Fatalf("open: %v", err)
+			}
+			t.Cleanup(func() {
+				if err := store.Close(); err != nil {
+					t.Fatalf("close store: %v", err)
+				}
+			})
+
+			result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
+			if _, err := store.SaveFromResult(ctx, "alpha", "result", "ws", "alpha summary", result); err != nil {
+				t.Fatalf("save alpha: %v", err)
+			}
+			if _, err := store.db.ExecContext(ctx, "UPDATE named_memory SET "+tt.column+" = $1 WHERE name = $2 AND workspace = $3", tt.value, "alpha", "ws"); err != nil {
+				t.Fatalf("corrupt %s: %v", tt.column, err)
+			}
+
+			if _, err := store.Get(ctx, "alpha", "ws"); err == nil || !strings.Contains(err.Error(), tt.wantMessage) {
+				t.Fatalf("Get() error=%v, want %s", err, tt.wantMessage)
+			}
+			if _, err := store.List(ctx, "ws", 10); err == nil || !strings.Contains(err.Error(), tt.wantMessage) {
+				t.Fatalf("List() error=%v, want %s", err, tt.wantMessage)
+			}
+		})
+	}
+}
+
+func TestSaveRejectsNegativeMemoryTelemetryCounters(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name   string
+		mutate func(*NamedEntry)
+	}{
+		{name: "selected", mutate: func(entry *NamedEntry) { entry.SelectedCount = -1 }},
+		{name: "used", mutate: func(entry *NamedEntry) { entry.UseCount = -1 }},
+		{name: "succeeded", mutate: func(entry *NamedEntry) { entry.SuccessCount = -1 }},
+		{name: "failed", mutate: func(entry *NamedEntry) { entry.FailureCount = -1 }},
+		{name: "patched", mutate: func(entry *NamedEntry) { entry.PatchCount = -1 }},
+		{name: "restored", mutate: func(entry *NamedEntry) { entry.RestoreCount = -1 }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store, err := Open(ctx, t.TempDir(), "")
+			if err != nil {
+				t.Fatalf("open: %v", err)
+			}
+			t.Cleanup(func() {
+				if err := store.Close(); err != nil {
+					t.Fatalf("close store: %v", err)
+				}
+			})
+
+			entry := NamedEntry{
+				Name:      "alpha",
+				Type:      "result",
+				Workspace: "ws",
+				Summary:   "negative telemetry should fail closed",
+				Result:    []byte(`{"ok":true}`),
+			}
+			tt.mutate(&entry)
+
+			_, err = store.Save(ctx, entry)
+			if err == nil || !strings.Contains(err.Error(), "must be non-negative") {
+				t.Fatalf("Save() error=%v, want non-negative telemetry error", err)
+			}
+			entries, err := store.List(ctx, "ws", 10)
+			if err != nil {
+				t.Fatalf("list after rejected save: %v", err)
+			}
+			if len(entries) != 0 {
+				t.Fatalf("rejected save persisted entries: %#v", entries)
+			}
+		})
+	}
+}
+
+func TestNamedMemoryReadsRejectNegativePersistedTelemetryCounters(t *testing.T) {
+	ctx := context.Background()
+
+	for _, column := range []string{
+		"selected_count",
+		"use_count",
+		"success_count",
+		"failure_count",
+		"patch_count",
+		"restore_count",
+	} {
+		t.Run(column, func(t *testing.T) {
+			store, err := Open(ctx, t.TempDir(), "")
+			if err != nil {
+				t.Fatalf("open: %v", err)
+			}
+			t.Cleanup(func() {
+				if err := store.Close(); err != nil {
+					t.Fatalf("close store: %v", err)
+				}
+			})
+
+			result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
+			if _, err := store.SaveFromResult(ctx, "alpha", "result", "ws", "alpha summary", result); err != nil {
+				t.Fatalf("save alpha: %v", err)
+			}
+			if _, err := store.db.ExecContext(ctx, "UPDATE named_memory SET "+column+" = $1 WHERE name = $2 AND workspace = $3", -1, "alpha", "ws"); err != nil {
+				t.Fatalf("corrupt %s: %v", column, err)
+			}
+
+			if _, err := store.Get(ctx, "alpha", "ws"); err == nil || !strings.Contains(err.Error(), column) {
+				t.Fatalf("Get() error=%v, want it to name %s", err, column)
+			}
+			if _, err := store.List(ctx, "ws", 10); err == nil || !strings.Contains(err.Error(), column) {
+				t.Fatalf("List() error=%v, want it to name %s", err, column)
+			}
+		})
 	}
 }
 
@@ -786,6 +1167,166 @@ func TestEmbeddings(t *testing.T) {
 	_, err = store.GetEmbedding(ctx, "nonexistent", "ws")
 	if err == nil {
 		t.Log("Note: GetEmbedding for nonexistent may return error or nil")
+	}
+}
+
+func TestUpdateEmbeddingRejectsEmptyVector(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
+
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
+	if _, err := store.SaveFromResult(ctx, "embed_test", "result", "ws", "summary", result); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	if err := store.UpdateEmbedding(ctx, "embed_test", "ws", nil); err == nil || !strings.Contains(err.Error(), "embedding must not be empty") {
+		t.Fatalf("UpdateEmbedding() error=%v, want empty embedding rejection", err)
+	}
+	got, err := store.GetEmbedding(ctx, "embed_test", "ws")
+	if err != nil {
+		t.Fatalf("get embedding after rejected update: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("rejected empty embedding was persisted: %#v", got)
+	}
+}
+
+func TestDecodeStoredEmbeddingJSONProperty(t *testing.T) {
+	acceptsGeneratedFiniteVectors := func(raw []byte) bool {
+		if len(raw) == 0 {
+			raw = []byte{0}
+		}
+		if len(raw) > 32 {
+			raw = raw[:32]
+		}
+		want := make([]float32, len(raw))
+		for i, b := range raw {
+			want[i] = float32(int(b)-128) / 16
+		}
+
+		encoded, err := json.Marshal(want)
+		if err != nil {
+			return false
+		}
+		got, err := decodeStoredEmbeddingJSON(encoded, len(want))
+		if err != nil || len(got) != len(want) {
+			return false
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				return false
+			}
+		}
+		_, err = decodeStoredEmbeddingJSON(encoded, len(want)+1)
+		return err != nil && strings.Contains(err.Error(), "expected")
+	}
+
+	if err := quick.Check(acceptsGeneratedFiniteVectors, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("stored embedding decoder property failed: %v", err)
+	}
+}
+
+func TestGetEmbeddingRejectsCorruptPersistedEmbeddingJSON(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name        string
+		value       string
+		wantMessage string
+	}{
+		{name: "null", value: "null", wantMessage: "JSON array"},
+		{name: "empty", value: "[]", wantMessage: "must not be empty"},
+		{name: "object", value: `{"x":1}`, wantMessage: "cannot unmarshal object"},
+		{name: "wrong dimension", value: "[1,0]", wantMessage: "dimensions=2 expected=3"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store, err := Open(ctx, t.TempDir(), "")
+			if err != nil {
+				t.Fatalf("open: %v", err)
+			}
+			t.Cleanup(func() {
+				if err := store.Close(); err != nil {
+					t.Fatalf("close store: %v", err)
+				}
+			})
+
+			result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
+			if _, err := store.SaveFromResult(ctx, "embed_test", "result", "ws", "summary", result); err != nil {
+				t.Fatalf("save: %v", err)
+			}
+			if err := store.UpdateEmbedding(ctx, "embed_test", "ws", []float32{1, 0, 0}); err != nil {
+				t.Fatalf("update embedding: %v", err)
+			}
+			if _, err := store.db.ExecContext(ctx, `UPDATE named_memory SET embedding = $1 WHERE name = $2 AND workspace = $3`, []byte(tt.value), "embed_test", "ws"); err != nil {
+				t.Fatalf("corrupt embedding: %v", err)
+			}
+
+			if _, err := store.GetEmbedding(ctx, "embed_test", "ws"); err == nil || !strings.Contains(err.Error(), tt.wantMessage) {
+				t.Fatalf("GetEmbedding() error=%v, want %s", err, tt.wantMessage)
+			}
+		})
+	}
+}
+
+func TestSearchSimilarRejectsCorruptPersistedEmbeddingJSON(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name        string
+		value       string
+		wantMessage string
+	}{
+		{name: "null", value: "null", wantMessage: "JSON array"},
+		{name: "malformed", value: `[1,`, wantMessage: "unexpected end of JSON input"},
+		{name: "wrong dimension", value: "[1,0]", wantMessage: "dimensions=2 expected=3"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store, err := Open(ctx, t.TempDir(), "")
+			if err != nil {
+				t.Fatalf("open: %v", err)
+			}
+			t.Cleanup(func() {
+				if err := store.Close(); err != nil {
+					t.Fatalf("close store: %v", err)
+				}
+			})
+
+			result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
+			if _, err := store.SaveFromResult(ctx, "valid", "result", "ws", "valid summary", result); err != nil {
+				t.Fatalf("save valid: %v", err)
+			}
+			if _, err := store.SaveFromResult(ctx, "corrupt", "result", "ws", "corrupt summary", result); err != nil {
+				t.Fatalf("save corrupt: %v", err)
+			}
+			if err := store.UpdateEmbedding(ctx, "valid", "ws", []float32{1, 0, 0}); err != nil {
+				t.Fatalf("update valid embedding: %v", err)
+			}
+			if err := store.UpdateEmbedding(ctx, "corrupt", "ws", []float32{0.9, 0.1, 0}); err != nil {
+				t.Fatalf("update corrupt embedding: %v", err)
+			}
+			if _, err := store.db.ExecContext(ctx, `UPDATE named_memory SET embedding = $1 WHERE name = $2 AND workspace = $3`, []byte(tt.value), "corrupt", "ws"); err != nil {
+				t.Fatalf("corrupt embedding: %v", err)
+			}
+
+			if _, err := store.SearchSimilar(ctx, "ws", []float32{1, 0, 0}, 10); err == nil || !strings.Contains(err.Error(), tt.wantMessage) {
+				t.Fatalf("SearchSimilar() error=%v, want %s", err, tt.wantMessage)
+			}
+			if _, err := store.SearchSimilarByType(ctx, "ws", "result", []float32{1, 0, 0}, 10); err == nil || !strings.Contains(err.Error(), tt.wantMessage) {
+				t.Fatalf("SearchSimilarByType() error=%v, want %s", err, tt.wantMessage)
+			}
+		})
 	}
 }
 

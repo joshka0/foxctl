@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 )
 
@@ -148,6 +150,187 @@ func TestRebuildSearchRelatedAndStats(t *testing.T) {
 
 	if _, err := store.SearchNotesSemantic(ctx, "compact handoff pattern", fakeEmbeddingProviderDifferentDims{}, 10); err == nil {
 		t.Fatalf("expected dimension mismatch error")
+	}
+}
+
+func TestSearchNotesRejectsCorruptAnchorRolesJSON(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{name: "malformed json", raw: `{"impl":`},
+		{name: "null json", raw: `null`},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			storageRoot := t.TempDir()
+			vaultRoot := fixtureVaultRoot(t)
+
+			storeIface, err := Open(ctx, storageRoot, vaultRoot)
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			defer storeIface.Close()
+			store := storeIface.(*sqlStore)
+
+			if _, err := store.Rebuild(ctx, vaultRoot); err != nil {
+				t.Fatalf("Rebuild: %v", err)
+			}
+			if _, err := store.db.ExecContext(
+				ctx,
+				`UPDATE obsidian_notes SET anchor_roles_json = ? WHERE path = ?`,
+				tc.raw,
+				"notes/patterns/compact-handoff-pattern.md",
+			); err != nil {
+				t.Fatalf("corrupt anchor_roles_json: %v", err)
+			}
+
+			_, err = store.SearchNotes(ctx, "compact handoff", 10)
+			if err == nil {
+				t.Fatal("SearchNotes accepted corrupt anchor_roles_json")
+			}
+			if !strings.Contains(err.Error(), "decode anchor roles") {
+				t.Fatalf("SearchNotes error = %v, want decode anchor roles", err)
+			}
+		})
+	}
+}
+
+func TestSearchNotesSemanticRejectsCorruptStoredEmbeddings(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name       string
+		corrupt    func(context.Context, *sqlStore) error
+		wantErrSub string
+	}{
+		{
+			name: "note embedding null json",
+			corrupt: func(ctx context.Context, store *sqlStore) error {
+				_, err := store.db.ExecContext(
+					ctx,
+					`UPDATE obsidian_note_embeddings SET embedding_json = ? WHERE model = ? AND path = ?`,
+					"null",
+					fakeEmbeddingProvider{}.Model(),
+					"notes/patterns/compact-handoff-pattern.md",
+				)
+				return err
+			},
+			wantErrSub: "decode semantic embedding",
+		},
+		{
+			name: "note embedding wrong dimensions",
+			corrupt: func(ctx context.Context, store *sqlStore) error {
+				_, err := store.db.ExecContext(
+					ctx,
+					`UPDATE obsidian_note_embeddings SET embedding_json = ? WHERE model = ? AND path = ?`,
+					"[1,0]",
+					fakeEmbeddingProvider{}.Model(),
+					"notes/patterns/compact-handoff-pattern.md",
+				)
+				return err
+			},
+			wantErrSub: "decode semantic embedding",
+		},
+		{
+			name: "chunk embedding null json",
+			corrupt: func(ctx context.Context, store *sqlStore) error {
+				_, err := store.db.ExecContext(
+					ctx,
+					`UPDATE obsidian_chunk_embeddings SET embedding_json = ? WHERE model = ? AND path = ? AND chunk_index = ?`,
+					"null",
+					fakeEmbeddingProvider{}.Model(),
+					"notes/patterns/compact-handoff-pattern.md",
+					0,
+				)
+				return err
+			},
+			wantErrSub: "decode semantic chunk embedding",
+		},
+		{
+			name: "chunk embedding wrong dimensions",
+			corrupt: func(ctx context.Context, store *sqlStore) error {
+				_, err := store.db.ExecContext(
+					ctx,
+					`UPDATE obsidian_chunk_embeddings SET embedding_json = ? WHERE model = ? AND path = ? AND chunk_index = ?`,
+					"[1,0]",
+					fakeEmbeddingProvider{}.Model(),
+					"notes/patterns/compact-handoff-pattern.md",
+					0,
+				)
+				return err
+			},
+			wantErrSub: "decode semantic chunk embedding",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			storageRoot := t.TempDir()
+			vaultRoot := fixtureVaultRoot(t)
+
+			storeIface, err := Open(ctx, storageRoot, vaultRoot)
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			defer storeIface.Close()
+			store := storeIface.(*sqlStore)
+
+			if _, err := store.Rebuild(ctx, vaultRoot); err != nil {
+				t.Fatalf("Rebuild: %v", err)
+			}
+			if _, err := store.EnsureSemanticEmbeddings(ctx, fakeEmbeddingProvider{}); err != nil {
+				t.Fatalf("EnsureSemanticEmbeddings: %v", err)
+			}
+			if _, err := store.EnsureChunkSemanticEmbeddings(ctx, fakeEmbeddingProvider{}); err != nil {
+				t.Fatalf("EnsureChunkSemanticEmbeddings: %v", err)
+			}
+			if err := tc.corrupt(ctx, store); err != nil {
+				t.Fatalf("corrupt embedding_json: %v", err)
+			}
+
+			_, err = store.SearchNotesSemantic(ctx, "compact handoff pattern", fakeEmbeddingProvider{}, 10)
+			if err == nil {
+				t.Fatal("SearchNotesSemantic accepted corrupt embedding_json")
+			}
+			if !strings.Contains(err.Error(), tc.wantErrSub) {
+				t.Fatalf("SearchNotesSemantic error = %v, want substring %q", err, tc.wantErrSub)
+			}
+		})
+	}
+}
+
+func TestNormalizeAnchorRolesProperty(t *testing.T) {
+	prop := func(input map[string][]string) bool {
+		got := normalizeAnchorRoles(input)
+		if !reflect.DeepEqual(got, normalizeAnchorRoles(got)) {
+			return false
+		}
+
+		for role, paths := range got {
+			if role == "" || strings.TrimSpace(role) != role || strings.ToLower(role) != role {
+				return false
+			}
+			if len(paths) == 0 {
+				return false
+			}
+			seen := make(map[string]struct{}, len(paths))
+			for _, path := range paths {
+				if path == "" || strings.TrimSpace(path) != path {
+					return false
+				}
+				if _, ok := seen[path]; ok {
+					return false
+				}
+				seen[path] = struct{}{}
+			}
+		}
+		return true
+	}
+
+	if err := quick.Check(prop, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("normalize anchor roles property failed: %v", err)
 	}
 }
 

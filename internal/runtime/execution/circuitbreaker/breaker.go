@@ -58,12 +58,33 @@ type Breaker struct {
 
 // New creates a new circuit breaker with the given name and config.
 func New(name string, config Config) *Breaker {
+	config = normalizeConfig(config)
 	return &Breaker{
 		name:            name,
 		config:          config,
 		state:           StateClosed,
 		lastStateChange: time.Now(),
 	}
+}
+
+func normalizeConfig(config Config) Config {
+	defaults := DefaultConfig()
+	if config.MaxFailures <= 0 {
+		config.MaxFailures = defaults.MaxFailures
+	}
+	if config.ResetTimeout < 0 {
+		config.ResetTimeout = defaults.ResetTimeout
+	}
+	if config.MaxHalfOpenRequests <= 0 {
+		config.MaxHalfOpenRequests = defaults.MaxHalfOpenRequests
+	}
+	if config.SuccessThreshold <= 0 {
+		config.SuccessThreshold = defaults.SuccessThreshold
+	}
+	if config.MaxHalfOpenRequests < config.SuccessThreshold {
+		config.MaxHalfOpenRequests = config.SuccessThreshold
+	}
+	return config
 }
 
 // Execute runs the given function through the circuit breaker.

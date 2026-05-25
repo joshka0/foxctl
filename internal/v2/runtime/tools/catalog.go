@@ -38,7 +38,7 @@ func NewCatalog(defs []coretool.ToolDef, specs map[coretool.ProcessProfile]profi
 		rawName := def.Name
 		name := normalizeName(rawName)
 		if name == "" {
-			continue
+			return nil, fmt.Errorf("invalid tool name %q", rawName)
 		}
 		if _, exists := c.toolsByName[name]; exists {
 			return nil, fmt.Errorf("duplicate canonical tool name %q (input %q)", name, rawName)

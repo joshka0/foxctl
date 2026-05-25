@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -322,6 +324,57 @@ func TestCopyFiles_ContextMenuCancellation(t *testing.T) {
 	err := mgr.CopyFiles(ctx, "/tmp/any", "/tmp/any-dst")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
+}
+
+func TestShouldCopyFilePropertyExcludeAlwaysWins(t *testing.T) {
+	t.Parallel()
+
+	property := func(rawDir, rawFile string) bool {
+		dir := safeCopyPatternComponent(rawDir, "dir")
+		file := safeCopyPatternComponent(rawFile, "file.txt")
+		rel := filepath.Join(dir, file)
+		includes := [][]string{
+			{"*"},
+			{file},
+			{rel},
+			{filepath.Join(dir, "*")},
+		}
+		excludes := [][]string{
+			{file},
+			{rel},
+			{filepath.Join(dir, "**")},
+		}
+		for _, include := range includes {
+			for _, exclude := range excludes {
+				if shouldCopyFile(rel, include, exclude) {
+					t.Logf("shouldCopyFile(%q, include=%v, exclude=%v) = true, want false", rel, include, exclude)
+					return false
+				}
+			}
+		}
+		return true
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 250}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestShouldCopyFilePropertyIncludeRequiresMatch(t *testing.T) {
+	t.Parallel()
+
+	property := func(rawDir, rawFile string) bool {
+		dir := safeCopyPatternComponent(rawDir, "dir")
+		file := safeCopyPatternComponent(rawFile, "file.txt")
+		rel := filepath.Join(dir, file)
+		return shouldCopyFile(rel, []string{file}, nil) &&
+			shouldCopyFile(rel, []string{rel}, nil) &&
+			!shouldCopyFile(rel, []string{"other-*"}, nil)
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 250}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // ============================================================================
@@ -683,4 +736,28 @@ func TestHooks_Integration(t *testing.T) {
 	data, err = os.ReadFile(postRemoveLog)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "removed="+result.Path)
+}
+
+func safeCopyPatternComponent(raw, fallback string) string {
+	var b strings.Builder
+	for _, r := range raw {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '.', r == '-', r == '_':
+			b.WriteRune(r)
+		}
+		if b.Len() >= 24 {
+			break
+		}
+	}
+	value := strings.Trim(b.String(), ".-_")
+	if value == "" {
+		return fallback
+	}
+	return value
 }

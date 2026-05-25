@@ -5,6 +5,9 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"testing/quick"
+	"unicode"
+	"unicode/utf8"
 )
 
 func TestBoundArtifactText_ClipsLargeInputs(t *testing.T) {
@@ -22,6 +25,55 @@ func TestBoundArtifactText_PreservesSmallInputs(t *testing.T) {
 	input := "small artifact"
 	if got := BoundArtifactText(input, 100000); got != input {
 		t.Fatalf("got=%q want %q", got, input)
+	}
+}
+
+func TestBoundArtifactTextFallbackPreservesUTF8(t *testing.T) {
+	t.Parallel()
+
+	input := strings.Repeat("é", 5000)
+	got := BoundArtifactText(input, 1)
+	if !utf8.ValidString(got) {
+		t.Fatalf("BoundArtifactText() produced invalid UTF-8: %q", got)
+	}
+	if got == "" {
+		t.Fatal("BoundArtifactText() returned empty output for non-empty input")
+	}
+	if utf8.RuneCountInString(got) >= utf8.RuneCountInString(input) {
+		t.Fatalf("BoundArtifactText() rune count=%d want less than input", utf8.RuneCountInString(got))
+	}
+}
+
+func TestTranscriptTruncateInlinePropertyNormalizesAndBoundsGeneratedText(t *testing.T) {
+	t.Parallel()
+
+	property := func(input string, rawLimit uint8) bool {
+		limit := int(rawLimit)
+		got := truncateInline(input, limit)
+		if !utf8.ValidString(got) {
+			t.Logf("truncateInline(%q, %d) produced invalid UTF-8: %q", input, limit, got)
+			return false
+		}
+		normalized := normalizeTranscriptInlineForTest(input)
+		if limit <= 0 {
+			return got == normalized
+		}
+		if utf8.RuneCountInString(got) > limit {
+			t.Logf("truncateInline(%q, %d) produced %d runes", input, limit, utf8.RuneCountInString(got))
+			return false
+		}
+		if utf8.RuneCountInString(normalized) <= limit {
+			return got == normalized
+		}
+		if limit > 1 && !strings.HasSuffix(got, "…") {
+			t.Logf("truncated output missing ellipsis: %q", got)
+			return false
+		}
+		return true
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatalf("truncateInline property failed: %v", err)
 	}
 }
 
@@ -81,4 +133,9 @@ func TestRunLLMTaskWithFallbackModel_UsesFallbackWhenPrimaryOutputRejected(t *te
 	if len(calls) != 2 || calls[0] != "distill-model" || calls[1] != "main-model" {
 		t.Fatalf("calls=%v want [distill-model main-model]", calls)
 	}
+}
+
+func normalizeTranscriptInlineForTest(input string) string {
+	fields := strings.FieldsFunc(strings.TrimSpace(input), unicode.IsSpace)
+	return strings.Join(fields, " ")
 }

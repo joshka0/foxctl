@@ -166,6 +166,7 @@ func (s *WFQScheduler) Start(ctx context.Context) {
 		return
 	}
 	s.running = true
+	s.stopCh = make(chan struct{})
 	s.mu.Unlock()
 
 	// Start worker goroutines

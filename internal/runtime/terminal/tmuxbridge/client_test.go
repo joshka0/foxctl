@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/quick"
 )
 
 func TestParsePaneList(t *testing.T) {
@@ -194,6 +195,50 @@ func TestTmuxPaneSocketPathUsesSocketSafeLength(t *testing.T) {
 	}
 	if len(got) >= 104 {
 		t.Fatalf("tmuxPaneSocketPath() length = %d, want < 104 (%q)", len(got), got)
+	}
+}
+
+func TestTmuxPanePathsSanitizeTraversalComponents(t *testing.T) {
+	root := tmuxSocketBaseDir()
+	paths := []struct {
+		name string
+		path string
+		ext  string
+	}{
+		{name: "socket", path: tmuxPaneSocketPath("../session/../../escape", "../participant/../../x"), ext: ".sock"},
+		{name: "ready", path: tmuxPaneReadyPath("../session/../../escape", "../participant/../../x"), ext: ".ready"},
+	}
+
+	for _, tt := range paths {
+		t.Run(tt.name, func(t *testing.T) {
+			assertTmuxPanePathUnderSocketRoot(t, root, tt.path, tt.ext)
+		})
+	}
+}
+
+func TestTmuxPanePathsPropertyStayUnderSocketRoot(t *testing.T) {
+	t.Parallel()
+
+	root := tmuxSocketBaseDir()
+	property := func(rawScope, rawParticipant string) bool {
+		paths := []struct {
+			path string
+			ext  string
+		}{
+			{path: tmuxPaneSocketPath(rawScope, rawParticipant), ext: ".sock"},
+			{path: tmuxPaneReadyPath(rawScope, rawParticipant), ext: ".ready"},
+		}
+		for _, tt := range paths {
+			if !tmuxPanePathUnderSocketRoot(root, tt.path, tt.ext) {
+				t.Logf("path %q escaped root %q or failed %s shape", tt.path, root, tt.ext)
+				return false
+			}
+		}
+		return true
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 250}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -1549,4 +1594,32 @@ func createTestUnixSocket(t *testing.T) string {
 		_ = listener.Close()
 	})
 	return socket
+}
+
+func assertTmuxPanePathUnderSocketRoot(t *testing.T, root, candidate, ext string) {
+	t.Helper()
+	if !tmuxPanePathUnderSocketRoot(root, candidate, ext) {
+		t.Fatalf("path %q escaped root %q or failed %s shape", candidate, root, ext)
+	}
+}
+
+func tmuxPanePathUnderSocketRoot(root, candidate, ext string) bool {
+	rel, err := filepath.Rel(root, candidate)
+	if err != nil {
+		return false
+	}
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return false
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	if len(parts) != 2 {
+		return false
+	}
+	if parts[0] == "" || parts[1] == "" || parts[0] == "." || parts[0] == ".." || parts[1] == "." || parts[1] == ".." {
+		return false
+	}
+	if filepath.Ext(parts[1]) != ext {
+		return false
+	}
+	return len(parts[0]) <= 24 && len(strings.TrimSuffix(parts[1], ext)) <= 24
 }

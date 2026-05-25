@@ -2,7 +2,6 @@ package vector
 
 import (
 	"context"
-	"sort"
 )
 
 // BruteForceSearcher performs exact cosine similarity search over candidates
@@ -44,9 +43,7 @@ func bruteForceSearch(query []float32, candidates []IDEmbedding, k int, allowlis
 		})
 	}
 
-	sort.Slice(scores, func(i, j int) bool {
-		return scores[i].Score > scores[j].Score
-	})
+	sortScoredIDs(scores)
 
 	if len(scores) > k {
 		scores = scores[:k]

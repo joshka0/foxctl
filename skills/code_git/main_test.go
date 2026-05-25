@@ -4,6 +4,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"testing/quick"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skilltest"
 )
@@ -46,11 +47,13 @@ func TestParseSinceArg(t *testing.T) {
 }
 
 func TestParseRecentChanges(t *testing.T) {
-	output := `hash12345|author1|email1|date1|subject1
+	hash1 := validGitHash("a")
+	hash2 := validGitHash("b")
+	output := hash1 + `|author1|email1|date1|subject1
 file1.go
 file2.go
 
-hash23456|author2|email2|date2|subject2
+` + hash2 + `|author2|email2|date2|subject2
 file3.go
 `
 	results := parseRecentChanges([]byte(output), "/tmp", 10)
@@ -60,13 +63,13 @@ file3.go
 	if results[0].File != "file1.go" {
 		t.Errorf("expected file1.go, got %s", results[0].File)
 	}
-	if results[0].Commit != "hash123" {
+	if results[0].Commit != "aaaaaaa" {
 		t.Errorf("expected shortened hash, got %s", results[0].Commit)
 	}
 }
 
 func TestParseRecentChanges_MaxResults(t *testing.T) {
-	output := `hash12345|author1|email1|date1|subject1
+	output := validGitHash("a") + `|author1|email1|date1|subject1
 file1.go
 file2.go
 file3.go
@@ -76,6 +79,29 @@ file5.go
 	results := parseRecentChanges([]byte(output), "/tmp", 2)
 	if len(results) != 2 {
 		t.Errorf("expected 2 results (maxResults), got %d", len(results))
+	}
+}
+
+func TestParseRecentChangesPreservesPipeInFilenames(t *testing.T) {
+	output := validGitHash("a") + `|author|email@example.com|date|subject
+pkg/name|with|pipes.go
+`
+	results := parseRecentChanges([]byte(output), "/tmp", 10)
+	if len(results) != 1 {
+		t.Fatalf("expected one result, got %d: %+v", len(results), results)
+	}
+	if results[0].File != "pkg/name|with|pipes.go" {
+		t.Fatalf("file = %q, want pipe-containing filename", results[0].File)
+	}
+}
+
+func TestParseRecentChangesIgnoresMalformedHeadersWithoutPanic(t *testing.T) {
+	output := `short|author|email|date|subject
+file.go
+`
+	results := parseRecentChanges([]byte(output), "/tmp", 10)
+	if len(results) != 0 {
+		t.Fatalf("expected malformed short hash header to be ignored, got %+v", results)
 	}
 }
 
@@ -116,6 +142,21 @@ file3.go
 	results := parseHotspots([]byte(output), "/tmp", 1)
 	if len(results) != 1 {
 		t.Errorf("expected 1 result (maxResults), got %d", len(results))
+	}
+}
+
+func TestParseHotspotsStableTieOrder(t *testing.T) {
+	output := `zeta.go
+alpha.go
+zeta.go
+alpha.go
+`
+	results := parseHotspots([]byte(output), "/tmp", 10)
+	if len(results) != 2 {
+		t.Fatalf("expected two hotspot results, got %+v", results)
+	}
+	if results[0].File != "alpha.go" || results[1].File != "zeta.go" {
+		t.Fatalf("tie order = %q, %q; want alpha.go, zeta.go", results[0].File, results[1].File)
 	}
 }
 
@@ -196,6 +237,33 @@ Author Three|three@example.com
 	results := parseAuthors([]byte(output), 2)
 	if len(results) != 2 {
 		t.Errorf("expected 2 results (maxResults), got %d", len(results))
+	}
+}
+
+func TestParseAuthorsStableTieOrder(t *testing.T) {
+	output := `Zed|zed@example.com
+Ann|ann@example.com
+`
+	results := parseAuthors([]byte(output), 10)
+	if len(results) != 2 {
+		t.Fatalf("expected two author results, got %+v", results)
+	}
+	if results[0].Author != "Ann" || results[1].Author != "Zed" {
+		t.Fatalf("tie order = %q, %q; want Ann, Zed", results[0].Author, results[1].Author)
+	}
+}
+
+func TestParseGitOutputsGeneratedDoNotPanic(t *testing.T) {
+	prop := func(raw string, max int8) bool {
+		maxResults := int(max)
+		_ = parseRecentChanges([]byte(raw), "/tmp", maxResults)
+		_ = parseHotspots([]byte(raw), "/tmp", maxResults)
+		_ = parseAuthors([]byte(raw), maxResults)
+		_ = parseBlame([]byte(raw), "file.go", maxResults)
+		return true
+	}
+	if err := quick.Check(prop, &quick.Config{MaxCount: 1000}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -299,4 +367,8 @@ func TestParseInput_InvalidJSON(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for invalid JSON")
 	}
+}
+
+func validGitHash(char string) string {
+	return strings.Repeat(char, 40)
 }

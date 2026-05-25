@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/quick"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/codeedit"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/diffutil"
@@ -504,4 +505,119 @@ func TestRunFileNotFound(t *testing.T) {
 	if data["error"] == nil || !strings.Contains(data["error"].(string), "read file") {
 		t.Errorf("expected 'read file' error, got: %v", data["error"])
 	}
+}
+
+func TestRunRestoreWritesCASContent(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	testFile := filepath.Join(workspace, "restore.txt")
+	if err := os.WriteFile(testFile, []byte("current\n"), 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	buf := &bytes.Buffer{}
+	rc := newTestRunnerContext(t, buf, workspace)
+	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
+
+	restored := []byte("restored from backup\n")
+	digest := putCASObject(t, ctx, rc, restored)
+	if err := run(ctx, rc, input{
+		Path:          testFile,
+		RestoreDigest: digest,
+	}); err != nil {
+		t.Fatalf("run restore: %v", err)
+	}
+
+	after, err := os.ReadFile(testFile)
+	if err != nil {
+		t.Fatalf("read restored file: %v", err)
+	}
+	if !bytes.Equal(after, restored) {
+		t.Fatalf("restored file = %q, want %q", string(after), string(restored))
+	}
+
+	var env map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal envelope: %v", err)
+	}
+	data := env["data"].(map[string]any)
+	if data["restored"] != true {
+		t.Fatalf("expected restored=true, got %v", data["restored"])
+	}
+	if data["dry_run"] != false {
+		t.Fatalf("expected dry_run=false, got %v", data["dry_run"])
+	}
+	if int(data["size"].(float64)) != len(restored) {
+		t.Fatalf("size = %v, want %d", data["size"], len(restored))
+	}
+}
+
+func TestRunRestoreDryRunGeneratedInputsDoNotWrite(t *testing.T) {
+	prop := func(raw []byte) bool {
+		ctx := context.Background()
+		workspace := t.TempDir()
+		testFile := filepath.Join(workspace, "restore.txt")
+		current := shortBytes(raw)
+		restored := append(append([]byte(nil), current...), []byte("\nrestored")...)
+		if err := os.WriteFile(testFile, current, 0o644); err != nil {
+			t.Logf("write test file: %v", err)
+			return false
+		}
+
+		buf := &bytes.Buffer{}
+		rc := newTestRunnerContext(t, buf, workspace)
+		defer func() { errs.Ignore(rc.Close(), "cleanup") }()
+
+		digest := putCASObject(t, ctx, rc, restored)
+		if err := run(ctx, rc, input{
+			Path:          testFile,
+			RestoreDigest: digest,
+			DryRun:        true,
+		}); err != nil {
+			t.Logf("run restore dry-run: %v", err)
+			return false
+		}
+
+		after, err := os.ReadFile(testFile)
+		if err != nil {
+			t.Logf("read test file: %v", err)
+			return false
+		}
+		if !bytes.Equal(after, current) {
+			t.Logf("dry-run changed file: got %q want %q", string(after), string(current))
+			return false
+		}
+
+		var env map[string]any
+		if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
+			t.Logf("unmarshal envelope: %v", err)
+			return false
+		}
+		data := env["data"].(map[string]any)
+		return data["restored"] == false && data["dry_run"] == true && int(data["size"].(float64)) == len(restored)
+	}
+
+	if err := quick.Check(prop, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func putCASObject(t *testing.T, ctx context.Context, rc *skillmain.RunContext, content []byte) string {
+	t.Helper()
+	obj, err := rc.CASStore.Put(ctx, bytes.NewReader(content), "text/plain", []string{"test-restore"})
+	if err != nil {
+		t.Fatalf("put CAS object: %v", err)
+	}
+	return obj.Digest
+}
+
+func shortBytes(raw []byte) []byte {
+	if len(raw) == 0 {
+		return []byte("current")
+	}
+	out := append([]byte(nil), raw...)
+	if len(out) > 128 {
+		out = out[:128]
+	}
+	return out
 }

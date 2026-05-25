@@ -2,9 +2,11 @@ package smolvm
 
 import (
 	"errors"
+	"path"
 	"reflect"
 	"strings"
 	"testing"
+	"testing/quick"
 )
 
 func TestNormalizeReadableID(t *testing.T) {
@@ -56,6 +58,38 @@ func TestNormalizeReadableAgentIDPreservesHierarchy(t *testing.T) {
 	}
 }
 
+func TestNormalizeReadableAgentIDRemovesTraversalSegments(t *testing.T) {
+	t.Parallel()
+
+	got := NormalizeReadableAgentID(`Agent Root/../Escape/.\Child`)
+	if got != "agent-root/escape/child" {
+		t.Fatalf("NormalizeReadableAgentID()=%q", got)
+	}
+}
+
+func TestNormalizeReadableAgentIDPropertyProducesSafeRelativeSegments(t *testing.T) {
+	t.Parallel()
+
+	property := func(raw string) bool {
+		got := NormalizeReadableAgentID(raw)
+		if got == "" {
+			return true
+		}
+		if strings.HasPrefix(got, "/") || strings.HasSuffix(got, "/") || strings.Contains(got, "\\") {
+			return false
+		}
+		for _, segment := range strings.Split(got, "/") {
+			if segment == "" || segment == "." || segment == ".." {
+				return false
+			}
+		}
+		return path.Clean(got) == got
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPlanOutputLayout(t *testing.T) {
 	t.Parallel()
 
@@ -101,6 +135,48 @@ func TestPlanOutputLayout(t *testing.T) {
 	}
 	if !strings.Contains(sharedJoined, "/blackboard.jsonl") {
 		t.Fatalf("shared paths should include blackboard: %v", plan.SharedReadPaths)
+	}
+}
+
+func TestPlanOutputLayoutPropertyAgentPathsStayUnderAgentsRoot(t *testing.T) {
+	t.Parallel()
+
+	property := func(rawAgentID string) bool {
+		normalizedAgentID := NormalizeReadableAgentID(rawAgentID)
+		plan, err := PlanOutputLayout("/mnt/out", "run-1", []string{rawAgentID})
+		if normalizedAgentID == "" {
+			return errors.Is(err, ErrInvalidAgentID)
+		}
+		if err != nil || len(plan.Run.Agents) != 1 {
+			return false
+		}
+
+		agentsRoot := "/mnt/out/runs/run-1/agents"
+		agent := plan.Run.Agents[0]
+		for _, candidate := range []string{
+			agent.Dir,
+			agent.TrajectoryPath,
+			agent.ArtifactsDir,
+			agent.ScratchDir,
+		} {
+			cleaned := path.Clean(candidate)
+			if cleaned != candidate {
+				return false
+			}
+			if cleaned != agentsRoot && !strings.HasPrefix(cleaned, agentsRoot+"/") {
+				return false
+			}
+		}
+
+		for _, shared := range plan.SharedReadPaths {
+			if strings.Contains(shared, "/scratch") {
+				return false
+			}
+		}
+		return true
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatal(err)
 	}
 }
 

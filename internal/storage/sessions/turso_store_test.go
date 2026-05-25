@@ -3,6 +3,7 @@ package sessions
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,6 +46,62 @@ func TestTursoStoreLocalNoCGOPath(t *testing.T) {
 	}
 	if got.Summary != "local turso session" {
 		t.Fatalf("Summary = %q, want local turso session", got.Summary)
+	}
+}
+
+func TestTursoStoreRejectsUnknownStatus(t *testing.T) {
+	ctx := context.Background()
+	store, err := OpenTurso(ctx, dbdriver.TursoConfig{
+		Path:             filepath.Join(t.TempDir(), "sessions.turso"),
+		VectorDimensions: 4,
+	})
+	if err != nil {
+		t.Fatalf("OpenTurso(local) failed: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	if _, err := store.Save(ctx, storage.Session{
+		ID:            "sess-turso-invalid-status",
+		WorkspacePath: "/workspace/project",
+		Status:        "paused",
+	}); !errors.Is(err, ErrInvalidStatus) {
+		t.Fatalf("Save() error = %v, want ErrInvalidStatus", err)
+	}
+
+	if _, err := store.Save(ctx, storage.Session{
+		ID:            "sess-turso-status",
+		WorkspacePath: "/workspace/project",
+		Status:        storage.SessionStatusRunning,
+	}); err != nil {
+		t.Fatalf("save valid session: %v", err)
+	}
+
+	if err := store.SetStatus(ctx, "sess-turso-status", "paused"); !errors.Is(err, ErrInvalidStatus) {
+		t.Fatalf("SetStatus() error = %v, want ErrInvalidStatus", err)
+	}
+	if err := store.SetStatusWithError(ctx, "sess-turso-status", "paused", "should not persist"); !errors.Is(err, ErrInvalidStatus) {
+		t.Fatalf("SetStatusWithError() error = %v, want ErrInvalidStatus", err)
+	}
+
+	got, err := store.Get(ctx, "sess-turso-status")
+	if err != nil {
+		t.Fatalf("get valid session: %v", err)
+	}
+	if got.Status != storage.SessionStatusRunning {
+		t.Fatalf("status = %q, want %q", got.Status, storage.SessionStatusRunning)
+	}
+	if !got.EndedAt.IsZero() {
+		t.Fatalf("EndedAt = %v, want zero after rejected status updates", got.EndedAt)
+	}
+	if got.ErrorMessage != "" {
+		t.Fatalf("ErrorMessage = %q, want empty after rejected status updates", got.ErrorMessage)
+	}
+
+	if _, err := store.db.ExecContext(ctx, `UPDATE sessions SET status = ? WHERE id = ?`, "paused", "sess-turso-status"); err != nil {
+		t.Fatalf("corrupt status fixture: %v", err)
+	}
+	if _, err := store.Get(ctx, "sess-turso-status"); !errors.Is(err, ErrInvalidStatus) {
+		t.Fatalf("Get() error = %v, want ErrInvalidStatus for corrupt stored status", err)
 	}
 }
 

@@ -19,13 +19,25 @@ func Digests(result []byte) []string {
 	if env.Data == nil {
 		return nil
 	}
-	if s, ok := env.Data["artifact"].(string); ok && isDigest(s) {
-		out = append(out, s)
+	seen := map[string]struct{}{}
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if !isDigest(value) {
+			return
+		}
+		if _, ok := seen[value]; ok {
+			return
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	if s, ok := env.Data["artifact"].(string); ok {
+		add(s)
 	}
 	if arr, ok := env.Data["artifacts"].([]any); ok {
 		for _, v := range arr {
-			if s, ok := v.(string); ok && isDigest(s) {
-				out = append(out, s)
+			if s, ok := v.(string); ok {
+				add(s)
 			}
 		}
 	}

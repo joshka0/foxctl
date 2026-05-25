@@ -229,52 +229,48 @@ func buildNamespace(parentNS, agentID string) string {
 
 // validatePolicyNarrowing ensures child policy is narrower than parent.
 func validatePolicyNarrowing(parent, child agent.Policy) error {
-	// CPU: child must not exceed parent
-	if child.CPU > parent.CPU {
-		return fmt.Errorf("child CPU (%d) exceeds parent CPU (%d)", child.CPU, parent.CPU)
+	if err := validatePolicyLimitNarrowing("CPU", parent.CPU, child.CPU); err != nil {
+		return err
+	}
+	if err := validatePolicyLimitNarrowing("memory", parent.MemoryMB, child.MemoryMB); err != nil {
+		return err
 	}
 
-	// Memory: child must not exceed parent
-	if child.MemoryMB > parent.MemoryMB {
-		return fmt.Errorf("child memory (%d MB) exceeds parent memory (%d MB)", child.MemoryMB, parent.MemoryMB)
+	parentTimeout, parentHasTimeout, err := parsePolicyTimeout(parent.Timeout)
+	if err != nil {
+		return fmt.Errorf("invalid parent timeout: %w", err)
+	}
+	childTimeout, childHasTimeout, err := parsePolicyTimeout(child.Timeout)
+	if err != nil {
+		return fmt.Errorf("invalid child timeout: %w", err)
+	}
+	if parentHasTimeout && (!childHasTimeout || childTimeout > parentTimeout) {
+		return fmt.Errorf("child timeout exceeds parent timeout")
 	}
 
-	// Timeout: child must not exceed parent
-	if parent.Timeout != "" {
-		parentDuration, err := time.ParseDuration(parent.Timeout)
-		if err == nil {
-			childDuration, err := time.ParseDuration(child.Timeout)
-			if err != nil || childDuration > parentDuration {
-				return fmt.Errorf("child timeout exceeds parent timeout")
-			}
-		}
+	if err := validatePolicyLimitNarrowing("MaxOutputKB", parent.MaxOutputKB, child.MaxOutputKB); err != nil {
+		return err
 	}
 
-	// MaxOutputKB: child must not exceed parent
-	if parent.MaxOutputKB > 0 && (child.MaxOutputKB <= 0 || child.MaxOutputKB > parent.MaxOutputKB) {
-		return fmt.Errorf("child MaxOutputKB exceeds parent MaxOutputKB")
+	// Filesystem: child mounts must be no broader than parent mounts.
+	if err := validateFilesystemNarrowing(parent.Filesystem, child.Filesystem); err != nil {
+		return err
 	}
 
-	// Filesystem: child mounts must be subset of parent
-	if len(child.Filesystem) > 0 {
-		parentMounts := make(map[string]bool)
-		for _, fs := range parent.Filesystem {
-			parentMounts[fs.To] = true // Simplified check: mount point match only for now
-		}
-		for _, fs := range child.Filesystem {
-			if !parentMounts[fs.To] {
-				return fmt.Errorf("child filesystem mount %s not allowed by parent", fs.To)
-			}
-		}
+	parentNetwork, err := networkPolicyRank(parent.Network)
+	if err != nil {
+		return fmt.Errorf("invalid parent network policy: %w", err)
 	}
-
-	// Network: child must be more restrictive
-	if parent.Network == "none" && child.Network == "egress" {
-		return fmt.Errorf("child network (egress) is less restrictive than parent (none)")
+	childNetwork, err := networkPolicyRank(child.Network)
+	if err != nil {
+		return fmt.Errorf("invalid child network policy: %w", err)
+	}
+	if childNetwork > parentNetwork {
+		return fmt.Errorf("child network (%s) is less restrictive than parent (%s)", normalizeNetworkPolicy(child.Network), normalizeNetworkPolicy(parent.Network))
 	}
 
 	// Egress: child must be subset of parent
-	if child.Network == "egress" && parent.Network == "egress" {
+	if childNetwork == networkPolicyEgress && parentNetwork == networkPolicyEgress {
 		if !isSubset(child.EgressAllow, parent.EgressAllow) {
 			return fmt.Errorf("child egressAllow is not a subset of parent egressAllow")
 		}
@@ -293,12 +289,123 @@ func validatePolicyNarrowing(parent, child agent.Policy) error {
 	return nil
 }
 
+func validatePolicyLimitNarrowing(name string, parent, child int) error {
+	if parent < 0 {
+		return fmt.Errorf("invalid parent %s (%d)", name, parent)
+	}
+	if child < 0 {
+		return fmt.Errorf("invalid child %s (%d)", name, child)
+	}
+	if parent <= 0 {
+		return nil
+	}
+	if child <= 0 {
+		return fmt.Errorf("child %s must be set when parent %s is set", name, name)
+	}
+	if child > parent {
+		return fmt.Errorf("child %s (%d) exceeds parent %s (%d)", name, child, name, parent)
+	}
+	return nil
+}
+
+type filesystemMountKey struct {
+	from string
+	to   string
+}
+
+func validateFilesystemNarrowing(parent, child []agent.FilesystemPolicy) error {
+	parentMounts := make(map[filesystemMountKey]int)
+	for i, fs := range parent {
+		key, rank, err := filesystemPolicyRank(fs)
+		if err != nil {
+			return fmt.Errorf("invalid parent filesystem policy[%d]: %w", i, err)
+		}
+		if currentRank, ok := parentMounts[key]; !ok || rank > currentRank {
+			parentMounts[key] = rank
+		}
+	}
+
+	for i, fs := range child {
+		key, childRank, err := filesystemPolicyRank(fs)
+		if err != nil {
+			return fmt.Errorf("invalid child filesystem policy[%d]: %w", i, err)
+		}
+		parentRank, ok := parentMounts[key]
+		if !ok {
+			return fmt.Errorf("child filesystem mount %s from %s not allowed by parent", key.to, key.from)
+		}
+		if childRank > parentRank {
+			return fmt.Errorf("child filesystem mount %s from %s is less restrictive than parent", key.to, key.from)
+		}
+	}
+
+	return nil
+}
+
+func filesystemPolicyRank(fs agent.FilesystemPolicy) (filesystemMountKey, int, error) {
+	key := filesystemMountKey{
+		from: strings.TrimSpace(fs.From),
+		to:   strings.TrimSpace(fs.To),
+	}
+	if key.from == "" {
+		return key, 0, fmt.Errorf("from is required")
+	}
+	if key.to == "" {
+		return key, 0, fmt.Errorf("to is required")
+	}
+
+	switch strings.TrimSpace(fs.Type) {
+	case "ro":
+		return key, 0, nil
+	case "workdir":
+		return key, 1, nil
+	default:
+		return key, 0, fmt.Errorf("unsupported type %q", fs.Type)
+	}
+}
+
 // validateSkillsAllowlist ensures child skills are subset of parent.
 func validateSkillsAllowlist(parent, child []string) error {
 	if !isSubset(child, parent) {
 		return fmt.Errorf("child skills_allow is not a subset of parent skills_allow")
 	}
 	return nil
+}
+
+const (
+	networkPolicyNone = iota
+	networkPolicyEgress
+)
+
+func networkPolicyRank(value string) (int, error) {
+	switch normalizeNetworkPolicy(value) {
+	case "none":
+		return networkPolicyNone, nil
+	case "egress":
+		return networkPolicyEgress, nil
+	default:
+		return 0, fmt.Errorf("unsupported network policy %q", value)
+	}
+}
+
+func normalizeNetworkPolicy(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return "none"
+	}
+	return value
+}
+
+func parsePolicyTimeout(value string) (time.Duration, bool, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, false, nil
+	}
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, false, err
+	}
+	return d, true, nil
 }
 
 // isSubset checks if child is a subset of parent.

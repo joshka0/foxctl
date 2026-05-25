@@ -415,11 +415,26 @@ func exprToString(expr ast.Expr) string {
 	case *ast.StarExpr:
 		return "*" + exprToString(e.X)
 	case *ast.ArrayType:
+		if e.Len != nil {
+			return "[" + exprToString(e.Len) + "]" + exprToString(e.Elt)
+		}
 		return "[]" + exprToString(e.Elt)
+	case *ast.BasicLit:
+		return e.Value
 	case *ast.MapType:
 		return "map[" + exprToString(e.Key) + "]" + exprToString(e.Value)
 	case *ast.SelectorExpr:
 		return exprToString(e.X) + "." + e.Sel.Name
+	case *ast.IndexExpr:
+		return exprToString(e.X) + "[" + exprToString(e.Index) + "]"
+	case *ast.IndexListExpr:
+		indices := make([]string, 0, len(e.Indices))
+		for _, index := range e.Indices {
+			indices = append(indices, exprToString(index))
+		}
+		return exprToString(e.X) + "[" + strings.Join(indices, ", ") + "]"
+	case *ast.ParenExpr:
+		return exprToString(e.X)
 	case *ast.InterfaceType:
 		return "interface{}"
 	case *ast.StructType:

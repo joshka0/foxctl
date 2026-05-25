@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	stderrors "errors"
 	"slices"
+	"strings"
 	"testing"
+	"testing/quick"
 
 	v2errors "github.com/joshka0/foxctl/internal/v2/core/errors"
 	coretool "github.com/joshka0/foxctl/internal/v2/core/tool"
@@ -221,6 +223,135 @@ func TestToolCatalog_DuplicateCanonicalNameRejected(t *testing.T) {
 	}
 }
 
+func TestToolCatalog_InvalidToolDefinitionNameRejected(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{
+		"",
+		" ",
+		"___",
+		"fs read file",
+		"fs-read-file",
+		"fs/read;file",
+		"fs/read\nfile",
+	} {
+		name := name
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := tools.NewCatalog([]coretool.ToolDef{
+				{Name: "fs_read_file"},
+				{Name: name},
+			}, map[coretool.ProcessProfile]profiles.ProfileSpec{
+				coretool.ProfileWorker: {
+					Profile:      coretool.ProfileWorker,
+					AllowedTools: []string{"fs_read_file", name},
+				},
+			})
+			if err == nil {
+				t.Fatalf("expected invalid tool definition name %q to be rejected", name)
+			}
+		})
+	}
+}
+
+func TestToolCatalog_InvalidAllowlistEntriesDoNotExposeTools(t *testing.T) {
+	t.Parallel()
+
+	catalog, err := tools.NewCatalog([]coretool.ToolDef{
+		{Name: "fs_read_file"},
+	}, map[coretool.ProcessProfile]profiles.ProfileSpec{
+		coretool.ProfileWorker: {
+			Profile:      coretool.ProfileWorker,
+			AllowedTools: []string{"fs-read-file", "fs read file", "fs/read;file"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewCatalog returned error: %v", err)
+	}
+	if got := catalog.ForProfile(coretool.ProfileWorker); len(got) != 0 {
+		t.Fatalf("invalid allowlist entries exposed tools: %+v", got)
+	}
+	if _, ok := catalog.Resolve("fs_read_file", coretool.ProfileWorker); ok {
+		t.Fatal("invalid allowlist entry resolved fs_read_file")
+	}
+}
+
+func TestToolCatalogPropertyAllowedAliasesResolveCanonicalToolOnly(t *testing.T) {
+	t.Parallel()
+
+	property := func(toolSeed uint8, allowedAliasSeed uint8, resolveAliasSeed uint8) bool {
+		canonical := generatedCatalogToolName(toolSeed)
+		allowedAlias := catalogToolAlias(canonical, allowedAliasSeed)
+		resolveAlias := catalogToolAlias(canonical, resolveAliasSeed)
+
+		catalog, err := tools.NewCatalog([]coretool.ToolDef{
+			{Name: canonical},
+		}, map[coretool.ProcessProfile]profiles.ProfileSpec{
+			coretool.ProfileWorker: {
+				Profile:      coretool.ProfileWorker,
+				AllowedTools: []string{allowedAlias},
+			},
+		})
+		if err != nil {
+			t.Logf("NewCatalog(%q, %q) error=%v", canonical, allowedAlias, err)
+			return false
+		}
+
+		if _, ok := catalog.Resolve(resolveAlias, coretool.ProfileWorker); !ok {
+			t.Logf("Resolve(%q) failed for catalog tool %q allowed by %q", resolveAlias, canonical, allowedAlias)
+			return false
+		}
+
+		for _, listed := range catalog.ForProfile(coretool.ProfileWorker) {
+			if listed.Name != canonical || strings.ContainsAny(listed.Name, "./ ") || strings.Contains(listed.Name, "__") {
+				t.Logf("ForProfile listed non-canonical tool %+v", listed)
+				return false
+			}
+		}
+		return true
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 300}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestToolCatalogPropertyInvalidAllowlistEntriesFailClosed(t *testing.T) {
+	t.Parallel()
+
+	property := func(toolSeed uint8, badSeed uint8) bool {
+		canonical := generatedCatalogToolName(toolSeed)
+		invalidAlias := injectUnsupportedCatalogNameByte(canonical, badSeed)
+
+		catalog, err := tools.NewCatalog([]coretool.ToolDef{
+			{Name: canonical},
+		}, map[coretool.ProcessProfile]profiles.ProfileSpec{
+			coretool.ProfileWorker: {
+				Profile:      coretool.ProfileWorker,
+				AllowedTools: []string{invalidAlias},
+			},
+		})
+		if err != nil {
+			t.Logf("NewCatalog valid def with invalid allowlist %q error=%v", invalidAlias, err)
+			return false
+		}
+		if len(catalog.ForProfile(coretool.ProfileWorker)) != 0 {
+			t.Logf("invalid allowlist %q exposed %v", invalidAlias, catalog.ForProfile(coretool.ProfileWorker))
+			return false
+		}
+		if _, ok := catalog.Resolve(canonical, coretool.ProfileWorker); ok {
+			t.Logf("invalid allowlist %q resolved canonical tool %q", invalidAlias, canonical)
+			return false
+		}
+		return true
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 300}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestToolExecutor_TodoSlashAliasDelegatesCanonicalName(t *testing.T) {
 	t.Parallel()
 
@@ -323,6 +454,42 @@ func assertErrKind(t *testing.T, err error, kind v2errors.ErrorKind) {
 	if verr.Kind != kind {
 		t.Fatalf("error kind=%q want %q", verr.Kind, kind)
 	}
+}
+
+func generatedCatalogToolName(seed uint8) string {
+	names := []string{
+		"agent_spawn",
+		"code_search",
+		"context_retrieve",
+		"fs_read_file",
+		"obsidian_related",
+		"repo_index_dag_grep",
+		"todo_set_active",
+	}
+	return names[int(seed)%len(names)]
+}
+
+func catalogToolAlias(canonical string, seed uint8) string {
+	switch seed % 6 {
+	case 0:
+		return canonical
+	case 1:
+		return strings.ReplaceAll(canonical, "_", "/")
+	case 2:
+		return strings.ReplaceAll(canonical, "_", ".")
+	case 3:
+		return " " + strings.ToUpper(strings.ReplaceAll(canonical, "_", "/")) + " "
+	case 4:
+		return "__" + canonical + "__"
+	default:
+		return strings.ReplaceAll(canonical, "_", "___")
+	}
+}
+
+func injectUnsupportedCatalogNameByte(canonical string, seed uint8) string {
+	bad := []byte{' ', '-', ';', ':', '\n', '\t', '\'', '"', '\\', '$', '#', '@', '!', '?', '*'}
+	at := len(canonical) / 2
+	return canonical[:at] + string([]byte{bad[int(seed)%len(bad)]}) + canonical[at:]
 }
 
 type fakeDelegate struct {

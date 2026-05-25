@@ -125,6 +125,86 @@ func TestLoadFromMemoryWithDigest(t *testing.T) {
 	}
 }
 
+func TestLoadFromMemoryInlineSpecWithStatusCommandFields(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	root := t.TempDir()
+	casPath := filepath.Join(root, "cas")
+	memoryPath := filepath.Join(root, "memory")
+	if err := os.MkdirAll(casPath, 0o755); err != nil {
+		t.Fatalf("mkdir cas: %v", err)
+	}
+	if err := os.MkdirAll(memoryPath, 0o755); err != nil {
+		t.Fatalf("mkdir memory: %v", err)
+	}
+	memStore, err := memstore.Open(ctx, memoryPath, casPath)
+	if err != nil {
+		t.Fatalf("memory open: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := memStore.Close(); err != nil {
+			t.Fatalf("memory close: %v", err)
+		}
+	})
+
+	specBytes := []byte(`{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Command API",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/commands": {
+      "get": {
+        "operationId": "getCommandStatus",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string" },
+                    "command": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}`)
+	entry := storage.NamedEntry{
+		Name:      "inline-openapi",
+		Type:      "openapi_spec",
+		Workspace: memoryPath,
+		Summary:   "inline spec",
+		Result:    specBytes,
+	}
+	if _, err := memStore.Save(ctx, entry); err != nil {
+		t.Fatalf("memory save: %v", err)
+	}
+
+	l := New(nil, memStore, WithWorkspace(memoryPath))
+	spec, err := l.Load(ctx, "memory:inline-openapi")
+	if err != nil {
+		t.Fatalf("load inline spec: %v", err)
+	}
+	if spec.Digest != "" {
+		t.Fatalf("expected inline memory spec without digest, got %s", spec.Digest)
+	}
+	op, err := spec.GetOperation("getCommandStatus")
+	if err != nil {
+		t.Fatalf("operation lookup: %v", err)
+	}
+	if op.Path != "/commands" || op.Method != "GET" {
+		t.Fatalf("unexpected operation: %#v", op)
+	}
+}
+
 func TestInvalidSpecs(t *testing.T) {
 	t.Parallel()
 	l := New(nil, nil)

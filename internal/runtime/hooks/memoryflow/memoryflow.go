@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/context/memorycore"
@@ -18,6 +19,7 @@ import (
 	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/runtime/hooks/lifecycle"
+	hookpathutil "github.com/joshka0/foxctl/internal/runtime/hooks/pathutil"
 	"github.com/joshka0/foxctl/internal/storage"
 	ctxengstore "github.com/joshka0/foxctl/internal/storage/contextengine"
 	"github.com/joshka0/foxctl/internal/storage/memory"
@@ -237,7 +239,10 @@ func captureEditMemory(ctx context.Context, deps Dependencies, workspacePath, to
 	if filePath == "" {
 		return nil
 	}
-	relPath := strings.TrimPrefix(filepath.ToSlash(filePath), filepath.ToSlash(workspacePath)+"/")
+	relPath := memoryflowRelPath(workspacePath, filePath)
+	if relPath == "" {
+		return nil
+	}
 	changeType, changeSummary := summarizeEditChange(toolName, payload)
 	store, err := memory.OpenWithConfig(ctx, deps.Config)
 	if err != nil {
@@ -273,7 +278,10 @@ func refreshMemoryEmbedding(ctx context.Context, deps Dependencies, workspacePat
 	if filePath == "" {
 		return nil
 	}
-	relPath := strings.TrimPrefix(filepath.ToSlash(filePath), filepath.ToSlash(workspacePath)+"/")
+	relPath := memoryflowRelPath(workspacePath, filePath)
+	if relPath == "" {
+		return nil
+	}
 	return refreshNamedMemory(ctx, deps, workspacePath, "edit:"+relPath)
 }
 
@@ -304,10 +312,17 @@ func summarizeEditChange(toolName string, payload LifecyclePayload) (string, str
 
 func truncate(value string, limit int) string {
 	value = strings.TrimSpace(value)
-	if len(value) <= limit {
+	if limit <= 0 {
+		return ""
+	}
+	if utf8.RuneCountInString(value) <= limit {
 		return value
 	}
-	return value[:limit]
+	return string([]rune(value)[:limit])
+}
+
+func memoryflowRelPath(workspacePath, filePath string) string {
+	return hookpathutil.ContainedRelativePath(filePath, workspacePath)
 }
 
 func envEnabled(name string) bool {
@@ -361,7 +376,10 @@ func emitDirtyEditEvent(ctx context.Context, cfg config.Config, workspacePath st
 	if filePath == "" {
 		return nil
 	}
-	relPath := strings.TrimPrefix(filepath.ToSlash(filePath), filepath.ToSlash(workspacePath)+"/")
+	relPath := memoryflowRelPath(workspacePath, filePath)
+	if relPath == "" {
+		return nil
+	}
 	store, err := ctxengstore.Open(ctx, cfg.Storage.Root)
 	if err != nil {
 		return err

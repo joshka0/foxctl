@@ -62,6 +62,9 @@ func AddWorkItem(state *SolverState, item WorkItem) error {
 	if item.Status == "" {
 		item.Status = StatusPending
 	}
+	if !ValidWorkItemStatus(item.Status) {
+		return fmt.Errorf("generalsolver: invalid status %q for work item %q", item.Status, item.ID)
+	}
 	for _, depID := range item.DependsOn {
 		if depID == "" {
 			return fmt.Errorf("generalsolver: work item %q has empty dependency id", item.ID)

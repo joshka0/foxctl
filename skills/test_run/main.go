@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -26,13 +27,16 @@ type input struct {
 }
 
 type testResult struct {
-	Package  string  `json:"package"`
-	Status   string  `json:"status"` // pass, fail, skip
-	Duration float64 `json:"duration_seconds"`
-	Coverage float64 `json:"coverage_percent,omitempty"`
+	Package     string  `json:"package"`
+	Status      string  `json:"status"` // pass, fail, skip
+	Duration    float64 `json:"duration_seconds"`
+	Coverage    float64 `json:"coverage_percent,omitempty"`
+	HasCoverage bool    `json:"-"`
 }
 
 const command = "test/run"
+
+var requireTool = executil.RequireTool
 
 func main() {
 	skillmain.Main(command, run)
@@ -126,19 +130,19 @@ func buildTestCommand(mode, path string, in input) (string, []string, []string, 
 
 	switch mode {
 	case "test":
-		if _, err := executil.RequireTool("go", "install Go from https://go.dev/doc/install"); err != nil {
+		if _, err := requireTool("go", "install Go from https://go.dev/doc/install"); err != nil {
 			return "", nil, nil, "", fmt.Errorf("go command not found: %w", err)
 		}
 		runner = "go"
 		args = []string{"test"}
 	case "race":
-		if _, err := executil.RequireTool("go", "install Go from https://go.dev/doc/install"); err != nil {
+		if _, err := requireTool("go", "install Go from https://go.dev/doc/install"); err != nil {
 			return "", nil, nil, "", fmt.Errorf("go command not found: %w", err)
 		}
 		runner = "go"
 		args = []string{"test", "-race"}
 	case "bench":
-		if _, err := executil.RequireTool("go", "install Go from https://go.dev/doc/install"); err != nil {
+		if _, err := requireTool("go", "install Go from https://go.dev/doc/install"); err != nil {
 			return "", nil, nil, "", fmt.Errorf("go command not found: %w", err)
 		}
 		runner = "go"
@@ -150,13 +154,13 @@ func buildTestCommand(mode, path string, in input) (string, []string, []string, 
 			args = append(args, "-bench=.")
 		}
 	case "coverage":
-		if _, err := executil.RequireTool("go", "install Go from https://go.dev/doc/install"); err != nil {
+		if _, err := requireTool("go", "install Go from https://go.dev/doc/install"); err != nil {
 			return "", nil, nil, "", fmt.Errorf("go command not found: %w", err)
 		}
 		runner = "go"
 		args = []string{"test", "-cover", "-covermode=atomic"}
 	case "cargo":
-		if _, err := executil.RequireTool("cargo", "install Rust/Cargo"); err != nil {
+		if _, err := requireTool("cargo", "install Rust/Cargo"); err != nil {
 			return "", nil, nil, "", fmt.Errorf("cargo command not found: %w", err)
 		}
 		runner = "cargo"
@@ -166,7 +170,7 @@ func buildTestCommand(mode, path string, in input) (string, []string, []string, 
 			args = append(args, in.Pattern)
 		}
 	case "pytest":
-		if _, err := executil.RequireTool("pytest", "install pytest in the active environment"); err != nil {
+		if _, err := requireTool("pytest", "install pytest in the active environment"); err != nil {
 			return "", nil, nil, "", fmt.Errorf("pytest command not found: %w", err)
 		}
 		runner = "pytest"
@@ -177,25 +181,25 @@ func buildTestCommand(mode, path string, in input) (string, []string, []string, 
 		if in.Pattern != "" {
 			args = append(args, "-k", in.Pattern)
 		}
-		if path != "" && path != "." {
+		if path != "" && path != "." && path != "./..." {
 			args = append(args, path)
 		}
 	case "npm":
-		if _, err := executil.RequireTool("npm", "install npm or Node.js"); err != nil {
+		if _, err := requireTool("npm", "install npm or Node.js"); err != nil {
 			return "", nil, nil, "", fmt.Errorf("npm command not found: %w", err)
 		}
 		runner = "npm"
 		runDir = testCommandDir(path)
 		args = []string{"test"}
 	case "pnpm":
-		if _, err := executil.RequireTool("pnpm", "install pnpm"); err != nil {
+		if _, err := requireTool("pnpm", "install pnpm"); err != nil {
 			return "", nil, nil, "", fmt.Errorf("pnpm command not found: %w", err)
 		}
 		runner = "pnpm"
 		runDir = testCommandDir(path)
 		args = []string{"test"}
 	case "yarn":
-		if _, err := executil.RequireTool("yarn", "install yarn"); err != nil {
+		if _, err := requireTool("yarn", "install yarn"); err != nil {
 			return "", nil, nil, "", fmt.Errorf("yarn command not found: %w", err)
 		}
 		runner = "yarn"
@@ -247,6 +251,7 @@ func testCommandDir(path string) string {
 func parseGoTestOutput(output, mode string) []testResult {
 	var results []testResult
 	packageMap := make(map[string]*testResult)
+	coverageByPackage := make(map[string]coverageSample)
 
 	scanner := bufio.NewScanner(strings.NewReader(output))
 	for scanner.Scan() {
@@ -262,6 +267,16 @@ func parseGoTestOutput(output, mode string) []testResult {
 			continue
 		}
 
+		if mode == "coverage" && event.Package != "" && event.Output != "" {
+			if cov, ok := extractCoverage(event.Output); ok {
+				coverageByPackage[event.Package] = coverageSample{Percent: cov}
+				if result := packageMap[event.Package]; result != nil {
+					result.Coverage = cov
+					result.HasCoverage = true
+				}
+			}
+		}
+
 		if event.Action == "pass" || event.Action == "fail" || event.Action == "skip" {
 			if event.Package != "" {
 				result := testResult{
@@ -269,12 +284,9 @@ func parseGoTestOutput(output, mode string) []testResult {
 					Status:   event.Action,
 					Duration: event.Elapsed,
 				}
-
-				// Try to extract coverage
-				if mode == "coverage" && event.Output != "" {
-					if cov := extractCoverage(event.Output); cov > 0 {
-						result.Coverage = cov
-					}
+				if cov, ok := coverageByPackage[event.Package]; ok {
+					result.Coverage = cov.Percent
+					result.HasCoverage = true
 				}
 
 				packageMap[event.Package] = &result
@@ -286,20 +298,27 @@ func parseGoTestOutput(output, mode string) []testResult {
 	for _, result := range packageMap {
 		results = append(results, *result)
 	}
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Package < results[j].Package
+	})
 
 	return results
 }
 
-func extractCoverage(output string) float64 {
+type coverageSample struct {
+	Percent float64
+}
+
+func extractCoverage(output string) (float64, bool) {
 	// Match patterns like "coverage: 85.3% of statements"
 	re := regexp.MustCompile(`coverage:\s+(\d+\.?\d*)%`)
 	matches := re.FindStringSubmatch(output)
 	if len(matches) > 1 {
 		if cov, err := strconv.ParseFloat(matches[1], 64); err == nil {
-			return cov
+			return cov, true
 		}
 	}
-	return 0
+	return 0, false
 }
 
 func summarizeResults(mode, stdout, stderr string, exitCode int, results []testResult) map[string]any {
@@ -334,7 +353,7 @@ func summarizeResults(mode, stdout, stderr string, exitCode int, results []testR
 		}
 		summary["total_duration"] = summary["total_duration"].(float64) + r.Duration
 
-		if r.Coverage > 0 {
+		if r.HasCoverage {
 			totalCoverage += r.Coverage
 			coveredPackages++
 		}
@@ -344,7 +363,7 @@ func summarizeResults(mode, stdout, stderr string, exitCode int, results []testR
 		summary["average_coverage"] = totalCoverage / float64(coveredPackages)
 	}
 
-	summary["success"] = summary["failed"].(int) == 0
+	summary["success"] = exitCode == 0 && summary["failed"].(int) == 0
 
 	return summary
 }

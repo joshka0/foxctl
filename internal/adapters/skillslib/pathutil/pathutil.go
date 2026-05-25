@@ -106,8 +106,8 @@ func RelTo(base, target string) string {
 	if err != nil {
 		return filepath.ToSlash(target)
 	}
-	// If the relative path escapes the base (starts with ..), return absolute
-	if strings.HasPrefix(rel, "..") {
+	// If the relative path escapes the base, return absolute.
+	if isParentRelativePath(rel) {
 		return filepath.ToSlash(target)
 	}
 	return filepath.ToSlash(rel)
@@ -174,4 +174,8 @@ func CommonPrefix(paths []string) string {
 		return ""
 	}
 	return strings.Join(parts, string(filepath.Separator))
+}
+
+func isParentRelativePath(rel string) bool {
+	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }

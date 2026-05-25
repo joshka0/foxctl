@@ -2,7 +2,9 @@ package semantic
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 )
 
@@ -37,6 +39,16 @@ func TestJobArgs_Validate(t *testing.T) {
 			wantErr: "workspace_id is required",
 		},
 		{
+			name: "blank workspace_id",
+			args: JobArgs{
+				WorkspaceID: " \t\n",
+				Files: []JobFileInput{
+					{Path: "main.go"},
+				},
+			},
+			wantErr: "workspace_id is required",
+		},
+		{
 			name: "empty files list",
 			args: JobArgs{
 				WorkspaceID: "ws-123",
@@ -58,6 +70,16 @@ func TestJobArgs_Validate(t *testing.T) {
 				WorkspaceID: "ws-123",
 				Files: []JobFileInput{
 					{Path: ""},
+				},
+			},
+			wantErr: "file path is required at index 0",
+		},
+		{
+			name: "blank file path",
+			args: JobArgs{
+				WorkspaceID: "ws-123",
+				Files: []JobFileInput{
+					{Path: " \t\n"},
 				},
 			},
 			wantErr: "file path is required at index 0",
@@ -90,6 +112,28 @@ func TestJobArgs_Validate(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestJobArgsValidatePropertyRequiresNonBlankWorkspaceAndPath(t *testing.T) {
+	property := func(raw string) bool {
+		blank := strings.TrimSpace(raw) == ""
+		workspaceArgs := JobArgs{
+			WorkspaceID: raw,
+			Files:       []JobFileInput{{Path: "main.go"}},
+		}
+		pathArgs := JobArgs{
+			WorkspaceID: "ws-123",
+			Files:       []JobFileInput{{Path: raw}},
+		}
+		workspaceErr := workspaceArgs.Validate() != nil
+		pathErr := pathArgs.Validate() != nil
+
+		return workspaceErr == blank && pathErr == blank
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 1000}); err != nil {
+		t.Fatalf("non-blank job args property failed: %v", err)
 	}
 }
 

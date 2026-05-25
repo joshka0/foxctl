@@ -16,8 +16,12 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
-// ErrNotFound indicates the requested job doesn't exist.
-var ErrNotFound = errors.New("not found")
+var (
+	// ErrNotFound indicates the requested job doesn't exist.
+	ErrNotFound = errors.New("not found")
+	// ErrInvalidState indicates a queue lifecycle transition is not allowed.
+	ErrInvalidState = errors.New("invalid state transition")
+)
 
 // Options configures a queue store.
 type Options struct {
@@ -293,12 +297,22 @@ func (s *Store) ClaimNext(ctx context.Context, opts ClaimOptions) (*Job, error) 
 // Complete marks a job as completed successfully.
 func (s *Store) Complete(ctx context.Context, jobID string) error {
 	nowStr := sqlutil.FormatTimestamp(time.Now().UTC())
-	_, err := s.db.ExecContext(ctx, fmt.Sprintf(`
+	res, err := s.db.ExecContext(ctx, fmt.Sprintf(`
 		UPDATE %s
 		SET state = 'ok', updated_at = ?, completed_at = ?, error = NULL
-		WHERE id = ?
+		WHERE id = ? AND state = 'running'
 	`, s.table), nowStr, nowStr, jobID)
-	return err
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("complete rows affected: %w", err)
+	}
+	if rows == 0 {
+		return s.invalidTransitionError(ctx, jobID, "complete")
+	}
+	return nil
 }
 
 // Fail records a job failure, scheduling retries when allowed.
@@ -306,31 +320,58 @@ func (s *Store) Fail(ctx context.Context, jobID string, errMsg string) error {
 	now := time.Now().UTC()
 	nowStr := sqlutil.FormatTimestamp(now)
 
+	var state JobState
 	var attempts, maxAttempts int
 	err := s.db.QueryRowContext(ctx, fmt.Sprintf(`
-		SELECT attempts, max_attempts FROM %s WHERE id = ?
-	`, s.table), jobID).Scan(&attempts, &maxAttempts)
+		SELECT state, attempts, max_attempts FROM %s WHERE id = ?
+	`, s.table), jobID).Scan(&state, &attempts, &maxAttempts)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
 		return fmt.Errorf("get job: %w", err)
+	}
+	if state != StateRunning {
+		return fmt.Errorf("%w: cannot fail job %q from %s", ErrInvalidState, jobID, state)
 	}
 
 	if attempts < maxAttempts {
 		backoff := time.Duration(1<<uint(max(attempts, 1)-1)) * time.Minute
 		scheduledAt := sqlutil.FormatTimestamp(now.Add(backoff))
-		_, err = s.db.ExecContext(ctx, fmt.Sprintf(`
+		res, err := s.db.ExecContext(ctx, fmt.Sprintf(`
 			UPDATE %s
 			SET state = 'retry', updated_at = ?, scheduled_at = ?, error = ?
-			WHERE id = ?
+			WHERE id = ? AND state = 'running'
 		`, s.table), nowStr, scheduledAt, errMsg, jobID)
-		return err
+		if err != nil {
+			return err
+		}
+		rows, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("fail retry rows affected: %w", err)
+		}
+		if rows == 0 {
+			return s.invalidTransitionError(ctx, jobID, "fail")
+		}
+		return nil
 	}
 
-	_, err = s.db.ExecContext(ctx, fmt.Sprintf(`
+	res, err := s.db.ExecContext(ctx, fmt.Sprintf(`
 		UPDATE %s
 		SET state = 'error', updated_at = ?, completed_at = ?, error = ?
-		WHERE id = ?
+		WHERE id = ? AND state = 'running'
 	`, s.table), nowStr, nowStr, errMsg, jobID)
-	return err
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("fail terminal rows affected: %w", err)
+	}
+	if rows == 0 {
+		return s.invalidTransitionError(ctx, jobID, "fail")
+	}
+	return nil
 }
 
 // RequeueStaleRunning moves running jobs older than olderThan back to retry.
@@ -409,6 +450,18 @@ func (s *Store) GetJob(ctx context.Context, id string) (*Job, error) {
 	return job, nil
 }
 
+func (s *Store) invalidTransitionError(ctx context.Context, jobID, transition string) error {
+	var state JobState
+	err := s.db.QueryRowContext(ctx, fmt.Sprintf(`SELECT state FROM %s WHERE id = ?`, s.table), jobID).Scan(&state)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("get job state: %w", err)
+	}
+	return fmt.Errorf("%w: cannot %s job %q from %s", ErrInvalidState, transition, jobID, state)
+}
+
 // Stats returns queue state counts, optionally scoped to a group.
 func (s *Store) Stats(ctx context.Context, groupID string) (*Stats, error) {
 	return s.stats(ctx, groupID, "")
@@ -449,12 +502,15 @@ func (s *Store) stats(ctx context.Context, groupID, payloadKind string) (*Stats,
 	}()
 
 	for rows.Next() {
-		var state string
+		var state JobState
 		var count int
 		if err := rows.Scan(&state, &count); err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
 		}
-		switch JobState(state) {
+		if err := validateJobState(state); err != nil {
+			return nil, fmt.Errorf("queue: stats state: %w", err)
+		}
+		switch state {
 		case StateQueued, StateRetry:
 			stats.QueuedCount += count
 		case StateRunning:
@@ -464,6 +520,9 @@ func (s *Store) stats(ctx context.Context, groupID, payloadKind string) (*Stats,
 		case StateError:
 			stats.FailedCount = count
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate queue stats: %w", err)
 	}
 
 	oldestQuery := fmt.Sprintf("SELECT MIN(created_at) FROM %s WHERE state IN ('queued','retry')", s.table)
@@ -480,10 +539,15 @@ func (s *Store) stats(ctx context.Context, groupID, payloadKind string) (*Stats,
 	}
 
 	var oldestStr sql.NullString
-	if err := s.db.QueryRowContext(ctx, oldestQuery, oldestArgs...).Scan(&oldestStr); err == nil && oldestStr.Valid {
-		if t, parseErr := sqlutil.ScanTimestamp(oldestStr.String); parseErr == nil {
-			stats.OldestQueuedAt = &t
+	if err := s.db.QueryRowContext(ctx, oldestQuery, oldestArgs...).Scan(&oldestStr); err != nil {
+		return nil, fmt.Errorf("queue: scan oldest created_at: %w", err)
+	}
+	if oldestStr.Valid {
+		t, parseErr := sqlutil.ScanTimestamp(oldestStr.String)
+		if parseErr != nil {
+			return nil, fmt.Errorf("queue: scan oldest created_at: %w", parseErr)
 		}
+		stats.OldestQueuedAt = &t
 	}
 
 	return stats, nil
@@ -516,6 +580,10 @@ func (s *Store) CleanupForGroupKind(ctx context.Context, olderThan time.Duration
 }
 
 func (s *Store) cleanup(ctx context.Context, olderThan time.Duration, groupID, payloadKind string) (int64, error) {
+	if olderThan < 0 {
+		return 0, nil
+	}
+
 	cutoff := sqlutil.FormatTimestamp(time.Now().UTC().Add(-olderThan))
 	clauses := []string{"state IN ('ok', 'error')", "completed_at < ?"}
 	args := []any{cutoff}
@@ -573,14 +641,30 @@ func scanJob(row *sql.Row) (*Job, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := validateJobState(job.State); err != nil {
+		return nil, err
+	}
 
-	job.CreatedAt, _ = sqlutil.ScanTimestamp(createdStr)
-	job.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedStr)
+	var parseErr error
+	job.CreatedAt, parseErr = sqlutil.ScanTimestamp(createdStr)
+	if parseErr != nil {
+		return nil, fmt.Errorf("queue: scan created_at: %w", parseErr)
+	}
+	job.UpdatedAt, parseErr = sqlutil.ScanTimestamp(updatedStr)
+	if parseErr != nil {
+		return nil, fmt.Errorf("queue: scan updated_at: %w", parseErr)
+	}
 	if scheduledStr.Valid {
-		job.ScheduledAt, _ = sqlutil.ScanTimestamp(scheduledStr.String)
+		job.ScheduledAt, parseErr = sqlutil.ScanTimestamp(scheduledStr.String)
+		if parseErr != nil {
+			return nil, fmt.Errorf("queue: scan scheduled_at: %w", parseErr)
+		}
 	}
 	if completedStr.Valid {
-		t, _ := sqlutil.ScanTimestamp(completedStr.String)
+		t, parseErr := sqlutil.ScanTimestamp(completedStr.String)
+		if parseErr != nil {
+			return nil, fmt.Errorf("queue: scan completed_at: %w", parseErr)
+		}
 		job.CompletedAt = &t
 	}
 	if errStr.Valid {
@@ -588,6 +672,15 @@ func scanJob(row *sql.Row) (*Job, error) {
 	}
 
 	return &job, nil
+}
+
+func validateJobState(state JobState) error {
+	switch state {
+	case StateQueued, StateRunning, StateOK, StateError, StateRetry:
+		return nil
+	default:
+		return fmt.Errorf("%w: unknown queue state %q", ErrInvalidState, state)
+	}
 }
 
 var tableNamePattern = regexp.MustCompile(`^[A-Za-z0-9_]+$`)

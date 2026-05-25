@@ -66,6 +66,9 @@ func (s *sqlStore) Send(ctx context.Context, msg agent.Message) error {
 	if err != nil {
 		return fmt.Errorf("mailbox: marshal headers: %w", err)
 	}
+	if err := validatePayloadJSON(msg.Payload); err != nil {
+		return err
+	}
 
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO mailbox (id, from_ns, to_ns, type, ttl_ms, headers, payload, visible_at, attempt, ts, session_id, workspace, agent_id)
@@ -163,7 +166,7 @@ func (s *sqlStore) poll(ctx context.Context, agentNS string, leaseDuration time.
 	}
 
 	// Lease claimed messages
-	leaseUntil := time.Now().Add(leaseDuration).Unix()
+	leaseUntil := visibleAtAfter(time.Now(), leaseDuration)
 	for i := range messages {
 		res, err := tx.ExecContext(ctx, `
 			UPDATE mailbox
@@ -224,7 +227,7 @@ func (s *sqlStore) Ack(ctx context.Context, messageID string) error {
 }
 
 func (s *sqlStore) Nack(ctx context.Context, messageID string, visibilityTimeout time.Duration) error {
-	newVisibleAt := time.Now().Add(visibilityTimeout).Unix()
+	newVisibleAt := visibleAtAfter(time.Now(), visibilityTimeout)
 	res, err := s.db.ExecContext(ctx, `UPDATE mailbox SET visible_at = $1 WHERE id = $2`, newVisibleAt, messageID)
 	if err != nil {
 		return fmt.Errorf("mailbox: nack: %w", err)
@@ -237,6 +240,14 @@ func (s *sqlStore) Nack(ctx context.Context, messageID string, visibilityTimeout
 		return ErrNotFound
 	}
 	return nil
+}
+
+func visibleAtAfter(now time.Time, delay time.Duration) int64 {
+	visibleAt := now.Add(delay).Unix()
+	if delay > 0 && visibleAt <= now.Unix() {
+		return now.Unix() + 1
+	}
+	return visibleAt
 }
 
 func (s *sqlStore) List(ctx context.Context, agentNS string, limit int) ([]agent.Message, error) {
@@ -415,9 +426,20 @@ func scanMessage(rows *sql.Rows) (agent.Message, error) {
 	}
 
 	// Set payload as RawMessage
-	msg.Payload = json.RawMessage(payloadJSON)
+	payload := json.RawMessage(payloadJSON)
+	if err := validatePayloadJSON(payload); err != nil {
+		return agent.Message{}, err
+	}
+	msg.Payload = payload
 
 	return msg, nil
+}
+
+func validatePayloadJSON(payload json.RawMessage) error {
+	if !json.Valid(payload) {
+		return fmt.Errorf("mailbox: invalid payload JSON")
+	}
+	return nil
 }
 
 // ErrNotFound indicates the message was not found.

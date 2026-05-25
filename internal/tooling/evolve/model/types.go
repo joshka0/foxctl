@@ -3,6 +3,7 @@ package model
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -170,6 +171,9 @@ func (n Node) Validate() error {
 	if n.EvaluatedAttempts < 0 {
 		return fmt.Errorf("node evaluated attempts cannot be negative")
 	}
+	if err := validateOptionalFiniteScore("node score", n.Score); err != nil {
+		return err
+	}
 	if n.CreatedAt.IsZero() {
 		return fmt.Errorf("node created_at is required")
 	}
@@ -241,8 +245,21 @@ func (a Attempt) Validate() error {
 	if !a.Status.Valid() {
 		return fmt.Errorf("attempt status %q is invalid", a.Status)
 	}
+	if err := validateOptionalFiniteScore("attempt score", a.Score); err != nil {
+		return err
+	}
 	if a.StartedAt.IsZero() {
 		return fmt.Errorf("attempt started_at is required")
+	}
+	return nil
+}
+
+func validateOptionalFiniteScore(field string, score *float64) error {
+	if score == nil {
+		return nil
+	}
+	if math.IsNaN(*score) || math.IsInf(*score, 0) {
+		return fmt.Errorf("%s must be finite", field)
 	}
 	return nil
 }

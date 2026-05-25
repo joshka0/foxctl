@@ -182,6 +182,44 @@ func TestBashGuard_RewritesSedRangeFromCat(t *testing.T) {
 	assert.Contains(t, command, `"line_end":12`)
 }
 
+func TestRewriteSedToContextGrepRejectsCompoundCommands(t *testing.T) {
+	tests := []string{
+		"sed -n '10,12p' /tmp/notes.txt && rm -rf /",
+		"sed -n '10,12p' /tmp/notes.txt; rm -rf /",
+		"sed -n '10,12p' /tmp/notes.txt > /tmp/out",
+		"cat /tmp/notes.txt | sed -n '10,12p' | sh",
+		"printf sed -n '10,12p' /tmp/notes.txt",
+	}
+
+	for _, command := range tests {
+		t.Run(command, func(t *testing.T) {
+			rewritten, _, ok := rewriteSedToContextGrep(command)
+			assert.False(t, ok, "command should not be rewritten to %q", rewritten)
+		})
+	}
+}
+
+func TestBashGuard_RestrictedProfileBlocksCompoundSedInsteadOfRewrite(t *testing.T) {
+	var buf bytes.Buffer
+	rc, cleanup := newTestContext(t, &buf)
+	defer cleanup()
+
+	in := bashInput("sed -n '10,12p' /tmp/notes.txt && rm -rf /")
+	in.HookConfig = map[string]any{"profile": "explorer"}
+
+	err := run(context.Background(), rc, in)
+	require.NoError(t, err)
+
+	env := decodeEnvelope(t, &buf)
+	assertOK(t, env)
+	data := getData(t, env)
+	hookOutput := getHookOutput(t, data)
+	assert.Equal(t, "block", hookOutput["decision"])
+	assert.Contains(t, hookOutput["reason"], "shell control operators")
+	_, hasUpdate := hookOutput["updated_tool_input"]
+	assert.False(t, hasUpdate, "blocked compound command must not carry a rewritten tool input")
+}
+
 // Tests for explorer profile blocking non-foxctl commands
 
 func TestBashGuard_ExplorerBlocksArbitraryCommand(t *testing.T) {

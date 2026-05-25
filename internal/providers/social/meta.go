@@ -7,31 +7,37 @@ import (
 
 func planFacebook(baseURL string, in Input) (callPlan, error) {
 	q := url.Values{}
-	version := graphVersion(in.APIVersion)
+	version, err := graphVersion(in.APIVersion)
+	if err != nil {
+		return callPlan{}, err
+	}
 	route := ""
 
 	switch in.Operation {
 	case "page_info":
-		if err := require(in.PageID, "page_id is required for page_info", "Pass a Facebook Page ID."); err != nil {
+		pageID, err := requirePathToken(in.PageID, "page_id", "page_id is required for page_info", "Pass a Facebook Page ID without path separators.")
+		if err != nil {
 			return callPlan{}, err
 		}
-		route = "/" + version + "/" + in.PageID
+		route = "/" + version + "/" + pageID
 		q.Set("fields", "id,name,username,category,link,fan_count,followers_count,verification_status,picture")
 	case "page_posts":
-		if err := require(in.PageID, "page_id is required for page_posts", "Pass a Facebook Page ID."); err != nil {
+		pageID, err := requirePathToken(in.PageID, "page_id", "page_id is required for page_posts", "Pass a Facebook Page ID without path separators.")
+		if err != nil {
 			return callPlan{}, err
 		}
-		route = "/" + version + "/" + in.PageID + "/posts"
+		route = "/" + version + "/" + pageID + "/posts"
 		q.Set("fields", "id,message,story,created_time,permalink_url,from,shares,comments.summary(true),reactions.summary(true)")
 		q.Set("limit", intString(boundedLimit(in.Limit, 25, 100)))
 		addIf(q, "after", in.After)
 		addIf(q, "since", in.Since)
 		addIf(q, "until", in.Until)
 	case "post_comments":
-		if err := require(in.PostID, "post_id is required for post_comments", "Pass a Facebook Graph post ID."); err != nil {
+		postID, err := requirePathToken(in.PostID, "post_id", "post_id is required for post_comments", "Pass a Facebook Graph post ID without path separators.")
+		if err != nil {
 			return callPlan{}, err
 		}
-		route = "/" + version + "/" + in.PostID + "/comments"
+		route = "/" + version + "/" + postID + "/comments"
 		q.Set("fields", "id,message,created_time,from,like_count,comment_count,permalink_url")
 		q.Set("limit", intString(boundedLimit(in.Limit, 25, 100)))
 		addIf(q, "after", in.After)
@@ -64,43 +70,51 @@ func planFacebook(baseURL string, in Input) (callPlan, error) {
 
 func planInstagram(baseURL string, in Input) (callPlan, error) {
 	q := url.Values{}
-	version := graphVersion(in.APIVersion)
+	version, err := graphVersion(in.APIVersion)
+	if err != nil {
+		return callPlan{}, err
+	}
 	route := ""
 
 	switch in.Operation {
 	case "user_media":
-		if err := require(in.IGUserID, "ig_user_id is required for user_media", "Pass an authorized Instagram Business/Creator user ID."); err != nil {
+		igUserID, err := requirePathToken(in.IGUserID, "ig_user_id", "ig_user_id is required for user_media", "Pass an authorized Instagram Business/Creator user ID without path separators.")
+		if err != nil {
 			return callPlan{}, err
 		}
-		route = "/" + version + "/" + in.IGUserID + "/media"
+		route = "/" + version + "/" + igUserID + "/media"
 		q.Set("fields", "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,username,like_count,comments_count,children")
 		q.Set("limit", intString(boundedLimit(in.Limit, 25, 100)))
 		addIf(q, "after", in.After)
 		addIf(q, "since", in.Since)
 		addIf(q, "until", in.Until)
 	case "media_details":
-		if err := require(in.MediaID, "media_id is required for media_details", "Pass an Instagram media ID."); err != nil {
+		mediaID, err := requirePathToken(in.MediaID, "media_id", "media_id is required for media_details", "Pass an Instagram media ID without path separators.")
+		if err != nil {
 			return callPlan{}, err
 		}
-		route = "/" + version + "/" + in.MediaID
+		route = "/" + version + "/" + mediaID
 		q.Set("fields", "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,username,like_count,comments_count,children")
 	case "media_comments":
-		if err := require(in.MediaID, "media_id is required for media_comments", "Pass an Instagram media ID."); err != nil {
+		mediaID, err := requirePathToken(in.MediaID, "media_id", "media_id is required for media_comments", "Pass an Instagram media ID without path separators.")
+		if err != nil {
 			return callPlan{}, err
 		}
-		route = "/" + version + "/" + in.MediaID + "/comments"
+		route = "/" + version + "/" + mediaID + "/comments"
 		q.Set("fields", "id,text,timestamp,username,like_count,replies")
 		q.Set("limit", intString(boundedLimit(in.Limit, 25, 100)))
 		addIf(q, "after", in.After)
 	case "business_discovery":
-		if err := require(in.IGUserID, "ig_user_id is required for business_discovery", "Pass your authorized IG user ID as ig_user_id."); err != nil {
+		igUserID, err := requirePathToken(in.IGUserID, "ig_user_id", "ig_user_id is required for business_discovery", "Pass your authorized IG user ID as ig_user_id without path separators.")
+		if err != nil {
 			return callPlan{}, err
 		}
-		if err := require(in.Username, "username is required for business_discovery", "Pass the target Business/Creator username."); err != nil {
+		username, err := requireFieldArgumentToken(in.Username, "username", "username is required for business_discovery", "Pass the target Business/Creator username without Graph field syntax characters.")
+		if err != nil {
 			return callPlan{}, err
 		}
-		route = "/" + version + "/" + in.IGUserID
-		q.Set("fields", "business_discovery.username("+in.Username+"){id,username,name,biography,website,followers_count,follows_count,media_count,profile_picture_url,media.limit(25){id,caption,media_type,permalink,timestamp,like_count,comments_count}}")
+		route = "/" + version + "/" + igUserID
+		q.Set("fields", "business_discovery.username("+username+"){id,username,name,biography,website,followers_count,follows_count,media_count,profile_picture_url,media.limit(25){id,caption,media_type,permalink,timestamp,like_count,comments_count}}")
 	default:
 		return callPlan{}, unsupportedOperation("instagram", in.Operation, "user_media, media_details, media_comments, business_discovery")
 	}
@@ -128,12 +142,13 @@ func planInstagram(baseURL string, in Input) (callPlan, error) {
 	}, nil
 }
 
-func graphVersion(value string) string {
+func graphVersion(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return defaultMetaVersion
+		return defaultMetaVersion, nil
 	}
-	return strings.TrimPrefix(value, "/")
+	value = strings.TrimPrefix(value, "/")
+	return pathToken(value, "api_version", "Pass api_version as a single Graph API version, for example v25.0.")
 }
 
 func parseMeta(platform Platform, operation string) func(any) ([]Item, *Pagination, error) {

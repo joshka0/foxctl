@@ -30,7 +30,10 @@ func planX(baseURL string, in Input) (callPlan, error) {
 		q.Set("expansions", "author_id")
 		q.Set("user.fields", "created_at,description,location,public_metrics,verified,url,username,name")
 	case "posts_lookup":
-		postIDs := ids(in, in.ID)
+		postIDs, err := ids(in, in.ID)
+		if err != nil {
+			return callPlan{}, err
+		}
 		if len(postIDs) == 0 {
 			return callPlan{}, require("", "ids are required for posts_lookup", "Pass ids:[\"...\"] or id:\"...\".")
 		}
@@ -41,19 +44,25 @@ func planX(baseURL string, in Input) (callPlan, error) {
 		q.Set("user.fields", "created_at,description,location,public_metrics,verified,url,username,name")
 	case "user_lookup":
 		if strings.TrimSpace(in.Username) != "" {
-			route = "/users/by/username/" + in.Username
-		} else {
-			if err := require(in.UserID, "username or user_id is required for user_lookup", "Pass username for /users/by/username or user_id for /users/:id."); err != nil {
+			username, err := pathToken(in.Username, "username", "Pass username without path separators.")
+			if err != nil {
 				return callPlan{}, err
 			}
-			route = "/users/" + in.UserID
+			route = "/users/by/username/" + username
+		} else {
+			userID, err := requirePathToken(in.UserID, "user_id", "username or user_id is required for user_lookup", "Pass username for /users/by/username or a user_id without path separators.")
+			if err != nil {
+				return callPlan{}, err
+			}
+			route = "/users/" + userID
 		}
 		q.Set("user.fields", "created_at,description,location,public_metrics,verified,url,username,name,protected")
 	case "user_posts":
-		if err := require(in.UserID, "user_id is required for user_posts", "Resolve a username first with operation:user_lookup."); err != nil {
+		userID, err := requirePathToken(in.UserID, "user_id", "user_id is required for user_posts", "Resolve a username first with operation:user_lookup and pass a user_id without path separators.")
+		if err != nil {
 			return callPlan{}, err
 		}
-		route = "/users/" + in.UserID + "/tweets"
+		route = "/users/" + userID + "/tweets"
 		q.Set("max_results", intString(limit))
 		addIf(q, "pagination_token", in.PageToken)
 		addIf(q, "start_time", in.Since)

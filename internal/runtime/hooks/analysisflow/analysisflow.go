@@ -15,6 +15,7 @@ import (
 	"github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/runtime/hooks"
 	"github.com/joshka0/foxctl/internal/runtime/hooks/lifecycle"
+	hookpathutil "github.com/joshka0/foxctl/internal/runtime/hooks/pathutil"
 )
 
 type Dependencies struct {
@@ -264,18 +265,7 @@ func (hookAnchorOwnerResolver) ResolveSymbolOwner(path string, lang string, span
 }
 
 func normalizeHookRepoPath(workspacePath, filePath string) string {
-	filePath = strings.TrimSpace(filePath)
-	if filePath == "" {
-		return ""
-	}
-	if filepath.IsAbs(filePath) {
-		rel, err := filepath.Rel(workspacePath, filePath)
-		if err != nil || strings.HasPrefix(rel, "..") {
-			return ""
-		}
-		filePath = rel
-	}
-	return filepath.ToSlash(filepath.Clean(filePath))
+	return hookpathutil.ContainedRelativePath(filePath, workspacePath)
 }
 
 func semanticAnchorWarnings(extracted semanticanchors.ExtractionResult) []string {

@@ -61,7 +61,7 @@ func init() {
 // CanonicalizeToolName resolves a tool name to its canonical form for the given mode.
 // Returns the canonical name and true if found, or empty string and false otherwise.
 func CanonicalizeToolName(mode ToolMode, name string) (string, bool) {
-	key := strings.ToLower(name)
+	key := strings.ToLower(strings.TrimSpace(name))
 	switch mode {
 	case ToolModeRuntime:
 		canonical, ok := runtimeAliases[key]
@@ -85,9 +85,13 @@ func ValidateAllowlist(mode ToolMode, allowlist []string) (normalized []string, 
 	seenNormalized := make(map[string]struct{})
 
 	for _, name := range allowlist {
-		canonical, ok := CanonicalizeToolName(mode, name)
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+		canonical, ok := CanonicalizeToolName(mode, trimmed)
 		if !ok {
-			canonical = name
+			canonical = trimmed
 			if _, exists := seenUnknown[canonical]; !exists {
 				unknown = append(unknown, canonical)
 				seenUnknown[canonical] = struct{}{}
@@ -131,9 +135,13 @@ func addAlias(m map[string]string, alias string, canonical string) {
 func normalizeAllowlist(mode ToolMode, allowlist []string) (normalized []string) {
 	seen := make(map[string]struct{}, len(allowlist))
 	for _, name := range allowlist {
-		canonical, ok := CanonicalizeToolName(mode, name)
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+		canonical, ok := CanonicalizeToolName(mode, trimmed)
 		if !ok {
-			canonical = name
+			canonical = trimmed
 		}
 		if _, exists := seen[canonical]; exists {
 			continue

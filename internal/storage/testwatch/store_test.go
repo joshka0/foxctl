@@ -99,6 +99,146 @@ func TestStore_UpsertAndGet(t *testing.T) {
 	}
 }
 
+func TestStore_UpsertAcceptsKnownStatuses(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	store, err := testwatch.Open(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	statuses := []testwatch.Status{
+		testwatch.StatusUnknown,
+		testwatch.StatusPass,
+		testwatch.StatusFail,
+		testwatch.StatusError,
+		testwatch.StatusRunning,
+	}
+
+	for _, status := range statuses {
+		t.Run(string(status), func(t *testing.T) {
+			err := store.Upsert(ctx, testwatch.TestStatus{
+				WorkspaceID: "ws-statuses",
+				WatcherID:   "watcher-" + string(status),
+				Status:      status,
+				Command:     "test command",
+			})
+			if err != nil {
+				t.Fatalf("Upsert status %q: %v", status, err)
+			}
+		})
+	}
+}
+
+func TestStore_UpsertRejectsInvalidStatus(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	store, err := testwatch.Open(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	err = store.Upsert(ctx, testwatch.TestStatus{
+		WorkspaceID: "ws-invalid",
+		WatcherID:   "go",
+		Status:      testwatch.Status("not-a-status"),
+		Command:     "go test ./...",
+	})
+	if err == nil {
+		t.Fatalf("expected invalid status to be rejected")
+	}
+
+	statuses, err := store.ListByWorkspace(ctx, "ws-invalid")
+	if err != nil {
+		t.Fatalf("ListByWorkspace: %v", err)
+	}
+	if len(statuses) != 0 {
+		t.Fatalf("invalid status was persisted: %+v", statuses)
+	}
+}
+
+func TestStore_UpsertRejectsInvalidStatusWithoutMutatingExisting(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	store, err := testwatch.Open(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	if err := store.Upsert(ctx, testwatch.TestStatus{
+		WorkspaceID: "ws-update-invalid",
+		WatcherID:   "go",
+		Status:      testwatch.StatusPass,
+		Command:     "go test ./...",
+		Summary:     "original summary",
+	}); err != nil {
+		t.Fatalf("initial Upsert: %v", err)
+	}
+
+	err = store.Upsert(ctx, testwatch.TestStatus{
+		WorkspaceID: "ws-update-invalid",
+		WatcherID:   "go",
+		Status:      testwatch.Status("not-a-status"),
+		Command:     "go test ./...",
+		Summary:     "mutated summary",
+	})
+	if err == nil {
+		t.Fatalf("expected invalid status update to be rejected")
+	}
+
+	got, found, err := store.Get(ctx, "ws-update-invalid", "go")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !found {
+		t.Fatal("expected existing status")
+	}
+	if got.Status != testwatch.StatusPass {
+		t.Fatalf("Status = %q, want %q", got.Status, testwatch.StatusPass)
+	}
+	if got.Summary != "original summary" {
+		t.Fatalf("Summary = %q, want original summary", got.Summary)
+	}
+}
+
+func TestStore_UpsertRejectsNegativeFailureLine(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	store, err := testwatch.Open(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	err = store.Upsert(ctx, testwatch.TestStatus{
+		WorkspaceID: "ws-invalid-failure",
+		WatcherID:   "go",
+		Status:      testwatch.StatusFail,
+		Command:     "go test ./...",
+		Failures: []testwatch.Failure{
+			{Name: "TestFoo", Line: -1},
+		},
+	})
+	if err == nil {
+		t.Fatalf("expected negative failure line to be rejected")
+	}
+
+	statuses, err := store.ListByWorkspace(ctx, "ws-invalid-failure")
+	if err != nil {
+		t.Fatalf("ListByWorkspace: %v", err)
+	}
+	if len(statuses) != 0 {
+		t.Fatalf("invalid failure was persisted: %+v", statuses)
+	}
+}
+
 func TestStore_ListByWorkspace(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()

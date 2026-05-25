@@ -3,7 +3,10 @@ package conversationsettings
 import (
 	"context"
 	"errors"
+	"reflect"
+	"strings"
 	"testing"
+	"testing/quick"
 )
 
 func TestStore_PatchAndGet(t *testing.T) {
@@ -121,5 +124,112 @@ func TestStore_PatchInvalidExecMode(t *testing.T) {
 	}
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("expected ErrInvalid, got %v", err)
+	}
+}
+
+func TestStore_GetRejectsCorruptPersistedSettings(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name       string
+		corrupt    func(context.Context, *sqlStore, string) error
+		wantErrSub string
+	}{
+		{
+			name: "tools allow null json",
+			corrupt: func(ctx context.Context, store *sqlStore, convID string) error {
+				_, err := store.db.ExecContext(
+					ctx,
+					`UPDATE conversation_settings SET tools_allow_json = ? WHERE conversation_id = ?`,
+					"null",
+					convID,
+				)
+				return err
+			},
+			wantErrSub: "tools_allow_json",
+		},
+		{
+			name: "exec mode unknown",
+			corrupt: func(ctx context.Context, store *sqlStore, convID string) error {
+				_, err := store.db.ExecContext(
+					ctx,
+					`UPDATE conversation_settings SET exec_mode = ? WHERE conversation_id = ?`,
+					"sideways",
+					convID,
+				)
+				return err
+			},
+			wantErrSub: "exec_mode",
+		},
+		{
+			name: "presence enabled not boolean",
+			corrupt: func(ctx context.Context, store *sqlStore, convID string) error {
+				_, err := store.db.ExecContext(
+					ctx,
+					`UPDATE conversation_settings SET presence_enabled = ? WHERE conversation_id = ?`,
+					2,
+					convID,
+				)
+				return err
+			},
+			wantErrSub: "presence_enabled",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			storeIface, err := Open(ctx, t.TempDir())
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			defer storeIface.Close()
+			store := storeIface.(*sqlStore)
+
+			convID := "conv-corrupt"
+			execMode := "story"
+			presenceEnabled := true
+			tools := []string{"rlm_context_query"}
+			if _, err := store.Patch(ctx, convID, Patch{
+				ExecMode:        &execMode,
+				PresenceEnabled: &presenceEnabled,
+				ToolsAllow:      &tools,
+			}); err != nil {
+				t.Fatalf("Patch: %v", err)
+			}
+			if err := tc.corrupt(ctx, store, convID); err != nil {
+				t.Fatalf("corrupt row: %v", err)
+			}
+
+			_, err = store.Get(ctx, convID)
+			if !errors.Is(err, ErrInvalid) {
+				t.Fatalf("Get error = %v, want ErrInvalid", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantErrSub) {
+				t.Fatalf("Get error = %v, want substring %q", err, tc.wantErrSub)
+			}
+		})
+	}
+}
+
+func TestNormalizeAllowlistProperty(t *testing.T) {
+	prop := func(input []string) bool {
+		got := normalizeAllowlist(input)
+		seen := make(map[string]struct{}, len(got))
+		for i, value := range got {
+			if value == "" || strings.TrimSpace(value) != value {
+				return false
+			}
+			if _, ok := seen[value]; ok {
+				return false
+			}
+			if i > 0 && got[i-1] > value {
+				return false
+			}
+			seen[value] = struct{}{}
+		}
+		return reflect.DeepEqual(got, normalizeAllowlist(got))
+	}
+
+	if err := quick.Check(prop, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("normalize allowlist property failed: %v", err)
 	}
 }

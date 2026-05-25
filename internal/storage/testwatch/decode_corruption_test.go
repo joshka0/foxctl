@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"testing/quick"
 )
 
 func TestDecodeRejectsCorruptTestStatusFields(t *testing.T) {
@@ -16,8 +17,27 @@ func TestDecodeRejectsCorruptTestStatusFields(t *testing.T) {
 		upsertDecodeStatus(t, ctx, store, "go")
 		mustExecDecodeTest(t, store, `UPDATE test_status SET failures_json = ? WHERE workspace_id = ? AND watcher_id = ?`, "{", "ws-decode", "go")
 
-		_, _, err := store.Get(ctx, "ws-decode", "go")
-		requireDecodeError(t, err, "failures_json")
+		requireStatusDecodeError(t, ctx, store, "failures_json")
+	})
+
+	t.Run("failures json null", func(t *testing.T) {
+		store := openDecodeTestStore(t)
+		defer store.Close()
+
+		upsertDecodeStatus(t, ctx, store, "go")
+		mustExecDecodeTest(t, store, `UPDATE test_status SET failures_json = ? WHERE workspace_id = ? AND watcher_id = ?`, "null", "ws-decode", "go")
+
+		requireStatusDecodeError(t, ctx, store, "failures_json")
+	})
+
+	t.Run("failure line", func(t *testing.T) {
+		store := openDecodeTestStore(t)
+		defer store.Close()
+
+		upsertDecodeStatus(t, ctx, store, "go")
+		mustExecDecodeTest(t, store, `UPDATE test_status SET failures_json = ? WHERE workspace_id = ? AND watcher_id = ?`, `[{"name":"TestFoo","line":-1}]`, "ws-decode", "go")
+
+		requireStatusDecodeError(t, ctx, store, "failures_json")
 	})
 
 	t.Run("started timestamp", func(t *testing.T) {
@@ -27,8 +47,17 @@ func TestDecodeRejectsCorruptTestStatusFields(t *testing.T) {
 		upsertDecodeStatus(t, ctx, store, "go")
 		mustExecDecodeTest(t, store, `UPDATE test_status SET started_at = ? WHERE workspace_id = ? AND watcher_id = ?`, "not-a-time", "ws-decode", "go")
 
-		_, _, err := store.Get(ctx, "ws-decode", "go")
-		requireDecodeError(t, err, "started_at")
+		requireStatusDecodeError(t, ctx, store, "started_at")
+	})
+
+	t.Run("status", func(t *testing.T) {
+		store := openDecodeTestStore(t)
+		defer store.Close()
+
+		upsertDecodeStatus(t, ctx, store, "go")
+		mustExecDecodeTest(t, store, `UPDATE test_status SET status = ? WHERE workspace_id = ? AND watcher_id = ?`, "not-a-status", "ws-decode", "go")
+
+		requireStatusDecodeError(t, ctx, store, "status")
 	})
 }
 
@@ -55,6 +84,24 @@ func TestDecodePreservesEmptyOptionalTestStatusFields(t *testing.T) {
 	}
 	if len(got.Failures) != 0 {
 		t.Fatalf("Failures len = %d, want 0", len(got.Failures))
+	}
+}
+
+func TestValidateFailuresProperty(t *testing.T) {
+	rejectsGeneratedNegativeLines := func(raw uint16) bool {
+		line := -int(raw) - 1
+		err := validateFailures([]Failure{{Name: "generated", Line: line}})
+		return err != nil && strings.Contains(err.Error(), "line")
+	}
+	if err := quick.Check(rejectsGeneratedNegativeLines, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("negative failure line property failed: %v", err)
+	}
+
+	acceptsGeneratedNonNegativeLines := func(raw uint16) bool {
+		return validateFailures([]Failure{{Name: "generated", Line: int(raw)}}) == nil
+	}
+	if err := quick.Check(acceptsGeneratedNonNegativeLines, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("nonnegative failure line property failed: %v", err)
 	}
 }
 
@@ -85,6 +132,14 @@ func mustExecDecodeTest(t *testing.T, store Store, query string, args ...any) {
 	if _, err := sqlStore.db.ExecContext(context.Background(), query, args...); err != nil {
 		t.Fatalf("exec corrupt fixture: %v", err)
 	}
+}
+
+func requireStatusDecodeError(t *testing.T, ctx context.Context, store Store, want string) {
+	t.Helper()
+	_, _, err := store.Get(ctx, "ws-decode", "go")
+	requireDecodeError(t, err, want)
+	_, err = store.ListByWorkspace(ctx, "ws-decode")
+	requireDecodeError(t, err, want)
 }
 
 func requireDecodeError(t *testing.T, err error, want string) {

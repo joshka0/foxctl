@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"testing/quick"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/diffutil"
 )
@@ -138,6 +139,58 @@ func TestApplyNoMatch(t *testing.T) {
 	}
 	if modified != content {
 		t.Error("expected content unchanged")
+	}
+}
+
+func TestApplyEditRejectsEmptySearch(t *testing.T) {
+	content := "alpha\nbeta\n"
+	for _, mode := range []MatchMode{MatchExact, MatchFuzzy, MatchRegex, ""} {
+		t.Run(string(mode), func(t *testing.T) {
+			result, modified, err := applyEdit(content, Edit{
+				Search:    "",
+				Replace:   "replacement",
+				MatchMode: mode,
+			})
+			if err == nil {
+				t.Fatal("expected empty search to be rejected")
+			}
+			if modified != content {
+				t.Fatalf("empty search mutated content: %q", modified)
+			}
+			if result.Replacements != 0 || len(result.Lines) != 0 {
+				t.Fatalf("empty search result recorded replacements: %+v", result)
+			}
+		})
+	}
+}
+
+func TestApplyEditPropertyInvalidEmptySearchNeverMutatesContent(t *testing.T) {
+	modes := []MatchMode{MatchExact, MatchFuzzy, MatchRegex, ""}
+
+	property := func(content string, modeSeed uint8) bool {
+		mode := modes[int(modeSeed)%len(modes)]
+		result, modified, err := applyEdit(content, Edit{
+			Search:    "",
+			Replace:   "replacement",
+			MatchMode: mode,
+		})
+		if err == nil {
+			t.Logf("empty search accepted for mode %q", mode)
+			return false
+		}
+		if modified != content {
+			t.Logf("empty search mutated content for mode %q: got %q want %q", mode, modified, content)
+			return false
+		}
+		if result.Replacements != 0 || len(result.Lines) != 0 {
+			t.Logf("empty search recorded replacement metadata for mode %q: %+v", mode, result)
+			return false
+		}
+		return true
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 300}); err != nil {
+		t.Fatal(err)
 	}
 }
 

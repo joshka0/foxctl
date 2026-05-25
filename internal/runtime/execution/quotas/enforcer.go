@@ -2,6 +2,7 @@ package quotas
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -19,21 +20,39 @@ func NewEnforcer(store quotas.Store) *Enforcer {
 	return &Enforcer{store: store}
 }
 
+func (e *Enforcer) getValidatedConsumption(ctx context.Context, ns string) (agent.QuotaConsumption, error) {
+	consumption, err := e.store.GetConsumption(ctx, ns)
+	if err != nil {
+		return agent.QuotaConsumption{}, err
+	}
+	if err := quotas.ValidateConsumption(consumption); err != nil {
+		return agent.QuotaConsumption{}, err
+	}
+	return consumption, nil
+}
+
 // CheckJobSubmission verifies if a namespace has available quota for a new job.
 // Returns an error if the quota would be exceeded.
 func (e *Enforcer) CheckJobSubmission(ctx context.Context, ns string, cpuRequest, memMBRequest int) error {
+	if err := validateJobResourceRequest(cpuRequest, memMBRequest); err != nil {
+		return err
+	}
+
 	// Get namespace quotas
 	q, err := e.store.Get(ctx, ns)
 	if err != nil {
-		if err == quotas.ErrNotFound {
+		if errors.Is(err, quotas.ErrNotFound) {
 			// No quotas defined means unlimited
 			return nil
 		}
 		return fmt.Errorf("quota check: %w", err)
 	}
+	if err := quotas.ValidateLimits(q); err != nil {
+		return fmt.Errorf("quota check: invalid quotas: %w", err)
+	}
 
 	// Get current consumption
-	consumption, err := e.store.GetConsumption(ctx, ns)
+	consumption, err := e.getValidatedConsumption(ctx, ns)
 	if err != nil {
 		return fmt.Errorf("quota check: get consumption: %w", err)
 	}
@@ -52,28 +71,24 @@ func (e *Enforcer) CheckJobSubmission(ctx context.Context, ns string, cpuRequest
 	}
 
 	// Check CPU limit
-	if q.CPULimit > 0 {
-		if consumption.CPUUsed+cpuRequest > q.CPULimit {
-			return &QuotaExceededError{
-				Namespace: ns,
-				Resource:  "cpu",
-				Limit:     q.CPULimit,
-				Current:   consumption.CPUUsed,
-				Requested: cpuRequest,
-			}
+	if quotaLimitExceeded(consumption.CPUUsed, cpuRequest, q.CPULimit) {
+		return &QuotaExceededError{
+			Namespace: ns,
+			Resource:  "cpu",
+			Limit:     q.CPULimit,
+			Current:   consumption.CPUUsed,
+			Requested: cpuRequest,
 		}
 	}
 
 	// Check memory limit
-	if q.MemMBLimit > 0 {
-		if consumption.MemMBUsed+memMBRequest > q.MemMBLimit {
-			return &QuotaExceededError{
-				Namespace: ns,
-				Resource:  "memory_mb",
-				Limit:     q.MemMBLimit,
-				Current:   consumption.MemMBUsed,
-				Requested: memMBRequest,
-			}
+	if quotaLimitExceeded(consumption.MemMBUsed, memMBRequest, q.MemMBLimit) {
+		return &QuotaExceededError{
+			Namespace: ns,
+			Resource:  "memory_mb",
+			Limit:     q.MemMBLimit,
+			Current:   consumption.MemMBUsed,
+			Requested: memMBRequest,
 		}
 	}
 
@@ -84,17 +99,20 @@ func (e *Enforcer) CheckJobSubmission(ctx context.Context, ns string, cpuRequest
 func (e *Enforcer) CheckLLMCall(ctx context.Context, ns string) error {
 	q, err := e.store.Get(ctx, ns)
 	if err != nil {
-		if err == quotas.ErrNotFound {
+		if errors.Is(err, quotas.ErrNotFound) {
 			return nil
 		}
 		return fmt.Errorf("quota check: %w", err)
+	}
+	if err := quotas.ValidateLimits(q); err != nil {
+		return fmt.Errorf("quota check: invalid quotas: %w", err)
 	}
 
 	if q.LLMCallsPerMin <= 0 {
 		return nil // No limit
 	}
 
-	consumption, err := e.store.GetConsumption(ctx, ns)
+	consumption, err := e.getValidatedConsumption(ctx, ns)
 	if err != nil {
 		return fmt.Errorf("quota check: get consumption: %w", err)
 	}
@@ -121,19 +139,26 @@ func (e *Enforcer) CheckLLMCall(ctx context.Context, ns string) error {
 
 // CheckEgress verifies if a namespace can send egress bytes.
 func (e *Enforcer) CheckEgress(ctx context.Context, ns string, bytes int) error {
+	if err := validateNonNegativeQuotaRequest("egress bytes", bytes); err != nil {
+		return err
+	}
+
 	q, err := e.store.Get(ctx, ns)
 	if err != nil {
-		if err == quotas.ErrNotFound {
+		if errors.Is(err, quotas.ErrNotFound) {
 			return nil
 		}
 		return fmt.Errorf("quota check: %w", err)
+	}
+	if err := quotas.ValidateLimits(q); err != nil {
+		return fmt.Errorf("quota check: invalid quotas: %w", err)
 	}
 
 	if q.EgressBytesPerMin <= 0 {
 		return nil // No limit
 	}
 
-	consumption, err := e.store.GetConsumption(ctx, ns)
+	consumption, err := e.getValidatedConsumption(ctx, ns)
 	if err != nil {
 		return fmt.Errorf("quota check: get consumption: %w", err)
 	}
@@ -145,7 +170,7 @@ func (e *Enforcer) CheckEgress(ctx context.Context, ns string, bytes int) error 
 		currentBytes = 0
 	}
 
-	if currentBytes+bytes > q.EgressBytesPerMin {
+	if quotaLimitExceeded(currentBytes, bytes, q.EgressBytesPerMin) {
 		return &QuotaExceededError{
 			Namespace: ns,
 			Resource:  "egress_bytes_per_min",
@@ -160,6 +185,10 @@ func (e *Enforcer) CheckEgress(ctx context.Context, ns string, bytes int) error 
 
 // RecordJobStart updates consumption when a job starts.
 func (e *Enforcer) RecordJobStart(ctx context.Context, ns string, cpuRequest, memMBRequest int) error {
+	if err := validateJobResourceRequest(cpuRequest, memMBRequest); err != nil {
+		return err
+	}
+
 	delta := agent.QuotaConsumption{
 		Namespace:  ns,
 		ActiveJobs: 1,
@@ -171,6 +200,10 @@ func (e *Enforcer) RecordJobStart(ctx context.Context, ns string, cpuRequest, me
 
 // RecordJobEnd updates consumption when a job completes.
 func (e *Enforcer) RecordJobEnd(ctx context.Context, ns string, cpuRequest, memMBRequest int) error {
+	if err := validateJobResourceRequest(cpuRequest, memMBRequest); err != nil {
+		return err
+	}
+
 	delta := agent.QuotaConsumption{
 		Namespace:  ns,
 		ActiveJobs: -1,
@@ -182,7 +215,7 @@ func (e *Enforcer) RecordJobEnd(ctx context.Context, ns string, cpuRequest, memM
 
 // RecordLLMCall increments the LLM call counter.
 func (e *Enforcer) RecordLLMCall(ctx context.Context, ns string) error {
-	consumption, err := e.store.GetConsumption(ctx, ns)
+	consumption, err := e.getValidatedConsumption(ctx, ns)
 	if err != nil {
 		return fmt.Errorf("get consumption: %w", err)
 	}
@@ -197,6 +230,7 @@ func (e *Enforcer) RecordLLMCall(ctx context.Context, ns string) error {
 	// If window expired or first call, reset counter before incrementing
 	if consumption.LastResetTS == 0 || now-consumption.LastResetTS >= 60 {
 		delta.LLMCalls1Min = 1 - consumption.LLMCalls1Min
+		delta.EgressBytes1Min = -consumption.EgressBytes1Min
 	}
 
 	return e.store.UpdateConsumption(ctx, ns, delta)
@@ -204,7 +238,11 @@ func (e *Enforcer) RecordLLMCall(ctx context.Context, ns string) error {
 
 // RecordEgress increments the egress byte counter.
 func (e *Enforcer) RecordEgress(ctx context.Context, ns string, bytes int) error {
-	consumption, err := e.store.GetConsumption(ctx, ns)
+	if err := validateNonNegativeQuotaRequest("egress bytes", bytes); err != nil {
+		return err
+	}
+
+	consumption, err := e.getValidatedConsumption(ctx, ns)
 	if err != nil {
 		return fmt.Errorf("get consumption: %w", err)
 	}
@@ -219,9 +257,37 @@ func (e *Enforcer) RecordEgress(ctx context.Context, ns string, bytes int) error
 	// If window expired or first call, reset counter before incrementing
 	if consumption.LastResetTS == 0 || now-consumption.LastResetTS >= 60 {
 		delta.EgressBytes1Min = bytes - consumption.EgressBytes1Min
+		delta.LLMCalls1Min = -consumption.LLMCalls1Min
 	}
 
 	return e.store.UpdateConsumption(ctx, ns, delta)
+}
+
+func validateJobResourceRequest(cpuRequest, memMBRequest int) error {
+	if err := validateNonNegativeQuotaRequest("cpu", cpuRequest); err != nil {
+		return err
+	}
+	return validateNonNegativeQuotaRequest("memory_mb", memMBRequest)
+}
+
+func validateNonNegativeQuotaRequest(resource string, value int) error {
+	if value < 0 {
+		return fmt.Errorf("%s request must be non-negative", resource)
+	}
+	return nil
+}
+
+func quotaLimitExceeded(current, requested, limit int) bool {
+	if limit <= 0 {
+		return false
+	}
+	if current < 0 {
+		return true
+	}
+	if current > limit {
+		return true
+	}
+	return requested > limit-current
 }
 
 // QuotaExceededError is returned when a quota limit is exceeded.
@@ -240,6 +306,6 @@ func (e *QuotaExceededError) Error() string {
 
 // IsQuotaExceeded checks if an error is a QuotaExceededError.
 func IsQuotaExceeded(err error) bool {
-	_, ok := err.(*QuotaExceededError)
-	return ok
+	var exceeded *QuotaExceededError
+	return errors.As(err, &exceeded)
 }

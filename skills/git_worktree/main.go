@@ -155,12 +155,18 @@ func addWorktree(ctx context.Context, rc *skillmain.RunContext, gitPath, repoPat
 	args := []string{"-C", repoPath, "worktree", "add"}
 
 	if in.NewBranch && in.Branch != "" {
+		if err := validateBranchArg(in.Branch); err != nil {
+			return nil, err
+		}
 		args = append(args, "-b", in.Branch)
 	}
 
 	args = append(args, targetPath)
 
 	if !in.NewBranch && in.Branch != "" {
+		if err := validateBranchArg(in.Branch); err != nil {
+			return nil, err
+		}
 		args = append(args, in.Branch)
 	}
 
@@ -175,6 +181,19 @@ func addWorktree(ctx context.Context, rc *skillmain.RunContext, gitPath, repoPat
 		"branch":    in.Branch,
 		"message":   fmt.Sprintf("Worktree added at %s", targetPath),
 	}, nil
+}
+
+func validateBranchArg(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return skillerr.Arg("branch must not be blank")
+	}
+	if strings.HasPrefix(value, "-") {
+		return skillerr.Arg("branch must not be a git option")
+	}
+	if strings.ContainsAny(value, "\x00\n\r") {
+		return skillerr.Arg("branch contains invalid control characters")
+	}
+	return nil
 }
 
 // removeWorktree removes an existing git worktree with optional force flag.

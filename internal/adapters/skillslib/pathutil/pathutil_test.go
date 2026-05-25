@@ -1,9 +1,12 @@
 package pathutil
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"path/filepath"
 	"testing"
+	"testing/quick"
 )
 
 func TestResolveSearchPath(t *testing.T) {
@@ -33,6 +36,17 @@ func TestResolveSearchPath(t *testing.T) {
 			candidate: "subdir",
 			checkResult: func(t *testing.T, ws, path string) {
 				expected := filepath.Join(tmpDir, "subdir")
+				if path != expected {
+					t.Errorf("expected %q, got %q", expected, path)
+				}
+			},
+		},
+		{
+			name:      "dot-dot-prefixed child under workspace",
+			workspace: tmpDir,
+			candidate: filepath.Join("..cache", "file.go"),
+			checkResult: func(t *testing.T, ws, path string) {
+				expected := filepath.Join(tmpDir, "..cache", "file.go")
 				if path != expected {
 					t.Errorf("expected %q, got %q", expected, path)
 				}
@@ -100,6 +114,12 @@ func TestRelTo(t *testing.T) {
 			want:   "src/main.go",
 		},
 		{
+			name:   "dot-dot-prefixed child",
+			base:   "/home/user/project",
+			target: "/home/user/project/..cache/file.go",
+			want:   "..cache/file.go",
+		},
+		{
 			name:   "empty base uses current dir",
 			base:   "",
 			target: "file.go",
@@ -115,6 +135,42 @@ func TestRelTo(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRelToPropertyKeepsDotDotPrefixedChildrenRelative(t *testing.T) {
+	t.Parallel()
+
+	base := filepath.Join(t.TempDir(), "workspace")
+	cfg := &quick.Config{MaxCount: 250}
+	err := quick.Check(func(seed string) bool {
+		name := dotDotPathSegment(seed)
+		target := filepath.Join(base, name, "file.go")
+		return RelTo(base, target) == filepath.ToSlash(filepath.Join(name, "file.go"))
+	}, cfg)
+	if err != nil {
+		t.Fatalf("RelTo dot-dot child property failed: %v", err)
+	}
+}
+
+func TestResolveSearchPathPropertyRejectsSiblingPrefixes(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	workspace := filepath.Join(parent, "workspace")
+	cfg := &quick.Config{MaxCount: 250}
+	err := quick.Check(func(seed string) bool {
+		sibling := filepath.Join(parent, "workspace-"+dotDotPathSegment(seed), "file.go")
+		_, _, err := ResolveSearchPath(workspace, sibling)
+		return errors.Is(err, ErrOutsideWorkspace)
+	}, cfg)
+	if err != nil {
+		t.Fatalf("ResolveSearchPath sibling property failed: %v", err)
+	}
+}
+
+func dotDotPathSegment(seed string) string {
+	sum := sha256.Sum256([]byte(seed))
+	return ".." + hex.EncodeToString(sum[:4])
 }
 
 func TestIsHidden(t *testing.T) {

@@ -67,8 +67,8 @@ func TestIntegrationRelayRoomMessageTmuxRealTmux(t *testing.T) {
 	room := agent.RoomSummary{
 		ID: "alpha",
 		Members: []agent.RoomMember{
-			{ActorID: "agent-a", Backend: "tmux", PaneID: paneA},
-			{ActorID: "agent-b", Backend: "tmux", PaneID: paneB},
+			relayTmuxMember("agent-a", session, paneA),
+			relayTmuxMember("agent-b", session, paneB),
 		},
 	}
 	msg := agent.BoardMessage{
@@ -165,8 +165,8 @@ func TestIntegrationRelayRoomMessageTmuxConsumesInputRealTmux(t *testing.T) {
 			room := agent.RoomSummary{
 				ID: "alpha",
 				Members: []agent.RoomMember{
-					{ActorID: "agent-a", Backend: "tmux", PaneID: paneSender},
-					{ActorID: tc.targetID, Backend: "tmux", PaneID: paneReceiver},
+					relayTmuxMember("agent-a", session, paneSender),
+					relayTmuxMember(tc.targetID, session, paneReceiver),
 				},
 			}
 			msg := agent.BoardMessage{
@@ -290,8 +290,8 @@ while True:
 	room := agent.RoomSummary{
 		ID: "alpha",
 		Members: []agent.RoomMember{
-			{ActorID: "agent-a", Backend: "tmux", PaneID: paneSender},
-			{ActorID: "gemini-a", Backend: "tmux", PaneID: paneReceiver},
+			relayTmuxMember("agent-a", session, paneSender),
+			relayTmuxMember("gemini-a", session, paneReceiver),
 		},
 	}
 	msg := agent.BoardMessage{

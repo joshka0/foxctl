@@ -14,9 +14,11 @@ import (
 )
 
 type goListPackage struct {
-	ImportPath string
-	Dir        string
-	Deps       []string
+	ImportPath   string
+	Dir          string
+	Deps         []string
+	TestImports  []string
+	XTestImports []string
 }
 
 type impactReport struct {
@@ -251,6 +253,14 @@ func mergePackages(groups ...[]goListPackage) []goListPackage {
 			deps = append(deps, pkg.Deps...)
 			sort.Strings(deps)
 			existing.Deps = dedupeStrings(deps)
+			testImports := append(existing.TestImports[:0:0], existing.TestImports...)
+			testImports = append(testImports, pkg.TestImports...)
+			sort.Strings(testImports)
+			existing.TestImports = dedupeStrings(testImports)
+			xTestImports := append(existing.XTestImports[:0:0], existing.XTestImports...)
+			xTestImports = append(xTestImports, pkg.XTestImports...)
+			sort.Strings(xTestImports)
+			existing.XTestImports = dedupeStrings(xTestImports)
 			index[key] = existing
 		}
 	}
@@ -344,12 +354,20 @@ func collectPackageImpactReasons(pkg goListPackage, changedPkgReasons map[string
 	for _, reason := range changedPkgReasons[pkg.ImportPath] {
 		reasonSet[reason] = struct{}{}
 	}
-	for _, dep := range pkg.Deps {
+	for _, dep := range packageTestDependencyImports(pkg) {
 		for _, reason := range changedPkgReasons[dep] {
 			reasonSet[reason] = struct{}{}
 		}
 	}
 	return sortedReasonSet(reasonSet)
+}
+
+func packageTestDependencyImports(pkg goListPackage) []string {
+	deps := append(pkg.Deps[:0:0], pkg.Deps...)
+	deps = append(deps, pkg.TestImports...)
+	deps = append(deps, pkg.XTestImports...)
+	sort.Strings(deps)
+	return dedupeStrings(deps)
 }
 
 func buildImpactedSkills(skillPkgs []goListPackage, directSkillReasons, changedPkgReasons map[string][]string, globalTriggers []string, globalAll bool) []skillImpact {

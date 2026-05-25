@@ -2,7 +2,9 @@ package tools
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
+	"testing/quick"
 )
 
 func TestCompileSchema_InvalidRequiredEntry(t *testing.T) {
@@ -54,6 +56,95 @@ func TestCompileSchema_RejectsNonObjectSchema(t *testing.T) {
 	}
 }
 
+func TestCompileSchema_RejectsRequiredFieldWithoutProperty(t *testing.T) {
+	t.Parallel()
+
+	_, err := compileSchema(json.RawMessage(`{
+		"type":"object",
+		"required":["path"],
+		"properties":{"limit":{"type":"integer"}}
+	}`))
+	if err == nil {
+		t.Fatal("compileSchema() expected error for required field without declared property")
+	}
+}
+
+func TestCompileSchema_RejectsDuplicateRequiredEntryAfterTrim(t *testing.T) {
+	t.Parallel()
+
+	_, err := compileSchema(json.RawMessage(`{
+		"type":"object",
+		"required":["path"," path "],
+		"properties":{"path":{"type":"string"}}
+	}`))
+	if err == nil {
+		t.Fatal("compileSchema() expected error for duplicate required entry")
+	}
+}
+
+func TestCompileSchema_RejectsUnknownPropertyType(t *testing.T) {
+	t.Parallel()
+
+	_, err := compileSchema(json.RawMessage(`{
+		"type":"object",
+		"properties":{"id":{"type":"uuid"}}
+	}`))
+	if err == nil {
+		t.Fatal("compileSchema() expected error for unknown property type")
+	}
+}
+
+func TestCompileSchema_RejectsPropertyNameCollisionAfterTrim(t *testing.T) {
+	t.Parallel()
+
+	_, err := compileSchema(json.RawMessage(`{
+		"type":"object",
+		"properties":{
+			"path":{"type":"string"},
+			" path ":{"type":"integer"}
+		}
+	}`))
+	if err == nil {
+		t.Fatal("compileSchema() expected error for property name collision")
+	}
+}
+
+func TestCompileSchemaPropertyKnownTypesValidateMatchingValues(t *testing.T) {
+	t.Parallel()
+
+	property := func(typeSeed uint8, required bool) bool {
+		fixture := schemaTypeFixture(typeSeed)
+		requiredJSON := "[]"
+		if required {
+			requiredJSON = `["value"]`
+		}
+		raw := json.RawMessage(fmt.Sprintf(`{
+			"type":"object",
+			"required":%s,
+			"properties":{"value":{"type":%q}}
+		}`, requiredJSON, fixture.typ))
+
+		schema, err := compileSchema(raw)
+		if err != nil {
+			t.Logf("compileSchema(%s) error=%v", raw, err)
+			return false
+		}
+		if err := validateArgs(schema, json.RawMessage(`{"value":`+fixture.validJSON+`}`)); err != nil {
+			t.Logf("validateArgs valid %s for %s error=%v", fixture.validJSON, fixture.typ, err)
+			return false
+		}
+		if err := validateArgs(schema, json.RawMessage(`{"value":null}`)); err == nil {
+			t.Logf("validateArgs null for %s unexpectedly passed", fixture.typ)
+			return false
+		}
+		return true
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSchemaObjectBuildsTypedSchema(t *testing.T) {
 	t.Parallel()
 
@@ -83,17 +174,12 @@ func TestSchemaObjectBuildsTypedSchema(t *testing.T) {
 func TestValidateArgs_UnknownTypeRejected(t *testing.T) {
 	t.Parallel()
 
-	schema, err := compileSchema(json.RawMessage(`{
+	_, err := compileSchema(json.RawMessage(`{
 		"type":"object",
 		"properties":{"id":{"type":"uuid"}}
 	}`))
-	if err != nil {
-		t.Fatalf("compileSchema() error = %v", err)
-	}
-
-	err = validateArgs(schema, json.RawMessage(`{"id":"abc-123"}`))
 	if err == nil {
-		t.Fatal("validateArgs() expected error for unknown schema type")
+		t.Fatal("compileSchema() expected error for unknown schema type")
 	}
 }
 
@@ -144,4 +230,21 @@ func TestValidateArgs_NullDoesNotMatchType(t *testing.T) {
 	if err == nil {
 		t.Fatal("validateArgs() expected null type mismatch")
 	}
+}
+
+type schemaFixture struct {
+	typ       string
+	validJSON string
+}
+
+func schemaTypeFixture(seed uint8) schemaFixture {
+	fixtures := []schemaFixture{
+		{typ: string(JSONSchemaTypeString), validJSON: `"fox"`},
+		{typ: string(JSONSchemaTypeBoolean), validJSON: `true`},
+		{typ: string(JSONSchemaTypeNumber), validJSON: `2.5`},
+		{typ: string(JSONSchemaTypeInteger), validJSON: `2`},
+		{typ: string(JSONSchemaTypeObject), validJSON: `{"nested":true}`},
+		{typ: string(JSONSchemaTypeArray), validJSON: `["a","b"]`},
+	}
+	return fixtures[int(seed)%len(fixtures)]
 }

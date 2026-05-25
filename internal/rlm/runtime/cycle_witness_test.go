@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"testing/quick"
 )
 
 func TestCheckCycleWitnessFindsBoundedCandidate(t *testing.T) {
@@ -59,6 +60,170 @@ func TestCheckCycleWitnessRejectsExcessiveDomain(t *testing.T) {
 	}
 }
 
+func TestParseCycleWitnessRejectsNonCanonicalModelOutput(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		text string
+		want string
+	}{
+		{
+			name: "markdown_fence",
+			text: "```json\n{\"version\":1}\n```",
+			want: "must be raw JSON",
+		},
+		{
+			name: "unknown_field",
+			text: `{"version":1,"checker_kind":"bounded_search","variables":[],"constraints":[],"extra":true}`,
+			want: "unknown field",
+		},
+		{
+			name: "multiple_json_values",
+			text: `{"version":1,"checker_kind":"bounded_search","variables":[],"constraints":[]} {}`,
+			want: "multiple JSON values",
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := ParseCycleWitnessText(tc.text)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("ParseCycleWitnessText() error=%v want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidateCycleWitnessRejectsInvalidBoundedSearchSpecs(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		mutate func(*CycleWitness)
+		want   string
+	}{
+		{
+			name: "duplicate_variable",
+			mutate: func(w *CycleWitness) {
+				w.Variables = append(w.Variables, CycleWitnessVariable{Name: "x", Min: 0, Max: 1})
+			},
+			want: `duplicate variable "x"`,
+		},
+		{
+			name: "min_exceeds_max",
+			mutate: func(w *CycleWitness) {
+				w.Variables[0].Min = 2
+				w.Variables[0].Max = 1
+			},
+			want: "min 2 exceeds max 1",
+		},
+		{
+			name: "unsupported_constraint_op",
+			mutate: func(w *CycleWitness) {
+				w.Constraints[0].Op = "approx"
+			},
+			want: `unsupported op "approx"`,
+		},
+		{
+			name: "unknown_known_value",
+			mutate: func(w *CycleWitness) {
+				w.Constraints[0].Right = CycleExpr{Known: "missing"}
+			},
+			want: `unknown known value "missing"`,
+		},
+		{
+			name: "expression_multiple_kinds",
+			mutate: func(w *CycleWitness) {
+				one := 1.0
+				w.Constraints[0].Left = CycleExpr{Const: &one, Var: "x"}
+			},
+			want: "expression must set exactly one",
+		},
+		{
+			name: "op_without_args",
+			mutate: func(w *CycleWitness) {
+				w.Constraints[0].Left = CycleExpr{Op: "add"}
+			},
+			want: `op "add" requires args`,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			witness := minimalCycleWitness()
+			tc.mutate(&witness)
+			err := ValidateCycleWitness(witness)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("ValidateCycleWitness() error=%v want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidateCycleWitnessRejectsGeneratedUnknownVariables(t *testing.T) {
+	t.Parallel()
+
+	unknownVarsFailClosed := func(raw string) bool {
+		witness := minimalCycleWitness()
+		witness.Constraints[0].Left = CycleExpr{Var: "unknown:" + raw}
+		err := ValidateCycleWitness(witness)
+		return err != nil && strings.Contains(err.Error(), "unknown variable")
+	}
+	if err := quick.Check(unknownVarsFailClosed, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatalf("generated unknown variable was accepted: %v", err)
+	}
+}
+
+func TestCheckCycleWitnessEmitsDeterministicCandidatesAndStats(t *testing.T) {
+	t.Parallel()
+
+	witness := CycleWitness{
+		Version:     cycleWitnessVersionV1,
+		CheckerKind: cycleWitnessCheckerBounded,
+		Variables: []CycleWitnessVariable{
+			{Name: "x", Type: "int", Min: 0, Max: 2},
+			{Name: "y", Type: "int", Min: 0, Max: 3},
+		},
+		Constraints: []CycleWitnessConstraint{{
+			Name: "sum",
+			Op:   "eq",
+			Left: CycleExpr{Op: "add", Args: []CycleExpr{
+				{Var: "x"},
+				{Var: "y"},
+			}},
+			Right: CycleExpr{Const: floatPtr(3)},
+		}},
+		Claims: map[string]CycleExpr{
+			"answer": {Op: "add", Args: []CycleExpr{{Var: "x"}, {Var: "y"}}},
+		},
+	}
+	result, err := CheckCycleWitness(witness)
+	if err != nil {
+		t.Fatalf("CheckCycleWitness() error = %v", err)
+	}
+	if !result.Pass {
+		t.Fatalf("pass=false result=%+v", result)
+	}
+	if got, want := result.Candidates["x"], int64(0); got != want {
+		t.Fatalf("candidate x=%v want %v", got, want)
+	}
+	if got, want := result.Candidates["y"], int64(3); got != want {
+		t.Fatalf("candidate y=%v want %v", got, want)
+	}
+	if got, want := result.Candidates["answer"], int64(3); got != want {
+		t.Fatalf("candidate answer=%v want %v", got, want)
+	}
+	if got, want := result.Stats["attempts"], 4; got != want {
+		t.Fatalf("attempts=%v want %v", got, want)
+	}
+}
+
 func TestCheckCycleWitnessRejectsUnsupportedFunction(t *testing.T) {
 	t.Parallel()
 
@@ -86,4 +251,25 @@ func TestCheckCycleWitnessReturnsPassFalseWhenNoCandidate(t *testing.T) {
 	if len(result.Checks) == 0 || result.Checks[0].OK {
 		t.Fatalf("checks=%+v want failing check", result.Checks)
 	}
+}
+
+func minimalCycleWitness() CycleWitness {
+	return CycleWitness{
+		Version:     cycleWitnessVersionV1,
+		CheckerKind: cycleWitnessCheckerBounded,
+		Variables: []CycleWitnessVariable{
+			{Name: "x", Type: "int", Min: 0, Max: 2},
+		},
+		KnownValues: map[string]float64{"target": 1},
+		Constraints: []CycleWitnessConstraint{{
+			Name:  "target",
+			Op:    "eq",
+			Left:  CycleExpr{Var: "x"},
+			Right: CycleExpr{Known: "target"},
+		}},
+	}
+}
+
+func floatPtr(value float64) *float64 {
+	return &value
 }

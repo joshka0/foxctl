@@ -1,7 +1,9 @@
 package agentmanager
 
 import (
+	"fmt"
 	"testing"
+	"testing/quick"
 
 	"github.com/joshka0/foxctl/internal/domain/agent"
 )
@@ -48,6 +50,92 @@ func TestPolicyNarrowing(t *testing.T) {
 			wantError: false,
 		},
 		{
+			name: "valid - child timeout equals parent",
+			parent: agent.Policy{
+				CPU:      4,
+				MemoryMB: 2048,
+				Timeout:  "5m",
+			},
+			child: agent.Policy{
+				CPU:      2,
+				MemoryMB: 1024,
+				Timeout:  "5m",
+			},
+			wantError: false,
+		},
+		{
+			name: "valid - child timeout narrower than parent",
+			parent: agent.Policy{
+				CPU:      4,
+				MemoryMB: 2048,
+				Timeout:  "5m",
+			},
+			child: agent.Policy{
+				CPU:      2,
+				MemoryMB: 1024,
+				Timeout:  "30s",
+			},
+			wantError: false,
+		},
+		{
+			name: "valid - child adds caps under uncapped parent",
+			child: agent.Policy{
+				CPU:         2,
+				MemoryMB:    1024,
+				MaxOutputKB: 64,
+			},
+			wantError: false,
+		},
+		{
+			name: "valid - child max output equals parent",
+			parent: agent.Policy{
+				CPU:         4,
+				MemoryMB:    2048,
+				MaxOutputKB: 128,
+			},
+			child: agent.Policy{
+				CPU:         2,
+				MemoryMB:    1024,
+				MaxOutputKB: 128,
+			},
+			wantError: false,
+		},
+		{
+			name: "invalid - parent CPU negative",
+			parent: agent.Policy{
+				CPU:      -1,
+				MemoryMB: 2048,
+			},
+			child: agent.Policy{
+				CPU:      1,
+				MemoryMB: 1024,
+			},
+			wantError: true,
+		},
+		{
+			name: "invalid - child CPU negative",
+			parent: agent.Policy{
+				CPU:      2,
+				MemoryMB: 2048,
+			},
+			child: agent.Policy{
+				CPU:      -1,
+				MemoryMB: 1024,
+			},
+			wantError: true,
+		},
+		{
+			name: "invalid - child clears parent CPU cap",
+			parent: agent.Policy{
+				CPU:      2,
+				MemoryMB: 2048,
+			},
+			child: agent.Policy{
+				MemoryMB: 1024,
+			},
+			wantError: true,
+		},
+		{
 			name: "invalid - child CPU exceeds parent",
 			parent: agent.Policy{
 				CPU:      2,
@@ -58,6 +146,41 @@ func TestPolicyNarrowing(t *testing.T) {
 				CPU:      4,
 				MemoryMB: 1024,
 				Network:  "none",
+			},
+			wantError: true,
+		},
+		{
+			name: "invalid - parent memory negative",
+			parent: agent.Policy{
+				CPU:      4,
+				MemoryMB: -1,
+			},
+			child: agent.Policy{
+				CPU:      2,
+				MemoryMB: 1024,
+			},
+			wantError: true,
+		},
+		{
+			name: "invalid - child memory negative",
+			parent: agent.Policy{
+				CPU:      4,
+				MemoryMB: 2048,
+			},
+			child: agent.Policy{
+				CPU:      2,
+				MemoryMB: -1,
+			},
+			wantError: true,
+		},
+		{
+			name: "invalid - child clears parent memory cap",
+			parent: agent.Policy{
+				CPU:      4,
+				MemoryMB: 2048,
+			},
+			child: agent.Policy{
+				CPU: 2,
 			},
 			wantError: true,
 		},
@@ -76,6 +199,115 @@ func TestPolicyNarrowing(t *testing.T) {
 			wantError: true,
 		},
 		{
+			name: "invalid - parent max output negative",
+			parent: agent.Policy{
+				CPU:         4,
+				MemoryMB:    2048,
+				MaxOutputKB: -1,
+			},
+			child: agent.Policy{
+				CPU:         2,
+				MemoryMB:    1024,
+				MaxOutputKB: 64,
+			},
+			wantError: true,
+		},
+		{
+			name: "invalid - child max output negative",
+			parent: agent.Policy{
+				CPU:         4,
+				MemoryMB:    2048,
+				MaxOutputKB: 128,
+			},
+			child: agent.Policy{
+				CPU:         2,
+				MemoryMB:    1024,
+				MaxOutputKB: -1,
+			},
+			wantError: true,
+		},
+		{
+			name: "invalid - child clears parent max output cap",
+			parent: agent.Policy{
+				CPU:         4,
+				MemoryMB:    2048,
+				MaxOutputKB: 128,
+			},
+			child: agent.Policy{
+				CPU:      2,
+				MemoryMB: 1024,
+			},
+			wantError: true,
+		},
+		{
+			name: "invalid - child max output exceeds parent",
+			parent: agent.Policy{
+				CPU:         4,
+				MemoryMB:    2048,
+				MaxOutputKB: 128,
+			},
+			child: agent.Policy{
+				CPU:         2,
+				MemoryMB:    1024,
+				MaxOutputKB: 256,
+			},
+			wantError: true,
+		},
+		{
+			name: "invalid - child timeout exceeds parent",
+			parent: agent.Policy{
+				CPU:      4,
+				MemoryMB: 2048,
+				Timeout:  "30s",
+			},
+			child: agent.Policy{
+				CPU:      2,
+				MemoryMB: 1024,
+				Timeout:  "5m",
+			},
+			wantError: true,
+		},
+		{
+			name: "invalid - child clears parent timeout",
+			parent: agent.Policy{
+				CPU:      4,
+				MemoryMB: 2048,
+				Timeout:  "30s",
+			},
+			child: agent.Policy{
+				CPU:      2,
+				MemoryMB: 1024,
+			},
+			wantError: true,
+		},
+		{
+			name: "invalid - child timeout malformed",
+			parent: agent.Policy{
+				CPU:      4,
+				MemoryMB: 2048,
+			},
+			child: agent.Policy{
+				CPU:      2,
+				MemoryMB: 1024,
+				Timeout:  "tomorrow",
+			},
+			wantError: true,
+		},
+		{
+			name: "invalid - parent timeout malformed",
+			parent: agent.Policy{
+				CPU:      4,
+				MemoryMB: 2048,
+				Timeout:  "later",
+			},
+			child: agent.Policy{
+				CPU:      2,
+				MemoryMB: 1024,
+				Timeout:  "1s",
+			},
+			wantError: true,
+		},
+		{
 			name: "invalid - child network less restrictive",
 			parent: agent.Policy{
 				CPU:      4,
@@ -86,6 +318,34 @@ func TestPolicyNarrowing(t *testing.T) {
 				CPU:      2,
 				MemoryMB: 1024,
 				Network:  "egress",
+			},
+			wantError: true,
+		},
+		{
+			name: "invalid - child network unknown",
+			parent: agent.Policy{
+				CPU:      4,
+				MemoryMB: 2048,
+				Network:  "none",
+			},
+			child: agent.Policy{
+				CPU:      2,
+				MemoryMB: 1024,
+				Network:  "direct",
+			},
+			wantError: true,
+		},
+		{
+			name: "invalid - parent network unknown",
+			parent: agent.Policy{
+				CPU:      4,
+				MemoryMB: 2048,
+				Network:  "direct",
+			},
+			child: agent.Policy{
+				CPU:      2,
+				MemoryMB: 1024,
+				Network:  "none",
 			},
 			wantError: true,
 		},
@@ -102,6 +362,123 @@ func TestPolicyNarrowing(t *testing.T) {
 				MemoryMB:    1024,
 				Network:     "egress",
 				EgressAllow: []string{"api.github.com:443", "*.amazonaws.com:443"},
+			},
+			wantError: true,
+		},
+		{
+			name: "valid - child filesystem exact subset",
+			parent: agent.Policy{
+				CPU:      4,
+				MemoryMB: 2048,
+				Filesystem: []agent.FilesystemPolicy{
+					{Type: "workdir", From: "/repo", To: "/workspace"},
+					{Type: "ro", From: "/docs", To: "/docs"},
+				},
+			},
+			child: agent.Policy{
+				CPU:      2,
+				MemoryMB: 1024,
+				Filesystem: []agent.FilesystemPolicy{
+					{Type: "workdir", From: "/repo", To: "/workspace"},
+					{Type: "ro", From: "/docs", To: "/docs"},
+				},
+			},
+			wantError: false,
+		},
+		{
+			name: "valid - child filesystem can narrow workdir to read-only",
+			parent: agent.Policy{
+				CPU:        4,
+				MemoryMB:   2048,
+				Filesystem: []agent.FilesystemPolicy{{Type: "workdir", From: "/repo", To: "/workspace"}},
+			},
+			child: agent.Policy{
+				CPU:        2,
+				MemoryMB:   1024,
+				Filesystem: []agent.FilesystemPolicy{{Type: "ro", From: "/repo", To: "/workspace"}},
+			},
+			wantError: false,
+		},
+		{
+			name: "invalid - child filesystem changes source behind same target",
+			parent: agent.Policy{
+				CPU:        4,
+				MemoryMB:   2048,
+				Filesystem: []agent.FilesystemPolicy{{Type: "workdir", From: "/repo", To: "/workspace"}},
+			},
+			child: agent.Policy{
+				CPU:        2,
+				MemoryMB:   1024,
+				Filesystem: []agent.FilesystemPolicy{{Type: "workdir", From: "/etc", To: "/workspace"}},
+			},
+			wantError: true,
+		},
+		{
+			name: "invalid - child filesystem changes target for same source",
+			parent: agent.Policy{
+				CPU:        4,
+				MemoryMB:   2048,
+				Filesystem: []agent.FilesystemPolicy{{Type: "workdir", From: "/repo", To: "/workspace"}},
+			},
+			child: agent.Policy{
+				CPU:        2,
+				MemoryMB:   1024,
+				Filesystem: []agent.FilesystemPolicy{{Type: "workdir", From: "/repo", To: "/other"}},
+			},
+			wantError: true,
+		},
+		{
+			name: "invalid - child filesystem broadens read-only parent",
+			parent: agent.Policy{
+				CPU:        4,
+				MemoryMB:   2048,
+				Filesystem: []agent.FilesystemPolicy{{Type: "ro", From: "/repo", To: "/workspace"}},
+			},
+			child: agent.Policy{
+				CPU:        2,
+				MemoryMB:   1024,
+				Filesystem: []agent.FilesystemPolicy{{Type: "workdir", From: "/repo", To: "/workspace"}},
+			},
+			wantError: true,
+		},
+		{
+			name: "invalid - child filesystem type unknown",
+			parent: agent.Policy{
+				CPU:        4,
+				MemoryMB:   2048,
+				Filesystem: []agent.FilesystemPolicy{{Type: "workdir", From: "/repo", To: "/workspace"}},
+			},
+			child: agent.Policy{
+				CPU:        2,
+				MemoryMB:   1024,
+				Filesystem: []agent.FilesystemPolicy{{Type: "rw", From: "/repo", To: "/workspace"}},
+			},
+			wantError: true,
+		},
+		{
+			name: "invalid - parent filesystem missing target",
+			parent: agent.Policy{
+				CPU:        4,
+				MemoryMB:   2048,
+				Filesystem: []agent.FilesystemPolicy{{Type: "workdir", From: "/repo"}},
+			},
+			child: agent.Policy{
+				CPU:      2,
+				MemoryMB: 1024,
+			},
+			wantError: true,
+		},
+		{
+			name: "invalid - child filesystem missing target",
+			parent: agent.Policy{
+				CPU:        4,
+				MemoryMB:   2048,
+				Filesystem: []agent.FilesystemPolicy{{Type: "workdir", From: "/repo", To: "/workspace"}},
+			},
+			child: agent.Policy{
+				CPU:        2,
+				MemoryMB:   1024,
+				Filesystem: []agent.FilesystemPolicy{{Type: "workdir", From: "/repo"}},
 			},
 			wantError: true,
 		},
@@ -128,6 +505,295 @@ func TestPolicyNarrowing(t *testing.T) {
 				t.Errorf("validatePolicyNarrowing() error = %v, wantError %v", err, tt.wantError)
 			}
 		})
+	}
+}
+
+func TestPolicyNarrowingPropertyFilesystemMountIdentityNeverBroadens(t *testing.T) {
+	t.Parallel()
+
+	cfg := &quick.Config{MaxCount: 250}
+	err := quick.Check(func(raw uint8) bool {
+		parentFrom := fmt.Sprintf("/workspace/allowed-%d", raw%17)
+		parentTo := fmt.Sprintf("/mnt/work-%d", raw%13)
+		cases := []struct {
+			childFrom string
+			childTo   string
+			wantAllow bool
+		}{
+			{childFrom: parentFrom, childTo: parentTo, wantAllow: true},
+			{childFrom: parentFrom + "-sibling", childTo: parentTo, wantAllow: false},
+			{childFrom: "/outside/" + parentFrom[1:], childTo: parentTo, wantAllow: false},
+			{childFrom: parentFrom, childTo: parentTo + "-sibling", wantAllow: false},
+		}
+
+		for _, tc := range cases {
+			err := validatePolicyNarrowing(agent.Policy{
+				CPU:        4,
+				MemoryMB:   2048,
+				Filesystem: []agent.FilesystemPolicy{{Type: "workdir", From: parentFrom, To: parentTo}},
+			}, agent.Policy{
+				CPU:        2,
+				MemoryMB:   1024,
+				Filesystem: []agent.FilesystemPolicy{{Type: "workdir", From: tc.childFrom, To: tc.childTo}},
+			})
+			if (err == nil) != tc.wantAllow {
+				return false
+			}
+		}
+		return true
+	}, cfg)
+	if err != nil {
+		t.Fatalf("filesystem mount identity property failed: %v", err)
+	}
+}
+
+func TestPolicyNarrowingPropertyFilesystemModeNeverBroadens(t *testing.T) {
+	t.Parallel()
+
+	cfg := &quick.Config{MaxCount: 250}
+	err := quick.Check(func(parentAllowsWorkdir, childRequestsWorkdir bool) bool {
+		parentType := "ro"
+		if parentAllowsWorkdir {
+			parentType = "workdir"
+		}
+		childType := "ro"
+		if childRequestsWorkdir {
+			childType = "workdir"
+		}
+
+		err := validatePolicyNarrowing(agent.Policy{
+			CPU:        4,
+			MemoryMB:   2048,
+			Filesystem: []agent.FilesystemPolicy{{Type: parentType, From: "/repo", To: "/workspace"}},
+		}, agent.Policy{
+			CPU:        2,
+			MemoryMB:   1024,
+			Filesystem: []agent.FilesystemPolicy{{Type: childType, From: "/repo", To: "/workspace"}},
+		})
+		shouldAllow := !childRequestsWorkdir || parentAllowsWorkdir
+		return (err == nil) == shouldAllow
+	}, cfg)
+	if err != nil {
+		t.Fatalf("filesystem mode narrowing property failed: %v", err)
+	}
+}
+
+func TestPolicyNarrowingPropertyResourceLimitsNeverBroaden(t *testing.T) {
+	t.Parallel()
+
+	cfg := &quick.Config{MaxCount: 250}
+	err := quick.Check(func(parentRaw, childRaw uint8) bool {
+		parentCPU := int(parentRaw%32) + 1
+		childCPU := int(childRaw % 34)
+
+		err := validatePolicyNarrowing(agent.Policy{
+			CPU:         parentCPU,
+			MemoryMB:    2048,
+			MaxOutputKB: 128,
+		}, agent.Policy{
+			CPU:         childCPU,
+			MemoryMB:    1024,
+			MaxOutputKB: 64,
+		})
+		shouldAllow := childCPU > 0 && childCPU <= parentCPU
+		return (err == nil) == shouldAllow
+	}, cfg)
+	if err != nil {
+		t.Fatalf("CPU resource narrowing property failed: %v", err)
+	}
+
+	err = quick.Check(func(parentRaw, childRaw uint8) bool {
+		parentMemory := (int(parentRaw%64) + 1) * 128
+		childMemory := int(childRaw%66) * 128
+
+		err := validatePolicyNarrowing(agent.Policy{
+			CPU:         4,
+			MemoryMB:    parentMemory,
+			MaxOutputKB: 128,
+		}, agent.Policy{
+			CPU:         2,
+			MemoryMB:    childMemory,
+			MaxOutputKB: 64,
+		})
+		shouldAllow := childMemory > 0 && childMemory <= parentMemory
+		return (err == nil) == shouldAllow
+	}, cfg)
+	if err != nil {
+		t.Fatalf("memory resource narrowing property failed: %v", err)
+	}
+
+	err = quick.Check(func(parentRaw, childRaw uint8) bool {
+		parentOutputKB := int(parentRaw%128) + 1
+		childOutputKB := int(childRaw % 130)
+
+		err := validatePolicyNarrowing(agent.Policy{
+			CPU:         4,
+			MemoryMB:    2048,
+			MaxOutputKB: parentOutputKB,
+		}, agent.Policy{
+			CPU:         2,
+			MemoryMB:    1024,
+			MaxOutputKB: childOutputKB,
+		})
+		shouldAllow := childOutputKB > 0 && childOutputKB <= parentOutputKB
+		return (err == nil) == shouldAllow
+	}, cfg)
+	if err != nil {
+		t.Fatalf("max output resource narrowing property failed: %v", err)
+	}
+}
+
+func TestPolicyNarrowingPropertyRejectsNegativeResourceLimits(t *testing.T) {
+	t.Parallel()
+
+	cfg := &quick.Config{MaxCount: 250}
+	err := quick.Check(func(raw uint8) bool {
+		negative := -int(raw%64) - 1
+		tests := []struct {
+			parent agent.Policy
+			child  agent.Policy
+		}{
+			{
+				parent: agent.Policy{CPU: negative, MemoryMB: 2048, MaxOutputKB: 128},
+				child:  agent.Policy{CPU: 2, MemoryMB: 1024, MaxOutputKB: 64},
+			},
+			{
+				parent: agent.Policy{CPU: 4, MemoryMB: 2048, MaxOutputKB: 128},
+				child:  agent.Policy{CPU: negative, MemoryMB: 1024, MaxOutputKB: 64},
+			},
+			{
+				parent: agent.Policy{CPU: 4, MemoryMB: negative, MaxOutputKB: 128},
+				child:  agent.Policy{CPU: 2, MemoryMB: 1024, MaxOutputKB: 64},
+			},
+			{
+				parent: agent.Policy{CPU: 4, MemoryMB: 2048, MaxOutputKB: 128},
+				child:  agent.Policy{CPU: 2, MemoryMB: negative, MaxOutputKB: 64},
+			},
+			{
+				parent: agent.Policy{CPU: 4, MemoryMB: 2048, MaxOutputKB: negative},
+				child:  agent.Policy{CPU: 2, MemoryMB: 1024, MaxOutputKB: 64},
+			},
+			{
+				parent: agent.Policy{CPU: 4, MemoryMB: 2048, MaxOutputKB: 128},
+				child:  agent.Policy{CPU: 2, MemoryMB: 1024, MaxOutputKB: negative},
+			},
+		}
+
+		for _, tt := range tests {
+			if err := validatePolicyNarrowing(tt.parent, tt.child); err == nil {
+				return false
+			}
+		}
+		return true
+	}, cfg)
+	if err != nil {
+		t.Fatalf("negative resource limit property failed: %v", err)
+	}
+}
+
+func TestPolicyNarrowingPropertyTimeoutNeverBroadens(t *testing.T) {
+	t.Parallel()
+
+	cfg := &quick.Config{MaxCount: 250}
+	err := quick.Check(func(parentRaw, childRaw uint8) bool {
+		parentSeconds := int(parentRaw%120) + 1
+		childSeconds := int(childRaw%120) + 1
+
+		err := validatePolicyNarrowing(agent.Policy{
+			CPU:      4,
+			MemoryMB: 2048,
+			Timeout:  fmt.Sprintf("%ds", parentSeconds),
+		}, agent.Policy{
+			CPU:      2,
+			MemoryMB: 1024,
+			Timeout:  fmt.Sprintf("%ds", childSeconds),
+		})
+		shouldAllow := childSeconds <= parentSeconds
+		return (err == nil) == shouldAllow
+	}, cfg)
+	if err != nil {
+		t.Fatalf("timeout narrowing property failed: %v", err)
+	}
+}
+
+func TestPolicyNarrowingPropertyRejectsMalformedTimeouts(t *testing.T) {
+	t.Parallel()
+
+	cfg := &quick.Config{MaxCount: 250}
+	err := quick.Check(func(raw string) bool {
+		timeout := raw
+		if _, _, err := parsePolicyTimeout(timeout); err == nil {
+			timeout = "invalid:" + raw
+		}
+		err := validatePolicyNarrowing(agent.Policy{
+			CPU:      4,
+			MemoryMB: 2048,
+		}, agent.Policy{
+			CPU:      2,
+			MemoryMB: 1024,
+			Timeout:  timeout,
+		})
+		return err != nil
+	}, cfg)
+	if err != nil {
+		t.Fatalf("malformed timeout property failed: %v", err)
+	}
+}
+
+func TestPolicyNarrowingPropertyNetworkNeverBroadens(t *testing.T) {
+	t.Parallel()
+
+	cfg := &quick.Config{MaxCount: 250}
+	err := quick.Check(func(parentAllowsEgress, childRequestsEgress bool) bool {
+		parentNetwork := "none"
+		if parentAllowsEgress {
+			parentNetwork = "egress"
+		}
+		childNetwork := "none"
+		if childRequestsEgress {
+			childNetwork = "egress"
+		}
+
+		err := validatePolicyNarrowing(agent.Policy{
+			CPU:      4,
+			MemoryMB: 2048,
+			Network:  parentNetwork,
+		}, agent.Policy{
+			CPU:      2,
+			MemoryMB: 1024,
+			Network:  childNetwork,
+		})
+		shouldAllow := !childRequestsEgress || parentAllowsEgress
+		return (err == nil) == shouldAllow
+	}, cfg)
+	if err != nil {
+		t.Fatalf("network narrowing property failed: %v", err)
+	}
+}
+
+func TestPolicyNarrowingPropertyRejectsUnknownNetworkValues(t *testing.T) {
+	t.Parallel()
+
+	cfg := &quick.Config{MaxCount: 250}
+	err := quick.Check(func(raw string) bool {
+		network := raw
+		switch normalizeNetworkPolicy(network) {
+		case "none", "egress":
+			network = "direct:" + raw
+		}
+		err := validatePolicyNarrowing(agent.Policy{
+			CPU:      4,
+			MemoryMB: 2048,
+			Network:  "egress",
+		}, agent.Policy{
+			CPU:      2,
+			MemoryMB: 1024,
+			Network:  network,
+		})
+		return err != nil
+	}, cfg)
+	if err != nil {
+		t.Fatalf("unknown child network property failed: %v", err)
 	}
 }
 

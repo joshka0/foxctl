@@ -130,14 +130,26 @@ func ValidateSolverState(state *SolverState) error {
 	}
 	ids := make(map[string]bool, len(state.Items))
 	for id, item := range state.Items {
+		if id == "" {
+			return fmt.Errorf("generalsolver: work item id is required")
+		}
 		if id != item.ID {
 			return fmt.Errorf("generalsolver: map key %q does not match item id %q", id, item.ID)
 		}
 		if ids[id] {
 			return fmt.Errorf("generalsolver: duplicate id %q", id)
 		}
+		if !ValidProblemArchetype(item.Archetype) {
+			return fmt.Errorf("generalsolver: work item %q has invalid archetype %q", id, item.Archetype)
+		}
+		if !ValidWorkItemStatus(item.Status) {
+			return fmt.Errorf("generalsolver: work item %q has invalid status %q", id, item.Status)
+		}
 		ids[id] = true
 		for _, depID := range item.DependsOn {
+			if depID == "" {
+				return fmt.Errorf("generalsolver: work item %q has empty dependency id", id)
+			}
 			if !ids[depID] && state.Items[depID].ID == "" {
 				return fmt.Errorf("generalsolver: work item %q depends on unknown id %q", id, depID)
 			}

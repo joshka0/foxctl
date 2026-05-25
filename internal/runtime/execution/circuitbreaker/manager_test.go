@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"testing/quick"
 )
 
 func TestManagerGetOrCreate(t *testing.T) {
@@ -289,4 +290,98 @@ func TestManagerConcurrentAccess(t *testing.T) {
 	if breaker.State() != StateClosed {
 		t.Errorf("expected closed state, got %s", breaker.State())
 	}
+}
+
+func TestManagerRegistryPropertyOperationsStayConsistent(t *testing.T) {
+	ctx := context.Background()
+
+	property := func(rawOps []uint8) bool {
+		if len(rawOps) > 100 {
+			rawOps = rawOps[:100]
+		}
+		manager := NewManager(Config{
+			MaxFailures:         2,
+			ResetTimeout:        0,
+			MaxHalfOpenRequests: 1,
+			SuccessThreshold:    1,
+		})
+		model := map[string]struct{}{}
+		for _, name := range generatedBreakerNames() {
+			if manager.GetOrCreate(name) == nil {
+				return false
+			}
+			model[name] = struct{}{}
+		}
+
+		for _, op := range rawOps {
+			name := generatedBreakerName(op)
+			switch op % 5 {
+			case 0:
+				if manager.GetOrCreate(name) == nil {
+					return false
+				}
+				model[name] = struct{}{}
+			case 1:
+				if err := manager.Execute(ctx, name, func(context.Context) error { return nil }); err != nil {
+					return false
+				}
+				model[name] = struct{}{}
+			case 2:
+				_, exists := model[name]
+				if manager.Reset(name) != exists {
+					return false
+				}
+			case 3:
+				_, exists := model[name]
+				if manager.Remove(name) != exists {
+					return false
+				}
+				delete(model, name)
+			case 4:
+				_, exists := model[name]
+				if (manager.Get(name) != nil) != exists {
+					return false
+				}
+			}
+
+			if manager.Count() != len(model) {
+				return false
+			}
+			if !managerStatsMatchModel(manager.ListAll(), model) {
+				return false
+			}
+		}
+
+		return true
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatalf("manager registry property failed: %v", err)
+	}
+}
+
+func generatedBreakerName(raw uint8) string {
+	names := generatedBreakerNames()
+	return names[int(raw)%len(names)]
+}
+
+func generatedBreakerNames() []string {
+	return []string{"api", "db", "queue", "cache", "llm"}
+}
+
+func managerStatsMatchModel(stats []Stats, model map[string]struct{}) bool {
+	if len(stats) != len(model) {
+		return false
+	}
+	seen := make(map[string]struct{}, len(stats))
+	for _, stat := range stats {
+		if _, ok := model[stat.Name]; !ok {
+			return false
+		}
+		if _, duplicate := seen[stat.Name]; duplicate {
+			return false
+		}
+		seen[stat.Name] = struct{}{}
+	}
+	return true
 }

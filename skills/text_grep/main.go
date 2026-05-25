@@ -76,6 +76,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		Include:       in.Include,
 		Exclude:       fsutil.AppendCommonExcludes(in.Exclude),
 		IncludeHidden: true,
+		ValidatePath: func(path string) (string, error) {
+			return skillmain.ValidatePath(rc, path)
+		},
 	})
 	if err != nil {
 		return skillerr.WrapIO("collect entries", err)

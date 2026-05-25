@@ -45,6 +45,15 @@ type TestStatus struct {
 	RawTail     string
 }
 
+func validateStatus(status Status) error {
+	switch status {
+	case StatusUnknown, StatusPass, StatusFail, StatusError, StatusRunning:
+		return nil
+	default:
+		return fmt.Errorf("testwatch: invalid status %q", status)
+	}
+}
+
 // Store defines the persistence interface for test watcher status.
 type Store interface {
 	Close() error
@@ -123,7 +132,17 @@ CREATE INDEX IF NOT EXISTS idx_test_status_workspace ON test_status(workspace_id
 
 // Upsert creates or updates the test status for a (workspace, watcher) pair.
 func (s *sqlStore) Upsert(ctx context.Context, ts TestStatus) error {
-	failuresJSON, err := json.Marshal(ts.Failures)
+	if err := validateStatus(ts.Status); err != nil {
+		return err
+	}
+	if err := validateFailures(ts.Failures); err != nil {
+		return err
+	}
+	failures := ts.Failures
+	if failures == nil {
+		failures = []Failure{}
+	}
+	failuresJSON, err := json.Marshal(failures)
 	if err != nil {
 		return fmt.Errorf("testwatch: marshal failures: %w", err)
 	}
@@ -240,6 +259,9 @@ func scanTestStatus(row *sql.Row) (TestStatus, error) {
 	if err != nil {
 		return TestStatus{}, err
 	}
+	if err := validateStatus(ts.Status); err != nil {
+		return TestStatus{}, fmt.Errorf("decode status: %w", err)
+	}
 
 	if startedAt.Valid {
 		parsed, err := parseTimePtr(startedAt.String, "started_at")
@@ -255,11 +277,11 @@ func scanTestStatus(row *sql.Row) (TestStatus, error) {
 		}
 		ts.FinishedAt = parsed
 	}
-	if failuresJSON.Valid && failuresJSON.String != "" {
-		if err := json.Unmarshal([]byte(failuresJSON.String), &ts.Failures); err != nil {
-			return TestStatus{}, fmt.Errorf("decode failures_json: %w", err)
-		}
+	failures, err := decodeFailuresJSON(failuresJSON)
+	if err != nil {
+		return TestStatus{}, err
 	}
+	ts.Failures = failures
 
 	return ts, nil
 }
@@ -276,6 +298,9 @@ func scanTestStatusRows(rows *sql.Rows) (TestStatus, error) {
 	if err != nil {
 		return TestStatus{}, err
 	}
+	if err := validateStatus(ts.Status); err != nil {
+		return TestStatus{}, fmt.Errorf("decode status: %w", err)
+	}
 
 	if startedAt.Valid {
 		parsed, err := parseTimePtr(startedAt.String, "started_at")
@@ -291,13 +316,39 @@ func scanTestStatusRows(rows *sql.Rows) (TestStatus, error) {
 		}
 		ts.FinishedAt = parsed
 	}
-	if failuresJSON.Valid && failuresJSON.String != "" {
-		if err := json.Unmarshal([]byte(failuresJSON.String), &ts.Failures); err != nil {
-			return TestStatus{}, fmt.Errorf("decode failures_json: %w", err)
-		}
+	failures, err := decodeFailuresJSON(failuresJSON)
+	if err != nil {
+		return TestStatus{}, err
 	}
+	ts.Failures = failures
 
 	return ts, nil
+}
+
+func validateFailures(failures []Failure) error {
+	for i, failure := range failures {
+		if failure.Line < 0 {
+			return fmt.Errorf("testwatch: invalid failure %d line %d", i, failure.Line)
+		}
+	}
+	return nil
+}
+
+func decodeFailuresJSON(raw sql.NullString) ([]Failure, error) {
+	if !raw.Valid || raw.String == "" {
+		return nil, nil
+	}
+	var failures []Failure
+	if err := json.Unmarshal([]byte(raw.String), &failures); err != nil {
+		return nil, fmt.Errorf("decode failures_json: %w", err)
+	}
+	if failures == nil {
+		return nil, fmt.Errorf("decode failures_json: expected array")
+	}
+	if err := validateFailures(failures); err != nil {
+		return nil, fmt.Errorf("decode failures_json: %w", err)
+	}
+	return failures, nil
 }
 
 func parseTimePtr(s, field string) (*time.Time, error) {

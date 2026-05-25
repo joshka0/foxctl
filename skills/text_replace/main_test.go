@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"testing/quick"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/platform/config"
@@ -345,6 +347,60 @@ func TestReplaceMultipleOperations(t *testing.T) {
 	expected := "FOO BAR BAZ\n"
 	if string(modified) != expected {
 		t.Fatalf("expected %q, got %q", expected, string(modified))
+	}
+}
+
+func TestReplaceRejectsEmptyOperationPatternWithoutMutatingFile(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	work := filepath.Join(tmp, "workspace")
+	if err := os.MkdirAll(work, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	content := "abc\n"
+	testFile := filepath.Join(work, "test.txt")
+	if err := os.WriteFile(testFile, []byte(content), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	buf := &bytes.Buffer{}
+	rc := newTestRunnerContext(t, buf, work)
+	t.Cleanup(func() {
+		if err := rc.Close(); err != nil {
+			t.Fatalf("close runner context: %v", err)
+		}
+	})
+
+	err := run(ctx, rc, input{
+		Paths: []string{testFile},
+		Operations: []operation{
+			{Pattern: "", Replacement: "X", Literal: true},
+		},
+		MaxFiles: 100,
+	})
+	if err == nil {
+		t.Fatal("expected empty operation pattern to be rejected")
+	}
+
+	got, readErr := os.ReadFile(testFile)
+	if readErr != nil {
+		t.Fatalf("read file: %v", readErr)
+	}
+	if string(got) != content {
+		t.Fatalf("invalid operation mutated file: got %q want %q", string(got), content)
+	}
+}
+
+func TestBuildReplacerPropertyRejectsWhitespaceOnlyPatterns(t *testing.T) {
+	err := quick.Check(func(raw string, literal bool) bool {
+		if strings.TrimSpace(raw) != "" {
+			return true
+		}
+		_, err := buildReplacer(operation{Pattern: raw, Replacement: "x", Literal: literal}, false, false, false)
+		return err != nil
+	}, &quick.Config{MaxCount: 100})
+	if err != nil {
+		t.Fatalf("whitespace pattern property failed: %v", err)
 	}
 }
 

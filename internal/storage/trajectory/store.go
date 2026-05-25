@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"math"
 	"path/filepath"
 	"time"
 
@@ -199,9 +200,79 @@ func generateID() string {
 	return ulid.Make().String()
 }
 
+func validateStatus(status Status) error {
+	switch status {
+	case StatusOK, StatusError, StatusAborted, StatusPartial:
+		return nil
+	default:
+		return fmt.Errorf("trajectory: invalid status %q", status)
+	}
+}
+
+func validateSource(source Source) error {
+	switch source {
+	case SourceCLI, SourceMailbox, SourceAPI, SourceViewer:
+		return nil
+	default:
+		return fmt.Errorf("trajectory: invalid source %q", source)
+	}
+}
+
+func validateEventKind(kind EventKind) error {
+	switch kind {
+	case EventKindUserRequest,
+		EventKindAgentThought,
+		EventKindToolCall,
+		EventKindToolResult,
+		EventKindReviewRequest,
+		EventKindReviewResult,
+		EventKindTaskTransition,
+		EventKindGraphSearch,
+		EventKindSWEGrep,
+		EventKindHookCall,
+		EventKindHookResult:
+		return nil
+	default:
+		return fmt.Errorf("trajectory: invalid event kind %q", kind)
+	}
+}
+
+func validateOutcome(outcome *Outcome) error {
+	if outcome == nil {
+		return nil
+	}
+	if outcome.TasksCompleted < 0 {
+		return fmt.Errorf("trajectory: invalid outcome tasks_completed %d", outcome.TasksCompleted)
+	}
+	if outcome.ToolCallCount < 0 {
+		return fmt.Errorf("trajectory: invalid outcome tool_call_count %d", outcome.ToolCallCount)
+	}
+	if outcome.ErrorCount < 0 {
+		return fmt.Errorf("trajectory: invalid outcome error_count %d", outcome.ErrorCount)
+	}
+	if outcome.DurationMS < 0 {
+		return fmt.Errorf("trajectory: invalid outcome duration_ms %d", outcome.DurationMS)
+	}
+	if outcome.HumanRating != nil && (*outcome.HumanRating < 1 || *outcome.HumanRating > 5) {
+		return fmt.Errorf("trajectory: invalid outcome human_rating %d", *outcome.HumanRating)
+	}
+	for name, metric := range outcome.Metrics {
+		if math.IsNaN(metric) || math.IsInf(metric, 0) {
+			return fmt.Errorf("trajectory: invalid outcome metric %q", name)
+		}
+	}
+	return nil
+}
+
 // InsertTrajectory creates a new trajectory record.
 func (s *sqlStore) InsertTrajectory(ctx context.Context, t Trajectory) (Trajectory, error) {
 	t.WorkspaceID = ws.CanonicalID(t.WorkspaceID)
+	if err := validateStatus(t.Status); err != nil {
+		return Trajectory{}, err
+	}
+	if err := validateOutcome(t.Outcome); err != nil {
+		return Trajectory{}, err
+	}
 	now := timeutil.NowUTC()
 	if t.ID == "" {
 		t.ID = generateID()
@@ -268,6 +339,12 @@ WHERE workspace_id = ? AND id = ?
 // UpdateTrajectory updates an existing trajectory.
 func (s *sqlStore) UpdateTrajectory(ctx context.Context, t Trajectory) error {
 	t.WorkspaceID = ws.CanonicalID(t.WorkspaceID)
+	if err := validateStatus(t.Status); err != nil {
+		return err
+	}
+	if err := validateOutcome(t.Outcome); err != nil {
+		return err
+	}
 	t.UpdatedAt = timeutil.NowUTC()
 
 	taskIDsJSON, err := sqlutil.FormatJSON(t.TaskIDs)
@@ -343,6 +420,9 @@ WHERE workspace_id = ?`
 		args = append(args, filter.AgentRole)
 	}
 	if filter.Status != "" {
+		if err := validateStatus(filter.Status); err != nil {
+			return nil, err
+		}
 		query += ` AND status = ?`
 		args = append(args, string(filter.Status))
 	}
@@ -411,6 +491,9 @@ DELETE FROM trajectories WHERE workspace_id = ? AND id = ?
 // SetOutcome records the outcome for a trajectory.
 func (s *sqlStore) SetOutcome(ctx context.Context, workspaceID, id string, outcome Outcome) error {
 	workspaceID = ws.CanonicalID(workspaceID)
+	if err := validateOutcome(&outcome); err != nil {
+		return err
+	}
 	// Set recorded time if not already set
 	if outcome.RecordedAt.IsZero() {
 		outcome.RecordedAt = timeutil.NowUTC()
@@ -508,6 +591,9 @@ WHERE workspace_id = ? AND outcome_json IS NOT NULL`
 // InsertUserRequest creates a new user request capture.
 func (s *sqlStore) InsertUserRequest(ctx context.Context, ur UserRequestCapture) (UserRequestCapture, error) {
 	ur.WorkspaceID = ws.CanonicalID(ur.WorkspaceID)
+	if err := validateSource(ur.Source); err != nil {
+		return UserRequestCapture{}, err
+	}
 	if ur.ID == "" {
 		ur.ID = generateID()
 	}
@@ -604,6 +690,9 @@ LIMIT ?
 
 // InsertEvent creates a new trajectory event.
 func (s *sqlStore) InsertEvent(ctx context.Context, e Event) (Event, error) {
+	if err := validateEventKind(e.Kind); err != nil {
+		return Event{}, err
+	}
 	if e.ID == "" {
 		e.ID = generateID()
 	}
@@ -657,6 +746,11 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 func (s *sqlStore) InsertEvents(ctx context.Context, events []Event) error {
 	if len(events) == 0 {
 		return nil
+	}
+	for i := range events {
+		if err := validateEventKind(events[i].Kind); err != nil {
+			return fmt.Errorf("trajectory: event %d: %w", i, err)
+		}
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -752,6 +846,9 @@ WHERE trajectory_id = ?`
 	args := []any{filter.TrajectoryID}
 
 	if filter.Kind != "" {
+		if err := validateEventKind(filter.Kind); err != nil {
+			return nil, err
+		}
 		query += ` AND kind = ?`
 		args = append(args, string(filter.Kind))
 	}
@@ -846,6 +943,9 @@ func scanTrajectory(row *sql.Row) (Trajectory, error) {
 	t.JobID = jobID.String
 	t.TraceID = traceID.String
 	t.Status = Status(status)
+	if err := validateStatus(t.Status); err != nil {
+		return Trajectory{}, fmt.Errorf("decode trajectory %q status: %w", t.ID, err)
+	}
 	t.Summary = summary.String
 	t.ArtifactDigest = artifactDigest.String
 	t.SessionID = sessionID.String
@@ -859,6 +959,9 @@ func scanTrajectory(row *sql.Row) (Trajectory, error) {
 	if outcomeJSON.Valid && outcomeJSON.String != "" {
 		t.Outcome = &Outcome{}
 		if err := sqlutil.ScanJSON(outcomeJSON.String, t.Outcome); err != nil {
+			return Trajectory{}, fmt.Errorf("decode trajectory %q outcome_json: %w", t.ID, err)
+		}
+		if err := validateOutcome(t.Outcome); err != nil {
 			return Trajectory{}, fmt.Errorf("decode trajectory %q outcome_json: %w", t.ID, err)
 		}
 	}
@@ -896,6 +999,9 @@ func scanTrajectoryRows(rows *sql.Rows) (Trajectory, error) {
 	t.JobID = jobID.String
 	t.TraceID = traceID.String
 	t.Status = Status(status)
+	if err := validateStatus(t.Status); err != nil {
+		return Trajectory{}, fmt.Errorf("decode trajectory %q status: %w", t.ID, err)
+	}
 	t.Summary = summary.String
 	t.ArtifactDigest = artifactDigest.String
 	t.SessionID = sessionID.String
@@ -909,6 +1015,9 @@ func scanTrajectoryRows(rows *sql.Rows) (Trajectory, error) {
 	if outcomeJSON.Valid && outcomeJSON.String != "" {
 		t.Outcome = &Outcome{}
 		if err := sqlutil.ScanJSON(outcomeJSON.String, t.Outcome); err != nil {
+			return Trajectory{}, fmt.Errorf("decode trajectory %q outcome_json: %w", t.ID, err)
+		}
+		if err := validateOutcome(t.Outcome); err != nil {
 			return Trajectory{}, fmt.Errorf("decode trajectory %q outcome_json: %w", t.ID, err)
 		}
 	}
@@ -940,6 +1049,9 @@ func scanUserRequest(row *sql.Row) (UserRequestCapture, error) {
 	}
 
 	ur.Source = Source(source)
+	if err := validateSource(ur.Source); err != nil {
+		return UserRequestCapture{}, fmt.Errorf("decode user_request %q source: %w", ur.ID, err)
+	}
 	ur.TS, err = scanRequiredTimestamp(ts, fmt.Sprintf("user_request %q ts", ur.ID))
 	if err != nil {
 		return UserRequestCapture{}, err
@@ -976,6 +1088,9 @@ func scanUserRequestRows(rows *sql.Rows) (UserRequestCapture, error) {
 	}
 
 	ur.Source = Source(source)
+	if err := validateSource(ur.Source); err != nil {
+		return UserRequestCapture{}, fmt.Errorf("decode user_request %q source: %w", ur.ID, err)
+	}
 	ur.TS, err = scanRequiredTimestamp(ts, fmt.Sprintf("user_request %q ts", ur.ID))
 	if err != nil {
 		return UserRequestCapture{}, err
@@ -1012,6 +1127,9 @@ func scanEventRows(rows *sql.Rows) (Event, error) {
 	}
 
 	e.Kind = EventKind(kind)
+	if err := validateEventKind(e.Kind); err != nil {
+		return Event{}, fmt.Errorf("decode event %q kind: %w", e.ID, err)
+	}
 	e.Actor = actor.String
 	e.Command = command.String
 	e.Status = status.String

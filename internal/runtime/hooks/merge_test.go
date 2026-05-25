@@ -2,7 +2,10 @@ package hooks
 
 import (
 	"encoding/json"
+	"fmt"
+	"reflect"
 	"testing"
+	"testing/quick"
 )
 
 func TestMerge_EmptyOutputs(t *testing.T) {
@@ -424,6 +427,29 @@ func TestMergeWithDetails(t *testing.T) {
 	}
 }
 
+func TestMergeWithDetailsPropertyMatchesMergeOutput(t *testing.T) {
+	t.Parallel()
+
+	property := func(a, b, c uint8) bool {
+		outputs := []Output{
+			mergePropertyOutput(a, 0),
+			mergePropertyOutput(b, 1),
+			mergePropertyOutput(c, 2),
+		}
+
+		got := MergeWithDetails(outputs).Output
+		want := Merge(outputs)
+		if !reflect.DeepEqual(got, want) {
+			t.Logf("MergeWithDetails output = %#v\nMerge output = %#v\ninputs = %#v", got, want, outputs)
+			return false
+		}
+		return true
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDeduplicateActions(t *testing.T) {
 	a1 := RunSkillAction("skill1", nil)
 	a2 := RunSkillAction("skill1", nil) // duplicate
@@ -437,6 +463,33 @@ func TestDeduplicateActions(t *testing.T) {
 	if len(result) != 3 {
 		t.Errorf("expected 3 unique actions, got %d", len(result))
 	}
+}
+
+func mergePropertyOutput(seed uint8, index int) Output {
+	decisions := []Decision{DecisionNone, DecisionApprove, DecisionBlock}
+	out := Output{Decision: decisions[int(seed)%len(decisions)]}
+	if seed&0b0000_0100 != 0 {
+		out.Reason = fmt.Sprintf("reason-%d", index)
+	}
+	if seed&0b0000_1000 != 0 {
+		out.Context = fmt.Sprintf("context-%d", index)
+	}
+	if seed&0b0001_0000 != 0 {
+		out.UpdatedToolInput = json.RawMessage(fmt.Sprintf(`{"index":%d}`, index))
+	}
+	if seed&0b0010_0000 != 0 {
+		out.UpdatedAssistantText = fmt.Sprintf("assistant-%d", index)
+	}
+	if seed&0b0100_0000 != 0 {
+		out.Actions = []Action{RunSkillAction(fmt.Sprintf("skill-%d", index), nil)}
+	}
+	if seed&0b1000_0000 != 0 {
+		out.Meta = map[string]any{
+			"shared":                  index,
+			fmt.Sprintf("k%d", index): fmt.Sprintf("v%d", index),
+		}
+	}
+	return out
 }
 
 func TestSortActionsByPriority(t *testing.T) {

@@ -2,9 +2,11 @@ package hooks
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/quick"
 	"time"
 )
 
@@ -298,6 +300,7 @@ func TestParseShellOutput_Formats(t *testing.T) {
 		input   string
 		want    Decision
 		wantCtx string
+		wantErr bool
 	}{
 		{
 			name:  "v1 format",
@@ -332,11 +335,22 @@ func TestParseShellOutput_Formats(t *testing.T) {
 			want:    DecisionNone,
 			wantCtx: "just some text",
 		},
+		{
+			name:    "invalid explicit decision",
+			input:   `{"decision":"deny","reason":"typo should not fail open"}`,
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			output, err := parseShellOutput([]byte(tt.input))
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -347,5 +361,30 @@ func TestParseShellOutput_Formats(t *testing.T) {
 				t.Errorf("expected context %q, got %q", tt.wantCtx, output.Context)
 			}
 		})
+	}
+}
+
+func TestParseShellOutputRejectsUnknownDecisionStrings(t *testing.T) {
+	prop := func(candidate string) bool {
+		decision := Decision(candidate)
+		if candidate == "" || decision.IsValid() {
+			return true
+		}
+
+		payload, err := json.Marshal(Output{Decision: decision})
+		if err != nil {
+			t.Logf("marshal decision %q: %v", candidate, err)
+			return false
+		}
+
+		if _, err := parseShellOutput(payload); err == nil {
+			t.Logf("accepted invalid shell decision %q", candidate)
+			return false
+		}
+		return true
+	}
+
+	if err := quick.Check(prop, &quick.Config{MaxCount: 200}); err != nil {
+		t.Fatal(err)
 	}
 }

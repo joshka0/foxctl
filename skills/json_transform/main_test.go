@@ -3,9 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"testing"
+	"testing/quick"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/platform/config"
@@ -118,6 +121,93 @@ func TestExtractPath(t *testing.T) {
 		if !reflect.DeepEqual(got, tt.want) {
 			t.Errorf("extractPath(%s) = %v, want %v", tt.path, got, tt.want)
 		}
+	}
+}
+
+func TestExtractPathRejectsMalformedArrayIndexes(t *testing.T) {
+	data := map[string]any{
+		"items": []any{"zero", "one"},
+	}
+
+	for _, path := range []string{
+		"items[1x]",
+		"items[+1]",
+		"items[ 1]",
+		"items[]",
+		"items[x]",
+		"items[-1]",
+	} {
+		if got := extractPath(data, path); got != nil {
+			t.Fatalf("extractPath(%q)=%v, want nil for malformed index", path, got)
+		}
+	}
+}
+
+func TestExtractPathGeneratedValidArrayIndexes(t *testing.T) {
+	values := []any{"zero", "one", "two", "three", "four"}
+	data := map[string]any{"items": values}
+	cfg := &quick.Config{MaxCount: 100}
+
+	err := quick.Check(func(rawIndex uint8) bool {
+		index := int(rawIndex) % len(values)
+		path := fmt.Sprintf("items[%d]", index)
+		got := extractPath(data, path)
+		if !reflect.DeepEqual(got, values[index]) {
+			t.Logf("extractPath(%q)=%v want %v", path, got, values[index])
+			return false
+		}
+		return true
+	}, cfg)
+	if err != nil {
+		t.Fatalf("valid array index property failed: %v", err)
+	}
+}
+
+func TestCollectAllKeysReturnsSortedStablePaths(t *testing.T) {
+	indexed := make([]any, 12)
+	for i := range indexed {
+		indexed[i] = map[string]any{"value": i}
+	}
+	data := map[string]any{
+		"z": 1,
+		"a": map[string]any{
+			"m": 2,
+			"b": 3,
+		},
+		"arr": []any{
+			map[string]any{"y": 4, "x": 5},
+		},
+		"indexed": indexed,
+	}
+
+	got := collectAllKeys(data, "")
+	if !sort.StringsAreSorted(got) {
+		t.Fatalf("all keys should be sorted for stable output, got %v", got)
+	}
+
+	want := []string{
+		"a", "a.b", "a.m",
+		"arr", "arr[0].x", "arr[0].y",
+		"indexed", "indexed[0].value", "indexed[10].value", "indexed[11].value", "indexed[1].value",
+		"indexed[2].value", "indexed[3].value", "indexed[4].value", "indexed[5].value", "indexed[6].value",
+		"indexed[7].value", "indexed[8].value", "indexed[9].value",
+		"z",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("collectAllKeys=%v want %v", got, want)
+	}
+}
+
+func TestKeysOperationReturnsSortedTopLevelKeys(t *testing.T) {
+	got := keysOperation(map[string]any{
+		"z": 1,
+		"a": 2,
+		"m": 3,
+	})
+
+	want := []string{"a", "m", "z"}
+	if !reflect.DeepEqual(got["keys"], want) {
+		t.Fatalf("keys=%v want %v", got["keys"], want)
 	}
 }
 

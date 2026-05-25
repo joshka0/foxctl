@@ -492,12 +492,10 @@ func (c *Client) execdURL(endpointHost, reqPath string) (string, error) {
 func buildNetworkPolicy(repoURL string, allow []string) *NetworkPolicy {
 	targets := make([]string, 0, len(allow)+4)
 	targets = append(targets, allow...)
-	if u, err := neturl.Parse(strings.TrimSpace(repoURL)); err == nil {
-		if host := strings.TrimSpace(u.Hostname()); host != "" {
-			targets = append(targets, host)
-			if host == "github.com" {
-				targets = append(targets, "codeload.github.com", "objects.githubusercontent.com")
-			}
+	if host := repoURLHost(repoURL); host != "" {
+		targets = append(targets, host)
+		if host == "github.com" {
+			targets = append(targets, "codeload.github.com", "objects.githubusercontent.com")
 		}
 	}
 	targets = dedupeStrings(targets)
@@ -509,6 +507,28 @@ func buildNetworkPolicy(repoURL string, allow []string) *NetworkPolicy {
 		policy.Egress = append(policy.Egress, NetworkRule{Action: "allow", Target: target})
 	}
 	return policy
+}
+
+func repoURLHost(repoURL string) string {
+	repoURL = strings.TrimSpace(repoURL)
+	if repoURL == "" {
+		return ""
+	}
+	if u, err := neturl.Parse(repoURL); err == nil {
+		if host := strings.TrimSpace(u.Hostname()); host != "" {
+			return host
+		}
+	}
+
+	repoLocator := repoURL
+	if at := strings.LastIndex(repoLocator, "@"); at >= 0 {
+		repoLocator = repoLocator[at+1:]
+	}
+	colon := strings.Index(repoLocator, ":")
+	if colon <= 0 || strings.Contains(repoLocator[:colon], "/") {
+		return ""
+	}
+	return strings.TrimSpace(repoLocator[:colon])
 }
 
 func buildShallowCloneCommand(repoURL, repoRef, workspaceRoot string) string {

@@ -1,8 +1,6 @@
 package updater
 
-import (
-	"time"
-)
+import "time"
 
 // Config configures the context updater worker.
 type Config struct {
@@ -100,6 +98,12 @@ func (c *Config) Validate() error {
 	if c.TurnWindowSize < 1 {
 		c.TurnWindowSize = 5
 	}
+	if !validThreshold(c.DriftThreshold) {
+		c.DriftThreshold = 0.7
+	}
+	if !validThreshold(c.ConfidenceMin) {
+		c.ConfidenceMin = 0.8
+	}
 	if c.MemorySize < 1 {
 		c.MemorySize = 50
 	}
@@ -107,4 +111,8 @@ func (c *Config) Validate() error {
 		c.MaxInjectionRate = 3
 	}
 	return nil
+}
+
+func validThreshold(value float32) bool {
+	return value > 0 && value <= 1
 }

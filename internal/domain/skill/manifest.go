@@ -17,6 +17,7 @@ type Manifest struct {
 	Distribution Distribution   `yaml:"distribution" json:"distribution"`
 	IO           IOConfig       `yaml:"io" json:"io"`
 	Signature    Signature      `yaml:"signature" json:"signature"`
+	Returns      []Parameter    `yaml:"returns,omitempty" json:"returns,omitempty"`
 	Capabilities Capabilities   `yaml:"capabilities" json:"capabilities"`
 	Memory       MemoryConfig   `yaml:"memory" json:"memory"`
 	OpenAPI      *OpenAPIConfig `yaml:"openapi,omitempty" json:"openapi,omitempty"`
@@ -99,6 +100,7 @@ type Capabilities struct {
 // FileAccess grants access to specific filesystem roots.
 type FileAccess struct {
 	Type string `yaml:"type" json:"type"`
+	Path string `yaml:"path,omitempty" json:"path,omitempty"`
 }
 
 // MemoryConfig hints how results integrate with memory/cache.
@@ -166,10 +168,25 @@ func LoadManifest(path string) (Manifest, error) {
 	if err := yaml.Unmarshal(data, &m); err != nil {
 		return Manifest{}, err
 	}
+	if err := normalizeManifest(&m); err != nil {
+		return Manifest{}, err
+	}
 	if err := validateManifest(m); err != nil {
 		return Manifest{}, err
 	}
 	return m, nil
+}
+
+func normalizeManifest(m *Manifest) error {
+	if len(m.Returns) == 0 {
+		return nil
+	}
+	if len(m.Signature.Returns) > 0 {
+		return fmt.Errorf("returns must be declared in only one location")
+	}
+	m.Signature.Returns = m.Returns
+	m.Returns = nil
+	return nil
 }
 
 func validateManifest(m Manifest) error {
@@ -196,6 +213,93 @@ func validateManifest(m Manifest) error {
 	}
 	if m.Signature.Command == "" {
 		return fmt.Errorf("signature.command required")
+	}
+	if err := validateIOConfig(m.IO); err != nil {
+		return err
+	}
+	if err := validateParameters("signature.parameters", m.Signature.Parameters, true); err != nil {
+		return err
+	}
+	if err := validateParameters("signature.returns", m.Signature.Returns, true); err != nil {
+		return err
+	}
+	if err := ValidateWASIPolicy(m); err != nil {
+		return fmt.Errorf("policy validation failed: %w", err)
+	}
+	if err := ValidateFilesystemCapabilities(m); err != nil {
+		return fmt.Errorf("filesystem capabilities validation failed: %w", err)
+	}
+	return nil
+}
+
+func validateIOConfig(io IOConfig) error {
+	if io.Format != "" && strings.ToUpper(strings.TrimSpace(io.Format)) != "JSON" {
+		return fmt.Errorf("io.format must be JSON")
+	}
+	if io.InlineOutputKB < 0 {
+		return fmt.Errorf("io.inline_output_kb must be non-negative")
+	}
+	return nil
+}
+
+func validateParameters(scope string, params []Parameter, requireName bool) error {
+	seen := make(map[string]struct{}, len(params))
+	for i := range params {
+		param := &params[i]
+		name := strings.TrimSpace(param.Name)
+		if requireName && name == "" {
+			return fmt.Errorf("%s[%d].name required", scope, i)
+		}
+		if name != "" {
+			if _, ok := seen[name]; ok {
+				return fmt.Errorf("duplicate %s name %q", scope, name)
+			}
+			seen[name] = struct{}{}
+		}
+
+		param.Name = name
+		if err := validateParameterType(parameterScope(scope, i, name), param); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func parameterScope(scope string, index int, name string) string {
+	if name == "" {
+		return fmt.Sprintf("%s[%d]", scope, index)
+	}
+	return fmt.Sprintf("%s[%q]", scope, name)
+}
+
+func validateParameterType(scope string, param *Parameter) error {
+	typ := strings.ToLower(strings.TrimSpace(param.Type))
+	if typ == "" {
+		return fmt.Errorf("%s.type required", scope)
+	}
+	switch typ {
+	case "any", "array", "boolean", "integer", "number", "object", "string":
+		param.Type = typ
+	default:
+		return fmt.Errorf("%s.type %q unsupported", scope, param.Type)
+	}
+
+	if param.Items != nil {
+		if err := validateParameterType(scope+".items", param.Items); err != nil {
+			return err
+		}
+	}
+	if len(param.Properties) > 0 {
+		for name, child := range param.Properties {
+			child.Name = strings.TrimSpace(child.Name)
+			if child.Name == "" {
+				child.Name = strings.TrimSpace(name)
+			}
+			if err := validateParameterType(scope+".properties."+name, &child); err != nil {
+				return err
+			}
+			param.Properties[name] = child
+		}
 	}
 	return nil
 }
