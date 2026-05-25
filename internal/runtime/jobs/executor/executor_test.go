@@ -296,6 +296,33 @@ func TestExecutorHandleFailureUpdatesState(t *testing.T) {
 	}
 }
 
+func TestExecutorHandleFailureFinalStateIgnoresCanceledCallerContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	root := t.TempDir()
+	persist := newFakePersistence()
+
+	job := types.Job{
+		ID:        "job-fail-canceled",
+		Command:   "skill:demo",
+		ArgsJSON:  "{}",
+		ArgsHash:  "hash",
+		State:     types.StateRunning,
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := persist.InsertJob(context.Background(), job); err != nil {
+		t.Fatalf("insert job: %v", err)
+	}
+
+	exec := New(root, persist)
+	_, err := exec.handleFailure(ctx, job.ID, nil, nil, errors.New("fail"), nil)
+	if err == nil {
+		t.Fatal("expected failure error")
+	}
+	assertLastStateUpdateUsesLiveDeadlineContext(t, persist, types.StateError)
+}
+
 func TestExecutorHandleSuccessWritesResult(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -359,6 +386,94 @@ func TestExecutorHandleSuccessWritesResult(t *testing.T) {
 	}
 }
 
+func TestExecutorHandleSuccessFinalStateIgnoresCanceledCallerContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	root := t.TempDir()
+	persist := newFakePersistence()
+
+	job := types.Job{
+		ID:        "job-success-canceled",
+		Command:   "skill:demo",
+		ArgsJSON:  "{}",
+		ArgsHash:  "hash",
+		State:     types.StateRunning,
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := persist.InsertJob(context.Background(), job); err != nil {
+		t.Fatalf("insert job: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, job.ID), 0o755); err != nil {
+		t.Fatalf("mkdir job dir: %v", err)
+	}
+
+	exec := New(root, persist)
+	env := envelope.OK("test", map[string]string{"message": "ok"})
+	stdout, err := json.Marshal(env)
+	if err != nil {
+		t.Fatalf("marshal env: %v", err)
+	}
+
+	if _, err := exec.handleSuccess(ctx, job.ID, stdout, nil); err != nil {
+		t.Fatalf("handle success: %v", err)
+	}
+	assertLastStateUpdateUsesLiveDeadlineContext(t, persist, types.StateOK)
+}
+
+func TestExecutorHandleSuccessErrorFinalStateIgnoresCanceledCallerContext(t *testing.T) {
+	tests := []struct {
+		name   string
+		stdout []byte
+	}{
+		{
+			name:   "decode error",
+			stdout: []byte("not-json"),
+		},
+		{
+			name: "validation error",
+			stdout: mustMarshalEnvelope(t, envelope.Envelope{
+				Version: envelope.Version,
+				Status:  "maybe",
+				Command: "test",
+				Meta: envelope.Meta{
+					TS: time.Now().UTC().Format(time.RFC3339),
+				},
+			}),
+		},
+		{
+			name:   "result write error",
+			stdout: mustMarshalEnvelope(t, envelope.OK("test", map[string]string{"message": "ok"})),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			root := t.TempDir()
+			persist := newFakePersistence()
+			job := types.Job{
+				ID:        "job-success-error-canceled",
+				Command:   "skill:demo",
+				ArgsJSON:  "{}",
+				ArgsHash:  "hash",
+				State:     types.StateRunning,
+				CreatedAt: time.Now().UTC(),
+				UpdatedAt: time.Now().UTC(),
+			}
+			if err := persist.InsertJob(context.Background(), job); err != nil {
+				t.Fatalf("insert job: %v", err)
+			}
+			exec := New(root, persist)
+			if _, err := exec.handleSuccess(ctx, job.ID, tt.stdout, nil); err == nil {
+				t.Fatal("expected handle success error")
+			}
+			assertLastStateUpdateUsesLiveDeadlineContext(t, persist, types.StateError)
+		})
+	}
+}
+
 func TestExecutorRunSkillUsesExecutor(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -381,8 +496,15 @@ func TestExecutorRunSkillUsesExecutor(t *testing.T) {
 }
 
 type fakePersistence struct {
-	mu   sync.Mutex
-	jobs map[string]types.Job
+	mu      sync.Mutex
+	jobs    map[string]types.Job
+	updates []updateRecord
+}
+
+type updateRecord struct {
+	State       types.State
+	ContextErr  error
+	HasDeadline bool
 }
 
 func newFakePersistence() *fakePersistence {
@@ -408,7 +530,10 @@ func (f *fakePersistence) FindOrInsertJob(_ context.Context, job types.Job) (typ
 	return job, false, nil
 }
 
-func (f *fakePersistence) UpdateState(_ context.Context, id string, newState types.State, errMsg, resultPath string) error {
+func (f *fakePersistence) UpdateState(ctx context.Context, id string, newState types.State, errMsg, resultPath string) error {
+	_, hasDeadline := ctx.Deadline()
+	ctxErr := ctx.Err()
+
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	job, ok := f.jobs[id]
@@ -425,6 +550,11 @@ func (f *fakePersistence) UpdateState(_ context.Context, id string, newState typ
 	}
 	job.UpdatedAt = time.Now().UTC()
 	f.jobs[id] = job
+	f.updates = append(f.updates, updateRecord{
+		State:       newState,
+		ContextErr:  ctxErr,
+		HasDeadline: hasDeadline,
+	})
 	return nil
 }
 
@@ -453,6 +583,42 @@ func (f *fakePersistence) snapshot() map[string]types.Job {
 		out[k] = v
 	}
 	return out
+}
+
+func (f *fakePersistence) updatesSnapshot() []updateRecord {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]updateRecord, len(f.updates))
+	copy(out, f.updates)
+	return out
+}
+
+func assertLastStateUpdateUsesLiveDeadlineContext(t *testing.T, persist *fakePersistence, wantState types.State) {
+	t.Helper()
+
+	updates := persist.updatesSnapshot()
+	if len(updates) == 0 {
+		t.Fatal("expected state update")
+	}
+	got := updates[len(updates)-1]
+	if got.State != wantState {
+		t.Fatalf("last state update=%s want %s", got.State, wantState)
+	}
+	if got.ContextErr != nil {
+		t.Fatalf("final state update used canceled context: %v", got.ContextErr)
+	}
+	if !got.HasDeadline {
+		t.Fatal("final state update should use a bounded timeout context")
+	}
+}
+
+func mustMarshalEnvelope(t *testing.T, env envelope.Envelope) []byte {
+	t.Helper()
+	buf, err := json.Marshal(env)
+	if err != nil {
+		t.Fatalf("marshal envelope: %v", err)
+	}
+	return buf
 }
 
 func validTransition(current, next types.State) bool {
