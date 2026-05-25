@@ -80,7 +80,7 @@ func TestPageRank_BasicComputation(t *testing.T) {
 	require.NoError(t, store.UpsertNode(ctx, graph.Node{
 		Workspace: rc.Workspace,
 		NodeID:    "A",
-		NodeType:  "test",
+		NodeType:  graph.NodeTypeTask,
 		Title:     "Node A",
 		LastSeen:  now,
 		CreatedAt: now,
@@ -89,7 +89,7 @@ func TestPageRank_BasicComputation(t *testing.T) {
 	require.NoError(t, store.UpsertNode(ctx, graph.Node{
 		Workspace: rc.Workspace,
 		NodeID:    "B",
-		NodeType:  "test",
+		NodeType:  graph.NodeTypeTask,
 		Title:     "Node B",
 		LastSeen:  now,
 		CreatedAt: now,
@@ -98,7 +98,7 @@ func TestPageRank_BasicComputation(t *testing.T) {
 	require.NoError(t, store.UpsertNode(ctx, graph.Node{
 		Workspace: rc.Workspace,
 		NodeID:    "C",
-		NodeType:  "test",
+		NodeType:  graph.NodeTypeTask,
 		Title:     "Node C",
 		LastSeen:  now,
 		CreatedAt: now,
@@ -108,8 +108,10 @@ func TestPageRank_BasicComputation(t *testing.T) {
 		ID:        "edge-ab",
 		Workspace: rc.Workspace,
 		FromID:    "A",
+		FromType:  graph.NodeTypeTask,
 		ToID:      "B",
-		EdgeType:  "link",
+		ToType:    graph.NodeTypeTask,
+		EdgeType:  graph.EdgeTypeRelatesTo,
 		Weight:    1.0,
 		CreatedAt: now,
 	}))
@@ -117,8 +119,10 @@ func TestPageRank_BasicComputation(t *testing.T) {
 		ID:        "edge-bc",
 		Workspace: rc.Workspace,
 		FromID:    "B",
+		FromType:  graph.NodeTypeTask,
 		ToID:      "C",
-		EdgeType:  "link",
+		ToType:    graph.NodeTypeTask,
+		EdgeType:  graph.EdgeTypeRelatesTo,
 		Weight:    1.0,
 		CreatedAt: now,
 	}))
@@ -155,7 +159,7 @@ func TestPageRank_CustomParameters(t *testing.T) {
 	require.NoError(t, store.UpsertNode(ctx, graph.Node{
 		Workspace: rc.Workspace,
 		NodeID:    "X",
-		NodeType:  "test",
+		NodeType:  graph.NodeTypeTask,
 		Title:     "Node X",
 		LastSeen:  now,
 		CreatedAt: now,
@@ -164,7 +168,7 @@ func TestPageRank_CustomParameters(t *testing.T) {
 	require.NoError(t, store.UpsertNode(ctx, graph.Node{
 		Workspace: rc.Workspace,
 		NodeID:    "Y",
-		NodeType:  "test",
+		NodeType:  graph.NodeTypeTask,
 		Title:     "Node Y",
 		LastSeen:  now,
 		CreatedAt: now,
@@ -174,8 +178,10 @@ func TestPageRank_CustomParameters(t *testing.T) {
 		ID:        "edge-xy",
 		Workspace: rc.Workspace,
 		FromID:    "X",
+		FromType:  graph.NodeTypeTask,
 		ToID:      "Y",
-		EdgeType:  "link",
+		ToType:    graph.NodeTypeTask,
+		EdgeType:  graph.EdgeTypeRelatesTo,
 		Weight:    1.0,
 		CreatedAt: now,
 	}))
@@ -211,7 +217,7 @@ func TestPageRank_WorkspaceScoping(t *testing.T) {
 	require.NoError(t, store.UpsertNode(ctx, graph.Node{
 		Workspace: otherWorkspace,
 		NodeID:    "OtherNode",
-		NodeType:  "test",
+		NodeType:  graph.NodeTypeTask,
 		Title:     "Other Node",
 		LastSeen:  now,
 		CreatedAt: now,
@@ -247,7 +253,7 @@ func TestPageRank_ExplicitWorkspace(t *testing.T) {
 	require.NoError(t, store.UpsertNode(ctx, graph.Node{
 		Workspace: explicitWorkspace,
 		NodeID:    "Node1",
-		NodeType:  "test",
+		NodeType:  graph.NodeTypeTask,
 		Title:     "Node 1",
 		LastSeen:  now,
 		CreatedAt: now,
@@ -280,7 +286,7 @@ func TestPageRank_SelfLoopsSkipped(t *testing.T) {
 	require.NoError(t, store.UpsertNode(ctx, graph.Node{
 		Workspace: rc.Workspace,
 		NodeID:    "SelfRef",
-		NodeType:  "test",
+		NodeType:  graph.NodeTypeTask,
 		Title:     "Self Reference",
 		LastSeen:  now,
 		CreatedAt: now,
@@ -291,8 +297,10 @@ func TestPageRank_SelfLoopsSkipped(t *testing.T) {
 		ID:        "self-edge",
 		Workspace: rc.Workspace,
 		FromID:    "SelfRef",
+		FromType:  graph.NodeTypeTask,
 		ToID:      "SelfRef",
-		EdgeType:  "self",
+		ToType:    graph.NodeTypeTask,
+		EdgeType:  graph.EdgeTypeRelatesTo,
 		Weight:    1.0,
 		CreatedAt: now,
 	}))
@@ -329,7 +337,7 @@ func TestPageRank_ComplexGraph(t *testing.T) {
 		require.NoError(t, store.UpsertNode(ctx, graph.Node{
 			Workspace: rc.Workspace,
 			NodeID:    n,
-			NodeType:  "test",
+			NodeType:  graph.NodeTypeTask,
 			Title:     "Node " + n,
 			LastSeen:  now,
 			CreatedAt: now,
@@ -343,8 +351,10 @@ func TestPageRank_ComplexGraph(t *testing.T) {
 			ID:        "edge-hub-" + string(rune('a'+i)),
 			Workspace: rc.Workspace,
 			FromID:    "Hub",
+			FromType:  graph.NodeTypeTask,
 			ToID:      target,
-			EdgeType:  "link",
+			ToType:    graph.NodeTypeTask,
+			EdgeType:  graph.EdgeTypeRelatesTo,
 			Weight:    1.0,
 			CreatedAt: now,
 		}))
@@ -356,8 +366,10 @@ func TestPageRank_ComplexGraph(t *testing.T) {
 			ID:        "edge-" + source + "-hub",
 			Workspace: rc.Workspace,
 			FromID:    source,
+			FromType:  graph.NodeTypeTask,
 			ToID:      "Hub",
-			EdgeType:  "backlink",
+			ToType:    graph.NodeTypeTask,
+			EdgeType:  graph.EdgeTypeRelatesTo,
 			Weight:    1.0,
 			CreatedAt: now,
 		}))
@@ -394,7 +406,7 @@ func TestPageRank_ValuesPersisted(t *testing.T) {
 	require.NoError(t, store.UpsertNode(ctx, graph.Node{
 		Workspace: rc.Workspace,
 		NodeID:    "Node1",
-		NodeType:  "test",
+		NodeType:  graph.NodeTypeTask,
 		Title:     "Node 1",
 		LastSeen:  now,
 		CreatedAt: now,
@@ -403,7 +415,7 @@ func TestPageRank_ValuesPersisted(t *testing.T) {
 	require.NoError(t, store.UpsertNode(ctx, graph.Node{
 		Workspace: rc.Workspace,
 		NodeID:    "Node2",
-		NodeType:  "test",
+		NodeType:  graph.NodeTypeTask,
 		Title:     "Node 2",
 		LastSeen:  now,
 		CreatedAt: now,
@@ -413,8 +425,10 @@ func TestPageRank_ValuesPersisted(t *testing.T) {
 		ID:        "edge-12",
 		Workspace: rc.Workspace,
 		FromID:    "Node1",
+		FromType:  graph.NodeTypeTask,
 		ToID:      "Node2",
-		EdgeType:  "link",
+		ToType:    graph.NodeTypeTask,
+		EdgeType:  graph.EdgeTypeRelatesTo,
 		Weight:    1.0,
 		CreatedAt: now,
 	}))
@@ -455,7 +469,7 @@ func TestPageRank_ComputeTimeReturned(t *testing.T) {
 	require.NoError(t, store.UpsertNode(ctx, graph.Node{
 		Workspace: rc.Workspace,
 		NodeID:    "Node1",
-		NodeType:  "test",
+		NodeType:  graph.NodeTypeTask,
 		Title:     "Node 1",
 		LastSeen:  now,
 		CreatedAt: now,

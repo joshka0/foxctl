@@ -274,7 +274,7 @@ distribution:
   exec:
     entry: ./bin/test-skill
 io:
-  format: envelope
+  format: JSON
   inline_output_kb: 32
 signature:
   command: %s

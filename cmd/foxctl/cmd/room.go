@@ -3899,10 +3899,10 @@ func runRoomResolve(cmd *cobra.Command, workspace, roomID, actorID, mode string,
 	)
 	switch strings.TrimSpace(strings.ToLower(mode)) {
 	case "", "acked", "ack":
-		updated, err = store.AckMessages(cmd.Context(), absWorkspace, identity.Sender, trimmedIDs)
+		updated, err = updateRoomMessagesAsCoordinator(cmd.Context(), store, absWorkspace, roomID, identity.Sender, trimmedIDs, agent.BoardMessageStatusAcked)
 		resolvedStatus = agent.BoardMessageStatusAcked
 	case "read":
-		updated, err = store.MarkRead(cmd.Context(), absWorkspace, identity.Sender, trimmedIDs)
+		updated, err = updateRoomMessagesAsCoordinator(cmd.Context(), store, absWorkspace, roomID, identity.Sender, trimmedIDs, agent.BoardMessageStatusRead)
 		resolvedStatus = agent.BoardMessageStatusRead
 	default:
 		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.resolve", protocol.ErrorCodeEARG, fmt.Sprintf("unsupported resolve mode %q", mode), map[string]any{
@@ -3988,10 +3988,10 @@ func runRoomClear(cmd *cobra.Command, workspace, roomID, actorID, mode, preset s
 	)
 	switch strings.TrimSpace(strings.ToLower(mode)) {
 	case "", "read":
-		updated, err = store.MarkRead(cmd.Context(), absWorkspace, identity.Sender, expandedIDs)
+		updated, err = updateRoomMessagesAsCoordinator(cmd.Context(), store, absWorkspace, roomID, identity.Sender, expandedIDs, agent.BoardMessageStatusRead)
 		resolvedStatus = agent.BoardMessageStatusRead
 	case "acked", "ack":
-		updated, err = store.AckMessages(cmd.Context(), absWorkspace, identity.Sender, expandedIDs)
+		updated, err = updateRoomMessagesAsCoordinator(cmd.Context(), store, absWorkspace, roomID, identity.Sender, expandedIDs, agent.BoardMessageStatusAcked)
 		resolvedStatus = agent.BoardMessageStatusAcked
 	default:
 		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.clear", protocol.ErrorCodeEARG, fmt.Sprintf("unsupported clear mode %q", mode), map[string]any{
@@ -18992,6 +18992,54 @@ func expandRoomResolveMessageIDs(ctx context.Context, store blackboard.BoardStor
 		}
 	}
 	return out, nil
+}
+
+func updateRoomMessagesAsCoordinator(ctx context.Context, store blackboard.BoardStore, workspaceID, roomID, actorID string, messageIDs []string, status agent.BoardMessageStatus) (int, error) {
+	if len(messageIDs) == 0 {
+		return 0, nil
+	}
+	messages, err := store.ListRoomMessages(ctx, workspaceID, roomID, roomTaskScanLimit)
+	if err != nil {
+		return 0, fmt.Errorf("list room messages: %w", err)
+	}
+	byID := make(map[string]agent.BoardMessage, len(messages))
+	for _, msg := range messages {
+		byID[strings.TrimSpace(msg.ID)] = msg
+	}
+
+	idsByActor := make(map[string][]string)
+	for _, id := range messageIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		targetActor := strings.TrimSpace(actorID)
+		if msg, ok := byID[id]; ok {
+			recipient := strings.TrimSpace(msg.Recipient)
+			if recipient != "" && recipient != agent.BroadcastRecipient {
+				targetActor = recipient
+			}
+		}
+		idsByActor[targetActor] = append(idsByActor[targetActor], id)
+	}
+
+	updated := 0
+	for targetActor, ids := range idsByActor {
+		var count int
+		switch status {
+		case agent.BoardMessageStatusAcked:
+			count, err = store.AckMessages(ctx, workspaceID, targetActor, ids)
+		case agent.BoardMessageStatusRead:
+			count, err = store.MarkRead(ctx, workspaceID, targetActor, ids)
+		default:
+			return updated, fmt.Errorf("unsupported room message status %q", status)
+		}
+		if err != nil {
+			return updated, err
+		}
+		updated += count
+	}
+	return updated, nil
 }
 
 func roomMessageChainKey(msg agent.BoardMessage) string {

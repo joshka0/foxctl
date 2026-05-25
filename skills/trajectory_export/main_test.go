@@ -99,7 +99,7 @@ func seedUserRequest(t *testing.T, rc *skillmain.RunContext, workspaceID, text s
 	ur := trajectory.UserRequestCapture{
 		WorkspaceID: workspaceID,
 		Actor:       "user",
-		Source:      "test",
+		Source:      trajectory.SourceCLI,
 		TS:          time.Now().UTC(),
 		Text:        text,
 	}
