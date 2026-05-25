@@ -3,10 +3,14 @@ package loader
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
+	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/joshka0/foxctl/internal/storage"
 	"github.com/joshka0/foxctl/internal/storage/cas"
 	memstore "github.com/joshka0/foxctl/internal/storage/memory"
@@ -214,6 +218,184 @@ func TestInvalidSpecs(t *testing.T) {
 	if _, err := l.Load(context.Background(), filepath.Join("testdata", "malformed.yaml")); err == nil {
 		t.Fatalf("expected parse error")
 	}
+}
+
+func TestIndexOperationsRejectsDuplicateOperationIDs(t *testing.T) {
+	t.Parallel()
+	responses := openapi3.NewResponses(openapi3.WithStatus(200, &openapi3.ResponseRef{
+		Value: openapi3.NewResponse().WithDescription("OK"),
+	}))
+	doc := &openapi3.T{
+		OpenAPI: "3.0.3",
+		Info:    &openapi3.Info{Title: "Duplicate API", Version: "1.0.0"},
+		Paths: openapi3.NewPaths(
+			openapi3.WithPath("/alpha", &openapi3.PathItem{
+				Get: &openapi3.Operation{
+					OperationID: "sameOperation",
+					Responses:   responses,
+				},
+			}),
+			openapi3.WithPath("/beta", &openapi3.PathItem{
+				Post: &openapi3.Operation{
+					OperationID: "sameOperation",
+					Responses:   responses,
+				},
+			}),
+		),
+	}
+
+	if _, err := indexOperations(doc); err == nil || !strings.Contains(err.Error(), `duplicate operationId "sameOperation"`) {
+		t.Fatalf("indexOperations duplicate error = %v", err)
+	}
+}
+
+func FuzzParseGeneratedSpecIndexesOperations(f *testing.F) {
+	seeds := []struct {
+		operationID string
+		pathPart    string
+		methodSeed  uint8
+		duplicate   bool
+		strict      bool
+	}{
+		{operationID: "listUsers", pathPart: "users", methodSeed: 0},
+		{operationID: "createWidget", pathPart: "widgets-id", methodSeed: 1, strict: true},
+		{operationID: "duplicateOp", pathPart: "dupes", methodSeed: 2, duplicate: true},
+		{operationID: "   ", pathPart: "blank-operation", methodSeed: 3},
+	}
+	for _, seed := range seeds {
+		f.Add(seed.operationID, seed.pathPart, seed.methodSeed, seed.duplicate, seed.strict)
+	}
+
+	f.Fuzz(func(t *testing.T, operationID, pathPart string, methodSeed uint8, duplicate, strict bool) {
+		const maxInputLen = 256
+		if len(operationID) > maxInputLen || len(pathPart) > maxInputLen {
+			t.Skip("input too large for focused OpenAPI loader fuzzing")
+		}
+		if !utf8.ValidString(operationID) || !utf8.ValidString(pathPart) {
+			t.Skip("OpenAPI operation IDs and paths are UTF-8 strings")
+		}
+
+		method := openAPIFuzzMethod(methodSeed)
+		path := "/" + openAPIFuzzPathPart(pathPart)
+		raw := mustGeneratedOpenAPISpec(t, operationID, path, method, duplicate)
+
+		l := New(nil, nil)
+		spec, err := l.parse(context.Background(), raw, "memory:fuzz", "sha256:fuzz", loadOptions{strict: strict})
+		if duplicate && strings.TrimSpace(operationID) != "" {
+			if err == nil {
+				t.Fatalf("duplicate operationId %q parsed successfully", operationID)
+			}
+			if !strings.Contains(err.Error(), "duplicate operationId") && !strings.Contains(err.Error(), "same operation id") {
+				t.Fatalf("duplicate operationId error = %v", err)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("parse generated spec: %v\n%s", err, raw)
+		}
+
+		if spec.Doc == nil {
+			t.Fatal("parsed spec has nil document")
+		}
+		if spec.Version != "3.0.3" {
+			t.Fatalf("version = %q, want 3.0.3", spec.Version)
+		}
+		if spec.Source != "memory:fuzz" || spec.Digest != "sha256:fuzz" {
+			t.Fatalf("source/digest = %q/%q", spec.Source, spec.Digest)
+		}
+		if !bytes.Equal(spec.Raw, raw) {
+			t.Fatal("parsed spec did not preserve raw spec bytes")
+		}
+
+		if strings.TrimSpace(operationID) == "" {
+			if len(spec.Operations) != 0 {
+				t.Fatalf("blank operationId indexed operations: %+v", spec.Operations)
+			}
+			return
+		}
+
+		if len(spec.Operations) != 1 {
+			t.Fatalf("operation count = %d, want 1: %+v", len(spec.Operations), spec.Operations)
+		}
+		op, err := spec.GetOperation(operationID)
+		if err != nil {
+			t.Fatalf("get operation: %v", err)
+		}
+		if op.ID != operationID || op.Method != strings.ToUpper(method) || op.Path != path {
+			t.Fatalf("operation = %+v, want id=%q method=%q path=%q", op, operationID, strings.ToUpper(method), path)
+		}
+		if op.Responses == nil {
+			t.Fatal("operation responses were not preserved")
+		}
+	})
+}
+
+func mustGeneratedOpenAPISpec(t *testing.T, operationID, path, method string, duplicate bool) []byte {
+	t.Helper()
+
+	operation := map[string]any{
+		"operationId": operationID,
+		"responses": map[string]any{
+			"200": map[string]any{"description": "OK"},
+		},
+	}
+	pathItem := map[string]any{method: operation}
+	if duplicate && strings.TrimSpace(operationID) != "" {
+		otherMethod := "post"
+		if method == otherMethod {
+			otherMethod = "put"
+		}
+		pathItem[otherMethod] = map[string]any{
+			"operationId": operationID,
+			"responses": map[string]any{
+				"200": map[string]any{"description": "OK"},
+			},
+		}
+	}
+
+	raw, err := json.Marshal(map[string]any{
+		"openapi": "3.0.3",
+		"info": map[string]any{
+			"title":   "Fuzz API",
+			"version": "1.0.0",
+		},
+		"paths": map[string]any{path: pathItem},
+	})
+	if err != nil {
+		t.Fatalf("marshal generated spec: %v", err)
+	}
+	return raw
+}
+
+func openAPIFuzzMethod(seed uint8) string {
+	methods := []string{"get", "post", "put", "patch", "delete", "head", "options"}
+	return methods[int(seed)%len(methods)]
+}
+
+func openAPIFuzzPathPart(raw string) string {
+	var b strings.Builder
+	lastSlash := false
+	for _, r := range raw {
+		if b.Len() >= 96 {
+			break
+		}
+		switch {
+		case r >= 'a' && r <= 'z',
+			r >= 'A' && r <= 'Z',
+			r >= '0' && r <= '9',
+			r == '-' || r == '_' || r == '.':
+			b.WriteRune(r)
+			lastSlash = false
+		case r == '/' && b.Len() > 0 && !lastSlash:
+			b.WriteByte('/')
+			lastSlash = true
+		}
+	}
+	path := strings.Trim(b.String(), "/")
+	if path == "" {
+		return "resource"
+	}
+	return path
 }
 
 func bytesReader(data []byte) *bytes.Reader {
