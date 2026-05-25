@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"text/template"
+
+	"github.com/joshka0/foxctl/internal/domain/policy"
 )
 
 // ---------------------------------------------------------------------------
@@ -21,6 +23,26 @@ import (
 // The config string is transform-specific JSON.
 // All transforms return Go errors; the caller wraps them in error envelopes.
 type TransformFunc func(ctx context.Context, input any, config string) (any, error)
+
+type transformWorkspaceKey struct{}
+
+func withTransformWorkspace(ctx context.Context, workspace string) context.Context {
+	if strings.TrimSpace(workspace) == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, transformWorkspaceKey{}, workspace)
+}
+
+func transformWorkspace(ctx context.Context) (string, error) {
+	if workspace, ok := ctx.Value(transformWorkspaceKey{}).(string); ok && strings.TrimSpace(workspace) != "" {
+		return workspace, nil
+	}
+	workspace, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("resolve transform workspace: %w", err)
+	}
+	return workspace, nil
+}
 
 // transformRegistry maps TransformKind values to their implementations.
 var transformRegistry = map[TransformKind]TransformFunc{
@@ -417,7 +439,13 @@ type fileWriteResult struct {
 	Bytes   int    `json:"bytes"`
 }
 
-func fileWriteTransform(_ context.Context, input any, configStr string) (any, error) {
+type fileWriteTarget struct {
+	Workspace string
+	RelPath   string
+	Path      string
+}
+
+func fileWriteTransform(ctx context.Context, input any, configStr string) (any, error) {
 	// Parse config.
 	var cfg FileWriteConfig
 	if err := json.Unmarshal([]byte(configStr), &cfg); err != nil {
@@ -433,8 +461,9 @@ func fileWriteTransform(_ context.Context, input any, configStr string) (any, er
 		format = "raw"
 	}
 
-	// Resolve template variables in the path from envelope data.
-	path, err := resolvePathTemplate(cfg.Path, input)
+	// Resolve template variables in the path from envelope data, then constrain
+	// the result to the active flow workspace before touching the filesystem.
+	target, err := resolveFileWriteTarget(ctx, cfg.Path, input)
 	if err != nil {
 		return nil, fmt.Errorf("transform file_write: %w", err)
 	}
@@ -445,29 +474,63 @@ func fileWriteTransform(_ context.Context, input any, configStr string) (any, er
 		return nil, fmt.Errorf("transform file_write: %w", err)
 	}
 
+	root, err := os.OpenRoot(target.Workspace)
+	if err != nil {
+		return nil, fmt.Errorf("transform file_write: failed to open workspace %q: %w", target.Workspace, err)
+	}
+	defer func() { _ = root.Close() }()
+
 	// Create parent directories if needed.
-	dir := filepath.Dir(path)
+	dir := filepath.Dir(target.RelPath)
 	if dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := root.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("transform file_write: failed to create directory %q: %w", dir, err)
 		}
 	}
 
 	// Write file.
-	if err := os.WriteFile(path, content, 0o644); err != nil {
-		return nil, fmt.Errorf("transform file_write: failed to write file %q: %w", path, err)
+	if err := root.WriteFile(target.RelPath, content, 0o644); err != nil {
+		return nil, fmt.Errorf("transform file_write: failed to write file %q: %w", target.Path, err)
 	}
 
 	// Build result.
-	summary := fmt.Sprintf("Wrote %d bytes to %s", len(content), path)
+	summary := fmt.Sprintf("Wrote %d bytes to %s", len(content), target.Path)
 	result := fileWriteResult{
-		Path:    path,
+		Path:    target.Path,
 		Format:  format,
 		Summary: summary,
 		Bytes:   len(content),
 	}
 
 	return result, nil
+}
+
+func resolveFileWriteTarget(ctx context.Context, configuredPath string, input any) (fileWriteTarget, error) {
+	path, err := resolvePathTemplate(configuredPath, input)
+	if err != nil {
+		return fileWriteTarget{}, err
+	}
+	workspace, err := transformWorkspace(ctx)
+	if err != nil {
+		return fileWriteTarget{}, err
+	}
+	validator, err := policy.NewPathValidator(workspace, nil)
+	if err != nil {
+		return fileWriteTarget{}, fmt.Errorf("invalid workspace: %w", err)
+	}
+	path, err = validator.ValidatePath(path)
+	if err != nil {
+		return fileWriteTarget{}, fmt.Errorf("path %q is outside workspace: %w", path, err)
+	}
+	rel, err := filepath.Rel(validator.Workspace(), path)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fileWriteTarget{}, fmt.Errorf("path %q is outside workspace", path)
+	}
+	return fileWriteTarget{
+		Workspace: validator.Workspace(),
+		RelPath:   rel,
+		Path:      path,
+	}, nil
 }
 
 // resolvePathTemplate resolves {{.field.subfield}} template expressions in the
