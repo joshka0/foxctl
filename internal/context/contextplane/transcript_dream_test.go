@@ -125,6 +125,118 @@ func TestPlanTranscriptDreamNoteSanitizesDraftPath(t *testing.T) {
 	}
 }
 
+func TestPlanTranscriptDreamNoteRendersAgentBlur(t *testing.T) {
+	note, err := PlanTranscriptDreamNote(TranscriptDreamNoteInput{
+		Project:          "foxctl",
+		WorkspaceID:      "foxctl",
+		Provider:         "codex",
+		SessionID:        "sess-1",
+		SourceDigest:     "sha256:source",
+		Now:              time.Date(2026, 5, 24, 10, 30, 0, 0, time.UTC),
+		Title:            "You own exactly one file",
+		DistilledSummary: "You own exactly one file.",
+		BlurredMechanisms: []TranscriptDreamMechanism{{
+			Name:    "direction",
+			Summary: "You own exactly one file.",
+			Tags:    []string{"direction"},
+		}},
+		SourceRefs: []TranscriptDreamSourceRef{{RecordID: "record-1", Summary: "You own exactly one file."}},
+		AgentBlur: &TranscriptDreamAgentBlur{
+			Agent:          "pi",
+			AbstractSchema: "bounded ownership reduces coordination ambiguity by assigning one actor one explicit responsibility",
+			MechanismTags:  []string{"bounded_ownership", "coordination_control"},
+			Confidence:     0.86,
+			LeakageRisk:    0.02,
+		},
+	})
+	if err != nil {
+		t.Fatalf("PlanTranscriptDreamNote() error = %v", err)
+	}
+	for _, want := range []string{
+		`agent_blurred: "true"`,
+		`blur_agent: "pi"`,
+		`foxctl/agent-blurred`,
+		`## Agent Blurred Mechanism`,
+		`bounded ownership reduces coordination ambiguity`,
+		`Mechanism tags: bounded_ownership, coordination_control`,
+	} {
+		if !strings.Contains(note.Content, want) {
+			t.Fatalf("agent blur note missing %q:\n%s", want, note.Content)
+		}
+	}
+}
+
+func TestBuildTranscriptDreamBlurAgentPromptInputHidesConcreteSourceRefs(t *testing.T) {
+	input := TranscriptDreamNoteInput{
+		Project:          "/repo/foxctl",
+		WorkspaceID:      "repo-foxctl",
+		Provider:         "codex",
+		SessionID:        "sess-1",
+		SourceDigest:     "sha256:source",
+		Title:            "You own exactly one file",
+		DistilledSummary: "You own exactly one file.",
+		BlurredMechanisms: []TranscriptDreamMechanism{
+			{Name: "direction", Summary: "You own exactly one file."},
+			{Name: "command", Summary: "<user_shell_command> git status </user_shell_command>"},
+		},
+		SourceRefs: []TranscriptDreamSourceRef{{
+			RecordID:     "record-1",
+			SessionIDs:   []string{"sess-1"},
+			Summary:      "The assistant repeated the one-file ownership rule.",
+			EvidenceRefs: []string{"file:/home/dev/.codex/sessions/session.jsonl"},
+		}},
+	}
+	got, err := BuildTranscriptDreamBlurAgentPromptInput(input)
+	if err != nil {
+		t.Fatalf("BuildTranscriptDreamBlurAgentPromptInput() error = %v", err)
+	}
+	if got.ID != "transcript-dream" {
+		t.Fatalf("ID=%q want generic transcript-dream", got.ID)
+	}
+	if len(got.SourceRefs) != 0 {
+		t.Fatalf("agent prompt should not expose concrete source refs: %#v", got.SourceRefs)
+	}
+	for _, want := range []string{"record-1", "sess-1", "git status"} {
+		if !containsString(got.ForbiddenTerms, want) {
+			t.Fatalf("forbidden_terms missing %q: %v", want, got.ForbiddenTerms)
+		}
+	}
+	if !strings.Contains(got.LiteralText, "git status") {
+		t.Fatalf("literal text should include noisy material for forgetting:\n%s", got.LiteralText)
+	}
+	if !strings.Contains(BuildBlurredMechanismSchema(got.Shape), "discard command and output noise") {
+		t.Fatalf("shape does not describe transcript-noise blurring:\n%s", BuildBlurredMechanismSchema(got.Shape))
+	}
+}
+
+func TestApplyTranscriptDreamAgentBlurRejectsLiteralLeakage(t *testing.T) {
+	input := TranscriptDreamNoteInput{
+		Project:          "foxctl",
+		DistilledSummary: "You own exactly one file.",
+		BlurredMechanisms: []TranscriptDreamMechanism{{
+			Name:    "direction",
+			Summary: "You own exactly one file.",
+		}},
+		SourceRefs: []TranscriptDreamSourceRef{{RecordID: "record-1"}},
+	}
+	promptInput, err := BuildTranscriptDreamBlurAgentPromptInput(input)
+	if err != nil {
+		t.Fatalf("BuildTranscriptDreamBlurAgentPromptInput() error = %v", err)
+	}
+	got, validation := ApplyTranscriptDreamAgentBlur(input, promptInput, "pi", MemoryBlurAgentOutput{
+		AbstractSchema: "You own exactly one file as a coordination structure",
+		MechanismTags:  []string{"coordination_structure"},
+		Confidence:     0.8,
+		LeakageRisk:    0.2,
+	})
+	if validation.Valid {
+		t.Fatal("validation should reject leaked literal title")
+	}
+	if got.AgentBlur != nil {
+		t.Fatalf("rejected blur should not attach to note input: %#v", got.AgentBlur)
+	}
+}
+
 func TestPlanTranscriptDreamNoteRequiresFrontmatterInputs(t *testing.T) {
 	base := TranscriptDreamNoteInput{
 		Project:          "foxctl",

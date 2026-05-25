@@ -2,6 +2,7 @@ package dreamer
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -87,6 +88,69 @@ func TestWriteDreamNoteUsesDeterministicOverwrite(t *testing.T) {
 	}
 }
 
+func TestIndexDreamNotePassesPlannedNote(t *testing.T) {
+	note := mustPlanDreamNote(t)
+	indexer := &recordingDreamNoteIndexer{}
+
+	if err := indexDreamNote(context.Background(), indexer, note); err != nil {
+		t.Fatalf("indexDreamNote() error = %v", err)
+	}
+	if indexer.note.DraftPath != note.DraftPath || indexer.note.Content != note.Content {
+		t.Fatalf("indexed note=%+v want planned note=%+v", indexer.note, note)
+	}
+}
+
+func TestIndexDreamNoteReturnsIndexerError(t *testing.T) {
+	want := errors.New("index unavailable")
+	indexer := &recordingDreamNoteIndexer{err: want}
+
+	err := indexDreamNote(context.Background(), indexer, mustPlanDreamNote(t))
+	if !errors.Is(err, want) {
+		t.Fatalf("indexDreamNote() error=%v want %v", err, want)
+	}
+}
+
+func TestBlurSingleInsightDreamNoteInputAddsValidatedAgentBlur(t *testing.T) {
+	input := contextplane.TranscriptDreamNoteInput{
+		Project:          "foxctl",
+		WorkspaceID:      "foxctl",
+		Provider:         "codex",
+		SessionID:        "sess-1",
+		SourceDigest:     "sha256:source",
+		Title:            "You own exactly one file",
+		DistilledSummary: "You own exactly one file.",
+		BlurredMechanisms: []contextplane.TranscriptDreamMechanism{{
+			Name:    "direction",
+			Summary: "You own exactly one file.",
+		}},
+		SourceRefs: []contextplane.TranscriptDreamSourceRef{{RecordID: "record-1", Summary: "You own exactly one file."}},
+	}
+	agent := &recordingDreamBlurAgent{output: contextplane.MemoryBlurAgentOutput{
+		AbstractSchema: "single-owner boundaries reduce coordination ambiguity across parallel workers",
+		MechanismTags:  []string{"bounded_ownership"},
+		Confidence:     0.87,
+		LeakageRisk:    0.01,
+	}}
+
+	got, ok, err := blurSingleInsightDreamNoteInput(context.Background(), agent, "pi", input)
+	if err != nil {
+		t.Fatalf("blurSingleInsightDreamNoteInput() error = %v", err)
+	}
+	if !ok || got.AgentBlur == nil {
+		t.Fatalf("expected accepted agent blur: ok=%v input=%#v", ok, got.AgentBlur)
+	}
+	if agent.input.ID != "transcript-dream" || len(agent.input.SourceRefs) != 0 {
+		t.Fatalf("agent prompt should use generic id and hide concrete source refs: %#v", agent.input)
+	}
+	note, err := contextplane.PlanTranscriptDreamNote(got)
+	if err != nil {
+		t.Fatalf("PlanTranscriptDreamNote() error = %v", err)
+	}
+	if !strings.Contains(note.Content, "## Agent Blurred Mechanism") || !strings.Contains(note.Content, "bounded_ownership") {
+		t.Fatalf("blurred note content missing agent abstraction:\n%s", note.Content)
+	}
+}
+
 func mustPlanDreamNote(t *testing.T) contextplane.TranscriptDreamNote {
 	t.Helper()
 	result := transcriptpipeline.SingleRunResult{
@@ -129,4 +193,24 @@ func (w *recordingDreamNoteWriter) CreateNote(_ context.Context, notePath, conte
 	w.content = content
 	w.overwrite = overwrite
 	return nil
+}
+
+type recordingDreamNoteIndexer struct {
+	note contextplane.TranscriptDreamNote
+	err  error
+}
+
+func (i *recordingDreamNoteIndexer) IndexDreamNote(_ context.Context, note contextplane.TranscriptDreamNote) error {
+	i.note = note
+	return i.err
+}
+
+type recordingDreamBlurAgent struct {
+	input  contextplane.MemoryBlurAgentPromptInput
+	output contextplane.MemoryBlurAgentOutput
+}
+
+func (a *recordingDreamBlurAgent) BlurMemory(_ context.Context, input contextplane.MemoryBlurAgentPromptInput) (contextplane.MemoryBlurAgentOutput, string, error) {
+	a.input = input
+	return a.output, "", nil
 }

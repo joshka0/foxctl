@@ -2,6 +2,7 @@ package memoryblur
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -78,6 +79,9 @@ func TestNewPiAgentDefaultsToSDKRunner(t *testing.T) {
 	}
 	if len(agent.opts.Args) < 2 || agent.opts.Args[0] != "run" || !strings.Contains(agent.opts.Args[1], "memory-blur-agent.ts") {
 		t.Fatalf("unexpected args=%v", agent.opts.Args)
+	}
+	if _, err := os.Stat(agent.opts.Args[1]); err != nil {
+		t.Fatalf("default pi sdk script path is not runnable from package tests: %v", err)
 	}
 }
 

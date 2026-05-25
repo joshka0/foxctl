@@ -17,19 +17,26 @@ import (
 type EmbedFunc historypkg.HistoryRecordEmbedFunc
 
 type SingleInsightProcessorConfig struct {
-	Runtime     transcriptpipeline.LocalModelRuntime
-	StorageRoot string
-	CASPath     string
-	ActorID     string
-	FrameLimit  int
-	MemoryStore *memstore.Store
-	Embed       EmbedFunc
-	NoteWriter  DreamNoteWriter
-	Now         func() time.Time
+	Runtime       transcriptpipeline.LocalModelRuntime
+	StorageRoot   string
+	CASPath       string
+	ActorID       string
+	FrameLimit    int
+	MemoryStore   *memstore.Store
+	Embed         EmbedFunc
+	NoteWriter    DreamNoteWriter
+	NoteIndexer   DreamNoteIndexer
+	BlurAgent     contextplane.MemoryBlurAgent
+	BlurAgentName string
+	Now           func() time.Time
 }
 
 type DreamNoteWriter interface {
 	CreateNote(ctx context.Context, notePath, content string, overwrite bool) error
+}
+
+type DreamNoteIndexer interface {
+	IndexDreamNote(ctx context.Context, note contextplane.TranscriptDreamNote) error
 }
 
 type SingleInsightProcessor struct {
@@ -93,8 +100,19 @@ func (p *SingleInsightProcessor) Process(ctx context.Context, source Source) (Pr
 	}
 
 	dreamNotes := 0
+	indexedDreamNotes := 0
+	blurred := false
 	if p.cfg.NoteWriter != nil && len(persisted.Persisted) > 0 {
-		note, err := PlanSingleInsightDreamNote(result, persisted.Persisted, p.cfg.Now(), source)
+		noteInput := PlanSingleInsightDreamNoteInput(result, persisted.Persisted, p.cfg.Now(), source)
+		if p.cfg.BlurAgent != nil {
+			var ok bool
+			noteInput, ok, err = blurSingleInsightDreamNoteInput(ctx, p.cfg.BlurAgent, p.cfg.BlurAgentName, noteInput)
+			if err != nil {
+				return ProcessResult{}, err
+			}
+			blurred = ok
+		}
+		note, err := contextplane.PlanTranscriptDreamNote(noteInput)
 		if err != nil {
 			return ProcessResult{}, err
 		}
@@ -102,14 +120,26 @@ func (p *SingleInsightProcessor) Process(ctx context.Context, source Source) (Pr
 			return ProcessResult{}, err
 		}
 		dreamNotes = 1
+		if p.cfg.NoteIndexer != nil {
+			if err := indexDreamNote(ctx, p.cfg.NoteIndexer, note); err != nil {
+				return ProcessResult{}, err
+			}
+			indexedDreamNotes = 1
+		}
 	}
 	return ProcessResult{
-		HistoryRecords: len(persisted.Persisted),
-		DreamNotes:     dreamNotes,
+		HistoryRecords:    len(persisted.Persisted),
+		DreamNotes:        dreamNotes,
+		IndexedDreamNotes: indexedDreamNotes,
+		Blurred:           blurred,
 	}, nil
 }
 
 func PlanSingleInsightDreamNote(result transcriptpipeline.SingleRunResult, persisted []historypkg.PersistedHistoryRecord, now time.Time, source Source) (contextplane.TranscriptDreamNote, error) {
+	return contextplane.PlanTranscriptDreamNote(PlanSingleInsightDreamNoteInput(result, persisted, now, source))
+}
+
+func PlanSingleInsightDreamNoteInput(result transcriptpipeline.SingleRunResult, persisted []historypkg.PersistedHistoryRecord, now time.Time, source Source) contextplane.TranscriptDreamNoteInput {
 	sourceRefs := make([]contextplane.TranscriptDreamSourceRef, 0, len(result.HistoryRecords))
 	for _, record := range result.HistoryRecords {
 		if !persistedContainsRecord(persisted, record.RecordID) {
@@ -126,7 +156,7 @@ func PlanSingleInsightDreamNote(result transcriptpipeline.SingleRunResult, persi
 		})
 	}
 	mechanisms := dreamMechanismsFromResult(result)
-	return contextplane.PlanTranscriptDreamNote(contextplane.TranscriptDreamNoteInput{
+	return contextplane.TranscriptDreamNoteInput{
 		Project:           firstNonEmpty(result.Parsed.WorkspacePath, result.WorkspaceFamilyPath, "workspace"),
 		WorkspaceID:       compactDreamTag(firstNonEmpty(result.Parsed.WorkspacePath, result.WorkspaceFamilyPath, "workspace")),
 		Provider:          firstNonEmpty(source.Provider, string(result.Parsed.Provider)),
@@ -141,7 +171,29 @@ func PlanSingleInsightDreamNote(result transcriptpipeline.SingleRunResult, persi
 			Required:    true,
 			GeneratedBy: "foxctl dreamer",
 		},
-	})
+	}
+}
+
+func blurSingleInsightDreamNoteInput(ctx context.Context, agent contextplane.MemoryBlurAgent, agentName string, input contextplane.TranscriptDreamNoteInput) (contextplane.TranscriptDreamNoteInput, bool, error) {
+	if agent == nil {
+		return input, false, nil
+	}
+	promptInput, err := contextplane.BuildTranscriptDreamBlurAgentPromptInput(input)
+	if err != nil {
+		return input, false, err
+	}
+	output, _, err := agent.BlurMemory(ctx, promptInput)
+	if err != nil {
+		return input, false, fmt.Errorf("dream blur agent: %w", err)
+	}
+	blurred, validation := contextplane.ApplyTranscriptDreamAgentBlur(input, promptInput, agentName, output)
+	if !validation.Valid {
+		if len(validation.LeakedTerms) > 0 {
+			return input, false, fmt.Errorf("dream blur agent validation failed: %s (leaked_terms=%s)", strings.Join(validation.Errors, "; "), strings.Join(validation.LeakedTerms, ", "))
+		}
+		return input, false, fmt.Errorf("dream blur agent validation failed: %s", strings.Join(validation.Errors, "; "))
+	}
+	return blurred, true, nil
 }
 
 func NewObsidianDreamNoteWriter(vaultPath string) *obsidiantool.Writer {
@@ -153,6 +205,10 @@ func NewObsidianDreamNoteWriter(vaultPath string) *obsidiantool.Writer {
 
 func writeDreamNote(ctx context.Context, writer DreamNoteWriter, note contextplane.TranscriptDreamNote) error {
 	return writer.CreateNote(ctx, note.DraftPath, note.Content, true)
+}
+
+func indexDreamNote(ctx context.Context, indexer DreamNoteIndexer, note contextplane.TranscriptDreamNote) error {
+	return indexer.IndexDreamNote(ctx, note)
 }
 
 func persistedContainsRecord(persisted []historypkg.PersistedHistoryRecord, recordID string) bool {
