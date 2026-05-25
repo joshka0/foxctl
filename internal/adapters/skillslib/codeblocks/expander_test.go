@@ -230,6 +230,126 @@ func TestExpandMatchesPropertyMatchLinesAreSortedUniqueAndCounted(t *testing.T) 
 	}
 }
 
+func FuzzExpandMatchesMaintainsBlockInvariants(f *testing.F) {
+	seeds := []struct {
+		source     string
+		langSeed   uint8
+		targetSeed uint8
+		maxSeed    uint8
+		lineA      uint16
+		lineB      uint16
+		lineC      uint16
+	}{
+		{source: "package main\n\nfunc main() {\n\tprintln(\"needle\")\n}\n", langSeed: 0, lineA: 4, lineB: 3, lineC: 1},
+		{source: "class Greeter:\n    def hello(self):\n        return 'needle'\n", langSeed: 1, lineA: 3, lineB: 2, lineC: 1},
+		{source: "export const fn = () => {\n  return 'needle'\n}\n", langSeed: 3, lineA: 2, lineB: 1, lineC: 3},
+		{source: "alpha\n\nbeta needle\ngamma\n", langSeed: 8, targetSeed: 1, lineA: 3, lineB: 1, lineC: 99},
+	}
+	for _, seed := range seeds {
+		f.Add(seed.source, seed.langSeed, seed.targetSeed, seed.maxSeed, seed.lineA, seed.lineB, seed.lineC)
+	}
+
+	f.Fuzz(func(t *testing.T, source string, langSeed, targetSeed, maxSeed uint8, lineA, lineB, lineC uint16) {
+		const (
+			maxSourceBytes = 4096
+			maxLines       = 200
+		)
+		if len(source) > maxSourceBytes {
+			t.Skip("source too large for focused codeblock fuzzing")
+		}
+
+		lines := strings.Split(source, "\n")
+		if len(lines) == 0 {
+			return
+		}
+		if len(lines) > maxLines {
+			t.Skip("too many source lines for focused codeblock fuzzing")
+		}
+
+		maxBlockLines := int(maxSeed%60) + 1
+		expander := NewExpander(
+			fuzzLanguage(langSeed),
+			maxBlockLines,
+			WithTarget(fuzzTarget(targetSeed)),
+		)
+		validMatches := []RawMatch{
+			{File: "fuzz.txt", Line: fuzzLine(lineA, len(lines)), Text: "needle"},
+			{File: "fuzz.txt", Line: fuzzLine(lineB, len(lines)), Text: "needle"},
+			{File: "fuzz.txt", Line: fuzzLine(lineC, len(lines)), Text: "needle"},
+		}
+		validMatchLines := make(map[int]struct{}, len(validMatches))
+		for _, match := range validMatches {
+			validMatchLines[match.Line] = struct{}{}
+		}
+		matches := append([]RawMatch(nil), validMatches...)
+		matches = append(
+			matches,
+			RawMatch{File: "fuzz.txt", Line: 0, Text: "invalid-zero"},
+			RawMatch{File: "fuzz.txt", Line: -1, Text: "invalid-negative"},
+			RawMatch{File: "fuzz.txt", Line: len(lines) + 1, Text: "invalid-out-of-range"},
+		)
+
+		blocks := expander.ExpandMatches("fuzz.txt", lines, matches)
+		if len(blocks) > len(validMatches) {
+			t.Fatalf("got %d blocks for %d valid single-line matches", len(blocks), len(validMatches))
+		}
+
+		for _, block := range blocks {
+			if block.File != "fuzz.txt" {
+				t.Fatalf("block file = %q, want fuzz.txt", block.File)
+			}
+			if block.Language != string(expander.lang) {
+				t.Fatalf("block language = %q, want %q", block.Language, expander.lang)
+			}
+			if block.StartLine < 1 || block.EndLine < block.StartLine || block.EndLine > len(lines) {
+				t.Fatalf("invalid block range %d-%d for %d lines", block.StartLine, block.EndLine, len(lines))
+			}
+			if got, want := block.Source, strings.Join(lines[block.StartLine-1:block.EndLine], "\n"); got != want {
+				t.Fatalf("block source = %q, want %q", got, want)
+			}
+			if block.MatchCount != len(block.MatchLines) {
+				t.Fatalf("match count = %d, want len(match lines) %d", block.MatchCount, len(block.MatchLines))
+			}
+			if !sortedUnique(block.MatchLines) {
+				t.Fatalf("match lines are not sorted and unique: %v", block.MatchLines)
+			}
+			for _, line := range block.MatchLines {
+				if line < block.StartLine || line > block.EndLine {
+					t.Fatalf("match line %d outside block range %d-%d", line, block.StartLine, block.EndLine)
+				}
+				if _, ok := validMatchLines[line]; !ok {
+					t.Fatalf("invalid or out-of-range match line %d survived into block metadata", line)
+				}
+			}
+		}
+	})
+}
+
+func fuzzLanguage(seed uint8) Language {
+	languages := []Language{LangGo, LangPython, LangJS, LangTS, LangGDScript, LangElixir, LangRuby, LangLua, LangGeneric}
+	return languages[int(seed)%len(languages)]
+}
+
+func fuzzTarget(seed uint8) Target {
+	targets := []Target{TargetAny, TargetBlock, TargetFunction, TargetClass}
+	return targets[int(seed)%len(targets)]
+}
+
+func fuzzLine(seed uint16, lineCount int) int {
+	return int(seed%uint16(lineCount)) + 1
+}
+
+func sortedUnique(lines []int) bool {
+	previous := 0
+	for i, line := range lines {
+		if i > 0 && line <= previous {
+			return false
+		}
+		previous = line
+	}
+	return true
+}
+
 func assertCandidate(t *testing.T, got, want goCandidate) {
 	t.Helper()
 	if got.startLine != want.startLine || got.endLine != want.endLine || got.symbolName != want.symbolName || got.symbolKind != want.symbolKind {
