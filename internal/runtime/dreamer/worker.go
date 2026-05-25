@@ -37,9 +37,10 @@ type Source struct {
 
 // ProcessResult describes durable work completed for one source.
 type ProcessResult struct {
-	HistoryRecords int  `json:"history_records"`
-	DreamNotes     int  `json:"dream_notes"`
-	Blurred        bool `json:"blurred"`
+	HistoryRecords    int  `json:"history_records"`
+	DreamNotes        int  `json:"dream_notes"`
+	IndexedDreamNotes int  `json:"indexed_dream_notes,omitempty"`
+	Blurred           bool `json:"blurred"`
 }
 
 // Report is returned by one dreamer pass.

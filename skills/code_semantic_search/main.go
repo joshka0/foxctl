@@ -126,6 +126,7 @@ const (
 	ScopeTasks    = "tasks"
 	ScopeCodemaps = "codemaps"
 	ScopeContext  = "context"
+	ScopeDreams   = "dreams"
 )
 
 // Retrieval profiles.
@@ -137,7 +138,7 @@ const (
 // Input is the expected JSON input for code/semantic_search operations.
 type Input struct {
 	Query              string   `json:"query,omitempty"`                // Empty query with format=tree returns full repo tree
-	Scope              []string `json:"scope,omitempty"`                // ["symbols", "sessions", "memories", "tasks"]
+	Scope              []string `json:"scope,omitempty"`                // ["symbols", "sessions", "memories", "tasks", "dreams"]
 	Profile            string   `json:"profile,omitempty"`              // "default" or "code"
 	Workspace          string   `json:"workspace,omitempty"`            // Workspace path (defaults to cwd)
 	VaultPath          string   `json:"vault_path,omitempty"`           // Optional knowledge-vault path for context scope
@@ -405,10 +406,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Validate scope values
-	validScopes := map[string]bool{ScopeSymbols: true, ScopeSessions: true, ScopeMemories: true, ScopeTasks: true, ScopeCodemaps: true, ScopeContext: true}
+	validScopes := map[string]bool{ScopeSymbols: true, ScopeSessions: true, ScopeMemories: true, ScopeTasks: true, ScopeCodemaps: true, ScopeContext: true, ScopeDreams: true}
 	for _, s := range in.Scope {
 		if !validScopes[s] {
-			return skillerr.Validationf("invalid scope: %s (valid: symbols, sessions, memories, tasks, codemaps, context)", s)
+			return skillerr.Validationf("invalid scope: %s (valid: symbols, sessions, memories, tasks, codemaps, context, dreams)", s)
 		}
 	}
 	if in.Profile != ProfileDefault && in.Profile != ProfileCode {
@@ -595,7 +596,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, geminiKey 
 
 	// Parallel search across enabled scopes
 	var wg sync.WaitGroup
-	resultsCh := make(chan sourceResults, 5) // symbols, sessions, memories, tasks, codemaps
+	resultsCh := make(chan sourceResults, max(len(in.Scope), 1))
 	var symbolGroups []retrievalv2.Group
 
 	// Search symbols using searchindex + retrieval/v2.
@@ -768,6 +769,26 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, geminiKey 
 			results, hint, err := searchContext(sourceCtx, cfg, workspacePath, in.Query, in.VaultPath, nil, in.Limit*2)
 			resultsCh <- sourceResults{
 				source:  ScopeContext,
+				results: results,
+				err:     err,
+				latency: time.Since(start),
+				hint:    hint,
+			}
+		}()
+	}
+
+	// Search agent-blurred transcript dreams in the Obsidian vault.
+	if scopeSet[ScopeDreams] {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			start := time.Now()
+			sourceCtx, sourceCancel := context.WithTimeout(ctx, DefaultSourceTimeout)
+			defer sourceCancel()
+
+			results, hint, err := searchDreams(sourceCtx, cfg, workspacePath, in.Query, in.VaultPath, nil, in.Limit*2)
+			resultsCh <- sourceResults{
+				source:  ScopeDreams,
 				results: results,
 				err:     err,
 				latency: time.Since(start),
@@ -2677,6 +2698,7 @@ func reciprocalRankFusion(sourceResults map[string][]Result, minSimilarity float
 		ScopeTasks:    0.95, // Tasks are high-value for understanding work context
 		ScopeCodemaps: 0.95, // Codemaps provide rich relationship context
 		ScopeSessions: 0.9,
+		ScopeDreams:   0.85, // Blurred dreams are structural memory, but still review-gated.
 		ScopeMemories: 0.7,
 	}
 
@@ -2766,6 +2788,64 @@ func searchContext(ctx context.Context, cfg config.Config, workspacePath, query,
 
 	results := contextRetrievalToResults(retrieved, limit)
 	return results, hint, nil
+}
+
+func searchDreams(ctx context.Context, cfg config.Config, workspacePath, query, inputVaultPath string, semanticProvider semantic.EmbeddingProvider, limit int) ([]Result, string, error) {
+	if strings.TrimSpace(workspacePath) == "" {
+		return nil, "", fmt.Errorf("workspace path required for dreams scope")
+	}
+	if limit <= 0 {
+		limit = 5
+	}
+	vaultPath := resolveSemanticSearchVaultPath(inputVaultPath)
+	if vaultPath == "" {
+		return nil, "dreams scope has no vault configured; set FOXCTL_CONTEXTWIKI_VAULT_PATH, FOXCTL_OBSIDIAN_VAULT_PATH, or vault_path", nil
+	}
+	index, err := obsidianindex.Open(ctx, cfg.Storage.Root, vaultPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("open dreams vault index: %w", err)
+	}
+	defer func() { _ = index.Close() }()
+
+	opts := obsidianindex.DreamSearchOptions{Limit: limit, BlurredOnly: true}
+	hits, err := index.SearchDreams(ctx, query, opts)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(hits) > 0 || semanticProvider == nil {
+		return dreamSearchHitsToResults(hits, limit), "", nil
+	}
+	hits, err = index.SearchDreamsSemantic(ctx, query, semanticProvider, opts)
+	if err != nil {
+		return nil, fmt.Sprintf("dream semantic search unavailable after lexical miss: %v", err), nil
+	}
+	return dreamSearchHitsToResults(hits, limit), "", nil
+}
+
+func dreamSearchHitsToResults(hits []obsidianindex.SearchHit, limit int) []Result {
+	if limit <= 0 {
+		limit = 5
+	}
+	if len(hits) > limit {
+		hits = hits[:limit]
+	}
+	results := make([]Result, 0, len(hits))
+	for i, hit := range hits {
+		path := strings.TrimSpace(hit.Path)
+		if path == "" {
+			continue
+		}
+		results = append(results, Result{
+			Source:     ScopeDreams,
+			ID:         "dream:" + path,
+			Name:       firstNonEmpty(strings.TrimSpace(hit.Title), contextResultPathLabel(path)),
+			Path:       path,
+			Summary:    strings.TrimSpace(hit.Snippet),
+			Similarity: rankedContextSimilarity(i, len(hits)),
+			SourceRank: i + 1,
+		})
+	}
+	return results
 }
 
 func contextRetrievalToResults(retrieved contextplane.RetrievalResult, limit int) []Result {
@@ -2895,6 +2975,7 @@ func normalizeSemanticSearchScopes(scopes []string) []string {
 		ScopeTasks:    {},
 		ScopeCodemaps: {},
 		ScopeContext:  {},
+		ScopeDreams:   {},
 	}
 	out := make([]string, 0, len(scopes))
 	seen := map[string]struct{}{}

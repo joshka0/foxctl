@@ -2,10 +2,10 @@ apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: code/semantic_search
-  description: Unified semantic search across code, session, memory, and ContextWiki context with BM25/vector fallback
+  description: Unified semantic search across code, session, memory, dreams, and ContextWiki context with BM25/vector fallback
   version: 0.3.0
   author: foxctl
-  tags: [search, semantic, embedding, symbols, sessions, memories, codemaps]
+  tags: [search, semantic, embedding, symbols, sessions, memories, codemaps, dreams]
 distribution:
   type: exec
   exec:
@@ -24,7 +24,7 @@ signature:
       type: array
       required: false
       default: ["symbols", "sessions", "memories", "tasks", "codemaps"]
-      description: Sources to search (symbols, sessions, memories, tasks, codemaps, context)
+      description: Sources to search (symbols, sessions, memories, tasks, codemaps, context, dreams)
     - name: profile
       type: string
       required: false
@@ -37,7 +37,7 @@ signature:
     - name: vault_path
       type: string
       required: false
-      description: Optional vault path override for scope=["context"] (otherwise uses FOXCTL_CONTEXTWIKI_VAULT_PATH or FOXCTL_OBSIDIAN_VAULT_PATH)
+      description: Optional vault path override for scope=["context"] or scope=["dreams"] (otherwise uses FOXCTL_CONTEXTWIKI_VAULT_PATH or FOXCTL_OBSIDIAN_VAULT_PATH)
     - name: limit
       type: integer
       required: false
@@ -174,6 +174,7 @@ signature:
       - tasks: Task embeddings for work context (vector search)
       - codemaps: Semantic codemaps showing code relationships (vector search)
       - context: ContextWiki top-of-mind + latest handoff + knowledge-vault retrieval (bounded blended retrieval)
+      - dreams: Agent-blurred transcript dreams from the Obsidian vault index (scope is opt-in)
 
       The search:
       1. Generates query embedding once (reused across sources)
@@ -181,8 +182,9 @@ signature:
       3. Sessions: Performs vector similarity search on session embeddings
       4. Memories: Performs BM25 text search on named memories
       5. Context scope can use the ContextWiki control plane and clean Obsidian vault when configured
-      6. Combines results using Reciprocal Rank Fusion (RRF)
-      7. Extracts context hints from matching sessions
+      6. Dreams scope searches agent-blurred dream notes from the Obsidian vault index
+      7. Combines results using Reciprocal Rank Fusion (RRF)
+      8. Extracts context hints from matching sessions
 
       Memory decay:
       - memory_decay_enabled=true applies a soft search-time recency rerank only
@@ -209,7 +211,7 @@ signature:
       - FOXCTL_RERANK_MODEL: Reranker model (Qwen/Qwen3-Reranker-0.6B by default)
       - TURSO_DATABASE_URL: Remote Turso database URL (required for remote=true)
       - TURSO_AUTH_TOKEN: Remote Turso auth token (required for remote=true)
-      - FOXCTL_CONTEXTWIKI_VAULT_PATH or FOXCTL_OBSIDIAN_VAULT_PATH: Vault path for scope=["context"]
+      - FOXCTL_CONTEXTWIKI_VAULT_PATH or FOXCTL_OBSIDIAN_VAULT_PATH: Vault path for scope=["context"] and scope=["dreams"]
 
       Without an API key:
       - Symbol search works via BM25 text matching and ripgrep fallback
@@ -237,6 +239,7 @@ signature:
         foxctl skills run code/semantic_search --query "authentication middleware" --scope symbols --limit 10
         foxctl run code/semantic_search --input '{"query":"current sprint context","scope":["memories"],"memory_decay_enabled":true,"limit":10}'
         foxctl run code/semantic_search --input '{"query":"database migration issues","scope":["sessions"],"include_context":true}'
+        foxctl run code/semantic_search --input '{"query":"bounded actor local context","scope":["dreams"],"vault_path":"~/.foxctl/dream-vault-preview","limit":5}'
         foxctl skills run code/semantic_search --query "database migration issues" --scope sessions --include-context
     workflows:
       - id: search-all

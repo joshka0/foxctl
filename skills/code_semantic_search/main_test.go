@@ -16,6 +16,7 @@ import (
 	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/storage"
 	"github.com/joshka0/foxctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/storage/obsidianindex"
 )
 
 func TestParseInlineMode(t *testing.T) {
@@ -903,11 +904,11 @@ func TestDefaultSemanticSearchScopes(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(policyPath), 0o755); err != nil {
 		t.Fatalf("mkdir policy dir: %v", err)
 	}
-	if err := os.WriteFile(policyPath, []byte("semantic_search_default_scopes:\n  - symbols\n  - context\n  - codemaps\n  - context\n"), 0o644); err != nil {
+	if err := os.WriteFile(policyPath, []byte("semantic_search_default_scopes:\n  - symbols\n  - context\n  - dreams\n  - codemaps\n  - context\n"), 0o644); err != nil {
 		t.Fatalf("write retrieval policy: %v", err)
 	}
 	got = defaultSemanticSearchScopes(workspace, "")
-	want = []string{ScopeSymbols, ScopeContext, ScopeCodemaps}
+	want = []string{ScopeSymbols, ScopeContext, ScopeDreams, ScopeCodemaps}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("policy scopes=%v want %v", got, want)
 	}
@@ -916,6 +917,87 @@ func TestDefaultSemanticSearchScopes(t *testing.T) {
 	want = []string{ScopeSymbols, ScopeCodemaps}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("code profile should ignore broad policy scopes, got %v want %v", got, want)
+	}
+}
+
+func TestSearchDreamsUsesBlurredObsidianDreamScope(t *testing.T) {
+	ctx := context.Background()
+	storageRoot := t.TempDir()
+	vaultRoot := t.TempDir()
+	writeSemanticSearchVaultNote(t, vaultRoot, "dreams/blurred.md", `---
+title: "Cross-domain flow"
+type: "memory"
+tags:
+  - foxctl/dream
+  - foxctl/agent-blurred
+---
+
+# Cross-domain flow
+
+## Agent Blurred Mechanism
+A far-alien analogy maps a congested central gate onto local actors that clear pressure at the edge.
+`)
+	writeSemanticSearchVaultNote(t, vaultRoot, "dreams/unblurred.md", `---
+title: "Unblurred transcript"
+type: "memory"
+tags:
+  - foxctl/dream
+---
+
+# Unblurred transcript
+
+## Blurred Mechanisms
+A far-alien analogy without agent blur should stay out of the dreams scope.
+`)
+	writeSemanticSearchVaultNote(t, vaultRoot, "notes/ordinary.md", `---
+title: "Ordinary note"
+type: "memory"
+tags:
+  - foxctl/memory
+---
+
+# Ordinary note
+
+A far-alien analogy exists here too but it is not a dream note.
+`)
+
+	store, err := obsidianindex.Open(ctx, storageRoot, vaultRoot)
+	if err != nil {
+		t.Fatalf("open obsidian index: %v", err)
+	}
+	if _, err := store.Rebuild(ctx, vaultRoot); err != nil {
+		t.Fatalf("rebuild obsidian index: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close obsidian index: %v", err)
+	}
+
+	results, hint, err := searchDreams(ctx, config.Config{Storage: config.StorageSettings{Root: storageRoot}}, t.TempDir(), "far alien analogy edge pressure", vaultRoot, nil, 10)
+	if err != nil {
+		t.Fatalf("searchDreams: %v", err)
+	}
+	if hint != "" {
+		t.Fatalf("hint=%q want empty", hint)
+	}
+	if len(results) != 1 {
+		t.Fatalf("len(results)=%d want 1: %#v", len(results), results)
+	}
+	if results[0].Source != ScopeDreams || results[0].Path != "dreams/blurred.md" {
+		t.Fatalf("result=%#v", results[0])
+	}
+	if !strings.Contains(results[0].Summary, "far-alien analogy") {
+		t.Fatalf("summary=%q", results[0].Summary)
+	}
+}
+
+func writeSemanticSearchVaultNote(t *testing.T, vaultRoot, relPath, body string) {
+	t.Helper()
+	path := filepath.Join(vaultRoot, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir note dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write note: %v", err)
 	}
 }
 

@@ -1841,7 +1841,7 @@ const foxctlBranchImpactTool = defineFoxctlSkillFacade({
 
 const FoxctlCodeSemanticSearchParams = Type.Object({
 	query: Type.String({ description: "Natural-language query" }),
-	scope: Type.Optional(Type.Array(Type.String(), { description: "Search scopes, e.g. symbols, sessions, memories, tasks, codemaps, context" })),
+	scope: Type.Optional(Type.Array(Type.String(), { description: "Search scopes, e.g. symbols, sessions, memories, tasks, codemaps, context, dreams" })),
 	profile: Type.Optional(Type.String({ description: "Retrieval profile, e.g. default or code" })),
 	limit: Type.Optional(Type.Number({ description: "Maximum results", default: 20 })),
 	repo_index_mode: Type.Optional(StringEnum(["auto", "search", "dag", "off"] as const, { default: "auto" })),

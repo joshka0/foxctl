@@ -66,13 +66,64 @@ func NewBuilder(store *Store, repoRoot string) *Builder {
 // [[protocol:repoindex-build]]
 // [[invariant:at-least-one-language-enabled]]
 func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, error) {
-	result := BuildResult{}
 	start := time.Now()
-	report := func(phase, message string) {
-		if opts.Progress == nil {
+	report := newBuildProgressReporter(opts.Progress, start)
+	graph, err := b.buildGraph(ctx, opts, report)
+	if err != nil {
+		return graph.Result, err
+	}
+	if graph.Opts.DryRun {
+		report("done", "dry run complete", graph.Result)
+		return graph.Result, nil
+	}
+
+	report("persist", "replacing repoindex store", graph.Result)
+	if err := b.store.ReplaceAll(ctx, graph.Nodes, graph.Edges); err != nil {
+		return graph.Result, err
+	}
+	report("persist", "upserting symbol locators", graph.Result)
+	for _, loc := range graph.Locators {
+		if err := b.store.UpsertLocator(ctx, loc); err != nil {
+			return graph.Result, fmt.Errorf("repoindex: upsert locator: %w", err)
+		}
+	}
+
+	snapshot := ResolveGitSnapshot(ctx, graph.Opts.RepoRoot)
+	report("persist", "updating file state", graph.Result)
+	if err := b.store.ReplaceFileStates(ctx, buildFileStates(graph.Opts.RepoRoot, graph.Nodes, snapshot.HeadSHA)); err != nil {
+		return graph.Result, fmt.Errorf("repoindex: replace file state: %w", err)
+	}
+
+	meta := IndexMetaFromGitSnapshot(IndexMeta{
+		RepoRoot:      graph.Opts.RepoRoot,
+		SchemaVersion: schemaVersion,
+		IndexedAt:     time.Now().UTC(),
+		Languages:     buildLanguages(graph.Opts),
+	}, snapshot)
+	if err := b.store.SetMeta(ctx, meta); err != nil {
+		return graph.Result, err
+	}
+
+	report("done", "repoindex build complete", graph.Result)
+	return graph.Result, nil
+}
+
+type repoGraphBuild struct {
+	Opts     BuildOptions
+	Result   BuildResult
+	Nodes    []Node
+	Edges    []Edge
+	Locators []LocatorEntry
+}
+
+type buildProgressReporter func(phase, message string, result BuildResult)
+
+func newBuildProgressReporter(progress func(BuildProgress), start time.Time) buildProgressReporter {
+	return func(phase, message string, result BuildResult) {
+		if progress == nil {
 			return
 		}
-		opts.Progress(BuildProgress{
+		progress(BuildProgress{
 			Phase:     phase,
 			Message:   message,
 			ElapsedMs: time.Since(start).Milliseconds(),
@@ -80,11 +131,15 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 			Result:    result,
 		})
 	}
+}
+
+func (b *Builder) buildGraph(ctx context.Context, opts BuildOptions, report buildProgressReporter) (repoGraphBuild, error) {
+	result := BuildResult{}
 	if opts.RepoRoot == "" {
 		opts.RepoRoot = b.repoRoot
 	}
 	if opts.RepoRoot == "" {
-		return result, fmt.Errorf("repoindex: repo root is required")
+		return repoGraphBuild{Opts: opts, Result: result}, fmt.Errorf("repoindex: repo root is required")
 	}
 	if opts.RepoKey == "" {
 		opts.RepoKey = repoKey(opts.RepoRoot)
@@ -93,9 +148,9 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 		opts.Patterns = []string{"./..."}
 	}
 	if !opts.IncludeGo && !opts.IncludePython && !opts.IncludeRust && !opts.IncludeCSharp && !opts.IncludeTypescript && !opts.IncludeElixir && !opts.IncludeTerraform && !opts.IncludeKubernetes && !opts.IncludeShell {
-		return result, fmt.Errorf("repoindex: at least one language or config family must be enabled")
+		return repoGraphBuild{Opts: opts, Result: result}, fmt.Errorf("repoindex: at least one language or config family must be enabled")
 	}
-	report("start", "initialized repoindex build")
+	report("start", "initialized repoindex build", result)
 
 	nodes := make(map[string]Node)
 	edges := make(map[string]Edge)
@@ -104,91 +159,91 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 	var locators []LocatorEntry
 
 	if opts.IncludeGo {
-		report("go", "building Go package graph")
+		report("go", "building Go package graph", result)
 		if err := b.buildGo(ctx, opts, nodes, edges, &result, &locators); err != nil {
-			return result, err
+			return repoGraphBuild{Opts: opts, Result: result}, err
 		}
-		report("go", "finished Go package graph")
+		report("go", "finished Go package graph", result)
 	}
 	if opts.IncludePython {
-		report("python", "building Python graph")
+		report("python", "building Python graph", result)
 		if err := b.buildPython(ctx, opts, nodes, edges, &result, &pending, &locators); err != nil {
-			return result, err
+			return repoGraphBuild{Opts: opts, Result: result}, err
 		}
-		report("python", "finished Python graph")
+		report("python", "finished Python graph", result)
 	}
 	if opts.IncludeRust {
-		report("rust", "building Rust graph")
+		report("rust", "building Rust graph", result)
 		if err := b.buildRust(ctx, opts, nodes, edges, &result, &pending, &locators); err != nil {
-			return result, err
+			return repoGraphBuild{Opts: opts, Result: result}, err
 		}
-		report("rust", "finished Rust graph")
+		report("rust", "finished Rust graph", result)
 	}
 	if opts.IncludeCSharp {
-		report("csharp", "building C# graph")
+		report("csharp", "building C# graph", result)
 		if err := b.buildCSharp(ctx, opts, nodes, edges, &result, &pending, &locators); err != nil {
-			return result, err
+			return repoGraphBuild{Opts: opts, Result: result}, err
 		}
-		report("csharp", "finished C# graph")
+		report("csharp", "finished C# graph", result)
 	}
 	if opts.IncludeTypescript {
-		report("typescript", "building TypeScript graph")
+		report("typescript", "building TypeScript graph", result)
 		if err := b.buildTS(ctx, opts, nodes, edges, &result, &pending, &pendingFileSymbols, &locators); err != nil {
-			return result, err
+			return repoGraphBuild{Opts: opts, Result: result}, err
 		}
-		report("typescript", "finished TypeScript graph")
+		report("typescript", "finished TypeScript graph", result)
 	}
 	if opts.IncludeElixir {
-		report("elixir", "building Elixir graph")
+		report("elixir", "building Elixir graph", result)
 		if err := b.buildElixir(ctx, opts, nodes, edges, &result, &pending, &locators); err != nil {
-			return result, err
+			return repoGraphBuild{Opts: opts, Result: result}, err
 		}
-		report("elixir", "finished Elixir graph")
+		report("elixir", "finished Elixir graph", result)
 	}
 	if opts.IncludeTerraform {
-		report("terraform", "building Terraform graph")
+		report("terraform", "building Terraform graph", result)
 		if err := b.buildTerraform(ctx, opts, nodes, edges, &result); err != nil {
-			return result, err
+			return repoGraphBuild{Opts: opts, Result: result}, err
 		}
-		report("terraform", "finished Terraform graph")
+		report("terraform", "finished Terraform graph", result)
 	}
 	if opts.IncludeKubernetes {
-		report("kubernetes", "building Kubernetes graph")
+		report("kubernetes", "building Kubernetes graph", result)
 		if err := b.buildKubernetes(ctx, opts, nodes, edges, &result); err != nil {
-			return result, err
+			return repoGraphBuild{Opts: opts, Result: result}, err
 		}
-		report("kubernetes", "finished Kubernetes graph")
+		report("kubernetes", "finished Kubernetes graph", result)
 	}
 	if opts.IncludeShell {
-		report("shell", "building shell graph")
+		report("shell", "building shell graph", result)
 		if err := b.buildShell(ctx, opts, nodes, edges, &result); err != nil {
-			return result, err
+			return repoGraphBuild{Opts: opts, Result: result}, err
 		}
-		report("shell", "finished shell graph")
+		report("shell", "finished shell graph", result)
 	}
 
-	report("resolve", "resolving pending graph edges")
+	report("resolve", "resolving pending graph edges", result)
 	applyPendingNameEdges(nodes, edges, pending)
 	applyPendingFileSymbolEdges(nodes, edges, pendingFileSymbols)
 
-	report("rollups", "building package and repo rollups")
+	report("rollups", "building package and repo rollups", result)
 	localPackages := collectLocalPackages(nodes, opts.RepoKey)
 	applyPackageRollups(nodes, localPackages)
 	applyRepoRollup(nodes, edges, opts.RepoKey, opts.RepoRoot, localPackages)
 	applyCommentEdges(nodes, edges, opts.RepoKey)
 	if opts.IncludeSemanticAnchors {
-		report("semantic_anchors", "building semantic anchor graph edges")
+		report("semantic_anchors", "building semantic anchor graph edges", result)
 		if err := applySemanticAnchorEdges(ctx, opts, nodes, edges); err != nil {
-			return result, err
+			return repoGraphBuild{Opts: opts, Result: result}, err
 		}
-		report("semantic_anchors", "finished semantic anchor graph edges")
+		report("semantic_anchors", "finished semantic anchor graph edges", result)
 	}
 	if opts.IncludeCoChange {
-		report("cochange", "building empirical co-change graph edges")
+		report("cochange", "building empirical co-change graph edges", result)
 		if err := applyCoChangeEdges(ctx, opts, nodes, edges); err != nil {
-			return result, err
+			return repoGraphBuild{Opts: opts, Result: result}, err
 		}
-		report("cochange", "finished empirical co-change graph edges")
+		report("cochange", "finished empirical co-change graph edges", result)
 	}
 
 	result.Nodes = len(nodes)
@@ -202,41 +257,13 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 	for _, edge := range edges {
 		edgeList = append(edgeList, edge)
 	}
-
-	if opts.DryRun {
-		report("done", "dry run complete")
-		return result, nil
-	}
-
-	report("persist", "replacing repoindex store")
-	if err := b.store.ReplaceAll(ctx, nodeList, edgeList); err != nil {
-		return result, err
-	}
-	report("persist", "upserting symbol locators")
-	for _, loc := range locators {
-		if err := b.store.UpsertLocator(ctx, loc); err != nil {
-			return result, fmt.Errorf("repoindex: upsert locator: %w", err)
-		}
-	}
-
-	snapshot := ResolveGitSnapshot(ctx, opts.RepoRoot)
-	report("persist", "updating file state")
-	if err := b.store.ReplaceFileStates(ctx, buildFileStates(opts.RepoRoot, nodeList, snapshot.HeadSHA)); err != nil {
-		return result, fmt.Errorf("repoindex: replace file state: %w", err)
-	}
-
-	meta := IndexMetaFromGitSnapshot(IndexMeta{
-		RepoRoot:      opts.RepoRoot,
-		SchemaVersion: schemaVersion,
-		IndexedAt:     time.Now().UTC(),
-		Languages:     buildLanguages(opts),
-	}, snapshot)
-	if err := b.store.SetMeta(ctx, meta); err != nil {
-		return result, err
-	}
-
-	report("done", "repoindex build complete")
-	return result, nil
+	return repoGraphBuild{
+		Opts:     opts,
+		Result:   result,
+		Nodes:    nodeList,
+		Edges:    edgeList,
+		Locators: locators,
+	}, nil
 }
 
 func buildFileStates(repoRoot string, nodes []Node, headSHA string) []FileState {

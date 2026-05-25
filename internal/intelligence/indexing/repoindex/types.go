@@ -336,12 +336,12 @@ type DeltaBuildMode string
 
 const (
 	DeltaBuildModeNoop         DeltaBuildMode = "noop"
+	DeltaBuildModeIncremental  DeltaBuildMode = "incremental"
 	DeltaBuildModeFullFallback DeltaBuildMode = "full_fallback"
 )
 
 // BuildDeltaResult captures the result and handling mode for an incremental
-// build request. Non-empty deltas currently rebuild the full graph because
-// repoindex edge repair and rollups are global.
+// build request.
 type BuildDeltaResult struct {
 	Result       BuildResult    `json:"result"`
 	Delta        WorkspaceDelta `json:"delta"`

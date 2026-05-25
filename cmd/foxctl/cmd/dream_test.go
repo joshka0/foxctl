@@ -8,7 +8,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/joshka0/foxctl/internal/context/contextplane"
 	"github.com/joshka0/foxctl/internal/context/transcriptpipeline"
+	"github.com/joshka0/foxctl/internal/runtime/memoryblur"
+	"github.com/joshka0/foxctl/internal/storage/obsidianindex"
 )
 
 func TestDreamSourceRootsUsesExplicitProviders(t *testing.T) {
@@ -96,6 +99,72 @@ func TestDreamScanCommandWritesPreviewEnvelope(t *testing.T) {
 	}
 	if envelope.Data.Discovered != 2 || envelope.Data.Queued != 1 || envelope.Data.Skipped != 1 {
 		t.Fatalf("data=%+v", envelope.Data)
+	}
+}
+
+func TestDreamBlurAgentForFlagsIsOptIn(t *testing.T) {
+	agent, name, err := dreamBlurAgentForFlags(defaultDreamCommandFlags())
+	if err != nil {
+		t.Fatalf("dreamBlurAgentForFlags() error = %v", err)
+	}
+	if agent != nil || name != "" {
+		t.Fatalf("agent=%T name=%q; dream blur should be disabled by default", agent, name)
+	}
+}
+
+func TestDreamBlurAgentForFlagsBuildsCommandBackend(t *testing.T) {
+	flags := defaultDreamCommandFlags()
+	flags.BlurDreams = true
+	flags.BlurAgent = memoryblur.BackendCommand
+	flags.BlurAgentCommand = `["/bin/cat"]`
+
+	agent, name, err := dreamBlurAgentForFlags(flags)
+	if err != nil {
+		t.Fatalf("dreamBlurAgentForFlags() error = %v", err)
+	}
+	if agent == nil || name != memoryblur.BackendCommand {
+		t.Fatalf("agent=%T name=%q", agent, name)
+	}
+}
+
+func TestObsidianDreamNoteIndexerIndexesDreamSearchPath(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	vaultRoot := filepath.Join(root, "vault")
+	storageRoot := filepath.Join(root, "storage")
+	notePath := "inbox/drafted-from-foxctl/dreams/test.md"
+	writeDreamCommandFile(t, filepath.Join(vaultRoot, notePath), `---
+title: "Bounded Actor Dream"
+type: "transcript_dream"
+tags:
+  - foxctl/dream
+  - foxctl/agent-blurred
+---
+
+# Bounded Actor Dream
+
+A bounded actor accepts one scoped work item and publishes a blurred mechanism for later collision.
+`)
+
+	store, err := obsidianindex.Open(ctx, storageRoot, vaultRoot)
+	if err != nil {
+		t.Fatalf("obsidianindex.Open() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	indexer := &obsidianDreamNoteIndexer{store: store, vaultPath: vaultRoot}
+	if err := indexer.IndexDreamNote(ctx, contextplane.TranscriptDreamNote{DraftPath: notePath}); err != nil {
+		t.Fatalf("IndexDreamNote() error = %v", err)
+	}
+	hits, err := store.SearchDreams(ctx, "bounded actor mechanism", obsidianindex.DreamSearchOptions{
+		Limit:       5,
+		BlurredOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("SearchDreams() error = %v", err)
+	}
+	if len(hits) != 1 || hits[0].Path != notePath {
+		t.Fatalf("hits=%+v", hits)
 	}
 }
 
