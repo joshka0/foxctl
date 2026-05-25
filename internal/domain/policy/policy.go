@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/joshka0/foxctl/internal/domain/skill"
 )
@@ -25,6 +26,12 @@ func NewValidator(m skill.Manifest) *Validator {
 func (v *Validator) ValidateNetworkAccess(host string, port int) error {
 	if !validNetworkPort(port) {
 		return fmt.Errorf("network access denied: invalid port %d", port)
+	}
+	rawHost := host
+	var ok bool
+	host, ok = canonicalEgressHost(host)
+	if !ok {
+		return fmt.Errorf("network access denied: invalid host %q", rawHost)
 	}
 
 	// Network access is only granted by an explicit egress capability.
@@ -69,8 +76,14 @@ func matchesEgressPattern(host string, port int, pattern string) bool {
 	if !ok {
 		return false
 	}
-	host = normalizeEgressHost(host)
-	patternHost = normalizeEgressHost(patternHost)
+	host, hostOK := canonicalEgressHost(host)
+	if !hostOK {
+		return false
+	}
+	patternHost, patternOK := canonicalEgressHost(patternHost)
+	if !patternOK {
+		return false
+	}
 
 	// Check port match
 	if patternPort != "*" {
@@ -128,11 +141,24 @@ func splitEgressPattern(pattern string) (string, string, bool) {
 	return host, port, true
 }
 
-func normalizeEgressHost(host string) string {
-	host = strings.ToLower(strings.TrimSpace(host))
-	host = strings.TrimPrefix(host, "[")
-	host = strings.TrimSuffix(host, "]")
-	return host
+func canonicalEgressHost(raw string) (string, bool) {
+	host := strings.ToLower(strings.TrimSpace(raw))
+	if host == "" || raw != strings.TrimSpace(raw) || strings.IndexFunc(host, unicode.IsSpace) != -1 {
+		return "", false
+	}
+	if strings.HasPrefix(host, "[") || strings.HasSuffix(host, "]") {
+		if !strings.HasPrefix(host, "[") || !strings.HasSuffix(host, "]") {
+			return "", false
+		}
+		host = strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
+		if net.ParseIP(host) == nil {
+			return "", false
+		}
+	}
+	if strings.ContainsAny(host, "[]") {
+		return "", false
+	}
+	return host, true
 }
 
 // matchesCIDR checks if a host (IP or hostname) matches a CIDR pattern.

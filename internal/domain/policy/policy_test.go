@@ -23,6 +23,24 @@ func TestValidateNetworkAccess_AllowsEgressPatterns(t *testing.T) {
 			port:     443,
 		},
 		{
+			name:     "network egress with empty allowlist allows IPv4 host",
+			manifest: manifestWithNetwork("egress"),
+			host:     "10.5.10.20",
+			port:     443,
+		},
+		{
+			name:     "network egress with empty allowlist allows IPv6 host",
+			manifest: manifestWithNetwork("egress"),
+			host:     "2001:db8::1",
+			port:     443,
+		},
+		{
+			name:     "network egress with empty allowlist allows bracketed IPv6 host",
+			manifest: manifestWithNetwork("egress"),
+			host:     "[2001:db8::1]",
+			port:     443,
+		},
+		{
 			name:     "exact match allows access",
 			manifest: manifestWithNetwork("egress", "api.github.com:443"),
 			host:     "api.github.com",
@@ -56,6 +74,12 @@ func TestValidateNetworkAccess_AllowsEgressPatterns(t *testing.T) {
 			name:     "IPv6 CIDR match allows IP in range",
 			manifest: manifestWithNetwork("egress", "2001:db8::/32:*"),
 			host:     "2001:db8::1",
+			port:     443,
+		},
+		{
+			name:     "IPv6 CIDR match allows bracketed IP host",
+			manifest: manifestWithNetwork("egress", "2001:db8::/32:*"),
+			host:     "[2001:db8::1]",
 			port:     443,
 		},
 		{
@@ -202,6 +226,91 @@ func TestValidateNetworkAccessBlocksInvalidPorts(t *testing.T) {
 	}
 }
 
+func TestValidateNetworkAccessBlocksInvalidHosts(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		manifest skill.Manifest
+		host     string
+	}{
+		{
+			name:     "empty allowlist still requires a host",
+			manifest: manifestWithNetwork("egress"),
+			host:     "",
+		},
+		{
+			name:     "empty allowlist rejects whitespace host",
+			manifest: manifestWithNetwork("egress"),
+			host:     " \t\n",
+		},
+		{
+			name:     "wildcard allowlist rejects whitespace host",
+			manifest: manifestWithNetwork("egress", "*.example.com:*"),
+			host:     " \t",
+		},
+		{
+			name:     "exact allowlist rejects bracket-only host",
+			manifest: manifestWithNetwork("egress", "api.github.com:443"),
+			host:     "[]",
+		},
+		{
+			name:     "empty allowlist rejects host with embedded whitespace",
+			manifest: manifestWithNetwork("egress"),
+			host:     "api github com",
+		},
+		{
+			name:     "empty allowlist rejects leading whitespace host",
+			manifest: manifestWithNetwork("egress"),
+			host:     " api.github.com",
+		},
+		{
+			name:     "empty allowlist rejects trailing whitespace host",
+			manifest: manifestWithNetwork("egress"),
+			host:     "api.github.com ",
+		},
+		{
+			name:     "exact allowlist rejects bracketed DNS host",
+			manifest: manifestWithNetwork("egress", "api.github.com:443"),
+			host:     "[api.github.com]",
+		},
+		{
+			name:     "exact allowlist rejects leading unbalanced bracket",
+			manifest: manifestWithNetwork("egress", "api.github.com:443"),
+			host:     "[api.github.com",
+		},
+		{
+			name:     "exact allowlist rejects trailing unbalanced bracket",
+			manifest: manifestWithNetwork("egress", "api.github.com:443"),
+			host:     "api.github.com]",
+		},
+		{
+			name:     "CIDR allowlist rejects leading unbalanced IPv6 bracket",
+			manifest: manifestWithNetwork("egress", "2001:db8::/32:*"),
+			host:     "[2001:db8::1",
+		},
+		{
+			name:     "CIDR allowlist rejects trailing unbalanced IPv6 bracket",
+			manifest: manifestWithNetwork("egress", "2001:db8::/32:*"),
+			host:     "2001:db8::1]",
+		},
+		{
+			name:     "CIDR allowlist rejects bracketed IPv6 with trailing content",
+			manifest: manifestWithNetwork("egress", "2001:db8::/32:*"),
+			host:     "[2001:db8::1]x",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := NewValidator(tt.manifest)
+			if err := v.ValidateNetworkAccess(tt.host, 443); err == nil {
+				t.Fatalf("ValidateNetworkAccess allowed invalid host %q", tt.host)
+			}
+		})
+	}
+}
+
 func TestValidateNetworkAccessPropertyDNSPatternsAreCaseInsensitive(t *testing.T) {
 	t.Parallel()
 
@@ -246,6 +355,35 @@ func TestValidateNetworkAccessPropertyWildcardDNSRequiresSubdomainBoundary(t *te
 	}, &quick.Config{MaxCount: 150})
 	if err != nil {
 		t.Fatalf("wildcard DNS boundary property failed: %v", err)
+	}
+}
+
+func TestValidateNetworkAccessPropertyHostMustNameConcreteTarget(t *testing.T) {
+	t.Parallel()
+
+	manifests := []skill.Manifest{
+		manifestWithNetwork("egress"),
+		manifestWithNetwork("egress", "api.github.com:*"),
+		manifestWithNetwork("egress", "*.example.com:443"),
+		manifestWithNetwork("egress", "2001:db8::/32:*"),
+	}
+
+	err := quick.Check(func(hostSeed, manifestSeed uint8, portSeed uint16) bool {
+		host := invalidNetworkHost(hostSeed)
+		port := int(portSeed%65535) + 1
+		v := NewValidator(manifests[int(manifestSeed)%len(manifests)])
+		if err := v.ValidateNetworkAccess(host, port); err == nil {
+			t.Logf("manifest allowed invalid host %q on port %d", host, port)
+			return false
+		}
+		if matchesEgressPattern(host, port, "*.example.com:*") {
+			t.Logf("egress matcher accepted invalid host %q", host)
+			return false
+		}
+		return true
+	}, &quick.Config{MaxCount: 200})
+	if err != nil {
+		t.Fatalf("concrete network host property failed: %v", err)
 	}
 }
 
@@ -325,6 +463,24 @@ func dnsLabel(prefix string, seed uint64) string {
 		seed /= uint64(len(alphabet))
 	}
 	return b.String()
+}
+
+func invalidNetworkHost(seed uint8) string {
+	hosts := []string{
+		"",
+		" \t\n",
+		"api github com",
+		" api.github.com",
+		"api.github.com ",
+		"[]",
+		"[api.github.com]",
+		"[api.github.com",
+		"api.github.com]",
+		"[2001:db8::1",
+		"2001:db8::1]",
+		"[2001:db8::1]x",
+	}
+	return hosts[int(seed)%len(hosts)]
 }
 
 func TestValidateWASIPolicy(t *testing.T) {
