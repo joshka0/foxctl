@@ -3,6 +3,7 @@ package hooks
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"testing/quick"
 
@@ -396,5 +397,73 @@ func TestParseSkillOutputRejectsUnknownDecisionStrings(t *testing.T) {
 
 	if err := quick.Check(prop, &quick.Config{MaxCount: 200}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestParseSkillOutputRejectsMalformedVersionedEnvelopes(t *testing.T) {
+	tests := []struct {
+		name  string
+		input []byte
+	}{
+		{
+			name:  "missing status",
+			input: []byte(`{"version":1,"command":"test/hook","data":{"hook_output":{"decision":"approve"}},"meta":{"ts":"2024-01-01T00:00:00Z"}}`),
+		},
+		{
+			name:  "missing command",
+			input: []byte(`{"version":1,"status":"ok","data":{"hook_output":{"decision":"approve"}},"meta":{"ts":"2024-01-01T00:00:00Z"}}`),
+		},
+		{
+			name:  "missing timestamp",
+			input: []byte(`{"version":1,"status":"ok","command":"test/hook","data":{"hook_output":{"decision":"approve"}},"meta":{}}`),
+		},
+		{
+			name:  "unsupported version",
+			input: []byte(`{"version":2,"status":"ok","command":"test/hook","data":{"hook_output":{"decision":"approve"}},"meta":{"ts":"2024-01-01T00:00:00Z"}}`),
+		},
+		{
+			name:  "zero version",
+			input: []byte(`{"version":0,"status":"ok","command":"test/hook","data":{"hook_output":{"decision":"approve"}},"meta":{"ts":"2024-01-01T00:00:00Z"}}`),
+		},
+		{
+			name:  "null version",
+			input: []byte(`{"version":null,"status":"ok","command":"test/hook","data":{"hook_output":{"decision":"approve"}},"meta":{"ts":"2024-01-01T00:00:00Z"}}`),
+		},
+		{
+			name:  "string version",
+			input: []byte(`{"version":"1","status":"ok","command":"test/hook","data":{"hook_output":{"decision":"approve"}},"meta":{"ts":"2024-01-01T00:00:00Z"}}`),
+		},
+		{
+			name:  "ok status with error fields",
+			input: []byte(`{"version":1,"status":"ok","command":"test/hook","data":{"hook_output":{"decision":"approve"}},"error":{"code":"ERR","message":"must not appear on ok"},"meta":{"ts":"2024-01-01T00:00:00Z"}}`),
+		},
+		{
+			name:  "invalid meta type",
+			input: []byte(`{"version":1,"status":"ok","command":"test/hook","data":{"hook_output":{"decision":"approve"}},"meta":"not-an-object"}`),
+		},
+		{
+			name:  "invalid error type",
+			input: []byte(`{"version":1,"status":"ok","command":"test/hook","data":{"hook_output":{"decision":"approve"}},"meta":{"ts":"2024-01-01T00:00:00Z"},"error":"not-an-object"}`),
+		},
+		{
+			name:  "protocol metadata violation",
+			input: []byte(`{"version":1,"status":"ok","command":"test/hook","data":{"hook_output":{"decision":"approve"}},"meta":{"ts":"2024-01-01T00:00:00Z","cas_digest":"sha256:abc"}}`),
+		},
+		{
+			name:  "versioned direct output",
+			input: []byte(`{"version":1,"decision":"block","reason":"direct-looking output must not bypass envelope contract"}`),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseSkillOutput(tt.input)
+			if err == nil {
+				t.Fatal("expected malformed envelope to fail closed")
+			}
+			if !strings.Contains(err.Error(), "invalid envelope") {
+				t.Fatalf("expected invalid envelope error, got %v", err)
+			}
+		})
 	}
 }

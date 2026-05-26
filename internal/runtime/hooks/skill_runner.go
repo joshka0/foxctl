@@ -101,7 +101,14 @@ func parseSkillOutput(data []byte) (Output, error) {
 		return NewApprove("skill completed", nil), nil
 	}
 
-	if env, err := protocol.DecodeEnvelope(data); err == nil && env.Version != 0 {
+	if declaresEnvelopeVersion(data) {
+		env, err := protocol.DecodeEnvelope(data)
+		if err != nil {
+			return Output{}, fmt.Errorf("invalid envelope: %w", err)
+		}
+		if err := protocol.Validate(env); err != nil {
+			return Output{}, fmt.Errorf("invalid envelope: %w", err)
+		}
 		if env.Status == envelope.StatusError {
 			return Output{}, protocol.EnvelopeStatusErrorFromEnvelope(env)
 		}
@@ -140,6 +147,15 @@ func parseSkillOutput(data []byte) (Output, error) {
 
 	// No decision field - treat as approve
 	return NewApprove("skill completed", nil), nil
+}
+
+func declaresEnvelopeVersion(data []byte) bool {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return false
+	}
+	_, ok := payload["version"]
+	return ok
 }
 
 func decodeHookOutput(value any) (Output, error) {

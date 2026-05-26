@@ -5,17 +5,20 @@ usage() {
 	cat <<'USAGE'
 Usage: scripts/mutation_critical.sh [--list|--dry-run|--run]
 
-Runs an opt-in mutation gate for critical Go packages.
+Runs a deliberately opt-in mutation gate for critical Go packages.
 
 Modes:
-  --list     Write the report skeleton and print the package commands without running them.
+  --list     Print the package commands without running them or writing reports.
   --dry-run  Ask the mutation runner to discover covered mutants without executing mutated tests.
   --run      Execute mutation testing and fail if the runner or thresholds fail.
 
 Environment:
   GO                         Go binary to use when the mutation runner is not on PATH.
   MUTATION_PACKAGES          Space-separated package paths to check.
-  MUTATION_REPORT_DIR        Directory for summary, stdout logs, JSON output, and temporary files.
+  MUTATION_REPORT_DIR        Directory for summary, stdout logs, and JSON output.
+  MUTATION_CONFIRM           Required for --dry-run and --run: set to test-robustness.
+  MUTATION_TMPDIR            Scratch directory for runner worktrees. Defaults outside the repo.
+  MUTATION_KEEP_TMP          Set to 1 to keep scratch worktrees after a run.
   MUTATION_WORKERS           Number of runner workers. Default: 2.
   MUTATION_TIMEOUT           Per-package timeout. Default: 20m.
   MUTATION_THRESHOLD_EFFICACY Run-mode efficacy threshold. Default: 70.
@@ -76,14 +79,35 @@ if [[ "$go_flags" != *"-buildvcs="* ]]; then
 	go_flags="${go_flags:+$go_flags }-buildvcs=false"
 fi
 
-mkdir -p "$report_dir"
-export TMPDIR="${TMPDIR:-$repo_root/$report_dir/tmp}"
-mkdir -p "$TMPDIR"
+if [[ "$mode" != "list" && "${MUTATION_CONFIRM:-}" != "test-robustness" ]]; then
+	cat >&2 <<'EOF'
+Mutation testing is disabled by default because it is expensive and can create
+large scratch worktrees. Re-run only when you intentionally want to test suite
+robustness, for example:
+
+  MUTATION_CONFIRM=test-robustness make mutation-critical
+
+Use `make mutation-critical-list` for a no-side-effect target inventory.
+EOF
+	exit 2
+fi
 
 if [[ "$mode" != "list" ]]; then
 	if ! git diff --quiet || ! git diff --cached --quiet; then
 		echo "mutation runs require a clean tracked worktree; commit or stash changes first" >&2
 		exit 2
+	fi
+fi
+
+scratch_parent="${MUTATION_TMPDIR:-/tmp/foxctl-mutation}"
+run_tmp=""
+summary=""
+if [[ "$mode" != "list" ]]; then
+	mkdir -p "$report_dir" "$scratch_parent"
+	run_tmp="$(mktemp -d "$scratch_parent/run.XXXXXXXX")"
+	export TMPDIR="$run_tmp"
+	if [[ "${MUTATION_KEEP_TMP:-}" != "1" ]]; then
+		trap 'rm -rf "$run_tmp"' EXIT
 	fi
 fi
 
@@ -97,15 +121,17 @@ elif [[ "$mode" != "list" ]]; then
 	exit 127
 fi
 
-summary="$report_dir/summary.md"
-{
-	printf '# Critical Mutation Report\n\n'
-	printf -- '- Mode: `%s`\n' "$mode"
-	printf -- '- Started: `%s`\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-	printf -- '- Report directory: `%s`\n' "$report_dir"
-	printf -- '- Temp directory: `%s`\n\n' "$TMPDIR"
-	printf '## Targets\n\n'
-} > "$summary"
+if [[ "$mode" != "list" ]]; then
+	summary="$report_dir/summary.md"
+	{
+		printf '# Critical Mutation Report\n\n'
+		printf -- '- Mode: `%s`\n' "$mode"
+		printf -- '- Started: `%s`\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+		printf -- '- Report directory: `%s`\n' "$report_dir"
+		printf -- '- Temp directory: `%s`\n\n' "$TMPDIR"
+		printf '## Targets\n\n'
+	} > "$summary"
+fi
 
 if command -v gremlins >/dev/null 2>&1; then
 	runner=(gremlins)
@@ -139,14 +165,14 @@ for pkg in $mutation_packages; do
 		args+=(--coverpkg "$MUTATION_COVERPKG")
 	fi
 
-	printf -- '- `%s`\n' "$pkg" >> "$summary"
-
 	if [[ "$mode" == "list" ]]; then
-		printf 'would run: TMPDIR=%q timeout %q' "$TMPDIR" "$timeout_duration"
+		printf 'would run: MUTATION_CONFIRM=test-robustness TMPDIR=<outside-repo> timeout %q' "$timeout_duration"
 		printf ' %q' "${runner[@]}" "${args[@]}"
 		printf '\n'
 		continue
 	fi
+
+	printf -- '- `%s`\n' "$pkg" >> "$summary"
 
 	printf 'Running mutation %s for %s\n' "$mode" "$pkg"
 	if "$timeout_bin" "$timeout_duration" env GOFLAGS="$go_flags" TMPDIR="$TMPDIR" "${runner[@]}" "${args[@]}" >"$stdout_out" 2>&1; then
@@ -165,16 +191,14 @@ for pkg in $mutation_packages; do
 	fi
 done
 
-{
-	printf '\n## Notes\n\n'
-	if [[ "$mode" == "list" ]]; then
-		printf 'List mode does not execute mutation analysis. Use `make mutation-critical-dry-run` to discover covered mutants, or `make mutation-critical` for the full opt-in gate.\n'
-	else
+if [[ "$mode" != "list" ]]; then
+	{
+		printf '\n## Notes\n\n'
 		printf 'Review surviving mutants in the per-package JSON and log files before raising thresholds.\n'
-	fi
-} >> "$summary"
+	} >> "$summary"
 
-printf 'Wrote %s\n' "$summary"
+	printf 'Wrote %s\n' "$summary"
+fi
 if [[ "$failures" -gt 0 ]]; then
 	exit 1
 fi
