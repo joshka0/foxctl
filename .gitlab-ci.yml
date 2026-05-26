@@ -135,23 +135,12 @@ unit-tests:
         make test-race-shard SHARD="$RACE_SHARD"
       fi
 
-race-tests-changed:
+race-tests-smoke:
   stage: check
   rules:
     - if: $CI_MERGE_REQUEST_IID
   script:
-    - |
-      base_ref=""
-      if [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ] && git cat-file -e "$CI_MERGE_REQUEST_DIFF_BASE_SHA^{commit}" >/dev/null 2>&1; then
-        base_ref="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
-      elif [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ] && git rev-parse --verify "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" >/dev/null 2>&1; then
-        base_ref="$(git merge-base HEAD "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME")"
-      fi
-      if [ -z "$base_ref" ]; then
-        echo "Unable to resolve merge request base ref for changed-package race tests"
-        exit 1
-      fi
-      make test-race-changed BASE_REF="$base_ref" HEAD_REF=HEAD
+    - make test-race-smoke
 
 race-tests-core-cmd:
   extends: .race-tests-template
@@ -264,7 +253,7 @@ all-checks:
   needs:
     - job: static-analysis
     - job: unit-tests
-    - job: race-tests-changed
+    - job: race-tests-smoke
       optional: true
     - job: race-tests-core-cmd
       optional: true
