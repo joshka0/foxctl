@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"testing/quick"
 
 	workspacepkg "github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/storage/memory"
@@ -172,48 +171,79 @@ func TestPersistSingleRunHistory_NormalizesWorkspaceInEntryAndPayload(t *testing
 	}
 }
 
-func TestPersistSingleRunHistoryPropertyWorkspaceCanonicalizesEntryAndPreservesPayloadPath(t *testing.T) {
+func TestPersistSingleRunHistoryCanonicalizesEntryAndPreservesPayloadPathCases(t *testing.T) {
 	t.Parallel()
 
-	property := func(seed string) bool {
-		ctx := context.Background()
-		store := openHistoryMemoryStore(t, ctx)
-		workspacePath := filepath.Join(t.TempDir(), "workspace-"+stablePathSegment(seed), "..", "workspace-"+stablePathSegment(seed))
-		wantWorkspace := NormalizeTranscriptHistoryWorkspace(workspacePath)
+	root := t.TempDir()
 
-		report, err := PersistSingleRunHistory(ctx, store, SingleRunHistoryInput{
-			WorkspacePath: workspacePath,
-			SessionID:     "sess-workspace-property",
-			Records:       []HistoryRecord{testHistoryRecord("workspace-property")},
-		}, nil)
-		if err != nil {
-			t.Logf("PersistSingleRunHistory() error = %v", err)
-			return false
-		}
-		if len(report.Persisted) != 1 {
-			t.Logf("persisted=%d want 1", len(report.Persisted))
-			return false
-		}
-		entry, err := store.Get(ctx, report.Persisted[0].Name, wantWorkspace)
-		if err != nil {
-			t.Logf("Get() error = %v", err)
-			return false
-		}
-		if entry.Workspace != workspacepkg.CanonicalID(wantWorkspace) {
-			t.Logf("entry workspace=%q want %q", entry.Workspace, workspacepkg.CanonicalID(wantWorkspace))
-			return false
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(entry.Result, &payload); err != nil {
-			t.Logf("unmarshal result: %v", err)
-			return false
-		}
-		return payload["workspace_path"] == wantWorkspace &&
-			payload["workspace_family_path"] == workspacepkg.FamilyPath(wantWorkspace)
+	tests := []struct {
+		name     string
+		pathTail string
+	}{
+		{
+			name:     "dotdot traversal",
+			pathTail: filepath.Join("workspace-alpha", "..", "workspace-alpha"),
+		},
+		{
+			name:     "double dotdot traversal",
+			pathTail: filepath.Join("a", "b", "..", "..", "a", "b"),
+		},
+		{
+			name:     "trailing slash",
+			pathTail: "workspace-beta" + string(filepath.Separator),
+		},
+		{
+			name:     "dot segments",
+			pathTail: filepath.Join(".", "workspace-gamma"),
+		},
+		{
+			name:     "mixed dotdot and dots",
+			pathTail: filepath.Join("x", "..", ".", "workspace-delta"),
+		},
+		{
+			name:     "simple path",
+			pathTail: "workspace-epsilon",
+		},
 	}
 
-	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
-		t.Fatalf("workspace persistence property failed: %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := context.Background()
+			store := openHistoryMemoryStore(t, ctx)
+			workspacePath := filepath.Join(root, tt.pathTail)
+			wantWorkspace := NormalizeTranscriptHistoryWorkspace(workspacePath)
+
+			report, err := PersistSingleRunHistory(ctx, store, SingleRunHistoryInput{
+				WorkspacePath: workspacePath,
+				SessionID:     "sess-workspace-table",
+				Records:       []HistoryRecord{testHistoryRecord("workspace-table-" + tt.name)},
+			}, nil)
+			if err != nil {
+				t.Fatalf("PersistSingleRunHistory() error = %v", err)
+			}
+			if len(report.Persisted) != 1 {
+				t.Fatalf("persisted=%d want 1", len(report.Persisted))
+			}
+			entry, err := store.Get(ctx, report.Persisted[0].Name, wantWorkspace)
+			if err != nil {
+				t.Fatalf("Get() error = %v", err)
+			}
+			if entry.Workspace != workspacepkg.CanonicalID(wantWorkspace) {
+				t.Fatalf("entry workspace=%q want %q", entry.Workspace, workspacepkg.CanonicalID(wantWorkspace))
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(entry.Result, &payload); err != nil {
+				t.Fatalf("unmarshal result: %v", err)
+			}
+			if payload["workspace_path"] != wantWorkspace {
+				t.Fatalf("workspace_path=%v want %q", payload["workspace_path"], wantWorkspace)
+			}
+			if payload["workspace_family_path"] != workspacepkg.FamilyPath(wantWorkspace) {
+				t.Fatalf("workspace_family_path=%v want %q", payload["workspace_family_path"], workspacepkg.FamilyPath(wantWorkspace))
+			}
+		})
 	}
 }
 
@@ -342,27 +372,4 @@ func testHistoryRecord(seed string) HistoryRecord {
 		Confidence:     0.8,
 		NormalizedHash: "sha256:" + strings.Repeat("a", 63) + seed[:1],
 	}
-}
-
-func stablePathSegment(seed string) string {
-	segment := strings.Map(func(r rune) rune {
-		switch {
-		case r >= 'a' && r <= 'z':
-			return r
-		case r >= 'A' && r <= 'Z':
-			return r
-		case r >= '0' && r <= '9':
-			return r
-		default:
-			return '-'
-		}
-	}, seed)
-	segment = strings.Trim(segment, "-")
-	if segment == "" {
-		return "empty"
-	}
-	if len(segment) > 32 {
-		return segment[:32]
-	}
-	return segment
 }

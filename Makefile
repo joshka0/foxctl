@@ -45,7 +45,7 @@ SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 CGO_SKILLS :=
 OPTIONAL_CGO_SKILLS :=
 
-.PHONY: fmt lint static-analysis install-git-hooks typecheck lsp-check vet test test-race test-race-smoke test-race-shard test-race-impacted test-race-changed test-race-shard-impacted test-integration test-integration-package test-integration-impacted test-integration-cmd mutation-critical mutation-critical-list mutation-critical-dry-run cover check-coverage check-coverage-strict check-doc-links check-large-files check-tech-debt check-duplication test-timing build build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-impact skills-build-impacted packages-impact test-short-impacted skills-install skills-install-cgo skills-install-all skills-test completions init go-tui-build go-tui-spawn go-tui-agent go-tui go-tui-smoke tui ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean benchmark-manifest bench-go bench-orientation gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-foxctl-package eval-code-search-praze-infra eval-code-search-foxctl-repo-grounded eval-code-search-foxctl-change-impact eval-code-search-foxctl-trace-symbol eval-code-search-foxctl-bridge-esoteric eval-retrieval-foxctl eval-retrieval-foxctl-mixed eval-retrieval-foxctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
+.PHONY: fmt lint static-analysis install-git-hooks typecheck lsp-check vet test test-race test-race-smoke test-race-shard test-race-impacted test-race-changed test-race-shard-impacted test-integration test-integration-package test-integration-impacted test-integration-cmd test-integration-golden mutation-critical mutation-critical-list mutation-critical-dry-run cover check-coverage check-coverage-strict check-doc-links check-large-files check-tech-debt check-duplication test-timing build build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-impact skills-build-impacted packages-impact test-short-impacted skills-install skills-install-cgo skills-install-all skills-test completions init go-tui-build go-tui-spawn go-tui-agent go-tui go-tui-smoke tui ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean benchmark-manifest bench-go bench-orientation gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-foxctl-package eval-code-search-praze-infra eval-code-search-foxctl-repo-grounded eval-code-search-foxctl-change-impact eval-code-search-foxctl-trace-symbol eval-code-search-foxctl-bridge-esoteric eval-retrieval-foxctl eval-retrieval-foxctl-mixed eval-retrieval-foxctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
 
 fmt:
 	@echo "Running gofumpt"
@@ -256,7 +256,7 @@ ifndef BASE_REF
 endif
 	@set -euo pipefail; \
 		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
-		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -vx 'github.com/joshka0/foxctl/tests/integration' || true )"; \
+		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -Ev '^github.com/joshka0/foxctl/tests/integration(/|$$)|^github.com/joshka0/foxctl/tests/golden/trajectories(/|$$)' || true )"; \
 		pkgs="$$( printf '%s\n' "$$pkgs" | sed '/^$$/d' | paste -sd' ' - )"; \
 		if [ -z "$$pkgs" ]; then \
 			echo "No impacted packages"; \
@@ -271,7 +271,7 @@ ifndef BASE_REF
 endif
 	@set -euo pipefail; \
 		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode changed-packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
-		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -vx 'github.com/joshka0/foxctl/tests/integration' || true )"; \
+		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -Ev '^github.com/joshka0/foxctl/tests/integration(/|$$)|^github.com/joshka0/foxctl/tests/golden/trajectories(/|$$)' || true )"; \
 		pkgs="$$( printf '%s\n' "$$pkgs" | sed '/^$$/d' | paste -sd' ' - )"; \
 		if [ -z "$$pkgs" ]; then \
 			echo "No changed packages"; \
@@ -303,7 +303,7 @@ endif
 			*) echo "Unknown race shard: $(SHARD)" >&2; exit 1 ;; \
 		esac; \
 		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
-		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -E "$$include_re" | grep -vx 'github.com/joshka0/foxctl/tests/integration' || true )"; \
+		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -E "$$include_re" | grep -Ev '^github.com/joshka0/foxctl/tests/integration(/|$$)|^github.com/joshka0/foxctl/tests/golden/trajectories(/|$$)' || true )"; \
 		pkgs="$$( printf '%s\n' "$$pkgs" | sed '/^$$/d' | paste -sd' ' - )"; \
 		if [ -z "$$pkgs" ]; then \
 			echo "No impacted packages for race shard $(SHARD)"; \
@@ -312,7 +312,7 @@ endif
 		echo "Race-testing impacted shard $(SHARD): $$pkgs"; \
 		$(GO_CMD_CGO) test -race -short -p $(RACE_P) $$pkgs
 
-test-integration: test-integration-package test-integration-cmd
+test-integration: test-integration-package test-integration-cmd test-integration-golden
 
 test-integration-package:
 	@$(GO_CMD) test -tags=integration ./tests/integration/... -timeout 15m -v
@@ -339,12 +339,23 @@ endif
 		else \
 			echo "Command integration packages not impacted"; \
 		fi; \
+		golden_pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -E '^github.com/joshka0/foxctl/tests/golden' || true )"; \
+		if [ -n "$$golden_pkgs" ]; then \
+			echo "Running impacted golden test packages"; \
+			$(GO_CMD) test -tags=integration ./tests/golden/... -timeout 15m -v; \
+			ran=1; \
+		else \
+			echo "Golden test packages not impacted"; \
+		fi; \
 		if [ "$$ran" = 0 ]; then \
 			echo "No integration packages impacted"; \
 		fi; \
 
 test-integration-cmd:
 	@$(GO_CMD) test -tags=integration ./cmd/foxctl/cmd/... -timeout 15m -v
+
+test-integration-golden:
+	@$(GO_CMD) test -tags=integration ./tests/golden/... -timeout 15m -v
 
 cover:
 	@mkdir -p coverage
@@ -795,7 +806,8 @@ ifndef BASE_REF
 endif
 	@set -euo pipefail; \
 		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
-		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -vx 'github.com/joshka0/foxctl/tests/integration' | xargs )"; \
+		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -Ev '^github.com/joshka0/foxctl/tests/integration(/|$$)|^github.com/joshka0/foxctl/tests/golden/trajectories(/|$$)' || true )"; \
+		pkgs="$$( printf '%s\n' "$$pkgs" | sed '/^$$/d' | paste -sd' ' - )"; \
 		if [ -z "$$pkgs" ]; then \
 			echo "No impacted packages"; \
 			exit 0; \

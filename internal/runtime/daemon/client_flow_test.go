@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -600,39 +599,32 @@ func TestClient_FlowStart_Timeout(t *testing.T) {
 		_ = os.Remove(tmp)
 	})
 
-	var accepted atomic.Bool
 	go func() {
 		conn, err := listener.Accept()
 		if err != nil {
 			return
 		}
-		accepted.Store(true)
 		// Read request but never respond — simulates hung daemon
 		buf := make([]byte, 4096)
 		_, _ = conn.Read(buf)
 		// Hold connection open until test cleanup closes listener
-		time.Sleep(60 * time.Second)
+		time.Sleep(5 * time.Second)
 		conn.Close()
 	}()
 
 	client := NewClient()
+	client.callTimeout = 50 * time.Millisecond
 
-	// The client.call() sets a 30s deadline, but for test speed,
-	// we verify the error is a timeout or connection-related
-	done := make(chan error, 1)
-	go func() {
-		_, err := client.FlowStart("flow-1", "/tmp/ws")
-		done <- err
-	}()
+	start := time.Now()
+	_, err = client.FlowStart("flow-1", "/tmp/ws")
+	elapsed := time.Since(start)
 
-	select {
-	case err := <-done:
-		if err == nil {
-			t.Fatal("expected error for hung daemon, got nil")
-		}
-		// Either timeout or connection closed — both are acceptable
-	case <-time.After(35 * time.Second):
-		t.Fatal("FlowStart timed out waiting for response — client should have timed out")
+	if err == nil {
+		t.Fatal("expected error for hung daemon, got nil")
+	}
+	// The call should complete within a few hundred milliseconds, not 30 seconds.
+	if elapsed > 2*time.Second {
+		t.Fatalf("FlowStart took %v for hung daemon; expected fast timeout", elapsed)
 	}
 }
 

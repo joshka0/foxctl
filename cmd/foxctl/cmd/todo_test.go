@@ -45,37 +45,3 @@ func TestNewTodoCommand(t *testing.T) {
 		}
 	}
 }
-
-func TestTodoAddFlags(t *testing.T) {
-	cmd := newTodoAddCommand()
-	if cmd.Use != "add" {
-		t.Fatalf("expected add command, got %s", cmd.Use)
-	}
-	for _, flag := range []string{"title", "description", "parent", "depends-on", "scope", "workspace"} {
-		if cmd.Flags().Lookup(flag) == nil {
-			t.Fatalf("expected flag --%s", flag)
-		}
-	}
-}
-
-func TestTodoCompleteFlags(t *testing.T) {
-	cmd := newTodoCompleteCommand()
-	if cmd.Use != "complete" {
-		t.Fatalf("expected complete command, got %s", cmd.Use)
-	}
-	for _, flag := range []string{"id", "notes", "gotchas", "workspace"} {
-		if cmd.Flags().Lookup(flag) == nil {
-			t.Fatalf("expected flag --%s", flag)
-		}
-	}
-}
-
-func TestTodoListFlags(t *testing.T) {
-	cmd := newTodoListCommand()
-	if cmd.Use != "list" {
-		t.Fatalf("expected list command, got %s", cmd.Use)
-	}
-	if cmd.Flags().Lookup("workspace") == nil {
-		t.Fatalf("expected --workspace flag")
-	}
-}

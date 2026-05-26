@@ -74,6 +74,10 @@ func main() {
 	if err == nil {
 		allPkgs = mergePackages(allPkgs, integrationPkgs)
 	}
+	goldenPkgs, err := goListWithTags("integration", "./tests/golden/trajectories/...")
+	if err == nil {
+		allPkgs = mergePackages(allPkgs, goldenPkgs)
+	}
 	skillPkgs, err := goList("./skills/...")
 	if err != nil {
 		fatalf("go list skill packages: %v", err)

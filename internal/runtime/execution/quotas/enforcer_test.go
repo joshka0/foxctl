@@ -963,6 +963,70 @@ func TestEnforcerRecordJobEndRejectsOverReleaseWithoutPartialMutation(t *testing
 	}
 }
 
+// trackingQuotaStore is an in-memory quotas.Store that applies UpdateConsumption
+// deltas and returns ErrNegativeConsumption on underflow. It avoids opening
+// a new SQLite database per test iteration.
+type trackingQuotaStore struct {
+	quotas      agent.Quotas
+	consumption agent.QuotaConsumption
+}
+
+func (s *trackingQuotaStore) Close() error { return nil }
+func (s *trackingQuotaStore) Get(_ context.Context, ns string) (agent.Quotas, error) {
+	q := s.quotas
+	if q.Namespace == "" {
+		q.Namespace = ns
+	}
+	return q, nil
+}
+
+func (s *trackingQuotaStore) Set(_ context.Context, ns string, q agent.Quotas) error {
+	q.Namespace = ns
+	s.quotas = q
+	return nil
+}
+func (s *trackingQuotaStore) Update(context.Context, string, agent.Quotas) error { return nil }
+func (s *trackingQuotaStore) Delete(context.Context, string) error               { return nil }
+func (s *trackingQuotaStore) ListAll(context.Context) (map[string]agent.Quotas, error) {
+	return map[string]agent.Quotas{s.quotas.Namespace: s.quotas}, nil
+}
+
+func (s *trackingQuotaStore) GetConsumption(_ context.Context, ns string) (agent.QuotaConsumption, error) {
+	c := s.consumption
+	if c.Namespace == "" {
+		c.Namespace = ns
+	}
+	return c, nil
+}
+
+func (s *trackingQuotaStore) UpdateConsumption(_ context.Context, ns string, delta agent.QuotaConsumption) error {
+	newActive := s.consumption.ActiveJobs + delta.ActiveJobs
+	newCPU := s.consumption.CPUUsed + delta.CPUUsed
+	newMem := s.consumption.MemMBUsed + delta.MemMBUsed
+	newLLM := s.consumption.LLMCalls1Min + delta.LLMCalls1Min
+	newEgress := s.consumption.EgressBytes1Min + delta.EgressBytes1Min
+
+	if newActive < 0 || newCPU < 0 || newMem < 0 || newLLM < 0 || newEgress < 0 {
+		return quotas.ErrNegativeConsumption
+	}
+
+	lastReset := s.consumption.LastResetTS
+	if delta.LastResetTS > lastReset {
+		lastReset = delta.LastResetTS
+	}
+
+	s.consumption = agent.QuotaConsumption{
+		Namespace:       ns,
+		ActiveJobs:      newActive,
+		CPUUsed:         newCPU,
+		MemMBUsed:       newMem,
+		LLMCalls1Min:    newLLM,
+		EgressBytes1Min: newEgress,
+		LastResetTS:     lastReset,
+	}
+	return nil
+}
+
 func TestEnforcerPropertyBalancedJobStartEndNeverOverReleases(t *testing.T) {
 	ctx := context.Background()
 
@@ -972,12 +1036,7 @@ func TestEnforcerPropertyBalancedJobStartEndNeverOverReleases(t *testing.T) {
 		mem := int(rawMem%128) + 1
 		ns := "org/balanced-property"
 
-		store, err := quotas.Open(ctx, t.TempDir())
-		if err != nil {
-			t.Logf("open store: %v", err)
-			return false
-		}
-		defer func() { _ = store.Close() }()
+		store := &trackingQuotaStore{}
 		enforcer := NewEnforcer(store)
 
 		for i := 0; i < jobCount; i++ {

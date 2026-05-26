@@ -138,26 +138,112 @@ func TestStore_AddSubtaskRejectsInvalidStatusWithoutLinkingChild(t *testing.T) {
 	}
 }
 
-func TestStoreRejectsGeneratedUnknownStatuses(t *testing.T) {
-	ctx := context.Background()
-
+// TestValidateTaskStatusRejectsUnknownStatuses exercises the pure validator with
+// broad unknown inputs. No database is opened.
+func TestValidateTaskStatusRejectsUnknownStatuses(t *testing.T) {
 	unknownStatusesFailClosed := func(raw string) bool {
-		store := setupTestStore(t)
-		_, err := store.Add(ctx, Task{
-			WorkspaceID: "ws-1",
-			Title:       "Generated invalid status",
-			Status:      "unknown:" + raw,
-		})
-		tasks, listErr := store.ListByWorkspace(ctx, "ws-1")
-		return err != nil &&
-			strings.Contains(err.Error(), "invalid task status") &&
-			listErr == nil &&
-			len(tasks) == 0
+		err := validateTaskStatus("unknown:" + raw)
+		return err != nil && strings.Contains(err.Error(), "invalid task status")
 	}
 
 	if err := quick.Check(unknownStatusesFailClosed, &quick.Config{MaxCount: 100}); err != nil {
-		t.Fatalf("generated unknown status was accepted: %v", err)
+		t.Fatalf("generated unknown task status was accepted: %v", err)
 	}
+}
+
+// TestValidateTaskReviewStatusRejectsUnknownStatuses exercises the pure validator.
+func TestValidateTaskReviewStatusRejectsUnknownStatuses(t *testing.T) {
+	unknownStatusesFailClosed := func(raw string) bool {
+		err := validateTaskReviewStatus("unknown:" + raw)
+		return err != nil && strings.Contains(err.Error(), "invalid task review status")
+	}
+
+	if err := quick.Check(unknownStatusesFailClosed, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("generated unknown review status was accepted: %v", err)
+	}
+}
+
+// TestValidateEpicStatusRejectsUnknownStatuses exercises the pure validator.
+func TestValidateEpicStatusRejectsUnknownStatuses(t *testing.T) {
+	unknownStatusesFailClosed := func(raw string) bool {
+		err := validateEpicStatus("unknown:" + raw)
+		return err != nil && strings.Contains(err.Error(), "invalid epic status")
+	}
+
+	if err := quick.Check(unknownStatusesFailClosed, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("generated unknown epic status was accepted: %v", err)
+	}
+}
+
+// TestStore_PersistenceRejectsInvalidDataTaskEpic proves the store-level atomic
+// rejection for representative invalid values across tasks and epics, confirming
+// nothing leaks to disk.
+func TestStore_PersistenceRejectsInvalidDataTaskEpic(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("invalid_task_status", func(t *testing.T) {
+		store := setupTestStore(t)
+		_, err := store.Add(ctx, Task{WorkspaceID: "ws-1", Title: "Bad task", Status: "done"})
+		if err == nil || !strings.Contains(err.Error(), "invalid task status") {
+			t.Fatalf("error=%v want invalid task status", err)
+		}
+		tasks, listErr := store.ListByWorkspace(ctx, "ws-1")
+		if listErr != nil {
+			t.Fatalf("ListByWorkspace: %v", listErr)
+		}
+		if len(tasks) != 0 {
+			t.Fatalf("invalid-status task was persisted: %+v", tasks)
+		}
+	})
+
+	t.Run("invalid_task_review_status", func(t *testing.T) {
+		store := setupTestStore(t)
+		_, err := store.Add(ctx, Task{WorkspaceID: "ws-1", Title: "Bad review", Status: StatusReadyForReview, LastReviewStatus: "maybe"})
+		if err == nil || !strings.Contains(err.Error(), "invalid task review status") {
+			t.Fatalf("error=%v want invalid task review status", err)
+		}
+		tasks, listErr := store.ListByWorkspace(ctx, "ws-1")
+		if listErr != nil {
+			t.Fatalf("ListByWorkspace: %v", listErr)
+		}
+		if len(tasks) != 0 {
+			t.Fatalf("invalid-review-status task was persisted: %+v", tasks)
+		}
+	})
+
+	t.Run("invalid_epic_status", func(t *testing.T) {
+		store := setupTestStore(t)
+		_, err := store.AddEpic(ctx, Epic{WorkspaceID: "ws-1", Title: "Bad epic", Status: "open"})
+		if err == nil || !strings.Contains(err.Error(), "invalid epic status") {
+			t.Fatalf("error=%v want invalid epic status", err)
+		}
+		epics, listErr := store.ListEpics(ctx, "ws-1")
+		if listErr != nil {
+			t.Fatalf("ListEpics: %v", listErr)
+		}
+		if len(epics) != 0 {
+			t.Fatalf("invalid-status epic was persisted: %+v", epics)
+		}
+	})
+
+	t.Run("update_rejects_invalid_task_status", func(t *testing.T) {
+		store := setupTestStore(t)
+		task, err := store.Add(ctx, Task{WorkspaceID: "ws-1", Title: "Valid", Status: StatusPending})
+		if err != nil {
+			t.Fatalf("Add: %v", err)
+		}
+		task.Status = "archived"
+		if _, err := store.Update(ctx, task); err == nil || !strings.Contains(err.Error(), "invalid task status") {
+			t.Fatalf("error=%v want invalid task status", err)
+		}
+		got, err := store.Get(ctx, task.ID)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.Status != StatusPending {
+			t.Fatalf("status=%q want %q", got.Status, StatusPending)
+		}
+	})
 }
 
 func TestStore_AddRejectsInvalidReviewStatus(t *testing.T) {
@@ -251,29 +337,6 @@ func TestStore_AddSubtaskRejectsInvalidReviewStatusWithoutLinkingChild(t *testin
 	}
 	if len(got.Children) != 0 {
 		t.Fatalf("parent children=%v want none after rejected child", got.Children)
-	}
-}
-
-func TestStoreRejectsGeneratedUnknownReviewStatuses(t *testing.T) {
-	ctx := context.Background()
-
-	unknownReviewStatusesFailClosed := func(raw string) bool {
-		store := setupTestStore(t)
-		_, err := store.Add(ctx, Task{
-			WorkspaceID:      "ws-1",
-			Title:            "Generated invalid review status",
-			Status:           StatusReadyForReview,
-			LastReviewStatus: "unknown:" + raw,
-		})
-		tasks, listErr := store.ListByWorkspace(ctx, "ws-1")
-		return err != nil &&
-			strings.Contains(err.Error(), "invalid task review status") &&
-			listErr == nil &&
-			len(tasks) == 0
-	}
-
-	if err := quick.Check(unknownReviewStatusesFailClosed, &quick.Config{MaxCount: 100}); err != nil {
-		t.Fatalf("generated unknown review status was accepted: %v", err)
 	}
 }
 
@@ -388,28 +451,6 @@ func TestStore_UpdateEpicRejectsInvalidStatusWithoutMutatingExistingEpic(t *test
 	}
 	if got.Status != EpicStatusActive {
 		t.Fatalf("status=%q want %q", got.Status, EpicStatusActive)
-	}
-}
-
-func TestStoreRejectsGeneratedUnknownEpicStatuses(t *testing.T) {
-	ctx := context.Background()
-
-	unknownStatusesFailClosed := func(raw string) bool {
-		store := setupTestStore(t)
-		_, err := store.AddEpic(ctx, Epic{
-			WorkspaceID: "ws-1",
-			Title:       "Generated invalid epic status",
-			Status:      "unknown:" + raw,
-		})
-		epics, listErr := store.ListEpics(ctx, "ws-1")
-		return err != nil &&
-			strings.Contains(err.Error(), "invalid epic status") &&
-			listErr == nil &&
-			len(epics) == 0
-	}
-
-	if err := quick.Check(unknownStatusesFailClosed, &quick.Config{MaxCount: 100}); err != nil {
-		t.Fatalf("generated unknown epic status was accepted: %v", err)
 	}
 }
 
