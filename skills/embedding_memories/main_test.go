@@ -337,24 +337,6 @@ func TestInput_PreservesCustomBatchSize(t *testing.T) {
 	assert.Equal(t, 25, in.BatchSize)
 }
 
-func TestInput_AllFields(t *testing.T) {
-	in := Input{
-		Workspace:  "/test/workspace",
-		BatchSize:  20,
-		ProcessAll: true,
-		DryRun:     true,
-		Enqueue:    true,
-	}
-
-	assert.Equal(t, "/test/workspace", in.Workspace)
-	assert.Equal(t, 20, in.BatchSize)
-	assert.True(t, in.ProcessAll)
-	assert.True(t, in.DryRun)
-	assert.True(t, in.Enqueue)
-}
-
-// Tests for Output structure
-
 func TestOutput_SuccessfulRun(t *testing.T) {
 	output := Output{
 		Workspace:     "/workspace",
@@ -459,10 +441,6 @@ func TestMemoryResult_DryRun(t *testing.T) {
 }
 
 // Tests for constants
-
-func TestCommand(t *testing.T) {
-	assert.Equal(t, "embedding/memories", command)
-}
 
 func TestDefaultBatchMax(t *testing.T) {
 	assert.Equal(t, 10, defaultBatchMax)

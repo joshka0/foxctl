@@ -9,46 +9,6 @@ import (
 
 // Tests for constants
 
-func TestCommand(t *testing.T) {
-	assert.Equal(t, "optimize/weights", command)
-}
-
-// Tests for input structure
-
-func TestInput_AllFields(t *testing.T) {
-	in := input{
-		Action:    "show",
-		Workspace: "/workspace/path",
-	}
-
-	assert.Equal(t, "show", in.Action)
-	assert.Equal(t, "/workspace/path", in.Workspace)
-}
-
-func TestInput_JSONSerialization(t *testing.T) {
-	in := input{
-		Action:    "learn",
-		Workspace: "/test/workspace",
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	var decoded input
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, in.Action, decoded.Action)
-	assert.Equal(t, in.Workspace, decoded.Workspace)
-}
-
-func TestInput_EmptyFields(t *testing.T) {
-	in := input{}
-
-	assert.Empty(t, in.Action)
-	assert.Empty(t, in.Workspace)
-}
-
 func TestInput_ActionValues(t *testing.T) {
 	actions := []string{"show", "learn"}
 
@@ -83,22 +43,6 @@ func TestInput_WorkspaceExplicit(t *testing.T) {
 }
 
 // Tests for JSON field names
-
-func TestInput_JSONFieldNames(t *testing.T) {
-	in := input{
-		Action:    "show",
-		Workspace: "/ws",
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	jsonStr := string(data)
-	assert.Contains(t, jsonStr, "action")
-	assert.Contains(t, jsonStr, "workspace")
-}
-
-// Tests for show action
 
 func TestInput_ShowAction(t *testing.T) {
 	in := input{

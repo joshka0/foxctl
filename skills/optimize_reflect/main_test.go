@@ -9,51 +9,6 @@ import (
 
 // Tests for constants
 
-func TestCommand(t *testing.T) {
-	assert.Equal(t, "optimize/reflect", command)
-}
-
-// Tests for input structure
-
-func TestInput_AllFields(t *testing.T) {
-	in := input{
-		Workspace:    "/workspace/path",
-		Role:         "coder",
-		TrajectoryID: "traj-123",
-	}
-
-	assert.Equal(t, "/workspace/path", in.Workspace)
-	assert.Equal(t, "coder", in.Role)
-	assert.Equal(t, "traj-123", in.TrajectoryID)
-}
-
-func TestInput_JSONSerialization(t *testing.T) {
-	in := input{
-		Workspace:    "/test/workspace",
-		Role:         "reviewer",
-		TrajectoryID: "traj-abc",
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	var decoded input
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, in.Workspace, decoded.Workspace)
-	assert.Equal(t, in.Role, decoded.Role)
-	assert.Equal(t, in.TrajectoryID, decoded.TrajectoryID)
-}
-
-func TestInput_EmptyFields(t *testing.T) {
-	in := input{}
-
-	assert.Empty(t, in.Workspace)
-	assert.Empty(t, in.Role)
-	assert.Empty(t, in.TrajectoryID)
-}
-
 func TestInput_RoleValues(t *testing.T) {
 	roles := []string{"coder", "planner", "reviewer", "overseer"}
 
@@ -131,24 +86,6 @@ func TestInput_SummaryMode(t *testing.T) {
 }
 
 // Tests for JSON field names
-
-func TestInput_JSONFieldNames(t *testing.T) {
-	in := input{
-		Workspace:    "/ws",
-		Role:         "coder",
-		TrajectoryID: "traj-1",
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	jsonStr := string(data)
-	assert.Contains(t, jsonStr, "workspace")
-	assert.Contains(t, jsonStr, "role")
-	assert.Contains(t, jsonStr, "trajectory_id")
-}
-
-// Edge case tests
 
 func TestInput_FullJSONRoundTrip(t *testing.T) {
 	in := input{

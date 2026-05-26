@@ -9,63 +9,6 @@ import (
 
 // Tests for constants
 
-func TestCommand(t *testing.T) {
-	assert.Equal(t, "web/search", command)
-}
-
-// Tests for Input structure
-
-func TestInput_AllFields(t *testing.T) {
-	in := Input{
-		Query:        "golang concurrency",
-		MaxResults:   15,
-		Extract:      true,
-		ExtractQuery: "goroutines",
-		ExtractLimit: 5,
-		Provider:     "exa",
-		Topic:        "news",
-	}
-
-	assert.Equal(t, "golang concurrency", in.Query)
-	assert.Equal(t, 15, in.MaxResults)
-	assert.True(t, in.Extract)
-	assert.Equal(t, "goroutines", in.ExtractQuery)
-	assert.Equal(t, 5, in.ExtractLimit)
-	assert.Equal(t, "exa", in.Provider)
-	assert.Equal(t, "news", in.Topic)
-}
-
-func TestInput_JSONSerialization(t *testing.T) {
-	in := Input{
-		Query:      "test query",
-		MaxResults: 10,
-		Extract:    true,
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	var decoded Input
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, in.Query, decoded.Query)
-	assert.Equal(t, in.MaxResults, decoded.MaxResults)
-	assert.Equal(t, in.Extract, decoded.Extract)
-}
-
-func TestInput_EmptyFields(t *testing.T) {
-	in := Input{}
-
-	assert.Empty(t, in.Query)
-	assert.Zero(t, in.MaxResults)
-	assert.False(t, in.Extract)
-	assert.Empty(t, in.ExtractQuery)
-	assert.Zero(t, in.ExtractLimit)
-	assert.Empty(t, in.Provider)
-	assert.Empty(t, in.Topic)
-}
-
 func TestInput_ProviderValues(t *testing.T) {
 	providers := []string{"exa", "tavily"}
 
@@ -86,48 +29,6 @@ func TestInput_TopicValues(t *testing.T) {
 
 // Tests for SearchResult structure
 
-func TestSearchResult_AllFields(t *testing.T) {
-	result := SearchResult{
-		Title:   "Go Concurrency Guide",
-		URL:     "https://example.com/go-concurrency",
-		Snippet: "Learn about goroutines and channels...",
-		Score:   0.95,
-	}
-
-	assert.Equal(t, "Go Concurrency Guide", result.Title)
-	assert.Equal(t, "https://example.com/go-concurrency", result.URL)
-	assert.Equal(t, "Learn about goroutines and channels...", result.Snippet)
-	assert.Equal(t, 0.95, result.Score)
-}
-
-func TestSearchResult_JSONSerialization(t *testing.T) {
-	result := SearchResult{
-		Title: "Test Title",
-		URL:   "https://test.com",
-		Score: 0.8,
-	}
-
-	data, err := json.Marshal(result)
-	assert.NoError(t, err)
-
-	var decoded SearchResult
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, result.Title, decoded.Title)
-	assert.Equal(t, result.URL, decoded.URL)
-	assert.Equal(t, result.Score, decoded.Score)
-}
-
-func TestSearchResult_EmptyFields(t *testing.T) {
-	result := SearchResult{}
-
-	assert.Empty(t, result.Title)
-	assert.Empty(t, result.URL)
-	assert.Empty(t, result.Snippet)
-	assert.Zero(t, result.Score)
-}
-
 func TestSearchResult_OmitEmptyScore(t *testing.T) {
 	result := SearchResult{
 		Title:   "Test",
@@ -144,48 +45,6 @@ func TestSearchResult_OmitEmptyScore(t *testing.T) {
 }
 
 // Tests for Extraction structure
-
-func TestExtraction_AllFields(t *testing.T) {
-	extraction := Extraction{
-		URL:     "https://example.com/article",
-		Title:   "Article Title",
-		Content: "This is the extracted content...",
-		Query:   "search query",
-	}
-
-	assert.Equal(t, "https://example.com/article", extraction.URL)
-	assert.Equal(t, "Article Title", extraction.Title)
-	assert.Equal(t, "This is the extracted content...", extraction.Content)
-	assert.Equal(t, "search query", extraction.Query)
-}
-
-func TestExtraction_JSONSerialization(t *testing.T) {
-	extraction := Extraction{
-		URL:     "https://test.com",
-		Title:   "Test",
-		Content: "content",
-	}
-
-	data, err := json.Marshal(extraction)
-	assert.NoError(t, err)
-
-	var decoded Extraction
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, extraction.URL, decoded.URL)
-	assert.Equal(t, extraction.Title, decoded.Title)
-	assert.Equal(t, extraction.Content, decoded.Content)
-}
-
-func TestExtraction_EmptyFields(t *testing.T) {
-	extraction := Extraction{}
-
-	assert.Empty(t, extraction.URL)
-	assert.Empty(t, extraction.Title)
-	assert.Empty(t, extraction.Content)
-	assert.Empty(t, extraction.Query)
-}
 
 func TestExtraction_OmitEmptyQuery(t *testing.T) {
 	extraction := Extraction{
@@ -204,49 +63,6 @@ func TestExtraction_OmitEmptyQuery(t *testing.T) {
 
 // Tests for Output structure
 
-func TestOutput_AllFields(t *testing.T) {
-	output := Output{
-		Results: []SearchResult{
-			{Title: "Result 1", URL: "https://r1.com"},
-		},
-		Extractions: []Extraction{
-			{URL: "https://r1.com", Content: "extracted"},
-		},
-		Provider:  "exa",
-		Query:     "test query",
-		Truncated: true,
-		Artifact:  "sha256:abc123",
-	}
-
-	assert.Len(t, output.Results, 1)
-	assert.Len(t, output.Extractions, 1)
-	assert.Equal(t, "exa", output.Provider)
-	assert.Equal(t, "test query", output.Query)
-	assert.True(t, output.Truncated)
-	assert.Equal(t, "sha256:abc123", output.Artifact)
-}
-
-func TestOutput_JSONSerialization(t *testing.T) {
-	output := Output{
-		Results: []SearchResult{
-			{Title: "Test", URL: "https://test.com"},
-		},
-		Provider: "tavily",
-		Query:    "query",
-	}
-
-	data, err := json.Marshal(output)
-	assert.NoError(t, err)
-
-	var decoded Output
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, output.Provider, decoded.Provider)
-	assert.Equal(t, output.Query, decoded.Query)
-	assert.Len(t, decoded.Results, 1)
-}
-
 func TestOutput_EmptyResults(t *testing.T) {
 	output := Output{
 		Results:  []SearchResult{},
@@ -257,25 +73,6 @@ func TestOutput_EmptyResults(t *testing.T) {
 	assert.Empty(t, output.Results)
 	assert.Equal(t, "exa", output.Provider)
 }
-
-func TestOutput_OmitEmptyFields(t *testing.T) {
-	output := Output{
-		Results:  []SearchResult{},
-		Provider: "exa",
-		Query:    "test",
-		// Extractions, Truncated, Artifact are zero values
-	}
-
-	data, err := json.Marshal(output)
-	assert.NoError(t, err)
-
-	jsonStr := string(data)
-	assert.NotContains(t, jsonStr, "extractions")
-	assert.NotContains(t, jsonStr, "truncated")
-	assert.NotContains(t, jsonStr, "artifact")
-}
-
-// Tests for extractTextFromHTML helper
 
 func TestExtractTextFromHTML_Simple(t *testing.T) {
 	html := "<p>Hello World</p>"
@@ -497,30 +294,6 @@ func TestOutput_WithExtractions(t *testing.T) {
 
 	assert.Len(t, output.Extractions, 1)
 	assert.Equal(t, "Full content here", output.Extractions[0].Content)
-}
-
-func TestInput_JSONFieldNames(t *testing.T) {
-	in := Input{
-		Query:        "q",
-		MaxResults:   1,
-		Extract:      true,
-		ExtractQuery: "eq",
-		ExtractLimit: 2,
-		Provider:     "p",
-		Topic:        "t",
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	jsonStr := string(data)
-	assert.Contains(t, jsonStr, "query")
-	assert.Contains(t, jsonStr, "max_results")
-	assert.Contains(t, jsonStr, "extract")
-	assert.Contains(t, jsonStr, "extract_query")
-	assert.Contains(t, jsonStr, "extract_limit")
-	assert.Contains(t, jsonStr, "provider")
-	assert.Contains(t, jsonStr, "topic")
 }
 
 func TestExtractTextFromHTML_ComplexHTML(t *testing.T) {

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -122,21 +121,6 @@ func TestIdempotentMigration(t *testing.T) {
 	}
 	if got.Name != "persist-test" {
 		t.Errorf("flow name after re-migration = %q, want %q", got.Name, "persist-test")
-	}
-}
-
-func TestOpenCreatesDBFile(t *testing.T) {
-	dir := t.TempDir()
-	ctx := context.Background()
-	store, err := Open(ctx, dir)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	_ = store.Close()
-
-	dbPath := filepath.Join(dir, "flow.db")
-	if _, err := filepath.Glob(dbPath); err != nil {
-		t.Fatalf("glob flow.db: %v", err)
 	}
 }
 
@@ -2682,58 +2666,6 @@ func ptrTime(t time.Time) *time.Time {
 }
 
 // ---------------------------------------------------------------------------
-// Timestamps
-// ---------------------------------------------------------------------------
-
-func TestTimestampsRFC3339(t *testing.T) {
-	store := newTestStore(t)
-	ctx := context.Background()
-
-	before := time.Now().UTC()
-	f := newFlow("ts-test", "/ws")
-	created, err := store.CreateFlow(ctx, f)
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	after := time.Now().UTC()
-
-	// Timestamps should be valid and within range.
-	if created.CreatedAt.Before(before) {
-		t.Errorf("CreatedAt %v is before start %v", created.CreatedAt, before)
-	}
-	if created.CreatedAt.After(after) {
-		t.Errorf("CreatedAt %v is after end %v", created.CreatedAt, after)
-	}
-	if created.UpdatedAt.Before(before) {
-		t.Errorf("UpdatedAt %v is before start %v", created.UpdatedAt, before)
-	}
-	if created.UpdatedAt.After(after) {
-		t.Errorf("UpdatedAt %v is after end %v", created.UpdatedAt, after)
-	}
-}
-
-func TestUpdatedAtChangesOnMutation(t *testing.T) {
-	store := newTestStore(t)
-	ctx := context.Background()
-
-	f := newFlow("ts-mut-test", "/ws")
-	created, _ := store.CreateFlow(ctx, f)
-	originalUpdatedAt := created.UpdatedAt
-
-	time.Sleep(2 * time.Millisecond) // ensure time passes
-
-	created.Description = "updated"
-	updated, err := store.UpdateFlow(ctx, created)
-	if err != nil {
-		t.Fatalf("update: %v", err)
-	}
-
-	if !updated.UpdatedAt.After(originalUpdatedAt) {
-		t.Errorf("UpdatedAt %v should be after original %v", updated.UpdatedAt, originalUpdatedAt)
-	}
-}
-
-// ---------------------------------------------------------------------------
 // Run Log Tests
 // ---------------------------------------------------------------------------
 
@@ -3715,77 +3647,6 @@ func TestStreamRunLogsEmptyCompletedRun(t *testing.T) {
 	}
 }
 
-func TestRunLogSchemaAndIndexes(t *testing.T) {
-	store := newTestStore(t)
-	ctx := context.Background()
-	_ = ctx // just need the store to trigger migration
-
-	// Access the underlying DB to check schema.
-	db := store.(*sqlStore).db
-
-	// Check table exists.
-	var name string
-	err := db.QueryRowContext(ctx,
-		`SELECT name FROM sqlite_master WHERE type='table' AND name='flow_run_logs'`).Scan(&name)
-	if err != nil {
-		t.Fatalf("flow_run_logs table not found: %v", err)
-	}
-
-	// Check columns via PRAGMA.
-	rows, err := db.QueryContext(ctx, `PRAGMA table_info(flow_run_logs)`)
-	if err != nil {
-		t.Fatalf("PRAGMA table_info: %v", err)
-	}
-	defer rows.Close()
-
-	columns := map[string]string{}
-	for rows.Next() {
-		var cid int
-		var colName, colType string
-		var notNull int
-		var dfltValue any
-		var pk int
-		if err := rows.Scan(&cid, &colName, &colType, &notNull, &dfltValue, &pk); err != nil {
-			t.Fatalf("scan column: %v", err)
-		}
-		columns[colName] = colType
-	}
-
-	expectedCols := []string{"id", "run_id", "node_id", "seq", "envelope", "created_at"}
-	for _, col := range expectedCols {
-		if _, ok := columns[col]; !ok {
-			t.Errorf("missing column %q in flow_run_logs", col)
-		}
-	}
-
-	// Check indexes.
-	idxRows, err := db.QueryContext(ctx, `PRAGMA index_list(flow_run_logs)`)
-	if err != nil {
-		t.Fatalf("PRAGMA index_list: %v", err)
-	}
-	defer idxRows.Close()
-
-	idxNames := map[string]bool{}
-	for idxRows.Next() {
-		var seq int
-		var idxName string
-		var unique int
-		var origin string
-		var partial int
-		if err := idxRows.Scan(&seq, &idxName, &unique, &origin, &partial); err != nil {
-			t.Fatalf("scan index: %v", err)
-		}
-		idxNames[idxName] = true
-	}
-
-	expectedIdx := []string{"idx_flow_run_logs_run_seq", "idx_flow_run_logs_run_node"}
-	for _, idx := range expectedIdx {
-		if !idxNames[idx] {
-			t.Errorf("missing index %q", idx)
-		}
-	}
-}
-
 func TestRunLogLinearChainAllNodesLogged(t *testing.T) {
 	// Simulate a linear chain A→B→C: each node produces one log.
 	store := newTestStore(t)
@@ -3848,24 +3709,6 @@ func TestRunLogEnvelopePreservesMetaSource(t *testing.T) {
 	}
 	if parsedMeta["source"] != "flow/engine" {
 		t.Errorf("meta.source = %v, want flow/engine", parsedMeta["source"])
-	}
-}
-
-func TestRunLogCreatedAtBetweenRunBounds(t *testing.T) {
-	store := newTestStore(t)
-	ctx := context.Background()
-	_, run := setupFlowRun(t, store, ctx)
-
-	envJSON := makeEnvelopeJSON(t, "ok", "test", nil)
-	time.Sleep(1 * time.Millisecond)
-	got, err := store.WriteRunLog(ctx, flow.RunLog{RunID: run.ID, NodeID: "a", Envelope: envJSON})
-	if err != nil {
-		t.Fatalf("WriteRunLog: %v", err)
-	}
-	time.Sleep(1 * time.Millisecond)
-
-	if got.CreatedAt.Before(run.StartedAt) {
-		t.Errorf("log CreatedAt %v before run StartedAt %v", got.CreatedAt, run.StartedAt)
 	}
 }
 

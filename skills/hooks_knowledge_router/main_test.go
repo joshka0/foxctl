@@ -31,25 +31,6 @@ func TestRouterConfig_CustomValues(t *testing.T) {
 	assert.Equal(t, 5, cfg.MaxRecommendations)
 }
 
-func TestRouterConfig_JSONSerialization(t *testing.T) {
-	cfg := RouterConfig{
-		Threshold:          0.8,
-		MaxRecommendations: 10,
-	}
-
-	data, err := json.Marshal(cfg)
-	assert.NoError(t, err)
-
-	var decoded RouterConfig
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, cfg.Threshold, decoded.Threshold)
-	assert.Equal(t, cfg.MaxRecommendations, decoded.MaxRecommendations)
-}
-
-// Tests for Match structure
-
 func TestMatch_Structure(t *testing.T) {
 	m := Match{
 		Name:        "react-patterns",
@@ -63,29 +44,6 @@ func TestMatch_Structure(t *testing.T) {
 	assert.Equal(t, "React component patterns", m.Description)
 	assert.Equal(t, 0.85, m.Score)
 }
-
-func TestMatch_JSONSerialization(t *testing.T) {
-	m := Match{
-		Name:        "auth",
-		Kind:        "guide",
-		Description: "Authentication guide",
-		Score:       0.92,
-	}
-
-	data, err := json.Marshal(m)
-	assert.NoError(t, err)
-
-	var decoded Match
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, m.Name, decoded.Name)
-	assert.Equal(t, m.Kind, decoded.Kind)
-	assert.Equal(t, m.Description, decoded.Description)
-	assert.Equal(t, m.Score, decoded.Score)
-}
-
-// Tests for extractPrompt helper
 
 func TestExtractPrompt_DirectPrompt(t *testing.T) {
 	in := hooks.Input{

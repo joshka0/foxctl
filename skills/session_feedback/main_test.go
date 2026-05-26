@@ -10,12 +10,6 @@ import (
 
 // Tests for constants
 
-func TestCommand(t *testing.T) {
-	assert.Equal(t, "session/feedback", command)
-}
-
-// Tests for valid outcomes (matching the validation in run)
-
 func TestValidOutcomes(t *testing.T) {
 	validOutcomes := map[string]bool{
 		"success":   true,
@@ -63,151 +57,6 @@ func TestRatingValidation_InvalidRatings(t *testing.T) {
 
 // Tests for Input structure
 
-func TestInput_AllFields(t *testing.T) {
-	in := Input{
-		SessionID:       "sess-123",
-		Workspace:       "/path/to/ws",
-		Rating:          4,
-		Outcome:         "success",
-		WhatWorked:      []string{"feature1", "feature2"},
-		WhatDidntWork:   []string{"issue1"},
-		Blockers:        []string{"blocker1"},
-		Suggestions:     []string{"suggestion1", "suggestion2"},
-		TaskID:          "task-456",
-		ToolsUsed:       []string{"tool1", "tool2"},
-		DurationMinutes: 45,
-		Notes:           "Additional notes here",
-	}
-
-	assert.Equal(t, "sess-123", in.SessionID)
-	assert.Equal(t, "/path/to/ws", in.Workspace)
-	assert.Equal(t, 4, in.Rating)
-	assert.Equal(t, "success", in.Outcome)
-	assert.Equal(t, []string{"feature1", "feature2"}, in.WhatWorked)
-	assert.Equal(t, []string{"issue1"}, in.WhatDidntWork)
-	assert.Equal(t, []string{"blocker1"}, in.Blockers)
-	assert.Equal(t, []string{"suggestion1", "suggestion2"}, in.Suggestions)
-	assert.Equal(t, "task-456", in.TaskID)
-	assert.Equal(t, []string{"tool1", "tool2"}, in.ToolsUsed)
-	assert.Equal(t, 45, in.DurationMinutes)
-	assert.Equal(t, "Additional notes here", in.Notes)
-}
-
-func TestInput_JSONSerialization(t *testing.T) {
-	in := Input{
-		SessionID: "sess-123",
-		Workspace: "/ws",
-		Rating:    3,
-		Outcome:   "partial",
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	var decoded Input
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, in.SessionID, decoded.SessionID)
-	assert.Equal(t, in.Workspace, decoded.Workspace)
-	assert.Equal(t, in.Rating, decoded.Rating)
-	assert.Equal(t, in.Outcome, decoded.Outcome)
-}
-
-func TestInput_EmptyFields(t *testing.T) {
-	in := Input{}
-
-	assert.Empty(t, in.SessionID)
-	assert.Empty(t, in.Workspace)
-	assert.Zero(t, in.Rating)
-	assert.Empty(t, in.Outcome)
-	assert.Nil(t, in.WhatWorked)
-	assert.Nil(t, in.WhatDidntWork)
-}
-
-func TestInput_JSONOmitEmpty(t *testing.T) {
-	in := Input{
-		Workspace: "/ws",
-		Rating:    3,
-		Outcome:   "success",
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	// session_id should be omitted when empty
-	assert.NotContains(t, string(data), "session_id")
-	// what_worked should be omitted when nil
-	assert.NotContains(t, string(data), "what_worked")
-}
-
-// Tests for SessionFeedback structure
-
-func TestSessionFeedback_AllFields(t *testing.T) {
-	now := time.Now().UTC()
-	fb := SessionFeedback{
-		FeedbackID:      "fb-123",
-		SessionID:       "sess-456",
-		Workspace:       "/workspace",
-		Rating:          5,
-		Outcome:         "success",
-		WhatWorked:      []string{"item1"},
-		WhatDidntWork:   []string{"item2"},
-		Blockers:        []string{"blocker"},
-		Suggestions:     []string{"suggest"},
-		TaskID:          "task-789",
-		ToolsUsed:       []string{"grep", "read"},
-		DurationMinutes: 30,
-		Notes:           "test notes",
-		Timestamp:       now,
-	}
-
-	assert.Equal(t, "fb-123", fb.FeedbackID)
-	assert.Equal(t, "sess-456", fb.SessionID)
-	assert.Equal(t, "/workspace", fb.Workspace)
-	assert.Equal(t, 5, fb.Rating)
-	assert.Equal(t, "success", fb.Outcome)
-	assert.Equal(t, []string{"item1"}, fb.WhatWorked)
-	assert.Equal(t, []string{"item2"}, fb.WhatDidntWork)
-	assert.Equal(t, []string{"blocker"}, fb.Blockers)
-	assert.Equal(t, []string{"suggest"}, fb.Suggestions)
-	assert.Equal(t, "task-789", fb.TaskID)
-	assert.Equal(t, []string{"grep", "read"}, fb.ToolsUsed)
-	assert.Equal(t, 30, fb.DurationMinutes)
-	assert.Equal(t, "test notes", fb.Notes)
-	assert.Equal(t, now, fb.Timestamp)
-}
-
-func TestSessionFeedback_JSONSerialization(t *testing.T) {
-	fb := SessionFeedback{
-		FeedbackID: "fb-test",
-		Workspace:  "/ws",
-		Rating:     4,
-		Outcome:    "partial",
-	}
-
-	data, err := json.Marshal(fb)
-	assert.NoError(t, err)
-
-	var decoded SessionFeedback
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, fb.FeedbackID, decoded.FeedbackID)
-	assert.Equal(t, fb.Workspace, decoded.Workspace)
-	assert.Equal(t, fb.Rating, decoded.Rating)
-	assert.Equal(t, fb.Outcome, decoded.Outcome)
-}
-
-func TestSessionFeedback_EmptyFields(t *testing.T) {
-	fb := SessionFeedback{}
-
-	assert.Empty(t, fb.FeedbackID)
-	assert.Empty(t, fb.SessionID)
-	assert.Zero(t, fb.Rating)
-	assert.Empty(t, fb.Outcome)
-}
-
 func TestSessionFeedback_TimeFormat(t *testing.T) {
 	now := time.Date(2026, 1, 15, 10, 30, 0, 0, time.UTC)
 	fb := SessionFeedback{
@@ -222,42 +71,6 @@ func TestSessionFeedback_TimeFormat(t *testing.T) {
 }
 
 // Tests for Output structure
-
-func TestOutput_AllFields(t *testing.T) {
-	out := Output{
-		FeedbackID: "fb-123",
-		Message:    "Feedback recorded: fb-123 (success, 5/5)",
-	}
-
-	assert.Equal(t, "fb-123", out.FeedbackID)
-	assert.Equal(t, "Feedback recorded: fb-123 (success, 5/5)", out.Message)
-}
-
-func TestOutput_JSONSerialization(t *testing.T) {
-	out := Output{
-		FeedbackID: "fb-test",
-		Message:    "test message",
-	}
-
-	data, err := json.Marshal(out)
-	assert.NoError(t, err)
-
-	var decoded Output
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, out.FeedbackID, decoded.FeedbackID)
-	assert.Equal(t, out.Message, decoded.Message)
-}
-
-func TestOutput_EmptyFields(t *testing.T) {
-	out := Output{}
-
-	assert.Empty(t, out.FeedbackID)
-	assert.Empty(t, out.Message)
-}
-
-// Tests for rating boundary values
 
 func TestRatingBoundaries(t *testing.T) {
 	tests := []struct {

@@ -189,20 +189,6 @@ func TestJoinStrings_DifferentSeparator(t *testing.T) {
 
 // Tests for Input structure
 
-func TestInput_AllFields(t *testing.T) {
-	in := Input{
-		Scope:     "memory",
-		Name:      "test-memory",
-		Workspace: "/test/workspace",
-		DryRun:    true,
-	}
-
-	assert.Equal(t, "memory", in.Scope)
-	assert.Equal(t, "test-memory", in.Name)
-	assert.Equal(t, "/test/workspace", in.Workspace)
-	assert.True(t, in.DryRun)
-}
-
 func TestInput_ValidScopes(t *testing.T) {
 	validScopes := []string{"memory", "symbol", "session"}
 	for _, scope := range validScopes {
@@ -289,10 +275,6 @@ func TestOutput_WithHint(t *testing.T) {
 }
 
 // Tests for constants
-
-func TestCommand(t *testing.T) {
-	assert.Equal(t, "embedding/refresh", command)
-}
 
 func TestGeminiConstants(t *testing.T) {
 	assert.Equal(t, "gemini-embedding-001", geminiModel)

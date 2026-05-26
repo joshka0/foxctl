@@ -9,28 +9,6 @@ import (
 
 // Tests for constants
 
-func TestCommand(t *testing.T) {
-	assert.Equal(t, "hooks/subagent_stop", command)
-}
-
-// Tests for SubagentStopPayload structure
-
-func TestSubagentStopPayload_AllFields(t *testing.T) {
-	payload := SubagentStopPayload{
-		SubagentName: "explorer",
-		SubagentType: "Explore",
-		AgentID:      "agent-123",
-		ExitCode:     0,
-		Error:        "",
-	}
-
-	assert.Equal(t, "explorer", payload.SubagentName)
-	assert.Equal(t, "Explore", payload.SubagentType)
-	assert.Equal(t, "agent-123", payload.AgentID)
-	assert.Equal(t, 0, payload.ExitCode)
-	assert.Empty(t, payload.Error)
-}
-
 func TestSubagentStopPayload_WithError(t *testing.T) {
 	payload := SubagentStopPayload{
 		SubagentName: "failed-agent",
@@ -41,37 +19,6 @@ func TestSubagentStopPayload_WithError(t *testing.T) {
 	assert.Equal(t, "failed-agent", payload.SubagentName)
 	assert.Equal(t, 1, payload.ExitCode)
 	assert.Equal(t, "task failed: timeout exceeded", payload.Error)
-}
-
-func TestSubagentStopPayload_JSONSerialization(t *testing.T) {
-	payload := SubagentStopPayload{
-		SubagentName: "test-agent",
-		SubagentType: "Test",
-		AgentID:      "agent-456",
-		ExitCode:     0,
-	}
-
-	data, err := json.Marshal(payload)
-	assert.NoError(t, err)
-
-	var decoded SubagentStopPayload
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, payload.SubagentName, decoded.SubagentName)
-	assert.Equal(t, payload.SubagentType, decoded.SubagentType)
-	assert.Equal(t, payload.AgentID, decoded.AgentID)
-	assert.Equal(t, payload.ExitCode, decoded.ExitCode)
-}
-
-func TestSubagentStopPayload_EmptyFields(t *testing.T) {
-	payload := SubagentStopPayload{}
-
-	assert.Empty(t, payload.SubagentName)
-	assert.Empty(t, payload.SubagentType)
-	assert.Empty(t, payload.AgentID)
-	assert.Zero(t, payload.ExitCode)
-	assert.Empty(t, payload.Error)
 }
 
 func TestSubagentStopPayload_NonZeroExitCode(t *testing.T) {

@@ -333,32 +333,6 @@ func TestBuildOverseerContext_AllKinds(t *testing.T) {
 
 // Tests for BoardMessage structure usage
 
-func TestBoardMessage_AllFields(t *testing.T) {
-	msg := agent.BoardMessage{
-		ID:          "msg-full",
-		Subject:     "Full Message",
-		Body:        "Complete body",
-		Sender:      "admin",
-		Recipient:   "overseer",
-		Stream:      "main",
-		Priority:    1,
-		Kind:        agent.BoardMessageKindInstruction,
-		AckRequired: true,
-	}
-
-	assert.Equal(t, "msg-full", msg.ID)
-	assert.Equal(t, "Full Message", msg.Subject)
-	assert.Equal(t, "Complete body", msg.Body)
-	assert.Equal(t, "admin", msg.Sender)
-	assert.Equal(t, "overseer", msg.Recipient)
-	assert.Equal(t, "main", msg.Stream)
-	assert.Equal(t, 1, msg.Priority)
-	assert.Equal(t, agent.BoardMessageKindInstruction, msg.Kind)
-	assert.True(t, msg.AckRequired)
-}
-
-// Tests for edge cases
-
 func TestBuildOverseerContext_SpecialCharactersInSubject(t *testing.T) {
 	messages := []agent.BoardMessage{
 		{Subject: "Test <script>alert('xss')</script>"},
@@ -424,24 +398,6 @@ func TestInboxFilter_OnlyUnsurfaced(t *testing.T) {
 
 	assert.True(t, filter.OnlyUnsurfaced)
 }
-
-func TestInboxFilter_AllFields(t *testing.T) {
-	filter := agent.InboxFilter{
-		WorkspaceID:    "ws-123",
-		ActorID:        "overseer",
-		OnlyUnread:     true,
-		OnlyUnsurfaced: true,
-		Limit:          20,
-	}
-
-	assert.Equal(t, "ws-123", filter.WorkspaceID)
-	assert.Equal(t, "overseer", filter.ActorID)
-	assert.True(t, filter.OnlyUnread)
-	assert.True(t, filter.OnlyUnsurfaced)
-	assert.Equal(t, 20, filter.Limit)
-}
-
-// Tests for BoardMessageKind constants
 
 func TestBoardMessageKind_Constants(t *testing.T) {
 	assert.Equal(t, agent.BoardMessageKind("instruction"), agent.BoardMessageKindInstruction)

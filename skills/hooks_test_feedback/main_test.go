@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/joshka0/foxctl/internal/storage/testwatch"
@@ -26,23 +25,6 @@ func TestFeedbackConfig_CustomValues(t *testing.T) {
 	assert.Equal(t, 10, cfg.MaxFailures)
 }
 
-func TestFeedbackConfig_JSONSerialization(t *testing.T) {
-	cfg := FeedbackConfig{
-		MaxFailures: 5,
-	}
-
-	data, err := json.Marshal(cfg)
-	assert.NoError(t, err)
-
-	var decoded FeedbackConfig
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, cfg.MaxFailures, decoded.MaxFailures)
-}
-
-// Tests for WatcherFeedback structure
-
 func TestWatcherFeedback_Structure(t *testing.T) {
 	feedback := WatcherFeedback{
 		WatcherID: "watcher-1",
@@ -57,29 +39,6 @@ func TestWatcherFeedback_Structure(t *testing.T) {
 	assert.Equal(t, "fail", feedback.Status)
 	assert.Equal(t, "3 tests failed", feedback.Summary)
 	assert.Len(t, feedback.Failures, 1)
-}
-
-func TestWatcherFeedback_JSONSerialization(t *testing.T) {
-	feedback := WatcherFeedback{
-		WatcherID: "watcher-1",
-		Status:    "fail",
-		Summary:   "Tests failed",
-		Failures: []testwatch.Failure{
-			{Name: "TestFoo", File: "foo_test.go"},
-		},
-	}
-
-	data, err := json.Marshal(feedback)
-	assert.NoError(t, err)
-
-	var decoded WatcherFeedback
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, feedback.WatcherID, decoded.WatcherID)
-	assert.Equal(t, feedback.Status, decoded.Status)
-	assert.Equal(t, feedback.Summary, decoded.Summary)
-	assert.Len(t, decoded.Failures, 1)
 }
 
 func TestWatcherFeedback_NoFailures(t *testing.T) {
@@ -299,31 +258,6 @@ func TestBuildContextString_FooterPresent(t *testing.T) {
 
 // Tests for testwatch.Failure structure
 
-func TestFailure_AllFields(t *testing.T) {
-	f := testwatch.Failure{
-		Name:    "TestSomething",
-		File:    "something_test.go",
-		Line:    100,
-		Message: "test failed",
-	}
-
-	assert.Equal(t, "TestSomething", f.Name)
-	assert.Equal(t, "something_test.go", f.File)
-	assert.Equal(t, 100, f.Line)
-	assert.Equal(t, "test failed", f.Message)
-}
-
-func TestFailure_EmptyFields(t *testing.T) {
-	f := testwatch.Failure{}
-
-	assert.Empty(t, f.Name)
-	assert.Empty(t, f.File)
-	assert.Zero(t, f.Line)
-	assert.Empty(t, f.Message)
-}
-
-// Tests for testwatch.Status values
-
 func TestStatusValues(t *testing.T) {
 	assert.Equal(t, testwatch.Status("unknown"), testwatch.StatusUnknown)
 	assert.Equal(t, testwatch.Status("pass"), testwatch.StatusPass)
@@ -374,25 +308,6 @@ func TestLimitFailures(t *testing.T) {
 }
 
 // Tests for testwatch.TestStatus structure
-
-func TestTestStatus_AllFields(t *testing.T) {
-	status := testwatch.TestStatus{
-		WatcherID: "my-watcher",
-		Status:    testwatch.StatusFail,
-		Summary:   "5 of 20 tests failed",
-		Failures: []testwatch.Failure{
-			{Name: "Test1"},
-			{Name: "Test2"},
-		},
-	}
-
-	assert.Equal(t, "my-watcher", status.WatcherID)
-	assert.Equal(t, testwatch.StatusFail, status.Status)
-	assert.Equal(t, "5 of 20 tests failed", status.Summary)
-	assert.Len(t, status.Failures, 2)
-}
-
-// Tests for edge cases
 
 func TestBuildContextString_NoSummary(t *testing.T) {
 	watchers := []WatcherFeedback{

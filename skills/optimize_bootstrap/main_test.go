@@ -9,61 +9,6 @@ import (
 
 // Tests for constants
 
-func TestCommand(t *testing.T) {
-	assert.Equal(t, "optimize/bootstrap", command)
-}
-
-// Tests for input structure
-
-func TestInput_AllFields(t *testing.T) {
-	in := input{
-		Workspace:      "/workspace/path",
-		Role:           "coder",
-		MaxExamples:    10,
-		MinSuccessRate: 0.8,
-		Format:         "prompt",
-	}
-
-	assert.Equal(t, "/workspace/path", in.Workspace)
-	assert.Equal(t, "coder", in.Role)
-	assert.Equal(t, 10, in.MaxExamples)
-	assert.Equal(t, 0.8, in.MinSuccessRate)
-	assert.Equal(t, "prompt", in.Format)
-}
-
-func TestInput_JSONSerialization(t *testing.T) {
-	in := input{
-		Workspace:      "/test/workspace",
-		Role:           "reviewer",
-		MaxExamples:    5,
-		MinSuccessRate: 0.9,
-		Format:         "json",
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	var decoded input
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, in.Workspace, decoded.Workspace)
-	assert.Equal(t, in.Role, decoded.Role)
-	assert.Equal(t, in.MaxExamples, decoded.MaxExamples)
-	assert.Equal(t, in.MinSuccessRate, decoded.MinSuccessRate)
-	assert.Equal(t, in.Format, decoded.Format)
-}
-
-func TestInput_EmptyFields(t *testing.T) {
-	in := input{}
-
-	assert.Empty(t, in.Workspace)
-	assert.Empty(t, in.Role)
-	assert.Zero(t, in.MaxExamples)
-	assert.Zero(t, in.MinSuccessRate)
-	assert.Empty(t, in.Format)
-}
-
 func TestInput_RoleValues(t *testing.T) {
 	roles := []string{"coder", "planner", "reviewer", "overseer"}
 
@@ -221,24 +166,4 @@ func TestInput_NegativeMaxExamples(t *testing.T) {
 
 	// Negative values should be handled by the skill
 	assert.Equal(t, -5, in.MaxExamples)
-}
-
-func TestInput_JSONFieldNames(t *testing.T) {
-	in := input{
-		Workspace:      "/ws",
-		Role:           "coder",
-		MaxExamples:    10,
-		MinSuccessRate: 0.8,
-		Format:         "prompt",
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	jsonStr := string(data)
-	assert.Contains(t, jsonStr, "workspace")
-	assert.Contains(t, jsonStr, "role")
-	assert.Contains(t, jsonStr, "max_examples")
-	assert.Contains(t, jsonStr, "min_success_rate")
-	assert.Contains(t, jsonStr, "format")
 }

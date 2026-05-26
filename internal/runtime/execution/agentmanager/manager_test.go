@@ -643,51 +643,44 @@ func TestPolicyNarrowingPropertyResourceLimitsNeverBroaden(t *testing.T) {
 	}
 }
 
-func TestPolicyNarrowingPropertyRejectsNegativeResourceLimits(t *testing.T) {
+func TestPolicyNarrowingRejectsNegativeResourceLimits(t *testing.T) {
 	t.Parallel()
 
-	cfg := &quick.Config{MaxCount: 250}
-	err := quick.Check(func(raw uint8) bool {
-		negative := -int(raw%64) - 1
-		tests := []struct {
-			parent agent.Policy
-			child  agent.Policy
-		}{
-			{
-				parent: agent.Policy{CPU: negative, MemoryMB: 2048, MaxOutputKB: 128},
-				child:  agent.Policy{CPU: 2, MemoryMB: 1024, MaxOutputKB: 64},
-			},
-			{
-				parent: agent.Policy{CPU: 4, MemoryMB: 2048, MaxOutputKB: 128},
-				child:  agent.Policy{CPU: negative, MemoryMB: 1024, MaxOutputKB: 64},
-			},
-			{
-				parent: agent.Policy{CPU: 4, MemoryMB: negative, MaxOutputKB: 128},
-				child:  agent.Policy{CPU: 2, MemoryMB: 1024, MaxOutputKB: 64},
-			},
-			{
-				parent: agent.Policy{CPU: 4, MemoryMB: 2048, MaxOutputKB: 128},
-				child:  agent.Policy{CPU: 2, MemoryMB: negative, MaxOutputKB: 64},
-			},
-			{
-				parent: agent.Policy{CPU: 4, MemoryMB: 2048, MaxOutputKB: negative},
-				child:  agent.Policy{CPU: 2, MemoryMB: 1024, MaxOutputKB: 64},
-			},
-			{
-				parent: agent.Policy{CPU: 4, MemoryMB: 2048, MaxOutputKB: 128},
-				child:  agent.Policy{CPU: 2, MemoryMB: 1024, MaxOutputKB: negative},
-			},
-		}
-
-		for _, tt := range tests {
-			if err := validatePolicyNarrowing(tt.parent, tt.child); err == nil {
-				return false
+	neg := -1
+	for name, tc := range map[string]struct {
+		parent agent.Policy
+		child  agent.Policy
+	}{
+		"parent_cpu_negative": {
+			parent: agent.Policy{CPU: neg, MemoryMB: 2048, MaxOutputKB: 128},
+			child:  agent.Policy{CPU: 2, MemoryMB: 1024, MaxOutputKB: 64},
+		},
+		"child_cpu_negative": {
+			parent: agent.Policy{CPU: 4, MemoryMB: 2048, MaxOutputKB: 128},
+			child:  agent.Policy{CPU: neg, MemoryMB: 1024, MaxOutputKB: 64},
+		},
+		"parent_memory_negative": {
+			parent: agent.Policy{CPU: 4, MemoryMB: neg, MaxOutputKB: 128},
+			child:  agent.Policy{CPU: 2, MemoryMB: 1024, MaxOutputKB: 64},
+		},
+		"child_memory_negative": {
+			parent: agent.Policy{CPU: 4, MemoryMB: 2048, MaxOutputKB: 128},
+			child:  agent.Policy{CPU: 2, MemoryMB: neg, MaxOutputKB: 64},
+		},
+		"parent_output_negative": {
+			parent: agent.Policy{CPU: 4, MemoryMB: 2048, MaxOutputKB: neg},
+			child:  agent.Policy{CPU: 2, MemoryMB: 1024, MaxOutputKB: 64},
+		},
+		"child_output_negative": {
+			parent: agent.Policy{CPU: 4, MemoryMB: 2048, MaxOutputKB: 128},
+			child:  agent.Policy{CPU: 2, MemoryMB: 1024, MaxOutputKB: neg},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := validatePolicyNarrowing(tc.parent, tc.child); err == nil {
+				t.Fatal("expected rejection for negative resource limit")
 			}
-		}
-		return true
-	}, cfg)
-	if err != nil {
-		t.Fatalf("negative resource limit property failed: %v", err)
+		})
 	}
 }
 

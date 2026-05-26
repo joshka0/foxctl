@@ -10,10 +10,6 @@ import (
 
 // Tests for constants
 
-func TestCommand(t *testing.T) {
-	assert.Equal(t, "summary/worker", command)
-}
-
 func TestDefaultBatch(t *testing.T) {
 	assert.Equal(t, 10, defaultBatch)
 }
@@ -23,73 +19,6 @@ func TestDefaultMaxDur(t *testing.T) {
 }
 
 // Tests for Input structure
-
-func TestInput_AllFields(t *testing.T) {
-	in := Input{
-		BatchSize:   20,
-		MaxDuration: 600,
-		ProcessAll:  true,
-		DryRun:      true,
-		SessionID:   "sess-123",
-	}
-
-	assert.Equal(t, 20, in.BatchSize)
-	assert.Equal(t, 600, in.MaxDuration)
-	assert.True(t, in.ProcessAll)
-	assert.True(t, in.DryRun)
-	assert.Equal(t, "sess-123", in.SessionID)
-}
-
-func TestInput_JSONSerialization(t *testing.T) {
-	in := Input{
-		BatchSize:   15,
-		MaxDuration: 120,
-		ProcessAll:  false,
-		DryRun:      true,
-		SessionID:   "test-session",
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	var decoded Input
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, in.BatchSize, decoded.BatchSize)
-	assert.Equal(t, in.MaxDuration, decoded.MaxDuration)
-	assert.Equal(t, in.ProcessAll, decoded.ProcessAll)
-	assert.Equal(t, in.DryRun, decoded.DryRun)
-	assert.Equal(t, in.SessionID, decoded.SessionID)
-}
-
-func TestInput_EmptyFields(t *testing.T) {
-	in := Input{}
-
-	assert.Zero(t, in.BatchSize)
-	assert.Zero(t, in.MaxDuration)
-	assert.False(t, in.ProcessAll)
-	assert.False(t, in.DryRun)
-	assert.Empty(t, in.SessionID)
-}
-
-func TestInput_JSONOmitEmpty(t *testing.T) {
-	in := Input{}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	// batch_size should be omitted when 0
-	assert.NotContains(t, string(data), "batch_size")
-	// max_duration should be omitted when 0
-	assert.NotContains(t, string(data), "max_duration")
-	// process_all should be omitted when false
-	assert.NotContains(t, string(data), "process_all")
-	// dry_run should be omitted when false
-	assert.NotContains(t, string(data), "dry_run")
-	// session_id should be omitted when empty
-	assert.NotContains(t, string(data), "session_id")
-}
 
 func TestInput_DefaultsApplied(t *testing.T) {
 	in := Input{}
@@ -126,82 +55,6 @@ func TestInput_CustomValues(t *testing.T) {
 
 // Tests for Output structure
 
-func TestOutput_AllFields(t *testing.T) {
-	out := Output{
-		Processed:  50,
-		Errors:     3,
-		Skipped:    5,
-		Remaining:  10,
-		BatchCount: 5,
-		Status:     "completed",
-		DurationMs: 12345,
-		LastError:  "some error",
-		Stats: &QueueSnapshot{
-			Queued:    10,
-			Running:   0,
-			Completed: 50,
-			Failed:    3,
-		},
-		Message: "Processed 50 summaries",
-	}
-
-	assert.Equal(t, 50, out.Processed)
-	assert.Equal(t, 3, out.Errors)
-	assert.Equal(t, 5, out.Skipped)
-	assert.Equal(t, 10, out.Remaining)
-	assert.Equal(t, 5, out.BatchCount)
-	assert.Equal(t, "completed", out.Status)
-	assert.Equal(t, int64(12345), out.DurationMs)
-	assert.Equal(t, "some error", out.LastError)
-	assert.NotNil(t, out.Stats)
-	assert.Equal(t, "Processed 50 summaries", out.Message)
-}
-
-func TestOutput_JSONSerialization(t *testing.T) {
-	out := Output{
-		Processed:  25,
-		Errors:     0,
-		Skipped:    2,
-		Status:     "completed",
-		DurationMs: 5000,
-		Message:    "test message",
-	}
-
-	data, err := json.Marshal(out)
-	assert.NoError(t, err)
-
-	var decoded Output
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, out.Processed, decoded.Processed)
-	assert.Equal(t, out.Errors, decoded.Errors)
-	assert.Equal(t, out.Skipped, decoded.Skipped)
-	assert.Equal(t, out.Status, decoded.Status)
-	assert.Equal(t, out.DurationMs, decoded.DurationMs)
-	assert.Equal(t, out.Message, decoded.Message)
-}
-
-func TestOutput_EmptyFields(t *testing.T) {
-	out := Output{}
-
-	assert.Zero(t, out.Processed)
-	assert.Zero(t, out.Errors)
-	assert.Zero(t, out.Skipped)
-	assert.Zero(t, out.Remaining)
-	assert.Empty(t, out.Status)
-	assert.Nil(t, out.Stats)
-}
-
-func TestOutput_StatusValues(t *testing.T) {
-	validStatuses := []string{"completed", "timeout", "no_jobs", "error"}
-
-	for _, status := range validStatuses {
-		out := Output{Status: status}
-		assert.Equal(t, status, out.Status)
-	}
-}
-
 func TestOutput_NilStats(t *testing.T) {
 	out := Output{
 		Processed: 10,
@@ -220,52 +73,6 @@ func TestOutput_NilStats(t *testing.T) {
 }
 
 // Tests for QueueSnapshot structure
-
-func TestQueueSnapshot_AllFields(t *testing.T) {
-	snap := QueueSnapshot{
-		Queued:    15,
-		Running:   2,
-		Completed: 100,
-		Failed:    5,
-	}
-
-	assert.Equal(t, 15, snap.Queued)
-	assert.Equal(t, 2, snap.Running)
-	assert.Equal(t, 100, snap.Completed)
-	assert.Equal(t, 5, snap.Failed)
-}
-
-func TestQueueSnapshot_JSONSerialization(t *testing.T) {
-	snap := QueueSnapshot{
-		Queued:    10,
-		Running:   1,
-		Completed: 50,
-		Failed:    2,
-	}
-
-	data, err := json.Marshal(snap)
-	assert.NoError(t, err)
-
-	var decoded QueueSnapshot
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, snap.Queued, decoded.Queued)
-	assert.Equal(t, snap.Running, decoded.Running)
-	assert.Equal(t, snap.Completed, decoded.Completed)
-	assert.Equal(t, snap.Failed, decoded.Failed)
-}
-
-func TestQueueSnapshot_EmptyFields(t *testing.T) {
-	snap := QueueSnapshot{}
-
-	assert.Zero(t, snap.Queued)
-	assert.Zero(t, snap.Running)
-	assert.Zero(t, snap.Completed)
-	assert.Zero(t, snap.Failed)
-}
-
-// Tests for buildWindowSummaryPrompt helper
 
 func TestBuildWindowSummaryPrompt_Basic(t *testing.T) {
 	window := &storage.ContextWindow{

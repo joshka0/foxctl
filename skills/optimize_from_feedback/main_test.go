@@ -3,67 +3,11 @@ package main
 import (
 	"encoding/json"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 )
 
 // Tests for constants
-
-func TestCommand(t *testing.T) {
-	assert.Equal(t, "optimize/from_feedback", command)
-}
-
-// Tests for Input structure
-
-func TestInput_AllFields(t *testing.T) {
-	in := Input{
-		Workspace: "/workspace/path",
-		Since:     "2026-01-01",
-		MinRating: 3,
-		MaxRating: 5,
-		Outcome:   "success",
-	}
-
-	assert.Equal(t, "/workspace/path", in.Workspace)
-	assert.Equal(t, "2026-01-01", in.Since)
-	assert.Equal(t, 3, in.MinRating)
-	assert.Equal(t, 5, in.MaxRating)
-	assert.Equal(t, "success", in.Outcome)
-}
-
-func TestInput_JSONSerialization(t *testing.T) {
-	in := Input{
-		Workspace: "/test/workspace",
-		Since:     "2026-01-15T10:00:00Z",
-		MinRating: 2,
-		MaxRating: 4,
-		Outcome:   "partial",
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	var decoded Input
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, in.Workspace, decoded.Workspace)
-	assert.Equal(t, in.Since, decoded.Since)
-	assert.Equal(t, in.MinRating, decoded.MinRating)
-	assert.Equal(t, in.MaxRating, decoded.MaxRating)
-	assert.Equal(t, in.Outcome, decoded.Outcome)
-}
-
-func TestInput_EmptyFields(t *testing.T) {
-	in := Input{}
-
-	assert.Empty(t, in.Workspace)
-	assert.Empty(t, in.Since)
-	assert.Zero(t, in.MinRating)
-	assert.Zero(t, in.MaxRating)
-	assert.Empty(t, in.Outcome)
-}
 
 func TestInput_OutcomeValues(t *testing.T) {
 	outcomes := []string{"success", "partial", "failure", "abandoned"}
@@ -75,119 +19,6 @@ func TestInput_OutcomeValues(t *testing.T) {
 }
 
 // Tests for SessionFeedback structure
-
-func TestSessionFeedback_AllFields(t *testing.T) {
-	now := time.Now()
-	fb := SessionFeedback{
-		FeedbackID:      "fb-123",
-		SessionID:       "sess-456",
-		Workspace:       "/workspace",
-		Rating:          4,
-		Outcome:         "success",
-		WhatWorked:      []string{"Clear task definition", "Good tooling"},
-		WhatDidntWork:   []string{"Slow builds"},
-		Blockers:        []string{"Missing docs"},
-		Suggestions:     []string{"Add caching"},
-		TaskID:          "task-789",
-		ToolsUsed:       []string{"Bash", "Read", "Edit"},
-		DurationMinutes: 45,
-		Notes:           "Good session overall",
-		Timestamp:       now,
-	}
-
-	assert.Equal(t, "fb-123", fb.FeedbackID)
-	assert.Equal(t, "sess-456", fb.SessionID)
-	assert.Equal(t, "/workspace", fb.Workspace)
-	assert.Equal(t, 4, fb.Rating)
-	assert.Equal(t, "success", fb.Outcome)
-	assert.Len(t, fb.WhatWorked, 2)
-	assert.Len(t, fb.WhatDidntWork, 1)
-	assert.Len(t, fb.Blockers, 1)
-	assert.Len(t, fb.Suggestions, 1)
-	assert.Equal(t, "task-789", fb.TaskID)
-	assert.Len(t, fb.ToolsUsed, 3)
-	assert.Equal(t, 45, fb.DurationMinutes)
-	assert.Equal(t, "Good session overall", fb.Notes)
-	assert.Equal(t, now, fb.Timestamp)
-}
-
-func TestSessionFeedback_JSONSerialization(t *testing.T) {
-	fb := SessionFeedback{
-		FeedbackID: "fb-test",
-		Workspace:  "/test",
-		Rating:     3,
-		Outcome:    "partial",
-		WhatWorked: []string{"item1"},
-		Timestamp:  time.Now().Truncate(time.Second),
-	}
-
-	data, err := json.Marshal(fb)
-	assert.NoError(t, err)
-
-	var decoded SessionFeedback
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, fb.FeedbackID, decoded.FeedbackID)
-	assert.Equal(t, fb.Rating, decoded.Rating)
-	assert.Equal(t, fb.Outcome, decoded.Outcome)
-	assert.Equal(t, fb.WhatWorked, decoded.WhatWorked)
-}
-
-func TestSessionFeedback_EmptyFields(t *testing.T) {
-	fb := SessionFeedback{}
-
-	assert.Empty(t, fb.FeedbackID)
-	assert.Empty(t, fb.SessionID)
-	assert.Zero(t, fb.Rating)
-	assert.Nil(t, fb.WhatWorked)
-	assert.Nil(t, fb.ToolsUsed)
-}
-
-// Tests for PatternCount structure
-
-func TestPatternCount_AllFields(t *testing.T) {
-	pc := PatternCount{
-		Pattern: "Clear requirements",
-		Count:   5,
-	}
-
-	assert.Equal(t, "Clear requirements", pc.Pattern)
-	assert.Equal(t, 5, pc.Count)
-}
-
-func TestPatternCount_JSONSerialization(t *testing.T) {
-	pc := PatternCount{
-		Pattern: "Good documentation",
-		Count:   10,
-	}
-
-	data, err := json.Marshal(pc)
-	assert.NoError(t, err)
-
-	var decoded PatternCount
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, pc.Pattern, decoded.Pattern)
-	assert.Equal(t, pc.Count, decoded.Count)
-}
-
-// Tests for Recommendation structure
-
-func TestRecommendation_AllFields(t *testing.T) {
-	rec := Recommendation{
-		Priority:    "high",
-		Category:    "process",
-		Description: "Review failing sessions",
-		Evidence:    "5 failures in the last week",
-	}
-
-	assert.Equal(t, "high", rec.Priority)
-	assert.Equal(t, "process", rec.Category)
-	assert.Equal(t, "Review failing sessions", rec.Description)
-	assert.Equal(t, "5 failures in the last week", rec.Evidence)
-}
 
 func TestRecommendation_PriorityValues(t *testing.T) {
 	priorities := []string{"high", "medium", "low"}
@@ -206,67 +37,6 @@ func TestRecommendation_CategoryValues(t *testing.T) {
 		assert.Equal(t, category, rec.Category)
 	}
 }
-
-func TestRecommendation_JSONSerialization(t *testing.T) {
-	rec := Recommendation{
-		Priority:    "medium",
-		Category:    "tooling",
-		Description: "Add caching",
-		Evidence:    "Suggested 3 times",
-	}
-
-	data, err := json.Marshal(rec)
-	assert.NoError(t, err)
-
-	var decoded Recommendation
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, rec.Priority, decoded.Priority)
-	assert.Equal(t, rec.Category, decoded.Category)
-	assert.Equal(t, rec.Description, decoded.Description)
-	assert.Equal(t, rec.Evidence, decoded.Evidence)
-}
-
-// Tests for Output structure
-
-func TestOutput_AllFields(t *testing.T) {
-	output := Output{
-		FeedbackCount:       10,
-		AvgRating:           3.5,
-		OutcomeDistribution: map[string]int{"success": 6, "failure": 4},
-		TopSuccesses:        []PatternCount{{Pattern: "Good docs", Count: 5}},
-		TopFailures:         []PatternCount{{Pattern: "Missing tests", Count: 3}},
-		TopBlockers:         []PatternCount{{Pattern: "Slow CI", Count: 2}},
-		TopSuggestions:      []PatternCount{{Pattern: "Add caching", Count: 4}},
-		ToolUsageStats:      map[string]int{"Bash": 10, "Read": 8},
-		AvgDurationMinutes:  35.0,
-		Recommendations:     []Recommendation{{Priority: "high", Category: "process"}},
-	}
-
-	assert.Equal(t, 10, output.FeedbackCount)
-	assert.Equal(t, 3.5, output.AvgRating)
-	assert.Len(t, output.OutcomeDistribution, 2)
-	assert.Len(t, output.TopSuccesses, 1)
-	assert.Len(t, output.TopFailures, 1)
-	assert.Len(t, output.TopBlockers, 1)
-	assert.Len(t, output.TopSuggestions, 1)
-	assert.Len(t, output.ToolUsageStats, 2)
-	assert.Equal(t, 35.0, output.AvgDurationMinutes)
-	assert.Len(t, output.Recommendations, 1)
-}
-
-func TestOutput_EmptyFields(t *testing.T) {
-	output := Output{}
-
-	assert.Zero(t, output.FeedbackCount)
-	assert.Zero(t, output.AvgRating)
-	assert.Nil(t, output.OutcomeDistribution)
-	assert.Nil(t, output.TopSuccesses)
-	assert.Nil(t, output.Recommendations)
-}
-
-// Tests for topPatterns helper
 
 func TestTopPatterns_Empty(t *testing.T) {
 	counts := make(map[string]int)
@@ -661,32 +431,4 @@ func TestSessionFeedback_LargeArrays(t *testing.T) {
 	assert.Len(t, decoded.WhatWorked, 50)
 	assert.Len(t, decoded.WhatDidntWork, 30)
 	assert.Len(t, decoded.ToolsUsed, 20)
-}
-
-func TestOutput_JSONSerialization(t *testing.T) {
-	output := Output{
-		FeedbackCount:       10,
-		AvgRating:           4.2,
-		OutcomeDistribution: map[string]int{"success": 8, "partial": 2},
-		TopSuccesses:        []PatternCount{{Pattern: "Good docs", Count: 5}},
-		Recommendations: []Recommendation{{
-			Priority:    "medium",
-			Category:    "workflow",
-			Description: "Test recommendation",
-			Evidence:    "Test evidence",
-		}},
-	}
-
-	data, err := json.Marshal(output)
-	assert.NoError(t, err)
-
-	var decoded Output
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, output.FeedbackCount, decoded.FeedbackCount)
-	assert.Equal(t, output.AvgRating, decoded.AvgRating)
-	assert.Equal(t, output.OutcomeDistribution, decoded.OutcomeDistribution)
-	assert.Len(t, decoded.TopSuccesses, 1)
-	assert.Len(t, decoded.Recommendations, 1)
 }

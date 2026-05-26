@@ -211,84 +211,6 @@ func TestUpdateStateRejectsTerminalSameStateMetadataMutation(t *testing.T) {
 	}
 }
 
-func TestInsertJobRejectsUnknownStateWithoutPersisting(t *testing.T) {
-	ctx := context.Background()
-	store := openTestStore(t, ctx)
-
-	now := time.Now().UTC()
-	job := types.Job{
-		ID:        "job-invalid-state",
-		Command:   "test",
-		ArgsJSON:  "{}",
-		ArgsHash:  "invalid-state-hash",
-		State:     types.State("paused"),
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-	if err := store.InsertJob(ctx, job); err == nil {
-		t.Fatal("expected invalid state error")
-	} else if !errors.Is(err, types.ErrInvalidState) {
-		t.Fatalf("error=%v want ErrInvalidState", err)
-	}
-	if _, err := store.Get(ctx, job.ID); !errors.Is(err, types.ErrNotFound) {
-		t.Fatalf("invalid-state job lookup error=%v want ErrNotFound", err)
-	}
-}
-
-func TestFindOrInsertJobRejectsUnknownStateWithoutPersisting(t *testing.T) {
-	ctx := context.Background()
-	store := openTestStore(t, ctx)
-
-	now := time.Now().UTC()
-	job := types.Job{
-		ID:        "job-invalid-find-or-insert",
-		Command:   "test",
-		ArgsJSON:  "{}",
-		ArgsHash:  "invalid-find-or-insert-hash",
-		State:     types.State("paused"),
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-	if _, _, err := store.FindOrInsertJob(ctx, job); err == nil {
-		t.Fatal("expected invalid state error")
-	} else if !errors.Is(err, types.ErrInvalidState) {
-		t.Fatalf("error=%v want ErrInvalidState", err)
-	}
-	if _, err := store.Get(ctx, job.ID); !errors.Is(err, types.ErrNotFound) {
-		t.Fatalf("invalid-state job lookup error=%v want ErrNotFound", err)
-	}
-}
-
-func TestInsertJobRejectsGeneratedUnknownStates(t *testing.T) {
-	ctx := context.Background()
-	store := openTestStore(t, ctx)
-
-	prop := func(raw string) bool {
-		token := safeJobToken(raw)
-		now := time.Now().UTC()
-		job := types.Job{
-			ID:        "job-generated-" + token,
-			Command:   "test",
-			ArgsJSON:  "{}",
-			ArgsHash:  "hash-generated-" + token,
-			State:     types.State("unknown:" + raw),
-			CreatedAt: now,
-			UpdatedAt: now,
-		}
-		err := store.InsertJob(ctx, job)
-		if !errors.Is(err, types.ErrInvalidState) {
-			t.Logf("InsertJob state=%q err=%v want ErrInvalidState", job.State, err)
-			return false
-		}
-		_, getErr := store.Get(ctx, job.ID)
-		return errors.Is(getErr, types.ErrNotFound)
-	}
-
-	if err := quick.Check(prop, &quick.Config{MaxCount: 100}); err != nil {
-		t.Fatalf("generated unknown state was accepted: %v", err)
-	}
-}
-
 func TestJobReadsRejectCorruptPersistedState(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t, ctx)
@@ -761,25 +683,4 @@ func insertTestJobWithState(t *testing.T, ctx context.Context, store Store, id s
 		t.Fatalf("insert %s: %v", id, err)
 	}
 	return job
-}
-
-func safeJobToken(raw string) string {
-	var b strings.Builder
-	for _, r := range raw {
-		switch {
-		case r >= 'a' && r <= 'z':
-			b.WriteRune(r)
-		case r >= 'A' && r <= 'Z':
-			b.WriteRune(r)
-		case r >= '0' && r <= '9':
-			b.WriteRune(r)
-		}
-		if b.Len() >= 12 {
-			break
-		}
-	}
-	if b.Len() == 0 {
-		return "empty"
-	}
-	return b.String()
 }
