@@ -38,12 +38,23 @@ workflow:
 # Rebuilds CI image only when infra files change. All downstream stages wait.
 build-ci-image:
   stage: prepare
+  image: docker:27
+  services:
+    - name: docker:27-dind
+      alias: docker
+      variables:
+        HEALTHCHECK_TCP_PORT: "2376"
   retry:
     max: 2
     when:
       - script_failure
       - runner_system_failure
       - stuck_or_timeout_failure
+  variables:
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_CERT_PATH: "/certs/client"
+    DOCKER_TLS_VERIFY: "1"
   before_script: []
   script:
     - |
