@@ -225,8 +225,6 @@ typescript-frontend:
 # --- Stage: build ---
 build:
   stage: build
-  needs:
-    - job: build-ci-image
   script:
     - make build
     - |
