@@ -22,7 +22,9 @@ stages:
 default:
   interruptible: true
   tags:
-    - foxctl-dev
+    - docker
+    - foxctl
+    - k3s
 
 workflow:
   auto_cancel:
