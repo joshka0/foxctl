@@ -21,6 +21,8 @@ stages:
 
 default:
   interruptible: true
+  tags:
+    - foxctl-dev
 
 workflow:
   auto_cancel:
