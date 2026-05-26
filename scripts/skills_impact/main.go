@@ -56,7 +56,7 @@ func main() {
 	flag.StringVar(&baseRef, "base-ref", "", "Base git ref for changed file detection (required unless --files is provided)")
 	flag.StringVar(&headRef, "head-ref", "HEAD", "Head git ref for changed file detection")
 	flag.StringVar(&format, "format", "text", "Output format: text|json|names")
-	flag.StringVar(&mode, "mode", "skills", "Impact mode: skills|packages")
+	flag.StringVar(&mode, "mode", "skills", "Impact mode: skills|packages|changed-packages")
 	flag.StringVar(&files, "files", "", "Optional comma-separated explicit changed files (skips git diff)")
 	flag.BoolVar(&worktree, "worktree", false, "Use current unstaged, staged, and untracked working tree files")
 	flag.Parse()
@@ -104,6 +104,8 @@ func main() {
 			for _, pkg := range report.Packages {
 				names = append(names, pkg.ImportPath)
 			}
+		case "changed-packages":
+			names = append([]string(nil), report.ChangedPkgs...)
 		default:
 			fatalf("unsupported mode %q", mode)
 		}
@@ -114,6 +116,8 @@ func main() {
 			printSkillsReportText(report)
 		case "packages":
 			printPackageReportText(report)
+		case "changed-packages":
+			printChangedPackageReportText(report)
 		default:
 			fatalf("unsupported mode %q", mode)
 		}
@@ -571,5 +575,16 @@ func printPackageReportText(report impactReport) {
 		for _, reason := range pkg.Reasons {
 			fmt.Printf("  reason: %s\n", reason)
 		}
+	}
+}
+
+func printChangedPackageReportText(report impactReport) {
+	fmt.Printf("Changed files: %d\n", len(report.ChangedFiles))
+	for _, file := range report.ChangedFiles {
+		fmt.Printf("- %s\n", file)
+	}
+	fmt.Printf("\nChanged packages: %d\n", len(report.ChangedPkgs))
+	for _, pkg := range report.ChangedPkgs {
+		fmt.Printf("- %s\n", pkg)
 	}
 }

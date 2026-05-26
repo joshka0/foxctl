@@ -93,6 +93,10 @@ func TestBuildImpactReportPackagesIncludesReverseDeps(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("impacted packages = %v, want %v", got, want)
 	}
+
+	if !reflect.DeepEqual(report.ChangedPkgs, []string{"github.com/example/repo/internal/foo"}) {
+		t.Fatalf("changed packages = %v, want direct foo package only", report.ChangedPkgs)
+	}
 }
 
 func TestBuildImpactReportPackagesIncludesTestOnlyImports(t *testing.T) {
