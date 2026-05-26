@@ -21,8 +21,6 @@ stages:
 
 default:
   interruptible: true
-  tags:
-    - e2e-android
 
 workflow:
   auto_cancel:
