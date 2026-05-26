@@ -226,8 +226,7 @@ typescript-frontend:
 build:
   stage: build
   needs:
-    - job: static-analysis
-    - job: unit-tests
+    - job: build-ci-image
   script:
     - make build
     - |
