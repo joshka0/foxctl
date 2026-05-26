@@ -99,6 +99,25 @@ func TestBuildImpactReportPackagesIncludesReverseDeps(t *testing.T) {
 	}
 }
 
+func TestBuildImpactReportTestOnlyChangesDoNotFanOutReverseDeps(t *testing.T) {
+	allPkgs := []goListPackage{
+		{ImportPath: "github.com/example/repo/internal/foo", Dir: filepath.ToSlash("/repo/internal/foo")},
+		{ImportPath: "github.com/example/repo/internal/bar", Dir: filepath.ToSlash("/repo/internal/bar"), Deps: []string{"github.com/example/repo/internal/foo"}},
+		{ImportPath: "github.com/example/repo/cmd/app", Dir: filepath.ToSlash("/repo/cmd/app"), Deps: []string{"github.com/example/repo/internal/bar", "github.com/example/repo/internal/foo"}},
+	}
+	report := buildImpactReportWithRepoRoot("/repo", "origin/main", "HEAD", []string{"internal/foo/service_test.go"}, allPkgs, nil)
+
+	got := packageImportPaths(report.Packages)
+	want := []string{"github.com/example/repo/internal/foo"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("impacted packages = %v, want test-only package without reverse deps %v", got, want)
+	}
+
+	if !reflect.DeepEqual(report.ChangedPkgs, []string{"github.com/example/repo/internal/foo"}) {
+		t.Fatalf("changed packages = %v, want direct foo package only", report.ChangedPkgs)
+	}
+}
+
 func TestBuildImpactReportPackagesIncludesTestOnlyImports(t *testing.T) {
 	allPkgs := []goListPackage{
 		{ImportPath: "github.com/example/repo/internal/envelope", Dir: filepath.ToSlash("/repo/internal/envelope")},

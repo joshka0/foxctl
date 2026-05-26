@@ -298,6 +298,7 @@ func buildImpactReportWithRepoRoot(repoRoot, baseRef, headRef string, changedFil
 	globalAll := false
 	directSkillReasons := map[string][]string{}
 	changedPkgReasons := map[string][]string{}
+	fanoutPkgReasons := map[string][]string{}
 
 	for _, file := range changedFiles {
 		if trigger := globalSkillTrigger(file); trigger != "" {
@@ -308,7 +309,10 @@ func buildImpactReportWithRepoRoot(repoRoot, baseRef, headRef string, changedFil
 			directSkillReasons[skillName] = append(directSkillReasons[skillName], "changed file "+file)
 		}
 		if importPath := nearestPackageImport(file, repoRoot, dirToImport); importPath != "" {
-			changedPkgReasons[importPath] = append(changedPkgReasons[importPath], "depends on changed package "+importPath)
+			changedPkgReasons[importPath] = append(changedPkgReasons[importPath], "changed file "+file)
+			if shouldFanoutPackageChange(file) {
+				fanoutPkgReasons[importPath] = append(fanoutPkgReasons[importPath], "depends on changed package "+importPath)
+			}
 		}
 	}
 
@@ -320,7 +324,7 @@ func buildImpactReportWithRepoRoot(repoRoot, baseRef, headRef string, changedFil
 	sort.Strings(globalTriggers)
 	globalTriggers = dedupeStrings(globalTriggers)
 
-	impactedPackages := buildImpactedPackages(allPkgs, changedPkgReasons, globalTriggers, globalAll)
+	impactedPackages := buildImpactedPackages(allPkgs, changedPkgReasons, fanoutPkgReasons, globalTriggers, globalAll)
 	impacted := buildImpactedSkills(skillPkgs, directSkillReasons, changedPkgReasons, globalTriggers, globalAll)
 
 	return impactReport{
@@ -334,10 +338,10 @@ func buildImpactReportWithRepoRoot(repoRoot, baseRef, headRef string, changedFil
 	}
 }
 
-func buildImpactedPackages(allPkgs []goListPackage, changedPkgReasons map[string][]string, globalTriggers []string, globalAll bool) []packageImpact {
+func buildImpactedPackages(allPkgs []goListPackage, changedPkgReasons, fanoutPkgReasons map[string][]string, globalTriggers []string, globalAll bool) []packageImpact {
 	impactedPackages := make([]packageImpact, 0)
 	for _, pkg := range allPkgs {
-		reasons := collectPackageImpactReasons(pkg, changedPkgReasons, globalTriggers, globalAll)
+		reasons := collectPackageImpactReasons(pkg, changedPkgReasons, fanoutPkgReasons, globalTriggers, globalAll)
 		if len(reasons) == 0 {
 			continue
 		}
@@ -351,7 +355,7 @@ func buildImpactedPackages(allPkgs []goListPackage, changedPkgReasons map[string
 	return impactedPackages
 }
 
-func collectPackageImpactReasons(pkg goListPackage, changedPkgReasons map[string][]string, globalTriggers []string, globalAll bool) []string {
+func collectPackageImpactReasons(pkg goListPackage, changedPkgReasons, fanoutPkgReasons map[string][]string, globalTriggers []string, globalAll bool) []string {
 	reasonSet := map[string]struct{}{}
 	if globalAll {
 		for _, trigger := range globalTriggers {
@@ -363,7 +367,7 @@ func collectPackageImpactReasons(pkg goListPackage, changedPkgReasons map[string
 		reasonSet[reason] = struct{}{}
 	}
 	for _, dep := range packageTestDependencyImports(pkg) {
-		for _, reason := range changedPkgReasons[dep] {
+		for _, reason := range fanoutPkgReasons[dep] {
 			reasonSet[reason] = struct{}{}
 		}
 	}
@@ -441,6 +445,10 @@ func globalSkillTrigger(path string) string {
 	default:
 		return ""
 	}
+}
+
+func shouldFanoutPackageChange(path string) bool {
+	return !strings.HasSuffix(normalizeSlash(strings.TrimSpace(path)), "_test.go")
 }
 
 func directSkillForPath(path string) string {
