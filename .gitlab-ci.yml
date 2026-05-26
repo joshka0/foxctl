@@ -24,7 +24,7 @@ default:
   tags:
     - foxctl
     - docker
-    - k3s
+    - dev
 
 workflow:
   auto_cancel:
