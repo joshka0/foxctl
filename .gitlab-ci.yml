@@ -225,6 +225,12 @@ typescript-frontend:
 # --- Stage: build ---
 build:
   stage: build
+  needs:
+    - job: build-ci-image
+  variables:
+    GOFLAGS: "-buildvcs=false -p=2"
+    KUBERNETES_MEMORY_REQUEST: "768Mi"
+    KUBERNETES_MEMORY_LIMIT: "1536Mi"
   script:
     - make build
     - |
