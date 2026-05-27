@@ -21,6 +21,7 @@ REFACTOR_SCOUT_RULE_SET ?= default
 REFACTOR_SCOUT_MIN_SCORE ?= 70
 REFACTOR_SCOUT_MAX_RESULTS ?= 8
 REFACTOR_SCOUT_INCLUDE_TESTS ?= false
+RLM_INTEGRATION_TESTS := ^(TestSmokeContextEngineWiring|TestReadOnlyAdapterGatherContext|TestReadOnlyAdapterGatherContextRealWorldStores|TestReadOnlyAdapterGatherContextUsesRepoIndexBeforeSemanticSkill|TestReadOnlyAdapterGatherContextUsesExactCodeProbe|TestReadOnlyAdapterGatherContextCanIncludeCandidateMemory|TestReadOnlyAdapterGatherContextUsesRegistrationTrace|TestReadOnlyAdapterGatherContextExpandsReferencedDefinitions|TestReadOnlyAdapterGatherContextBoostsCommandBuildCompanions|TestReadOnlyAdapterGatherContextExecutionTraceUsesEnsembleBridgeFile|TestReadOnlyAdapterGatherContextSymbolInspectUsesDefinitionPath|TestReadOnlyAdapterCodeSearchEnsembleFileLocate|TestReadOnlyAdapterCodeSearchEnsembleExecutionTrace|TestReadOnlyAdapterCodeSearchEnsembleUsesExactCodeProbe|TestReadOnlyAdapterCodeSearchEnsembleEmitsTelemetry|TestReadOnlyAdapterCodeSearchEnsembleRegistrationTrace|TestReadOnlyAdapterCodeSearchEnsembleChangeImpact|TestReadOnlyAdapterCodeSearchEnsembleExecutionTracePromotesBridgeFile|TestReadOnlyAdapterCodeSearchEnsembleSymbolInspectUsesGoDefinitions|TestGatherContextSelectsNonCodeTestDataWithCoverage|TestGatherContextStructuredCoverageRequirementsFeedProviders|TestGatherContextOmitsTestsByDefault|TestGatherContextIncludesTestsWhenRequested|TestGatherTestContextIncludesTestsByDefault|TestGatherDocsContextUsesDocsProfileAndNoiseFilters)$$
 GOFUMPT ?= gofumpt
 GOLANGCI ?= golangci-lint
 GOLANGCI_FLAGS ?=
@@ -45,7 +46,7 @@ SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 CGO_SKILLS :=
 OPTIONAL_CGO_SKILLS :=
 
-.PHONY: fmt lint static-analysis install-git-hooks typecheck lsp-check vet test test-race test-race-smoke test-race-shard test-race-impacted test-race-changed test-race-shard-impacted test-integration test-integration-package test-integration-impacted test-integration-cmd test-integration-golden mutation-critical mutation-critical-list mutation-critical-dry-run cover check-coverage check-coverage-strict check-doc-links check-large-files check-tech-debt check-duplication test-timing build build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-impact skills-build-impacted packages-impact test-short-impacted skills-install skills-install-cgo skills-install-all skills-test completions init go-tui-build go-tui-spawn go-tui-agent go-tui go-tui-smoke tui ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean benchmark-manifest bench-go bench-orientation gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-foxctl-package eval-code-search-praze-infra eval-code-search-foxctl-repo-grounded eval-code-search-foxctl-change-impact eval-code-search-foxctl-trace-symbol eval-code-search-foxctl-bridge-esoteric eval-retrieval-foxctl eval-retrieval-foxctl-mixed eval-retrieval-foxctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
+.PHONY: fmt lint static-analysis install-git-hooks typecheck lsp-check vet test test-race test-race-smoke test-race-shard test-race-impacted test-race-changed test-race-shard-impacted test-integration test-integration-package test-integration-impacted test-integration-cmd test-integration-golden test-integration-rlm mutation-critical mutation-critical-list mutation-critical-dry-run cover check-coverage check-coverage-strict check-doc-links check-large-files check-tech-debt check-duplication test-timing build build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-impact skills-build-impacted packages-impact test-short-impacted skills-install skills-install-cgo skills-install-all skills-test completions init go-tui-build go-tui-spawn go-tui-agent go-tui go-tui-smoke tui ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean benchmark-manifest bench-go bench-orientation gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-foxctl-package eval-code-search-praze-infra eval-code-search-foxctl-repo-grounded eval-code-search-foxctl-change-impact eval-code-search-foxctl-trace-symbol eval-code-search-foxctl-bridge-esoteric eval-retrieval-foxctl eval-retrieval-foxctl-mixed eval-retrieval-foxctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
 
 fmt:
 	@echo "Running gofumpt"
@@ -312,7 +313,7 @@ endif
 		echo "Race-testing impacted shard $(SHARD): $$pkgs"; \
 		$(GO_CMD_CGO) test -race -short -p $(RACE_P) $$pkgs
 
-test-integration: test-integration-package test-integration-cmd test-integration-golden
+test-integration: test-integration-package test-integration-cmd test-integration-golden test-integration-rlm
 
 test-integration-package:
 	@$(GO_CMD) test -tags=integration ./tests/integration/... -timeout 15m -v
@@ -347,6 +348,14 @@ endif
 		else \
 			echo "Golden test packages not impacted"; \
 		fi; \
+		rlm_pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -E '^github.com/joshka0/foxctl/internal/rlm(/|$$)' || true )"; \
+		if [ -n "$$rlm_pkgs" ]; then \
+			echo "Running impacted RLM integration tests"; \
+			$(GO_CMD) test -tags=integration ./internal/rlm/env/... -run '$(RLM_INTEGRATION_TESTS)' -timeout 15m -v; \
+			ran=1; \
+		else \
+			echo "RLM integration tests not impacted"; \
+		fi; \
 		if [ "$$ran" = 0 ]; then \
 			echo "No integration packages impacted"; \
 		fi; \
@@ -356,6 +365,9 @@ test-integration-cmd:
 
 test-integration-golden:
 	@$(GO_CMD) test -tags=integration ./tests/golden/... -timeout 15m -v
+
+test-integration-rlm:
+	@$(GO_CMD) test -tags=integration ./internal/rlm/env/... -run '$(RLM_INTEGRATION_TESTS)' -timeout 15m -v
 
 cover:
 	@mkdir -p coverage

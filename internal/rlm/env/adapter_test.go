@@ -898,6 +898,7 @@ func TestDirectContextPackFromObsidianHits(t *testing.T) {
 }
 
 func TestReadOnlyAdapterGatherContext(t *testing.T) {
+	skipShortRLMIntegration(t)
 	t.Parallel()
 
 	adapter := NewReadOnlyAdapter(config.Config{}, t.TempDir(), "", nil, rlm.Environment{
@@ -1500,6 +1501,7 @@ signature:
 }
 
 func TestReadOnlyAdapterCodeSearchEnsembleFileLocate(t *testing.T) {
+	skipShortRLMIntegration(t)
 	t.Parallel()
 
 	ctx := context.Background()
@@ -1605,6 +1607,7 @@ func TestReadOnlyAdapterCodeSearchEnsembleFileLocate(t *testing.T) {
 }
 
 func TestReadOnlyAdapterCodeSearchEnsembleExecutionTrace(t *testing.T) {
+	skipShortRLMIntegration(t)
 	t.Parallel()
 
 	ctx := context.Background()
@@ -1707,6 +1710,7 @@ func TestReadOnlyAdapterCodeSearchEnsembleExecutionTrace(t *testing.T) {
 }
 
 func TestReadOnlyAdapterCodeSearchEnsembleUsesExactCodeProbe(t *testing.T) {
+	skipShortRLMIntegration(t)
 	t.Parallel()
 
 	ctx := context.Background()
@@ -1771,6 +1775,7 @@ func TestReadOnlyAdapterCodeSearchEnsembleUsesExactCodeProbe(t *testing.T) {
 }
 
 func TestReadOnlyAdapterCodeSearchEnsembleEmitsTelemetry(t *testing.T) {
+	skipShortRLMIntegration(t)
 	t.Parallel()
 
 	ctx := context.Background()
@@ -1851,6 +1856,7 @@ func TestExtractSkillTokenUsage(t *testing.T) {
 }
 
 func TestReadOnlyAdapterCodeSearchEnsembleRegistrationTrace(t *testing.T) {
+	skipShortRLMIntegration(t)
 	t.Parallel()
 
 	ctx := context.Background()
@@ -1897,6 +1903,7 @@ func TestReadOnlyAdapterCodeSearchEnsembleRegistrationTrace(t *testing.T) {
 }
 
 func TestReadOnlyAdapterCodeSearchEnsembleChangeImpact(t *testing.T) {
+	skipShortRLMIntegration(t)
 	t.Parallel()
 
 	ctx := context.Background()
@@ -2010,6 +2017,7 @@ func TestReadOnlyAdapterCodeSearchEnsembleChangeImpact(t *testing.T) {
 }
 
 func TestReadOnlyAdapterCodeSearchEnsembleExecutionTracePromotesBridgeFile(t *testing.T) {
+	skipShortRLMIntegration(t)
 	t.Parallel()
 
 	ctx := context.Background()
@@ -2140,6 +2148,7 @@ func TestReadOnlyAdapterCodeSearchEnsembleExecutionTracePromotesBridgeFile(t *te
 }
 
 func TestReadOnlyAdapterCodeSearchEnsembleSymbolInspectUsesGoDefinitions(t *testing.T) {
+	skipShortRLMIntegration(t)
 	t.Parallel()
 
 	ctx := context.Background()
@@ -2722,6 +2731,7 @@ func TestReadOnlyAdapterNonCodeConfigDataProviderFindsGenericFixtures(t *testing
 }
 
 func TestGatherContextSelectsNonCodeTestDataWithCoverage(t *testing.T) {
+	skipShortRLMIntegration(t)
 	t.Parallel()
 
 	workspace := t.TempDir()
@@ -2862,6 +2872,7 @@ func TestGatherContextSkipsExpensiveProvidersWhenCheapCoverageSatisfies(t *testi
 }
 
 func TestGatherContextStructuredCoverageRequirementsFeedProviders(t *testing.T) {
+	skipShortRLMIntegration(t)
 	t.Parallel()
 
 	workspace := t.TempDir()
@@ -2988,6 +2999,7 @@ func TestRankSemanticEmbeddingCacheEntriesAggregatesBestScorePerPath(t *testing.
 }
 
 func TestGatherContextOmitsTestsByDefault(t *testing.T) {
+	skipShortRLMIntegration(t)
 	t.Parallel()
 
 	workspace := t.TempDir()
@@ -3027,6 +3039,7 @@ func TestGatherContextOmitsTestsByDefault(t *testing.T) {
 }
 
 func TestGatherContextIncludesTestsWhenRequested(t *testing.T) {
+	skipShortRLMIntegration(t)
 	t.Parallel()
 
 	workspace := t.TempDir()
@@ -3060,6 +3073,7 @@ func TestGatherContextIncludesTestsWhenRequested(t *testing.T) {
 }
 
 func TestGatherTestContextIncludesTestsByDefault(t *testing.T) {
+	skipShortRLMIntegration(t)
 	t.Parallel()
 
 	workspace := t.TempDir()
@@ -3089,6 +3103,7 @@ func TestGatherTestContextIncludesTestsByDefault(t *testing.T) {
 }
 
 func TestGatherDocsContextUsesDocsProfileAndNoiseFilters(t *testing.T) {
+	skipShortRLMIntegration(t)
 	t.Parallel()
 
 	workspace := t.TempDir()
