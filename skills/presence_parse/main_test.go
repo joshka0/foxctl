@@ -1,7 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 )
 
 func TestExtractEmoji(t *testing.T) {
@@ -321,5 +328,137 @@ func TestIntensityScaling(t *testing.T) {
 		if intensity != tt.wantIntensity {
 			t.Errorf("For %d unique emoji, intensity = %v, want %v", tt.count, intensity, tt.wantIntensity)
 		}
+	}
+}
+
+func newTestContext(t *testing.T, stdout *bytes.Buffer) *lite.RunContext {
+	t.Helper()
+	tmpDir := t.TempDir()
+	cfg := lite.LiteConfig{
+		Home:           tmpDir,
+		InlineOutputKB: 32,
+		Paths: lite.LitePaths{
+			CAS:   filepath.Join(tmpDir, "cas"),
+			Cache: filepath.Join(tmpDir, "cache"),
+		},
+		CAS: lite.LiteCASPolicy{Store: true, Expose: "off"},
+	}
+	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+		t.Fatalf("mkdir state: %v", err)
+	}
+	rc, err := lite.BuildRunContext(cfg, stdout)
+	if err != nil {
+		t.Fatalf("runner context: %v", err)
+	}
+	return rc
+}
+
+func TestRunPresenceParse(t *testing.T) {
+	ctx := context.Background()
+	stdout := &bytes.Buffer{}
+	rc := newTestContext(t, stdout)
+	defer func() { _ = rc.Close() }()
+
+	in := Input{
+		Text:         "That's great! \U0001F60A",
+		StripMarkers: true,
+	}
+
+	if err := run(ctx, rc, in); err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	out := stdout.String()
+	if out == "" {
+		t.Fatal("expected non-empty output envelope")
+	}
+
+	var env struct {
+		Status string `json:"status"`
+		Data   struct {
+			Emotion string   `json:"emotion"`
+			Emoji   []string `json:"detected_emoji"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(out), &env); err != nil {
+		t.Fatalf("parse envelope: %v\noutput: %s", err, out)
+	}
+	if env.Status != "ok" {
+		t.Fatalf("expected ok status, got %q", env.Status)
+	}
+	if env.Data.Emotion != EmotionJoy {
+		t.Fatalf("expected joy emotion, got %q", env.Data.Emotion)
+	}
+	if len(env.Data.Emoji) == 0 {
+		t.Fatal("expected at least one detected emoji")
+	}
+}
+
+func TestRunPresenceParseMarkers(t *testing.T) {
+	ctx := context.Background()
+	stdout := &bytes.Buffer{}
+	rc := newTestContext(t, stdout)
+	defer func() { _ = rc.Close() }()
+
+	in := Input{
+		Text: "*laughs* That's funny!",
+	}
+
+	if err := run(ctx, rc, in); err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	out := stdout.String()
+	var env struct {
+		Data struct {
+			Emotion string   `json:"emotion"`
+			Markers []string `json:"markers"`
+			Method  string   `json:"method"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(out), &env); err != nil {
+		t.Fatalf("parse envelope: %v", err)
+	}
+	if env.Data.Emotion != EmotionJoy {
+		t.Fatalf("expected joy emotion from marker, got %q", env.Data.Emotion)
+	}
+	if env.Data.Method != "marker_analysis" {
+		t.Fatalf("expected marker_analysis method, got %q", env.Data.Method)
+	}
+	if len(env.Data.Markers) == 0 {
+		t.Fatal("expected at least one marker")
+	}
+}
+
+func TestRunPresenceParseAllowedEmotionsFilter(t *testing.T) {
+	ctx := context.Background()
+	stdout := &bytes.Buffer{}
+	rc := newTestContext(t, stdout)
+	defer func() { _ = rc.Close() }()
+
+	in := Input{
+		Text:            "That's great! \U0001F60A",
+		AllowedEmotions: []string{"sadness", "neutral"},
+	}
+
+	if err := run(ctx, rc, in); err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+
+	out := stdout.String()
+	var env struct {
+		Data struct {
+			Emotion    string  `json:"emotion"`
+			Confidence float64 `json:"confidence"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(out), &env); err != nil {
+		t.Fatalf("parse envelope: %v", err)
+	}
+	if env.Data.Emotion != EmotionNeutral {
+		t.Fatalf("expected neutral after filter, got %q", env.Data.Emotion)
+	}
+	if env.Data.Confidence >= 0.9 {
+		t.Fatalf("expected reduced confidence after filter, got %v", env.Data.Confidence)
 	}
 }

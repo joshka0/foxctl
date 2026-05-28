@@ -8,8 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 )
 
 // Input defines the input parameters for presence/parse with text and emotion filtering.
@@ -179,7 +178,7 @@ var markerRegex = regexp.MustCompile(`\*([a-zA-Z]+)\*`)
 
 // main is the skill entry point for presence/parse.
 func main() {
-	skillmain.Main("presence/parse", run)
+	lite.Main("presence/parse", run)
 }
 
 // run orchestrates emotion detection from emoji and text markers with configurable filtering.
@@ -196,7 +195,7 @@ func main() {
 //
 // [[domain:emotion-parsing]]
 // [[invariant:emoji-precedence-over-markers]]
-func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+func run(ctx context.Context, rc *lite.RunContext, in Input) error {
 	out := Output{
 		Emotion:       EmotionNeutral,
 		Intensity:     0.5,
@@ -263,7 +262,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		out.StrippedText = regexp.MustCompile(`\s+`).ReplaceAllString(out.StrippedText, " ")
 	}
 
-	return skillout.Emit(rc, "presence/parse", map[string]any{
+	return lite.Emit(rc, "presence/parse", map[string]any{
 		"emotion":        out.Emotion,
 		"intensity":      out.Intensity,
 		"confidence":     out.Confidence,
