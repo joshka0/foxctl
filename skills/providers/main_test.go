@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skilltest"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -27,6 +27,24 @@ func newTestContext(t *testing.T, buf *bytes.Buffer, homeDir string) func() {
 	return func() {
 		os.Setenv("HOME", origHome)
 	}
+}
+
+func newLiteRunContext(t *testing.T, stdout *bytes.Buffer, homeDir string) (*lite.RunContext, func()) {
+	t.Helper()
+	cfg := lite.LiteConfig{
+		Home:           homeDir,
+		InlineOutputKB: 32,
+		Paths: lite.LitePaths{
+			CAS:   filepath.Join(homeDir, "cas"),
+			Cache: filepath.Join(homeDir, "cache"),
+		},
+		CAS: lite.LiteCASPolicy{Store: true, Expose: "off"},
+	}
+	rc, err := lite.BuildRunContext(cfg, stdout)
+	if err != nil {
+		t.Fatalf("BuildRunContext: %v", err)
+	}
+	return rc, func() { _ = rc.Close() }
 }
 
 func decodeEnvelope(t *testing.T, buf *bytes.Buffer) map[string]any {
@@ -79,7 +97,7 @@ func readClaudeConfig(t *testing.T, homeDir string) map[string]any {
 func TestProviders_MissingOperation(t *testing.T) {
 	var buf bytes.Buffer
 	homeDir := t.TempDir()
-	rc, rcCleanup := skilltest.NewTestRunContext(t, &buf, nil)
+	rc, rcCleanup := newLiteRunContext(t, &buf, homeDir)
 	defer rcCleanup()
 	homeCleanup := newTestContext(t, &buf, homeDir)
 	defer homeCleanup()
@@ -94,7 +112,7 @@ func TestProviders_MissingOperation(t *testing.T) {
 func TestProviders_InvalidOperation(t *testing.T) {
 	var buf bytes.Buffer
 	homeDir := t.TempDir()
-	rc, rcCleanup := skilltest.NewTestRunContext(t, &buf, nil)
+	rc, rcCleanup := newLiteRunContext(t, &buf, homeDir)
 	defer rcCleanup()
 	homeCleanup := newTestContext(t, &buf, homeDir)
 	defer homeCleanup()
@@ -113,7 +131,7 @@ func TestProviders_InvalidOperation(t *testing.T) {
 func TestProviders_List(t *testing.T) {
 	var buf bytes.Buffer
 	homeDir := t.TempDir()
-	rc, rcCleanup := skilltest.NewTestRunContext(t, &buf, nil)
+	rc, rcCleanup := newLiteRunContext(t, &buf, homeDir)
 	defer rcCleanup()
 	homeCleanup := newTestContext(t, &buf, homeDir)
 	defer homeCleanup()
@@ -163,7 +181,7 @@ func TestProviders_List(t *testing.T) {
 func TestProviders_GetConfig(t *testing.T) {
 	var buf bytes.Buffer
 	homeDir := t.TempDir()
-	rc, rcCleanup := skilltest.NewTestRunContext(t, &buf, nil)
+	rc, rcCleanup := newLiteRunContext(t, &buf, homeDir)
 	defer rcCleanup()
 	homeCleanup := newTestContext(t, &buf, homeDir)
 	defer homeCleanup()
@@ -196,7 +214,7 @@ func TestProviders_GetConfig(t *testing.T) {
 func TestProviders_GetConfig_NotFound(t *testing.T) {
 	var buf bytes.Buffer
 	homeDir := t.TempDir()
-	rc, rcCleanup := skilltest.NewTestRunContext(t, &buf, nil)
+	rc, rcCleanup := newLiteRunContext(t, &buf, homeDir)
 	defer rcCleanup()
 	homeCleanup := newTestContext(t, &buf, homeDir)
 	defer homeCleanup()
@@ -221,7 +239,7 @@ func TestProviders_GetConfig_NotFound(t *testing.T) {
 func TestProviders_GetConfig_UnknownProvider(t *testing.T) {
 	var buf bytes.Buffer
 	homeDir := t.TempDir()
-	rc, rcCleanup := skilltest.NewTestRunContext(t, &buf, nil)
+	rc, rcCleanup := newLiteRunContext(t, &buf, homeDir)
 	defer rcCleanup()
 	homeCleanup := newTestContext(t, &buf, homeDir)
 	defer homeCleanup()
@@ -241,7 +259,7 @@ func TestProviders_GetConfig_UnknownProvider(t *testing.T) {
 func TestProviders_SetConfig(t *testing.T) {
 	var buf bytes.Buffer
 	homeDir := t.TempDir()
-	rc, rcCleanup := skilltest.NewTestRunContext(t, &buf, nil)
+	rc, rcCleanup := newLiteRunContext(t, &buf, homeDir)
 	defer rcCleanup()
 	homeCleanup := newTestContext(t, &buf, homeDir)
 	defer homeCleanup()
@@ -280,7 +298,7 @@ func TestProviders_SetConfig(t *testing.T) {
 func TestProviders_SetConfig_Nested(t *testing.T) {
 	var buf bytes.Buffer
 	homeDir := t.TempDir()
-	rc, rcCleanup := skilltest.NewTestRunContext(t, &buf, nil)
+	rc, rcCleanup := newLiteRunContext(t, &buf, homeDir)
 	defer rcCleanup()
 	homeCleanup := newTestContext(t, &buf, homeDir)
 	defer homeCleanup()
@@ -313,7 +331,7 @@ func TestProviders_SetConfig_Nested(t *testing.T) {
 func TestProviders_SetConfig_DryRun(t *testing.T) {
 	var buf bytes.Buffer
 	homeDir := t.TempDir()
-	rc, rcCleanup := skilltest.NewTestRunContext(t, &buf, nil)
+	rc, rcCleanup := newLiteRunContext(t, &buf, homeDir)
 	defer rcCleanup()
 	homeCleanup := newTestContext(t, &buf, homeDir)
 	defer homeCleanup()
@@ -352,7 +370,7 @@ func TestProviders_SetConfig_DryRun(t *testing.T) {
 func TestProviders_SetConfig_MissingSetting(t *testing.T) {
 	var buf bytes.Buffer
 	homeDir := t.TempDir()
-	rc, rcCleanup := skilltest.NewTestRunContext(t, &buf, nil)
+	rc, rcCleanup := newLiteRunContext(t, &buf, homeDir)
 	defer rcCleanup()
 	homeCleanup := newTestContext(t, &buf, homeDir)
 	defer homeCleanup()
@@ -372,7 +390,7 @@ func TestProviders_SetConfig_MissingSetting(t *testing.T) {
 func TestProviders_AddMCP(t *testing.T) {
 	var buf bytes.Buffer
 	homeDir := t.TempDir()
-	rc, rcCleanup := skilltest.NewTestRunContext(t, &buf, nil)
+	rc, rcCleanup := newLiteRunContext(t, &buf, homeDir)
 	defer rcCleanup()
 	homeCleanup := newTestContext(t, &buf, homeDir)
 	defer homeCleanup()
@@ -417,7 +435,7 @@ func TestProviders_AddMCP(t *testing.T) {
 func TestProviders_AddMCP_DryRun(t *testing.T) {
 	var buf bytes.Buffer
 	homeDir := t.TempDir()
-	rc, rcCleanup := skilltest.NewTestRunContext(t, &buf, nil)
+	rc, rcCleanup := newLiteRunContext(t, &buf, homeDir)
 	defer rcCleanup()
 	homeCleanup := newTestContext(t, &buf, homeDir)
 	defer homeCleanup()
@@ -456,7 +474,7 @@ func TestProviders_AddMCP_DryRun(t *testing.T) {
 func TestProviders_AddMCP_MissingName(t *testing.T) {
 	var buf bytes.Buffer
 	homeDir := t.TempDir()
-	rc, rcCleanup := skilltest.NewTestRunContext(t, &buf, nil)
+	rc, rcCleanup := newLiteRunContext(t, &buf, homeDir)
 	defer rcCleanup()
 	homeCleanup := newTestContext(t, &buf, homeDir)
 	defer homeCleanup()
@@ -476,7 +494,7 @@ func TestProviders_AddMCP_MissingName(t *testing.T) {
 func TestProviders_RemoveMCP(t *testing.T) {
 	var buf bytes.Buffer
 	homeDir := t.TempDir()
-	rc, rcCleanup := skilltest.NewTestRunContext(t, &buf, nil)
+	rc, rcCleanup := newLiteRunContext(t, &buf, homeDir)
 	defer rcCleanup()
 	homeCleanup := newTestContext(t, &buf, homeDir)
 	defer homeCleanup()
@@ -528,7 +546,7 @@ func TestProviders_RemoveMCP(t *testing.T) {
 func TestProviders_AddSkill(t *testing.T) {
 	var buf bytes.Buffer
 	homeDir := t.TempDir()
-	rc, rcCleanup := skilltest.NewTestRunContext(t, &buf, nil)
+	rc, rcCleanup := newLiteRunContext(t, &buf, homeDir)
 	defer rcCleanup()
 	homeCleanup := newTestContext(t, &buf, homeDir)
 	defer homeCleanup()
@@ -570,7 +588,7 @@ func TestProviders_AddSkill(t *testing.T) {
 func TestProviders_AddSkill_MissingSource(t *testing.T) {
 	var buf bytes.Buffer
 	homeDir := t.TempDir()
-	rc, rcCleanup := skilltest.NewTestRunContext(t, &buf, nil)
+	rc, rcCleanup := newLiteRunContext(t, &buf, homeDir)
 	defer rcCleanup()
 	homeCleanup := newTestContext(t, &buf, homeDir)
 	defer homeCleanup()
@@ -594,7 +612,7 @@ func TestProviders_AddSkill_MissingSource(t *testing.T) {
 func TestProviders_RemoveSkill(t *testing.T) {
 	var buf bytes.Buffer
 	homeDir := t.TempDir()
-	rc, rcCleanup := skilltest.NewTestRunContext(t, &buf, nil)
+	rc, rcCleanup := newLiteRunContext(t, &buf, homeDir)
 	defer rcCleanup()
 	homeCleanup := newTestContext(t, &buf, homeDir)
 	defer homeCleanup()
@@ -634,7 +652,7 @@ func TestProviders_RemoveSkill(t *testing.T) {
 func TestProviders_Export(t *testing.T) {
 	var buf bytes.Buffer
 	homeDir := t.TempDir()
-	rc, rcCleanup := skilltest.NewTestRunContext(t, &buf, nil)
+	rc, rcCleanup := newLiteRunContext(t, &buf, homeDir)
 	defer rcCleanup()
 	homeCleanup := newTestContext(t, &buf, homeDir)
 	defer homeCleanup()
@@ -678,7 +696,7 @@ func TestProviders_Export(t *testing.T) {
 func TestProviders_Import(t *testing.T) {
 	var buf bytes.Buffer
 	homeDir := t.TempDir()
-	rc, rcCleanup := skilltest.NewTestRunContext(t, &buf, nil)
+	rc, rcCleanup := newLiteRunContext(t, &buf, homeDir)
 	defer rcCleanup()
 	homeCleanup := newTestContext(t, &buf, homeDir)
 	defer homeCleanup()
@@ -721,7 +739,7 @@ func TestProviders_Import(t *testing.T) {
 func TestProviders_Import_DryRun(t *testing.T) {
 	var buf bytes.Buffer
 	homeDir := t.TempDir()
-	rc, rcCleanup := skilltest.NewTestRunContext(t, &buf, nil)
+	rc, rcCleanup := newLiteRunContext(t, &buf, homeDir)
 	defer rcCleanup()
 	homeCleanup := newTestContext(t, &buf, homeDir)
 	defer homeCleanup()
@@ -760,7 +778,7 @@ func TestProviders_Import_DryRun(t *testing.T) {
 func TestProviders_Import_MissingFile(t *testing.T) {
 	var buf bytes.Buffer
 	homeDir := t.TempDir()
-	rc, rcCleanup := skilltest.NewTestRunContext(t, &buf, nil)
+	rc, rcCleanup := newLiteRunContext(t, &buf, homeDir)
 	defer rcCleanup()
 	homeCleanup := newTestContext(t, &buf, homeDir)
 	defer homeCleanup()
@@ -781,7 +799,7 @@ func TestProviders_Import_MissingFile(t *testing.T) {
 func TestProviders_Sync_MCP(t *testing.T) {
 	var buf bytes.Buffer
 	homeDir := t.TempDir()
-	rc, rcCleanup := skilltest.NewTestRunContext(t, &buf, nil)
+	rc, rcCleanup := newLiteRunContext(t, &buf, homeDir)
 	defer rcCleanup()
 	homeCleanup := newTestContext(t, &buf, homeDir)
 	defer homeCleanup()
@@ -839,7 +857,7 @@ func TestProviders_Sync_MCP(t *testing.T) {
 func TestProviders_Sync_MissingConfig(t *testing.T) {
 	var buf bytes.Buffer
 	homeDir := t.TempDir()
-	rc, rcCleanup := skilltest.NewTestRunContext(t, &buf, nil)
+	rc, rcCleanup := newLiteRunContext(t, &buf, homeDir)
 	defer rcCleanup()
 	homeCleanup := newTestContext(t, &buf, homeDir)
 	defer homeCleanup()
@@ -859,7 +877,7 @@ func TestProviders_Sync_MissingConfig(t *testing.T) {
 func TestProviders_DefaultsToClaudeProvider(t *testing.T) {
 	var buf bytes.Buffer
 	homeDir := t.TempDir()
-	rc, rcCleanup := skilltest.NewTestRunContext(t, &buf, nil)
+	rc, rcCleanup := newLiteRunContext(t, &buf, homeDir)
 	defer rcCleanup()
 	homeCleanup := newTestContext(t, &buf, homeDir)
 	defer homeCleanup()
@@ -890,7 +908,7 @@ func TestProviders_DefaultsToClaudeProvider(t *testing.T) {
 func TestProviders_AddMCP_AllProviders(t *testing.T) {
 	var buf bytes.Buffer
 	homeDir := t.TempDir()
-	rc, rcCleanup := skilltest.NewTestRunContext(t, &buf, nil)
+	rc, rcCleanup := newLiteRunContext(t, &buf, homeDir)
 	defer rcCleanup()
 	homeCleanup := newTestContext(t, &buf, homeDir)
 	defer homeCleanup()

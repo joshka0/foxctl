@@ -9,8 +9,7 @@ import (
 	"strings"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 )
 
 const command = "presence/orchestrate"
@@ -199,10 +198,10 @@ var markerToEmotion = map[string]string{
 var markerRegex = regexp.MustCompile(`\*([a-zA-Z]+)\*`)
 
 func main() {
-	skillmain.Main(command, run)
+	lite.Main(command, run)
 }
 
-func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+func run(ctx context.Context, rc *lite.RunContext, in Input) error {
 	if strings.TrimSpace(in.Text) == "" {
 		return skillerr.Arg("text is required")
 	}
@@ -305,7 +304,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		}
 	}
 
-	return skillout.Emit(rc, command, out)
+	return lite.Emit(rc, command, out)
 }
 
 // extractEmoji finds emoji in text and returns the dominant emotion.

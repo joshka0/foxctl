@@ -16,8 +16,7 @@ import (
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/fsutil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/oputil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 )
 
 // Provider represents a supported AI coding assistant with configuration paths and metadata.
@@ -159,7 +158,7 @@ type change struct {
 
 // main is the skill entry point for providers/config with unified configuration management.
 func main() {
-	skillmain.Main(command, run)
+	lite.Main(command, run)
 }
 
 // run orchestrates provider configuration management with validation, routing, and operation execution.
@@ -176,7 +175,7 @@ func main() {
 //
 // [[domain:ai-assistant-provider-config]]
 // [[protocol:provider-operation-dispatch]]
-func run(_ context.Context, rc *skillmain.RunContext, in input) error {
+func run(_ context.Context, rc *lite.RunContext, in input) error {
 	op := oputil.Op(in.Operation)
 	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOps, ", "))
 	if op == "" {
@@ -244,7 +243,7 @@ func run(_ context.Context, rc *skillmain.RunContext, in input) error {
 		return err
 	}
 
-	return skillout.Emit(rc, command, out)
+	return lite.Emit(rc, command, out)
 }
 
 // listProviders enumerates all supported providers with installation status and resource statistics.
