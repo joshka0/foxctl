@@ -13,8 +13,7 @@ import (
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/oputil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 )
 
 const command = "json/transform"
@@ -33,7 +32,7 @@ type input struct {
 
 // main is the skill entry point for json/transform with comprehensive JSON manipulation capabilities.
 func main() {
-	skillmain.Main(command, run)
+	lite.Main(command, run)
 }
 
 // run orchestrates JSON transformation operations including extract, merge, validate, format, and keys.
@@ -49,7 +48,7 @@ func main() {
 //	OutputFields: operation, result, formatted, keys, error
 //
 // [[domain:json-manipulation]]
-func run(_ context.Context, rc *skillmain.RunContext, in input) error {
+func run(_ context.Context, rc *lite.RunContext, in input) error {
 	op := oputil.Op(in.Operation)
 	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOps, ", "))
 	if op == "" {
@@ -85,7 +84,7 @@ func run(_ context.Context, rc *skillmain.RunContext, in input) error {
 		return skillerr.Arg(err.Error(), skillerr.WithHint(opHint))
 	}
 
-	return skillout.Emit(rc, command, result)
+	return lite.Emit(rc, command, result)
 }
 
 // extractOperation extracts values from JSON data using dot notation paths with array index support.

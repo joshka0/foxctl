@@ -4,31 +4,32 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"testing"
 	"testing/quick"
 
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/platform/config"
-	errs "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 )
 
-func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer) *skillmain.RunContext {
+func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer) *lite.RunContext {
 	t.Helper()
 	state := t.TempDir()
-	cfg := config.Config{
+	cfg := lite.LiteConfig{
 		Home:           state,
 		InlineOutputKB: 32,
-		MaxCaptureKB:   10240,
-		Paths: config.Paths{
+		Paths: lite.LitePaths{
 			CAS:   filepath.Join(state, "cas"),
-			Jobs:  filepath.Join(state, "jobs"),
 			Cache: filepath.Join(state, "cache"),
 		},
+		CAS: lite.LiteCASPolicy{Store: true, Expose: "off"},
 	}
-	rc, err := skillmain.BuildRunContext(cfg, stdout)
+	if err := os.MkdirAll(state, 0o755); err != nil {
+		t.Fatalf("mkdir state: %v", err)
+	}
+	rc, err := lite.BuildRunContext(cfg, stdout)
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
@@ -39,7 +40,7 @@ func TestRunJsonTransform(t *testing.T) {
 	ctx := context.Background()
 	stdout := &bytes.Buffer{}
 	rc := newTestRunnerContext(t, stdout)
-	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
+	defer func() { _ = rc.Close() }()
 
 	in := input{
 		Input:     `{"a": 1, "b": 2}`,
@@ -55,7 +56,7 @@ func TestRunJsonFormat(t *testing.T) {
 	ctx := context.Background()
 	stdout := &bytes.Buffer{}
 	rc := newTestRunnerContext(t, stdout)
-	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
+	defer func() { _ = rc.Close() }()
 
 	in := input{
 		Input:     `{"a":1}`,
@@ -72,7 +73,7 @@ func TestRunJsonValidate(t *testing.T) {
 	ctx := context.Background()
 	stdout := &bytes.Buffer{}
 	rc := newTestRunnerContext(t, stdout)
-	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
+	defer func() { _ = rc.Close() }()
 
 	in := input{
 		Input:     `{"a":1}`,
@@ -88,7 +89,7 @@ func TestRunJsonMerge(t *testing.T) {
 	ctx := context.Background()
 	stdout := &bytes.Buffer{}
 	rc := newTestRunnerContext(t, stdout)
-	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
+	defer func() { _ = rc.Close() }()
 
 	in := input{
 		Input:     `{"a":1}`,
