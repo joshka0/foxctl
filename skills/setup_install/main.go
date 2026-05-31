@@ -13,8 +13,7 @@ import (
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/fsutil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 )
 
 const command = "setup/install"
@@ -72,7 +71,7 @@ type envStatus struct {
 
 // main is the skill entry point for setup/install with comprehensive foxctl installation capabilities.
 func main() {
-	skillmain.Main(command, run)
+	lite.Main(command, run)
 }
 
 // run orchestrates foxctl installation with validation and setup operations for multiple providers.
@@ -89,7 +88,7 @@ func main() {
 //
 // [[domain:foxctl-installation]]
 // [[protocol:provider-hook-installation]]
-func run(_ context.Context, rc *skillmain.RunContext, in input) error {
+func run(_ context.Context, rc *lite.RunContext, in input) error {
 	if in.Provider == "" {
 		in.Provider = "claude-code"
 	}
@@ -101,7 +100,7 @@ func run(_ context.Context, rc *skillmain.RunContext, in input) error {
 		out = install(in)
 	}
 
-	return skillout.Emit(rc, command, out)
+	return lite.Emit(rc, command, out)
 }
 
 // validate performs comprehensive validation of foxctl setup without making changes.

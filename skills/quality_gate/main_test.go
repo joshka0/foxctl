@@ -6,8 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skilltest"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 )
 
 func TestQualityGate_NeedsChangesForBlockingFinding(t *testing.T) {
@@ -256,9 +255,14 @@ func TestQualityGate_CustomBlockSeverities(t *testing.T) {
 	}
 }
 
-func newTestContext(t *testing.T, stdout *bytes.Buffer) (*skillmain.RunContext, func()) {
+func newTestContext(t *testing.T, stdout *bytes.Buffer) (*lite.RunContext, func()) {
 	t.Helper()
-	return skilltest.NewTestRunContext(t, stdout, nil)
+	cfg := lite.LiteConfig{Home: t.TempDir()}
+	rc, err := lite.BuildRunContext(cfg, stdout)
+	if err != nil {
+		t.Fatalf("build run context: %v", err)
+	}
+	return rc, func() { _ = rc.Close() }
 }
 
 func decodeData(t *testing.T, payload []byte) map[string]any {

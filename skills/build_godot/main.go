@@ -13,8 +13,7 @@ import (
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 	errs "github.com/joshka0/foxctl/internal/platform/errors"
 )
 
@@ -57,7 +56,7 @@ type ExportPreset struct {
 
 // main is the skill entry point for build/godot.
 func main() {
-	skillmain.Main(skillName, run)
+	lite.Main(skillName, run)
 }
 
 // run orchestrates build/godot operations based on the specified action.
@@ -74,7 +73,7 @@ func main() {
 //
 // [[domain:godot-project-export]]
 // [[protocol:build/godot-action-routing]]
-func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+func run(ctx context.Context, rc *lite.RunContext, in Input) error {
 	// Validate
 	if strings.TrimSpace(in.Action) == "" {
 		return skillerr.Arg(
@@ -123,7 +122,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 //	Keywords: list_presets, export_presets.cfg, presets, count, parseExportPresets
 //
 // [[domain:godot-export-presets]]
-func listPresets(ctx context.Context, rc *skillmain.RunContext, workspace string) error {
+func listPresets(ctx context.Context, rc *lite.RunContext, workspace string) error {
 	presets, err := parseExportPresets(workspace)
 	if err != nil {
 		return err
@@ -158,7 +157,7 @@ func listPresets(ctx context.Context, rc *skillmain.RunContext, workspace string
 //
 // [[domain:godot-project-export]]
 // [[risk:export-preset-mismatch]]
-func exportProject(ctx context.Context, rc *skillmain.RunContext, workspace string, in Input, dryRun bool) error {
+func exportProject(ctx context.Context, rc *lite.RunContext, workspace string, in Input, dryRun bool) error {
 	// Validate preset is provided
 	if strings.TrimSpace(in.Preset) == "" {
 		return skillerr.Arg(
@@ -364,17 +363,17 @@ func parseExportPresets(workspace string) ([]ExportPreset, error) {
 }
 
 // buildCSharp builds the C# project using dotnet.
-func buildCSharp(ctx context.Context, rc *skillmain.RunContext, workspace string, in Input) error {
+func buildCSharp(ctx context.Context, rc *lite.RunContext, workspace string, in Input) error {
 	return runDotnet(ctx, rc, workspace, in, "build")
 }
 
 // restoreCSharp restores NuGet packages for the C# project.
-func restoreCSharp(ctx context.Context, rc *skillmain.RunContext, workspace string, in Input) error {
+func restoreCSharp(ctx context.Context, rc *lite.RunContext, workspace string, in Input) error {
 	return runDotnet(ctx, rc, workspace, in, "restore")
 }
 
 // cleanCSharp cleans the C# project build outputs.
-func cleanCSharp(ctx context.Context, rc *skillmain.RunContext, workspace string, in Input) error {
+func cleanCSharp(ctx context.Context, rc *lite.RunContext, workspace string, in Input) error {
 	return runDotnet(ctx, rc, workspace, in, "clean")
 }
 
@@ -391,7 +390,7 @@ func cleanCSharp(ctx context.Context, rc *skillmain.RunContext, workspace string
 //	Keywords: dotnet, build, restore, clean, csproj, configuration, verbosity, target
 //
 // [[domain:dotnet-godot-build]]
-func runDotnet(ctx context.Context, rc *skillmain.RunContext, workspace string, in Input, command string) error {
+func runDotnet(ctx context.Context, rc *lite.RunContext, workspace string, in Input, command string) error {
 	// Find the .csproj file
 	csprojPath, err := findCsproj(workspace)
 	if err != nil {
@@ -483,6 +482,6 @@ func findCsproj(workspace string) (string, error) {
 }
 
 // emitSuccess emits a successful result with the provided data.
-func emitSuccess(rc *skillmain.RunContext, result map[string]any) error {
-	return skillout.Emit(rc, skillName, result)
+func emitSuccess(rc *lite.RunContext, result map[string]any) error {
+	return lite.Emit(rc, skillName, result)
 }

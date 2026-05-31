@@ -13,8 +13,7 @@ import (
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/htmledit"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/pathutil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 )
 
 const command = "html/edit"
@@ -33,7 +32,7 @@ type operation = htmledit.Operation
 
 // main is the skill entry point for html/edit.
 func main() {
-	skillmain.Main(command, run)
+	lite.Main(command, run)
 }
 
 // run orchestrates DOM-aware HTML editing using CSS selectors with diff generation and dry-run support.
@@ -49,7 +48,7 @@ func main() {
 //	OutputFields: path, edited, operations_applied, elements_affected, diff
 //
 // [[domain:html-editing]]
-func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+func run(ctx context.Context, rc *lite.RunContext, in input) error {
 	// Validate
 	if strings.TrimSpace(in.Path) == "" {
 		return skillerr.Arg(
@@ -69,7 +68,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 
 	// Validate and resolve path
-	absPath, err := skillmain.ValidatePath(rc, in.Path)
+	absPath, err := lite.ValidatePath(rc, in.Path)
 	if err != nil {
 		return err
 	}
@@ -144,5 +143,5 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		data["message"] = "no changes made"
 	}
 
-	return skillout.Emit(rc, command, data)
+	return lite.Emit(rc, command, data)
 }

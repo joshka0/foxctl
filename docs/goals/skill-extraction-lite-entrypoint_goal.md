@@ -15,6 +15,13 @@ This goal is for the current extraction-prep MR. It must not move skills into a 
   - `skills/providers`
   - `skills/presence_orchestrate`
   - `skills/skill_inspect`
+  - `skills/build_godot`
+  - `skills/build_unity`
+  - `skills/quality_gate`
+  - `skills/setup_install`
+  - `skills/html_edit`
+  - `skills/jira_board`
+  - `skills/jira_issue`
 - Current docs:
   - `docs/architecture/skill-pack-split-analysis.md`
   - `docs/architecture/skill-pack-split-analysis-pi.md`
@@ -27,8 +34,12 @@ This goal is for the current extraction-prep MR. It must not move skills into a 
 - Pi and Hermes should do most implementation slices through `herdr` panes; the integrator owns scope, review, commits, pushes, and CI/MR follow-up.
 
 ## Current Classification Notes
-- `skills/skill_inspect`: converted in this goal; dependency check is quiet.
+- `skills/skill_inspect`, `skills/build_godot`, `skills/build_unity`, `skills/quality_gate`, `skills/setup_install`, `skills/html_edit`, `skills/jira_board`, and `skills/jira_issue`: converted in this goal; dependency checks are quiet.
 - `skills/agent_handbook`: `helper-needed` / defer. The skill itself is simple, but it imports `internal/runtime/agentpolicy`; converting it would violate the lite package boundary until agent policy types move to a non-runtime package or a narrow stable type surface is introduced.
+- `skills/setup_foxctl_mode`: `helper-needed` / defer. It currently uses full `skillmain.Chain`, `WithTimeout`, and `WithRecover`; convert after equivalent lite middleware exists or the entrypoint is simplified deliberately.
+- `skills/ci_checks`: `helper-needed` / defer. It uses `skillmain.FlexString`; convert after that small input helper is moved or duplicated into the lite surface.
+- `skills/mcp_bridge` and `skills/mcp_install`: `helper-needed` / defer. They use custom bootstrap/error handling, and `mcp_bridge` logs through `rc.Logger`, which lite intentionally omits.
+- `skills/ardoq_resource`: `defer`. It appears store-less but is a large guarded HTTP integration with many helper signatures; convert as its own reviewable slice rather than hiding it in this MR cleanup.
 - CAS-heavy and persistence-heavy skills remain out of scope for this MR unless a separate helper phase is approved. Examples include skills using `skillout.PersistBuffer`, `EmitWithCAS`, `PreviewAndPersist*`, `rc.CAS`, or `rc.MaxPreview`.
 
 ## Constraints

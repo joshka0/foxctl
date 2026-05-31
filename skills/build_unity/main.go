@@ -14,8 +14,7 @@ import (
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 )
 
 const skillName = "build/unity"
@@ -60,11 +59,11 @@ type Input struct {
 }
 
 func main() {
-	skillmain.Main(skillName, run)
+	lite.Main(skillName, run)
 }
 
 // run orchestrates build/unity operations based on the specified action.
-func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+func run(ctx context.Context, rc *lite.RunContext, in Input) error {
 	if strings.TrimSpace(in.Action) == "" {
 		return skillerr.Arg(
 			"action is required",
@@ -103,7 +102,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 }
 
 // listTargets returns the list of known Unity build target platforms.
-func listTargets(rc *skillmain.RunContext) error {
+func listTargets(rc *lite.RunContext) error {
 	result := map[string]any{
 		"action":  ActionListTargets,
 		"targets": knownTargets,
@@ -114,7 +113,7 @@ func listTargets(rc *skillmain.RunContext) error {
 }
 
 // buildProject builds the Unity project for the specified target platform.
-func buildProject(ctx context.Context, rc *skillmain.RunContext, projectPath string, in Input) error {
+func buildProject(ctx context.Context, rc *lite.RunContext, projectPath string, in Input) error {
 	if strings.TrimSpace(in.BuildTarget) == "" {
 		return skillerr.Arg(
 			"build_target is required for build action",
@@ -163,7 +162,7 @@ func buildProject(ctx context.Context, rc *skillmain.RunContext, projectPath str
 }
 
 // testProject runs Unity tests via the Test Runner.
-func testProject(ctx context.Context, rc *skillmain.RunContext, projectPath string, in Input) error {
+func testProject(ctx context.Context, rc *lite.RunContext, projectPath string, in Input) error {
 	if err := validateProjectPath(projectPath); err != nil {
 		return err
 	}
@@ -246,7 +245,7 @@ func testProject(ctx context.Context, rc *skillmain.RunContext, projectPath stri
 }
 
 // exportProject builds and exports a standalone player.
-func exportProject(ctx context.Context, rc *skillmain.RunContext, projectPath string, in Input) error {
+func exportProject(ctx context.Context, rc *lite.RunContext, projectPath string, in Input) error {
 	if strings.TrimSpace(in.BuildTarget) == "" {
 		return skillerr.Arg(
 			"build_target is required for export action",
@@ -294,7 +293,7 @@ func exportProject(ctx context.Context, rc *skillmain.RunContext, projectPath st
 }
 
 // cleanProject removes Library/ and build artifacts.
-func cleanProject(rc *skillmain.RunContext, projectPath string) error {
+func cleanProject(rc *lite.RunContext, projectPath string) error {
 	if err := validateProjectPath(projectPath); err != nil {
 		return err
 	}
@@ -408,7 +407,7 @@ func resolveUnityPath(ctx context.Context, explicit string) (string, error) {
 }
 
 // emitBuildResult emits the result of a build or export operation.
-func emitBuildResult(rc *skillmain.RunContext, action, buildTarget, outputPath string, cmdResult executil.CmdResult) error {
+func emitBuildResult(rc *lite.RunContext, action, buildTarget, outputPath string, cmdResult executil.CmdResult) error {
 	if cmdResult.Err != nil && cmdResult.ExitCode == -1 {
 		return skillerr.Runtime(
 			"failed to run Unity",
@@ -449,6 +448,6 @@ func emitBuildResult(rc *skillmain.RunContext, action, buildTarget, outputPath s
 }
 
 // emitSuccess emits a successful result with the provided data.
-func emitSuccess(rc *skillmain.RunContext, result map[string]any) error {
-	return skillout.Emit(rc, skillName, result)
+func emitSuccess(rc *lite.RunContext, result map[string]any) error {
+	return lite.Emit(rc, skillName, result)
 }
