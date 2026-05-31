@@ -23,8 +23,7 @@ import (
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/oputil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -169,7 +168,7 @@ type RPCError struct {
 
 // main is the skill entry point for x402/payment.
 func main() {
-	skillmain.Main(commandName, run)
+	lite.Main(commandName, run)
 }
 
 // run orchestrates x402 payment operations with wallet management and HTTP payment handling.
@@ -186,7 +185,7 @@ func main() {
 //
 // [[protocol:x402_payment]]
 // [[risk:crypto_payment_failure]]
-func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+func run(ctx context.Context, rc *lite.RunContext, in Input) error {
 	op := oputil.Op(in.Operation)
 	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOps, ", "))
 	if op == "" {
@@ -228,7 +227,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 }
 
 // handleWalletInit initializes wallets with support for CDP and local key management.
-func handleWalletInit(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+func handleWalletInit(ctx context.Context, rc *lite.RunContext, in Input) error {
 	var wallet *WalletInfo
 	var err error
 
@@ -253,7 +252,7 @@ func handleWalletInit(ctx context.Context, rc *skillmain.RunContext, in Input) e
 				},
 				Error: err.Error(),
 			}
-			return skillout.Emit(rc, commandName, output)
+			return lite.Emit(rc, commandName, output)
 		}
 		return skillerr.Runtime("init wallet", skillerr.WithCause(err))
 	}
@@ -268,11 +267,11 @@ func handleWalletInit(ctx context.Context, rc *skillmain.RunContext, in Input) e
 		Wallet:    wallet,
 	}
 
-	return skillout.Emit(rc, commandName, output)
+	return lite.Emit(rc, commandName, output)
 }
 
 // handleWalletStatus retrieves wallet information including balances via RPC queries.
-func handleWalletStatus(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+func handleWalletStatus(ctx context.Context, rc *lite.RunContext, in Input) error {
 	// Load wallet config or use provided address
 	walletCfg, err := loadWalletConfig(rc)
 	if err != nil && in.Address == "" {
@@ -317,11 +316,11 @@ func handleWalletStatus(ctx context.Context, rc *skillmain.RunContext, in Input)
 		Wallet:    wallet,
 	}
 
-	return skillout.Emit(rc, commandName, output)
+	return lite.Emit(rc, commandName, output)
 }
 
 // handleFetch executes HTTP requests with automatic x402 payment handling for 402 responses.
-func handleFetch(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+func handleFetch(ctx context.Context, rc *lite.RunContext, in Input) error {
 	if in.URL == "" {
 		return skillerr.Arg("url is required for fetch operation", skillerr.WithHint("Provide url for fetch (e.g., https://example.com)."))
 	}
@@ -345,7 +344,7 @@ func handleFetch(ctx context.Context, rc *skillmain.RunContext, in Input) error 
 	// Execute request
 	client := &http.Client{Timeout: 30 * time.Second}
 	var resp *http.Response
-	err = skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err = lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var e error
 		resp, e = client.Do(req)
 		return e
@@ -390,11 +389,11 @@ func handleFetch(ctx context.Context, rc *skillmain.RunContext, in Input) error 
 		},
 	}
 
-	return skillout.Emit(rc, commandName, output)
+	return lite.Emit(rc, commandName, output)
 }
 
 // handle402Response processes HTTP 402 Payment Required responses with payment negotiation.
-func handle402Response(ctx context.Context, rc *skillmain.RunContext, in Input, resp *http.Response, body []byte) error {
+func handle402Response(ctx context.Context, rc *lite.RunContext, in Input, resp *http.Response, body []byte) error {
 	// Parse x402 payment requirements from header
 	paymentHeader := resp.Header.Get("X-Payment-Required")
 	if paymentHeader == "" {
@@ -411,7 +410,7 @@ func handle402Response(ctx context.Context, rc *skillmain.RunContext, in Input, 
 			},
 			Error: "received 402 but no payment requirements in response headers",
 		}
-		return skillout.Emit(rc, commandName, output)
+		return lite.Emit(rc, commandName, output)
 	}
 
 	// Decode payment requirements (base64 JSON)
@@ -454,7 +453,7 @@ func handle402Response(ctx context.Context, rc *skillmain.RunContext, in Input, 
 			},
 			Error: fmt.Sprintf("payment amount %s exceeds max_payment %s", selectedReq.MaxAmountRequired, in.MaxPayment),
 		}
-		return skillout.Emit(rc, commandName, output)
+		return lite.Emit(rc, commandName, output)
 	}
 
 	// Load wallet and execute payment
@@ -486,7 +485,7 @@ func handle402Response(ctx context.Context, rc *skillmain.RunContext, in Input, 
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	var retryResp *http.Response
-	err = skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err = lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var e error
 		retryResp, e = client.Do(retryReq)
 		return e
@@ -524,11 +523,11 @@ func handle402Response(ctx context.Context, rc *skillmain.RunContext, in Input, 
 		},
 	}
 
-	return skillout.Emit(rc, commandName, output)
+	return lite.Emit(rc, commandName, output)
 }
 
 // handlePay executes direct cryptocurrency payments with wallet integration.
-func handlePay(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+func handlePay(ctx context.Context, rc *lite.RunContext, in Input) error {
 	if in.To == "" {
 		return skillerr.Arg("to is required for pay operation", skillerr.WithHint("Provide recipient address in to."))
 	}
@@ -561,7 +560,7 @@ func handlePay(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 				Payment:   payment,
 				Error:     err.Error(),
 			}
-			return skillout.Emit(rc, commandName, output)
+			return lite.Emit(rc, commandName, output)
 		}
 		payment.TxHash = txHash
 		payment.Status = "submitted"
@@ -575,7 +574,7 @@ func handlePay(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 				Payment:   payment,
 				Error:     err.Error(),
 			}
-			return skillout.Emit(rc, commandName, output)
+			return lite.Emit(rc, commandName, output)
 		}
 		payment.TxHash = txHash
 		payment.Status = "submitted"
@@ -589,7 +588,7 @@ func handlePay(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		Payment:   payment,
 	}
 
-	return skillout.Emit(rc, commandName, output)
+	return lite.Emit(rc, commandName, output)
 }
 
 // Wallet initialization functions
@@ -609,7 +608,7 @@ func initCDPWallet(ctx context.Context, network string) (*WalletInfo, error) {
 		skillerr.WithHint("Set up credentials and use 'go get github.com/coinbase/coinbase-sdk-go' for full support"))
 }
 
-func initLocalWallet(ctx context.Context, rc *skillmain.RunContext, network, keyPath string) (*WalletInfo, error) {
+func initLocalWallet(ctx context.Context, rc *lite.RunContext, network, keyPath string) (*WalletInfo, error) {
 	var privateKey *ecdsa.PrivateKey
 	var err error
 
@@ -657,7 +656,7 @@ func initLocalWallet(ctx context.Context, rc *skillmain.RunContext, network, key
 
 // Config persistence
 
-func walletConfigPath(rc *skillmain.RunContext) string {
+func walletConfigPath(rc *lite.RunContext) string {
 	home := os.Getenv("FOXCTL_HOME")
 	if home == "" {
 		home = filepath.Join(os.Getenv("HOME"), ".foxctl")
@@ -665,7 +664,7 @@ func walletConfigPath(rc *skillmain.RunContext) string {
 	return filepath.Join(home, "x402_wallet.json")
 }
 
-func saveWalletConfig(rc *skillmain.RunContext, wallet *WalletInfo, keyPath string) error {
+func saveWalletConfig(rc *lite.RunContext, wallet *WalletInfo, keyPath string) error {
 	cfg := WalletConfig{
 		Type:      wallet.Type,
 		Network:   wallet.Network,
@@ -687,7 +686,7 @@ func saveWalletConfig(rc *skillmain.RunContext, wallet *WalletInfo, keyPath stri
 	return os.WriteFile(configPath, data, 0o600)
 }
 
-func loadWalletConfig(rc *skillmain.RunContext) (*WalletConfig, error) {
+func loadWalletConfig(rc *lite.RunContext) (*WalletConfig, error) {
 	// Check environment first
 	if addr := os.Getenv("X402_WALLET_ADDRESS"); addr != "" {
 		network := os.Getenv("X402_NETWORK")

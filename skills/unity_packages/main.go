@@ -11,8 +11,7 @@ import (
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/oputil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 )
 
 const skillName = "unity/packages"
@@ -26,11 +25,11 @@ type Input struct {
 }
 
 func main() {
-	skillmain.Main(skillName, run)
+	lite.Main(skillName, run)
 }
 
 // run validates input, loads Unity manifest dependencies, and dispatches operations.
-func run(_ context.Context, rc *skillmain.RunContext, in Input) error {
+func run(_ context.Context, rc *lite.RunContext, in Input) error {
 	if strings.TrimSpace(in.Operation) == "" {
 		return skillerr.Arg(
 			"operation is required",
@@ -56,7 +55,7 @@ func run(_ context.Context, rc *skillmain.RunContext, in Input) error {
 		return err
 	}
 
-	return skillout.Emit(rc, skillName, result)
+	return lite.Emit(rc, skillName, result)
 }
 
 // manifestPath returns the Unity manifest path for a project.
@@ -65,7 +64,7 @@ func manifestPath(projectPath string) string {
 }
 
 // validateProjectPath validates the provided project path points to a Unity project.
-func validateProjectPath(rc *skillmain.RunContext, projectPath string) (string, error) {
+func validateProjectPath(rc *lite.RunContext, projectPath string) (string, error) {
 	path := strings.TrimSpace(projectPath)
 	if path == "" {
 		path = rc.PathValidator.Workspace()

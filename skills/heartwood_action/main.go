@@ -10,8 +10,7 @@ import (
 	"strings"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 )
 
 const skillName = "heartwood/action"
@@ -28,10 +27,10 @@ type Input struct {
 }
 
 func main() {
-	skillmain.Main(skillName, run)
+	lite.Main(skillName, run)
 }
 
-func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+func run(ctx context.Context, rc *lite.RunContext, in Input) error {
 	if in.Host == "" {
 		return skillerr.Arg("host is required")
 	}
@@ -93,7 +92,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if err := json.Unmarshal(rawJSON, &out); err != nil {
 		return skillerr.Runtime("parse heartwood action output", skillerr.WithCause(err))
 	}
-	return skillout.Emit(rc, skillName, out)
+	return lite.Emit(rc, skillName, out)
 }
 
 func extractJSONPayload(raw []byte) ([]byte, error) {
