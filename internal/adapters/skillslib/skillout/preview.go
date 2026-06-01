@@ -218,7 +218,9 @@ func PreviewAndPersistNDJSON[T any](
 		previewLimit = rc.MaxPreview
 	}
 	var writer skillcas.Writer
-	if rc.ShouldStoreCAS() {
+	// NoCAS disables automatic output truncation, but result-set artifacts are
+	// explicit skill output and should still be persisted when CAS is configured.
+	if rc != nil && rc.Config.CAS.Store && rc.CASStore != nil {
 		writer = rc
 	}
 	return PreviewAndPersistNDJSONContext(ctx, writer, items, previewLimit, artifactName, persist)

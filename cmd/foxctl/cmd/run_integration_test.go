@@ -63,7 +63,7 @@ func TestRunCommandEmitsCompleteMeta(t *testing.T) {
 	}
 	artifact, ok := data["artifact"].(string)
 	if !ok {
-		t.Fatalf("artifact is not a string: %T", data["artifact"])
+		t.Fatalf("artifact is not a string: %T\nstdout: %s\nstderr: %s", data["artifact"], stdout.String(), stderr.String())
 	}
 	if artifact == "" {
 		t.Fatalf("expected artifact in data")

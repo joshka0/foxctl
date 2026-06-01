@@ -89,6 +89,10 @@ func newSkillTestConfig(t *testing.T) config.Config {
 		Storage: config.StorageSettings{
 			Root: filepath.Join(agentHome, "storage"),
 		},
+		CAS: config.CASPolicy{
+			Store:  true,
+			Expose: config.ExposePolicyOff,
+		},
 	}
 
 	for _, dir := range []string{
