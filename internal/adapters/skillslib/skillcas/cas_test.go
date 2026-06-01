@@ -17,6 +17,30 @@ type fakeWriter struct {
 	err     error
 }
 
+type fakeOutputContext struct {
+	fakeWriter
+	stdout       bytes.Buffer
+	store        bool
+	expose       ExposePolicy
+	truncateOver int
+}
+
+func (c *fakeOutputContext) OutputWriter() io.Writer {
+	return &c.stdout
+}
+
+func (c *fakeOutputContext) ShouldTruncate(dataSize int) bool {
+	return c.truncateOver > 0 && dataSize > c.truncateOver
+}
+
+func (c *fakeOutputContext) ShouldStoreCAS() bool {
+	return c.store
+}
+
+func (c *fakeOutputContext) CASExposePolicy() ExposePolicy {
+	return c.expose
+}
+
 func (w *fakeWriter) PutArtifact(_ context.Context, r io.Reader, kind string, tags []string) (Artifact, error) {
 	if w.err != nil {
 		return Artifact{}, w.err
@@ -54,6 +78,57 @@ func TestPersistBufferStoresContentThroughWriter(t *testing.T) {
 	}
 	if buf.String() != "stored output" {
 		t.Fatalf("PersistBuffer consumed caller buffer: %q", buf.String())
+	}
+}
+
+func TestEmitWithCASStoresTruncatedOutput(t *testing.T) {
+	rc := &fakeOutputContext{
+		store:        true,
+		expose:       ExposePolicyDigest,
+		truncateOver: 8,
+	}
+
+	err := EmitWithCAS(context.Background(), rc, "test/large", map[string]string{"result": "large output"})
+	if err != nil {
+		t.Fatalf("EmitWithCAS returned error: %v", err)
+	}
+
+	output := rc.stdout.String()
+	if !strings.Contains(output, `"artifact":"sha256:test"`) {
+		t.Fatalf("expected artifact digest in output, got: %s", output)
+	}
+	if strings.Contains(output, "large output") {
+		t.Fatalf("expected large payload to be replaced by CAS result, got: %s", output)
+	}
+	if rc.kind != "application/json" {
+		t.Fatalf("stored kind = %q, want application/json", rc.kind)
+	}
+	if got := strings.Join(rc.tags, ","); got != "test/large" {
+		t.Fatalf("stored tags = %q, want test/large", got)
+	}
+	if !json.Valid(rc.content) {
+		t.Fatalf("stored content is not valid JSON: %q", rc.content)
+	}
+}
+
+func TestEmitWithCASFallsBackInlineWhenStoreDisabled(t *testing.T) {
+	rc := &fakeOutputContext{
+		store:        false,
+		expose:       ExposePolicyDigest,
+		truncateOver: 8,
+	}
+
+	err := EmitWithCAS(context.Background(), rc, "test/large", map[string]string{"result": "large output"})
+	if err != nil {
+		t.Fatalf("EmitWithCAS returned error: %v", err)
+	}
+
+	output := rc.stdout.String()
+	if !strings.Contains(output, "large output") {
+		t.Fatalf("expected inline payload when CAS storage is disabled, got: %s", output)
+	}
+	if len(rc.content) != 0 {
+		t.Fatalf("stored content should be empty when CAS storage is disabled")
 	}
 }
 

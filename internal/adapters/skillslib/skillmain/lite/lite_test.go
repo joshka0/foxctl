@@ -251,6 +251,29 @@ func TestRunContextCASCapability(t *testing.T) {
 	}
 }
 
+func TestEmitWithCASStoresLargeOutputWithInjectedWriter(t *testing.T) {
+	var stdout bytes.Buffer
+	rc := &RunContext{
+		Config:    LiteConfig{CAS: LiteCASPolicy{Store: true, Expose: "digest"}},
+		Stdout:    &stdout,
+		CASWriter: liteFakeCASWriter{},
+		InlineKB:  1,
+	}
+
+	large := strings.Repeat("x", 2*1024)
+	if err := EmitWithCAS(context.Background(), rc, "test/lite-cas", map[string]string{"payload": large}); err != nil {
+		t.Fatalf("EmitWithCAS returned error: %v", err)
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, `"artifact":"sha256:lite"`) {
+		t.Fatalf("expected artifact digest, got: %s", out)
+	}
+	if strings.Contains(out, large) {
+		t.Fatalf("expected large payload to be replaced by CAS result")
+	}
+}
+
 func TestLoadConfigDefaults(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)

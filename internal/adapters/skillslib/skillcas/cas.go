@@ -46,6 +46,32 @@ type OutputContext interface {
 	CASExposePolicy() ExposePolicy
 }
 
+// EmitOK writes a success envelope using a backend-neutral output context.
+func EmitOK(rc interface{ OutputWriter() io.Writer }, command string, data any) error {
+	env := envelope.OK(command, data)
+	return envelope.Write(rc.OutputWriter(), env)
+}
+
+// EmitWithCAS emits data inline unless it exceeds the context's inline limit,
+// in which case it stores the full JSON payload through the configured writer.
+func EmitWithCAS(ctx context.Context, rc OutputContext, command string, data any) error {
+	payload, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("skillcas: marshal data: %w", err)
+	}
+
+	if !rc.ShouldTruncate(len(payload)) || !rc.ShouldStoreCAS() {
+		return EmitOK(rc, command, data)
+	}
+
+	artifact, err := PersistJSON(ctx, rc, data, command)
+	if err != nil {
+		return fmt.Errorf("skillcas: persist output: %w", err)
+	}
+
+	return EmitOK(rc, command, BuildCASResult(artifact, rc.CASExposePolicy()))
+}
+
 // PersistJSON marshals value to JSON and stores it with the provided tags.
 func PersistJSON(ctx context.Context, writer Writer, value any, tags ...string) (Artifact, error) {
 	payload, err := json.Marshal(value)

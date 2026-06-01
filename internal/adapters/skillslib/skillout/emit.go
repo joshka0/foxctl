@@ -2,8 +2,6 @@ package skillout
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"io"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillcas"
@@ -19,8 +17,7 @@ func Emit(rc *skillmain.RunContext, command string, data any) error {
 
 // EmitContext writes a success envelope using a backend-neutral output context.
 func EmitContext(rc interface{ OutputWriter() io.Writer }, command string, data any) error {
-	env := envelope.OK(command, data)
-	return envelope.Write(rc.OutputWriter(), env)
+	return skillcas.EmitOK(rc, command, data)
 }
 
 // EmitWithMeta writes a success envelope with custom metadata.
@@ -63,32 +60,7 @@ func EmitWithCAS(ctx context.Context, rc *skillmain.RunContext, command string, 
 
 // EmitWithCASContext emits data through a backend-neutral CAS output context.
 func EmitWithCASContext(ctx context.Context, rc skillcas.OutputContext, command string, data any) error {
-	// Marshal to check size
-	payload, err := json.Marshal(data)
-	if err != nil {
-		return fmt.Errorf("marshal data: %w", err)
-	}
-
-	// Check if truncation needed
-	if !rc.ShouldTruncate(len(payload)) {
-		return EmitContext(rc, command, data)
-	}
-
-	// Check if CAS storage is enabled
-	if !rc.ShouldStoreCAS() {
-		return EmitContext(rc, command, data)
-	}
-
-	// Store in CAS
-	artifact, err := skillcas.PersistJSON(ctx, rc, data, command)
-	if err != nil {
-		return fmt.Errorf("persist to cas: %w", err)
-	}
-
-	// Build result based on expose policy
-	result := BuildCASResult(artifact, rc.CASExposePolicy())
-
-	return EmitContext(rc, command, result)
+	return skillcas.EmitWithCAS(ctx, rc, command, data)
 }
 
 // BuildCASResult builds the result payload based on CAS expose policy.

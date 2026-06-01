@@ -56,6 +56,7 @@ This goal is for the current extraction-prep MR. It must not move skills into a 
 - `skills/presence_character`: `helper-needed` / defer. It reads full config storage settings, which are intentionally absent from `LiteConfig`.
 - `skills/repo_index_build` and `skills/repo_index_enrich_summaries`: `keep-core` / defer. They are store-less wrappers, but their protocol decoding currently pulls storage/intelligence packages transitively, so the dependency audit is not quiet.
 - CAS output producers now have a narrow helper phase in progress/completed: `internal/adapters/skillslib/skillcas` defines the backend-neutral writer, artifact, expose policy, hint, and truncation-result contract. Full `skillmain.RunContext` adapts the existing store to that contract, while lite can accept an injected writer without importing storage/runtime/intelligence/context.
+- CAS can also be consumed as the core CLI API contract for extracted code: `skillcas.CLIWriter` implements the writer interface by invoking `foxctl cas put -` and decoding the canonical `foxctl.cas.put` envelope. Lite exposes `EmitWithCAS`, so custom/lite entrypoints can store large outputs through an injected writer without importing full `skillmain`.
 - CAS-heavy skills are still not automatic lite-conversion candidates. Writer-only paths can migrate to `skillcas`, but read/cache-heavy skills using `Get`, `Head`, pinning, GC, storage providers, runtime, observability, or intelligence remain `keep-core` until a separate contract is designed for those capabilities.
 
 ## Constraints

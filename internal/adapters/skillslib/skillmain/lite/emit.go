@@ -1,10 +1,12 @@
 package lite
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strings"
 
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillcas"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
 	"github.com/joshka0/foxctl/internal/domain/envelope"
 )
@@ -18,6 +20,11 @@ func Emit(rc *RunContext, command string, data any) error {
 func EmitWithMeta(rc *RunContext, command string, data any, meta envelope.Meta) error {
 	env := envelope.OK(command, data, envelope.WithMeta(meta))
 	return envelope.Write(rc.Stdout, env)
+}
+
+// EmitWithCAS emits data inline or stores large JSON output through rc.CASWriter.
+func EmitWithCAS(ctx context.Context, rc *RunContext, command string, data any) error {
+	return skillcas.EmitWithCAS(ctx, rc, command, data)
 }
 
 // Fatal emits an error envelope. Use this for skills with custom main().
