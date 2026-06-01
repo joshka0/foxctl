@@ -14,17 +14,16 @@ import (
 
 	cihelpers "github.com/joshka0/foxctl/internal/adapters/skillslib/ci"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 )
 
 // Input defines the skill input parameters for ci/checks operations.
 type Input struct {
-	PR         skillmain.FlexString `json:"pr" validate:"required"`
-	Owner      string               `json:"owner,omitempty"`
-	Repo       string               `json:"repo,omitempty"`
-	Mode       string               `json:"mode,omitempty"`
-	ErrorsOnly bool                 `json:"errors_only,omitempty"`
+	PR         lite.FlexString `json:"pr" validate:"required"`
+	Owner      string          `json:"owner,omitempty"`
+	Repo       string          `json:"repo,omitempty"`
+	Mode       string          `json:"mode,omitempty"`
+	ErrorsOnly bool            `json:"errors_only,omitempty"`
 }
 
 // PRInfo represents basic pull request information from GitHub API.
@@ -85,7 +84,7 @@ type JobStep struct {
 
 // main is the skill entry point for ci/checks.
 func main() {
-	skillmain.Main("ci/checks", run)
+	lite.Main("ci/checks", run)
 }
 
 // run orchestrates CI check run analysis for a GitHub pull request.
@@ -102,7 +101,7 @@ func main() {
 //
 // [[domain:github-ci-checks]]
 // [[protocol:github-api-check-runs]]
-func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+func run(ctx context.Context, rc *lite.RunContext, in Input) error {
 	prRef := strings.TrimSpace(in.PR.String())
 
 	mode := strings.ToLower(strings.TrimSpace(in.Mode))
@@ -128,7 +127,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	client := &http.Client{Timeout: 30 * time.Second}
 
 	var prInfo *PRInfo
-	err = skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err = lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var e error
 		prInfo, e = getPR(client, token, owner, repo, prNum)
 		return e
@@ -138,7 +137,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	var checkRuns []CheckRun
-	err = skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err = lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var e error
 		checkRuns, e = getCheckRuns(client, token, owner, repo, prInfo.Head.SHA)
 		return e
@@ -232,7 +231,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		"checks":      summaries,
 	}
 
-	return skillout.Emit(rc, "ci/checks", data)
+	return lite.Emit(rc, "ci/checks", data)
 }
 
 // getPR fetches basic pull request information from GitHub API.

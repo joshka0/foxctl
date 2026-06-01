@@ -7,12 +7,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/workspaceutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 	_ "modernc.org/sqlite"
 )
 
@@ -38,10 +37,10 @@ type ModeValue struct {
 
 // main is the skill entry point for setup/foxctl_mode.
 func main() {
-	skillmain.Main(command, skillmain.Chain(
+	lite.Main(command, lite.Chain(
 		run,
-		skillmain.WithTimeout[Input](5*time.Second),
-		skillmain.WithRecover[Input](),
+		lite.WithTimeout[Input](5*time.Second),
+		lite.WithRecover[Input](),
 	))
 }
 
@@ -59,13 +58,16 @@ func main() {
 //
 // [[domain:workspace-mode-management]]
 // [[protocol:mode-get-set-dispatch]]
-func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
+func run(ctx context.Context, rc *lite.RunContext, input Input) error {
 	if input.Operation == "" {
 		return skillerr.Arg("operation is required", skillerr.WithHint("Use 'get' or 'set'."))
 	}
 
 	// Default workspace using standard detection chain.
-	workspace := workspaceutil.ResolveID(input.WorkspaceID, rc.Workspace)
+	workspace := input.WorkspaceID
+	if strings.TrimSpace(workspace) == "" {
+		workspace = rc.Workspace
+	}
 
 	// Get DB path
 	foxctlHome := os.Getenv("FOXCTL_HOME")
@@ -91,7 +93,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 		if err != nil {
 			return skillerr.WrapIO("get mode", err)
 		}
-		return skillout.Emit(rc, command, Output{Enabled: enabled, WorkspaceID: workspace})
+		return lite.Emit(rc, command, Output{Enabled: enabled, WorkspaceID: workspace})
 
 	case "set":
 		if input.Enabled == nil {
@@ -100,7 +102,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 		if err := setMode(ctx, db, workspace, *input.Enabled); err != nil {
 			return skillerr.WrapIO("set mode", err)
 		}
-		return skillout.Emit(rc, command, Output{Enabled: *input.Enabled, WorkspaceID: workspace})
+		return lite.Emit(rc, command, Output{Enabled: *input.Enabled, WorkspaceID: workspace})
 
 	default:
 		return skillerr.Arg(
