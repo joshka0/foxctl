@@ -249,9 +249,9 @@ Each repository:
 The core repo CI currently shards skill tests across 3 race-detection jobs:
 
 ```yaml
-race-tests-skills-a-g:  # skills starting with a-g
-race-tests-skills-h-o:  # skills starting with h-o
-race-tests-skills-p-x:  # skills starting with p-x
+race-skills-a-g:        # skills starting with a-g
+race-skills-h-o:        # skills starting with h-o
+race-skills-p-x:        # skills starting with p-x
 ```
 
 Additionally, `make skills-build-impacted` and `make skills-build` compile all ~160 skills on every relevant change.
