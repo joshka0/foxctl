@@ -46,7 +46,7 @@ SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 CGO_SKILLS :=
 OPTIONAL_CGO_SKILLS :=
 
-.PHONY: fmt lint static-analysis install-git-hooks typecheck lsp-check vet test test-race test-race-smoke test-race-shard test-race-impacted test-race-changed test-race-shard-impacted test-integration test-integration-package test-integration-package-impacted test-integration-impacted test-integration-cmd test-integration-cmd-impacted test-integration-golden test-integration-golden-impacted test-integration-rlm test-integration-rlm-impacted mutation-critical mutation-critical-list mutation-critical-dry-run cover check-coverage check-coverage-strict check-doc-links check-large-files check-tech-debt check-duplication test-timing build build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-impact skills-dependency-audit skills-build-impacted packages-impact test-short-core test-short-core-impacted test-short-skills test-short-skills-impacted test-short-impacted skills-install skills-install-cgo skills-install-all skills-test completions init go-tui-build go-tui-spawn go-tui-agent go-tui go-tui-smoke tui ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean benchmark-manifest bench-go bench-orientation gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-foxctl-package eval-code-search-praze-infra eval-code-search-foxctl-repo-grounded eval-code-search-foxctl-change-impact eval-code-search-foxctl-trace-symbol eval-code-search-foxctl-bridge-esoteric eval-retrieval-foxctl eval-retrieval-foxctl-mixed eval-retrieval-foxctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
+.PHONY: fmt lint static-analysis install-git-hooks typecheck lsp-check vet test test-race test-race-smoke test-race-shard test-race-impacted test-race-changed test-race-shard-impacted test-integration test-integration-package test-integration-package-impacted test-integration-impacted test-integration-cmd test-integration-cmd-impacted test-integration-golden test-integration-golden-impacted test-integration-rlm test-integration-rlm-impacted mutation-critical mutation-critical-list mutation-critical-dry-run cover check-coverage check-coverage-strict check-doc-links check-large-files check-tech-debt repo-hygiene check-duplication test-timing build build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-impact skills-dependency-audit skills-build-impacted packages-impact test-short-core test-short-core-impacted test-short-skills test-short-skills-impacted test-short-impacted skills-install skills-install-cgo skills-install-all skills-test completions init go-tui-build go-tui-spawn go-tui-agent go-tui go-tui-smoke tui ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean benchmark-manifest bench-go bench-orientation gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-foxctl-package eval-code-search-praze-infra eval-code-search-foxctl-repo-grounded eval-code-search-foxctl-change-impact eval-code-search-foxctl-trace-symbol eval-code-search-foxctl-bridge-esoteric eval-retrieval-foxctl eval-retrieval-foxctl-mixed eval-retrieval-foxctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
 
 fmt:
 	@echo "Running gofumpt"
@@ -1030,6 +1030,8 @@ check-large-files:
 check-tech-debt:
 	@bash scripts/check_tech_debt.sh
 
+repo-hygiene: check-large-files check-tech-debt
+
 check-duplication:
 	@command -v jscpd >/dev/null 2>&1 || { echo "jscpd not installed. Run: npm i -g jscpd"; exit 1; }
 	@jscpd --config .jscpd.json .
@@ -1037,7 +1039,7 @@ check-duplication:
 test-timing:
 	@$(GO_CMD) test ./... -v -count=1 2>&1 | grep -E '(^--- |PASS|FAIL|panic)' | awk '{print $$0}'
 
-check: fmt lint vet test check-coverage check-doc-links check-large-files check-tech-debt build
+check: fmt lint vet test check-coverage check-doc-links repo-hygiene build
 
 completions: build
 	@mkdir -p dist

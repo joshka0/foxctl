@@ -35,11 +35,142 @@ workflow:
     - if: $CI_MERGE_REQUEST_IID
     - if: $CI_COMMIT_TAG
 
+.ci-image-change-paths: &ci_image_change_paths
+  - .gitlab-ci.yml
+  - .golangci.yml
+  - deploy/docker/**/*
+  - Makefile
+  - go.mod
+  - go.sum
+  - cmd/**/*
+  - internal/**/*
+  - plugins/**/*
+  - scripts/**/*.go
+  - scripts/checkmanifests/**/*
+  - skills/**/*
+  - tests/**/*
+
+.go-core-change-paths: &go_core_change_paths
+  - .gitlab-ci.yml
+  - .golangci.yml
+  - deploy/docker/**/*
+  - Makefile
+  - go.mod
+  - go.sum
+  - cmd/**/*
+  - internal/**/*
+  - plugins/**/*
+  - scripts/**/*.go
+  - tests/**/*
+
+.skill-change-paths: &skill_change_paths
+  - .gitlab-ci.yml
+  - deploy/docker/**/*
+  - Makefile
+  - go.mod
+  - go.sum
+  - internal/**/*
+  - scripts/**/*.go
+  - scripts/skill_dependency_audit/**/*
+  - scripts/skills_impact/**/*
+  - skills/**/*
+  - tests/**/*
+
+.go-format-change-paths: &go_format_change_paths
+  - .gitlab-ci.yml
+  - Makefile
+  - go.mod
+  - go.sum
+  - cmd/**/*
+  - internal/**/*
+  - plugins/**/*
+  - scripts/**/*.go
+  - skills/**/*
+  - tests/**/*
+
+.manifest-change-paths: &manifest_change_paths
+  - .gitlab-ci.yml
+  - deploy/docker/**/*
+  - Makefile
+  - internal/domain/policy/**/*
+  - internal/domain/skill/**/*
+  - scripts/checkmanifests/**/*
+  - skills/**/skill.yaml
+
+.race-smoke-change-paths: &race_smoke_change_paths
+  - .gitlab-ci.yml
+  - deploy/docker/**/*
+  - Makefile
+  - go.mod
+  - go.sum
+  - cmd/**/*
+  - internal/**/*
+
+.frontend-change-paths: &frontend_change_paths
+  - .gitlab-ci.yml
+  - Makefile
+  - bun.lock
+  - bunfig.toml
+  - package.json
+  - tsconfig.json
+  - packages/data/**/*
+  - packages/foxterm/**/*
+  - packages/gui-agent/**/*
+  - packages/gui-auth-gateway/**/*
+  - scripts/**/*.ts
+  - scripts/**/*.mjs
+  - internal/interfaces/web/**/*
+
+.docs-site-change-paths: &docs_site_change_paths
+  - .gitlab-ci.yml
+  - bun.lock
+  - bunfig.toml
+  - package.json
+  - packages/docs-site/**/*
+
+.docs-change-paths: &docs_change_paths
+  - .gitlab-ci.yml
+  - AGENTS.md
+  - CLAUDE.md
+  - README.md
+  - CONTRIBUTING.md
+  - docs/**/*.md
+  - scripts/check_doc_links.sh
+
+.go-change-rules: &go_change_rules
+  - if: '$CI_COMMIT_BRANCH == "main"'
+  - if: '$CI_COMMIT_TAG'
+  - if: '$CI_MERGE_REQUEST_IID'
+    changes: *go_core_change_paths
+
+.skill-change-rules: &skill_change_rules
+  - if: '$CI_COMMIT_BRANCH == "main"'
+  - if: '$CI_COMMIT_TAG'
+  - if: '$CI_MERGE_REQUEST_IID'
+    changes: *skill_change_paths
+
+.go-format-change-rules: &go_format_change_rules
+  - if: '$CI_COMMIT_BRANCH == "main"'
+  - if: '$CI_COMMIT_TAG'
+  - if: '$CI_MERGE_REQUEST_IID'
+    changes: *go_format_change_paths
+
+.light-check-template:
+  # Intentionally no Go toolchain. Use only for shell/Python checks and verify
+  # Jobs that must still run when the per-commit CI image is skipped.
+  image: python:3.13
+  before_script: []
+
 # --- Stage: prepare ---
-# Rebuilds CI image only when infra files change. All downstream stages wait.
+# Builds the per-commit CI image used by Go-backed downstream Jobs.
 build-ci-image:
   stage: prepare
   image: docker:27
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_MERGE_REQUEST_IID'
+      changes: *ci_image_change_paths
   services:
     - name: docker:27-dind
       alias: docker
@@ -82,7 +213,26 @@ build-ci-image:
     - retry_cmd 3 10 docker push ${CI_IMAGE}
 
 # --- Stage: check (all jobs run in parallel via DAG) ---
-static-analysis:
+format-check:
+  stage: check
+  rules: *go_format_change_rules
+  script:
+    - make fmt
+    - git -c core.filemode=false diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
+
+go-lint:
+  stage: check
+  rules: *go_change_rules
+  script:
+    - |
+      if [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ]; then
+        git fetch --no-tags origin \
+          "+refs/heads/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}:refs/remotes/origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}"
+      fi
+    - GOGC=50 GOMEMLIMIT=1800MiB make lint GOLANGCI_TIMEOUT=30m GOLANGCI_FLAGS='--concurrency=1' LINT_TARGETS='./cmd/... ./internal/... ./plugins/... ./scripts/... ./tests/...'
+
+repo-hygiene:
+  extends: .light-check-template
   stage: check
   script:
     - |
@@ -90,14 +240,22 @@ static-analysis:
         git fetch --no-tags origin \
           "+refs/heads/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}:refs/remotes/origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}"
       fi
-    - make fmt
-    - git -c core.filemode=false diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
-    - GOGC=50 GOMEMLIMIT=1800MiB make lint GOLANGCI_TIMEOUT=30m GOLANGCI_FLAGS='--concurrency=1' LINT_TARGETS='./cmd/... ./internal/... ./plugins/... ./scripts/... ./tests/...'
-    - make check-large-files
-    - make check-tech-debt
+    - make repo-hygiene
+
+docs-links:
+  extends: .light-check-template
+  stage: check
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_MERGE_REQUEST_IID'
+      changes: *docs_change_paths
+  script:
+    - make check-doc-links
 
 unit-tests-core:
   stage: check
+  rules: *go_change_rules
   variables:
     CGO_ENABLED: "0"
   script:
@@ -117,6 +275,7 @@ unit-tests-core:
 
 unit-tests-skills:
   stage: check
+  rules: *skill_change_rules
   variables:
     CGO_ENABLED: "0"
   script:
@@ -158,7 +317,12 @@ unit-tests-skills:
 race-core-smoke:
   stage: check
   rules:
-    - if: $CI_MERGE_REQUEST_IID
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - if: '$RUN_FULL_RACE == "1"'
+    - if: '$CI_MERGE_REQUEST_IID'
+      changes: *race_smoke_change_paths
   script:
     - make test-race-smoke
 
@@ -219,6 +383,7 @@ race-skills-p-x:
 
 integration-package:
   stage: check
+  rules: *go_change_rules
   script:
     - |
       base_ref=""
@@ -235,6 +400,7 @@ integration-package:
 
 integration-cmd:
   stage: check
+  rules: *go_change_rules
   script:
     - |
       base_ref=""
@@ -251,6 +417,7 @@ integration-cmd:
 
 integration-golden:
   stage: check
+  rules: *go_change_rules
   script:
     - |
       base_ref=""
@@ -267,6 +434,7 @@ integration-golden:
 
 integration-rlm:
   stage: check
+  rules: *go_change_rules
   script:
     - |
       base_ref=""
@@ -283,6 +451,11 @@ integration-rlm:
 
 typescript-frontend:
   stage: check
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_MERGE_REQUEST_IID'
+      changes: *frontend_change_paths
   image: oven/bun:1.3.14
   before_script:
     - export PATH="/home/dev/.bun/bin:$PATH"
@@ -290,9 +463,24 @@ typescript-frontend:
   script:
     - bun run unused:frontend
 
+docs-site:
+  stage: check
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_MERGE_REQUEST_IID'
+      changes: *docs_site_change_paths
+  image: oven/bun:1.3.14
+  before_script:
+    - export PATH="/home/dev/.bun/bin:$PATH"
+    - bun install --frozen-lockfile
+  script:
+    - bun run check:docs
+
 # --- Stage: build ---
 build-core:
   stage: build
+  rules: *go_change_rules
   needs:
     - job: build-ci-image
   variables:
@@ -308,6 +496,7 @@ build-core:
 
 build-skills:
   stage: build
+  rules: *skill_change_rules
   needs:
     - job: build-ci-image
   variables:
@@ -330,17 +519,31 @@ build-skills:
 
 validate-manifests:
   stage: build
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_MERGE_REQUEST_IID'
+      changes: *manifest_change_paths
   needs:
     - job: build-ci-image
   script:
     - go run ./scripts/checkmanifests
 
 all-checks:
+  extends: .light-check-template
   stage: verify
   needs:
-    - job: static-analysis
+    - job: format-check
+      optional: true
+    - job: go-lint
+      optional: true
+    - job: repo-hygiene
+    - job: docs-links
+      optional: true
     - job: unit-tests-core
+      optional: true
     - job: unit-tests-skills
+      optional: true
     - job: race-core-smoke
       optional: true
     - job: race-core-cmd
@@ -366,11 +569,22 @@ all-checks:
     - job: race-skills-p-x
       optional: true
     - job: integration-package
+      optional: true
     - job: integration-cmd
+      optional: true
     - job: integration-golden
+      optional: true
     - job: integration-rlm
+      optional: true
+    - job: typescript-frontend
+      optional: true
+    - job: docs-site
+      optional: true
     - job: build-core
+      optional: true
     - job: build-skills
+      optional: true
     - job: validate-manifests
+      optional: true
   script:
     - echo "All checks passed"

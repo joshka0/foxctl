@@ -150,19 +150,27 @@ When making code changes that affect tests, prefer to:
 ## CI Overview
 
 GitLab CI (`.gitlab-ci.yml`) runs a containerized pipeline using the Go image
-built from `deploy/docker/Dockerfile.ci`. Key jobs:
+built from `deploy/docker/Dockerfile.ci` for Go-backed jobs and lighter images
+for docs/frontend-only checks. Key jobs:
 
-- **static-analysis** – `make fmt`, `make lint`, large-file checks, and tech
-  debt checks.
-- **unit-tests** – impacted `make test-short-impacted` on merge requests, or
-  `go test -short ./...` on main/full runs.
-- **race-tests-smoke** – merge-request race smoke over concurrency-sensitive
+- **format-check** – `make fmt` plus a diff check for committed formatting.
+- **go-lint** – `make lint` over Go packages and CI-owned Go tools.
+- **repo-hygiene** – large-file and tech-debt marker checks through
+  `make repo-hygiene`.
+- **docs-links** – local Markdown link checks for repo docs and root agent
+  docs.
+- **docs-site** – Starlight/Astro docs-site validation through
+  `bun run check:docs`.
+- **unit-tests-core** and **unit-tests-skills** – impacted short test lanes on
+  merge requests, or full short lanes on main/full runs.
+- **race-core-smoke** – merge-request race smoke over concurrency-sensitive
   runtime and storage packages through `make test-race-smoke`.
-- **race-tests-\*** – full sharded race checks through `make test-race-shard`
-  on `main`, tags, schedules, or explicit `RUN_FULL_RACE=1` pipelines.
-- **integration-tests** – impacted `make test-integration-impacted` on merge
-  requests, or `make test-integration` on main/full runs.
-- **build** – `make build`, impacted or full skill builds, and manifest checks.
+- **race-\*** – full sharded race checks through `make test-race-shard` on
+  `main`, tags, schedules, or explicit `RUN_FULL_RACE=1` pipelines.
+- **integration-\*** – impacted integration lanes on merge requests, or full
+  integration lanes on main/full runs.
+- **build-core**, **build-skills**, and **validate-manifests** – core binary,
+  Skill build, and Skill Manifest checks.
 
 Agents proposing CI changes should:
 

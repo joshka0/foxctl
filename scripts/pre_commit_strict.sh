@@ -40,5 +40,4 @@ GOGC=50 GOMEMLIMIT=1800MiB make lint \
     GOLANGCI_FLAGS="${GOLANGCI_FLAGS:---concurrency=1}" \
     LINT_TARGETS="${LINT_TARGETS:-./cmd/... ./internal/... ./plugins/... ./scripts/... ./tests/...}"
 
-make check-large-files
-make check-tech-debt
+make repo-hygiene

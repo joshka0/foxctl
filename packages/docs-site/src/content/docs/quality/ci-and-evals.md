@@ -51,15 +51,19 @@ bun run --cwd packages/docs-site check
 
 ## CI pipeline
 
-GitLab CI (`.gitlab-ci.yml`) runs a containerized pipeline using the Go image built from `deploy/docker/Dockerfile.ci`. Key jobs:
+GitLab CI (`.gitlab-ci.yml`) runs a containerized pipeline using the Go image built from `deploy/docker/Dockerfile.ci` for Go-backed jobs and lighter images for docs/frontend-only checks. Key jobs:
 
 | Job | What it runs |
 |---|---|
-| **static-analysis** | `make fmt`, `make lint`, large-file checks, and tech-debt checks |
-| **unit-tests** | Impacted `make test-short-impacted` on merge requests, or `go test -short ./...` on main/full runs |
-| **race-tests-\*** | Sharded `make test-race-shard` checks |
-| **integration-tests** | Impacted or full `make test-integration` |
-| **build** | `make build`, skill builds, and manifest checks |
+| **format-check** | `make fmt` plus committed diff validation |
+| **go-lint** | `make lint` over Go packages and CI-owned Go tools |
+| **repo-hygiene** | Large-file and tech-debt marker checks through `make repo-hygiene` |
+| **docs-links** | Local Markdown link checks for repo docs and root agent docs |
+| **docs-site** | Starlight/Astro docs-site validation through `bun run check:docs` |
+| **unit-tests-core** / **unit-tests-skills** | Impacted short test lanes on merge requests, or full short lanes on main/full runs |
+| **race-\*** | Race smoke and sharded `make test-race-shard` checks |
+| **integration-\*** | Impacted or full integration lanes |
+| **build-core** / **build-skills** / **validate-manifests** | Core binary, Skill build, and Skill Manifest checks |
 
 ### CI guidelines
 
