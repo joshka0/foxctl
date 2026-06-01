@@ -234,7 +234,8 @@ func TestMessagePassingIntegration(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, messages, 1)
 
-		// Use a short delay here; this test cares about retry semantics, not a literal 5s timeout.
+		// Mailbox visibility is stored at Unix-second precision, so a positive
+		// subsecond delay becomes visible on the next second boundary.
 		err = store.Nack(ctx, messages[0].ID, 100*time.Millisecond)
 		require.NoError(t, err)
 
@@ -246,7 +247,7 @@ func TestMessagePassingIntegration(t *testing.T) {
 				return false
 			}
 			return len(messages) == 1
-		}, 750*time.Millisecond, 25*time.Millisecond)
+		}, 1500*time.Millisecond, 25*time.Millisecond)
 		assert.Equal(t, msg.ID, messages[0].ID)
 		assert.GreaterOrEqual(t, messages[0].Attempt, 2) // Retried delivery
 

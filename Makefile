@@ -21,6 +21,7 @@ REFACTOR_SCOUT_RULE_SET ?= default
 REFACTOR_SCOUT_MIN_SCORE ?= 70
 REFACTOR_SCOUT_MAX_RESULTS ?= 8
 REFACTOR_SCOUT_INCLUDE_TESTS ?= false
+RLM_INTEGRATION_TESTS := ^(TestSmokeContextEngineWiring|TestReadOnlyAdapterGatherContext|TestReadOnlyAdapterGatherContextRealWorldStores|TestReadOnlyAdapterGatherContextUsesRepoIndexBeforeSemanticSkill|TestReadOnlyAdapterGatherContextUsesExactCodeProbe|TestReadOnlyAdapterGatherContextCanIncludeCandidateMemory|TestReadOnlyAdapterGatherContextUsesRegistrationTrace|TestReadOnlyAdapterGatherContextExpandsReferencedDefinitions|TestReadOnlyAdapterGatherContextBoostsCommandBuildCompanions|TestReadOnlyAdapterGatherContextExecutionTraceUsesEnsembleBridgeFile|TestReadOnlyAdapterGatherContextSymbolInspectUsesDefinitionPath|TestReadOnlyAdapterCodeSearchEnsembleFileLocate|TestReadOnlyAdapterCodeSearchEnsembleExecutionTrace|TestReadOnlyAdapterCodeSearchEnsembleUsesExactCodeProbe|TestReadOnlyAdapterCodeSearchEnsembleEmitsTelemetry|TestReadOnlyAdapterCodeSearchEnsembleRegistrationTrace|TestReadOnlyAdapterCodeSearchEnsembleChangeImpact|TestReadOnlyAdapterCodeSearchEnsembleExecutionTracePromotesBridgeFile|TestReadOnlyAdapterCodeSearchEnsembleSymbolInspectUsesGoDefinitions|TestGatherContextSelectsNonCodeTestDataWithCoverage|TestGatherContextStructuredCoverageRequirementsFeedProviders|TestGatherContextOmitsTestsByDefault|TestGatherContextIncludesTestsWhenRequested|TestGatherTestContextIncludesTestsByDefault|TestGatherDocsContextUsesDocsProfileAndNoiseFilters)$$
 GOFUMPT ?= gofumpt
 GOLANGCI ?= golangci-lint
 GOLANGCI_FLAGS ?=
@@ -32,13 +33,20 @@ COVERAGE_BRANCH_MIN ?= 40.0
 COVERAGE_STRICT_LINE_MIN ?= 85.0
 COVERAGE_STRICT_FUNC_MIN ?= 80.0
 COVERAGE_STRICT_BRANCH_MIN ?= 75.0
+MUTATION_PACKAGES ?= ./internal/domain/policy ./internal/runtime/flow ./internal/storage/jobs ./internal/storage/jobs/persist ./internal/runtime/jobs/workers
+MUTATION_REPORT_DIR ?= .mutation-reports
+MUTATION_CONFIRM ?=
+MUTATION_TMPDIR ?=
+MUTATION_KEEP_TMP ?=
+MUTATION_THRESHOLD_EFFICACY ?= 70
+MUTATION_THRESHOLD_MCOVER ?= 20
 GOFILES := $(shell find cmd internal skills -name '*.go')
 SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 # Skills requiring CGO (excluded from non-CGO builds).
 CGO_SKILLS :=
 OPTIONAL_CGO_SKILLS :=
 
-.PHONY: fmt lint static-analysis install-git-hooks typecheck lsp-check vet test test-race test-race-shard test-race-impacted test-race-shard-impacted test-integration test-integration-impacted test-integration-cmd cover check-coverage check-coverage-strict check-doc-links check-large-files check-tech-debt check-duplication test-timing build build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-impact skills-build-impacted packages-impact test-short-impacted skills-install skills-install-cgo skills-install-all skills-test completions init go-tui-build go-tui-spawn go-tui-agent go-tui go-tui-smoke tui ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean benchmark-manifest bench-go bench-orientation gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-foxctl-package eval-code-search-praze-infra eval-code-search-foxctl-repo-grounded eval-code-search-foxctl-change-impact eval-code-search-foxctl-trace-symbol eval-code-search-foxctl-bridge-esoteric eval-retrieval-foxctl eval-retrieval-foxctl-mixed eval-retrieval-foxctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
+.PHONY: fmt lint static-analysis install-git-hooks typecheck lsp-check vet test test-race test-race-smoke test-race-shard test-race-impacted test-race-changed test-race-shard-impacted test-integration test-integration-package test-integration-impacted test-integration-cmd test-integration-golden test-integration-rlm mutation-critical mutation-critical-list mutation-critical-dry-run cover check-coverage check-coverage-strict check-doc-links check-large-files check-tech-debt check-duplication test-timing build build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-impact skills-dependency-audit skills-build-impacted packages-impact test-short-impacted skills-install skills-install-cgo skills-install-all skills-test completions init go-tui-build go-tui-spawn go-tui-agent go-tui go-tui-smoke tui ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean benchmark-manifest bench-go bench-orientation gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-foxctl-package eval-code-search-praze-infra eval-code-search-foxctl-repo-grounded eval-code-search-foxctl-change-impact eval-code-search-foxctl-trace-symbol eval-code-search-foxctl-bridge-esoteric eval-retrieval-foxctl eval-retrieval-foxctl-mixed eval-retrieval-foxctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
 
 fmt:
 	@echo "Running gofumpt"
@@ -111,6 +119,15 @@ test:
 test-short:
 	@if [ -n "$(GOCACHE_DIR)" ]; then mkdir -p "$(GOCACHE_DIR)"; fi
 	@$(GO_CMD) test -short ./...
+
+mutation-critical:
+	@GO="$(GO)" MUTATION_PACKAGES="$(MUTATION_PACKAGES)" MUTATION_REPORT_DIR="$(MUTATION_REPORT_DIR)" MUTATION_CONFIRM="$(MUTATION_CONFIRM)" MUTATION_TMPDIR="$(MUTATION_TMPDIR)" MUTATION_KEEP_TMP="$(MUTATION_KEEP_TMP)" MUTATION_THRESHOLD_EFFICACY="$(MUTATION_THRESHOLD_EFFICACY)" MUTATION_THRESHOLD_MCOVER="$(MUTATION_THRESHOLD_MCOVER)" ./scripts/mutation_critical.sh --run
+
+mutation-critical-list:
+	@GO="$(GO)" MUTATION_PACKAGES="$(MUTATION_PACKAGES)" MUTATION_REPORT_DIR="$(MUTATION_REPORT_DIR)" MUTATION_CONFIRM="$(MUTATION_CONFIRM)" MUTATION_TMPDIR="$(MUTATION_TMPDIR)" MUTATION_KEEP_TMP="$(MUTATION_KEEP_TMP)" MUTATION_THRESHOLD_EFFICACY="$(MUTATION_THRESHOLD_EFFICACY)" MUTATION_THRESHOLD_MCOVER="$(MUTATION_THRESHOLD_MCOVER)" ./scripts/mutation_critical.sh --list
+
+mutation-critical-dry-run:
+	@GO="$(GO)" MUTATION_PACKAGES="$(MUTATION_PACKAGES)" MUTATION_REPORT_DIR="$(MUTATION_REPORT_DIR)" MUTATION_CONFIRM="$(MUTATION_CONFIRM)" MUTATION_TMPDIR="$(MUTATION_TMPDIR)" MUTATION_KEEP_TMP="$(MUTATION_KEEP_TMP)" MUTATION_THRESHOLD_EFFICACY="$(MUTATION_THRESHOLD_EFFICACY)" MUTATION_THRESHOLD_MCOVER="$(MUTATION_THRESHOLD_MCOVER)" ./scripts/mutation_critical.sh --dry-run
 
 benchmark-manifest:
 	@$(GO_CMD) run ./cmd/foxctl benchmark manifest validate
@@ -188,6 +205,17 @@ eval-retrieval-praze-k8s:
 	@bash ./scripts/eval_retrieval_praze_k8s.sh $(ARGS)
 
 RACE_P ?= 1
+RACE_SMOKE_PKGS ?= ./internal/runtime/execution/... ./internal/runtime/jobs/... ./internal/storage/jobs/... ./internal/storage/mailbox ./internal/storage/queue
+
+test-race-smoke:
+	@set -euo pipefail; \
+		pkgs="$$( $(GO_CMD_CGO) list $(RACE_SMOKE_PKGS) | paste -sd' ' - )"; \
+		if [ -z "$$pkgs" ]; then \
+			echo "No race smoke packages"; \
+			exit 0; \
+		fi; \
+		echo "Race-testing smoke packages: $$pkgs"; \
+		$(GO_CMD_CGO) test -race -short -p $(RACE_P) $$pkgs
 
 test-race:
 	@set -euo pipefail; \
@@ -229,13 +257,28 @@ ifndef BASE_REF
 endif
 	@set -euo pipefail; \
 		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
-		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -vx 'github.com/joshka0/foxctl/tests/integration' || true )"; \
+		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -Ev '^github.com/joshka0/foxctl/tests/integration(/|$$)|^github.com/joshka0/foxctl/tests/golden/trajectories(/|$$)' || true )"; \
 		pkgs="$$( printf '%s\n' "$$pkgs" | sed '/^$$/d' | paste -sd' ' - )"; \
 		if [ -z "$$pkgs" ]; then \
 			echo "No impacted packages"; \
 			exit 0; \
 		fi; \
 		echo "Race-testing impacted packages: $$pkgs"; \
+		$(GO_CMD_CGO) test -race -short -p $(RACE_P) $$pkgs
+
+test-race-changed:
+ifndef BASE_REF
+	$(error BASE_REF is required. Usage: make test-race-changed BASE_REF=origin/main [HEAD_REF=HEAD])
+endif
+	@set -euo pipefail; \
+		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode changed-packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
+		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -Ev '^github.com/joshka0/foxctl/tests/integration(/|$$)|^github.com/joshka0/foxctl/tests/golden/trajectories(/|$$)' || true )"; \
+		pkgs="$$( printf '%s\n' "$$pkgs" | sed '/^$$/d' | paste -sd' ' - )"; \
+		if [ -z "$$pkgs" ]; then \
+			echo "No changed packages"; \
+			exit 0; \
+		fi; \
+		echo "Race-testing changed packages: $$pkgs"; \
 		$(GO_CMD_CGO) test -race -short -p $(RACE_P) $$pkgs
 
 test-race-shard-impacted:
@@ -261,7 +304,7 @@ endif
 			*) echo "Unknown race shard: $(SHARD)" >&2; exit 1 ;; \
 		esac; \
 		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
-		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -E "$$include_re" | grep -vx 'github.com/joshka0/foxctl/tests/integration' || true )"; \
+		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -E "$$include_re" | grep -Ev '^github.com/joshka0/foxctl/tests/integration(/|$$)|^github.com/joshka0/foxctl/tests/golden/trajectories(/|$$)' || true )"; \
 		pkgs="$$( printf '%s\n' "$$pkgs" | sed '/^$$/d' | paste -sd' ' - )"; \
 		if [ -z "$$pkgs" ]; then \
 			echo "No impacted packages for race shard $(SHARD)"; \
@@ -270,7 +313,9 @@ endif
 		echo "Race-testing impacted shard $(SHARD): $$pkgs"; \
 		$(GO_CMD_CGO) test -race -short -p $(RACE_P) $$pkgs
 
-test-integration:
+test-integration: test-integration-package test-integration-cmd test-integration-golden test-integration-rlm
+
+test-integration-package:
 	@$(GO_CMD) test -tags=integration ./tests/integration/... -timeout 15m -v
 
 test-integration-impacted:
@@ -279,15 +324,50 @@ ifndef BASE_REF
 endif
 	@set -euo pipefail; \
 		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
-		if ! echo "$$pkgs" | tr ' ' '\n' | grep -qx 'github.com/joshka0/foxctl/tests/integration'; then \
+		ran=0; \
+		if echo "$$pkgs" | tr ' ' '\n' | grep -qx 'github.com/joshka0/foxctl/tests/integration'; then \
+			echo "Running impacted integration package"; \
+			$(GO_CMD) test -tags=integration ./tests/integration/... -timeout 15m -v; \
+			ran=1; \
+		else \
 			echo "Integration package not impacted"; \
-			exit 0; \
 		fi; \
-		echo "Running impacted integration package"; \
-		$(GO_CMD) test -tags=integration ./tests/integration/... -timeout 15m -v
+		cmd_pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -E '^github.com/joshka0/foxctl/cmd/foxctl/cmd($$|/)' || true )"; \
+		if [ -n "$$cmd_pkgs" ]; then \
+			echo "Running impacted command integration packages"; \
+			$(GO_CMD) test -tags=integration ./cmd/foxctl/cmd/... -timeout 15m -v; \
+			ran=1; \
+		else \
+			echo "Command integration packages not impacted"; \
+		fi; \
+		golden_pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -E '^github.com/joshka0/foxctl/tests/golden' || true )"; \
+		if [ -n "$$golden_pkgs" ]; then \
+			echo "Running impacted golden test packages"; \
+			$(GO_CMD) test -tags=integration ./tests/golden/... -timeout 15m -v; \
+			ran=1; \
+		else \
+			echo "Golden test packages not impacted"; \
+		fi; \
+		rlm_pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -E '^github.com/joshka0/foxctl/internal/rlm(/|$$)' || true )"; \
+		if [ -n "$$rlm_pkgs" ]; then \
+			echo "Running impacted RLM integration tests"; \
+			$(GO_CMD) test -tags=integration ./internal/rlm/env/... -run '$(RLM_INTEGRATION_TESTS)' -timeout 15m -v; \
+			ran=1; \
+		else \
+			echo "RLM integration tests not impacted"; \
+		fi; \
+		if [ "$$ran" = 0 ]; then \
+			echo "No integration packages impacted"; \
+		fi; \
 
 test-integration-cmd:
 	@$(GO_CMD) test -tags=integration ./cmd/foxctl/cmd/... -timeout 15m -v
+
+test-integration-golden:
+	@$(GO_CMD) test -tags=integration ./tests/golden/... -timeout 15m -v
+
+test-integration-rlm:
+	@$(GO_CMD) test -tags=integration ./internal/rlm/env/... -run '$(RLM_INTEGRATION_TESTS)' -timeout 15m -v
 
 cover:
 	@mkdir -p coverage
@@ -688,6 +768,9 @@ skills-build-all: skills-build skills-build-cgo
 skills-impact:
 	@$(GO_CMD) run ./scripts/skills_impact $(ARGS)
 
+skills-dependency-audit:
+	@scripts/skill-dependency-audit.sh $(ARGS)
+
 packages-impact:
 	@$(GO_CMD) run ./scripts/skills_impact --mode packages $(ARGS)
 
@@ -738,7 +821,8 @@ ifndef BASE_REF
 endif
 	@set -euo pipefail; \
 		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
-		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -vx 'github.com/joshka0/foxctl/tests/integration' | xargs )"; \
+		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -Ev '^github.com/joshka0/foxctl/tests/integration(/|$$)|^github.com/joshka0/foxctl/tests/golden/trajectories(/|$$)' || true )"; \
+		pkgs="$$( printf '%s\n' "$$pkgs" | sed '/^$$/d' | paste -sd' ' - )"; \
 		if [ -z "$$pkgs" ]; then \
 			echo "No impacted packages"; \
 			exit 0; \

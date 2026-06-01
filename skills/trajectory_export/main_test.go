@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -98,7 +99,7 @@ func seedUserRequest(t *testing.T, rc *skillmain.RunContext, workspaceID, text s
 	ur := trajectory.UserRequestCapture{
 		WorkspaceID: workspaceID,
 		Actor:       "user",
-		Source:      "test",
+		Source:      trajectory.SourceCLI,
 		TS:          time.Now().UTC(),
 		Text:        text,
 	}
@@ -541,6 +542,41 @@ func TestTrajectoryExport_WithUserRequest(t *testing.T) {
 
 	summary := data["summary"].(map[string]any)
 	assert.Equal(t, float64(1), summary["count"])
+}
+
+func TestTrajectoryExportRedactsSensitiveDataInArtifact(t *testing.T) {
+	var buf bytes.Buffer
+	rc, cleanup := newTestContext(t, &buf)
+	defer cleanup()
+
+	const (
+		passwordSecret = "topsecret123"
+		tokenSecret    = "abcdefghijklmnopqrstuvwxyz123456"
+	)
+	ur := seedUserRequest(t, rc, "workspace-123", "deploy with password="+passwordSecret)
+	seedTrajectory(t, rc, "workspace-123", &seedOpts{
+		RootRequestID: ur.ID,
+		TraceID:       "trace token=" + tokenSecret,
+	})
+
+	err := run(context.Background(), rc, input{WorkspaceID: "workspace-123"})
+	require.NoError(t, err)
+
+	env := decodeEnvelope(t, &buf)
+	assertOK(t, env)
+	artifact := getData(t, env)["artifact"].(string)
+
+	body, _, err := rc.CASStore.Get(context.Background(), artifact)
+	require.NoError(t, err)
+	defer body.Close()
+	exported, err := io.ReadAll(body)
+	require.NoError(t, err)
+
+	text := string(exported)
+	assert.NotContains(t, text, passwordSecret)
+	assert.NotContains(t, text, tokenSecret)
+	assert.Contains(t, text, "password=***")
+	assert.Contains(t, text, "token=***")
 }
 
 // Tests for time filtering

@@ -55,6 +55,17 @@ func CollectEntries(opts CollectOptions) ([]FileEntry, error) {
 			return nil, fmt.Errorf("walk %s: %w", p, err)
 		}
 		for _, entry := range found {
+			if opts.ValidatePath != nil {
+				validated, err := opts.ValidatePath(entry.Path)
+				if err != nil {
+					continue
+				}
+				info, err := os.Stat(validated)
+				if err != nil || info.IsDir() {
+					continue
+				}
+				entry = FileEntry{Path: validated, Info: info}
+			}
 			if seen[entry.Path] {
 				continue
 			}

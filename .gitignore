@@ -129,6 +129,7 @@ pr*.txt
 /.tmp/
 /artifacts/
 /prompt-exports/
+/.mutation-reports/
 
 # OpenCode
 .opencode/

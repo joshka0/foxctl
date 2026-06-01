@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/joshka0/foxctl/internal/domain/skill"
 )
@@ -23,13 +24,23 @@ func NewValidator(m skill.Manifest) *Validator {
 // ValidateNetworkAccess checks if network access to the given host:port is allowed.
 // Returns an error if access is denied by the egressAllow policy.
 func (v *Validator) ValidateNetworkAccess(host string, port int) error {
-	// If network capability is "none", deny all network access
-	if v.manifest.Capabilities.Network == "none" || v.manifest.Capabilities.Network == "" {
-		return fmt.Errorf("network access denied: skill has network capability set to 'none'")
+	if !validNetworkPort(port) {
+		return fmt.Errorf("network access denied: invalid port %d", port)
+	}
+	rawHost := host
+	var ok bool
+	host, ok = canonicalEgressHost(host)
+	if !ok {
+		return fmt.Errorf("network access denied: invalid host %q", rawHost)
+	}
+
+	// Network access is only granted by an explicit egress capability.
+	if v.manifest.Capabilities.Network != "egress" {
+		return fmt.Errorf("network access denied: skill has network capability %q", v.manifest.Capabilities.Network)
 	}
 
 	// If network capability is "egress" with no egressAllow list, allow all
-	if v.manifest.Capabilities.Network == "egress" && len(v.manifest.Capabilities.EgressAllow) == 0 {
+	if len(v.manifest.Capabilities.EgressAllow) == 0 {
 		return nil
 	}
 
@@ -57,14 +68,22 @@ func ValidateWASIPolicy(m skill.Manifest) error {
 // - "10.0.0.0/8:*" - CIDR with any port
 // - "example.com:*" - any port on domain
 func matchesEgressPattern(host string, port int, pattern string) bool {
-	// Split pattern into host and port parts
-	parts := strings.Split(pattern, ":")
-	if len(parts) != 2 {
+	if !validNetworkPort(port) {
 		return false
 	}
 
-	patternHost := parts[0]
-	patternPort := parts[1]
+	patternHost, patternPort, ok := splitEgressPattern(pattern)
+	if !ok {
+		return false
+	}
+	host, hostOK := canonicalEgressHost(host)
+	if !hostOK {
+		return false
+	}
+	patternHost, patternOK := canonicalEgressHost(patternHost)
+	if !patternOK {
+		return false
+	}
 
 	// Check port match
 	if patternPort != "*" {
@@ -99,6 +118,47 @@ func matchesEgressPattern(host string, port int, pattern string) bool {
 	}
 
 	return false
+}
+
+func validNetworkPort(port int) bool {
+	return port >= 1 && port <= 65535
+}
+
+func splitEgressPattern(pattern string) (string, string, bool) {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return "", "", false
+	}
+	idx := strings.LastIndex(pattern, ":")
+	if idx <= 0 || idx == len(pattern)-1 {
+		return "", "", false
+	}
+	host := strings.TrimSpace(pattern[:idx])
+	port := strings.TrimSpace(pattern[idx+1:])
+	if host == "" || port == "" {
+		return "", "", false
+	}
+	return host, port, true
+}
+
+func canonicalEgressHost(raw string) (string, bool) {
+	host := strings.ToLower(strings.TrimSpace(raw))
+	if host == "" || raw != strings.TrimSpace(raw) || strings.IndexFunc(host, unicode.IsSpace) != -1 {
+		return "", false
+	}
+	if strings.HasPrefix(host, "[") || strings.HasSuffix(host, "]") {
+		if !strings.HasPrefix(host, "[") || !strings.HasSuffix(host, "]") {
+			return "", false
+		}
+		host = strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
+		if net.ParseIP(host) == nil {
+			return "", false
+		}
+	}
+	if strings.ContainsAny(host, "[]") {
+		return "", false
+	}
+	return host, true
 }
 
 // matchesCIDR checks if a host (IP or hostname) matches a CIDR pattern.
@@ -185,6 +245,5 @@ func isWithinWorkdir(path, workDir string) bool {
 		return false
 	}
 
-	// If path is within workdir, it shouldn't start with ".."
-	return !strings.HasPrefix(rel, "..")
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }

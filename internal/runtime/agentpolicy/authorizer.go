@@ -24,8 +24,25 @@ func AuthorizeBash(profile Profile, command string) AuthorizationResult {
 		}
 	}
 
+	if hasUnsafeRestrictedShellSyntax(command) {
+		return AuthorizationResult{
+			Decision: DecisionBlock,
+			Reason:   fmt.Sprintf("shell control operators or incomplete shell syntax are not allowed for profile %q", profile),
+			Profile:  profile,
+		}
+	}
+
 	// Parse the command
 	parsed := ParseCommand(command)
+	for envName := range parsed.EnvVars {
+		if !isRestrictedProfileEnvAllowed(envName) {
+			return AuthorizationResult{
+				Decision: DecisionBlock,
+				Reason:   fmt.Sprintf("environment variable %q is not allowed for profile %q", envName, profile),
+				Profile:  profile,
+			}
+		}
+	}
 
 	// If it's an foxctl run command, check if the skill is allowed
 	if parsed.IsFoxctlRun {
@@ -206,6 +223,10 @@ func parseEnvAssignment(token string) (string, string) {
 	return token[:idx], token[idx+1:]
 }
 
+func isRestrictedProfileEnvAllowed(name string) bool {
+	return name == "FOXCTL_WORKSPACE"
+}
+
 // isFoxctlCommand checks if a token is the foxctl command.
 func isFoxctlCommand(token string) bool {
 	// Direct match
@@ -213,8 +234,8 @@ func isFoxctlCommand(token string) bool {
 		return true
 	}
 
-	// Check if it ends with /foxctl (path)
-	if strings.HasSuffix(token, "/foxctl") {
+	// Check if it is an absolute path to foxctl.
+	if strings.HasPrefix(token, "/") && strings.HasSuffix(token, "/foxctl") {
 		return true
 	}
 
@@ -229,4 +250,55 @@ func trimQuotes(s string) string {
 		}
 	}
 	return s
+}
+
+func hasUnsafeRestrictedShellSyntax(command string) bool {
+	inSingleQuote := false
+	inDoubleQuote := false
+	escapeNext := false
+	runes := []rune(command)
+
+	for i, r := range runes {
+		if escapeNext {
+			escapeNext = false
+			continue
+		}
+
+		if r == '\\' && !inSingleQuote {
+			escapeNext = true
+			continue
+		}
+
+		if r == '\'' && !inDoubleQuote {
+			inSingleQuote = !inSingleQuote
+			continue
+		}
+
+		if r == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+			continue
+		}
+
+		if inSingleQuote {
+			continue
+		}
+
+		if r == '`' {
+			return true
+		}
+		if r == '$' && i+1 < len(runes) && runes[i+1] == '(' {
+			return true
+		}
+
+		if inDoubleQuote {
+			continue
+		}
+
+		switch r {
+		case ';', '|', '&', '\n', '\r', '>', '<':
+			return true
+		}
+	}
+
+	return inSingleQuote || inDoubleQuote || escapeNext
 }

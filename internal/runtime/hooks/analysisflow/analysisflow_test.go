@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/quick"
 
 	"github.com/joshka0/foxctl/internal/runtime/hooks"
 	"github.com/joshka0/foxctl/internal/runtime/hooks/lifecycle"
@@ -204,6 +205,70 @@ func Build() {}
 	}
 	if !strings.Contains(resp.Context, "Semantic anchor warnings") {
 		t.Fatalf("expected warning context, got %q", resp.Context)
+	}
+}
+
+func TestAnalyzeSemanticAnchorsRejectsEscapingTouchedPath(t *testing.T) {
+	t.Setenv("FOXCTL_SEMANTIC_ANCHORS_HOOK", "1")
+	parent := t.TempDir()
+	workspace := filepath.Join(parent, "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	writeFile(t, parent, "outside.go", `package outside
+
+// [[invariant:should-not-be-read]]
+func Escape() {}
+`)
+
+	resp, err := AnalyzeSemanticAnchors(context.Background(), Request{
+		Workspace: workspace,
+		Payload: Payload{ToolInput: struct {
+			FilePath string `json:"file_path,omitempty"`
+		}{FilePath: filepath.Join("..", "outside.go")}},
+	})
+	if err != nil {
+		t.Fatalf("AnalyzeSemanticAnchors: %v", err)
+	}
+	if resp.Context != "" || len(resp.Warnings) != 0 || len(resp.GraphDiff) != 0 {
+		t.Fatalf("escaping touched path produced semantic anchor output: %+v", resp)
+	}
+}
+
+func TestNormalizeHookRepoPathDistinguishesDotDotNamesFromTraversal(t *testing.T) {
+	t.Parallel()
+
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	inside := filepath.Join(workspace, "..cache", "demo.go")
+	if got := normalizeHookRepoPath(workspace, inside); got != filepath.ToSlash(filepath.Join("..cache", "demo.go")) {
+		t.Fatalf("normalizeHookRepoPath(dot-dot child) = %q", got)
+	}
+	if got := normalizeHookRepoPath(workspace, filepath.Join("..", "outside.go")); got != "" {
+		t.Fatalf("normalizeHookRepoPath(parent relative escape) = %q, want empty", got)
+	}
+}
+
+func TestNormalizeHookRepoPathPropertyRejectsGeneratedEscapes(t *testing.T) {
+	t.Parallel()
+
+	parent := t.TempDir()
+	workspace := filepath.Join(parent, "workspace")
+	property := func(raw uint8) bool {
+		leaf := "outside-" + string(rune('a'+raw%26)) + ".go"
+		if got := normalizeHookRepoPath(workspace, filepath.Join("..", leaf)); got != "" {
+			t.Logf("relative escape normalized to %q", got)
+			return false
+		}
+		outside := filepath.Join(parent, leaf)
+		if got := normalizeHookRepoPath(workspace, outside); got != "" {
+			t.Logf("absolute escape normalized to %q", got)
+			return false
+		}
+		inside := filepath.Join(workspace, "..cache-"+string(rune('a'+raw%26)), "demo.go")
+		return normalizeHookRepoPath(workspace, inside) == filepath.ToSlash(filepath.Join(filepath.Base(filepath.Dir(inside)), "demo.go"))
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("hook path normalization property failed: %v", err)
 	}
 }
 

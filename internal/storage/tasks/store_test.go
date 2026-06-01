@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -47,6 +50,432 @@ func TestStore_AddAndGet(t *testing.T) {
 	}
 	if got.Description != task.Description {
 		t.Errorf("expected description %q, got %q", task.Description, got.Description)
+	}
+}
+
+func TestStore_AddRejectsInvalidStatus(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	_, err := store.Add(ctx, Task{
+		WorkspaceID: "ws-1",
+		Title:       "Invalid status",
+		Status:      "done",
+	})
+	if err == nil {
+		t.Fatal("expected invalid status error")
+	}
+	if !strings.Contains(err.Error(), "invalid task status") {
+		t.Fatalf("error=%v want invalid task status", err)
+	}
+	tasks, err := store.ListByWorkspace(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("ListByWorkspace: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("invalid-status task was persisted: %+v", tasks)
+	}
+}
+
+func TestStore_UpdateRejectsInvalidStatusWithoutMutatingExistingTask(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	task, err := store.Add(ctx, Task{
+		WorkspaceID: "ws-1",
+		Title:       "Valid task",
+		Status:      StatusPending,
+	})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	task.Status = "done"
+	if _, err := store.Update(ctx, task); err == nil {
+		t.Fatal("expected invalid status error")
+	} else if !strings.Contains(err.Error(), "invalid task status") {
+		t.Fatalf("error=%v want invalid task status", err)
+	}
+
+	got, err := store.Get(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != StatusPending {
+		t.Fatalf("status=%q want %q", got.Status, StatusPending)
+	}
+}
+
+func TestStore_AddSubtaskRejectsInvalidStatusWithoutLinkingChild(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	parent, err := store.Add(ctx, Task{
+		WorkspaceID: "ws-1",
+		Title:       "Parent",
+		Status:      StatusPending,
+	})
+	if err != nil {
+		t.Fatalf("Add parent: %v", err)
+	}
+
+	if _, err := store.AddSubtask(ctx, parent.ID, Task{
+		WorkspaceID: "ws-1",
+		Title:       "Child",
+		Status:      "done",
+	}); err == nil {
+		t.Fatal("expected invalid status error")
+	} else if !strings.Contains(err.Error(), "invalid task status") {
+		t.Fatalf("error=%v want invalid task status", err)
+	}
+
+	got, err := store.Get(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("Get parent: %v", err)
+	}
+	if len(got.Children) != 0 {
+		t.Fatalf("parent children=%v want none after rejected child", got.Children)
+	}
+}
+
+// TestValidateTaskStatusRejectsUnknownStatuses exercises the pure validator with
+// broad unknown inputs. No database is opened.
+func TestValidateTaskStatusRejectsUnknownStatuses(t *testing.T) {
+	unknownStatusesFailClosed := func(raw string) bool {
+		err := validateTaskStatus("unknown:" + raw)
+		return err != nil && strings.Contains(err.Error(), "invalid task status")
+	}
+
+	if err := quick.Check(unknownStatusesFailClosed, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("generated unknown task status was accepted: %v", err)
+	}
+}
+
+// TestValidateTaskReviewStatusRejectsUnknownStatuses exercises the pure validator.
+func TestValidateTaskReviewStatusRejectsUnknownStatuses(t *testing.T) {
+	unknownStatusesFailClosed := func(raw string) bool {
+		err := validateTaskReviewStatus("unknown:" + raw)
+		return err != nil && strings.Contains(err.Error(), "invalid task review status")
+	}
+
+	if err := quick.Check(unknownStatusesFailClosed, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("generated unknown review status was accepted: %v", err)
+	}
+}
+
+// TestValidateEpicStatusRejectsUnknownStatuses exercises the pure validator.
+func TestValidateEpicStatusRejectsUnknownStatuses(t *testing.T) {
+	unknownStatusesFailClosed := func(raw string) bool {
+		err := validateEpicStatus("unknown:" + raw)
+		return err != nil && strings.Contains(err.Error(), "invalid epic status")
+	}
+
+	if err := quick.Check(unknownStatusesFailClosed, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("generated unknown epic status was accepted: %v", err)
+	}
+}
+
+// TestStore_PersistenceRejectsInvalidDataTaskEpic proves the store-level atomic
+// rejection for representative invalid values across tasks and epics, confirming
+// nothing leaks to disk.
+func TestStore_PersistenceRejectsInvalidDataTaskEpic(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("invalid_task_status", func(t *testing.T) {
+		store := setupTestStore(t)
+		_, err := store.Add(ctx, Task{WorkspaceID: "ws-1", Title: "Bad task", Status: "done"})
+		if err == nil || !strings.Contains(err.Error(), "invalid task status") {
+			t.Fatalf("error=%v want invalid task status", err)
+		}
+		tasks, listErr := store.ListByWorkspace(ctx, "ws-1")
+		if listErr != nil {
+			t.Fatalf("ListByWorkspace: %v", listErr)
+		}
+		if len(tasks) != 0 {
+			t.Fatalf("invalid-status task was persisted: %+v", tasks)
+		}
+	})
+
+	t.Run("invalid_task_review_status", func(t *testing.T) {
+		store := setupTestStore(t)
+		_, err := store.Add(ctx, Task{WorkspaceID: "ws-1", Title: "Bad review", Status: StatusReadyForReview, LastReviewStatus: "maybe"})
+		if err == nil || !strings.Contains(err.Error(), "invalid task review status") {
+			t.Fatalf("error=%v want invalid task review status", err)
+		}
+		tasks, listErr := store.ListByWorkspace(ctx, "ws-1")
+		if listErr != nil {
+			t.Fatalf("ListByWorkspace: %v", listErr)
+		}
+		if len(tasks) != 0 {
+			t.Fatalf("invalid-review-status task was persisted: %+v", tasks)
+		}
+	})
+
+	t.Run("invalid_epic_status", func(t *testing.T) {
+		store := setupTestStore(t)
+		_, err := store.AddEpic(ctx, Epic{WorkspaceID: "ws-1", Title: "Bad epic", Status: "open"})
+		if err == nil || !strings.Contains(err.Error(), "invalid epic status") {
+			t.Fatalf("error=%v want invalid epic status", err)
+		}
+		epics, listErr := store.ListEpics(ctx, "ws-1")
+		if listErr != nil {
+			t.Fatalf("ListEpics: %v", listErr)
+		}
+		if len(epics) != 0 {
+			t.Fatalf("invalid-status epic was persisted: %+v", epics)
+		}
+	})
+
+	t.Run("update_rejects_invalid_task_status", func(t *testing.T) {
+		store := setupTestStore(t)
+		task, err := store.Add(ctx, Task{WorkspaceID: "ws-1", Title: "Valid", Status: StatusPending})
+		if err != nil {
+			t.Fatalf("Add: %v", err)
+		}
+		task.Status = "archived"
+		if _, err := store.Update(ctx, task); err == nil || !strings.Contains(err.Error(), "invalid task status") {
+			t.Fatalf("error=%v want invalid task status", err)
+		}
+		got, err := store.Get(ctx, task.ID)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.Status != StatusPending {
+			t.Fatalf("status=%q want %q", got.Status, StatusPending)
+		}
+	})
+}
+
+func TestStore_AddRejectsInvalidReviewStatus(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	_, err := store.Add(ctx, Task{
+		WorkspaceID:      "ws-1",
+		Title:            "Invalid review status",
+		Status:           StatusReadyForReview,
+		LastReviewStatus: "maybe",
+		LastReviewID:     "review-1",
+	})
+	if err == nil {
+		t.Fatal("expected invalid review status error")
+	}
+	if !strings.Contains(err.Error(), "invalid task review status") {
+		t.Fatalf("error=%v want invalid task review status", err)
+	}
+	tasks, err := store.ListByWorkspace(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("ListByWorkspace: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("invalid-review-status task was persisted: %+v", tasks)
+	}
+}
+
+func TestStore_UpdateRejectsInvalidReviewStatusWithoutMutatingExistingTask(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	task, err := store.Add(ctx, Task{
+		WorkspaceID:      "ws-1",
+		Title:            "Reviewed task",
+		Status:           StatusReadyForReview,
+		LastReviewStatus: ReviewStatusOK,
+		LastReviewID:     "review-1",
+	})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	task.LastReviewStatus = "maybe"
+	task.LastReviewID = "review-2"
+	if _, err := store.Update(ctx, task); err == nil {
+		t.Fatal("expected invalid review status error")
+	} else if !strings.Contains(err.Error(), "invalid task review status") {
+		t.Fatalf("error=%v want invalid task review status", err)
+	}
+
+	got, err := store.Get(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.LastReviewStatus != ReviewStatusOK {
+		t.Fatalf("last_review_status=%q want %q", got.LastReviewStatus, ReviewStatusOK)
+	}
+	if got.LastReviewID != "review-1" {
+		t.Fatalf("last_review_id=%q want review-1", got.LastReviewID)
+	}
+}
+
+func TestStore_AddSubtaskRejectsInvalidReviewStatusWithoutLinkingChild(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	parent, err := store.Add(ctx, Task{
+		WorkspaceID: "ws-1",
+		Title:       "Parent",
+		Status:      StatusPending,
+	})
+	if err != nil {
+		t.Fatalf("Add parent: %v", err)
+	}
+
+	if _, err := store.AddSubtask(ctx, parent.ID, Task{
+		WorkspaceID:      "ws-1",
+		Title:            "Child",
+		Status:           StatusReadyForReview,
+		LastReviewStatus: "maybe",
+	}); err == nil {
+		t.Fatal("expected invalid review status error")
+	} else if !strings.Contains(err.Error(), "invalid task review status") {
+		t.Fatalf("error=%v want invalid task review status", err)
+	}
+
+	got, err := store.Get(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("Get parent: %v", err)
+	}
+	if len(got.Children) != 0 {
+		t.Fatalf("parent children=%v want none after rejected child", got.Children)
+	}
+}
+
+func TestStore_ReadsRejectCorruptPersistedTaskLifecycleValues(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name       string
+		column     string
+		value      string
+		wantErr    string
+		getOptions func(task Task) ListOptions
+	}{
+		{
+			name:    "task status",
+			column:  "status",
+			value:   "done",
+			wantErr: "invalid task status",
+		},
+		{
+			name:    "review status",
+			column:  "last_review_status",
+			value:   "maybe",
+			wantErr: "invalid task review status",
+			getOptions: func(task Task) ListOptions {
+				return ListOptions{Statuses: []string{task.Status}}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := setupTestStore(t)
+			sqlStore := store.(*sqlStore)
+			task, err := store.Add(ctx, Task{
+				WorkspaceID:      "ws-corrupt-task",
+				Title:            "Corrupt task",
+				Status:           StatusReadyForReview,
+				LastReviewStatus: ReviewStatusOK,
+			})
+			if err != nil {
+				t.Fatalf("Add: %v", err)
+			}
+			if _, err := sqlStore.db.ExecContext(ctx, fmt.Sprintf("UPDATE tasks SET %s = $1 WHERE id = $2", tt.column), tt.value, task.ID); err != nil {
+				t.Fatalf("corrupt task %s: %v", tt.column, err)
+			}
+
+			if _, err := store.Get(ctx, task.ID); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Get() error=%v want %q", err, tt.wantErr)
+			}
+			if _, err := store.ListByWorkspace(ctx, task.WorkspaceID); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("ListByWorkspace() error=%v want %q", err, tt.wantErr)
+			}
+			opts := ListOptions{}
+			if tt.getOptions != nil {
+				opts = tt.getOptions(task)
+			}
+			if _, err := store.ListWithOptions(ctx, task.WorkspaceID, opts); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("ListWithOptions() error=%v want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestStore_AddEpicRejectsInvalidStatus(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	_, err := store.AddEpic(ctx, Epic{
+		WorkspaceID: "ws-1",
+		Title:       "Invalid epic",
+		Status:      "open",
+	})
+	if err == nil {
+		t.Fatal("expected invalid epic status error")
+	}
+	if !strings.Contains(err.Error(), "invalid epic status") {
+		t.Fatalf("error=%v want invalid epic status", err)
+	}
+	epics, err := store.ListEpics(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("ListEpics: %v", err)
+	}
+	if len(epics) != 0 {
+		t.Fatalf("invalid-status epic was persisted: %+v", epics)
+	}
+}
+
+func TestStore_UpdateEpicRejectsInvalidStatusWithoutMutatingExistingEpic(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	epic, err := store.AddEpic(ctx, Epic{
+		WorkspaceID: "ws-1",
+		Title:       "Valid epic",
+		Status:      EpicStatusActive,
+	})
+	if err != nil {
+		t.Fatalf("AddEpic: %v", err)
+	}
+
+	epic.Status = "open"
+	if _, err := store.UpdateEpic(ctx, epic); err == nil {
+		t.Fatal("expected invalid epic status error")
+	} else if !strings.Contains(err.Error(), "invalid epic status") {
+		t.Fatalf("error=%v want invalid epic status", err)
+	}
+
+	got, err := store.GetEpic(ctx, epic.ID)
+	if err != nil {
+		t.Fatalf("GetEpic: %v", err)
+	}
+	if got.Status != EpicStatusActive {
+		t.Fatalf("status=%q want %q", got.Status, EpicStatusActive)
+	}
+}
+
+func TestStore_ReadsRejectCorruptPersistedEpicStatus(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+	sqlStore := store.(*sqlStore)
+
+	epic, err := store.AddEpic(ctx, Epic{
+		WorkspaceID: "ws-corrupt-epic",
+		Title:       "Corrupt epic",
+		Status:      EpicStatusActive,
+	})
+	if err != nil {
+		t.Fatalf("AddEpic: %v", err)
+	}
+	if _, err := sqlStore.db.ExecContext(ctx, `UPDATE epics SET status = $1 WHERE id = $2`, "open", epic.ID); err != nil {
+		t.Fatalf("corrupt epic status: %v", err)
+	}
+
+	if _, err := store.GetEpic(ctx, epic.ID); err == nil || !strings.Contains(err.Error(), "invalid epic status") {
+		t.Fatalf("GetEpic() error=%v want invalid epic status", err)
+	}
+	if _, err := store.ListEpics(ctx, epic.WorkspaceID); err == nil || !strings.Contains(err.Error(), "invalid epic status") {
+		t.Fatalf("ListEpics() error=%v want invalid epic status", err)
 	}
 }
 
@@ -295,6 +724,93 @@ func TestStore_ActiveTask(t *testing.T) {
 	}
 	if found {
 		t.Error("expected no active task after clear")
+	}
+}
+
+func TestStore_SetActiveRejectsTaskFromDifferentWorkspace(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	task, err := store.Add(ctx, Task{WorkspaceID: "ws-owner", Title: "Owner task"})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	if _, err := store.SetActive(ctx, "ws-other", task.ID); err == nil {
+		t.Fatal("expected cross-workspace active task to be rejected")
+	}
+
+	if _, found, err := store.GetActive(ctx, "ws-other"); err != nil {
+		t.Fatalf("GetActive failed: %v", err)
+	} else if found {
+		t.Fatal("cross-workspace active task was persisted")
+	}
+}
+
+func TestStore_SetActivePropertyRejectsCrossWorkspaceTasks(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	property := func(rawOwner, rawOther string) bool {
+		owner := "ws-" + safeTaskToken(rawOwner)
+		other := "ws-" + safeTaskToken(rawOther)
+		if owner == other {
+			other += "-other"
+		}
+
+		task, err := store.Add(ctx, Task{
+			WorkspaceID: owner,
+			Title:       "Generated task",
+		})
+		if err != nil {
+			t.Logf("Add: %v", err)
+			return false
+		}
+
+		if _, err := store.SetActive(ctx, other, task.ID); err == nil {
+			t.Logf("SetActive accepted task %q from %q as active for %q", task.ID, owner, other)
+			return false
+		}
+		_, found, err := store.GetActive(ctx, other)
+		return err == nil && !found
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("cross-workspace active task property failed: %v", err)
+	}
+}
+
+func TestStore_RejectsCrossWorkspaceActiveEpicAndTaskLink(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	task, err := store.Add(ctx, Task{WorkspaceID: "ws-task", Title: "Task"})
+	if err != nil {
+		t.Fatalf("Add task failed: %v", err)
+	}
+	epic, err := store.AddEpic(ctx, Epic{WorkspaceID: "ws-epic", Title: "Epic"})
+	if err != nil {
+		t.Fatalf("AddEpic failed: %v", err)
+	}
+
+	if err := store.SetActiveEpic(ctx, "ws-other", "session-1", epic.ID); err == nil {
+		t.Fatal("expected cross-workspace active epic to be rejected")
+	}
+	if _, found, err := store.GetActiveEpic(ctx, "ws-other", "session-1"); err != nil {
+		t.Fatalf("GetActiveEpic failed: %v", err)
+	} else if found {
+		t.Fatal("cross-workspace active epic was persisted")
+	}
+
+	if err := store.LinkTaskToEpic(ctx, task.ID, epic.ID); err == nil {
+		t.Fatal("expected cross-workspace task-to-epic link to be rejected")
+	}
+	got, err := store.Get(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("Get task failed: %v", err)
+	}
+	if got.EpicID != "" {
+		t.Fatalf("cross-workspace epic link was persisted: %q", got.EpicID)
 	}
 }
 
@@ -827,6 +1343,79 @@ func TestStore_SetPageRanks(t *testing.T) {
 	}
 }
 
+func TestStore_SetPageRanksRejectsNonFiniteWithoutMutatingBatch(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	task1, err := store.Add(ctx, Task{WorkspaceID: "ws-1", Title: "Task 1"})
+	if err != nil {
+		t.Fatalf("Add task1 failed: %v", err)
+	}
+	task2, err := store.Add(ctx, Task{WorkspaceID: "ws-1", Title: "Task 2"})
+	if err != nil {
+		t.Fatalf("Add task2 failed: %v", err)
+	}
+	if err := store.SetPageRanks(ctx, map[string]float64{
+		task1.ID: 0.25,
+		task2.ID: 0.75,
+	}); err != nil {
+		t.Fatalf("SetPageRanks initial values failed: %v", err)
+	}
+
+	err = store.SetPageRanks(ctx, map[string]float64{
+		task1.ID: 0.9,
+		task2.ID: math.NaN(),
+	})
+	if err == nil {
+		t.Fatal("expected non-finite pagerank error")
+	}
+	if !strings.Contains(err.Error(), "invalid pagerank") {
+		t.Fatalf("error=%v want invalid pagerank", err)
+	}
+
+	got1, err := store.Get(ctx, task1.ID)
+	if err != nil {
+		t.Fatalf("Get task1 failed: %v", err)
+	}
+	got2, err := store.Get(ctx, task2.ID)
+	if err != nil {
+		t.Fatalf("Get task2 failed: %v", err)
+	}
+	if got1.PageRank != 0.25 || got2.PageRank != 0.75 {
+		t.Fatalf("pageranks after rejected batch = (%f, %f), want (0.25, 0.75)", got1.PageRank, got2.PageRank)
+	}
+}
+
+func TestStore_SetPageRanksRejectsGeneratedNonFiniteScores(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+	task, err := store.Add(ctx, Task{WorkspaceID: "ws-1", Title: "Generated rank task"})
+	if err != nil {
+		t.Fatalf("Add task failed: %v", err)
+	}
+
+	property := func(raw float64) bool {
+		err := store.SetPageRanks(ctx, map[string]float64{task.ID: raw})
+		got, getErr := store.Get(ctx, task.ID)
+		if getErr != nil {
+			t.Logf("Get failed: %v", getErr)
+			return false
+		}
+		if math.IsNaN(raw) || math.IsInf(raw, 0) {
+			if err == nil {
+				t.Logf("accepted non-finite pagerank %v", raw)
+				return false
+			}
+			return !math.IsNaN(got.PageRank) && !math.IsInf(got.PageRank, 0)
+		}
+		return err == nil && got.PageRank == raw
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("generated pagerank property failed: %v", err)
+	}
+}
+
 func setupTestStore(t *testing.T) Store {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "tasks-test-*")
@@ -845,4 +1434,25 @@ func setupTestStore(t *testing.T) Store {
 	t.Cleanup(func() { store.Close() })
 
 	return store
+}
+
+func safeTaskToken(raw string) string {
+	var b strings.Builder
+	for _, r := range raw {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		}
+		if b.Len() >= 12 {
+			break
+		}
+	}
+	if b.Len() == 0 {
+		return "empty"
+	}
+	return b.String()
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -174,13 +175,25 @@ func (b *Builder) addQueryParams(u *url.URL, queryParams map[string]any, _ opena
 
 	q := u.Query()
 	for name, value := range queryParams {
-		// Convert value to string
-		strValue := fmt.Sprintf("%v", value)
-		q.Add(name, strValue)
+		addQueryValue(q, name, value)
 	}
 	u.RawQuery = q.Encode()
 
 	return nil
+}
+
+func addQueryValue(q url.Values, name string, value any) {
+	rv := reflect.ValueOf(value)
+	if rv.IsValid() {
+		switch rv.Kind() {
+		case reflect.Array, reflect.Slice:
+			for i := 0; i < rv.Len(); i++ {
+				q.Add(name, fmt.Sprintf("%v", rv.Index(i).Interface()))
+			}
+			return
+		}
+	}
+	q.Add(name, fmt.Sprintf("%v", value))
 }
 
 // buildHeaders constructs the headers map.

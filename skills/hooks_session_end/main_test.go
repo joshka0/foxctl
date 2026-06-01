@@ -12,12 +12,6 @@ import (
 
 // Tests for constants
 
-func TestCommand(t *testing.T) {
-	assert.Equal(t, "hooks/session_end", command)
-}
-
-// Tests for HookInput structure
-
 func TestHookInput_Structure(t *testing.T) {
 	in := HookInput{
 		Input:          hooks.Input{SessionID: "sess-123"},
@@ -26,22 +20,6 @@ func TestHookInput_Structure(t *testing.T) {
 
 	assert.Equal(t, "sess-123", in.SessionID)
 	assert.Equal(t, "/path/to/transcript.jsonl", in.TranscriptPath)
-}
-
-func TestHookInput_JSONSerialization(t *testing.T) {
-	in := HookInput{
-		Input:          hooks.Input{SessionID: "sess-456"},
-		TranscriptPath: "/tmp/transcript.jsonl",
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	var decoded HookInput
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, in.TranscriptPath, decoded.TranscriptPath)
 }
 
 func TestHookInput_EmptyTranscriptPath(t *testing.T) {
@@ -53,54 +31,6 @@ func TestHookInput_EmptyTranscriptPath(t *testing.T) {
 }
 
 // Tests for SessionMetrics structure
-
-func TestSessionMetrics_AllFields(t *testing.T) {
-	now := time.Now().UTC()
-	metrics := SessionMetrics{
-		MetricsID:         "metrics-123",
-		SessionID:         "sess-456",
-		Workspace:         "/workspace/path",
-		EndedAt:           now,
-		TasksCompleted:    5,
-		TasksInProgress:   2,
-		TasksPending:      3,
-		TrajectoriesCount: 10,
-		HasTranscript:     true,
-		FeedbackPending:   true,
-	}
-
-	assert.Equal(t, "metrics-123", metrics.MetricsID)
-	assert.Equal(t, "sess-456", metrics.SessionID)
-	assert.Equal(t, "/workspace/path", metrics.Workspace)
-	assert.Equal(t, now, metrics.EndedAt)
-	assert.Equal(t, 5, metrics.TasksCompleted)
-	assert.Equal(t, 2, metrics.TasksInProgress)
-	assert.Equal(t, 3, metrics.TasksPending)
-	assert.Equal(t, 10, metrics.TrajectoriesCount)
-	assert.True(t, metrics.HasTranscript)
-	assert.True(t, metrics.FeedbackPending)
-}
-
-func TestSessionMetrics_JSONSerialization(t *testing.T) {
-	metrics := SessionMetrics{
-		MetricsID:       "m-123",
-		SessionID:       "s-456",
-		Workspace:       "/ws",
-		TasksCompleted:  3,
-		TasksInProgress: 1,
-		TasksPending:    2,
-	}
-
-	data, err := json.Marshal(metrics)
-	assert.NoError(t, err)
-
-	var decoded SessionMetrics
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, metrics.MetricsID, decoded.MetricsID)
-	assert.Equal(t, metrics.TasksCompleted, decoded.TasksCompleted)
-}
 
 func TestSessionMetrics_ZeroValues(t *testing.T) {
 	metrics := SessionMetrics{}

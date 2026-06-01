@@ -166,15 +166,17 @@ func (s *WFQScheduler) Start(ctx context.Context) {
 		return
 	}
 	s.running = true
+	stopCh := make(chan struct{})
+	s.stopCh = stopCh
 	s.mu.Unlock()
 
 	// Start worker goroutines
 	for i := 0; i < s.workerCount; i++ {
-		go s.worker(ctx, i)
+		go s.worker(ctx, stopCh, i)
 	}
 
 	// Start scheduler loop
-	go s.schedulerLoop(ctx)
+	go s.schedulerLoop(ctx, stopCh)
 }
 
 // Stop gracefully stops the scheduler.
@@ -185,9 +187,10 @@ func (s *WFQScheduler) Stop() {
 		return
 	}
 	s.running = false
+	stopCh := s.stopCh
 	s.mu.Unlock()
 
-	close(s.stopCh)
+	close(stopCh)
 	// Do not close workCh here to avoid panic in dispatchNext if it tries to send
 	// Workers will exit on stopCh close
 }
@@ -205,7 +208,7 @@ func (s *WFQScheduler) Stop() {
 //	OutputFields: none
 //
 // [[domain:wfq-scheduler-loop]]
-func (s *WFQScheduler) schedulerLoop(ctx context.Context) {
+func (s *WFQScheduler) schedulerLoop(ctx context.Context, stopCh <-chan struct{}) {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -213,7 +216,7 @@ func (s *WFQScheduler) schedulerLoop(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-s.stopCh:
+		case <-stopCh:
 			return
 		case <-ticker.C:
 			s.dispatchNext()
@@ -263,12 +266,12 @@ func (s *WFQScheduler) dispatchNext() {
 }
 
 // worker executes jobs from the work channel.
-func (s *WFQScheduler) worker(ctx context.Context, _ int) {
+func (s *WFQScheduler) worker(ctx context.Context, stopCh <-chan struct{}, _ int) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-s.stopCh:
+		case <-stopCh:
 			return
 		case job, ok := <-s.workCh:
 			if !ok {

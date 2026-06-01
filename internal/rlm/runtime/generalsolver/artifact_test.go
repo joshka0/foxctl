@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"testing/quick"
 )
 
 func TestParseWorkArtifact(t *testing.T) {
@@ -192,6 +193,28 @@ func TestParseWorkArtifactFromText(t *testing.T) {
 	}
 }
 
+func TestParseWorkArtifactFromTextHandlesBracesInsideJSONStrings(t *testing.T) {
+	t.Parallel()
+
+	text := `solver said:
+{"work_item_id":"n-braces","status":"solved","answer":"set {x | x > 0}","code":"func solve() { return \"}\" }","confidence":0.9}
+done`
+
+	got, err := ParseWorkArtifactFromText(text)
+	if err != nil {
+		t.Fatalf("ParseWorkArtifactFromText() error = %v", err)
+	}
+	if got.WorkItemID != "n-braces" {
+		t.Fatalf("work_item_id=%q want n-braces", got.WorkItemID)
+	}
+	if got.Answer != "set {x | x > 0}" {
+		t.Fatalf("answer=%q", got.Answer)
+	}
+	if got.Code != `func solve() { return "}" }` {
+		t.Fatalf("code=%q", got.Code)
+	}
+}
+
 func TestValidateWorkArtifact(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -291,6 +314,43 @@ func TestValidateWorkArtifact(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 		})
+	}
+}
+
+func TestValidateWorkArtifactRejectsGeneratedUnknownStatuses(t *testing.T) {
+	t.Parallel()
+
+	unknownStatusesFailClosed := func(raw string) bool {
+		err := ValidateWorkArtifact(WorkArtifact{
+			WorkItemID: "n1",
+			Status:     "unknown:" + raw,
+			Answer:     "42",
+			Confidence: 0.9,
+		})
+		return err != nil && strings.Contains(err.Error(), "not valid")
+	}
+
+	if err := quick.Check(unknownStatusesFailClosed, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatalf("generated unknown status was accepted: %v", err)
+	}
+}
+
+func TestNormalizeCounterexamplesPreservesExistingMaps(t *testing.T) {
+	t.Parallel()
+
+	first := map[string]any{"input": 5}
+	artifact := &WorkArtifact{
+		Counterexamples: []map[string]any{first, nil},
+	}
+	NormalizeCounterexamples(artifact)
+	if len(artifact.Counterexamples) != 2 {
+		t.Fatalf("counterexamples=%d want 2", len(artifact.Counterexamples))
+	}
+	if artifact.Counterexamples[0]["input"] != 5 {
+		t.Fatalf("first counterexample changed: %v", artifact.Counterexamples[0])
+	}
+	if artifact.Counterexamples[1] == nil {
+		t.Fatal("nil counterexample was not normalized")
 	}
 }
 

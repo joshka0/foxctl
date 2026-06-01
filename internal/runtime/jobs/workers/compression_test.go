@@ -2,7 +2,9 @@ package workers
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -64,8 +66,8 @@ func TestCompressDailyWorker(t *testing.T) {
 
 	err := worker.Work(context.Background(), &river.Job[CompressDailyArgs]{
 		Args: CompressDailyArgs{
-			ConversationID: "conv-123",
-			Date:           "2026-02-10",
+			ConversationID: " conv-123 ",
+			Date:           " 2026-02-10 ",
 		},
 	})
 	if err != nil {
@@ -86,9 +88,89 @@ func TestCompressDailyWorker(t *testing.T) {
 	}
 }
 
+func TestCompressDailyWorkerContractValidation(t *testing.T) {
+	validJob := &river.Job[CompressDailyArgs]{
+		Args: CompressDailyArgs{
+			ConversationID: "conv-123",
+			Date:           "2026-02-10",
+		},
+	}
+
+	t.Run("nil_worker", func(t *testing.T) {
+		var worker *CompressDailyWorker
+		err := worker.Work(context.Background(), validJob)
+		if err == nil || err.Error() != "jobs: daily compressor dependency is required" {
+			t.Fatalf("Work() error = %v, want dependency error", err)
+		}
+	})
+
+	t.Run("nil_job", func(t *testing.T) {
+		worker := &CompressDailyWorker{Compressor: &mockDailyCompressor{}}
+		err := worker.Work(context.Background(), nil)
+		if err == nil || err.Error() != "jobs: daily compression job is required" {
+			t.Fatalf("Work() error = %v, want nil job error", err)
+		}
+	})
+
+	t.Run("nil_compressor", func(t *testing.T) {
+		worker := &CompressDailyWorker{}
+		err := worker.Work(context.Background(), validJob)
+		if err == nil || err.Error() != "jobs: daily compressor dependency is required" {
+			t.Fatalf("Work() error = %v, want dependency error", err)
+		}
+	})
+
+	t.Run("empty_conversation_id", func(t *testing.T) {
+		compressor := &mockDailyCompressor{}
+		worker := &CompressDailyWorker{Compressor: compressor}
+		err := worker.Work(context.Background(), &river.Job[CompressDailyArgs]{
+			Args: CompressDailyArgs{
+				ConversationID: "  ",
+				Date:           "2026-02-10",
+			},
+		})
+		if err == nil || err.Error() != "jobs: conversation_id is required" {
+			t.Fatalf("Work() error = %v, want conversation_id validation error", err)
+		}
+		if compressor.calls != 0 {
+			t.Fatalf("RunDayCompression() calls = %d, want 0", compressor.calls)
+		}
+	})
+
+	t.Run("empty_date", func(t *testing.T) {
+		compressor := &mockDailyCompressor{}
+		worker := &CompressDailyWorker{Compressor: compressor}
+		err := worker.Work(context.Background(), &river.Job[CompressDailyArgs]{
+			Args: CompressDailyArgs{
+				ConversationID: "conv-123",
+				Date:           "  ",
+			},
+		})
+		if err == nil || err.Error() != "jobs: date is required" {
+			t.Fatalf("Work() error = %v, want date validation error", err)
+		}
+		if compressor.calls != 0 {
+			t.Fatalf("RunDayCompression() calls = %d, want 0", compressor.calls)
+		}
+	})
+
+	t.Run("compressor_error", func(t *testing.T) {
+		sentinel := errors.New("storage unavailable")
+		compressor := &mockDailyCompressor{err: sentinel}
+		worker := &CompressDailyWorker{Compressor: compressor}
+		err := worker.Work(context.Background(), validJob)
+		if !errors.Is(err, sentinel) {
+			t.Fatalf("Work() error = %v, want wrapped sentinel", err)
+		}
+		if !strings.Contains(err.Error(), "jobs: run day compression:") {
+			t.Fatalf("Work() error = %v, want compression context", err)
+		}
+	})
+}
+
 func TestCompressScanWorkerEnqueueBehavior(t *testing.T) {
 	clock := skilltest.NewFakeClock(time.Date(2026, time.February, 11, 14, 0, 0, 0, time.UTC))
-	lister := &mockConversationLister{conversations: []CompressionConversation{{ID: "conv-a"}, {ID: "  "}, {ID: "conv-b"}}}
+	lister := &mockConversationLister{conversations: []CompressionConversation{{ID: " conv-a "}, {ID: "  "}, {ID: " conv-b "}}}
 	inserter := &mockInserter{}
 
 	worker := &CompressScanWorker{
@@ -121,4 +203,87 @@ func TestCompressScanWorkerEnqueueBehavior(t *testing.T) {
 	if inserter.inserted[1].ConversationID != "conv-b" {
 		t.Fatalf("inserted[1].conversation_id = %q, want conv-b", inserter.inserted[1].ConversationID)
 	}
+}
+
+func TestCompressScanWorkerContractValidation(t *testing.T) {
+	validJob := &river.Job[CompressScanArgs]{Args: CompressScanArgs{}}
+
+	t.Run("nil_worker", func(t *testing.T) {
+		var worker *CompressScanWorker
+		err := worker.Work(context.Background(), validJob)
+		if err == nil || err.Error() != "jobs: compression scan worker is nil" {
+			t.Fatalf("Work() error = %v, want nil worker error", err)
+		}
+	})
+
+	t.Run("nil_job", func(t *testing.T) {
+		worker := &CompressScanWorker{
+			Lister:   &mockConversationLister{},
+			Inserter: &mockInserter{},
+		}
+		err := worker.Work(context.Background(), nil)
+		if err == nil || err.Error() != "jobs: compression scan job is required" {
+			t.Fatalf("Work() error = %v, want nil job error", err)
+		}
+	})
+
+	t.Run("nil_lister", func(t *testing.T) {
+		worker := &CompressScanWorker{Inserter: &mockInserter{}}
+		err := worker.Work(context.Background(), validJob)
+		if err == nil || err.Error() != "jobs: compression scan lister is required" {
+			t.Fatalf("Work() error = %v, want lister dependency error", err)
+		}
+	})
+
+	t.Run("nil_inserter", func(t *testing.T) {
+		worker := &CompressScanWorker{Lister: &mockConversationLister{}}
+		err := worker.Work(context.Background(), validJob)
+		if err == nil || err.Error() != "jobs: compression scan inserter is required" {
+			t.Fatalf("Work() error = %v, want inserter dependency error", err)
+		}
+	})
+
+	t.Run("default_limit", func(t *testing.T) {
+		lister := &mockConversationLister{}
+		worker := &CompressScanWorker{
+			Lister:   lister,
+			Inserter: &mockInserter{},
+		}
+		if err := worker.Work(context.Background(), validJob); err != nil {
+			t.Fatalf("Work() error = %v", err)
+		}
+		if lister.lastLimit != 100 {
+			t.Fatalf("ListConversations() limit = %d, want 100", lister.lastLimit)
+		}
+	})
+
+	t.Run("list_error", func(t *testing.T) {
+		sentinel := errors.New("list failed")
+		worker := &CompressScanWorker{
+			Lister:   &mockConversationLister{err: sentinel},
+			Inserter: &mockInserter{},
+		}
+		err := worker.Work(context.Background(), validJob)
+		if !errors.Is(err, sentinel) {
+			t.Fatalf("Work() error = %v, want wrapped sentinel", err)
+		}
+		if !strings.Contains(err.Error(), "jobs: list conversations for compression scan:") {
+			t.Fatalf("Work() error = %v, want list context", err)
+		}
+	})
+
+	t.Run("insert_error", func(t *testing.T) {
+		sentinel := errors.New("insert failed")
+		worker := &CompressScanWorker{
+			Lister:   &mockConversationLister{conversations: []CompressionConversation{{ID: "conv-a"}}},
+			Inserter: &mockInserter{err: sentinel},
+		}
+		err := worker.Work(context.Background(), validJob)
+		if !errors.Is(err, sentinel) {
+			t.Fatalf("Work() error = %v, want wrapped sentinel", err)
+		}
+		if !strings.Contains(err.Error(), `jobs: enqueue daily compression for "conv-a":`) {
+			t.Fatalf("Work() error = %v, want enqueue context", err)
+		}
+	})
 }

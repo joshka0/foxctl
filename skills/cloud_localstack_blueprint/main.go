@@ -11,8 +11,7 @@ import (
 	"strings"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 )
 
 const command = "cloud/localstack_blueprint"
@@ -42,10 +41,10 @@ type output struct {
 }
 
 func main() {
-	skillmain.Main(command, run)
+	lite.Main(command, run)
 }
 
-func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+func run(ctx context.Context, rc *lite.RunContext, in input) error {
 	if in.Endpoint == "" {
 		in.Endpoint = "http://127.0.0.1:4566"
 	}
@@ -106,7 +105,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		},
 	}
 
-	return skillout.Emit(rc, command, out)
+	return lite.Emit(rc, command, out)
 }
 
 func blueprint(scenario, runID, endpoint string) ([]resource, []string, error) {

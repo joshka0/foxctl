@@ -10,8 +10,7 @@ import (
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/gitutil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/oputil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 )
 
 const command = "git/worktree"
@@ -36,7 +35,7 @@ type worktree struct {
 
 // main is the skill entry point for git/worktree.
 func main() {
-	skillmain.Main(command, run)
+	lite.Main(command, run)
 }
 
 // run orchestrates git worktree operations with path validation and repository management.
@@ -53,7 +52,7 @@ func main() {
 //
 // [[domain:git-operations]]
 // [[protocol:skill-dispatch]]
-func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+func run(ctx context.Context, rc *lite.RunContext, in input) error {
 	// Apply defaults
 	in.Operation = oputil.DefaultOp(in.Operation, "list")
 	if in.RepoPath == "" {
@@ -61,7 +60,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 
 	// Validate and resolve repository path
-	repoPath, err := gitutil.ResolveRepoPath(rc, in.RepoPath)
+	repoPath, err := gitutil.ResolveRepoPath(rc.PathValidator, in.RepoPath)
 	if err != nil {
 		return err
 	}
@@ -83,7 +82,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		return err
 	}
 
-	return skillout.Emit(rc, command, data)
+	return lite.Emit(rc, command, data)
 }
 
 // listWorktrees retrieves and parses all worktrees in the repository.
@@ -138,7 +137,7 @@ func parseWorktreeList(output string) []worktree {
 }
 
 // addWorktree creates a new git worktree with optional branch creation.
-func addWorktree(ctx context.Context, rc *skillmain.RunContext, gitPath, repoPath string, in input) (map[string]any, error) {
+func addWorktree(ctx context.Context, rc *lite.RunContext, gitPath, repoPath string, in input) (map[string]any, error) {
 	if in.Path == "" {
 		return nil, skillerr.Arg(
 			"path is required for add operation",
@@ -147,7 +146,7 @@ func addWorktree(ctx context.Context, rc *skillmain.RunContext, gitPath, repoPat
 	}
 
 	// Validate the target path
-	targetPath, err := skillmain.ValidatePath(rc, in.Path, skillmain.WithPathMessage("invalid target path"))
+	targetPath, err := lite.ValidatePath(rc, in.Path, lite.WithPathMessage("invalid target path"))
 	if err != nil {
 		return nil, err
 	}
@@ -155,12 +154,18 @@ func addWorktree(ctx context.Context, rc *skillmain.RunContext, gitPath, repoPat
 	args := []string{"-C", repoPath, "worktree", "add"}
 
 	if in.NewBranch && in.Branch != "" {
+		if err := validateBranchArg(in.Branch); err != nil {
+			return nil, err
+		}
 		args = append(args, "-b", in.Branch)
 	}
 
 	args = append(args, targetPath)
 
 	if !in.NewBranch && in.Branch != "" {
+		if err := validateBranchArg(in.Branch); err != nil {
+			return nil, err
+		}
 		args = append(args, in.Branch)
 	}
 
@@ -177,8 +182,21 @@ func addWorktree(ctx context.Context, rc *skillmain.RunContext, gitPath, repoPat
 	}, nil
 }
 
+func validateBranchArg(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return skillerr.Arg("branch must not be blank")
+	}
+	if strings.HasPrefix(value, "-") {
+		return skillerr.Arg("branch must not be a git option")
+	}
+	if strings.ContainsAny(value, "\x00\n\r") {
+		return skillerr.Arg("branch contains invalid control characters")
+	}
+	return nil
+}
+
 // removeWorktree removes an existing git worktree with optional force flag.
-func removeWorktree(ctx context.Context, rc *skillmain.RunContext, gitPath, repoPath string, in input) (map[string]any, error) {
+func removeWorktree(ctx context.Context, rc *lite.RunContext, gitPath, repoPath string, in input) (map[string]any, error) {
 	if in.Path == "" {
 		return nil, skillerr.Arg(
 			"path is required for remove operation",
@@ -187,7 +205,7 @@ func removeWorktree(ctx context.Context, rc *skillmain.RunContext, gitPath, repo
 	}
 
 	// Validate the target path
-	targetPath, err := skillmain.ValidatePath(rc, in.Path, skillmain.WithPathMessage("invalid target path"))
+	targetPath, err := lite.ValidatePath(rc, in.Path, lite.WithPathMessage("invalid target path"))
 	if err != nil {
 		return nil, err
 	}

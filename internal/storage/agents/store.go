@@ -71,14 +71,18 @@ func (s *sqlStore) Close() error {
 }
 
 func (s *sqlStore) Create(ctx context.Context, a agent.Agent) error {
+	if err := agent.ValidateState(a.State); err != nil {
+		return fmt.Errorf("agents: create state: %w", err)
+	}
+
 	// Marshal policy to JSON
-	policyJSON, err := json.Marshal(a.Policy)
+	policyJSON, err := agent.MarshalPolicyJSON(a.Policy)
 	if err != nil {
 		return fmt.Errorf("agents: marshal policy: %w", err)
 	}
 
 	// Marshal skills_allow to JSON
-	skillsJSON, err := json.Marshal(a.SkillsAllow)
+	skillsJSON, err := json.Marshal(normalizeSkillsAllow(a.SkillsAllow))
 	if err != nil {
 		return fmt.Errorf("agents: marshal skills_allow: %w", err)
 	}
@@ -238,6 +242,10 @@ func (s *sqlStore) ListByParent(ctx context.Context, parentID string, limit int)
 }
 
 func (s *sqlStore) UpdateState(ctx context.Context, id string, state agent.State) error {
+	if err := agent.ValidateState(state); err != nil {
+		return fmt.Errorf("agents: update state: %w", err)
+	}
+
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE agents SET state = $1 WHERE id = $2 AND deleted_at IS NULL`, state, id)
 	if err != nil {
@@ -641,6 +649,9 @@ func scanAgent(scanner rowScanner) (agent.Agent, error) {
 	if err := scanner.Scan(&a.ID, &parentID, &a.Namespace, &workspaceRoot, &workspaceSource, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &llmBaseURL, &llmAuthMode, &llmAuthHeader, &llmAuthPrefix, &execMode, &executionLayer, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID, &memoryScope, &memoryRetention, &sandboxProvider, &sandboxID, &repoURL, &repoRef, &terminalBinding); err != nil {
 		return agent.Agent{}, fmt.Errorf("agents: scan: %w", err)
 	}
+	if err := agent.ValidateState(a.State); err != nil {
+		return agent.Agent{}, fmt.Errorf("agents: scan state: %w", err)
+	}
 
 	a.ParentID = parentID.String
 	a.WorkspaceRoot = workspaceRoot.String
@@ -654,14 +665,19 @@ func scanAgent(scanner rowScanner) (agent.Agent, error) {
 	if err := json.Unmarshal([]byte(skillsJSON), &a.SkillsAllow); err != nil {
 		return agent.Agent{}, fmt.Errorf("agents: unmarshal skills_allow: %w", err)
 	}
+	if a.SkillsAllow == nil {
+		return agent.Agent{}, fmt.Errorf("agents: unmarshal skills_allow: expected JSON array")
+	}
+	a.SkillsAllow = normalizeSkillsAllow(a.SkillsAllow)
 
 	// Parse policy
-	if err := json.Unmarshal([]byte(policyJSON), &a.Policy); err != nil {
+	policy, err := agent.UnmarshalPolicyJSON([]byte(policyJSON))
+	if err != nil {
 		return agent.Agent{}, fmt.Errorf("agents: unmarshal policy: %w", err)
 	}
+	a.Policy = policy
 
 	// Parse timestamps
-	var err error
 	a.CreatedAt, err = sqlutil.ScanTimestamp(created)
 	if err != nil {
 		return agent.Agent{}, fmt.Errorf("agents: scan created_at: %w", err)
@@ -701,7 +717,10 @@ func scanAgent(scanner rowScanner) (agent.Agent, error) {
 	a.SandboxID = sandboxID.String
 	a.RepoURL = repoURL.String
 	a.RepoRef = repoRef.String
-	a.TerminalBinding = unmarshalTerminalBinding(terminalBinding)
+	a.TerminalBinding, err = unmarshalTerminalBinding(terminalBinding)
+	if err != nil {
+		return agent.Agent{}, err
+	}
 
 	return a, nil
 }
@@ -718,15 +737,38 @@ func marshalTerminalBinding(binding agent.TerminalBinding) string {
 	return string(data)
 }
 
-func unmarshalTerminalBinding(raw sql.NullString) agent.TerminalBinding {
+func normalizeSkillsAllow(skills []string) []string {
+	if len(skills) == 0 {
+		return []string{}
+	}
+	seen := make(map[string]struct{}, len(skills))
+	out := make([]string, 0, len(skills))
+	for _, skill := range skills {
+		skill = strings.TrimSpace(skill)
+		if skill == "" {
+			continue
+		}
+		if _, ok := seen[skill]; ok {
+			continue
+		}
+		seen[skill] = struct{}{}
+		out = append(out, skill)
+	}
+	if len(out) == 0 {
+		return []string{}
+	}
+	return out
+}
+
+func unmarshalTerminalBinding(raw sql.NullString) (agent.TerminalBinding, error) {
 	if !raw.Valid || strings.TrimSpace(raw.String) == "" {
-		return agent.TerminalBinding{}
+		return agent.TerminalBinding{}, nil
 	}
 	var binding agent.TerminalBinding
 	if err := json.Unmarshal([]byte(raw.String), &binding); err != nil {
-		return agent.TerminalBinding{}
+		return agent.TerminalBinding{}, fmt.Errorf("agents: scan terminal_binding: %w", err)
 	}
-	return agent.NormalizeTerminalBinding(binding)
+	return agent.NormalizeTerminalBinding(binding), nil
 }
 
 // ErrNotFound indicates the agent was not found.

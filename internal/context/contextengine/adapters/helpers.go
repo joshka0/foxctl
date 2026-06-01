@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/context/contextengine"
@@ -55,6 +56,7 @@ func mustTime(s string) time.Time {
 // that lacks a type prefix. It uses structural heuristics (file extension,
 // known prefix patterns) — NOT keyword matching.
 func InferRefType(raw string) contextengine.RefType {
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return ""
 	}
@@ -80,6 +82,7 @@ func InferRefType(raw string) contextengine.RefType {
 // ParseOrInferRef parses a string as "type:value" or infers the type
 // and returns a best-effort EvidenceRef.
 func ParseOrInferRef(s string) contextengine.EvidenceRef {
+	s = strings.TrimSpace(s)
 	if s == "" {
 		return contextengine.EvidenceRef{}
 	}

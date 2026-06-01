@@ -9,9 +9,6 @@ cd "$ROOT_DIR"
 
 MAX_COUNT="${1:-200}"
 
-# Skip vendored, generated, and dependency directories
-SKIP_DIRS='node_modules|vendor|\.git|dist|\.gocache|\.gomodcache|bun\.lock'
-
 echo "Scanning for TODO/FIXME/HACK markers..."
 echo ""
 
@@ -24,22 +21,22 @@ while IFS= read -r -d '' file; do
 
 	matches=$(grep -nE '\b(TODO|FIXME|HACK)\b' "$file" 2>/dev/null || true)
 	if [ -n "$matches" ]; then
-		relpath="${file#$ROOT_DIR/}"
-		echo "--- $relpath ---"
+		echo "--- $file ---"
 		echo "$matches"
 		echo ""
 		found=$(echo "$matches" | wc -l | tr -d ' ')
 		count=$((count + found))
 	fi
-done < <(find . -type f \( -name '*.go' -o -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' -o -name '*.py' -o -name '*.md' \) \
-	-not -path "*/vendor/*" \
-	-not -path "*/node_modules/*" \
-	-not -path "*/.git/*" \
-	-not -path "*/dist/*" \
-	-not -path "*/.cache/*" \
-	-not -path "*/.gocache/*" \
-	-not -path "*/.gomodcache/*" \
-	-print0 2>/dev/null)
+done < <(git ls-files -z -- \
+	'*.go' '*.ts' '*.tsx' '*.js' '*.jsx' '*.py' '*.md' \
+	':!vendor/**' \
+	':!node_modules/**' \
+	':!dist/**' \
+	':!.cache/**' \
+	':!.gocache/**' \
+	':!.gomodcache/**' \
+	':!.mutation-reports/**' \
+	':!.foxctl/**')
 
 echo "=============================="
 echo "Total TODO/FIXME/HACK markers: $count"

@@ -60,11 +60,18 @@ func (s *sqlStore) Get(ctx context.Context, ns string) (agent.Quotas, error) {
 		}
 		return agent.Quotas{}, fmt.Errorf("quotas: get: %w", err)
 	}
+	if err := ValidateLimits(quotas); err != nil {
+		return agent.Quotas{}, fmt.Errorf("quotas: get invalid limits: %w", err)
+	}
 
 	return quotas, nil
 }
 
 func (s *sqlStore) Set(ctx context.Context, ns string, quotas agent.Quotas) error {
+	if err := ValidateLimits(quotas); err != nil {
+		return err
+	}
+
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO ns_quotas (ns, max_concurrent_jobs, cpu_limit, memMB_limit, llm_calls_per_min, egress_bytes_per_min)
 		VALUES (?, ?, ?, ?, ?, ?)`,
@@ -77,6 +84,10 @@ func (s *sqlStore) Set(ctx context.Context, ns string, quotas agent.Quotas) erro
 }
 
 func (s *sqlStore) Update(ctx context.Context, ns string, quotas agent.Quotas) error {
+	if err := ValidateLimits(quotas); err != nil {
+		return err
+	}
+
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE ns_quotas
 		SET max_concurrent_jobs = ?, cpu_limit = ?, memMB_limit = ?,
@@ -136,6 +147,9 @@ func (s *sqlStore) ListAll(ctx context.Context) (map[string]agent.Quotas, error)
 		if err != nil {
 			return nil, fmt.Errorf("quotas: scan: %w", err)
 		}
+		if err := ValidateLimits(quotas); err != nil {
+			return nil, fmt.Errorf("quotas: scan invalid limits: %w", err)
+		}
 		result[quotas.Namespace] = quotas
 	}
 
@@ -161,29 +175,110 @@ func (s *sqlStore) GetConsumption(ctx context.Context, ns string) (agent.QuotaCo
 		}
 		return agent.QuotaConsumption{}, fmt.Errorf("quotas: get consumption: %w", err)
 	}
+	if err := ValidateConsumption(consumption); err != nil {
+		return agent.QuotaConsumption{}, fmt.Errorf("quotas: get invalid consumption: %w", err)
+	}
 
 	return consumption, nil
 }
 
 func (s *sqlStore) UpdateConsumption(ctx context.Context, ns string, delta agent.QuotaConsumption) error {
-	// Upsert consumption record
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO ns_consumption (ns, active_jobs, cpu_used, memMB_used, llm_calls_1min, egress_bytes_1min, last_reset_ts)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(ns) DO UPDATE SET
-			active_jobs = active_jobs + excluded.active_jobs,
-			cpu_used = cpu_used + excluded.cpu_used,
-			memMB_used = memMB_used + excluded.memMB_used,
-			llm_calls_1min = llm_calls_1min + excluded.llm_calls_1min,
-			egress_bytes_1min = egress_bytes_1min + excluded.egress_bytes_1min,
-			last_reset_ts = CASE WHEN excluded.last_reset_ts > 0 THEN excluded.last_reset_ts ELSE last_reset_ts END`,
-		ns, delta.ActiveJobs, delta.CPUUsed, delta.MemMBUsed,
-		delta.LLMCalls1Min, delta.EgressBytes1Min, delta.LastResetTS)
+	if delta.LastResetTS < 0 {
+		return ErrNegativeConsumption
+	}
+	if nonNegativeConsumptionDelta(delta) {
+		inserted, err := s.insertConsumption(ctx, ns, delta)
+		if err != nil {
+			return err
+		}
+		if inserted {
+			return nil
+		}
+	}
+
+	var updated int
+	err := s.db.QueryRowContext(ctx, `
+		UPDATE ns_consumption
+		SET
+			active_jobs = active_jobs + ?,
+			cpu_used = cpu_used + ?,
+			memMB_used = memMB_used + ?,
+			llm_calls_1min = llm_calls_1min + ?,
+			egress_bytes_1min = egress_bytes_1min + ?,
+			last_reset_ts = CASE WHEN ? > last_reset_ts THEN ? ELSE last_reset_ts END
+		WHERE
+			ns = ? AND
+			active_jobs + ? >= 0 AND
+			cpu_used + ? >= 0 AND
+			memMB_used + ? >= 0 AND
+			llm_calls_1min + ? >= 0 AND
+			egress_bytes_1min + ? >= 0
+		RETURNING 1`,
+		delta.ActiveJobs, delta.CPUUsed, delta.MemMBUsed,
+		delta.LLMCalls1Min, delta.EgressBytes1Min,
+		delta.LastResetTS, delta.LastResetTS, ns,
+		delta.ActiveJobs, delta.CPUUsed, delta.MemMBUsed,
+		delta.LLMCalls1Min, delta.EgressBytes1Min).Scan(&updated)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNegativeConsumption
+		}
 		return fmt.Errorf("quotas: update consumption: %w", err)
 	}
 
 	return nil
+}
+
+func (s *sqlStore) insertConsumption(ctx context.Context, ns string, consumption agent.QuotaConsumption) (bool, error) {
+	var inserted int
+	err := s.db.QueryRowContext(ctx, `
+		INSERT INTO ns_consumption (ns, active_jobs, cpu_used, memMB_used, llm_calls_1min, egress_bytes_1min, last_reset_ts)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(ns) DO NOTHING
+		RETURNING 1`,
+		ns, consumption.ActiveJobs, consumption.CPUUsed, consumption.MemMBUsed,
+		consumption.LLMCalls1Min, consumption.EgressBytes1Min, consumption.LastResetTS).Scan(&inserted)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("quotas: insert consumption: %w", err)
+	}
+	return true, nil
+}
+
+func nonNegativeConsumptionDelta(delta agent.QuotaConsumption) bool {
+	return delta.ActiveJobs >= 0 &&
+		delta.CPUUsed >= 0 &&
+		delta.MemMBUsed >= 0 &&
+		delta.LLMCalls1Min >= 0 &&
+		delta.EgressBytes1Min >= 0 &&
+		delta.LastResetTS >= 0
+}
+
+func ValidateConsumption(consumption agent.QuotaConsumption) error {
+	if nonNegativeConsumptionDelta(consumption) {
+		return nil
+	}
+	return ErrNegativeConsumption
+}
+
+// ValidateLimits rejects negative quota limits. Zero is valid and means unlimited.
+func ValidateLimits(quotas agent.Quotas) error {
+	switch {
+	case quotas.MaxConcurrentJobs < 0:
+		return fmt.Errorf("%w: max_concurrent_jobs", ErrInvalidQuotaLimit)
+	case quotas.CPULimit < 0:
+		return fmt.Errorf("%w: cpu_limit", ErrInvalidQuotaLimit)
+	case quotas.MemMBLimit < 0:
+		return fmt.Errorf("%w: memMB_limit", ErrInvalidQuotaLimit)
+	case quotas.LLMCallsPerMin < 0:
+		return fmt.Errorf("%w: llm_calls_per_min", ErrInvalidQuotaLimit)
+	case quotas.EgressBytesPerMin < 0:
+		return fmt.Errorf("%w: egress_bytes_per_min", ErrInvalidQuotaLimit)
+	default:
+		return nil
+	}
 }
 
 func migrate(ctx context.Context, db *sql.DB) error {
@@ -217,3 +312,9 @@ CREATE INDEX IF NOT EXISTS idx_consumption_ns ON ns_consumption(ns);
 
 // ErrNotFound indicates the quota record was not found.
 var ErrNotFound = errors.New("quotas: not found")
+
+// ErrInvalidQuotaLimit indicates one or more quota limits are invalid.
+var ErrInvalidQuotaLimit = errors.New("quotas: limit cannot be negative")
+
+// ErrNegativeConsumption indicates a consumption update would make usage counters negative.
+var ErrNegativeConsumption = errors.New("quotas: consumption cannot be negative")

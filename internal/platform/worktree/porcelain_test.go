@@ -1,7 +1,10 @@
 package worktree
 
 import (
+	"fmt"
+	"strings"
 	"testing"
+	"testing/quick"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -196,6 +199,66 @@ func TestParsePorcelain_TrailingNewline(t *testing.T) {
 	assert.Equal(t, "/home/user/project", entries[0].Path)
 }
 
+func TestParsePorcelain_RejectsMissingRequiredFields(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{
+			name: "missing worktree",
+			input: `HEAD abc123def456789012345678901234567890abcd
+branch refs/heads/main
+`,
+		},
+		{
+			name: "missing HEAD",
+			input: `worktree /home/user/project
+branch refs/heads/main
+`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			entries, err := ParsePorcelain(tc.input)
+			require.Error(t, err)
+			assert.Empty(t, entries)
+		})
+	}
+}
+
+func TestParsePorcelain_RoundTripGeneratedRecords(t *testing.T) {
+	property := func(raw []porcelainRecordCase) bool {
+		var input strings.Builder
+		want := make([]WorktreeEntry, 0, len(raw))
+
+		for i, item := range raw {
+			record, entry := generatedPorcelainRecord(i, item)
+			input.WriteString(record)
+			input.WriteString("\n\n")
+			want = append(want, entry)
+		}
+
+		got, err := ParsePorcelain(input.String())
+		if err != nil {
+			return false
+		}
+		if len(got) != len(want) {
+			return false
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 128}); err != nil {
+		t.Fatalf("generated porcelain round-trip failed: %v", err)
+	}
+}
+
 func TestBranchFromRef(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -214,5 +277,58 @@ func TestBranchFromRef(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.expected, branchFromRef(tc.ref))
 		})
+	}
+}
+
+type porcelainRecordCase struct {
+	ID     uint8
+	Kind   uint8
+	Reason uint8
+}
+
+func generatedPorcelainRecord(index int, item porcelainRecordCase) (string, WorktreeEntry) {
+	path := fmt.Sprintf("/tmp/foxctl-worktree-%03d-%03d", index, item.ID)
+	commit := fmt.Sprintf("%040x", (index+1)*1000+int(item.ID))
+	branch := generatedBranchName(index, item.ID)
+	entry := WorktreeEntry{
+		Path:   path,
+		Commit: commit,
+		Status: StatusOK,
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "worktree %s\nHEAD %s\n", path, commit)
+
+	switch item.Kind % 5 {
+	case 0:
+		fmt.Fprintf(&b, "branch refs/heads/%s\n", branch)
+		entry.Branch = branch
+	case 1:
+		fmt.Fprintf(&b, "branch refs/heads/%s\nlocked reason: reason-%03d\n", branch, item.Reason)
+		entry.Branch = branch
+		entry.Status = StatusLocked
+		entry.Reason = fmt.Sprintf("reason-%03d", item.Reason)
+	case 2:
+		fmt.Fprintf(&b, "branch refs/heads/%s\nprunable gitdir file points to non-existent location\n", branch)
+		entry.Branch = branch
+		entry.Status = StatusPrunable
+	case 3:
+		b.WriteString("detached\n")
+	default:
+		b.WriteString("bare\n")
+		entry.Bare = true
+	}
+
+	return b.String(), entry
+}
+
+func generatedBranchName(index int, id uint8) string {
+	switch id % 3 {
+	case 0:
+		return fmt.Sprintf("main-%03d", index)
+	case 1:
+		return fmt.Sprintf("feat/%03d/%03d", index, id)
+	default:
+		return fmt.Sprintf("bugfix-%03d-%03d", index, id)
 	}
 }

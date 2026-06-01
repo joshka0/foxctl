@@ -156,7 +156,10 @@ built from `deploy/docker/Dockerfile.ci`. Key jobs:
   debt checks.
 - **unit-tests** – impacted `make test-short-impacted` on merge requests, or
   `go test -short ./...` on main/full runs.
-- **race-tests-\*** – sharded race checks through `make test-race-shard`.
+- **race-tests-smoke** – merge-request race smoke over concurrency-sensitive
+  runtime and storage packages through `make test-race-smoke`.
+- **race-tests-\*** – full sharded race checks through `make test-race-shard`
+  on `main`, tags, schedules, or explicit `RUN_FULL_RACE=1` pipelines.
 - **integration-tests** – impacted `make test-integration-impacted` on merge
   requests, or `make test-integration` on main/full runs.
 - **build** – `make build`, impacted or full skill builds, and manifest checks.

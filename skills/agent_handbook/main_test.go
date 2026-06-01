@@ -10,41 +10,6 @@ import (
 
 // Tests for constants
 
-func TestCommand(t *testing.T) {
-	assert.Equal(t, "agent/handbook", command)
-}
-
-// Tests for input structure
-
-func TestInput_AllFields(t *testing.T) {
-	in := input{
-		Profile: "explorer",
-	}
-
-	assert.Equal(t, "explorer", in.Profile)
-}
-
-func TestInput_JSONSerialization(t *testing.T) {
-	in := input{
-		Profile: "reviewer",
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	var decoded input
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, in.Profile, decoded.Profile)
-}
-
-func TestInput_EmptyFields(t *testing.T) {
-	in := input{}
-
-	assert.Empty(t, in.Profile)
-}
-
 func TestInput_JSONContainsProfile(t *testing.T) {
 	in := input{
 		Profile: "implementer",

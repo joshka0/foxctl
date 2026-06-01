@@ -66,6 +66,16 @@ func ChunkCodex(reader *codexjsonl.Reader, opts ChunkOptions) (ChunkResult, erro
 			windowStartTime = msgTime
 		}
 
+		if opts.MaxChunks > 0 && len(chunks) >= opts.MaxChunks {
+			return ChunkResult{
+				Chunks:          chunks,
+				Windows:         windows,
+				HasMore:         true,
+				NextChunkIndex:  chunkIndex,
+				NextWindowIndex: windowIndex,
+			}, nil
+		}
+
 		chunkType := string(codexjsonl.Classify(msg))
 		contentPreview := codexjsonl.ExtractPreview(msg, DefaultMaxPreviewLen)
 		toolsUsed := codexjsonl.ExtractTools(msg)

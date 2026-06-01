@@ -3,6 +3,7 @@ package rlm
 import (
 	"reflect"
 	"testing"
+	"testing/quick"
 )
 
 func TestClassifyQueryReturnsTypedPlan(t *testing.T) {
@@ -108,6 +109,60 @@ func TestBuildPlanStagedMemoryRecallUsesCompositeTools(t *testing.T) {
 	}
 }
 
+func TestBuildPlanStagedRoutesSatisfyPhaseInvariants(t *testing.T) {
+	t.Parallel()
+
+	for _, route := range []RouteProfile{
+		RouteProfileCodeRetrieval,
+		RouteProfileMemoryRecall,
+		RouteProfileMixed,
+		RouteProfileEvidenceAudit,
+	} {
+		plan := BuildPlan("inspect internal/rlm/plan.go BuildPlan()", route, PlanModeStaged)
+		if plan.RouteProfile != route {
+			t.Fatalf("route %s produced route profile %s", route, plan.RouteProfile)
+		}
+		if plan.QueryPlan.Route != profileToQueryRoute(route) {
+			t.Fatalf("route %s produced query route %s", route, plan.QueryPlan.Route)
+		}
+		if len(plan.Phases) == 0 {
+			t.Fatalf("route %s produced no staged phases", route)
+		}
+
+		for _, phase := range plan.Phases {
+			if phase.Name == "" {
+				t.Fatalf("route %s has unnamed phase: %+v", route, phase)
+			}
+			if !phase.RequireToolUse {
+				t.Fatalf("route %s phase %q does not require tool use", route, phase.Name)
+			}
+			if phase.MaxIterations <= 0 {
+				t.Fatalf("route %s phase %q max_iterations=%d, want positive", route, phase.Name, phase.MaxIterations)
+			}
+			if len(phase.RequireOneOf) == 0 {
+				t.Fatalf("route %s phase %q has no required tool", route, phase.Name)
+			}
+			for _, required := range phase.RequireOneOf {
+				if !phaseAllowsTool(phase, required) {
+					t.Fatalf("route %s phase %q requires unavailable tool %q in %v", route, phase.Name, required, phase.AllowedTools)
+				}
+			}
+		}
+	}
+}
+
+func TestBuildPlanFreeModeDoesNotCreateStagedPhases(t *testing.T) {
+	t.Parallel()
+
+	plan := BuildPlan("inspect internal/rlm/plan.go BuildPlan()", RouteProfileCodeRetrieval, PlanModeFree)
+	if len(plan.Phases) != 0 {
+		t.Fatalf("free mode phases=%+v, want none", plan.Phases)
+	}
+	if plan.QueryPlan.Route != QueryRouteCode {
+		t.Fatalf("free mode query route=%s, want %s", plan.QueryPlan.Route, QueryRouteCode)
+	}
+}
+
 func TestFilterToolsByNames(t *testing.T) {
 	t.Parallel()
 
@@ -133,6 +188,28 @@ func TestNormalizeRouteProfileNoLegacyAliases(t *testing.T) {
 	}
 }
 
+func TestNormalizeRouteProfileGeneratedUnknownsStayAuto(t *testing.T) {
+	t.Parallel()
+
+	unknownsDefaultToAuto := func(raw string) bool {
+		return NormalizeRouteProfile("unknown:"+raw) == RouteProfileAuto
+	}
+	if err := quick.Check(unknownsDefaultToAuto, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatalf("generated unknown route profile did not default to auto: %v", err)
+	}
+}
+
+func TestNormalizePlanModeGeneratedUnknownsStayFree(t *testing.T) {
+	t.Parallel()
+
+	unknownsDefaultToFree := func(raw string) bool {
+		return NormalizePlanMode("unknown:"+raw) == PlanModeFree
+	}
+	if err := quick.Check(unknownsDefaultToFree, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatalf("generated unknown plan mode did not default to free: %v", err)
+	}
+}
+
 func TestValidateQueryPlanAcceptsValidRoutes(t *testing.T) {
 	t.Parallel()
 
@@ -149,4 +226,13 @@ func TestValidateQueryPlanRejectsUnknownRoute(t *testing.T) {
 	if err := ValidateQueryPlan(QueryPlan{Route: "unknown"}); err == nil {
 		t.Fatal("expected error for unknown route")
 	}
+}
+
+func phaseAllowsTool(phase Phase, name string) bool {
+	for _, allowed := range phase.AllowedTools {
+		if allowed == name {
+			return true
+		}
+	}
+	return false
 }

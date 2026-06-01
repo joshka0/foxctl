@@ -70,18 +70,10 @@ func main() {
 //
 // [[domain:import-dependency-analysis]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
-	// Apply defaults
-	if in.QueryType == "" {
-		in.QueryType = "list"
-	}
-	if in.Language == "" {
-		in.Language = "auto"
-	}
-	if in.MaxDepth <= 0 {
-		in.MaxDepth = 3
-	}
-	if in.MaxResults <= 0 {
-		in.MaxResults = 500
+	var err error
+	in, err = normalizeInput(in)
+	if err != nil {
+		return err
 	}
 
 	// Resolve workspace and search path
@@ -192,6 +184,32 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	skillout.AddArtifact(data, artifact)
 
 	return skillout.Emit(rc, "code/imports", data)
+}
+
+func normalizeInput(in input) (input, error) {
+	in.QueryType = strings.TrimSpace(in.QueryType)
+	if in.QueryType == "" {
+		in.QueryType = "list"
+	}
+	switch in.QueryType {
+	case "list", "graph", "external", "deps", "dependents":
+	case "unused":
+		return in, skillerr.Capability("query_type unused is not implemented", skillerr.WithHint("Use one of: list, graph, external, deps, dependents."))
+	default:
+		return in, skillerr.Arg("invalid query_type: "+in.QueryType, skillerr.WithHint("Use one of: list, graph, external, deps, dependents."))
+	}
+
+	in.Language = strings.TrimSpace(in.Language)
+	if in.Language == "" {
+		in.Language = "auto"
+	}
+	if in.MaxDepth <= 0 {
+		in.MaxDepth = 3
+	}
+	if in.MaxResults <= 0 {
+		in.MaxResults = 500
+	}
+	return in, nil
 }
 
 // extractFromDirectory walks a directory to extract imports from all supported language files.
@@ -464,20 +482,25 @@ func buildGraph(fileImports map[string][]string, _ string) []graphNode {
 
 // getDependencies recursively finds all dependencies of a file up to the specified depth.
 func getDependencies(file string, fileImports map[string][]string, maxDepth int) []string {
-	visited := make(map[string]bool)
+	if maxDepth <= 0 {
+		return nil
+	}
+
+	visited := map[string]bool{file: true}
 	var deps []string
 
 	var traverse func(string, int)
 	traverse = func(f string, depth int) {
-		if depth > maxDepth || visited[f] {
+		if depth >= maxDepth {
 			return
 		}
-		visited[f] = true
 
 		for _, imp := range fileImports[f] {
-			if !visited[imp] {
-				deps = append(deps, imp)
+			if visited[imp] {
+				continue
 			}
+			visited[imp] = true
+			deps = append(deps, imp)
 			traverse(imp, depth+1)
 		}
 	}
@@ -496,6 +519,10 @@ func getDependencies(file string, fileImports map[string][]string, maxDepth int)
 //   - getDependents
 //   - reverseMap
 func getDependents(file string, fileImports map[string][]string, maxDepth int) []string {
+	if maxDepth <= 0 {
+		return nil
+	}
+
 	// Build reverse map
 	reverseMap := make(map[string][]string)
 	for f, imports := range fileImports {
@@ -503,21 +530,25 @@ func getDependents(file string, fileImports map[string][]string, maxDepth int) [
 			reverseMap[imp] = append(reverseMap[imp], f)
 		}
 	}
+	for _, dependents := range reverseMap {
+		sort.Strings(dependents)
+	}
 
-	visited := make(map[string]bool)
+	visited := map[string]bool{file: true}
 	var dependents []string
 
 	var traverse func(string, int)
 	traverse = func(f string, depth int) {
-		if depth > maxDepth || visited[f] {
+		if depth >= maxDepth {
 			return
 		}
-		visited[f] = true
 
 		for _, dependent := range reverseMap[f] {
-			if !visited[dependent] {
-				dependents = append(dependents, dependent)
+			if visited[dependent] {
+				continue
 			}
+			visited[dependent] = true
+			dependents = append(dependents, dependent)
 			traverse(dependent, depth+1)
 		}
 	}

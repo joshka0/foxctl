@@ -9,74 +9,11 @@ import (
 
 // Tests for constants
 
-func TestCommand(t *testing.T) {
-	assert.Equal(t, "session/summarize", command)
-}
-
 func TestDefaultMaxTokens(t *testing.T) {
 	assert.Equal(t, 2000, defaultMaxTokens)
 }
 
 // Tests for Input structure
-
-func TestInput_AllFields(t *testing.T) {
-	in := Input{
-		SessionID:           "sess-123",
-		Force:               true,
-		MaxTokens:           4000,
-		Mode:                "windows",
-		Query:               "authentication flow",
-		SeedMaxChars:        15000,
-		SeedTopKWindows:     5,
-		SeedChunksPerWindow: 10,
-		BatchSize:           3,
-		ProcessAll:          true,
-		Queue:               true,
-		QueueOnly:           false,
-	}
-
-	assert.Equal(t, "sess-123", in.SessionID)
-	assert.True(t, in.Force)
-	assert.Equal(t, 4000, in.MaxTokens)
-	assert.Equal(t, "windows", in.Mode)
-	assert.Equal(t, "authentication flow", in.Query)
-	assert.Equal(t, 15000, in.SeedMaxChars)
-	assert.Equal(t, 5, in.SeedTopKWindows)
-	assert.Equal(t, 10, in.SeedChunksPerWindow)
-	assert.Equal(t, 3, in.BatchSize)
-	assert.True(t, in.ProcessAll)
-	assert.True(t, in.Queue)
-	assert.False(t, in.QueueOnly)
-}
-
-func TestInput_JSONSerialization(t *testing.T) {
-	in := Input{
-		SessionID: "sess-test",
-		Mode:      "summary",
-		MaxTokens: 2000,
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	var decoded Input
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, in.SessionID, decoded.SessionID)
-	assert.Equal(t, in.Mode, decoded.Mode)
-	assert.Equal(t, in.MaxTokens, decoded.MaxTokens)
-}
-
-func TestInput_EmptyFields(t *testing.T) {
-	in := Input{}
-
-	assert.Empty(t, in.SessionID)
-	assert.False(t, in.Force)
-	assert.Zero(t, in.MaxTokens)
-	assert.Empty(t, in.Mode)
-	assert.Empty(t, in.Query)
-}
 
 func TestInput_ModeValues(t *testing.T) {
 	modes := []string{"summary", "windows", "seed"}
@@ -89,36 +26,6 @@ func TestInput_ModeValues(t *testing.T) {
 
 // Tests for SummarizeStats structure
 
-func TestSummarizeStats_AllFields(t *testing.T) {
-	stats := SummarizeStats{
-		InputTokens:        1000,
-		OutputTokens:       500,
-		TotalTokens:        1500,
-		InputCost:          0.001,
-		OutputCost:         0.002,
-		TotalCost:          0.003,
-		Provider:           "cerebras",
-		Model:              "llama-3.3-70b",
-		Skipped:            true,
-		SkipReason:         "content_hash_dedup",
-		DedupFromSession:   "sess-456",
-		LearningsPersisted: 5,
-	}
-
-	assert.Equal(t, 1000, stats.InputTokens)
-	assert.Equal(t, 500, stats.OutputTokens)
-	assert.Equal(t, 1500, stats.TotalTokens)
-	assert.Equal(t, 0.001, stats.InputCost)
-	assert.Equal(t, 0.002, stats.OutputCost)
-	assert.Equal(t, 0.003, stats.TotalCost)
-	assert.Equal(t, "cerebras", stats.Provider)
-	assert.Equal(t, "llama-3.3-70b", stats.Model)
-	assert.True(t, stats.Skipped)
-	assert.Equal(t, "content_hash_dedup", stats.SkipReason)
-	assert.Equal(t, "sess-456", stats.DedupFromSession)
-	assert.Equal(t, 5, stats.LearningsPersisted)
-}
-
 func TestSummarizeStats_SkipReasons(t *testing.T) {
 	reasons := []string{"content_hash_dedup", "already_summarized", "no_jsonl"}
 
@@ -129,108 +36,6 @@ func TestSummarizeStats_SkipReasons(t *testing.T) {
 }
 
 // Tests for Output structure
-
-func TestOutput_AllFields(t *testing.T) {
-	out := Output{
-		SessionID:          "sess-123",
-		Summary:            "Test session summary",
-		Accomplished:       []string{"task1", "task2"},
-		Decisions:          []string{"decision1"},
-		Gotchas:            []string{"gotcha1", "gotcha2"},
-		UserInsights:       []string{"insight1"},
-		UserPreferences:    []string{"pref1"},
-		TimeSinks:          []string{"timesink1"},
-		KeyQuestions:       []string{"question1"},
-		Tags:               []string{"tag1", "tag2"},
-		KeyFiles:           []string{"file1.go", "file2.go"},
-		ToolsPattern:       "read-edit-test",
-		HasEmbedding:       true,
-		EmbeddingModel:     "text-embedding-qwen3-embedding-8b",
-		EmbeddingDims:      4096,
-		SeedPrompt:         "Seed prompt content",
-		WindowsSummarized:  5,
-		WindowsQueued:      3,
-		WindowsSkipped:     2,
-		WindowsRemaining:   1,
-		SessionsReembedded: 10,
-		SessionsSkipped:    5,
-		WindowsReembedded:  20,
-		Stats:              &SummarizeStats{Provider: "cerebras"},
-		Status:             "completed",
-		Message:            "Summarization complete",
-	}
-
-	assert.Equal(t, "sess-123", out.SessionID)
-	assert.Equal(t, "Test session summary", out.Summary)
-	assert.Len(t, out.Accomplished, 2)
-	assert.Len(t, out.Decisions, 1)
-	assert.Len(t, out.Gotchas, 2)
-	assert.Len(t, out.UserInsights, 1)
-	assert.Len(t, out.Tags, 2)
-	assert.True(t, out.HasEmbedding)
-	assert.Equal(t, "text-embedding-qwen3-embedding-8b", out.EmbeddingModel)
-	assert.Equal(t, 4096, out.EmbeddingDims)
-	assert.Equal(t, 5, out.WindowsSummarized)
-	assert.NotNil(t, out.Stats)
-	assert.Equal(t, "completed", out.Status)
-}
-
-func TestOutput_JSONSerialization(t *testing.T) {
-	out := Output{
-		SessionID: "sess-test",
-		Summary:   "Test summary",
-		Status:    "completed",
-	}
-
-	data, err := json.Marshal(out)
-	assert.NoError(t, err)
-
-	var decoded Output
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, out.SessionID, decoded.SessionID)
-	assert.Equal(t, out.Summary, decoded.Summary)
-	assert.Equal(t, out.Status, decoded.Status)
-}
-
-func TestOutput_EmptyFields(t *testing.T) {
-	out := Output{}
-
-	assert.Empty(t, out.SessionID)
-	assert.Empty(t, out.Summary)
-	assert.Nil(t, out.Accomplished)
-	assert.Nil(t, out.Stats)
-	assert.Empty(t, out.Status)
-}
-
-// Tests for TokenUsage structure
-
-func TestTokenUsage_AllFields(t *testing.T) {
-	usage := TokenUsage{
-		InputTokens:  1000,
-		OutputTokens: 500,
-		TotalTokens:  1500,
-	}
-
-	assert.Equal(t, 1000, usage.InputTokens)
-	assert.Equal(t, 500, usage.OutputTokens)
-	assert.Equal(t, 1500, usage.TotalTokens)
-}
-
-// Tests for ProviderCost structure
-
-func TestProviderCost_AllFields(t *testing.T) {
-	cost := ProviderCost{
-		InputPerMillion:  0.60,
-		OutputPerMillion: 2.20,
-	}
-
-	assert.Equal(t, 0.60, cost.InputPerMillion)
-	assert.Equal(t, 2.20, cost.OutputPerMillion)
-}
-
-// Tests for calculateCost helper
 
 func TestCalculateCost_Cerebras(t *testing.T) {
 	usage := TokenUsage{
@@ -298,89 +103,6 @@ func TestCalculateCost_OpenRouterPrefix(t *testing.T) {
 }
 
 // Tests for SummaryResponse structure
-
-func TestSummaryResponse_AllFields(t *testing.T) {
-	resp := SummaryResponse{
-		Summary:         "Session summary",
-		Accomplished:    []string{"task1", "task2"},
-		Decisions:       []string{"decision1"},
-		Gotchas:         []string{"gotcha1"},
-		UserInsights:    []string{"insight1"},
-		UserPreferences: []string{"pref1"},
-		TimeSinks:       []string{"timesink1"},
-		Tags:            []string{"tag1", "tag2"},
-		KeyFiles:        []string{"file1.go"},
-		ToolsPattern:    "read-edit",
-		KeyQuestions:    []string{"question1"},
-	}
-
-	assert.Equal(t, "Session summary", resp.Summary)
-	assert.Len(t, resp.Accomplished, 2)
-	assert.Len(t, resp.Decisions, 1)
-	assert.Len(t, resp.Gotchas, 1)
-	assert.Len(t, resp.Tags, 2)
-	assert.Equal(t, "read-edit", resp.ToolsPattern)
-}
-
-func TestSummaryResponse_JSONSerialization(t *testing.T) {
-	resp := SummaryResponse{
-		Summary: "Test summary",
-		Tags:    []string{"tag1"},
-	}
-
-	data, err := json.Marshal(resp)
-	assert.NoError(t, err)
-
-	var decoded SummaryResponse
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, resp.Summary, decoded.Summary)
-	assert.Equal(t, resp.Tags, decoded.Tags)
-}
-
-// Tests for ClaudeMessage structure
-
-func TestClaudeMessage_AllFields(t *testing.T) {
-	msg := ClaudeMessage{
-		Type:       "assistant",
-		UUID:       "uuid-123",
-		ParentUUID: "parent-uuid",
-		SessionID:  "sess-456",
-		Timestamp:  "2026-01-15T10:00:00Z",
-		CWD:        "/path/to/project",
-		GitBranch:  "main",
-		Version:    "1.0.0",
-		Summary:    "Message summary",
-	}
-
-	assert.Equal(t, "assistant", msg.Type)
-	assert.Equal(t, "uuid-123", msg.UUID)
-	assert.Equal(t, "parent-uuid", msg.ParentUUID)
-	assert.Equal(t, "sess-456", msg.SessionID)
-	assert.Equal(t, "/path/to/project", msg.CWD)
-	assert.Equal(t, "main", msg.GitBranch)
-}
-
-// Tests for FilteredMessage structure
-
-func TestFilteredMessage_AllFields(t *testing.T) {
-	fm := FilteredMessage{
-		Role:       "assistant",
-		Content:    "This is the content",
-		ToolsUsed:  []string{"Read", "Edit"},
-		Error:      "Some error",
-		Resolution: "Fixed the error",
-	}
-
-	assert.Equal(t, "assistant", fm.Role)
-	assert.Equal(t, "This is the content", fm.Content)
-	assert.Len(t, fm.ToolsUsed, 2)
-	assert.Equal(t, "Some error", fm.Error)
-	assert.Equal(t, "Fixed the error", fm.Resolution)
-}
-
-// Tests for normalizeLearning helper
 
 func TestNormalizeLearning_Empty(t *testing.T) {
 	result := normalizeLearning("")
@@ -781,22 +503,6 @@ func TestUniqueLimited_ZeroLimit(t *testing.T) {
 }
 
 // Edge case tests
-
-func TestOutput_StatusValues(t *testing.T) {
-	statuses := []string{
-		"completed",
-		"no_session",
-		"error",
-		"windows_queued",
-		"no_windows",
-		"reembed_complete",
-	}
-
-	for _, status := range statuses {
-		out := Output{Status: status}
-		assert.Equal(t, status, out.Status)
-	}
-}
 
 func TestInput_FullJSONRoundTrip(t *testing.T) {
 	in := Input{

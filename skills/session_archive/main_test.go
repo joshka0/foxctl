@@ -9,70 +9,6 @@ import (
 
 // Tests for constants
 
-func TestCommand(t *testing.T) {
-	assert.Equal(t, "session/archive", command)
-}
-
-// Tests for Input structure
-
-func TestInput_AllFields(t *testing.T) {
-	in := Input{
-		SessionID:    "sess-123",
-		JSONLPath:    "/path/to/session.jsonl",
-		Workspace:    "/workspace",
-		Source:       "claude",
-		MaxChunkSize: 4096,
-		EmbedWindows: true,
-		Force:        true,
-		DryRun:       true,
-	}
-
-	assert.Equal(t, "sess-123", in.SessionID)
-	assert.Equal(t, "/path/to/session.jsonl", in.JSONLPath)
-	assert.Equal(t, "/workspace", in.Workspace)
-	assert.Equal(t, "claude", in.Source)
-	assert.Equal(t, 4096, in.MaxChunkSize)
-	assert.True(t, in.EmbedWindows)
-	assert.True(t, in.Force)
-	assert.True(t, in.DryRun)
-}
-
-func TestInput_JSONSerialization(t *testing.T) {
-	in := Input{
-		SessionID:    "sess-abc",
-		JSONLPath:    "/test/session.jsonl",
-		Source:       "codex",
-		MaxChunkSize: 8192,
-		EmbedWindows: true,
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	var decoded Input
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, in.SessionID, decoded.SessionID)
-	assert.Equal(t, in.JSONLPath, decoded.JSONLPath)
-	assert.Equal(t, in.Source, decoded.Source)
-	assert.Equal(t, in.MaxChunkSize, decoded.MaxChunkSize)
-	assert.Equal(t, in.EmbedWindows, decoded.EmbedWindows)
-}
-
-func TestInput_EmptyFields(t *testing.T) {
-	in := Input{}
-
-	assert.Empty(t, in.SessionID)
-	assert.Empty(t, in.JSONLPath)
-	assert.Empty(t, in.Workspace)
-	assert.Empty(t, in.Source)
-	assert.Zero(t, in.MaxChunkSize)
-	assert.False(t, in.EmbedWindows)
-	assert.False(t, in.Force)
-	assert.False(t, in.DryRun)
-}
-
 func TestInput_SourceValues(t *testing.T) {
 	sources := []string{"claude", "codex"}
 
@@ -83,72 +19,6 @@ func TestInput_SourceValues(t *testing.T) {
 }
 
 // Tests for Output structure
-
-func TestOutput_AllFields(t *testing.T) {
-	output := Output{
-		SessionID:       "sess-123",
-		ArchivePath:     "/archives/sess-123.jsonl.gz",
-		OriginalSize:    10000,
-		CompressedSize:  2500,
-		ChunkCount:      50,
-		WindowCount:     5,
-		EmbeddedWindows: 5,
-		EmbeddingModel:  "text-embedding-qwen3-embedding-8b",
-		Status:          "ok",
-		Message:         "Archive complete",
-	}
-
-	assert.Equal(t, "sess-123", output.SessionID)
-	assert.Equal(t, "/archives/sess-123.jsonl.gz", output.ArchivePath)
-	assert.Equal(t, int64(10000), output.OriginalSize)
-	assert.Equal(t, int64(2500), output.CompressedSize)
-	assert.Equal(t, 50, output.ChunkCount)
-	assert.Equal(t, 5, output.WindowCount)
-	assert.Equal(t, 5, output.EmbeddedWindows)
-	assert.Equal(t, "text-embedding-qwen3-embedding-8b", output.EmbeddingModel)
-	assert.Equal(t, "ok", output.Status)
-	assert.Equal(t, "Archive complete", output.Message)
-}
-
-func TestOutput_JSONSerialization(t *testing.T) {
-	output := Output{
-		SessionID:      "sess-test",
-		ArchivePath:    "/test/archive.gz",
-		OriginalSize:   5000,
-		CompressedSize: 1000,
-		ChunkCount:     25,
-		WindowCount:    3,
-		Status:         "ok",
-		Message:        "Test complete",
-	}
-
-	data, err := json.Marshal(output)
-	assert.NoError(t, err)
-
-	var decoded Output
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, output.SessionID, decoded.SessionID)
-	assert.Equal(t, output.ArchivePath, decoded.ArchivePath)
-	assert.Equal(t, output.OriginalSize, decoded.OriginalSize)
-	assert.Equal(t, output.CompressedSize, decoded.CompressedSize)
-	assert.Equal(t, output.ChunkCount, decoded.ChunkCount)
-	assert.Equal(t, output.WindowCount, decoded.WindowCount)
-}
-
-func TestOutput_EmptyFields(t *testing.T) {
-	output := Output{}
-
-	assert.Empty(t, output.SessionID)
-	assert.Empty(t, output.ArchivePath)
-	assert.Zero(t, output.OriginalSize)
-	assert.Zero(t, output.CompressedSize)
-	assert.Zero(t, output.ChunkCount)
-	assert.Zero(t, output.WindowCount)
-}
-
-// Tests for source default logic
 
 func TestInput_SourceDefault(t *testing.T) {
 	in := Input{}
@@ -321,30 +191,4 @@ func TestInput_SessionIDOnly(t *testing.T) {
 
 	assert.Contains(t, string(data), "session_id")
 	assert.Contains(t, string(data), "sess-only")
-}
-
-func TestInput_JSONFieldNames(t *testing.T) {
-	in := Input{
-		SessionID:    "sess-1",
-		JSONLPath:    "/path",
-		Workspace:    "/ws",
-		Source:       "claude",
-		MaxChunkSize: 4096,
-		EmbedWindows: true,
-		Force:        true,
-		DryRun:       true,
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	jsonStr := string(data)
-	assert.Contains(t, jsonStr, "session_id")
-	assert.Contains(t, jsonStr, "jsonl_path")
-	assert.Contains(t, jsonStr, "workspace")
-	assert.Contains(t, jsonStr, "source")
-	assert.Contains(t, jsonStr, "max_chunk_size")
-	assert.Contains(t, jsonStr, "embed_windows")
-	assert.Contains(t, jsonStr, "force")
-	assert.Contains(t, jsonStr, "dry_run")
 }

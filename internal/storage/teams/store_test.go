@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 )
 
@@ -56,6 +59,36 @@ func TestStore_UpsertAndGetTeam(t *testing.T) {
 	}
 }
 
+func TestStore_UpsertTeamNormalizesMetadataLists(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	got, err := store.UpsertTeam(ctx, Team{
+		WorkspaceID:  "ws-1",
+		TeamID:       "team:backend",
+		Name:         "Backend",
+		PrimaryEpics: []string{" epic:one ", "", "epic:one", "epic:two"},
+		Tags:         []string{" tag:a ", "tag:a", "", "tag:b"},
+	})
+	if err != nil {
+		t.Fatalf("UpsertTeam failed: %v", err)
+	}
+	if want := []string{"epic:one", "epic:two"}; !reflect.DeepEqual(got.PrimaryEpics, want) {
+		t.Fatalf("PrimaryEpics=%v want %v", got.PrimaryEpics, want)
+	}
+	if want := []string{"tag:a", "tag:b"}; !reflect.DeepEqual(got.Tags, want) {
+		t.Fatalf("Tags=%v want %v", got.Tags, want)
+	}
+
+	read, err := store.GetTeam(ctx, "ws-1", "team:backend")
+	if err != nil {
+		t.Fatalf("GetTeam failed: %v", err)
+	}
+	if !reflect.DeepEqual(read.PrimaryEpics, got.PrimaryEpics) || !reflect.DeepEqual(read.Tags, got.Tags) {
+		t.Fatalf("metadata did not round trip: got=%v/%v read=%v/%v", got.PrimaryEpics, got.Tags, read.PrimaryEpics, read.Tags)
+	}
+}
+
 func TestStore_GetTeam_NotFound(t *testing.T) {
 	ctx := context.Background()
 	store := setupTestStore(t)
@@ -66,6 +99,82 @@ func TestStore_GetTeam_NotFound(t *testing.T) {
 	}
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestStore_GetTeamRejectsCorruptMetadataJSON(t *testing.T) {
+	ctx := context.Background()
+	tests := []struct {
+		name       string
+		column     string
+		raw        string
+		wantErrSub string
+	}{
+		{name: "primary epics malformed", column: "primary_epics", raw: "{", wantErrSub: "decode primary_epics"},
+		{name: "primary epics null", column: "primary_epics", raw: "null", wantErrSub: "decode primary_epics"},
+		{name: "tags malformed", column: "tags", raw: "{", wantErrSub: "decode tags"},
+		{name: "tags null", column: "tags", raw: "null", wantErrSub: "decode tags"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			store := setupTestStore(t).(*sqlStore)
+
+			if _, err := store.UpsertTeam(ctx, Team{
+				WorkspaceID:  "ws-1",
+				TeamID:       "team:backend",
+				Name:         "Backend",
+				PrimaryEpics: []string{"epic:one"},
+				Tags:         []string{"tag:a"},
+			}); err != nil {
+				t.Fatalf("UpsertTeam failed: %v", err)
+			}
+
+			query := "UPDATE teams SET " + tc.column + " = ? WHERE workspace_id = ? AND team_id = ?"
+			if _, err := store.db.ExecContext(ctx, query, tc.raw, "ws-1", "team:backend"); err != nil {
+				t.Fatalf("corrupt %s: %v", tc.column, err)
+			}
+
+			_, err := store.GetTeam(ctx, "ws-1", "team:backend")
+			if err == nil {
+				t.Fatal("GetTeam accepted corrupt metadata JSON")
+			}
+			if !strings.Contains(err.Error(), tc.wantErrSub) {
+				t.Fatalf("GetTeam error=%v want substring %q", err, tc.wantErrSub)
+			}
+
+			_, err = store.ListTeams(ctx, "ws-1", 10)
+			if err == nil {
+				t.Fatal("ListTeams accepted corrupt metadata JSON")
+			}
+			if !strings.Contains(err.Error(), tc.wantErrSub) {
+				t.Fatalf("ListTeams error=%v want substring %q", err, tc.wantErrSub)
+			}
+		})
+	}
+}
+
+func TestNormalizeTeamStringSliceProperty(t *testing.T) {
+	prop := func(input []string) bool {
+		got := normalizeTeamStringSlice(input)
+		if !reflect.DeepEqual(got, normalizeTeamStringSlice(got)) {
+			return false
+		}
+		seen := make(map[string]struct{}, len(got))
+		for _, value := range got {
+			if value == "" || strings.TrimSpace(value) != value {
+				return false
+			}
+			if _, ok := seen[value]; ok {
+				return false
+			}
+			seen[value] = struct{}{}
+		}
+		return true
+	}
+
+	if err := quick.Check(prop, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("normalize team string slice property failed: %v", err)
 	}
 }
 

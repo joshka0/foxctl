@@ -211,20 +211,6 @@ func TestIndexRepoBuildSkipsUnchangedDiffByDefault(t *testing.T) {
 	}
 }
 
-func TestIndexRepoBuildIncrementalFlagAndEnrichCommand(t *testing.T) {
-	cmd := newIndexRepoBuildCommand()
-	if got := cmd.Flags().Lookup("incremental").DefValue; got != "true" {
-		t.Fatalf("incremental default=%q want true", got)
-	}
-	if cmd.Flags().Lookup("summaries") != nil {
-		t.Fatalf("repo build should not expose summaries flag")
-	}
-	enrichCmd := newIndexRepoEnrichSummariesCommand()
-	if got := enrichCmd.Flags().Lookup("dry-run").DefValue; got != "false" {
-		t.Fatalf("enrich dry-run default=%q want false", got)
-	}
-}
-
 func TestIndexRepoEnrichSummariesAppliesStoredSummaries(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()

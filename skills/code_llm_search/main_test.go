@@ -6,8 +6,6 @@ import (
 	"io"
 	"strings"
 	"testing"
-
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skilltest"
 )
 
 // applyDefaultsAndValidate applies defaults and validates required fields (mirrors run function).
@@ -38,8 +36,8 @@ func applyDefaultsAndValidate(in *Input) error {
 
 // parseInput is a test helper that parses JSON, applies defaults, and validates.
 func parseInput(r io.Reader) (Input, error) {
-	in, err := skilltest.ParseInput[Input](r)
-	if err != nil {
+	var in Input
+	if err := json.NewDecoder(r).Decode(&in); err != nil && err != io.EOF {
 		return in, err
 	}
 	if err := applyDefaultsAndValidate(&in); err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -124,7 +125,7 @@ func (i *Injector) Stream() string {
 }
 
 func containsGotcha(source string) bool {
-	return len(source) >= 12 && source[7:13] == "gotcha"
+	return strings.HasPrefix(source, "memory:gotcha")
 }
 
 // NoOpInjector is an injector that does nothing (for testing).

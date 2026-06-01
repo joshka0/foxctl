@@ -1,6 +1,10 @@
 package skill
 
-import "fmt"
+import (
+	"fmt"
+	"path/filepath"
+	"strings"
+)
 
 // ValidateWASIPolicy ensures WASI skills comply with network restrictions.
 // Per Core Profile v1, WASI skills must have network capability set to "none".
@@ -13,8 +17,8 @@ func ValidateWASIPolicy(m Manifest) error {
 
 // ValidateFilesystemCapabilities checks that filesystem capabilities are valid.
 func ValidateFilesystemCapabilities(m Manifest) error {
-	for _, fs := range m.Capabilities.Filesystem {
-		switch fs.Type {
+	for i, fs := range m.Capabilities.Filesystem {
+		switch strings.TrimSpace(fs.Type) {
 		case "workdir":
 			// Valid
 		case "home", "tmp":
@@ -23,6 +27,34 @@ func ValidateFilesystemCapabilities(m Manifest) error {
 		default:
 			return fmt.Errorf("unknown filesystem capability type: %q", fs.Type)
 		}
+		if err := validateFilesystemCapabilityPath(i, fs.Path); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func validateFilesystemCapabilityPath(index int, rawPath string) error {
+	path := strings.TrimSpace(rawPath)
+	if path == "" {
+		return nil
+	}
+	if filepath.IsAbs(path) {
+		return fmt.Errorf("filesystem[%d].path must be relative to the capability root: %q", index, rawPath)
+	}
+	if hasParentPathSegment(path) {
+		return fmt.Errorf("filesystem[%d].path must not contain parent traversal: %q", index, rawPath)
+	}
+	return nil
+}
+
+func hasParentPathSegment(path string) bool {
+	for _, segment := range strings.FieldsFunc(path, func(r rune) bool {
+		return r == '/' || r == '\\'
+	}) {
+		if segment == ".." {
+			return true
+		}
+	}
+	return false
 }

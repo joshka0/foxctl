@@ -1,9 +1,20 @@
 package workspacerepair
 
 import (
+	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
+	"testing/quick"
 )
+
+func workspaceRepairQuickConfig() *quick.Config {
+	return &quick.Config{MaxCount: 100}
+}
+
+func workspaceRepairToken(prefix string, seed uint64) string {
+	return prefix + strconv.FormatUint(seed, 36)
+}
 
 func TestRepairHomePath(t *testing.T) {
 	tests := []struct {
@@ -53,6 +64,24 @@ func TestRepairHomePath(t *testing.T) {
 	}
 }
 
+func TestRepairHomePathPropertyExpandsTildeUnderHome(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	property := func(seed uint64) bool {
+		suffix := workspaceRepairToken("repo-", seed)
+		raw := "~/" + suffix
+		want := filepath.Join(home, suffix)
+		if got := RepairHomePath(raw, home); got != want {
+			t.Logf("RepairHomePath(%q, %q) = %q, want %q", raw, home, got, want)
+			return false
+		}
+		return true
+	}
+
+	if err := quick.Check(property, workspaceRepairQuickConfig()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestResolvePathWorkspace(t *testing.T) {
 	workspaceDir := t.TempDir()
 	resolved, ok := ResolvePathWorkspace("  "+workspaceDir+"  ", "")
@@ -74,5 +103,34 @@ func TestResolvePathWorkspace(t *testing.T) {
 	}
 	if _, ok := ResolvePathWorkspace(filepath.Join(t.TempDir(), "missing"), ""); ok {
 		t.Fatal("ResolvePathWorkspace() ok=true for missing path")
+	}
+}
+
+func TestResolvePathWorkspacePropertySkipsExistingOpaqueIDDirectories(t *testing.T) {
+	root := t.TempDir()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get wd: %v", err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir temp root: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+
+	property := func(seed uint64) bool {
+		id := "ws-" + workspaceRepairToken("opaque-", seed)
+		if err := os.MkdirAll(id, 0o755); err != nil {
+			t.Logf("mkdir %q: %v", id, err)
+			return false
+		}
+		if resolved, ok := ResolvePathWorkspace(id, ""); ok {
+			t.Logf("ResolvePathWorkspace(%q) = %+v, true; want no repair", id, resolved)
+			return false
+		}
+		return true
+	}
+
+	if err := quick.Check(property, workspaceRepairQuickConfig()); err != nil {
+		t.Fatal(err)
 	}
 }

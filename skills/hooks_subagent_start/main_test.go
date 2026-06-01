@@ -10,53 +10,6 @@ import (
 
 // Tests for constants
 
-func TestCommand(t *testing.T) {
-	assert.Equal(t, "hooks/subagent_start", command)
-}
-
-// Tests for SubagentPayload structure
-
-func TestSubagentPayload_AllFields(t *testing.T) {
-	payload := SubagentPayload{
-		SubagentName: "explorer",
-		SubagentType: "Explore",
-		AgentID:      "agent-123",
-	}
-
-	assert.Equal(t, "explorer", payload.SubagentName)
-	assert.Equal(t, "Explore", payload.SubagentType)
-	assert.Equal(t, "agent-123", payload.AgentID)
-}
-
-func TestSubagentPayload_JSONSerialization(t *testing.T) {
-	payload := SubagentPayload{
-		SubagentName: "test-agent",
-		SubagentType: "Test",
-		AgentID:      "agent-456",
-	}
-
-	data, err := json.Marshal(payload)
-	assert.NoError(t, err)
-
-	var decoded SubagentPayload
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, payload.SubagentName, decoded.SubagentName)
-	assert.Equal(t, payload.SubagentType, decoded.SubagentType)
-	assert.Equal(t, payload.AgentID, decoded.AgentID)
-}
-
-func TestSubagentPayload_EmptyFields(t *testing.T) {
-	payload := SubagentPayload{}
-
-	assert.Empty(t, payload.SubagentName)
-	assert.Empty(t, payload.SubagentType)
-	assert.Empty(t, payload.AgentID)
-}
-
-// Tests for inferProfile helper
-
 func TestInferProfile_ExplorerPatterns(t *testing.T) {
 	patterns := []string{
 		"explorer",

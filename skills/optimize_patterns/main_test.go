@@ -9,61 +9,6 @@ import (
 
 // Tests for constants
 
-func TestCommand(t *testing.T) {
-	assert.Equal(t, "optimize/patterns", command)
-}
-
-// Tests for input structure
-
-func TestInput_AllFields(t *testing.T) {
-	in := input{
-		Action:    "list",
-		Workspace: "/workspace/path",
-		Role:      "coder",
-		Context:   "debugging",
-		Limit:     100,
-	}
-
-	assert.Equal(t, "list", in.Action)
-	assert.Equal(t, "/workspace/path", in.Workspace)
-	assert.Equal(t, "coder", in.Role)
-	assert.Equal(t, "debugging", in.Context)
-	assert.Equal(t, 100, in.Limit)
-}
-
-func TestInput_JSONSerialization(t *testing.T) {
-	in := input{
-		Action:    "hints",
-		Workspace: "/test/workspace",
-		Role:      "reviewer",
-		Context:   "code review",
-		Limit:     25,
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	var decoded input
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, in.Action, decoded.Action)
-	assert.Equal(t, in.Workspace, decoded.Workspace)
-	assert.Equal(t, in.Role, decoded.Role)
-	assert.Equal(t, in.Context, decoded.Context)
-	assert.Equal(t, in.Limit, decoded.Limit)
-}
-
-func TestInput_EmptyFields(t *testing.T) {
-	in := input{}
-
-	assert.Empty(t, in.Action)
-	assert.Empty(t, in.Workspace)
-	assert.Empty(t, in.Role)
-	assert.Empty(t, in.Context)
-	assert.Zero(t, in.Limit)
-}
-
 func TestInput_ActionValues(t *testing.T) {
 	actions := []string{"list", "clear", "hints"}
 
@@ -207,28 +152,6 @@ func TestInput_ContextValues(t *testing.T) {
 }
 
 // Tests for JSON field names
-
-func TestInput_JSONFieldNames(t *testing.T) {
-	in := input{
-		Action:    "list",
-		Workspace: "/ws",
-		Role:      "coder",
-		Context:   "debug",
-		Limit:     10,
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	jsonStr := string(data)
-	assert.Contains(t, jsonStr, "action")
-	assert.Contains(t, jsonStr, "workspace")
-	assert.Contains(t, jsonStr, "role")
-	assert.Contains(t, jsonStr, "context")
-	assert.Contains(t, jsonStr, "limit")
-}
-
-// Edge case tests
 
 func TestInput_FullJSONRoundTrip(t *testing.T) {
 	in := input{

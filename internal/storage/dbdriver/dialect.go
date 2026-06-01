@@ -1,6 +1,9 @@
 package dbdriver
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Dialect abstracts SQL syntax differences between database engines.
 // Stores use the dialect to generate portable DDL and queries.
@@ -90,7 +93,8 @@ func sanitizeJSONKey(key string) string {
 }
 
 // rebindToPositional rewrites ?-style placeholders to $1, $2, ... style.
-// It correctly handles quoted strings and escaped characters.
+// It correctly handles quoted strings, quoted identifiers, SQL comments, and
+// PostgreSQL dollar-quoted strings.
 func rebindToPositional(query string) string {
 	n := 0
 	result := make([]byte, 0, len(query)+16)
@@ -136,9 +140,100 @@ func rebindToPositional(query string) string {
 			if !closed {
 				return string(result)
 			}
+		case '$':
+			delimiter, ok := dollarQuoteDelimiter(query[i:])
+			if !ok {
+				result = append(result, ch)
+				continue
+			}
+			result = append(result, delimiter...)
+			i += len(delimiter)
+			closed := false
+			for i < len(query) {
+				if strings.HasPrefix(query[i:], delimiter) {
+					result = append(result, delimiter...)
+					i += len(delimiter) - 1
+					closed = true
+					break
+				}
+				result = append(result, query[i])
+				i++
+			}
+			if !closed {
+				return string(result)
+			}
+		case '-':
+			if i+1 < len(query) && query[i+1] == '-' {
+				result = append(result, ch, query[i+1])
+				i += 2
+				for i < len(query) {
+					result = append(result, query[i])
+					if query[i] == '\n' {
+						break
+					}
+					i++
+				}
+				if i >= len(query) {
+					return string(result)
+				}
+			} else {
+				result = append(result, ch)
+			}
+		case '/':
+			if i+1 < len(query) && query[i+1] == '*' {
+				result = append(result, ch, query[i+1])
+				i += 2
+				closed := false
+				for i < len(query) {
+					result = append(result, query[i])
+					if query[i] == '*' && i+1 < len(query) && query[i+1] == '/' {
+						i++
+						result = append(result, query[i])
+						closed = true
+						break
+					}
+					i++
+				}
+				if !closed {
+					return string(result)
+				}
+			} else {
+				result = append(result, ch)
+			}
 		default:
 			result = append(result, ch)
 		}
 	}
 	return string(result)
+}
+
+func dollarQuoteDelimiter(input string) (string, bool) {
+	if len(input) < 2 || input[0] != '$' {
+		return "", false
+	}
+	if input[1] == '$' {
+		return "$$", true
+	}
+	if !isDollarQuoteTagStart(input[1]) {
+		return "", false
+	}
+	for i := 2; i < len(input); i++ {
+		switch {
+		case input[i] == '$':
+			return input[:i+1], true
+		case isDollarQuoteTagPart(input[i]):
+			continue
+		default:
+			return "", false
+		}
+	}
+	return "", false
+}
+
+func isDollarQuoteTagStart(ch byte) bool {
+	return ch == '_' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')
+}
+
+func isDollarQuoteTagPart(ch byte) bool {
+	return isDollarQuoteTagStart(ch) || (ch >= '0' && ch <= '9')
 }

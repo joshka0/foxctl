@@ -8,7 +8,9 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"testing/quick"
 )
 
 func TestResolveSocketPathOrder(t *testing.T) {
@@ -41,6 +43,54 @@ func TestResolveSocketPathOrder(t *testing.T) {
 	delete(env, "HERDR_SESSION")
 	if got := ResolveSocketPath(Options{Env: env}); got != "/xdg/herdr/herdr.sock" {
 		t.Fatalf("default socket path = %q", got)
+	}
+}
+
+func TestValidSessionNameProtectsSocketPathSegment(t *testing.T) {
+	t.Parallel()
+
+	invalid := []string{
+		".",
+		"..",
+		"../escape",
+		"nested/session",
+		`nested\session`,
+		"space session",
+		"semi;colon",
+		strings.Repeat("a", 65),
+	}
+	for _, session := range invalid {
+		if validSessionName(session) {
+			t.Fatalf("validSessionName(%q) = true, want false", session)
+		}
+	}
+
+	env := map[string]string{"XDG_CONFIG_HOME": "/xdg"}
+	if got := sessionSocketPath(env, "../escape"); got != "" {
+		t.Fatalf("sessionSocketPath() = %q, want empty path for unsafe session", got)
+	}
+}
+
+func TestValidSessionNamePropertyAllowsOnlySingleSafePathSegments(t *testing.T) {
+	t.Parallel()
+
+	property := func(raw string) bool {
+		session := safeSessionNameCandidate(raw)
+		if !validSessionName(session) {
+			t.Logf("validSessionName(%q) rejected safe candidate", session)
+			return false
+		}
+		path := sessionSocketPath(map[string]string{"XDG_CONFIG_HOME": "/xdg"}, session)
+		wantSuffix := filepath.Join("herdr", "sessions", session, "herdr.sock")
+		if !strings.HasSuffix(path, wantSuffix) {
+			t.Logf("sessionSocketPath(%q) = %q, want suffix %q", session, path, wantSuffix)
+			return false
+		}
+		return true
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 250}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -190,6 +240,30 @@ func TestParseParticipantID(t *testing.T) {
 	if ref.Session != "work" || ref.PaneID != "w1-2" {
 		t.Fatalf("ref=%+v", ref)
 	}
+}
+
+func safeSessionNameCandidate(raw string) string {
+	var b strings.Builder
+	for _, r := range raw {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '.', r == '_', r == '-':
+			b.WriteRune(r)
+		}
+		if b.Len() >= 64 {
+			break
+		}
+	}
+	session := strings.Trim(b.String(), ".")
+	if session == "" {
+		return "session"
+	}
+	return session
 }
 
 type fakeHerdrServer struct {

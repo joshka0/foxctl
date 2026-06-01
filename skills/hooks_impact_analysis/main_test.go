@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -37,41 +36,6 @@ func TestEnvConstants(t *testing.T) {
 }
 
 // Tests for Config structure
-
-func TestConfig_AllFields(t *testing.T) {
-	cfg := Config{
-		MaxSymbols: 5,
-		MaxRefs:    10,
-		Timeout:    30 * time.Second,
-		Disabled:   true,
-	}
-
-	assert.Equal(t, 5, cfg.MaxSymbols)
-	assert.Equal(t, 10, cfg.MaxRefs)
-	assert.Equal(t, 30*time.Second, cfg.Timeout)
-	assert.True(t, cfg.Disabled)
-}
-
-func TestConfig_JSONSerialization(t *testing.T) {
-	cfg := Config{
-		MaxSymbols: 3,
-		MaxRefs:    5,
-		Disabled:   false,
-	}
-
-	data, err := json.Marshal(cfg)
-	assert.NoError(t, err)
-
-	var decoded Config
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, cfg.MaxSymbols, decoded.MaxSymbols)
-	assert.Equal(t, cfg.MaxRefs, decoded.MaxRefs)
-	assert.Equal(t, cfg.Disabled, decoded.Disabled)
-}
-
-// Tests for ConfigFromMap helper
 
 func TestConfigFromMap_Defaults(t *testing.T) {
 	cfg := ConfigFromMap(map[string]string{})
@@ -180,78 +144,6 @@ func TestConfigFromMap_AllSettings(t *testing.T) {
 }
 
 // Tests for Symbol structure
-
-func TestSymbol_AllFields(t *testing.T) {
-	sym := Symbol{
-		Name:    "MyFunction",
-		Type:    "function",
-		Line:    25,
-		EndLine: 50,
-	}
-
-	assert.Equal(t, "MyFunction", sym.Name)
-	assert.Equal(t, "function", sym.Type)
-	assert.Equal(t, 25, sym.Line)
-	assert.Equal(t, 50, sym.EndLine)
-}
-
-func TestSymbol_JSONSerialization(t *testing.T) {
-	sym := Symbol{
-		Name: "Test",
-		Type: "struct",
-		Line: 10,
-	}
-
-	data, err := json.Marshal(sym)
-	assert.NoError(t, err)
-
-	var decoded Symbol
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, sym.Name, decoded.Name)
-	assert.Equal(t, sym.Type, decoded.Type)
-	assert.Equal(t, sym.Line, decoded.Line)
-}
-
-// Tests for Impact structure
-
-func TestImpact_AllFields(t *testing.T) {
-	imp := Impact{
-		Symbol:     "Handler",
-		SymbolType: "interface",
-		RefCount:   3,
-		RefFiles:   []string{"file1.go", "file2.go", "file3.go"},
-		ImplCount:  2,
-		ImplFiles:  []string{"impl1.go", "impl2.go"},
-	}
-
-	assert.Equal(t, "Handler", imp.Symbol)
-	assert.Equal(t, "interface", imp.SymbolType)
-	assert.Equal(t, 3, imp.RefCount)
-	assert.Len(t, imp.RefFiles, 3)
-	assert.Equal(t, 2, imp.ImplCount)
-	assert.Len(t, imp.ImplFiles, 2)
-}
-
-func TestImpact_JSONSerialization(t *testing.T) {
-	imp := Impact{
-		Symbol:     "Test",
-		SymbolType: "function",
-		RefCount:   2,
-		RefFiles:   []string{"a.go", "b.go"},
-	}
-
-	data, err := json.Marshal(imp)
-	assert.NoError(t, err)
-
-	var decoded Impact
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, imp.Symbol, decoded.Symbol)
-	assert.Equal(t, imp.RefCount, decoded.RefCount)
-}
 
 func TestImpact_NoImplementations(t *testing.T) {
 	imp := Impact{

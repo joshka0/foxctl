@@ -177,10 +177,11 @@ func (s *sqlStore) getWithQuerier(ctx context.Context, q querier, conversationID
 	}
 
 	if toolsJSON.Valid && strings.TrimSpace(toolsJSON.String) != "" {
-		if err := json.Unmarshal([]byte(toolsJSON.String), &out.ToolsAllow); err != nil {
-			return Settings{}, fmt.Errorf("conversationsettings: parse tools_allow_json: %w", err)
+		toolsAllow, err := parseToolsAllowJSON(toolsJSON.String)
+		if err != nil {
+			return Settings{}, err
 		}
-		out.ToolsAllow = normalizeAllowlist(out.ToolsAllow)
+		out.ToolsAllow = toolsAllow
 	}
 
 	out.LLMProvider = llmProvider.String
@@ -189,10 +190,17 @@ func (s *sqlStore) getWithQuerier(ctx context.Context, q querier, conversationID
 	out.StoryGatherModel = gatherModel.String
 	out.StoryDialogueModel = dialogueModel.String
 	if presenceEnabled.Valid {
+		if presenceEnabled.Int64 != 0 && presenceEnabled.Int64 != 1 {
+			return Settings{}, fmt.Errorf("%w: invalid presence_enabled %d", ErrInvalid, presenceEnabled.Int64)
+		}
 		v := presenceEnabled.Int64 != 0
 		out.PresenceEnabled = &v
 	}
 	out.UpdatedAt = updatedAt
+
+	if err := validate(out); err != nil {
+		return Settings{}, fmt.Errorf("conversationsettings: invalid stored settings: %w", err)
+	}
 
 	return out, nil
 }
@@ -350,6 +358,21 @@ func normalizeAllowlist(in []string) []string {
 		return nil
 	}
 	return out
+}
+
+func parseToolsAllowJSON(raw string) ([]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	if raw == "null" {
+		return nil, fmt.Errorf("%w: tools_allow_json must be a JSON array", ErrInvalid)
+	}
+	var tools []string
+	if err := json.Unmarshal([]byte(raw), &tools); err != nil {
+		return nil, fmt.Errorf("conversationsettings: parse tools_allow_json: %w", err)
+	}
+	return normalizeAllowlist(tools), nil
 }
 
 func validate(s Settings) error {

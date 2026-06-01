@@ -7,8 +7,7 @@ import (
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/oputil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 	jiraclient "github.com/joshka0/foxctl/internal/interfaces/jira"
 )
 
@@ -58,10 +57,10 @@ type moveToBacklogReq struct {
 }
 
 func main() {
-	skillmain.Main(command, run)
+	lite.Main(command, run)
 }
 
-func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+func run(ctx context.Context, rc *lite.RunContext, in input) error {
 	in.Operation = oputil.DefaultOp(in.Operation, "list")
 
 	client, err := jiraclient.NewClientFromEnv()
@@ -90,10 +89,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		return err
 	}
 
-	return skillout.Emit(rc, command, data)
+	return lite.Emit(rc, command, data)
 }
 
-func listBoards(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *listReq) (map[string]any, error) {
+func listBoards(ctx context.Context, rc *lite.RunContext, client *jiraclient.Client, req *listReq) (map[string]any, error) {
 	if req == nil {
 		req = &listReq{}
 	}
@@ -102,7 +101,7 @@ func listBoards(ctx context.Context, rc *skillmain.RunContext, client *jiraclien
 	}
 
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.ListBoards(ctx, req.StartAt, req.MaxResults, req.ProjectKeyOrID, req.Name, req.Type)
 		return callErr
@@ -114,7 +113,7 @@ func listBoards(ctx context.Context, rc *skillmain.RunContext, client *jiraclien
 	return result, nil
 }
 
-func listBoardIssues(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *boardIssuesReq) (map[string]any, error) {
+func listBoardIssues(ctx context.Context, rc *lite.RunContext, client *jiraclient.Client, req *boardIssuesReq) (map[string]any, error) {
 	if req == nil {
 		return nil, skillerr.Arg("issues options are required", skillerr.WithHint("Provide issues.board_id."))
 	}
@@ -126,7 +125,7 @@ func listBoardIssues(ctx context.Context, rc *skillmain.RunContext, client *jira
 	}
 
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.ListBoardIssues(ctx, req.BoardID, req.JQL, req.Fields, req.StartAt, req.MaxResults)
 		return callErr
@@ -139,7 +138,7 @@ func listBoardIssues(ctx context.Context, rc *skillmain.RunContext, client *jira
 	return result, nil
 }
 
-func listBoardSprints(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *sprintsReq) (map[string]any, error) {
+func listBoardSprints(ctx context.Context, rc *lite.RunContext, client *jiraclient.Client, req *sprintsReq) (map[string]any, error) {
 	if req == nil {
 		return nil, skillerr.Arg("sprints options are required", skillerr.WithHint("Provide sprints.board_id."))
 	}
@@ -151,7 +150,7 @@ func listBoardSprints(ctx context.Context, rc *skillmain.RunContext, client *jir
 	}
 
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.ListBoardSprints(ctx, req.BoardID, req.State, req.StartAt, req.MaxResults)
 		return callErr
@@ -164,7 +163,7 @@ func listBoardSprints(ctx context.Context, rc *skillmain.RunContext, client *jir
 	return result, nil
 }
 
-func listBacklogIssues(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *boardIssuesReq) (map[string]any, error) {
+func listBacklogIssues(ctx context.Context, rc *lite.RunContext, client *jiraclient.Client, req *boardIssuesReq) (map[string]any, error) {
 	if req == nil {
 		return nil, skillerr.Arg("backlog options are required", skillerr.WithHint("Provide backlog.board_id."))
 	}
@@ -176,7 +175,7 @@ func listBacklogIssues(ctx context.Context, rc *skillmain.RunContext, client *ji
 	}
 
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.ListBacklogIssues(ctx, req.BoardID, req.JQL, req.Fields, req.StartAt, req.MaxResults)
 		return callErr
@@ -189,7 +188,7 @@ func listBacklogIssues(ctx context.Context, rc *skillmain.RunContext, client *ji
 	return result, nil
 }
 
-func listCurrentSprintIssues(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *boardIssuesReq) (map[string]any, error) {
+func listCurrentSprintIssues(ctx context.Context, rc *lite.RunContext, client *jiraclient.Client, req *boardIssuesReq) (map[string]any, error) {
 	if req == nil {
 		return nil, skillerr.Arg("current options are required", skillerr.WithHint("Provide current.board_id."))
 	}
@@ -201,7 +200,7 @@ func listCurrentSprintIssues(ctx context.Context, rc *skillmain.RunContext, clie
 	}
 
 	var sprintResult map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		sprintResult, callErr = client.ListBoardSprints(ctx, req.BoardID, "active", 0, 1)
 		return callErr
@@ -224,7 +223,7 @@ func listCurrentSprintIssues(ctx context.Context, rc *skillmain.RunContext, clie
 	sprintID, _ := sprint["id"].(float64)
 
 	var result map[string]any
-	err = skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err = lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.ListSprintIssues(ctx, int(sprintID), req.JQL, req.Fields, req.StartAt, req.MaxResults)
 		return callErr
@@ -238,7 +237,7 @@ func listCurrentSprintIssues(ctx context.Context, rc *skillmain.RunContext, clie
 	return result, nil
 }
 
-func moveIssuesToSprint(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *moveToSprintReq) (map[string]any, error) {
+func moveIssuesToSprint(ctx context.Context, rc *lite.RunContext, client *jiraclient.Client, req *moveToSprintReq) (map[string]any, error) {
 	if req == nil {
 		return nil, skillerr.Arg("move_to_sprint options are required")
 	}
@@ -248,7 +247,7 @@ func moveIssuesToSprint(ctx context.Context, rc *skillmain.RunContext, client *j
 	if len(req.Issues) == 0 {
 		return nil, skillerr.Arg("move_to_sprint.issues is required")
 	}
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		return client.MoveIssuesToSprint(ctx, req.SprintID, req.Issues)
 	})
 	if err != nil {
@@ -262,11 +261,11 @@ func moveIssuesToSprint(ctx context.Context, rc *skillmain.RunContext, client *j
 	}, nil
 }
 
-func moveIssuesToBacklog(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *moveToBacklogReq) (map[string]any, error) {
+func moveIssuesToBacklog(ctx context.Context, rc *lite.RunContext, client *jiraclient.Client, req *moveToBacklogReq) (map[string]any, error) {
 	if req == nil || len(req.Issues) == 0 {
 		return nil, skillerr.Arg("move_to_backlog.issues is required")
 	}
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		return client.MoveIssuesToBacklog(ctx, req.Issues)
 	})
 	if err != nil {

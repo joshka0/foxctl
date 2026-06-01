@@ -43,6 +43,9 @@ func Cosine(a, b []float32) float64 {
 	for i := range a {
 		av := float64(a[i])
 		bv := float64(b[i])
+		if math.IsNaN(av) || math.IsInf(av, 0) || math.IsNaN(bv) || math.IsInf(bv, 0) {
+			return 0
+		}
 		dotProduct += av * bv
 		normA += av * av
 		normB += bv * bv
@@ -52,7 +55,11 @@ func Cosine(a, b []float32) float64 {
 		return 0
 	}
 
-	return dotProduct / (math.Sqrt(normA) * math.Sqrt(normB))
+	score := dotProduct / (math.Sqrt(normA) * math.Sqrt(normB))
+	if math.IsNaN(score) || math.IsInf(score, 0) {
+		return 0
+	}
+	return score
 }
 
 // DimsFromBytes returns the number of float32 dimensions from byte length.

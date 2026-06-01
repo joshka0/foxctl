@@ -362,6 +362,18 @@ func parseSpawnResponse(payload []byte) (any, error) {
 // ValidateSpawnDepth checks if a spawn is allowed given hierarchy constraints.
 // Returns nil if allowed, error describing why not if denied.
 func ValidateSpawnDepth(parentDepth, parentMaxDepth, parentLocalMaxDepth int) error {
+	if parentDepth < 0 {
+		return fmt.Errorf("%s: parent depth %d must be non-negative",
+			types.DenialPolicyViolation, parentDepth)
+	}
+	if parentMaxDepth <= 0 {
+		return fmt.Errorf("%s: max depth %d must be positive",
+			types.DenialPolicyViolation, parentMaxDepth)
+	}
+	if parentLocalMaxDepth <= 0 {
+		return fmt.Errorf("%s: local max depth %d must be positive",
+			types.DenialPolicyViolation, parentLocalMaxDepth)
+	}
 	if parentDepth >= parentMaxDepth {
 		return fmt.Errorf("%s: parent depth %d >= max depth %d",
 			types.DenialDepthLimitExceeded, parentDepth, parentMaxDepth)

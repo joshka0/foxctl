@@ -17,6 +17,7 @@ func TestParseStringRefs(t *testing.T) {
 		{"nil refs", nil, 0, false},
 		{"empty refs", []string{}, 0, false},
 		{"valid refs", []string{"path:foo.go", "task:abc123", "session:xyz"}, 3, false},
+		{"valid refs with whitespace", []string{" path:foo.go ", "\ttask:abc123\n"}, 2, false},
 		{"invalid ref", []string{"invalid_no_colon"}, 0, true},
 	}
 	for _, tt := range tests {
@@ -65,6 +66,7 @@ func TestInferRefType(t *testing.T) {
 		{"", ""},
 		{"path:foo.go", contextengine.RefTypePath},
 		{"task:abc", contextengine.RefTypeTask},
+		{" task:abc ", contextengine.RefTypeTask},
 		{"session:xyz", contextengine.RefTypeSession},
 		{"note:my-note", contextengine.RefTypeNote},
 		{"internal/foo.go", contextengine.RefTypePath},
@@ -89,7 +91,9 @@ func TestParseOrInferRef(t *testing.T) {
 	}{
 		{"empty", "", "", ""},
 		{"typed", "path:foo.go", contextengine.RefTypePath, "foo.go"},
+		{"typed with whitespace", " path:foo.go ", contextengine.RefTypePath, "foo.go"},
 		{"untyped file", "internal/foo.go", contextengine.RefTypePath, "internal/foo.go"},
+		{"untyped file with whitespace", " internal/foo.go ", contextengine.RefTypePath, "internal/foo.go"},
 		{"task type", "task:abc123", contextengine.RefTypeTask, "abc123"},
 		{"session type", "session:xyz789", contextengine.RefTypeSession, "xyz789"},
 		{"note type", "note:my-note", contextengine.RefTypeNote, "my-note"},

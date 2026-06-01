@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -73,5 +74,6 @@ func DecompressFile(src, dst string) error {
 
 // ArchivePath returns the archive path for a session ID in the given archives directory.
 func ArchivePath(archivesDir, sessionID string) string {
-	return filepath.Join(archivesDir, fmt.Sprintf("%s.jsonl.gz", sessionID))
+	filename := strings.NewReplacer("/", "_", `\`, "_").Replace(sessionID)
+	return filepath.Join(archivesDir, fmt.Sprintf("%s.jsonl.gz", filename))
 }

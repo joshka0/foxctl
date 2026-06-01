@@ -449,6 +449,9 @@ func scanEntry(rows *sql.Rows) (Entry, error) {
 		&createdAtMs, &expiresAtMs, &consumedAtMs, &metadataJSON); err != nil {
 		return Entry{}, fmt.Errorf("contextbuffer: scan: %w", err)
 	}
+	if e.Priority < 1 || e.Priority > 3 {
+		return Entry{}, fmt.Errorf("contextbuffer: invalid priority %d", e.Priority)
+	}
 
 	e.CreatedAt = time.UnixMilli(createdAtMs)
 	e.ExpiresAt = time.UnixMilli(expiresAtMs)
@@ -458,12 +461,28 @@ func scanEntry(rows *sql.Rows) (Entry, error) {
 	}
 
 	if metadataJSON.Valid && metadataJSON.String != "" {
-		if err := json.Unmarshal([]byte(metadataJSON.String), &e.Metadata); err != nil {
+		metadata, err := decodeEntryMetadataJSON(metadataJSON.String)
+		if err != nil {
 			return Entry{}, fmt.Errorf("contextbuffer: unmarshal metadata: %w", err)
 		}
+		e.Metadata = metadata
 	}
 
 	return e, nil
+}
+
+func decodeEntryMetadataJSON(raw string) (map[string]any, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
+		return nil, err
+	}
+	if metadata == nil {
+		return nil, fmt.Errorf("metadata must be a JSON object")
+	}
+	return metadata, nil
 }
 
 // renderMarkdown formats entries as markdown for injection.

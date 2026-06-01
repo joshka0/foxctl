@@ -248,6 +248,10 @@ func (s *S3Store) Remove(ctx context.Context, digest string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if err := validateDigest(digest); err != nil {
+		return err
+	}
+
 	// Delete both blob and metadata
 	_, err := s.client.DeleteObjects(ctx, &s3.DeleteObjectsInput{
 		Bucket: aws.String(s.bucket),
@@ -385,6 +389,10 @@ func (s *S3Store) GC(ctx context.Context, opts storage.CASGCOptions) (storage.CA
 
 // getMeta reads the metadata sidecar for a digest.
 func (s *S3Store) getMeta(ctx context.Context, digest string) (s3Meta, error) {
+	if err := validateDigest(digest); err != nil {
+		return s3Meta{}, err
+	}
+
 	result, err := s.client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(s.metaKey(digest)),
@@ -398,11 +406,21 @@ func (s *S3Store) getMeta(ctx context.Context, digest string) (s3Meta, error) {
 	if err := json.NewDecoder(result.Body).Decode(&meta); err != nil {
 		return s3Meta{}, fmt.Errorf("cas/s3: decode meta: %w", err)
 	}
+	if err := validateDigest(meta.Digest); err != nil {
+		return s3Meta{}, fmt.Errorf("cas/s3: invalid meta digest: %w", err)
+	}
+	if meta.Digest != digest {
+		return s3Meta{}, fmt.Errorf("cas/s3: meta digest mismatch: key %s contains %s", digest, meta.Digest)
+	}
 	return meta, nil
 }
 
 // putMeta writes the metadata sidecar for a digest.
 func (s *S3Store) putMeta(ctx context.Context, meta s3Meta) error {
+	if err := validateDigest(meta.Digest); err != nil {
+		return err
+	}
+
 	data, err := json.Marshal(meta)
 	if err != nil {
 		return fmt.Errorf("cas/s3: encode meta: %w", err)

@@ -1,7 +1,9 @@
 package worktree
 
 import (
+	"strings"
 	"testing"
+	"testing/quick"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,6 +29,11 @@ func TestSanitizeBranchName_UnsafeChars(t *testing.T) {
 			name:     "multiple consecutive unsafe chars",
 			input:    "fix/...bug",
 			expected: "fix/bug",
+		},
+		{
+			name:     "consecutive dots inside component",
+			input:    "fix/foo..bar",
+			expected: "fix/foo.bar",
 		},
 		{
 			name:     "special shell chars",
@@ -138,6 +145,16 @@ func TestSanitizeBranchName_UnsafeChars(t *testing.T) {
 			input:    "feat/branch.lock",
 			expected: "feat/branch",
 		},
+		{
+			name:     "lock suffix rejected inside component",
+			input:    "feat/branch.lock/next",
+			expected: "feat/branch/next",
+		},
+		{
+			name:     "repeated lock suffixes rejected inside component",
+			input:    "feat/branch.lock.lock/next",
+			expected: "feat/branch/next",
+		},
 	}
 
 	for _, tc := range tests {
@@ -211,6 +228,11 @@ func TestSanitizeBranchName_SafePreserved(t *testing.T) {
 			input:    "feat/ABC-123",
 			expected: "feat/ABC-123",
 		},
+		{
+			name:     "single dots inside component",
+			input:    "release/1.2.3",
+			expected: "release/1.2.3",
+		},
 	}
 
 	for _, tc := range tests {
@@ -220,4 +242,91 @@ func TestSanitizeBranchName_SafePreserved(t *testing.T) {
 			assert.Equal(t, tc.expected, result)
 		})
 	}
+}
+
+func TestSanitizeBranchNamePropertyLockSuffixComponentsAreRemoved(t *testing.T) {
+	t.Parallel()
+
+	cfg := &quick.Config{MaxCount: 200}
+	err := quick.Check(func(rawPrefix, rawComponent, rawSuffix string) bool {
+		prefix := safeBranchComponent(rawPrefix, "feat")
+		component := safeBranchComponent(rawComponent, "branch")
+		suffix := safeBranchComponent(rawSuffix, "next")
+		result, err := SanitizeBranchName(prefix + "/" + component + ".lock.lock/" + suffix)
+		if err != nil {
+			return false
+		}
+		return branchComponentsAreClean(result) && !strings.Contains(result, ".lock")
+	}, cfg)
+	if err != nil {
+		t.Fatalf("SanitizeBranchName .lock component property failed: %v", err)
+	}
+}
+
+func TestSanitizeBranchNamePropertySuccessfulResultsAreGitRefSafe(t *testing.T) {
+	t.Parallel()
+
+	cfg := &quick.Config{MaxCount: 500}
+	err := quick.Check(func(input string) bool {
+		result, err := SanitizeBranchName(input)
+		if err != nil {
+			return true
+		}
+		return result != "" &&
+			!unsafePattern.MatchString(result) &&
+			!strings.Contains(result, "..") &&
+			!strings.Contains(result, "//") &&
+			!strings.Contains(result, "@{") &&
+			!strings.HasPrefix(result, "/") &&
+			!strings.HasSuffix(result, "/") &&
+			!strings.HasSuffix(result, ".") &&
+			!strings.HasSuffix(result, ".lock") &&
+			branchComponentsAreClean(result)
+	}, cfg)
+	if err != nil {
+		t.Fatalf("SanitizeBranchName git ref safety property failed: %v", err)
+	}
+}
+
+func TestSanitizeBranchNamePropertyIdempotent(t *testing.T) {
+	t.Parallel()
+
+	cfg := &quick.Config{MaxCount: 500}
+	err := quick.Check(func(input string) bool {
+		once, err := SanitizeBranchName(input)
+		if err != nil {
+			return true
+		}
+		twice, err := SanitizeBranchName(once)
+		return err == nil && twice == once
+	}, cfg)
+	if err != nil {
+		t.Fatalf("SanitizeBranchName idempotence property failed: %v", err)
+	}
+}
+
+func safeBranchComponent(raw, fallback string) string {
+	cleaned := unsafePattern.ReplaceAllString(raw, "-")
+	cleaned = strings.Trim(cleaned, "-./ ")
+	cleaned = strings.ReplaceAll(cleaned, "/", "-")
+	cleaned = collapseHyphens.ReplaceAllString(cleaned, "-")
+	cleaned = collapseDots.ReplaceAllString(cleaned, ".")
+	if cleaned == "" || cleaned == ".lock" {
+		return fallback
+	}
+	return cleaned
+}
+
+func branchComponentsAreClean(branch string) bool {
+	for _, part := range strings.Split(branch, "/") {
+		if part == "" ||
+			strings.HasPrefix(part, ".") ||
+			strings.HasSuffix(part, ".") ||
+			strings.HasPrefix(part, "-") ||
+			strings.HasSuffix(part, "-") ||
+			strings.HasSuffix(part, ".lock") {
+			return false
+		}
+	}
+	return true
 }

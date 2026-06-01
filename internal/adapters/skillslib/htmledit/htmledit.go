@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -206,7 +207,7 @@ func filterSelection(selection *goquery.Selection, nth, limit int) *goquery.Sele
 		if nth <= selection.Length() {
 			return selection.Eq(nth - 1)
 		}
-		return selection.Eq(-1)
+		return selection.Slice(0, 0)
 	}
 	if limit > 0 && limit < selection.Length() {
 		return selection.Slice(0, limit)
@@ -311,6 +312,8 @@ func applyUpdateAttr(selection *goquery.Selection, op Operation) (int, []string,
 		count++
 	})
 
+	sort.Strings(attrSet)
+	sort.Strings(attrRemoved)
 	return count, attrSet, attrRemoved, nil
 }
 

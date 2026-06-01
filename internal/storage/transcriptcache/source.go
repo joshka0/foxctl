@@ -252,14 +252,14 @@ func (s *Store) MarkSourceFailed(ctx context.Context, failure SourceFailure) (So
 		UPDATE transcript_processed_sources
 		SET state = $3,
 		    attempts = CASE
-		    	WHEN attempts < $4 THEN attempts + 1
-		    	ELSE attempts
+		        WHEN attempts < $4 THEN attempts + 1
+		        ELSE attempts
 		    END,
 		    max_attempts = $4,
 		    last_error = $5,
 		    next_attempt_at = CASE
-		    	WHEN attempts + 1 < $4 THEN $6
-		    	ELSE NULL
+		        WHEN attempts + 1 < $4 THEN $6
+		        ELSE NULL
 		    END,
 		    failed_at = $7,
 		    updated_at = $7
@@ -294,8 +294,8 @@ func (s *Store) ResetStaleProcessingSources(ctx context.Context, opts ResetStale
 		UPDATE transcript_processed_sources
 		SET state = $1,
 		    attempts = CASE
-		    	WHEN attempts < max_attempts THEN attempts + 1
-		    	ELSE attempts
+		        WHEN attempts < max_attempts THEN attempts + 1
+		        ELSE attempts
 		    END,
 		    last_error = $2,
 		    next_attempt_at = NULL,

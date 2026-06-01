@@ -6,7 +6,10 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
+
+const sourceIDLimit = 8
 
 // MemorySearcher searches the memory store.
 type MemorySearcher interface {
@@ -155,7 +158,7 @@ func (f *Finder) FindContext(ctx context.Context, analysis *AnalysisResult, sess
 							ID:        r.SessionID + ":" + truncate(r.Content, 20),
 							Type:      "session",
 							Content:   formatSessionContent(r),
-							Source:    fmt.Sprintf("session:%s", r.SessionID[:8]),
+							Source:    fmt.Sprintf("session:%s", shortSourceID(r.SessionID)),
 							Score:     score,
 							Query:     query,
 							Timestamp: time.Now(),
@@ -175,7 +178,7 @@ func (f *Finder) FindContext(ctx context.Context, analysis *AnalysisResult, sess
 							ID:        r.ID,
 							Type:      "codemap",
 							Content:   formatCodemapContent(r),
-							Source:    fmt.Sprintf("codemap:%s", r.ID[:8]),
+							Source:    fmt.Sprintf("codemap:%s", shortSourceID(r.ID)),
 							Score:     r.Score,
 							Query:     query,
 							Timestamp: time.Now(),
@@ -207,13 +210,26 @@ func matchesActiveFiles(content string, activeFiles []string) bool {
 	contentLower := strings.ToLower(content)
 	for _, file := range activeFiles {
 		// Check filename (not full path)
-		parts := strings.Split(file, "/")
-		filename := parts[len(parts)-1]
+		filename := baseName(file)
+		if filename == "" {
+			continue
+		}
 		if strings.Contains(contentLower, strings.ToLower(filename)) {
 			return true
 		}
 	}
 	return false
+}
+
+func baseName(path string) string {
+	path = strings.TrimSpace(path)
+	parts := strings.FieldsFunc(path, func(r rune) bool {
+		return r == '/' || r == '\\'
+	})
+	if len(parts) == 0 {
+		return ""
+	}
+	return parts[len(parts)-1]
 }
 
 // formatMemoryContent formats a memory result for injection.
@@ -275,11 +291,26 @@ func deduplicateCandidates(candidates []ContextCandidate) []ContextCandidate {
 
 // truncate shortens a string to max length, adding ellipsis if needed.
 func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	if maxLen <= 0 {
+		return ""
+	}
+	if utf8.RuneCountInString(s) <= maxLen {
 		return s
 	}
+	runes := []rune(s)
 	if maxLen <= 3 {
-		return s[:maxLen]
+		return string(runes[:maxLen])
 	}
-	return s[:maxLen-3] + "..."
+	return string(runes[:maxLen-3]) + "..."
+}
+
+func shortSourceID(id string) string {
+	if id == "" {
+		return "unknown"
+	}
+	runes := []rune(id)
+	if len(runes) <= sourceIDLimit {
+		return id
+	}
+	return string(runes[:sourceIDLimit])
 }

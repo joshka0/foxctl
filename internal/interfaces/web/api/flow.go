@@ -630,6 +630,31 @@ func handleFlowAddEdge(w http.ResponseWriter, r *http.Request, cfg config.Config
 		return
 	}
 
+	fromNode, err := store.GetNode(r.Context(), edge.FromNodeID)
+	if err != nil {
+		if errors.Is(err, flowmodel.ErrNotFound) {
+			httpError(w, http.StatusNotFound, "source node not found")
+			return
+		}
+		log.Error().Err(err).Msg("flow: get source node")
+		httpError(w, http.StatusInternalServerError, "failed to verify edge source")
+		return
+	}
+	toNode, err := store.GetNode(r.Context(), edge.ToNodeID)
+	if err != nil {
+		if errors.Is(err, flowmodel.ErrNotFound) {
+			httpError(w, http.StatusNotFound, "target node not found")
+			return
+		}
+		log.Error().Err(err).Msg("flow: get target node")
+		httpError(w, http.StatusInternalServerError, "failed to verify edge target")
+		return
+	}
+	if fromNode.FlowID != flowID || toNode.FlowID != flowID {
+		httpError(w, http.StatusBadRequest, "edge endpoints must belong to the flow")
+		return
+	}
+
 	created, err := store.AddEdge(r.Context(), edge)
 	if err != nil {
 		log.Error().Err(err).Msg("flow: add edge")

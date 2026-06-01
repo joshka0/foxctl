@@ -240,6 +240,104 @@ func TestMailboxPollNoBlock(t *testing.T) {
 	})
 }
 
+func TestMailboxSendRejectsInvalidPayloadJSON(t *testing.T) {
+	ctx := context.Background()
+	store := openTestMailboxStore(t)
+
+	err := store.Send(ctx, agent.Message{
+		ID:        "invalid-payload-msg",
+		FromNS:    "sender",
+		ToNS:      "receiver",
+		Type:      agent.MessageTypeCmd,
+		TTLMS:     60_000,
+		Payload:   json.RawMessage(`{`),
+		VisibleAt: time.Now().Unix(),
+		Timestamp: time.Now().Unix(),
+	})
+	requireMailboxErrorContains(t, "Send", err, "payload")
+
+	messages, err := store.List(ctx, "receiver", 10)
+	if err != nil {
+		t.Fatalf("list after rejected send: %v", err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("rejected invalid payload persisted %d messages", len(messages))
+	}
+}
+
+func TestMailboxRejectsCorruptStoredPayloadJSON(t *testing.T) {
+	ctx := context.Background()
+	store := openTestMailboxStore(t)
+
+	now := time.Now().Unix()
+	msg := agent.Message{
+		ID:        "corrupt-payload-msg",
+		FromNS:    "sender",
+		ToNS:      "receiver",
+		Type:      agent.MessageTypeCmd,
+		TTLMS:     60_000,
+		Payload:   json.RawMessage(`{"ok":true}`),
+		VisibleAt: now,
+		Timestamp: now,
+		SessionID: "session-1",
+		Workspace: "/workspace",
+	}
+	if err := store.Send(ctx, msg); err != nil {
+		t.Fatalf("send valid message: %v", err)
+	}
+	if _, err := store.DB().ExecContext(ctx, `
+		UPDATE mailbox SET payload = $1 WHERE id = $2
+	`, "{", msg.ID); err != nil {
+		t.Fatalf("corrupt payload: %v", err)
+	}
+
+	_, err := store.List(ctx, "receiver", 10)
+	requireMailboxErrorContains(t, "List", err, "payload")
+	_, err = store.Poll(ctx, "receiver", time.Second, 1)
+	requireMailboxErrorContains(t, "Poll", err, "payload")
+	_, err = store.ListBySession(ctx, "session-1", 10)
+	requireMailboxErrorContains(t, "ListBySession", err, "payload")
+	_, err = store.ListByWorkspace(ctx, "/workspace", 10)
+	requireMailboxErrorContains(t, "ListByWorkspace", err, "payload")
+}
+
+func TestMailboxRejectsCorruptStoredHeadersJSON(t *testing.T) {
+	ctx := context.Background()
+	store := openTestMailboxStore(t)
+
+	now := time.Now().Unix()
+	msg := agent.Message{
+		ID:        "corrupt-headers-msg",
+		FromNS:    "sender",
+		ToNS:      "receiver",
+		Type:      agent.MessageTypeCmd,
+		TTLMS:     60_000,
+		Headers:   map[string]string{"correlation": "task-123"},
+		Payload:   json.RawMessage(`{"ok":true}`),
+		VisibleAt: now,
+		Timestamp: now,
+		SessionID: "session-1",
+		Workspace: "/workspace",
+	}
+	if err := store.Send(ctx, msg); err != nil {
+		t.Fatalf("send valid message: %v", err)
+	}
+	if _, err := store.DB().ExecContext(ctx, `
+		UPDATE mailbox SET headers = $1 WHERE id = $2
+	`, "{", msg.ID); err != nil {
+		t.Fatalf("corrupt headers: %v", err)
+	}
+
+	_, err := store.List(ctx, "receiver", 10)
+	requireMailboxErrorContains(t, "List", err, "headers")
+	_, err = store.Poll(ctx, "receiver", time.Second, 1)
+	requireMailboxErrorContains(t, "Poll", err, "headers")
+	_, err = store.ListBySession(ctx, "session-1", 10)
+	requireMailboxErrorContains(t, "ListBySession", err, "headers")
+	_, err = store.ListByWorkspace(ctx, "/workspace", 10)
+	requireMailboxErrorContains(t, "ListByWorkspace", err, "headers")
+}
+
 func TestMailboxPollRespectsLeaseDuration(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
@@ -257,6 +355,7 @@ func TestMailboxPollRespectsLeaseDuration(t *testing.T) {
 		ToNS:      "worker",
 		Type:      agent.MessageTypeCmd,
 		TTLMS:     60_000,
+		Payload:   json.RawMessage(`{"test":"lease"}`),
 		VisibleAt: now.Unix(),
 		Timestamp: now.Unix(),
 	}
@@ -282,6 +381,99 @@ func TestMailboxPollRespectsLeaseDuration(t *testing.T) {
 	}
 	if got.Attempt != 1 {
 		t.Fatalf("attempt = %d, want 1", got.Attempt)
+	}
+}
+
+func TestMailboxPollPositiveSubsecondLeasePreventsImmediateRedelivery(t *testing.T) {
+	ctx := context.Background()
+	store := openTestMailboxStore(t)
+	waitForStableUnixSecond(t, 200*time.Millisecond)
+
+	now := time.Now()
+	msg := agent.Message{
+		ID:        "subsecond-lease-msg",
+		FromNS:    "sender",
+		ToNS:      "worker",
+		Type:      agent.MessageTypeCmd,
+		TTLMS:     60_000,
+		Payload:   json.RawMessage(`{"test":"subsecond-lease"}`),
+		VisibleAt: now.Unix(),
+		Timestamp: now.Unix(),
+	}
+	if err := store.Send(ctx, msg); err != nil {
+		t.Fatalf("send message: %v", err)
+	}
+
+	first, err := store.Poll(ctx, "worker", time.Millisecond, 1)
+	if err != nil {
+		t.Fatalf("first poll: %v", err)
+	}
+	if len(first) != 1 {
+		t.Fatalf("first poll returned %d messages, want 1", len(first))
+	}
+	if first[0].VisibleAt <= now.Unix() {
+		t.Fatalf("positive subsecond lease visible_at=%d, want after %d", first[0].VisibleAt, now.Unix())
+	}
+
+	second, err := store.Poll(ctx, "worker", time.Second, 1)
+	if err != nil {
+		t.Fatalf("second poll: %v", err)
+	}
+	if len(second) != 0 {
+		t.Fatalf("positive lease allowed immediate redelivery of %q", second[0].ID)
+	}
+}
+
+func TestMailboxNackPositiveSubsecondTimeoutPreventsImmediateRedelivery(t *testing.T) {
+	ctx := context.Background()
+	store := openTestMailboxStore(t)
+
+	now := time.Now()
+	msg := agent.Message{
+		ID:        "subsecond-nack-msg",
+		FromNS:    "sender",
+		ToNS:      "worker",
+		Type:      agent.MessageTypeCmd,
+		TTLMS:     60_000,
+		Payload:   json.RawMessage(`{"test":"subsecond-nack"}`),
+		VisibleAt: now.Unix(),
+		Timestamp: now.Unix(),
+	}
+	if err := store.Send(ctx, msg); err != nil {
+		t.Fatalf("send message: %v", err)
+	}
+
+	first, err := store.Poll(ctx, "worker", time.Minute, 1)
+	if err != nil {
+		t.Fatalf("initial poll: %v", err)
+	}
+	if len(first) != 1 {
+		t.Fatalf("initial poll returned %d messages, want 1", len(first))
+	}
+
+	waitForStableUnixSecond(t, 200*time.Millisecond)
+	nackStart := time.Now().Unix()
+	if err := store.Nack(ctx, msg.ID, time.Millisecond); err != nil {
+		t.Fatalf("nack message: %v", err)
+	}
+
+	listed, err := store.List(ctx, "worker", 1)
+	if err != nil {
+		t.Fatalf("list nacked message: %v", err)
+	}
+	if len(listed) != 1 {
+		t.Fatalf("listed %d messages, want 1", len(listed))
+	}
+	if listed[0].VisibleAt <= nackStart {
+		t.Fatalf("positive subsecond nack visible_at=%d, want after %d", listed[0].VisibleAt, nackStart)
+	}
+
+	second, err := store.Poll(ctx, "worker", time.Second, 1)
+	if err != nil {
+		t.Fatalf("second poll: %v", err)
+	}
+	if len(second) != 0 {
+		t.Fatalf("positive nack timeout allowed immediate redelivery of %q", second[0].ID)
 	}
 }
 
@@ -365,6 +557,7 @@ func TestMailboxPollByTypes(t *testing.T) {
 			ToNS:      "receiver",
 			Type:      agent.MessageTypeAsk,
 			TTLMS:     300000,
+			Payload:   json.RawMessage(`{"test":"ask"}`),
 			VisibleAt: now,
 			Timestamp: now,
 		},
@@ -374,6 +567,7 @@ func TestMailboxPollByTypes(t *testing.T) {
 			ToNS:      "receiver",
 			Type:      agent.MessageTypeReply,
 			TTLMS:     300000,
+			Payload:   json.RawMessage(`{"test":"reply"}`),
 			VisibleAt: now,
 			Timestamp: now,
 		},
@@ -383,6 +577,7 @@ func TestMailboxPollByTypes(t *testing.T) {
 			ToNS:      "receiver",
 			Type:      agent.MessageTypeCmd,
 			TTLMS:     300000,
+			Payload:   json.RawMessage(`{"test":"cmd"}`),
 			VisibleAt: now,
 			Timestamp: now,
 		},
@@ -419,5 +614,45 @@ func TestMailboxPollByTypes(t *testing.T) {
 	}
 	if replies[0].Type != agent.MessageTypeReply {
 		t.Fatalf("expected reply message, got %s", replies[0].Type)
+	}
+}
+
+func openTestMailboxStore(t *testing.T) Store {
+	t.Helper()
+
+	store, err := Open(context.Background(), t.TempDir())
+	if err != nil {
+		t.Fatalf("open mailbox store: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("close mailbox store: %v", err)
+		}
+	})
+	return store
+}
+
+func waitForStableUnixSecond(t *testing.T, minRemaining time.Duration) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		now := time.Now()
+		nextSecond := time.Unix(now.Unix()+1, 0)
+		if nextSecond.Sub(now) > minRemaining {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("could not find a stable unix second with %s remaining", minRemaining)
+}
+
+func requireMailboxErrorContains(t *testing.T, operation string, err error, want string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("%s error = nil, want error containing %q", operation, want)
+	}
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("%s error = %v, want it to contain %q", operation, err, want)
 	}
 }

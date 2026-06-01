@@ -3,6 +3,7 @@ package textmatch
 import (
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
 )
@@ -63,10 +64,21 @@ func RequirePattern(pattern string) error {
 
 // TrimLine trims a line to a maximum length, appending ellipsis if needed.
 func TrimLine(line string, limit int) string {
+	if limit < 0 {
+		limit = 0
+	}
 	if len(line) <= limit {
 		return line
 	}
-	return line[:limit] + "..."
+	end := 0
+	for end < len(line) {
+		_, size := utf8.DecodeRuneInString(line[end:])
+		if end+size > limit {
+			break
+		}
+		end += size
+	}
+	return line[:end] + "..."
 }
 
 // EmptySearchResult builds a standard empty search response payload.

@@ -2,6 +2,7 @@ package graph
 
 import (
 	"context"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -60,6 +61,182 @@ func TestUpsertNode(t *testing.T) {
 	}
 }
 
+func TestUpsertNodeAcceptsKnownTypes(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	types := []NodeType{
+		NodeTypeSession,
+		NodeTypeTask,
+		NodeTypeSymbol,
+		NodeTypeMemory,
+		NodeTypeFile,
+	}
+
+	for _, nodeType := range types {
+		t.Run(string(nodeType), func(t *testing.T) {
+			node := Node{
+				Workspace: "/test/workspace",
+				NodeID:    "node:" + string(nodeType),
+				NodeType:  nodeType,
+				Title:     string(nodeType),
+				LastSeen:  time.Now().UTC(),
+			}
+			if err := store.UpsertNode(ctx, node); err != nil {
+				t.Fatalf("UpsertNode(%q) error = %v", nodeType, err)
+			}
+		})
+	}
+}
+
+func TestUpsertNodeRejectsInvalidType(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	err := store.UpsertNode(ctx, Node{
+		Workspace: "/test/workspace",
+		NodeID:    "node:invalid",
+		NodeType:  NodeType("unknown-node-type"),
+		Title:     "Invalid",
+		LastSeen:  time.Now().UTC(),
+	})
+	if err == nil {
+		t.Fatalf("expected invalid node type to be rejected")
+	}
+
+	nodes, err := store.GetAllNodes(ctx, "/test/workspace")
+	if err != nil {
+		t.Fatalf("GetAllNodes() error = %v", err)
+	}
+	if len(nodes) != 0 {
+		t.Fatalf("invalid node was persisted: %+v", nodes)
+	}
+}
+
+func TestUpsertNodesRejectsInvalidTypeWithoutPersistingBatch(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	err := store.UpsertNodes(ctx, []Node{
+		{
+			Workspace: "/test/workspace",
+			NodeID:    "node:valid",
+			NodeType:  NodeTypeTask,
+			Title:     "Valid",
+			LastSeen:  time.Now().UTC(),
+		},
+		{
+			Workspace: "/test/workspace",
+			NodeID:    "node:invalid",
+			NodeType:  NodeType("unknown-node-type"),
+			Title:     "Invalid",
+			LastSeen:  time.Now().UTC(),
+		},
+	})
+	if err == nil {
+		t.Fatalf("expected invalid node type batch to be rejected")
+	}
+
+	nodes, err := store.GetAllNodes(ctx, "/test/workspace")
+	if err != nil {
+		t.Fatalf("GetAllNodes() error = %v", err)
+	}
+	if len(nodes) != 0 {
+		t.Fatalf("invalid batch persisted nodes: %+v", nodes)
+	}
+}
+
+func TestUpsertNodeRejectsNegativeMetrics(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	tests := []struct {
+		name string
+		node Node
+	}{
+		{
+			name: "pagerank",
+			node: Node{
+				Workspace: "/test/workspace", NodeID: "node:pagerank",
+				NodeType: NodeTypeTask, PageRank: -0.1, LastSeen: time.Now().UTC(),
+			},
+		},
+		{
+			name: "in degree",
+			node: Node{
+				Workspace: "/test/workspace", NodeID: "node:in-degree",
+				NodeType: NodeTypeTask, InDegree: -1, LastSeen: time.Now().UTC(),
+			},
+		},
+		{
+			name: "out degree",
+			node: Node{
+				Workspace: "/test/workspace", NodeID: "node:out-degree",
+				NodeType: NodeTypeTask, OutDegree: -1, LastSeen: time.Now().UTC(),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := store.UpsertNode(ctx, tt.node); err == nil {
+				t.Fatalf("expected negative %s to be rejected", tt.name)
+			}
+
+			nodes, err := store.GetAllNodes(ctx, "/test/workspace")
+			if err != nil {
+				t.Fatalf("GetAllNodes() error = %v", err)
+			}
+			if len(nodes) != 0 {
+				t.Fatalf("invalid node was persisted: %+v", nodes)
+			}
+		})
+	}
+}
+
+func TestUpsertNodeRejectsNonFinitePageRank(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name     string
+		pageRank float64
+	}{
+		{name: "nan", pageRank: math.NaN()},
+		{name: "positive infinity", pageRank: math.Inf(1)},
+		{name: "negative infinity", pageRank: math.Inf(-1)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := setupTestStore(t)
+			defer store.Close()
+
+			err := store.UpsertNode(ctx, Node{
+				Workspace: "/test/workspace",
+				NodeID:    "node:" + tt.name,
+				NodeType:  NodeTypeTask,
+				PageRank:  tt.pageRank,
+				LastSeen:  time.Now().UTC(),
+			})
+			if err == nil {
+				t.Fatalf("expected non-finite pagerank %s to be rejected", tt.name)
+			}
+
+			nodes, err := store.GetAllNodes(ctx, "/test/workspace")
+			if err != nil {
+				t.Fatalf("GetAllNodes() error = %v", err)
+			}
+			if len(nodes) != 0 {
+				t.Fatalf("invalid node was persisted: %+v", nodes)
+			}
+		})
+	}
+}
+
 func TestUpsertEdge(t *testing.T) {
 	store := setupTestStore(t)
 	defer store.Close()
@@ -101,6 +278,260 @@ func TestUpsertEdge(t *testing.T) {
 	}
 	if edges[0].ToID != "task:2" {
 		t.Errorf("ToID = %s, want task:2", edges[0].ToID)
+	}
+}
+
+func TestUpsertEdgeRejectsNegativeMetrics(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	workspace := "/test/workspace"
+	node1 := Node{Workspace: workspace, NodeID: "task:1", NodeType: NodeTypeTask, Title: "Task 1", LastSeen: time.Now().UTC()}
+	node2 := Node{Workspace: workspace, NodeID: "task:2", NodeType: NodeTypeTask, Title: "Task 2", LastSeen: time.Now().UTC()}
+	if err := store.UpsertNodes(ctx, []Node{node1, node2}); err != nil {
+		t.Fatalf("UpsertNodes() error = %v", err)
+	}
+
+	negativeTTL := -1
+	tests := []struct {
+		name string
+		edge Edge
+	}{
+		{
+			name: "weight",
+			edge: Edge{
+				Workspace: workspace, FromID: "task:1", FromType: NodeTypeTask,
+				ToID: "task:2", ToType: NodeTypeTask, EdgeType: EdgeTypeDependsOn, Weight: -0.1, CreatedAt: time.Now().UTC(),
+			},
+		},
+		{
+			name: "ttl days",
+			edge: Edge{
+				Workspace: workspace, FromID: "task:1", FromType: NodeTypeTask,
+				ToID: "task:2", ToType: NodeTypeTask, EdgeType: EdgeTypeDependsOn, TTLDays: &negativeTTL, CreatedAt: time.Now().UTC(),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := store.UpsertEdge(ctx, tt.edge); err == nil {
+				t.Fatalf("expected negative %s to be rejected", tt.name)
+			}
+
+			edges, err := store.GetAllEdges(ctx, workspace)
+			if err != nil {
+				t.Fatalf("GetAllEdges() error = %v", err)
+			}
+			if len(edges) != 0 {
+				t.Fatalf("invalid edge was persisted: %+v", edges)
+			}
+		})
+	}
+}
+
+func TestUpsertEdgeRejectsNonFiniteWeight(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name   string
+		weight float64
+	}{
+		{name: "nan", weight: math.NaN()},
+		{name: "positive infinity", weight: math.Inf(1)},
+		{name: "negative infinity", weight: math.Inf(-1)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := setupTestStore(t)
+			defer store.Close()
+
+			workspace := "/test/workspace"
+			node1 := Node{Workspace: workspace, NodeID: "task:1", NodeType: NodeTypeTask, Title: "Task 1", LastSeen: time.Now().UTC()}
+			node2 := Node{Workspace: workspace, NodeID: "task:2", NodeType: NodeTypeTask, Title: "Task 2", LastSeen: time.Now().UTC()}
+			if err := store.UpsertNodes(ctx, []Node{node1, node2}); err != nil {
+				t.Fatalf("UpsertNodes() error = %v", err)
+			}
+
+			err := store.UpsertEdge(ctx, Edge{
+				Workspace: workspace,
+				FromID:    "task:1",
+				FromType:  NodeTypeTask,
+				ToID:      "task:2",
+				ToType:    NodeTypeTask,
+				EdgeType:  EdgeTypeDependsOn,
+				Weight:    tt.weight,
+				CreatedAt: time.Now().UTC(),
+			})
+			if err == nil {
+				t.Fatalf("expected non-finite weight %s to be rejected", tt.name)
+			}
+
+			edges, err := store.GetAllEdges(ctx, workspace)
+			if err != nil {
+				t.Fatalf("GetAllEdges() error = %v", err)
+			}
+			if len(edges) != 0 {
+				t.Fatalf("invalid edge was persisted: %+v", edges)
+			}
+		})
+	}
+}
+
+func TestUpsertEdgeAcceptsKnownTypes(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	workspace := "/test/workspace"
+	node1 := Node{Workspace: workspace, NodeID: "task:1", NodeType: NodeTypeTask, Title: "Task 1", LastSeen: time.Now().UTC()}
+	node2 := Node{Workspace: workspace, NodeID: "file:1", NodeType: NodeTypeFile, Title: "File 1", LastSeen: time.Now().UTC()}
+	if err := store.UpsertNodes(ctx, []Node{node1, node2}); err != nil {
+		t.Fatalf("UpsertNodes() error = %v", err)
+	}
+
+	edgeTypes := []EdgeType{
+		EdgeTypeTouched,
+		EdgeTypeModified,
+		EdgeTypeWorkedOn,
+		EdgeTypeCalls,
+		EdgeTypeImports,
+		EdgeTypeDependsOn,
+		EdgeTypeParentOf,
+		EdgeTypeAbout,
+		EdgeTypeRelatesTo,
+	}
+
+	for _, edgeType := range edgeTypes {
+		t.Run(string(edgeType), func(t *testing.T) {
+			if err := store.UpsertEdge(ctx, Edge{
+				Workspace: workspace,
+				FromID:    "task:1",
+				FromType:  NodeTypeTask,
+				ToID:      "file:1",
+				ToType:    NodeTypeFile,
+				EdgeType:  edgeType,
+				CreatedAt: time.Now().UTC(),
+			}); err != nil {
+				t.Fatalf("UpsertEdge(%q) error = %v", edgeType, err)
+			}
+		})
+	}
+}
+
+func TestUpsertEdgeRejectsInvalidTypes(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	workspace := "/test/workspace"
+	node1 := Node{Workspace: workspace, NodeID: "task:1", NodeType: NodeTypeTask, Title: "Task 1", LastSeen: time.Now().UTC()}
+	node2 := Node{Workspace: workspace, NodeID: "task:2", NodeType: NodeTypeTask, Title: "Task 2", LastSeen: time.Now().UTC()}
+	if err := store.UpsertNodes(ctx, []Node{node1, node2}); err != nil {
+		t.Fatalf("UpsertNodes() error = %v", err)
+	}
+
+	tests := []struct {
+		name string
+		edge Edge
+	}{
+		{
+			name: "from type",
+			edge: Edge{
+				Workspace: workspace, FromID: "task:1", FromType: NodeType("unknown-node-type"),
+				ToID: "task:2", ToType: NodeTypeTask, EdgeType: EdgeTypeDependsOn, CreatedAt: time.Now().UTC(),
+			},
+		},
+		{
+			name: "to type",
+			edge: Edge{
+				Workspace: workspace, FromID: "task:1", FromType: NodeTypeTask,
+				ToID: "task:2", ToType: NodeType("unknown-node-type"), EdgeType: EdgeTypeDependsOn, CreatedAt: time.Now().UTC(),
+			},
+		},
+		{
+			name: "edge type",
+			edge: Edge{
+				Workspace: workspace, FromID: "task:1", FromType: NodeTypeTask,
+				ToID: "task:2", ToType: NodeTypeTask, EdgeType: EdgeType("unknown-edge-type"), CreatedAt: time.Now().UTC(),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := store.UpsertEdge(ctx, tt.edge); err == nil {
+				t.Fatalf("expected invalid graph edge %s to be rejected", tt.name)
+			}
+
+			edges, err := store.GetAllEdges(ctx, workspace)
+			if err != nil {
+				t.Fatalf("GetAllEdges() error = %v", err)
+			}
+			if len(edges) != 0 {
+				t.Fatalf("invalid edge was persisted: %+v", edges)
+			}
+		})
+	}
+}
+
+func TestUpsertEdgesRejectsInvalidTypesWithoutPersistingBatch(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	workspace := "/test/workspace"
+	node1 := Node{Workspace: workspace, NodeID: "task:1", NodeType: NodeTypeTask, Title: "Task 1", LastSeen: time.Now().UTC()}
+	node2 := Node{Workspace: workspace, NodeID: "task:2", NodeType: NodeTypeTask, Title: "Task 2", LastSeen: time.Now().UTC()}
+	if err := store.UpsertNodes(ctx, []Node{node1, node2}); err != nil {
+		t.Fatalf("UpsertNodes() error = %v", err)
+	}
+
+	err := store.UpsertEdges(ctx, []Edge{
+		{Workspace: workspace, FromID: "task:1", FromType: NodeTypeTask, ToID: "task:2", ToType: NodeTypeTask, EdgeType: EdgeTypeDependsOn, CreatedAt: time.Now().UTC()},
+		{Workspace: workspace, FromID: "task:2", FromType: NodeTypeTask, ToID: "task:1", ToType: NodeTypeTask, EdgeType: EdgeType("unknown-edge-type"), CreatedAt: time.Now().UTC()},
+	})
+	if err == nil {
+		t.Fatalf("expected invalid edge type batch to be rejected")
+	}
+
+	edges, err := store.GetAllEdges(ctx, workspace)
+	if err != nil {
+		t.Fatalf("GetAllEdges() error = %v", err)
+	}
+	if len(edges) != 0 {
+		t.Fatalf("invalid edge batch persisted edges: %+v", edges)
+	}
+}
+
+func TestUpsertEdgesRejectsNegativeMetricsWithoutPersistingBatch(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	workspace := "/test/workspace"
+	node1 := Node{Workspace: workspace, NodeID: "task:1", NodeType: NodeTypeTask, Title: "Task 1", LastSeen: time.Now().UTC()}
+	node2 := Node{Workspace: workspace, NodeID: "task:2", NodeType: NodeTypeTask, Title: "Task 2", LastSeen: time.Now().UTC()}
+	if err := store.UpsertNodes(ctx, []Node{node1, node2}); err != nil {
+		t.Fatalf("UpsertNodes() error = %v", err)
+	}
+
+	err := store.UpsertEdges(ctx, []Edge{
+		{Workspace: workspace, FromID: "task:1", FromType: NodeTypeTask, ToID: "task:2", ToType: NodeTypeTask, EdgeType: EdgeTypeDependsOn, CreatedAt: time.Now().UTC()},
+		{Workspace: workspace, FromID: "task:2", FromType: NodeTypeTask, ToID: "task:1", ToType: NodeTypeTask, EdgeType: EdgeTypeDependsOn, Weight: -0.1, CreatedAt: time.Now().UTC()},
+	})
+	if err == nil {
+		t.Fatalf("expected negative edge weight batch to be rejected")
+	}
+
+	edges, err := store.GetAllEdges(ctx, workspace)
+	if err != nil {
+		t.Fatalf("GetAllEdges() error = %v", err)
+	}
+	if len(edges) != 0 {
+		t.Fatalf("invalid edge batch persisted edges: %+v", edges)
 	}
 }
 
@@ -207,6 +638,61 @@ func TestCleanupExpiredEdges_KeepsNonExpired(t *testing.T) {
 	edges, _ := store.GetAllEdges(ctx, workspace)
 	if len(edges) != 1 {
 		t.Errorf("expected 1 edge after cleanup, got %d", len(edges))
+	}
+}
+
+func TestUpsertEdgesRefreshesCreatedAtForSlidingTTL(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	workspace := "/test/workspace"
+	node1 := Node{Workspace: workspace, NodeID: "task:1", NodeType: NodeTypeTask, Title: "Task 1", LastSeen: time.Now().UTC()}
+	node2 := Node{Workspace: workspace, NodeID: "task:2", NodeType: NodeTypeTask, Title: "Task 2", LastSeen: time.Now().UTC()}
+	if err := store.UpsertNodes(ctx, []Node{node1, node2}); err != nil {
+		t.Fatalf("UpsertNodes() error = %v", err)
+	}
+
+	ttl := 1
+	oldCreatedAt := time.Now().UTC().AddDate(0, 0, -2)
+	edge := Edge{
+		Workspace: workspace,
+		FromID:    "task:1",
+		FromType:  NodeTypeTask,
+		ToID:      "task:2",
+		ToType:    NodeTypeTask,
+		EdgeType:  EdgeTypeDependsOn,
+		Weight:    1.0,
+		TTLDays:   &ttl,
+		CreatedAt: oldCreatedAt,
+	}
+	if err := store.UpsertEdges(ctx, []Edge{edge}); err != nil {
+		t.Fatalf("UpsertEdges(old) error = %v", err)
+	}
+
+	refreshedAt := time.Now().UTC()
+	edge.CreatedAt = refreshedAt
+	if err := store.UpsertEdges(ctx, []Edge{edge}); err != nil {
+		t.Fatalf("UpsertEdges(refresh) error = %v", err)
+	}
+
+	removed, err := store.CleanupExpiredEdges(ctx)
+	if err != nil {
+		t.Fatalf("CleanupExpiredEdges() error = %v", err)
+	}
+	if removed != 0 {
+		t.Fatalf("CleanupExpiredEdges() removed %d refreshed edge(s), want 0", removed)
+	}
+
+	edges, err := store.GetAllEdges(ctx, workspace)
+	if err != nil {
+		t.Fatalf("GetAllEdges() error = %v", err)
+	}
+	if len(edges) != 1 {
+		t.Fatalf("refreshed edge count=%d want 1", len(edges))
+	}
+	if edges[0].CreatedAt.Before(refreshedAt.Add(-time.Second)) {
+		t.Fatalf("edge CreatedAt=%v was not refreshed near %v", edges[0].CreatedAt, refreshedAt)
 	}
 }
 
@@ -549,6 +1035,197 @@ func TestBulkUpdatePageRank(t *testing.T) {
 	}
 	if got2.PageRank != 0.25 {
 		t.Errorf("task:2 PageRank = %f, want 0.25", got2.PageRank)
+	}
+}
+
+func TestUpdatePageRankRejectsNegativeWithoutMutatingExisting(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	workspace := "/test/workspace"
+	if err := store.UpsertNode(ctx, Node{
+		Workspace: workspace,
+		NodeID:    "task:1",
+		NodeType:  NodeTypeTask,
+		Title:     "Task 1",
+		PageRank:  0.5,
+		LastSeen:  time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("UpsertNode() error = %v", err)
+	}
+
+	if err := store.UpdatePageRank(ctx, workspace, "task:1", -0.1); err == nil {
+		t.Fatalf("expected negative pagerank update to be rejected")
+	}
+
+	got, err := store.GetNode(ctx, workspace, "task:1")
+	if err != nil {
+		t.Fatalf("GetNode() error = %v", err)
+	}
+	if got.PageRank != 0.5 {
+		t.Fatalf("PageRank = %f, want 0.5", got.PageRank)
+	}
+}
+
+func TestUpdatePageRankRejectsNonFiniteWithoutMutatingExisting(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	workspace := "/test/workspace"
+	if err := store.UpsertNode(ctx, Node{
+		Workspace: workspace,
+		NodeID:    "task:1",
+		NodeType:  NodeTypeTask,
+		Title:     "Task 1",
+		PageRank:  0.5,
+		LastSeen:  time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("UpsertNode() error = %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		pageRank float64
+	}{
+		{name: "nan", pageRank: math.NaN()},
+		{name: "positive infinity", pageRank: math.Inf(1)},
+		{name: "negative infinity", pageRank: math.Inf(-1)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := store.UpdatePageRank(ctx, workspace, "task:1", tt.pageRank); err == nil {
+				t.Fatalf("expected non-finite pagerank %s to be rejected", tt.name)
+			}
+
+			got, err := store.GetNode(ctx, workspace, "task:1")
+			if err != nil {
+				t.Fatalf("GetNode() error = %v", err)
+			}
+			if got.PageRank != 0.5 {
+				t.Fatalf("PageRank = %f, want 0.5", got.PageRank)
+			}
+		})
+	}
+}
+
+func TestUpdateDegreesRejectsNegativeWithoutMutatingExisting(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	workspace := "/test/workspace"
+	if err := store.UpsertNode(ctx, Node{
+		Workspace: workspace,
+		NodeID:    "task:1",
+		NodeType:  NodeTypeTask,
+		Title:     "Task 1",
+		InDegree:  2,
+		OutDegree: 3,
+		LastSeen:  time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("UpsertNode() error = %v", err)
+	}
+
+	if err := store.UpdateDegrees(ctx, workspace, "task:1", -1, 3); err == nil {
+		t.Fatalf("expected negative in-degree update to be rejected")
+	}
+	if err := store.UpdateDegrees(ctx, workspace, "task:1", 2, -1); err == nil {
+		t.Fatalf("expected negative out-degree update to be rejected")
+	}
+
+	got, err := store.GetNode(ctx, workspace, "task:1")
+	if err != nil {
+		t.Fatalf("GetNode() error = %v", err)
+	}
+	if got.InDegree != 2 || got.OutDegree != 3 {
+		t.Fatalf("degrees = (%d, %d), want (2, 3)", got.InDegree, got.OutDegree)
+	}
+}
+
+func TestBulkUpdatePageRankRejectsNegativeWithoutPartialMutation(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	workspace := "/test/workspace"
+	nodes := []Node{
+		{Workspace: workspace, NodeID: "task:1", NodeType: NodeTypeTask, PageRank: 0.2, LastSeen: time.Now().UTC()},
+		{Workspace: workspace, NodeID: "task:2", NodeType: NodeTypeTask, PageRank: 0.3, LastSeen: time.Now().UTC()},
+	}
+	if err := store.UpsertNodes(ctx, nodes); err != nil {
+		t.Fatalf("UpsertNodes() error = %v", err)
+	}
+
+	err := store.BulkUpdatePageRank(ctx, workspace, map[string]float64{
+		"task:1": 0.9,
+		"task:2": -0.1,
+	})
+	if err == nil {
+		t.Fatalf("expected negative pagerank batch to be rejected")
+	}
+
+	got1, err := store.GetNode(ctx, workspace, "task:1")
+	if err != nil {
+		t.Fatalf("GetNode(task:1) error = %v", err)
+	}
+	got2, err := store.GetNode(ctx, workspace, "task:2")
+	if err != nil {
+		t.Fatalf("GetNode(task:2) error = %v", err)
+	}
+	if got1.PageRank != 0.2 || got2.PageRank != 0.3 {
+		t.Fatalf("pageranks = (%f, %f), want (0.2, 0.3)", got1.PageRank, got2.PageRank)
+	}
+}
+
+func TestBulkUpdatePageRankRejectsNonFiniteWithoutPartialMutation(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name     string
+		pageRank float64
+	}{
+		{name: "nan", pageRank: math.NaN()},
+		{name: "positive infinity", pageRank: math.Inf(1)},
+		{name: "negative infinity", pageRank: math.Inf(-1)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := setupTestStore(t)
+			defer store.Close()
+
+			workspace := "/test/workspace"
+			nodes := []Node{
+				{Workspace: workspace, NodeID: "task:1", NodeType: NodeTypeTask, PageRank: 0.2, LastSeen: time.Now().UTC()},
+				{Workspace: workspace, NodeID: "task:2", NodeType: NodeTypeTask, PageRank: 0.3, LastSeen: time.Now().UTC()},
+			}
+			if err := store.UpsertNodes(ctx, nodes); err != nil {
+				t.Fatalf("UpsertNodes() error = %v", err)
+			}
+
+			err := store.BulkUpdatePageRank(ctx, workspace, map[string]float64{
+				"task:1": 0.9,
+				"task:2": tt.pageRank,
+			})
+			if err == nil {
+				t.Fatalf("expected non-finite pagerank %s batch to be rejected", tt.name)
+			}
+
+			got1, err := store.GetNode(ctx, workspace, "task:1")
+			if err != nil {
+				t.Fatalf("GetNode(task:1) error = %v", err)
+			}
+			got2, err := store.GetNode(ctx, workspace, "task:2")
+			if err != nil {
+				t.Fatalf("GetNode(task:2) error = %v", err)
+			}
+			if got1.PageRank != 0.2 || got2.PageRank != 0.3 {
+				t.Fatalf("pageranks = (%f, %f), want (0.2, 0.3)", got1.PageRank, got2.PageRank)
+			}
+		})
 	}
 }
 

@@ -1,9 +1,11 @@
 package hooks
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/quick"
 
 	"github.com/joshka0/foxctl/internal/domain/skill"
 	"github.com/joshka0/foxctl/internal/platform/buildinfo"
@@ -170,6 +172,87 @@ memory:
 	}
 }
 
+func TestDefaultResolver_RejectsTraversalSkillName(t *testing.T) {
+	tmpDir := t.TempDir()
+	skillsDir := filepath.Join(tmpDir, "skills")
+	outsideSkillDir := filepath.Join(tmpDir, "outside", "escape")
+	writeResolverSkill(t, outsideSkillDir, "outside/escape")
+
+	resolver := NewDefaultResolver(skillsDir)
+	for _, name := range []string{"../outside/escape", "safe/../../outside/escape"} {
+		t.Run(name, func(t *testing.T) {
+			if _, path, err := resolver.Resolve(name); err == nil {
+				t.Fatalf("Resolve(%q) succeeded outside skills dir with path %q", name, path)
+			}
+		})
+	}
+}
+
+func TestDefaultResolver_RejectsSymlinkEscape(t *testing.T) {
+	tmpDir := t.TempDir()
+	skillsDir := filepath.Join(tmpDir, "skills")
+	outsideSkillDir := filepath.Join(tmpDir, "outside", "escape")
+	writeResolverSkill(t, outsideSkillDir, "outside/escape")
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		t.Fatalf("mkdir skills dir: %v", err)
+	}
+	if err := os.Symlink(outsideSkillDir, filepath.Join(skillsDir, "escape")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	resolver := NewDefaultResolver(skillsDir)
+	if _, path, err := resolver.Resolve("escape"); err == nil {
+		t.Fatalf("Resolve followed symlink outside skills dir with path %q", path)
+	}
+}
+
+func TestDefaultResolver_AllowsDotDotPrefixInsideRoot(t *testing.T) {
+	tmpDir := t.TempDir()
+	skillsDir := filepath.Join(tmpDir, "skills")
+	skillDir := filepath.Join(skillsDir, "ns", "..cache")
+	writeResolverSkill(t, skillDir, "ns/..cache")
+
+	resolver := NewDefaultResolver(skillsDir)
+	manifest, path, err := resolver.Resolve("ns/..cache")
+	if err != nil {
+		t.Fatalf("Resolve rejected non-traversal dot-dot prefix: %v", err)
+	}
+	if manifest.Metadata.Name != "ns/..cache" {
+		t.Fatalf("manifest name=%q want ns/..cache", manifest.Metadata.Name)
+	}
+	if filepath.Dir(path) != skillDir {
+		t.Fatalf("artifact dir=%q want %q", filepath.Dir(path), skillDir)
+	}
+}
+
+func TestDefaultResolverPropertyRejectsTraversalSegments(t *testing.T) {
+	tmpDir := t.TempDir()
+	skillsDir := filepath.Join(tmpDir, "skills")
+	outsideDir := filepath.Join(tmpDir, "outside")
+	resolver := NewDefaultResolver(skillsDir)
+
+	cfg := &quick.Config{MaxCount: 100}
+	err := quick.Check(func(raw uint8) bool {
+		leaf := fmt.Sprintf("skill%d", raw%64)
+		writeResolverSkill(t, filepath.Join(outsideDir, leaf), "outside/"+leaf)
+
+		for _, name := range []string{
+			"../outside/" + leaf,
+			"safe/../../outside/" + leaf,
+			"./" + leaf,
+			leaf + "/..",
+		} {
+			if _, _, err := resolver.Resolve(name); err == nil {
+				return false
+			}
+		}
+		return true
+	}, cfg)
+	if err != nil {
+		t.Fatalf("traversal segment property failed: %v", err)
+	}
+}
+
 func TestChainResolver(t *testing.T) {
 	// First resolver fails
 	failResolver := ResolverFunc(func(name string) (skill.Manifest, string, error) {
@@ -242,5 +325,37 @@ func TestResolverFunc(t *testing.T) {
 	}
 	if path != "/path" {
 		t.Errorf("expected /path, got %s", path)
+	}
+}
+
+func writeResolverSkill(t *testing.T, skillDir, name string) {
+	t.Helper()
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("failed to create skill dir: %v", err)
+	}
+	manifest := fmt.Sprintf(`apiVersion: foxctl/v1
+kind: Skill
+metadata:
+  name: %s
+  version: "1.0.0"
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: json
+signature:
+  command: %s
+capabilities:
+  network: deny
+  filesystem: []
+memory:
+  recommend: false
+`, name, name)
+	if err := os.WriteFile(filepath.Join(skillDir, "skill.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("failed to write manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "bin"), []byte("binary"), 0o755); err != nil {
+		t.Fatalf("failed to write bin: %v", err)
 	}
 }

@@ -165,7 +165,26 @@ func parseInboundTodo(todo ClaudeTodo) (string, string, string) {
 	title := StripTaskID(todo.Content)
 	title = ParseProjectedContent(title) // Remove glyphs too
 	foxctlStatus := MapClaudeStatus(todo.Status)
+	if taskID != "" {
+		foxctlStatus = restoreLossyProjectedStatus(todo.Content, todo.Status, foxctlStatus)
+	}
 	return taskID, title, foxctlStatus
+}
+
+func restoreLossyProjectedStatus(content, claudeStatus, fallback string) string {
+	stripped := strings.TrimSpace(StripTaskID(content))
+	switch {
+	case claudeStatus == "pending" && hasProjectedGlyph(stripped, GlyphBlocked):
+		return StatusBlocked
+	case claudeStatus == "completed" && hasProjectedGlyph(stripped, GlyphCanceled):
+		return StatusCanceled
+	default:
+		return fallback
+	}
+}
+
+func hasProjectedGlyph(content, glyph string) bool {
+	return content == glyph || strings.HasPrefix(content, glyph+" ")
 }
 
 func resolveInboundTask(
@@ -257,9 +276,25 @@ func (s *Service) applyInboundStatusUpdate(
 			}
 		}
 		result.Completed++
+	case StatusPending:
+		if !in.DryRun {
+			task.Status = foxctlStatus
+			_, err := s.taskStore.Update(ctx, *task)
+			if err != nil {
+				result.Warnings = append(result.Warnings, "Failed to update task status: "+err.Error())
+				return false
+			}
+		}
+		result.Updated++
 	case StatusInProgress:
 		if !in.DryRun {
-			_, err := s.taskStore.SetActive(ctx, in.WorkspaceID, task.ID)
+			task.Status = foxctlStatus
+			_, err := s.taskStore.Update(ctx, *task)
+			if err != nil {
+				result.Warnings = append(result.Warnings, "Failed to update task status: "+err.Error())
+				return false
+			}
+			_, err = s.taskStore.SetActive(ctx, in.WorkspaceID, task.ID)
 			if err != nil {
 				result.Warnings = append(result.Warnings, "Failed to set active: "+err.Error())
 				return false

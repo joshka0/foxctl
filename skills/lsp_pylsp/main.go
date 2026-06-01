@@ -15,8 +15,7 @@ import (
 	lsphelpers "github.com/joshka0/foxctl/internal/adapters/skillslib/lsp"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/oputil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/sliceutil"
 	errs "github.com/joshka0/foxctl/internal/platform/errors"
 	"github.com/joshka0/foxctl/internal/platform/lsp/jsonrpc"
@@ -94,19 +93,19 @@ type LSPClient struct {
 }
 
 func main() {
-	skillmain.Main(command, skillmain.Chain(
+	lite.Main(command, lite.Chain(
 		run,
-		skillmain.WithDynamicTimeout[input](func(in input) time.Duration {
+		lite.WithDynamicTimeout[input](func(in input) time.Duration {
 			if in.Timeout > 0 {
 				return time.Duration(in.Timeout) * time.Second
 			}
 			return defaultTimeout
 		}),
-		skillmain.WithRecover[input](),
+		lite.WithRecover[input](),
 	))
 }
 
-func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+func run(ctx context.Context, rc *lite.RunContext, in input) error {
 	// Apply defaults
 	if in.MaxResults <= 0 {
 		in.MaxResults = 50
@@ -142,7 +141,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 
 	// Open the file if needed
 	if in.File != "" {
-		filePath := lsphelpers.ResolvePath(workspace, in.File)
+		filePath, err := resolveInputFile(workspace, in.File)
+		if err != nil {
+			return err
+		}
 		if err := client.openFile(ctx, filePath); err != nil {
 			return err
 		}
@@ -339,7 +341,10 @@ func (c *LSPClient) definition(ctx context.Context, workspace string, in input) 
 		return nil, skillerr.Arg("definition requires file and line")
 	}
 
-	filePath := lsphelpers.ResolvePath(workspace, in.File)
+	filePath, err := resolveInputFile(workspace, in.File)
+	if err != nil {
+		return nil, err
+	}
 	params := map[string]any{
 		"textDocument": map[string]any{
 			"uri": "file://" + filePath,
@@ -386,7 +391,10 @@ func (c *LSPClient) references(ctx context.Context, workspace string, in input) 
 		return nil, skillerr.Arg("references requires file and line")
 	}
 
-	filePath := lsphelpers.ResolvePath(workspace, in.File)
+	filePath, err := resolveInputFile(workspace, in.File)
+	if err != nil {
+		return nil, err
+	}
 	params := map[string]any{
 		"textDocument": map[string]any{
 			"uri": "file://" + filePath,
@@ -431,7 +439,10 @@ func (c *LSPClient) documentSymbols(ctx context.Context, workspace string, in in
 		return nil, skillerr.Arg("symbols requires file")
 	}
 
-	filePath := lsphelpers.ResolvePath(workspace, in.File)
+	filePath, err := resolveInputFile(workspace, in.File)
+	if err != nil {
+		return nil, err
+	}
 	params := map[string]any{
 		"textDocument": map[string]any{
 			"uri": "file://" + filePath,
@@ -520,12 +531,27 @@ func (c *LSPClient) workspaceSymbols(ctx context.Context, workspace string, in i
 	return syms, nil
 }
 
+func resolveInputFile(workspace, file string) (string, error) {
+	filePath, err := lsphelpers.ResolvePath(workspace, file)
+	if err != nil {
+		return "", skillerr.Arg(
+			"file path must stay within the workspace",
+			skillerr.WithCause(err),
+			skillerr.WithHint("Provide a relative file path or an absolute path under the workspace."),
+		)
+	}
+	return filePath, nil
+}
+
 func (c *LSPClient) hover(ctx context.Context, workspace string, in input) (string, error) {
 	if in.File == "" || in.Line <= 0 {
 		return "", skillerr.Arg("hover requires file and line")
 	}
 
-	filePath := lsphelpers.ResolvePath(workspace, in.File)
+	filePath, err := resolveInputFile(workspace, in.File)
+	if err != nil {
+		return "", err
+	}
 	params := map[string]any{
 		"textDocument": map[string]any{
 			"uri": "file://" + filePath,
@@ -580,6 +606,6 @@ func (c *LSPClient) diagnostics(_ context.Context, _ string, in input) ([]Diagno
 	)
 }
 
-func writeOutput(rc *skillmain.RunContext, out output) error {
-	return skillout.Emit(rc, command, out)
+func writeOutput(rc *lite.RunContext, out output) error {
+	return lite.Emit(rc, command, out)
 }

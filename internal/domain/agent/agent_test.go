@@ -2,7 +2,10 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 )
 
@@ -24,6 +27,41 @@ func TestState_Constants(t *testing.T) {
 				t.Errorf("State = %q, want %q", tt.state, tt.want)
 			}
 		})
+	}
+}
+
+func TestValidateStateAllowsOnlyDocumentedLifecycleStates(t *testing.T) {
+	validStates := []State{StateStarting, StateRunning, StateStopped, StateError}
+	for _, state := range validStates {
+		if err := ValidateState(state); err != nil {
+			t.Fatalf("ValidateState(%q) = %v, want nil", state, err)
+		}
+	}
+
+	err := ValidateState(State("paused"))
+	if !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("ValidateState(paused) = %v, want ErrInvalidState", err)
+	}
+}
+
+func TestValidateStatePropertyUnknownStatesFailClosed(t *testing.T) {
+	validStates := map[State]bool{
+		StateStarting: true,
+		StateRunning:  true,
+		StateStopped:  true,
+		StateError:    true,
+	}
+
+	prop := func(raw string) bool {
+		state := State(raw)
+		err := ValidateState(state)
+		if validStates[state] {
+			return err == nil
+		}
+		return errors.Is(err, ErrInvalidState)
+	}
+	if err := quick.Check(prop, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -74,6 +112,35 @@ func TestMarshalPolicyJSON(t *testing.T) {
 			}
 			if !tt.wantErr && len(data) == 0 {
 				t.Error("MarshalPolicyJSON() returned empty data")
+			}
+		})
+	}
+}
+
+func TestMarshalPolicyJSONRejectsInvalidPolicy(t *testing.T) {
+	tests := []struct {
+		name   string
+		policy Policy
+	}{
+		{name: "negative cpu", policy: Policy{CPU: -1}},
+		{name: "negative memory", policy: Policy{MemoryMB: -1}},
+		{name: "negative max output", policy: Policy{MaxOutputKB: -1}},
+		{name: "malformed timeout", policy: Policy{Timeout: "tomorrow"}},
+		{name: "zero timeout", policy: Policy{Timeout: "0s"}},
+		{name: "negative timeout", policy: Policy{Timeout: "-1s"}},
+		{name: "unknown network", policy: Policy{Network: "internet"}},
+		{name: "egress allow with network none", policy: Policy{Network: "none", EgressAllow: []string{"api.example.com"}}},
+		{name: "unknown filesystem policy", policy: Policy{Filesystem: []FilesystemPolicy{{Type: "rw", From: "/src"}}}},
+		{name: "workdir without source", policy: Policy{Filesystem: []FilesystemPolicy{{Type: "workdir"}}}},
+		{name: "ro without source", policy: Policy{Filesystem: []FilesystemPolicy{{Type: "ro"}}}},
+		{name: "workdir without target", policy: Policy{Filesystem: []FilesystemPolicy{{Type: "workdir", From: "/src"}}}},
+		{name: "ro without target", policy: Policy{Filesystem: []FilesystemPolicy{{Type: "ro", From: "/src"}}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := MarshalPolicyJSON(tt.policy); err == nil {
+				t.Fatalf("expected invalid policy to be rejected")
 			}
 		})
 	}
@@ -133,6 +200,81 @@ func TestUnmarshalPolicyJSON(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestUnmarshalPolicyJSONRejectsInvalidPolicy(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{name: "negative cpu", input: `{"cpu":-1}`},
+		{name: "negative memory", input: `{"memMB":-1}`},
+		{name: "negative max output", input: `{"max_output_kb":-1}`},
+		{name: "malformed timeout", input: `{"timeout":"tomorrow"}`},
+		{name: "zero timeout", input: `{"timeout":"0s"}`},
+		{name: "negative timeout", input: `{"timeout":"-1s"}`},
+		{name: "unknown network", input: `{"network":"internet"}`},
+		{name: "egress allow with network none", input: `{"network":"none","egressAllow":["api.example.com"]}`},
+		{name: "unknown filesystem policy", input: `{"filesystem":[{"type":"rw","from":"/src"}]}`},
+		{name: "workdir without source", input: `{"filesystem":[{"type":"workdir"}]}`},
+		{name: "ro without source", input: `{"filesystem":[{"type":"ro"}]}`},
+		{name: "workdir without target", input: `{"filesystem":[{"type":"workdir","from":"/src"}]}`},
+		{name: "ro without target", input: `{"filesystem":[{"type":"ro","from":"/src"}]}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := UnmarshalPolicyJSON([]byte(tt.input)); err == nil {
+				t.Fatalf("expected invalid policy JSON to be rejected")
+			}
+		})
+	}
+}
+
+func TestValidatePolicyAllowsPositiveTimeoutDurations(t *testing.T) {
+	for _, timeout := range []string{"1ns", "30s", "20m", "1h30m"} {
+		t.Run(timeout, func(t *testing.T) {
+			if err := ValidatePolicy(Policy{Timeout: timeout}); err != nil {
+				t.Fatalf("ValidatePolicy() error = %v, want nil", err)
+			}
+		})
+	}
+}
+
+func TestValidatePolicyPropertyAcceptsPositiveTimeoutDurations(t *testing.T) {
+	prop := func(raw uint32) bool {
+		duration := time.Duration(raw%86_400+1) * time.Second
+		return ValidatePolicy(Policy{Timeout: duration.String()}) == nil
+	}
+	if err := quick.Check(prop, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidatePolicyPropertyRejectsInvalidTimeoutDurations(t *testing.T) {
+	malformed := func(raw string) string {
+		timeout := strings.TrimSpace(raw)
+		if timeout == "" {
+			return "not-a-duration"
+		}
+		if duration, err := time.ParseDuration(timeout); err == nil && duration > 0 {
+			return "not-a-duration:" + timeout
+		}
+		return timeout
+	}
+
+	if err := quick.Check(func(raw string) bool {
+		return ValidatePolicy(Policy{Timeout: malformed(raw)}) != nil
+	}, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := quick.Check(func(raw uint8) bool {
+		duration := time.Duration(raw%60+1) * time.Second
+		return ValidatePolicy(Policy{Timeout: "-" + duration.String()}) != nil
+	}, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -279,6 +421,33 @@ func TestNormalizeTerminalBinding(t *testing.T) {
 	})
 }
 
+func TestNormalizeTerminalBindingPropertyRoomAccessControlsRoomID(t *testing.T) {
+	prop := func(rawAccess uint8, hasParent bool) bool {
+		parent := ""
+		if hasParent {
+			parent = " parent-a "
+		}
+		got := NormalizeTerminalBinding(TerminalBinding{
+			Backend:             " TMUX ",
+			RoomID:              " room-alpha ",
+			RoomAccess:          generatedRoomAccess(rawAccess),
+			ParentParticipantID: parent,
+		})
+
+		wantAccess := expectedRoomAccess(generatedRoomAccess(rawAccess), hasParent)
+		if got.Backend != "tmux" || got.RoomAccess != wantAccess {
+			return false
+		}
+		if got.RoomAccess == "direct" {
+			return got.RoomID == "room-alpha"
+		}
+		return got.RoomID == ""
+	}
+	if err := quick.Check(prop, &quick.Config{MaxCount: 1000}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestQuotas_JSONSerialization(t *testing.T) {
 	quotas := Quotas{
 		Namespace:         "ns:project",
@@ -418,5 +587,33 @@ func TestFileReservationIsExpired(t *testing.T) {
 				t.Errorf("IsExpired() = %v, want %v", got, tt.expired)
 			}
 		})
+	}
+}
+
+func generatedRoomAccess(raw uint8) string {
+	switch raw % 5 {
+	case 0:
+		return ""
+	case 1:
+		return " default "
+	case 2:
+		return " DIRECT "
+	case 3:
+		return " none "
+	default:
+		return " custom "
+	}
+}
+
+func expectedRoomAccess(raw string, hasParent bool) string {
+	normalized := strings.ToLower(strings.TrimSpace(raw))
+	switch normalized {
+	case "", "default":
+		if hasParent {
+			return "none"
+		}
+		return "direct"
+	default:
+		return normalized
 	}
 }

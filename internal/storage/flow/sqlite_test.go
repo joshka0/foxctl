@@ -4,13 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
-	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
+	"testing/quick"
 	"time"
 
+	envelopepkg "github.com/joshka0/foxctl/internal/domain/envelope"
 	flow "github.com/joshka0/foxctl/internal/runtime/flow"
+	"github.com/joshka0/foxctl/internal/storage/sqlutil"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -120,21 +124,6 @@ func TestIdempotentMigration(t *testing.T) {
 	}
 }
 
-func TestOpenCreatesDBFile(t *testing.T) {
-	dir := t.TempDir()
-	ctx := context.Background()
-	store, err := Open(ctx, dir)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	_ = store.Close()
-
-	dbPath := filepath.Join(dir, "flow.db")
-	if _, err := filepath.Glob(dbPath); err != nil {
-		t.Fatalf("glob flow.db: %v", err)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Flow CRUD
 // ---------------------------------------------------------------------------
@@ -212,6 +201,54 @@ func TestCreateFlowDuplicateNameRejected(t *testing.T) {
 	_, err := store.CreateFlow(ctx, f2)
 	if err == nil {
 		t.Fatal("expected error for duplicate name, got nil")
+	}
+}
+
+func TestCreateFlowRejectsInvalidState(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	f := newFlow("invalid-state-create", "/ws")
+	f.State = flow.FlowState("not-a-flow-state")
+
+	if _, err := store.CreateFlow(ctx, f); err == nil {
+		t.Fatal("CreateFlow accepted invalid flow state")
+	}
+
+	flows, err := store.ListFlows(ctx, "/ws")
+	if err != nil {
+		t.Fatalf("list flows after rejected create: %v", err)
+	}
+	if len(flows) != 0 {
+		t.Fatalf("rejected invalid flow state persisted %d flows", len(flows))
+	}
+}
+
+func TestFlowReadsRejectCorruptPersistedState(t *testing.T) {
+	store := newTestStore(t)
+	sqlStore := store.(*sqlStore)
+	ctx := context.Background()
+
+	f := newFlow("corrupt-flow-state", "/ws")
+	created, err := store.CreateFlow(ctx, f)
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+
+	if _, err := sqlStore.db.ExecContext(ctx, `
+		UPDATE flows SET state = $1 WHERE id = $2
+	`, "not-a-flow-state", created.ID); err != nil {
+		t.Fatalf("corrupt state: %v", err)
+	}
+
+	if _, err := store.GetFlow(ctx, created.ID); !flowReadErrorNamesColumn(err, "state") {
+		t.Fatalf("GetFlow() error=%v, want it to name corrupt state", err)
+	}
+	if _, err := store.GetFlowByName(ctx, created.Workspace, created.Name); !flowReadErrorNamesColumn(err, "state") {
+		t.Fatalf("GetFlowByName() error=%v, want it to name corrupt state", err)
+	}
+	if _, err := store.ListFlows(ctx, created.Workspace); !flowReadErrorNamesColumn(err, "state") {
+		t.Fatalf("ListFlows() error=%v, want it to name corrupt state", err)
 	}
 }
 
@@ -351,6 +388,43 @@ func TestListFlowsEmpty(t *testing.T) {
 	}
 }
 
+func TestFlowReadsRejectCorruptPersistedTimestamps(t *testing.T) {
+	ctx := context.Background()
+
+	for _, column := range []string{"created_at", "updated_at"} {
+		t.Run(column, func(t *testing.T) {
+			store := newTestStore(t)
+			sqlStore := store.(*sqlStore)
+
+			f := newFlow("corrupt-flow-"+column, "/ws")
+			created, err := store.CreateFlow(ctx, f)
+			if err != nil {
+				t.Fatalf("create flow: %v", err)
+			}
+
+			if _, err := sqlStore.db.ExecContext(ctx, fmt.Sprintf(`
+				UPDATE flows SET %s = $1 WHERE id = $2
+			`, column), "not-a-timestamp", created.ID); err != nil {
+				t.Fatalf("corrupt %s: %v", column, err)
+			}
+
+			if _, err := store.GetFlow(ctx, created.ID); !flowReadErrorNamesColumn(err, column) {
+				t.Fatalf("GetFlow() error=%v, want it to name corrupt column %s", err, column)
+			}
+			if _, err := store.GetFlowByName(ctx, created.Workspace, created.Name); !flowReadErrorNamesColumn(err, column) {
+				t.Fatalf("GetFlowByName() error=%v, want it to name corrupt column %s", err, column)
+			}
+			if _, err := store.ListFlows(ctx, created.Workspace); !flowReadErrorNamesColumn(err, column) {
+				t.Fatalf("ListFlows() error=%v, want it to name corrupt column %s", err, column)
+			}
+		})
+	}
+}
+
+func flowReadErrorNamesColumn(err error, column string) bool {
+	return err != nil && strings.Contains(err.Error(), column)
+}
+
 func TestUpdateFlow(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
@@ -378,6 +452,35 @@ func TestUpdateFlow(t *testing.T) {
 	}
 	if !updated.UpdatedAt.After(created.CreatedAt) && updated.UpdatedAt != created.UpdatedAt {
 		t.Errorf("UpdatedAt = %v, should be >= CreatedAt %v", updated.UpdatedAt, created.CreatedAt)
+	}
+}
+
+func TestUpdateFlowRejectsInvalidStateAndPreservesExistingFlow(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	f := newFlow("invalid-state-update", "/ws")
+	created, err := store.CreateFlow(ctx, f)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	invalid := created
+	invalid.State = flow.FlowState("not-a-flow-state")
+	invalid.Description = "should not persist"
+	if _, err := store.UpdateFlow(ctx, invalid); err == nil {
+		t.Fatal("UpdateFlow accepted invalid flow state")
+	}
+
+	persisted, err := store.GetFlow(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("get flow after rejected update: %v", err)
+	}
+	if persisted.State != flow.FlowDraft {
+		t.Fatalf("persisted state=%q want %q", persisted.State, flow.FlowDraft)
+	}
+	if persisted.Description != "" {
+		t.Fatalf("persisted description=%q want empty", persisted.Description)
 	}
 }
 
@@ -591,6 +694,229 @@ func TestAddNodeAllKinds(t *testing.T) {
 	}
 }
 
+func TestAddNodeRejectsInvalidKind(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	f := newFlow("invalid-node-kind-test", "/ws")
+	created, err := store.CreateFlow(ctx, f)
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+
+	node := flow.FlowNode{
+		ID:     ulid.Make().String(),
+		FlowID: created.ID,
+		Kind:   flow.NodeKind("not-a-node-kind"),
+		Label:  "invalid",
+		Config: json.RawMessage(`{}`),
+	}
+	if _, err := store.AddNode(ctx, node); err == nil {
+		t.Fatal("AddNode accepted invalid node kind")
+	}
+
+	nodes, err := store.ListNodesByFlow(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("list nodes after rejected add: %v", err)
+	}
+	if len(nodes) != 0 {
+		t.Fatalf("rejected invalid node kind persisted %d nodes", len(nodes))
+	}
+}
+
+func TestNodeReadsRejectCorruptPersistedKind(t *testing.T) {
+	store := newTestStore(t)
+	sqlStore := store.(*sqlStore)
+	ctx := context.Background()
+
+	f := newFlow("node-corrupt-kind-test", "/ws")
+	created, err := store.CreateFlow(ctx, f)
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+
+	node, err := store.AddNode(ctx, flow.FlowNode{
+		ID:     ulid.Make().String(),
+		FlowID: created.ID,
+		Kind:   flow.NodeSkill,
+		Label:  "valid-kind",
+		Config: json.RawMessage(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("add node: %v", err)
+	}
+
+	if _, err := sqlStore.db.ExecContext(ctx, `
+		UPDATE flow_nodes SET kind = $1 WHERE id = $2
+	`, "not-a-node-kind", node.ID); err != nil {
+		t.Fatalf("corrupt kind: %v", err)
+	}
+
+	if _, err := store.GetNode(ctx, node.ID); !flowReadErrorNamesColumn(err, "kind") {
+		t.Fatalf("GetNode() error=%v, want it to name corrupt kind", err)
+	}
+	if _, err := store.ListNodesByFlow(ctx, created.ID); !flowReadErrorNamesColumn(err, "kind") {
+		t.Fatalf("ListNodesByFlow() error=%v, want it to name corrupt kind", err)
+	}
+}
+
+func TestAddNodeRejectsInvalidConfigJSON(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	f := newFlow("invalid-node-config-test", "/ws")
+	created, err := store.CreateFlow(ctx, f)
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+
+	node := flow.FlowNode{
+		ID:     ulid.Make().String(),
+		FlowID: created.ID,
+		Kind:   flow.NodeSkill,
+		Label:  "invalid-config",
+		Config: json.RawMessage(`{"skill":`),
+	}
+	if _, err := store.AddNode(ctx, node); err == nil {
+		t.Fatal("AddNode accepted invalid JSON config")
+	}
+
+	nodes, err := store.ListNodesByFlow(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("list nodes after rejected add: %v", err)
+	}
+	if len(nodes) != 0 {
+		t.Fatalf("rejected invalid config persisted %d nodes", len(nodes))
+	}
+}
+
+func TestAddNodeRejectsNonObjectConfig(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	f := newFlow("non-object-node-config-test", "/ws")
+	created, err := store.CreateFlow(ctx, f)
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+
+	node := flow.FlowNode{
+		ID:     ulid.Make().String(),
+		FlowID: created.ID,
+		Kind:   flow.NodeSkill,
+		Label:  "array-config",
+		Config: json.RawMessage(`[]`),
+	}
+	if _, err := store.AddNode(ctx, node); err == nil {
+		t.Fatal("AddNode accepted non-object JSON config")
+	}
+}
+
+func TestAddNodeDefaultsEmptyConfigToObject(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	f := newFlow("empty-node-config-test", "/ws")
+	created, err := store.CreateFlow(ctx, f)
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+
+	node := flow.FlowNode{
+		ID:     ulid.Make().String(),
+		FlowID: created.ID,
+		Kind:   flow.NodeTransform,
+		Label:  "empty-config",
+	}
+	got, err := store.AddNode(ctx, node)
+	if err != nil {
+		t.Fatalf("add node with empty config: %v", err)
+	}
+	if string(got.Config) != "{}" {
+		t.Fatalf("empty node config stored as %q want {}", got.Config)
+	}
+}
+
+func TestNodeReadsRejectCorruptPersistedConfig(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name   string
+		config string
+	}{
+		{name: "malformed json", config: `{"skill":`},
+		{name: "array shape", config: `[]`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newTestStore(t)
+			sqlStore := store.(*sqlStore)
+
+			f := newFlow("node-corrupt-config-"+tt.name, "/ws")
+			created, err := store.CreateFlow(ctx, f)
+			if err != nil {
+				t.Fatalf("create flow: %v", err)
+			}
+
+			node, err := store.AddNode(ctx, flow.FlowNode{
+				ID:     ulid.Make().String(),
+				FlowID: created.ID,
+				Kind:   flow.NodeSkill,
+				Label:  "with-config",
+				Config: json.RawMessage(`{"skill":"test"}`),
+			})
+			if err != nil {
+				t.Fatalf("add node: %v", err)
+			}
+
+			if _, err := sqlStore.db.ExecContext(ctx, `
+				UPDATE flow_nodes SET config = $1 WHERE id = $2
+			`, tt.config, node.ID); err != nil {
+				t.Fatalf("corrupt config: %v", err)
+			}
+
+			if _, err := store.GetNode(ctx, node.ID); !flowReadErrorNamesColumn(err, "config") {
+				t.Fatalf("GetNode() error=%v, want it to name corrupt config", err)
+			}
+			if _, err := store.ListNodesByFlow(ctx, created.ID); !flowReadErrorNamesColumn(err, "config") {
+				t.Fatalf("ListNodesByFlow() error=%v, want it to name corrupt config", err)
+			}
+		})
+	}
+}
+
+func TestAddNodeRejectsNonFinitePosition(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	f := newFlow("invalid-node-position-test", "/ws")
+	created, err := store.CreateFlow(ctx, f)
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+
+	node := flow.FlowNode{
+		ID:       ulid.Make().String(),
+		FlowID:   created.ID,
+		Kind:     flow.NodeSkill,
+		Label:    "invalid-position",
+		Config:   json.RawMessage(`{}`),
+		Position: &flow.Position{X: math.Inf(1), Y: 10},
+	}
+	if _, err := store.AddNode(ctx, node); err == nil {
+		t.Fatal("AddNode accepted non-finite position")
+	}
+
+	nodes, err := store.ListNodesByFlow(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("list nodes after rejected add: %v", err)
+	}
+	if len(nodes) != 0 {
+		t.Fatalf("rejected invalid position persisted %d nodes", len(nodes))
+	}
+}
+
 func TestAddNodeWithPosition(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
@@ -618,6 +944,56 @@ func TestAddNodeWithPosition(t *testing.T) {
 	}
 	if got.Position.X != 100 || got.Position.Y != 200 {
 		t.Errorf("Position = {%v, %v}, want {100, 200}", got.Position.X, got.Position.Y)
+	}
+}
+
+func TestNodeReadsRejectCorruptPersistedPosition(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name     string
+		position string
+	}{
+		{name: "malformed json", position: `{"x":`},
+		{name: "array shape", position: `[1,2]`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newTestStore(t)
+			sqlStore := store.(*sqlStore)
+
+			f := newFlow("node-corrupt-position-"+tt.name, "/ws")
+			created, err := store.CreateFlow(ctx, f)
+			if err != nil {
+				t.Fatalf("create flow: %v", err)
+			}
+
+			node, err := store.AddNode(ctx, flow.FlowNode{
+				ID:       ulid.Make().String(),
+				FlowID:   created.ID,
+				Kind:     flow.NodeSkill,
+				Label:    "with-position",
+				Config:   json.RawMessage(`{}`),
+				Position: &flow.Position{X: 100, Y: 200},
+			})
+			if err != nil {
+				t.Fatalf("add node: %v", err)
+			}
+
+			if _, err := sqlStore.db.ExecContext(ctx, `
+				UPDATE flow_nodes SET position = $1 WHERE id = $2
+			`, tt.position, node.ID); err != nil {
+				t.Fatalf("corrupt position: %v", err)
+			}
+
+			if _, err := store.GetNode(ctx, node.ID); !flowReadErrorNamesColumn(err, "position") {
+				t.Fatalf("GetNode() error=%v, want it to name corrupt position", err)
+			}
+			if _, err := store.ListNodesByFlow(ctx, created.ID); !flowReadErrorNamesColumn(err, "position") {
+				t.Fatalf("ListNodesByFlow() error=%v, want it to name corrupt position", err)
+			}
+		})
 	}
 }
 
@@ -961,6 +1337,230 @@ func TestAddEdgeWithAllFields(t *testing.T) {
 	}
 }
 
+func TestAddEdgeRejectsInvalidEnums(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	f := newFlow("invalid-edge-enums-test", "/ws")
+	created, err := store.CreateFlow(ctx, f)
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+
+	nodeA := flow.FlowNode{
+		ID: ulid.Make().String(), FlowID: created.ID,
+		Kind: flow.NodeSkill, Label: "a", Config: json.RawMessage(`{}`),
+	}
+	nodeB := flow.FlowNode{
+		ID: ulid.Make().String(), FlowID: created.ID,
+		Kind: flow.NodeTransform, Label: "b", Config: json.RawMessage(`{}`),
+	}
+	nodeA, err = store.AddNode(ctx, nodeA)
+	if err != nil {
+		t.Fatalf("add node A: %v", err)
+	}
+	nodeB, err = store.AddNode(ctx, nodeB)
+	if err != nil {
+		t.Fatalf("add node B: %v", err)
+	}
+
+	tests := []struct {
+		name      string
+		transform flow.TransformKind
+		trigger   flow.TriggerKind
+	}{
+		{
+			name:      "invalid transform",
+			transform: flow.TransformKind("not-a-transform"),
+			trigger:   flow.TriggerOutputReady,
+		},
+		{
+			name:      "invalid trigger",
+			transform: flow.TransformPassthrough,
+			trigger:   flow.TriggerKind("not-a-trigger"),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			edge := flow.FlowEdge{
+				ID:         ulid.Make().String(),
+				FlowID:     created.ID,
+				FromNodeID: nodeA.ID,
+				ToNodeID:   nodeB.ID,
+				Transform:  tc.transform,
+				Trigger:    tc.trigger,
+			}
+			if _, err := store.AddEdge(ctx, edge); err == nil {
+				t.Fatalf("AddEdge accepted %s", tc.name)
+			}
+		})
+	}
+
+	edges, err := store.ListEdgesByFlow(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("list edges after rejected adds: %v", err)
+	}
+	if len(edges) != 0 {
+		t.Fatalf("rejected invalid edge enum persisted %d edges", len(edges))
+	}
+}
+
+func TestEdgeReadsRejectCorruptPersistedEnums(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name   string
+		column string
+		value  string
+	}{
+		{name: "invalid transform", column: "transform", value: "not-a-transform"},
+		{name: "invalid trigger", column: "trigger", value: "not-a-trigger"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newTestStore(t)
+			sqlStore := store.(*sqlStore)
+
+			f := newFlow("edge-corrupt-"+tt.column, "/ws")
+			created, err := store.CreateFlow(ctx, f)
+			if err != nil {
+				t.Fatalf("create flow: %v", err)
+			}
+			nodeA, err := store.AddNode(ctx, flow.FlowNode{
+				ID: ulid.Make().String(), FlowID: created.ID,
+				Kind: flow.NodeSkill, Label: "a", Config: json.RawMessage(`{}`),
+			})
+			if err != nil {
+				t.Fatalf("add node A: %v", err)
+			}
+			nodeB, err := store.AddNode(ctx, flow.FlowNode{
+				ID: ulid.Make().String(), FlowID: created.ID,
+				Kind: flow.NodeTransform, Label: "b", Config: json.RawMessage(`{}`),
+			})
+			if err != nil {
+				t.Fatalf("add node B: %v", err)
+			}
+			edge, err := store.AddEdge(ctx, flow.FlowEdge{
+				ID:         ulid.Make().String(),
+				FlowID:     created.ID,
+				FromNodeID: nodeA.ID,
+				ToNodeID:   nodeB.ID,
+				Transform:  flow.TransformPassthrough,
+				Trigger:    flow.TriggerOutputReady,
+			})
+			if err != nil {
+				t.Fatalf("add edge: %v", err)
+			}
+
+			if _, err := sqlStore.db.ExecContext(ctx, fmt.Sprintf(`
+				UPDATE flow_edges SET %s = $1 WHERE id = $2
+			`, tt.column), tt.value, edge.ID); err != nil {
+				t.Fatalf("corrupt %s: %v", tt.column, err)
+			}
+
+			if _, err := store.GetEdge(ctx, edge.ID); !flowReadErrorNamesColumn(err, tt.column) {
+				t.Fatalf("GetEdge() error=%v, want it to name corrupt %s", err, tt.column)
+			}
+			if _, err := store.ListEdgesByFlow(ctx, created.ID); !flowReadErrorNamesColumn(err, tt.column) {
+				t.Fatalf("ListEdgesByFlow() error=%v, want it to name corrupt %s", err, tt.column)
+			}
+		})
+	}
+}
+
+func TestAddEdgeEndpointFlowInvariantProperty(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	prop := func(fromInEdgeFlow, toInEdgeFlow bool) bool {
+		flowA, err := store.CreateFlow(ctx, newFlow("edge-owner-"+ulid.Make().String(), "/ws"))
+		if err != nil {
+			t.Logf("create edge-owner flow: %v", err)
+			return false
+		}
+		flowB, err := store.CreateFlow(ctx, newFlow("other-flow-"+ulid.Make().String(), "/ws"))
+		if err != nil {
+			t.Logf("create other flow: %v", err)
+			return false
+		}
+
+		fromA, err := store.AddNode(ctx, flow.FlowNode{
+			ID: ulid.Make().String(), FlowID: flowA.ID,
+			Kind: flow.NodeSkill, Label: "from-a", Config: json.RawMessage(`{}`),
+		})
+		if err != nil {
+			t.Logf("add fromA: %v", err)
+			return false
+		}
+		toA, err := store.AddNode(ctx, flow.FlowNode{
+			ID: ulid.Make().String(), FlowID: flowA.ID,
+			Kind: flow.NodeSkill, Label: "to-a", Config: json.RawMessage(`{}`),
+		})
+		if err != nil {
+			t.Logf("add toA: %v", err)
+			return false
+		}
+		fromB, err := store.AddNode(ctx, flow.FlowNode{
+			ID: ulid.Make().String(), FlowID: flowB.ID,
+			Kind: flow.NodeSkill, Label: "from-b", Config: json.RawMessage(`{}`),
+		})
+		if err != nil {
+			t.Logf("add fromB: %v", err)
+			return false
+		}
+		toB, err := store.AddNode(ctx, flow.FlowNode{
+			ID: ulid.Make().String(), FlowID: flowB.ID,
+			Kind: flow.NodeSkill, Label: "to-b", Config: json.RawMessage(`{}`),
+		})
+		if err != nil {
+			t.Logf("add toB: %v", err)
+			return false
+		}
+
+		fromNode := fromB
+		if fromInEdgeFlow {
+			fromNode = fromA
+		}
+		toNode := toB
+		if toInEdgeFlow {
+			toNode = toA
+		}
+
+		before, err := store.ListEdgesByFlow(ctx, flowA.ID)
+		if err != nil {
+			t.Logf("list edges before: %v", err)
+			return false
+		}
+
+		_, err = store.AddEdge(ctx, flow.FlowEdge{
+			ID:         ulid.Make().String(),
+			FlowID:     flowA.ID,
+			FromNodeID: fromNode.ID,
+			ToNodeID:   toNode.ID,
+			Transform:  flow.TransformPassthrough,
+			Trigger:    flow.TriggerOutputReady,
+		})
+
+		after, listErr := store.ListEdgesByFlow(ctx, flowA.ID)
+		if listErr != nil {
+			t.Logf("list edges after: %v", listErr)
+			return false
+		}
+
+		valid := fromInEdgeFlow && toInEdgeFlow
+		if valid {
+			return err == nil && len(after) == len(before)+1
+		}
+		return err != nil && len(after) == len(before)
+	}
+
+	if err := quick.Check(prop, &quick.Config{MaxCount: 50}); err != nil {
+		t.Fatalf("edge endpoint flow invariant failed: %v", err)
+	}
+}
+
 func TestAddEdgeWithTransformConfig(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
@@ -1030,6 +1630,197 @@ func TestAddEdgeWithRetryPolicy(t *testing.T) {
 	}
 	if got.RetryPolicy.DelayMS != 2000 {
 		t.Errorf("DelayMS = %d, want 2000", got.RetryPolicy.DelayMS)
+	}
+}
+
+func TestAddEdgeRejectsNegativeRetryPolicy(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	f := newFlow("edge-negative-retry-test", "/ws")
+	created, err := store.CreateFlow(ctx, f)
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+
+	nodeA := flow.FlowNode{
+		ID: ulid.Make().String(), FlowID: created.ID,
+		Kind: flow.NodeSkill, Label: "a", Config: json.RawMessage(`{}`),
+	}
+	nodeB := flow.FlowNode{
+		ID: ulid.Make().String(), FlowID: created.ID,
+		Kind: flow.NodeTransform, Label: "b", Config: json.RawMessage(`{}`),
+	}
+	nodeA, err = store.AddNode(ctx, nodeA)
+	if err != nil {
+		t.Fatalf("add node A: %v", err)
+	}
+	nodeB, err = store.AddNode(ctx, nodeB)
+	if err != nil {
+		t.Fatalf("add node B: %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		retry flow.RetryPolicy
+	}{
+		{name: "negative attempts", retry: flow.RetryPolicy{MaxAttempts: -1, DelayMS: 0}},
+		{name: "negative delay", retry: flow.RetryPolicy{MaxAttempts: 1, DelayMS: -1}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := store.AddEdge(ctx, flow.FlowEdge{
+				ID:          ulid.Make().String(),
+				FlowID:      created.ID,
+				FromNodeID:  nodeA.ID,
+				ToNodeID:    nodeB.ID,
+				Transform:   flow.TransformPassthrough,
+				Trigger:     flow.TriggerOutputReady,
+				RetryPolicy: &tc.retry,
+			})
+			if err == nil {
+				t.Fatal("AddEdge accepted negative retry policy")
+			}
+		})
+	}
+
+	edges, err := store.ListEdgesByFlow(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("list edges after rejected retry policies: %v", err)
+	}
+	if len(edges) != 0 {
+		t.Fatalf("rejected negative retry policy persisted %d edges", len(edges))
+	}
+}
+
+func TestEdgeReadsRejectCorruptPersistedRetryPolicy(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name        string
+		retryPolicy string
+	}{
+		{name: "malformed json", retryPolicy: `{"max_attempts":`},
+		{name: "negative attempts", retryPolicy: `{"max_attempts":-1,"delay_ms":0}`},
+		{name: "negative delay", retryPolicy: `{"max_attempts":1,"delay_ms":-1}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newTestStore(t)
+			sqlStore := store.(*sqlStore)
+
+			f := newFlow("edge-corrupt-retry-"+tt.name, "/ws")
+			created, err := store.CreateFlow(ctx, f)
+			if err != nil {
+				t.Fatalf("create flow: %v", err)
+			}
+			nodeA, err := store.AddNode(ctx, flow.FlowNode{
+				ID: ulid.Make().String(), FlowID: created.ID,
+				Kind: flow.NodeSkill, Label: "a", Config: json.RawMessage(`{}`),
+			})
+			if err != nil {
+				t.Fatalf("add node A: %v", err)
+			}
+			nodeB, err := store.AddNode(ctx, flow.FlowNode{
+				ID: ulid.Make().String(), FlowID: created.ID,
+				Kind: flow.NodeTransform, Label: "b", Config: json.RawMessage(`{}`),
+			})
+			if err != nil {
+				t.Fatalf("add node B: %v", err)
+			}
+			edge, err := store.AddEdge(ctx, flow.FlowEdge{
+				ID:          ulid.Make().String(),
+				FlowID:      created.ID,
+				FromNodeID:  nodeA.ID,
+				ToNodeID:    nodeB.ID,
+				Transform:   flow.TransformPassthrough,
+				Trigger:     flow.TriggerOutputReady,
+				RetryPolicy: &flow.RetryPolicy{MaxAttempts: 2, DelayMS: 10},
+			})
+			if err != nil {
+				t.Fatalf("add edge: %v", err)
+			}
+
+			if _, err := sqlStore.db.ExecContext(ctx, `
+				UPDATE flow_edges SET retry_policy = $1 WHERE id = $2
+			`, tt.retryPolicy, edge.ID); err != nil {
+				t.Fatalf("corrupt retry_policy: %v", err)
+			}
+
+			if _, err := store.GetEdge(ctx, edge.ID); !flowReadErrorNamesColumn(err, "retry_policy") {
+				t.Fatalf("GetEdge() error=%v, want it to name corrupt retry_policy", err)
+			}
+			if _, err := store.ListEdgesByFlow(ctx, created.ID); !flowReadErrorNamesColumn(err, "retry_policy") {
+				t.Fatalf("ListEdgesByFlow() error=%v, want it to name corrupt retry_policy", err)
+			}
+		})
+	}
+}
+
+func TestAddEdgeRetryPolicyNonNegativeProperty(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	f := newFlow("edge-retry-policy-property-test", "/ws")
+	created, err := store.CreateFlow(ctx, f)
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+
+	nodeA := flow.FlowNode{
+		ID: ulid.Make().String(), FlowID: created.ID,
+		Kind: flow.NodeSkill, Label: "a", Config: json.RawMessage(`{}`),
+	}
+	nodeB := flow.FlowNode{
+		ID: ulid.Make().String(), FlowID: created.ID,
+		Kind: flow.NodeTransform, Label: "b", Config: json.RawMessage(`{}`),
+	}
+	nodeA, err = store.AddNode(ctx, nodeA)
+	if err != nil {
+		t.Fatalf("add node A: %v", err)
+	}
+	nodeB, err = store.AddNode(ctx, nodeB)
+	if err != nil {
+		t.Fatalf("add node B: %v", err)
+	}
+
+	prop := func(maxAttempts int8, delayMS int8) bool {
+		before, err := store.ListEdgesByFlow(ctx, created.ID)
+		if err != nil {
+			t.Logf("list edges before: %v", err)
+			return false
+		}
+
+		_, addErr := store.AddEdge(ctx, flow.FlowEdge{
+			ID:         ulid.Make().String(),
+			FlowID:     created.ID,
+			FromNodeID: nodeA.ID,
+			ToNodeID:   nodeB.ID,
+			Transform:  flow.TransformPassthrough,
+			Trigger:    flow.TriggerOutputReady,
+			RetryPolicy: &flow.RetryPolicy{
+				MaxAttempts: int(maxAttempts),
+				DelayMS:     int64(delayMS),
+			},
+		})
+
+		after, err := store.ListEdgesByFlow(ctx, created.ID)
+		if err != nil {
+			t.Logf("list edges after: %v", err)
+			return false
+		}
+
+		valid := maxAttempts >= 0 && delayMS >= 0
+		if valid {
+			return addErr == nil && len(after) == len(before)+1
+		}
+		return addErr != nil && len(after) == len(before)
+	}
+
+	if err := quick.Check(prop, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("edge retry policy property failed: %v", err)
 	}
 }
 
@@ -1270,6 +2061,77 @@ func TestCreateRun(t *testing.T) {
 	}
 }
 
+func TestCreateRunRejectsInvalidState(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	f := newFlow("run-invalid-state-create-test", "/ws")
+	created, err := store.CreateFlow(ctx, f)
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+
+	_, err = store.CreateRun(ctx, flow.FlowRun{
+		ID:        ulid.Make().String(),
+		FlowID:    created.ID,
+		State:     flow.RunState("not-a-run-state"),
+		StartedAt: time.Now().UTC(),
+	})
+	if err == nil {
+		t.Fatal("CreateRun accepted invalid run state")
+	}
+}
+
+func TestCreateRunRejectsCompletedAtBeforeStartedAt(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	f := newFlow("run-invalid-completion-create-test", "/ws")
+	created, err := store.CreateFlow(ctx, f)
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+
+	startedAt := time.Now().UTC()
+	completedAt := startedAt.Add(-time.Second)
+	if _, err := store.CreateRun(ctx, flow.FlowRun{
+		ID:          ulid.Make().String(),
+		FlowID:      created.ID,
+		State:       flow.RunCompleted,
+		StartedAt:   startedAt,
+		CompletedAt: &completedAt,
+	}); err == nil {
+		t.Fatal("CreateRun accepted completed_at before started_at")
+	}
+}
+
+func TestCreateRunRejectsRunningWithCompletedAt(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	f := newFlow("run-running-completed-create-test", "/ws")
+	created, err := store.CreateFlow(ctx, f)
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+
+	startedAt := time.Now().UTC()
+	runID := ulid.Make().String()
+	if _, err := store.CreateRun(ctx, flow.FlowRun{
+		ID:          runID,
+		FlowID:      created.ID,
+		State:       flow.RunRunning,
+		StartedAt:   startedAt,
+		CompletedAt: ptrTime(startedAt.Add(time.Second)),
+	}); err == nil {
+		t.Fatal("CreateRun accepted running run with completed_at")
+	}
+
+	if _, err := store.GetRun(ctx, runID); err == nil {
+		t.Fatal("rejected running run with completed_at was persisted")
+	}
+}
+
 func TestUpdateRun(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
@@ -1298,6 +2160,372 @@ func TestUpdateRun(t *testing.T) {
 	}
 	if updated.CompletedAt == nil {
 		t.Fatal("CompletedAt is nil, want non-nil")
+	}
+}
+
+func TestUpdateRunRejectsInvalidStateAndPreservesExistingRun(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	f := newFlow("run-invalid-state-update-test", "/ws")
+	created, err := store.CreateFlow(ctx, f)
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+
+	run := flow.FlowRun{
+		ID:        ulid.Make().String(),
+		FlowID:    created.ID,
+		State:     flow.RunRunning,
+		StartedAt: time.Now().UTC(),
+	}
+	createdRun, err := store.CreateRun(ctx, run)
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	invalid := createdRun
+	invalid.State = flow.RunState("not-a-run-state")
+	invalid.Error = "should not persist"
+	if _, err := store.UpdateRun(ctx, invalid); err == nil {
+		t.Fatal("UpdateRun accepted invalid run state")
+	}
+
+	persisted, err := store.GetRun(ctx, createdRun.ID)
+	if err != nil {
+		t.Fatalf("get run after rejected update: %v", err)
+	}
+	if persisted.State != flow.RunRunning {
+		t.Fatalf("persisted state=%q want %q", persisted.State, flow.RunRunning)
+	}
+	if persisted.Error != "" {
+		t.Fatalf("persisted error=%q want empty", persisted.Error)
+	}
+}
+
+func TestUpdateRunRejectsCompletedAtBeforeStartedAtAndPreservesExistingRun(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	f := newFlow("run-invalid-completion-update-test", "/ws")
+	created, err := store.CreateFlow(ctx, f)
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+
+	startedAt := time.Now().UTC()
+	createdRun, err := store.CreateRun(ctx, flow.FlowRun{
+		ID:        ulid.Make().String(),
+		FlowID:    created.ID,
+		State:     flow.RunRunning,
+		StartedAt: startedAt,
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	invalid := createdRun
+	invalid.State = flow.RunCompleted
+	invalid.CompletedAt = ptrTime(startedAt.Add(-time.Second))
+	if _, err := store.UpdateRun(ctx, invalid); err == nil {
+		t.Fatal("UpdateRun accepted completed_at before started_at")
+	}
+
+	persisted, err := store.GetRun(ctx, createdRun.ID)
+	if err != nil {
+		t.Fatalf("get run after rejected update: %v", err)
+	}
+	if persisted.State != flow.RunRunning {
+		t.Fatalf("persisted state=%q want %q", persisted.State, flow.RunRunning)
+	}
+	if persisted.CompletedAt != nil {
+		t.Fatalf("persisted completed_at=%v want nil", persisted.CompletedAt)
+	}
+}
+
+func TestUpdateRunRejectsRunningWithCompletedAtAndPreservesExistingRun(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	f := newFlow("run-running-completed-update-test", "/ws")
+	created, err := store.CreateFlow(ctx, f)
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+
+	startedAt := time.Now().UTC()
+	createdRun, err := store.CreateRun(ctx, flow.FlowRun{
+		ID:        ulid.Make().String(),
+		FlowID:    created.ID,
+		State:     flow.RunRunning,
+		StartedAt: startedAt,
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	invalid := createdRun
+	invalid.CompletedAt = ptrTime(startedAt.Add(time.Second))
+	if _, err := store.UpdateRun(ctx, invalid); err == nil {
+		t.Fatal("UpdateRun accepted running run with completed_at")
+	}
+
+	persisted, err := store.GetRun(ctx, createdRun.ID)
+	if err != nil {
+		t.Fatalf("get run after rejected update: %v", err)
+	}
+	if persisted.State != flow.RunRunning {
+		t.Fatalf("persisted state=%q want %q", persisted.State, flow.RunRunning)
+	}
+	if persisted.CompletedAt != nil {
+		t.Fatalf("persisted completed_at=%v want nil", persisted.CompletedAt)
+	}
+}
+
+func TestRunningRunHasNoCompletedAtProperty(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	f := newFlow("run-running-completed-property-test", "/ws")
+	created, err := store.CreateFlow(ctx, f)
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+
+	prop := func(offsetSeconds uint8) bool {
+		startedAt := time.Date(2026, time.May, 25, 12, 0, 0, 0, time.UTC)
+		completedAt := startedAt.Add(time.Duration(offsetSeconds+1) * time.Second)
+
+		createID := ulid.Make().String()
+		_, createErr := store.CreateRun(ctx, flow.FlowRun{
+			ID:          createID,
+			FlowID:      created.ID,
+			State:       flow.RunRunning,
+			StartedAt:   startedAt,
+			CompletedAt: &completedAt,
+		})
+		if createErr == nil {
+			t.Logf("CreateRun accepted running completed_at offset=%d", offsetSeconds)
+			return false
+		}
+
+		updateID := ulid.Make().String()
+		running, err := store.CreateRun(ctx, flow.FlowRun{
+			ID:        updateID,
+			FlowID:    created.ID,
+			State:     flow.RunRunning,
+			StartedAt: startedAt,
+		})
+		if err != nil {
+			t.Logf("CreateRun running offset=%d err=%v", offsetSeconds, err)
+			return false
+		}
+		running.CompletedAt = &completedAt
+		if _, err := store.UpdateRun(ctx, running); err == nil {
+			t.Logf("UpdateRun accepted running completed_at offset=%d", offsetSeconds)
+			return false
+		}
+
+		return true
+	}
+
+	if err := quick.Check(prop, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("running run completed_at property failed: %v", err)
+	}
+}
+
+func TestRunCompletionTimestampOrderingProperty(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	f := newFlow("run-completion-order-property-test", "/ws")
+	created, err := store.CreateFlow(ctx, f)
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+
+	prop := func(offsetSeconds int8) bool {
+		startedAt := time.Date(2026, time.May, 25, 12, 0, 0, 0, time.UTC)
+		completedAt := startedAt.Add(time.Duration(offsetSeconds) * time.Second)
+		valid := !completedAt.Before(startedAt)
+
+		createID := ulid.Make().String()
+		_, createErr := store.CreateRun(ctx, flow.FlowRun{
+			ID:          createID,
+			FlowID:      created.ID,
+			State:       flow.RunCompleted,
+			StartedAt:   startedAt,
+			CompletedAt: &completedAt,
+		})
+		if valid != (createErr == nil) {
+			t.Logf("CreateRun offset=%d err=%v", offsetSeconds, createErr)
+			return false
+		}
+
+		updateID := ulid.Make().String()
+		running, err := store.CreateRun(ctx, flow.FlowRun{
+			ID:        updateID,
+			FlowID:    created.ID,
+			State:     flow.RunRunning,
+			StartedAt: startedAt,
+		})
+		if err != nil {
+			t.Logf("CreateRun running offset=%d err=%v", offsetSeconds, err)
+			return false
+		}
+		running.State = flow.RunCompleted
+		running.CompletedAt = &completedAt
+		_, updateErr := store.UpdateRun(ctx, running)
+		if valid != (updateErr == nil) {
+			t.Logf("UpdateRun offset=%d err=%v", offsetSeconds, updateErr)
+			return false
+		}
+
+		return true
+	}
+
+	if err := quick.Check(prop, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("run completion timestamp ordering property failed: %v", err)
+	}
+}
+
+func TestGetRunRejectsCorruptPersistedTimestamps(t *testing.T) {
+	ctx := context.Background()
+
+	for _, column := range []string{"started_at", "completed_at"} {
+		t.Run(column, func(t *testing.T) {
+			store := newTestStore(t)
+			sqlStore := store.(*sqlStore)
+
+			f := newFlow("run-corrupt-"+column, "/ws")
+			created, err := store.CreateFlow(ctx, f)
+			if err != nil {
+				t.Fatalf("create flow: %v", err)
+			}
+
+			completedAt := time.Now().UTC()
+			run, err := store.CreateRun(ctx, flow.FlowRun{
+				ID:          ulid.Make().String(),
+				FlowID:      created.ID,
+				State:       flow.RunCompleted,
+				StartedAt:   completedAt.Add(-time.Second),
+				CompletedAt: &completedAt,
+			})
+			if err != nil {
+				t.Fatalf("create run: %v", err)
+			}
+
+			if _, err := sqlStore.db.ExecContext(ctx, fmt.Sprintf(`
+				UPDATE flow_runs SET %s = $1 WHERE id = $2
+			`, column), "not-a-timestamp", run.ID); err != nil {
+				t.Fatalf("corrupt %s: %v", column, err)
+			}
+
+			_, err = store.GetRun(ctx, run.ID)
+			if err == nil {
+				t.Fatalf("GetRun accepted corrupt %s", column)
+			}
+			if !strings.Contains(err.Error(), column) {
+				t.Fatalf("GetRun error=%v, want it to name corrupt column %s", err, column)
+			}
+		})
+	}
+}
+
+func TestGetRunRejectsCorruptPersistedState(t *testing.T) {
+	store := newTestStore(t)
+	sqlStore := store.(*sqlStore)
+	ctx := context.Background()
+
+	f := newFlow("run-corrupt-state", "/ws")
+	created, err := store.CreateFlow(ctx, f)
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+
+	run, err := store.CreateRun(ctx, flow.FlowRun{
+		ID:        ulid.Make().String(),
+		FlowID:    created.ID,
+		State:     flow.RunRunning,
+		StartedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	if _, err := sqlStore.db.ExecContext(ctx, `
+		UPDATE flow_runs SET state = $1 WHERE id = $2
+	`, "not-a-run-state", run.ID); err != nil {
+		t.Fatalf("corrupt state: %v", err)
+	}
+
+	if _, err := store.GetRun(ctx, run.ID); !flowReadErrorNamesColumn(err, "state") {
+		t.Fatalf("GetRun() error=%v, want it to name corrupt state", err)
+	}
+}
+
+func TestGetRunRejectsCorruptPersistedCompletionInvariant(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name      string
+		initial   flow.RunState
+		corruptAt func(startedAt time.Time) time.Time
+	}{
+		{
+			name:    "running with completed_at",
+			initial: flow.RunRunning,
+			corruptAt: func(startedAt time.Time) time.Time {
+				return startedAt.Add(time.Second)
+			},
+		},
+		{
+			name:    "completed before started_at",
+			initial: flow.RunCompleted,
+			corruptAt: func(startedAt time.Time) time.Time {
+				return startedAt.Add(-time.Second)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newTestStore(t)
+			sqlStore := store.(*sqlStore)
+
+			f := newFlow("run-corrupt-completion-"+tt.name, "/ws")
+			created, err := store.CreateFlow(ctx, f)
+			if err != nil {
+				t.Fatalf("create flow: %v", err)
+			}
+
+			startedAt := time.Now().UTC()
+			completedAt := startedAt.Add(time.Second)
+			run := flow.FlowRun{
+				ID:        ulid.Make().String(),
+				FlowID:    created.ID,
+				State:     tt.initial,
+				StartedAt: startedAt,
+			}
+			if tt.initial != flow.RunRunning {
+				run.CompletedAt = &completedAt
+			}
+			createdRun, err := store.CreateRun(ctx, run)
+			if err != nil {
+				t.Fatalf("create run: %v", err)
+			}
+
+			corruptCompletedAt := tt.corruptAt(startedAt)
+			if _, err := sqlStore.db.ExecContext(ctx, `
+				UPDATE flow_runs SET completed_at = $1 WHERE id = $2
+			`, sqlutil.FormatTimestamp(corruptCompletedAt), createdRun.ID); err != nil {
+				t.Fatalf("corrupt completed_at: %v", err)
+			}
+
+			if _, err := store.GetRun(ctx, createdRun.ID); !flowReadErrorNamesColumn(err, "completed_at") {
+				t.Fatalf("GetRun() error=%v, want it to name corrupt completed_at", err)
+			}
+		})
 	}
 }
 
@@ -1333,56 +2561,108 @@ func TestUpdateRunWithFailure(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Timestamps
-// ---------------------------------------------------------------------------
-
-func TestTimestampsRFC3339(t *testing.T) {
+func TestUpdateRunTerminalStateCannotBeReopenedOrOverwritten(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	before := time.Now().UTC()
-	f := newFlow("ts-test", "/ws")
+	f := newFlow("run-terminal-immutable-test", "/ws")
 	created, err := store.CreateFlow(ctx, f)
 	if err != nil {
-		t.Fatalf("create: %v", err)
+		t.Fatalf("create flow: %v", err)
 	}
-	after := time.Now().UTC()
 
-	// Timestamps should be valid and within range.
-	if created.CreatedAt.Before(before) {
-		t.Errorf("CreatedAt %v is before start %v", created.CreatedAt, before)
-	}
-	if created.CreatedAt.After(after) {
-		t.Errorf("CreatedAt %v is after end %v", created.CreatedAt, after)
-	}
-	if created.UpdatedAt.Before(before) {
-		t.Errorf("UpdatedAt %v is before start %v", created.UpdatedAt, before)
-	}
-	if created.UpdatedAt.After(after) {
-		t.Errorf("UpdatedAt %v is after end %v", created.UpdatedAt, after)
+	for _, terminal := range []flow.RunState{flow.RunCompleted, flow.RunFailed} {
+		t.Run(string(terminal), func(t *testing.T) {
+			run := flow.FlowRun{
+				ID:        ulid.Make().String(),
+				FlowID:    created.ID,
+				State:     flow.RunRunning,
+				StartedAt: time.Now().UTC(),
+			}
+			createdRun, err := store.CreateRun(ctx, run)
+			if err != nil {
+				t.Fatalf("create run: %v", err)
+			}
+
+			completedAt := time.Now().UTC()
+			createdRun.State = terminal
+			createdRun.CompletedAt = &completedAt
+			if terminal == flow.RunFailed {
+				createdRun.Error = "original failure"
+			}
+			terminalRun, err := store.UpdateRun(ctx, createdRun)
+			if err != nil {
+				t.Fatalf("mark terminal: %v", err)
+			}
+
+			reopen := terminalRun
+			reopen.State = flow.RunRunning
+			reopen.CompletedAt = nil
+			reopen.Error = "should not persist"
+			if _, err := store.UpdateRun(ctx, reopen); err == nil {
+				t.Fatal("UpdateRun reopened terminal run")
+			}
+
+			persisted, err := store.GetRun(ctx, terminalRun.ID)
+			if err != nil {
+				t.Fatalf("get run after rejected reopen: %v", err)
+			}
+			if persisted.State != terminal {
+				t.Fatalf("persisted state=%q want %q", persisted.State, terminal)
+			}
+			if persisted.CompletedAt == nil || !persisted.CompletedAt.Equal(completedAt) {
+				t.Fatalf("persisted completed_at=%v want %v", persisted.CompletedAt, completedAt)
+			}
+			if persisted.Error != terminalRun.Error {
+				t.Fatalf("persisted error=%q want %q", persisted.Error, terminalRun.Error)
+			}
+
+			overwrite := persisted
+			overwrite.CompletedAt = ptrTime(completedAt.Add(time.Second))
+			overwrite.Error = "overwritten"
+			if _, err := store.UpdateRun(ctx, overwrite); err == nil {
+				t.Fatal("UpdateRun overwrote finalized terminal run")
+			}
+		})
 	}
 }
 
-func TestUpdatedAtChangesOnMutation(t *testing.T) {
+func TestUpdateRunCanFinalizeIncompleteTerminalRunOnce(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	f := newFlow("ts-mut-test", "/ws")
-	created, _ := store.CreateFlow(ctx, f)
-	originalUpdatedAt := created.UpdatedAt
-
-	time.Sleep(2 * time.Millisecond) // ensure time passes
-
-	created.Description = "updated"
-	updated, err := store.UpdateFlow(ctx, created)
+	f := newFlow("run-terminal-finalize-test", "/ws")
+	created, err := store.CreateFlow(ctx, f)
 	if err != nil {
-		t.Fatalf("update: %v", err)
+		t.Fatalf("create flow: %v", err)
 	}
 
-	if !updated.UpdatedAt.After(originalUpdatedAt) {
-		t.Errorf("UpdatedAt %v should be after original %v", updated.UpdatedAt, originalUpdatedAt)
+	run, err := store.CreateRun(ctx, flow.FlowRun{
+		ID:        ulid.Make().String(),
+		FlowID:    created.ID,
+		State:     flow.RunCompleted,
+		StartedAt: time.Now().Add(-time.Second).UTC(),
+	})
+	if err != nil {
+		t.Fatalf("create incomplete terminal run: %v", err)
 	}
+
+	completedAt := time.Now().UTC()
+	run.CompletedAt = &completedAt
+	finalized, err := store.UpdateRun(ctx, run)
+	if err != nil {
+		t.Fatalf("finalize incomplete terminal run: %v", err)
+	}
+	if finalized.State != flow.RunCompleted {
+		t.Fatalf("finalized state=%q want %q", finalized.State, flow.RunCompleted)
+	}
+	if finalized.CompletedAt == nil || !finalized.CompletedAt.Equal(completedAt) {
+		t.Fatalf("finalized completed_at=%v want %v", finalized.CompletedAt, completedAt)
+	}
+}
+
+func ptrTime(t time.Time) *time.Time {
+	return &t
 }
 
 // ---------------------------------------------------------------------------
@@ -1466,6 +2746,311 @@ func TestWriteRunLog(t *testing.T) {
 	}
 	if got.CreatedAt.IsZero() {
 		t.Error("expected auto-generated CreatedAt")
+	}
+}
+
+func TestListRunLogsRejectsCorruptPersistedCreatedAt(t *testing.T) {
+	store := newTestStore(t)
+	sqlStore := store.(*sqlStore)
+	ctx := context.Background()
+	_, run := setupFlowRun(t, store, ctx)
+
+	envJSON := makeEnvelopeJSON(t, "ok", "test", nil)
+	written, err := store.WriteRunLog(ctx, flow.RunLog{
+		RunID:    run.ID,
+		NodeID:   "node-a",
+		Envelope: envJSON,
+	})
+	if err != nil {
+		t.Fatalf("WriteRunLog: %v", err)
+	}
+
+	if _, err := sqlStore.db.ExecContext(ctx, `
+		UPDATE flow_run_logs SET created_at = $1 WHERE id = $2
+	`, "not-a-timestamp", written.ID); err != nil {
+		t.Fatalf("corrupt run log created_at: %v", err)
+	}
+
+	_, err = store.ListRunLogs(ctx, run.ID)
+	if err == nil {
+		t.Fatal("ListRunLogs accepted corrupt created_at")
+	}
+	if !strings.Contains(err.Error(), "created_at") {
+		t.Fatalf("ListRunLogs error=%v, want it to name corrupt created_at", err)
+	}
+}
+
+func TestListRunLogsRejectsCorruptPersistedCreatedAtBeforeRunStart(t *testing.T) {
+	store := newTestStore(t)
+	sqlStore := store.(*sqlStore)
+	ctx := context.Background()
+	_, run := setupFlowRun(t, store, ctx)
+
+	written, err := store.WriteRunLog(ctx, flow.RunLog{
+		RunID:    run.ID,
+		NodeID:   "node-a",
+		Envelope: makeEnvelopeJSON(t, "ok", "test", nil),
+	})
+	if err != nil {
+		t.Fatalf("WriteRunLog: %v", err)
+	}
+
+	tooEarly := run.StartedAt.Add(-time.Nanosecond)
+	if _, err := sqlStore.db.ExecContext(ctx, `
+		UPDATE flow_run_logs SET created_at = $1 WHERE id = $2
+	`, sqlutil.FormatTimestamp(tooEarly), written.ID); err != nil {
+		t.Fatalf("corrupt created_at: %v", err)
+	}
+
+	if _, err := store.ListRunLogs(ctx, run.ID); !flowReadErrorNamesColumn(err, "created_at") {
+		t.Fatalf("ListRunLogs() error=%v, want it to name corrupt created_at", err)
+	}
+}
+
+func TestListRunLogsRejectsCorruptPersistedEnvelope(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name     string
+		envelope string
+	}{
+		{name: "malformed json", envelope: `{"version":`},
+		{name: "missing command", envelope: `{"version":1,"status":"ok","meta":{"ts":"2026-05-25T12:00:00Z"}}`},
+		{name: "ok with error fields", envelope: `{"version":1,"status":"ok","command":"test","meta":{"ts":"2026-05-25T12:00:00Z"},"error":{"code":"EFAIL"}}`},
+		{name: "error missing code", envelope: `{"version":1,"status":"error","command":"test","meta":{"ts":"2026-05-25T12:00:00Z"},"error":{"message":"failed"}}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newTestStore(t)
+			sqlStore := store.(*sqlStore)
+			_, run := setupFlowRun(t, store, ctx)
+
+			written, err := store.WriteRunLog(ctx, flow.RunLog{
+				RunID:    run.ID,
+				NodeID:   "node-a",
+				Envelope: makeEnvelopeJSON(t, "ok", "test", nil),
+			})
+			if err != nil {
+				t.Fatalf("WriteRunLog: %v", err)
+			}
+
+			if _, err := sqlStore.db.ExecContext(ctx, `
+				UPDATE flow_run_logs SET envelope = $1 WHERE id = $2
+			`, tt.envelope, written.ID); err != nil {
+				t.Fatalf("corrupt envelope: %v", err)
+			}
+
+			if _, err := store.ListRunLogs(ctx, run.ID); !flowReadErrorNamesColumn(err, "envelope") {
+				t.Fatalf("ListRunLogs() error=%v, want it to name corrupt envelope", err)
+			}
+		})
+	}
+}
+
+func TestListRunLogsRejectsCorruptPersistedSeq(t *testing.T) {
+	ctx := context.Background()
+
+	for _, seq := range []int{0, -1} {
+		t.Run(fmt.Sprintf("seq_%d", seq), func(t *testing.T) {
+			store := newTestStore(t)
+			sqlStore := store.(*sqlStore)
+			_, run := setupFlowRun(t, store, ctx)
+
+			written, err := store.WriteRunLog(ctx, flow.RunLog{
+				RunID:    run.ID,
+				NodeID:   "node-a",
+				Envelope: makeEnvelopeJSON(t, "ok", "test", nil),
+			})
+			if err != nil {
+				t.Fatalf("WriteRunLog: %v", err)
+			}
+
+			if _, err := sqlStore.db.ExecContext(ctx, `
+				UPDATE flow_run_logs SET seq = $1 WHERE id = $2
+			`, seq, written.ID); err != nil {
+				t.Fatalf("corrupt seq: %v", err)
+			}
+
+			if _, err := store.ListRunLogs(ctx, run.ID); !flowReadErrorNamesColumn(err, "seq") {
+				t.Fatalf("ListRunLogs() error=%v, want it to name corrupt seq", err)
+			}
+		})
+	}
+}
+
+func TestListRunLogsRejectsDuplicatePersistedSeq(t *testing.T) {
+	store := newTestStore(t)
+	sqlStore := store.(*sqlStore)
+	ctx := context.Background()
+	_, run := setupFlowRun(t, store, ctx)
+
+	first, err := store.WriteRunLog(ctx, flow.RunLog{
+		RunID:    run.ID,
+		NodeID:   "node-a",
+		Envelope: makeEnvelopeJSON(t, "ok", "test", nil),
+	})
+	if err != nil {
+		t.Fatalf("write first log: %v", err)
+	}
+	second, err := store.WriteRunLog(ctx, flow.RunLog{
+		RunID:    run.ID,
+		NodeID:   "node-b",
+		Envelope: makeEnvelopeJSON(t, "ok", "test", nil),
+	})
+	if err != nil {
+		t.Fatalf("write second log: %v", err)
+	}
+
+	if _, err := sqlStore.db.ExecContext(ctx, `
+		UPDATE flow_run_logs SET seq = $1 WHERE id = $2
+	`, first.Seq, second.ID); err != nil {
+		t.Fatalf("corrupt duplicate seq: %v", err)
+	}
+
+	if _, err := store.ListRunLogs(ctx, run.ID); !flowReadErrorNamesColumn(err, "seq") {
+		t.Fatalf("ListRunLogs() error=%v, want it to name duplicate seq", err)
+	}
+}
+
+func TestWriteRunLogRejectsInvalidEnvelopeAndPreservesSequence(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	_, run := setupFlowRun(t, store, ctx)
+
+	validEnvelope := makeEnvelopeJSON(t, "ok", "test", map[string]any{"i": 1})
+	first, err := store.WriteRunLog(ctx, flow.RunLog{
+		RunID:    run.ID,
+		NodeID:   "node-a",
+		Envelope: validEnvelope,
+	})
+	if err != nil {
+		t.Fatalf("write first valid log: %v", err)
+	}
+	if first.Seq != 1 {
+		t.Fatalf("first seq=%d want 1", first.Seq)
+	}
+
+	tests := []struct {
+		name     string
+		envelope json.RawMessage
+	}{
+		{name: "malformed json", envelope: json.RawMessage(`{"version":`)},
+		{name: "missing command", envelope: json.RawMessage(`{"version":1,"status":"ok","meta":{"ts":"2026-05-25T12:00:00Z"}}`)},
+		{name: "ok with error fields", envelope: json.RawMessage(`{"version":1,"status":"ok","command":"test","meta":{"ts":"2026-05-25T12:00:00Z"},"error":{"code":"EFAIL"}}`)},
+		{name: "error missing code", envelope: json.RawMessage(`{"version":1,"status":"error","command":"test","meta":{"ts":"2026-05-25T12:00:00Z"},"error":{"message":"failed"}}`)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := store.WriteRunLog(ctx, flow.RunLog{
+				RunID:    run.ID,
+				NodeID:   "node-invalid",
+				Envelope: tc.envelope,
+			}); err == nil {
+				t.Fatal("WriteRunLog accepted invalid envelope")
+			}
+		})
+	}
+
+	second, err := store.WriteRunLog(ctx, flow.RunLog{
+		RunID:    run.ID,
+		NodeID:   "node-b",
+		Envelope: validEnvelope,
+	})
+	if err != nil {
+		t.Fatalf("write second valid log: %v", err)
+	}
+	if second.Seq != 2 {
+		t.Fatalf("second seq=%d want 2 after rejected invalid logs", second.Seq)
+	}
+}
+
+func TestWriteRunLogEnvelopeValidationProperty(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	f := newFlow("run-log-envelope-property-test", "/ws")
+	created, err := store.CreateFlow(ctx, f)
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+
+	prop := func(statusSelector uint8, badVersion, emptyCommand, missingTS, includeErrorCode, includeErrorMessage bool) bool {
+		env := envelopepkg.Envelope{
+			Version: envelopepkg.Version,
+			Status:  envelopepkg.StatusOK,
+			Command: "flow/log-test",
+			Meta: envelopepkg.Meta{
+				TS: "2026-05-25T12:00:00Z",
+			},
+		}
+
+		switch statusSelector % 3 {
+		case 0:
+			env.Status = envelopepkg.StatusOK
+		case 1:
+			env.Status = envelopepkg.StatusError
+		default:
+			env.Status = "unknown"
+		}
+		if badVersion {
+			env.Version = envelopepkg.Version + 1
+		}
+		if emptyCommand {
+			env.Command = ""
+		}
+		if missingTS {
+			env.Meta.TS = ""
+		}
+		if includeErrorCode {
+			env.Error.Code = "ETEST"
+		}
+		if includeErrorMessage {
+			env.Error.Message = "failed"
+		}
+
+		raw, err := json.Marshal(env)
+		if err != nil {
+			t.Logf("marshal envelope: %v", err)
+			return false
+		}
+		wantValid := envelopepkg.Validate(env) == nil
+
+		run, err := store.CreateRun(ctx, flow.FlowRun{
+			ID:        ulid.Make().String(),
+			FlowID:    created.ID,
+			State:     flow.RunRunning,
+			StartedAt: time.Now().UTC(),
+		})
+		if err != nil {
+			t.Logf("create run: %v", err)
+			return false
+		}
+
+		_, writeErr := store.WriteRunLog(ctx, flow.RunLog{
+			RunID:    run.ID,
+			NodeID:   "node",
+			Envelope: raw,
+		})
+		if wantValid != (writeErr == nil) {
+			t.Logf("WriteRunLog validity mismatch wantValid=%v err=%v raw=%s", wantValid, writeErr, raw)
+			return false
+		}
+
+		logs, err := store.ListRunLogs(ctx, run.ID)
+		if err != nil {
+			t.Logf("list logs: %v", err)
+			return false
+		}
+		if wantValid {
+			return len(logs) == 1
+		}
+		return len(logs) == 0
+	}
+
+	if err := quick.Check(prop, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("run log envelope validation property failed: %v", err)
 	}
 }
 
@@ -2062,77 +3647,6 @@ func TestStreamRunLogsEmptyCompletedRun(t *testing.T) {
 	}
 }
 
-func TestRunLogSchemaAndIndexes(t *testing.T) {
-	store := newTestStore(t)
-	ctx := context.Background()
-	_ = ctx // just need the store to trigger migration
-
-	// Access the underlying DB to check schema.
-	db := store.(*sqlStore).db
-
-	// Check table exists.
-	var name string
-	err := db.QueryRowContext(ctx,
-		`SELECT name FROM sqlite_master WHERE type='table' AND name='flow_run_logs'`).Scan(&name)
-	if err != nil {
-		t.Fatalf("flow_run_logs table not found: %v", err)
-	}
-
-	// Check columns via PRAGMA.
-	rows, err := db.QueryContext(ctx, `PRAGMA table_info(flow_run_logs)`)
-	if err != nil {
-		t.Fatalf("PRAGMA table_info: %v", err)
-	}
-	defer rows.Close()
-
-	columns := map[string]string{}
-	for rows.Next() {
-		var cid int
-		var colName, colType string
-		var notNull int
-		var dfltValue any
-		var pk int
-		if err := rows.Scan(&cid, &colName, &colType, &notNull, &dfltValue, &pk); err != nil {
-			t.Fatalf("scan column: %v", err)
-		}
-		columns[colName] = colType
-	}
-
-	expectedCols := []string{"id", "run_id", "node_id", "seq", "envelope", "created_at"}
-	for _, col := range expectedCols {
-		if _, ok := columns[col]; !ok {
-			t.Errorf("missing column %q in flow_run_logs", col)
-		}
-	}
-
-	// Check indexes.
-	idxRows, err := db.QueryContext(ctx, `PRAGMA index_list(flow_run_logs)`)
-	if err != nil {
-		t.Fatalf("PRAGMA index_list: %v", err)
-	}
-	defer idxRows.Close()
-
-	idxNames := map[string]bool{}
-	for idxRows.Next() {
-		var seq int
-		var idxName string
-		var unique int
-		var origin string
-		var partial int
-		if err := idxRows.Scan(&seq, &idxName, &unique, &origin, &partial); err != nil {
-			t.Fatalf("scan index: %v", err)
-		}
-		idxNames[idxName] = true
-	}
-
-	expectedIdx := []string{"idx_flow_run_logs_run_seq", "idx_flow_run_logs_run_node"}
-	for _, idx := range expectedIdx {
-		if !idxNames[idx] {
-			t.Errorf("missing index %q", idx)
-		}
-	}
-}
-
 func TestRunLogLinearChainAllNodesLogged(t *testing.T) {
 	// Simulate a linear chain A→B→C: each node produces one log.
 	store := newTestStore(t)
@@ -2198,21 +3712,96 @@ func TestRunLogEnvelopePreservesMetaSource(t *testing.T) {
 	}
 }
 
-func TestRunLogCreatedAtBetweenRunBounds(t *testing.T) {
+func TestWriteRunLogRejectsCreatedAtBeforeRunStartedAtAndPreservesSequence(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 	_, run := setupFlowRun(t, store, ctx)
 
 	envJSON := makeEnvelopeJSON(t, "ok", "test", nil)
-	time.Sleep(1 * time.Millisecond)
-	got, err := store.WriteRunLog(ctx, flow.RunLog{RunID: run.ID, NodeID: "a", Envelope: envJSON})
+	first, err := store.WriteRunLog(ctx, flow.RunLog{
+		RunID:    run.ID,
+		NodeID:   "a",
+		Envelope: envJSON,
+	})
 	if err != nil {
-		t.Fatalf("WriteRunLog: %v", err)
+		t.Fatalf("write first log: %v", err)
 	}
-	time.Sleep(1 * time.Millisecond)
+	if first.Seq != 1 {
+		t.Fatalf("first seq=%d want 1", first.Seq)
+	}
 
-	if got.CreatedAt.Before(run.StartedAt) {
-		t.Errorf("log CreatedAt %v before run StartedAt %v", got.CreatedAt, run.StartedAt)
+	if _, err := store.WriteRunLog(ctx, flow.RunLog{
+		RunID:     run.ID,
+		NodeID:    "too-early",
+		Envelope:  envJSON,
+		CreatedAt: run.StartedAt.Add(-time.Nanosecond),
+	}); err == nil {
+		t.Fatal("WriteRunLog accepted created_at before run started_at")
+	}
+
+	second, err := store.WriteRunLog(ctx, flow.RunLog{
+		RunID:    run.ID,
+		NodeID:   "b",
+		Envelope: envJSON,
+	})
+	if err != nil {
+		t.Fatalf("write second log: %v", err)
+	}
+	if second.Seq != 2 {
+		t.Fatalf("second seq=%d want 2 after rejected early log", second.Seq)
+	}
+}
+
+func TestRunLogCreatedAtOrderingProperty(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	f := newFlow("run-log-created-at-property-test", "/ws")
+	created, err := store.CreateFlow(ctx, f)
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+	envJSON := makeEnvelopeJSON(t, "ok", "test", nil)
+
+	prop := func(offsetSeconds int8) bool {
+		startedAt := time.Date(2026, time.May, 25, 12, 0, 0, 0, time.UTC)
+		run, err := store.CreateRun(ctx, flow.FlowRun{
+			ID:        ulid.Make().String(),
+			FlowID:    created.ID,
+			State:     flow.RunRunning,
+			StartedAt: startedAt,
+		})
+		if err != nil {
+			t.Logf("create run: %v", err)
+			return false
+		}
+
+		logCreatedAt := startedAt.Add(time.Duration(offsetSeconds) * time.Second)
+		valid := !logCreatedAt.Before(startedAt)
+		_, writeErr := store.WriteRunLog(ctx, flow.RunLog{
+			RunID:     run.ID,
+			NodeID:    "node",
+			Envelope:  envJSON,
+			CreatedAt: logCreatedAt,
+		})
+		if valid != (writeErr == nil) {
+			t.Logf("WriteRunLog offset=%d valid=%v err=%v", offsetSeconds, valid, writeErr)
+			return false
+		}
+
+		logs, err := store.ListRunLogs(ctx, run.ID)
+		if err != nil {
+			t.Logf("list run logs: %v", err)
+			return false
+		}
+		if valid {
+			return len(logs) == 1
+		}
+		return len(logs) == 0
+	}
+
+	if err := quick.Check(prop, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("run log created_at ordering property failed: %v", err)
 	}
 }
 

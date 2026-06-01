@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/storage/sqlutil"
@@ -69,8 +70,12 @@ type ActorRecord struct {
 	Config Config `json:"-"`
 }
 
-// ErrActorNotFound indicates the actor was not found.
-var ErrActorNotFound = errors.New("actor: not found")
+var (
+	// ErrActorNotFound indicates the actor was not found.
+	ErrActorNotFound = errors.New("actor: not found")
+	// ErrInvalidActorStatus indicates a persisted actor lifecycle status is not recognized.
+	ErrInvalidActorStatus = errors.New("actor: invalid status")
+)
 
 // SQLiteRegistryStore implements RegistryStore using SQLite.
 type SQLiteRegistryStore struct {
@@ -115,10 +120,16 @@ func (s *SQLiteRegistryStore) Close() error {
 
 // RegisterActor persists an actor configuration.
 func (s *SQLiteRegistryStore) RegisterActor(ctx context.Context, reg ActorRecord) error {
+	normalizedStatus, err := normalizeActorStatus(reg.Status, true)
+	if err != nil {
+		return err
+	}
+	reg.Status = normalizedStatus
+
 	now := time.Now().UTC()
 
 	// Use UPSERT to handle re-registration
-	_, err := s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO actor_registry (namespace, role, config_json, status, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(namespace) DO UPDATE SET
@@ -166,10 +177,13 @@ func (s *SQLiteRegistryStore) GetActor(ctx context.Context, namespace string) (A
 		}
 		return ActorRecord{}, fmt.Errorf("get actor: %w", err)
 	}
+	if err := validateActorRecordStatus(&rec); err != nil {
+		return ActorRecord{}, err
+	}
 
-	// Parse timestamps
-	rec.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt)
-	rec.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt)
+	if err := parseActorTimestamps(&rec, createdAt, updatedAt); err != nil {
+		return ActorRecord{}, err
+	}
 
 	// Parse config from JSON
 	if err := json.Unmarshal([]byte(rec.ConfigJSON), &rec.Config); err != nil {
@@ -199,9 +213,13 @@ func (s *SQLiteRegistryStore) ListActors(ctx context.Context) ([]ActorRecord, er
 		if err := rows.Scan(&rec.Namespace, &rec.Role, &rec.ConfigJSON, &rec.Status, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan actor: %w", err)
 		}
+		if err := validateActorRecordStatus(&rec); err != nil {
+			return nil, err
+		}
 
-		rec.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt)
-		rec.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt)
+		if err := parseActorTimestamps(&rec, createdAt, updatedAt); err != nil {
+			return nil, err
+		}
 
 		// Parse config from JSON
 		if err := json.Unmarshal([]byte(rec.ConfigJSON), &rec.Config); err != nil {
@@ -221,6 +239,12 @@ func (s *SQLiteRegistryStore) ListActors(ctx context.Context) ([]ActorRecord, er
 
 // UpdateStatus updates an actor's status.
 func (s *SQLiteRegistryStore) UpdateStatus(ctx context.Context, namespace string, status ActorStatus) error {
+	normalizedStatus, err := normalizeActorStatus(status, false)
+	if err != nil {
+		return err
+	}
+	status = normalizedStatus
+
 	now := time.Now().UTC()
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE actor_registry
@@ -242,6 +266,12 @@ func (s *SQLiteRegistryStore) UpdateStatus(ctx context.Context, namespace string
 
 // ListActorsByStatus returns actors with the given status.
 func (s *SQLiteRegistryStore) ListActorsByStatus(ctx context.Context, status ActorStatus) ([]ActorRecord, error) {
+	normalizedStatus, err := normalizeActorStatus(status, false)
+	if err != nil {
+		return nil, err
+	}
+	status = normalizedStatus
+
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT namespace, role, config_json, status, created_at, updated_at
 		FROM actor_registry
@@ -261,9 +291,13 @@ func (s *SQLiteRegistryStore) ListActorsByStatus(ctx context.Context, status Act
 		if err := rows.Scan(&rec.Namespace, &rec.Role, &rec.ConfigJSON, &rec.Status, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan actor: %w", err)
 		}
+		if err := validateActorRecordStatus(&rec); err != nil {
+			return nil, err
+		}
 
-		rec.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt)
-		rec.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt)
+		if err := parseActorTimestamps(&rec, createdAt, updatedAt); err != nil {
+			return nil, err
+		}
 
 		// Parse config from JSON
 		if err := json.Unmarshal([]byte(rec.ConfigJSON), &rec.Config); err != nil {
@@ -274,6 +308,45 @@ func (s *SQLiteRegistryStore) ListActorsByStatus(ctx context.Context, status Act
 	}
 
 	return records, rows.Err()
+}
+
+func validateActorRecordStatus(rec *ActorRecord) error {
+	normalizedStatus, err := normalizeActorStatus(rec.Status, false)
+	if err != nil {
+		return err
+	}
+	rec.Status = normalizedStatus
+	return nil
+}
+
+func normalizeActorStatus(status ActorStatus, defaultEmpty bool) (ActorStatus, error) {
+	status = ActorStatus(strings.TrimSpace(string(status)))
+	if status == "" {
+		if defaultEmpty {
+			return ActorStatusRegistered, nil
+		}
+		return "", fmt.Errorf("%w: empty", ErrInvalidActorStatus)
+	}
+
+	switch status {
+	case ActorStatusRegistered, ActorStatusRunning, ActorStatusStopped, ActorStatusError:
+		return status, nil
+	default:
+		return "", fmt.Errorf("%w: %q", ErrInvalidActorStatus, status)
+	}
+}
+
+func parseActorTimestamps(rec *ActorRecord, createdAt, updatedAt string) error {
+	var err error
+	rec.CreatedAt, err = sqlutil.ScanTimestamp(createdAt)
+	if err != nil {
+		return fmt.Errorf("actor: scan created_at: %w", err)
+	}
+	rec.UpdatedAt, err = sqlutil.ScanTimestamp(updatedAt)
+	if err != nil {
+		return fmt.Errorf("actor: scan updated_at: %w", err)
+	}
+	return nil
 }
 
 // MarshalConfig serializes an actor.Config to JSON for storage.

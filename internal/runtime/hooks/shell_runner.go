@@ -85,6 +85,9 @@ func parseShellOutput(data []byte) (Output, error) {
 	if err := json.Unmarshal(trimmed, &out); err == nil {
 		// Valid JSON - check if it has a decision field
 		if out.Decision != "" {
+			if !out.Decision.IsValid() {
+				return Output{}, fmt.Errorf("invalid hook decision %q", out.Decision)
+			}
 			return out, nil
 		}
 	}

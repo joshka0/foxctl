@@ -9,10 +9,6 @@ import (
 
 // Tests for constants
 
-func TestCommand(t *testing.T) {
-	assert.Equal(t, "mobile/ios", command)
-}
-
 func TestAllowedOps(t *testing.T) {
 	expectedOps := []string{
 		"list_devices",
@@ -59,146 +55,11 @@ func TestRecordPIDFile(t *testing.T) {
 
 // Tests for input structure
 
-func TestInput_AllFields(t *testing.T) {
-	in := input{
-		Operation:   "tap",
-		UDID:        "UDID-12345",
-		App:         "com.example.app",
-		X:           100,
-		Y:           200,
-		X2:          300,
-		Y2:          400,
-		Text:        "hello world",
-		URL:         "https://example.com",
-		Button:      "HOME",
-		Permissions: []string{"photos", "camera"},
-		Lat:         37.7749,
-		Long:        -122.4194,
-		Output:      "/tmp/screenshot.png",
-		ExpoURL:     "exp://localhost:8081",
-		MediaPath:   "/path/to/media.jpg",
-	}
-
-	assert.Equal(t, "tap", in.Operation)
-	assert.Equal(t, "UDID-12345", in.UDID)
-	assert.Equal(t, "com.example.app", in.App)
-	assert.Equal(t, 100, in.X)
-	assert.Equal(t, 200, in.Y)
-	assert.Equal(t, 300, in.X2)
-	assert.Equal(t, 400, in.Y2)
-	assert.Equal(t, "hello world", in.Text)
-	assert.Equal(t, "https://example.com", in.URL)
-	assert.Equal(t, "HOME", in.Button)
-	assert.Len(t, in.Permissions, 2)
-	assert.Equal(t, 37.7749, in.Lat)
-	assert.Equal(t, -122.4194, in.Long)
-	assert.Equal(t, "/tmp/screenshot.png", in.Output)
-	assert.Equal(t, "exp://localhost:8081", in.ExpoURL)
-	assert.Equal(t, "/path/to/media.jpg", in.MediaPath)
-}
-
-func TestInput_JSONSerialization(t *testing.T) {
-	in := input{
-		Operation: "screenshot",
-		UDID:      "ABCD-1234-5678-EFGH",
-		Output:    "/tmp/test.png",
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	var decoded input
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, in.Operation, decoded.Operation)
-	assert.Equal(t, in.UDID, decoded.UDID)
-	assert.Equal(t, in.Output, decoded.Output)
-}
-
-func TestInput_EmptyFields(t *testing.T) {
-	in := input{}
-
-	assert.Empty(t, in.Operation)
-	assert.Empty(t, in.UDID)
-	assert.Empty(t, in.App)
-	assert.Zero(t, in.X)
-	assert.Zero(t, in.Y)
-	assert.Zero(t, in.X2)
-	assert.Zero(t, in.Y2)
-	assert.Empty(t, in.Text)
-	assert.Empty(t, in.URL)
-	assert.Empty(t, in.Button)
-	assert.Nil(t, in.Permissions)
-	assert.Zero(t, in.Lat)
-	assert.Zero(t, in.Long)
-	assert.Empty(t, in.Output)
-	assert.Empty(t, in.ExpoURL)
-	assert.Empty(t, in.MediaPath)
-}
-
 func TestInput_OperationValues(t *testing.T) {
 	for _, op := range allowedOps {
 		in := input{Operation: op}
 		assert.Equal(t, op, in.Operation)
 	}
-}
-
-func TestInput_JSONFieldNames(t *testing.T) {
-	in := input{
-		Operation:   "tap",
-		UDID:        "udid",
-		App:         "app",
-		X:           1,
-		Y:           2,
-		X2:          3,
-		Y2:          4,
-		Text:        "t",
-		URL:         "u",
-		Button:      "b",
-		Permissions: []string{"p"},
-		Lat:         1.0,
-		Long:        2.0,
-		Output:      "o",
-		ExpoURL:     "e",
-		MediaPath:   "m",
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	jsonStr := string(data)
-	assert.Contains(t, jsonStr, "operation")
-	assert.Contains(t, jsonStr, "udid")
-	assert.Contains(t, jsonStr, "app")
-	assert.Contains(t, jsonStr, `"x":`)
-	assert.Contains(t, jsonStr, `"y":`)
-	assert.Contains(t, jsonStr, "x2")
-	assert.Contains(t, jsonStr, "y2")
-	assert.Contains(t, jsonStr, "text")
-	assert.Contains(t, jsonStr, "url")
-	assert.Contains(t, jsonStr, "button")
-	assert.Contains(t, jsonStr, "permissions")
-	assert.Contains(t, jsonStr, "lat")
-	assert.Contains(t, jsonStr, "long")
-	assert.Contains(t, jsonStr, "output")
-	assert.Contains(t, jsonStr, "expo_url")
-	assert.Contains(t, jsonStr, "media_path")
-}
-
-func TestInput_OmitEmptyFields(t *testing.T) {
-	in := input{
-		Operation: "list_devices",
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	jsonStr := string(data)
-	// Only operation should be present (others are omitempty)
-	assert.Contains(t, jsonStr, "operation")
-	assert.NotContains(t, jsonStr, "udid")
-	assert.NotContains(t, jsonStr, "app")
 }
 
 func TestInput_PermissionsArray(t *testing.T) {

@@ -11,11 +11,8 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 	"github.com/joshka0/foxctl/internal/domain/policy"
-	"github.com/joshka0/foxctl/internal/platform/config"
-	"github.com/joshka0/foxctl/internal/storage/cas"
-	"github.com/rs/zerolog"
 )
 
 func skipIfNoGopls(t *testing.T) {
@@ -25,43 +22,23 @@ func skipIfNoGopls(t *testing.T) {
 	}
 }
 
-func newTestRunContext(t *testing.T, stdout *bytes.Buffer, workspace string) *skillmain.RunContext {
+func newTestRunContext(t *testing.T, stdout *bytes.Buffer, workspace string) *lite.RunContext {
 	t.Helper()
 	t.Setenv("FOXCTL_WORKSPACE", workspace)
-	state := t.TempDir()
-	casPath := filepath.Join(state, "cas")
-	casStore, err := cas.NewStore(casPath)
-	if err != nil {
-		t.Fatalf("open cas: %v", err)
-	}
 
 	pv, err := policy.NewPathValidator(workspace, nil)
 	if err != nil {
 		t.Fatalf("path validator: %v", err)
 	}
 
-	cfg := config.Config{
-		Home:           state,
-		InlineOutputKB: 64,
-		MaxCaptureKB:   10240,
-		Paths: config.Paths{
-			CAS:   casPath,
-			Jobs:  filepath.Join(state, "jobs"),
-			Cache: filepath.Join(state, "cache"),
-		},
-	}
-
-	return &skillmain.RunContext{
-		Config:        cfg,
-		CASStore:      casStore,
+	return &lite.RunContext{
+		Config:        lite.LiteConfig{Home: t.TempDir(), InlineOutputKB: 64},
 		Workspace:     workspace,
-		Logger:        zerolog.Nop(),
 		PathValidator: pv,
 		Validator:     validator.New(),
 		Stdout:        stdout,
 		Now:           time.Now,
-		InlineKB:      cfg.InlineOutputKB,
-		MaxPreview:    100,
+		InlineKB:      64,
 	}
 }
 

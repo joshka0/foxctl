@@ -1,6 +1,10 @@
 package toolnames
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"testing/quick"
+)
 
 func TestCanonicalizeToolName(t *testing.T) {
 	tests := []struct {
@@ -96,6 +100,72 @@ func TestValidateAllowlist(t *testing.T) {
 	for i := range expectedUnknown {
 		if unknown[i] != expectedUnknown[i] {
 			t.Fatalf("expected unknown %s at idx %d, got %s", expectedUnknown[i], i, unknown[i])
+		}
+	}
+}
+
+func TestCanonicalizeToolNameTrimsOperatorInput(t *testing.T) {
+	got, ok := CanonicalizeToolName(ToolModeRuntime, " \tFS.READ_FILE\n")
+	if !ok {
+		t.Fatal("expected whitespace-padded known runtime alias to canonicalize")
+	}
+	if got != "fs_read_file" {
+		t.Fatalf("canonical name = %q, want %q", got, "fs_read_file")
+	}
+
+	normalized, unknown := ValidateAllowlist(ToolModeRuntime, []string{" ", "\tfs.read_file\n", " bad.tool "})
+	wantNormalized := []string{"fs_read_file", "bad.tool"}
+	wantUnknown := []string{"bad.tool"}
+	assertStringSliceEqual(t, normalized, wantNormalized)
+	assertStringSliceEqual(t, unknown, wantUnknown)
+}
+
+func TestCanonicalizeToolNamePropertyAliasFormsResolveToSameTool(t *testing.T) {
+	tools := RuntimeToolNames()
+	property := func(rawToolIndex, rawAliasIndex uint8, upper bool) bool {
+		canonical := tools[int(rawToolIndex)%len(tools)]
+		alias := runtimeAliasVariant(canonical, int(rawAliasIndex))
+		if upper {
+			alias = strings.ToUpper(alias)
+		}
+
+		runtimeName, ok := CanonicalizeToolName(ToolModeRuntime, " \t"+alias+"\n")
+		if !ok || runtimeName != canonical {
+			return false
+		}
+
+		legacyName, ok := CanonicalizeToolName(ToolModeLegacy, " \t"+alias+"\n")
+		return ok && legacyName == canonicalToDotted(canonical)
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 1000}); err != nil {
+		t.Fatalf("tool alias canonicalization property failed: %v", err)
+	}
+}
+
+func runtimeAliasVariant(canonical string, index int) string {
+	switch index % 5 {
+	case 0:
+		return canonical
+	case 1:
+		return canonicalToDotted(canonical)
+	case 2:
+		return canonicalToSlash(canonical)
+	case 3:
+		return firstSepReplace(canonical, '.')
+	default:
+		return firstSepReplace(canonical, '/')
+	}
+}
+
+func assertStringSliceEqual(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("len=%d want %d; got=%v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("at index %d got %q want %q; full=%v", i, got[i], want[i], got)
 		}
 	}
 }

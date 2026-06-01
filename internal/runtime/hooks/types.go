@@ -144,6 +144,16 @@ func (d Decision) IsBlocking() bool {
 	return d == DecisionBlock
 }
 
+// IsValid returns true if the decision is part of the canonical hook contract.
+func (d Decision) IsValid() bool {
+	switch d {
+	case DecisionNone, DecisionApprove, DecisionBlock:
+		return true
+	default:
+		return false
+	}
+}
+
 // ProviderCapabilities describes what the calling provider can do.
 // This helps hooks decide whether to inject immediately or enqueue for later.
 //

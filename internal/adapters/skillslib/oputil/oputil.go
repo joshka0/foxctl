@@ -22,7 +22,7 @@ func Op(op string) string {
 func Validate(op string, allowed ...string) error {
 	normalized := Op(op)
 	for _, a := range allowed {
-		if normalized == a {
+		if normalized == Op(a) {
 			return nil
 		}
 	}
@@ -172,7 +172,7 @@ func DefaultOp(op, defaultOp string) string {
 func RequireForOp(op, value, fieldName string, requiredOps ...string) error {
 	normalized := Op(op)
 	for _, reqOp := range requiredOps {
-		if normalized == reqOp {
+		if normalized == Op(reqOp) {
 			return Require(value, fieldName)
 		}
 	}
@@ -183,7 +183,7 @@ func RequireForOp(op, value, fieldName string, requiredOps ...string) error {
 func RequireIntForOp(op string, value int, fieldName string, requiredOps ...string) error {
 	normalized := Op(op)
 	for _, reqOp := range requiredOps {
-		if normalized == reqOp {
+		if normalized == Op(reqOp) {
 			return RequireInt(value, fieldName)
 		}
 	}

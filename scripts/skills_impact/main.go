@@ -14,9 +14,11 @@ import (
 )
 
 type goListPackage struct {
-	ImportPath string
-	Dir        string
-	Deps       []string
+	ImportPath   string
+	Dir          string
+	Deps         []string
+	TestImports  []string
+	XTestImports []string
 }
 
 type impactReport struct {
@@ -54,7 +56,7 @@ func main() {
 	flag.StringVar(&baseRef, "base-ref", "", "Base git ref for changed file detection (required unless --files is provided)")
 	flag.StringVar(&headRef, "head-ref", "HEAD", "Head git ref for changed file detection")
 	flag.StringVar(&format, "format", "text", "Output format: text|json|names")
-	flag.StringVar(&mode, "mode", "skills", "Impact mode: skills|packages")
+	flag.StringVar(&mode, "mode", "skills", "Impact mode: skills|packages|changed-packages")
 	flag.StringVar(&files, "files", "", "Optional comma-separated explicit changed files (skips git diff)")
 	flag.BoolVar(&worktree, "worktree", false, "Use current unstaged, staged, and untracked working tree files")
 	flag.Parse()
@@ -71,6 +73,10 @@ func main() {
 	integrationPkgs, err := goListWithTags("integration", "./tests/integration/...")
 	if err == nil {
 		allPkgs = mergePackages(allPkgs, integrationPkgs)
+	}
+	goldenPkgs, err := goListWithTags("integration", "./tests/golden/trajectories/...")
+	if err == nil {
+		allPkgs = mergePackages(allPkgs, goldenPkgs)
 	}
 	skillPkgs, err := goList("./skills/...")
 	if err != nil {
@@ -102,6 +108,8 @@ func main() {
 			for _, pkg := range report.Packages {
 				names = append(names, pkg.ImportPath)
 			}
+		case "changed-packages":
+			names = append([]string(nil), report.ChangedPkgs...)
 		default:
 			fatalf("unsupported mode %q", mode)
 		}
@@ -112,6 +120,8 @@ func main() {
 			printSkillsReportText(report)
 		case "packages":
 			printPackageReportText(report)
+		case "changed-packages":
+			printChangedPackageReportText(report)
 		default:
 			fatalf("unsupported mode %q", mode)
 		}
@@ -251,6 +261,14 @@ func mergePackages(groups ...[]goListPackage) []goListPackage {
 			deps = append(deps, pkg.Deps...)
 			sort.Strings(deps)
 			existing.Deps = dedupeStrings(deps)
+			testImports := append(existing.TestImports[:0:0], existing.TestImports...)
+			testImports = append(testImports, pkg.TestImports...)
+			sort.Strings(testImports)
+			existing.TestImports = dedupeStrings(testImports)
+			xTestImports := append(existing.XTestImports[:0:0], existing.XTestImports...)
+			xTestImports = append(xTestImports, pkg.XTestImports...)
+			sort.Strings(xTestImports)
+			existing.XTestImports = dedupeStrings(xTestImports)
 			index[key] = existing
 		}
 	}
@@ -280,6 +298,7 @@ func buildImpactReportWithRepoRoot(repoRoot, baseRef, headRef string, changedFil
 	globalAll := false
 	directSkillReasons := map[string][]string{}
 	changedPkgReasons := map[string][]string{}
+	fanoutPkgReasons := map[string][]string{}
 
 	for _, file := range changedFiles {
 		if trigger := globalSkillTrigger(file); trigger != "" {
@@ -290,7 +309,10 @@ func buildImpactReportWithRepoRoot(repoRoot, baseRef, headRef string, changedFil
 			directSkillReasons[skillName] = append(directSkillReasons[skillName], "changed file "+file)
 		}
 		if importPath := nearestPackageImport(file, repoRoot, dirToImport); importPath != "" {
-			changedPkgReasons[importPath] = append(changedPkgReasons[importPath], "depends on changed package "+importPath)
+			changedPkgReasons[importPath] = append(changedPkgReasons[importPath], "changed file "+file)
+			if shouldFanoutPackageChange(file) {
+				fanoutPkgReasons[importPath] = append(fanoutPkgReasons[importPath], "depends on changed package "+importPath)
+			}
 		}
 	}
 
@@ -302,7 +324,7 @@ func buildImpactReportWithRepoRoot(repoRoot, baseRef, headRef string, changedFil
 	sort.Strings(globalTriggers)
 	globalTriggers = dedupeStrings(globalTriggers)
 
-	impactedPackages := buildImpactedPackages(allPkgs, changedPkgReasons, globalTriggers, globalAll)
+	impactedPackages := buildImpactedPackages(allPkgs, changedPkgReasons, fanoutPkgReasons, globalTriggers, globalAll)
 	impacted := buildImpactedSkills(skillPkgs, directSkillReasons, changedPkgReasons, globalTriggers, globalAll)
 
 	return impactReport{
@@ -316,10 +338,10 @@ func buildImpactReportWithRepoRoot(repoRoot, baseRef, headRef string, changedFil
 	}
 }
 
-func buildImpactedPackages(allPkgs []goListPackage, changedPkgReasons map[string][]string, globalTriggers []string, globalAll bool) []packageImpact {
+func buildImpactedPackages(allPkgs []goListPackage, changedPkgReasons, fanoutPkgReasons map[string][]string, globalTriggers []string, globalAll bool) []packageImpact {
 	impactedPackages := make([]packageImpact, 0)
 	for _, pkg := range allPkgs {
-		reasons := collectPackageImpactReasons(pkg, changedPkgReasons, globalTriggers, globalAll)
+		reasons := collectPackageImpactReasons(pkg, changedPkgReasons, fanoutPkgReasons, globalTriggers, globalAll)
 		if len(reasons) == 0 {
 			continue
 		}
@@ -333,7 +355,7 @@ func buildImpactedPackages(allPkgs []goListPackage, changedPkgReasons map[string
 	return impactedPackages
 }
 
-func collectPackageImpactReasons(pkg goListPackage, changedPkgReasons map[string][]string, globalTriggers []string, globalAll bool) []string {
+func collectPackageImpactReasons(pkg goListPackage, changedPkgReasons, fanoutPkgReasons map[string][]string, globalTriggers []string, globalAll bool) []string {
 	reasonSet := map[string]struct{}{}
 	if globalAll {
 		for _, trigger := range globalTriggers {
@@ -344,12 +366,20 @@ func collectPackageImpactReasons(pkg goListPackage, changedPkgReasons map[string
 	for _, reason := range changedPkgReasons[pkg.ImportPath] {
 		reasonSet[reason] = struct{}{}
 	}
-	for _, dep := range pkg.Deps {
-		for _, reason := range changedPkgReasons[dep] {
+	for _, dep := range packageTestDependencyImports(pkg) {
+		for _, reason := range fanoutPkgReasons[dep] {
 			reasonSet[reason] = struct{}{}
 		}
 	}
 	return sortedReasonSet(reasonSet)
+}
+
+func packageTestDependencyImports(pkg goListPackage) []string {
+	deps := append(pkg.Deps[:0:0], pkg.Deps...)
+	deps = append(deps, pkg.TestImports...)
+	deps = append(deps, pkg.XTestImports...)
+	sort.Strings(deps)
+	return dedupeStrings(deps)
 }
 
 func buildImpactedSkills(skillPkgs []goListPackage, directSkillReasons, changedPkgReasons map[string][]string, globalTriggers []string, globalAll bool) []skillImpact {
@@ -415,6 +445,10 @@ func globalSkillTrigger(path string) string {
 	default:
 		return ""
 	}
+}
+
+func shouldFanoutPackageChange(path string) bool {
+	return !strings.HasSuffix(normalizeSlash(strings.TrimSpace(path)), "_test.go")
 }
 
 func directSkillForPath(path string) string {
@@ -553,5 +587,16 @@ func printPackageReportText(report impactReport) {
 		for _, reason := range pkg.Reasons {
 			fmt.Printf("  reason: %s\n", reason)
 		}
+	}
+}
+
+func printChangedPackageReportText(report impactReport) {
+	fmt.Printf("Changed files: %d\n", len(report.ChangedFiles))
+	for _, file := range report.ChangedFiles {
+		fmt.Printf("- %s\n", file)
+	}
+	fmt.Printf("\nChanged packages: %d\n", len(report.ChangedPkgs))
+	for _, pkg := range report.ChangedPkgs {
+		fmt.Printf("- %s\n", pkg)
 	}
 }

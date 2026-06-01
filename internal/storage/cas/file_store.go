@@ -42,6 +42,13 @@ var (
 
 var digestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
+func validateDigest(digest string) error {
+	if !digestPattern.MatchString(digest) {
+		return fmt.Errorf("cas: invalid digest")
+	}
+	return nil
+}
+
 // Store manages content-addressable objects rooted at a filesystem path.
 type Store struct {
 	root string
@@ -180,6 +187,7 @@ func (s *Store) finalizeUpload(tmp *os.File, digest, kind string, tags []string,
 		CreatedAt: time.Now().UTC(),
 	}
 	if err := s.writeMetadata(meta); err != nil {
+		errs.Ignore(os.Remove(dest), "remove cas blob after metadata failure")
 		return Object{}, err
 	}
 	metrics.Global().RecordCASOperation()
@@ -236,6 +244,7 @@ func (s *Store) List(_ context.Context) ([]Object, error) {
 		if len(entry.Name()) != 64 {
 			continue
 		}
+		digest := "sha256:" + entry.Name()
 		metaPath := filepath.Join(s.root, "sha256", entry.Name()+".json")
 		data, err := os.ReadFile(metaPath)
 		if err != nil {
@@ -243,6 +252,9 @@ func (s *Store) List(_ context.Context) ([]Object, error) {
 		}
 		var meta Metadata
 		if err := json.Unmarshal(data, &meta); err != nil {
+			continue
+		}
+		if err := validateMetadataDigest(digest, meta); err != nil {
 			continue
 		}
 		obj, err := s.objectFromMeta(meta)
@@ -306,6 +318,9 @@ func (s *Store) Pin(_ context.Context, digest string) error {
 func (s *Store) Unpin(_ context.Context, digest string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, err := s.pathForDigest(digest); err != nil {
+		return err
+	}
 	pin := s.pinPath(digest)
 	if err := os.Remove(pin); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -326,21 +341,7 @@ func (s *Store) AddTags(_ context.Context, digest string, tags []string) error {
 	if err != nil {
 		return err
 	}
-	tagSet := make(map[string]struct{}, len(meta.Tags)+len(tags))
-	for _, t := range meta.Tags {
-		tagSet[t] = struct{}{}
-	}
-	for _, t := range tags {
-		if strings.TrimSpace(t) == "" {
-			continue
-		}
-		tagSet[t] = struct{}{}
-	}
-	meta.Tags = meta.Tags[:0]
-	for t := range tagSet {
-		meta.Tags = append(meta.Tags, t)
-	}
-	sort.Strings(meta.Tags)
+	meta.Tags = mergeTags(meta.Tags, tags)
 	return s.writeMetadata(meta)
 }
 
@@ -376,7 +377,20 @@ func (s *Store) readMetadata(digest string) (Metadata, error) {
 	if err := json.Unmarshal(data, &meta); err != nil {
 		return Metadata{}, fmt.Errorf("cas: meta parse: %w", err)
 	}
+	if err := validateMetadataDigest(digest, meta); err != nil {
+		return Metadata{}, err
+	}
 	return meta, nil
+}
+
+func validateMetadataDigest(digest string, meta Metadata) error {
+	if err := validateDigest(meta.Digest); err != nil {
+		return fmt.Errorf("cas: invalid metadata digest: %w", err)
+	}
+	if meta.Digest != digest {
+		return fmt.Errorf("%w: metadata key %s contains %s", ErrDigestMismatch, digest, meta.Digest)
+	}
+	return nil
 }
 
 func (s *Store) writeMetadata(meta Metadata) error {
@@ -411,8 +425,8 @@ func (s *Store) writeMetadata(meta Metadata) error {
 }
 
 func (s *Store) pathForDigest(digest string) (string, error) {
-	if !digestPattern.MatchString(digest) {
-		return "", fmt.Errorf("cas: invalid digest")
+	if err := validateDigest(digest); err != nil {
+		return "", err
 	}
 	hex := strings.TrimPrefix(digest, "sha256:")
 	return filepath.Join(s.root, "sha256", hex), nil
@@ -421,9 +435,14 @@ func (s *Store) pathForDigest(digest string) (string, error) {
 func mergeTags(existing []string, added []string) []string {
 	set := make(map[string]struct{}, len(existing)+len(added))
 	for _, tag := range existing {
+		tag = strings.TrimSpace(tag)
+		if tag == "" {
+			continue
+		}
 		set[tag] = struct{}{}
 	}
 	for _, tag := range added {
+		tag = strings.TrimSpace(tag)
 		if tag == "" {
 			continue
 		}

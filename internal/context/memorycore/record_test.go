@@ -3,6 +3,7 @@ package memorycore
 import (
 	"encoding/json"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/context/contextengine"
@@ -174,5 +175,63 @@ func TestRecordFromNamedEntryLabelsEvidenceOnly(t *testing.T) {
 	}
 	if record.Content == "" {
 		t.Fatalf("content should be included")
+	}
+}
+
+func TestRecordFromNamedEntryPreservesKnownReviewStatuses(t *testing.T) {
+	statuses := []ReviewStatus{
+		ReviewStatusUnreviewed,
+		ReviewStatusNeedsReview,
+		ReviewStatusReviewed,
+		ReviewStatusValidated,
+		ReviewStatusFailedValidation,
+	}
+
+	for _, status := range statuses {
+		t.Run(string(status), func(t *testing.T) {
+			record := RecordFromNamedEntry(storage.NamedEntry{
+				Name:           "memory-" + string(status),
+				Type:           "decision",
+				LifecycleState: string(LifecycleStateActive),
+				ReviewStatus:   string(status),
+				Summary:        "known review statuses must survive projection",
+			}, NamedEntryOptions{})
+
+			if record.Lifecycle.ReviewStatus != status {
+				t.Fatalf("review_status=%q want %q", record.Lifecycle.ReviewStatus, status)
+			}
+		})
+	}
+}
+
+func TestRecordFromNamedEntryDefaultsUnknownReviewStatusToUnreviewed(t *testing.T) {
+	record := RecordFromNamedEntry(storage.NamedEntry{
+		Name:           "legacy-corrupt-review-status",
+		Type:           "decision",
+		LifecycleState: string(LifecycleStateActive),
+		ReviewStatus:   "trusted",
+		Summary:        "legacy storage should not leak unknown review status",
+	}, NamedEntryOptions{})
+
+	if record.Lifecycle.ReviewStatus != ReviewStatusUnreviewed {
+		t.Fatalf("review_status=%q want %q", record.Lifecycle.ReviewStatus, ReviewStatusUnreviewed)
+	}
+}
+
+func TestRecordFromNamedEntryRejectsGeneratedUnknownReviewStatusesAtCanonicalBoundary(t *testing.T) {
+	unknownReviewStatusesDefaultClosed := func(raw string) bool {
+		record := RecordFromNamedEntry(storage.NamedEntry{
+			Name:           "generated-corrupt-review-status",
+			Type:           "decision",
+			LifecycleState: string(LifecycleStateActive),
+			ReviewStatus:   "unknown:" + raw,
+			Summary:        "generated legacy value should not become canonical",
+		}, NamedEntryOptions{})
+
+		return record.Lifecycle.ReviewStatus == ReviewStatusUnreviewed
+	}
+
+	if err := quick.Check(unknownReviewStatusesDefaultClosed, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatalf("generated unknown review status leaked into canonical record: %v", err)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/joshka0/foxctl/internal/domain/agent"
 	errs "github.com/joshka0/foxctl/internal/platform/errors"
@@ -94,14 +95,24 @@ func (s *boardSQLStore) SendMessage(ctx context.Context, msg *agent.BoardMessage
 	if msg.Status == "" {
 		msg.Status = agent.BoardMessageStatusUnread
 	}
+	if err := agent.ValidateBoardMessageStatus(msg.Status); err != nil {
+		return fmt.Errorf("board: send message status: %w", err)
+	}
+	kind, err := agent.NormalizeBoardMessageKind(msg.Kind)
+	if err != nil {
+		return fmt.Errorf("board: send message kind: %w", err)
+	}
+	msg.Kind = kind
 	if msg.Stream == "" {
 		msg.Stream = agent.DefaultStream
 	}
-	if msg.Priority == 0 {
-		msg.Priority = agent.DefaultPriority
+	priority, err := agent.NormalizeBoardMessagePriority(msg.Priority)
+	if err != nil {
+		return fmt.Errorf("board: send message priority: %w", err)
 	}
+	msg.Priority = priority
 
-	err := retryBoardBusy(ctx, func() error {
+	err = retryBoardBusy(ctx, func() error {
 		_, execErr := s.db.ExecContext(ctx, `
 		INSERT INTO board_messages 
 		(id, workspace_id, task_id, related_message_id, stream, sender, recipient, kind, priority, ack_required, reply_expected, interrupt, status, subject, body, created_at)
@@ -640,8 +651,12 @@ func (s *boardSQLStore) ListRoomMessages(ctx context.Context, workspaceID, roomI
 }
 
 // MarkRead marks messages as read.
-func (s *boardSQLStore) MarkRead(ctx context.Context, workspaceID, _ string, messageIDs []string) (int, error) {
+func (s *boardSQLStore) MarkRead(ctx context.Context, workspaceID, actorID string, messageIDs []string) (int, error) {
 	workspaceID = workspaceutil.CanonicalWorkspaceKey(workspaceID)
+	actorID = strings.TrimSpace(actorID)
+	if actorID == "" {
+		return 0, fmt.Errorf("board: mark read: actor_id is required")
+	}
 	if len(messageIDs) == 0 {
 		return 0, nil
 	}
@@ -658,6 +673,7 @@ func (s *boardSQLStore) MarkRead(ctx context.Context, workspaceID, _ string, mes
 		workspaceID,
 		agent.BoardMessageStatusUnread,
 		agent.BoardMessageStatusSurfaced,
+		actorID,
 	}
 	for _, id := range messageIDs {
 		args = append(args, id)
@@ -666,7 +682,7 @@ func (s *boardSQLStore) MarkRead(ctx context.Context, workspaceID, _ string, mes
 	query := fmt.Sprintf(`
 		UPDATE board_messages
 		SET status = ?
-		WHERE workspace_id = ? AND status IN (?, ?) AND id IN (%s)`, placeholders)
+		WHERE workspace_id = ? AND status IN (?, ?) AND (recipient = ? OR recipient = '*') AND id IN (%s)`, placeholders)
 
 	res, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -680,8 +696,12 @@ func (s *boardSQLStore) MarkRead(ctx context.Context, workspaceID, _ string, mes
 // MarkSurfaced marks messages as surfaced (injected into AI context).
 // This is used by hooks to suppress re-injecting the same messages forever,
 // without claiming the user has explicitly read them.
-func (s *boardSQLStore) MarkSurfaced(ctx context.Context, workspaceID, _ string, messageIDs []string) (int, error) {
+func (s *boardSQLStore) MarkSurfaced(ctx context.Context, workspaceID, actorID string, messageIDs []string) (int, error) {
 	workspaceID = workspaceutil.CanonicalWorkspaceKey(workspaceID)
+	actorID = strings.TrimSpace(actorID)
+	if actorID == "" {
+		return 0, fmt.Errorf("board: mark surfaced: actor_id is required")
+	}
 	if len(messageIDs) == 0 {
 		return 0, nil
 	}
@@ -695,6 +715,7 @@ func (s *boardSQLStore) MarkSurfaced(ctx context.Context, workspaceID, _ string,
 		agent.BoardMessageStatusSurfaced,
 		workspaceID,
 		agent.BoardMessageStatusUnread,
+		actorID,
 	}
 	for _, id := range messageIDs {
 		args = append(args, id)
@@ -703,7 +724,7 @@ func (s *boardSQLStore) MarkSurfaced(ctx context.Context, workspaceID, _ string,
 	query := fmt.Sprintf(`
 		UPDATE board_messages
 		SET status = ?
-		WHERE workspace_id = ? AND status = ? AND id IN (%s)`, placeholders)
+		WHERE workspace_id = ? AND status = ? AND (recipient = ? OR recipient = '*') AND id IN (%s)`, placeholders)
 
 	res, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -714,8 +735,12 @@ func (s *boardSQLStore) MarkSurfaced(ctx context.Context, workspaceID, _ string,
 }
 
 // AckMessages marks messages as acknowledged.
-func (s *boardSQLStore) AckMessages(ctx context.Context, workspaceID, _ string, messageIDs []string) (int, error) {
+func (s *boardSQLStore) AckMessages(ctx context.Context, workspaceID, actorID string, messageIDs []string) (int, error) {
 	workspaceID = workspaceutil.CanonicalWorkspaceKey(workspaceID)
+	actorID = strings.TrimSpace(actorID)
+	if actorID == "" {
+		return 0, fmt.Errorf("board: ack messages: actor_id is required")
+	}
 	if len(messageIDs) == 0 {
 		return 0, nil
 	}
@@ -725,7 +750,7 @@ func (s *boardSQLStore) AckMessages(ctx context.Context, workspaceID, _ string, 
 		placeholders += ", ?"
 	}
 
-	args := []any{agent.BoardMessageStatusAcked, workspaceID}
+	args := []any{agent.BoardMessageStatusAcked, workspaceID, actorID}
 	for _, id := range messageIDs {
 		args = append(args, id)
 	}
@@ -733,7 +758,7 @@ func (s *boardSQLStore) AckMessages(ctx context.Context, workspaceID, _ string, 
 	query := fmt.Sprintf(`
 		UPDATE board_messages 
 		SET status = ?
-		WHERE workspace_id = ? AND id IN (%s)`, placeholders)
+		WHERE workspace_id = ? AND (recipient = ? OR recipient = '*') AND id IN (%s)`, placeholders)
 
 	res, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -757,6 +782,9 @@ func (s *boardSQLStore) Reserve(ctx context.Context, res *agent.FileReservation)
 	if res.ExpiresAt.IsZero() {
 		res.ExpiresAt = res.CreatedAt.Add(agent.DefaultReservationTTL)
 	}
+	if err := agent.ValidateReservationMode(res.Mode); err != nil {
+		return fmt.Errorf("board: reserve mode: %w", err)
+	}
 
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO file_reservations (id, workspace_id, task_id, path, holder, mode, reason, expires_at, created_at)
@@ -773,6 +801,9 @@ func (s *boardSQLStore) CheckConflicts(ctx context.Context, workspaceID string, 
 	workspaceID = workspaceutil.CanonicalWorkspaceKey(workspaceID)
 	if len(paths) == 0 {
 		return nil, nil
+	}
+	if err := agent.ValidateReservationMode(mode); err != nil {
+		return nil, fmt.Errorf("board: check conflicts mode: %w", err)
 	}
 
 	// Clean up expired reservations first
@@ -806,7 +837,7 @@ func (s *boardSQLStore) CheckConflicts(ctx context.Context, workspaceID string, 
 		// Shared only conflicts with exclusive by other holders
 		query = fmt.Sprintf(`
 			SELECT path, holder, mode, task_id, reason, expires_at FROM file_reservations
-			WHERE workspace_id = ? AND path IN (%s) AND holder != ? AND mode = 'exclusive' AND expires_at >= ?`, placeholders)
+			WHERE workspace_id = ? AND path IN (%s) AND holder != ? AND (mode = 'exclusive' OR mode NOT IN ('exclusive', 'shared')) AND expires_at >= ?`, placeholders)
 	}
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -820,10 +851,15 @@ func (s *boardSQLStore) CheckConflicts(ctx context.Context, workspaceID string, 
 	var conflicts []agent.ReservationConflict
 	for rows.Next() {
 		var c agent.ReservationConflict
+		var mode agent.ReservationMode
 		var expiresAt int64
-		if err := rows.Scan(&c.Path, &c.Holder, &c.Mode, &c.TaskID, &c.Reason, &expiresAt); err != nil {
+		if err := rows.Scan(&c.Path, &c.Holder, &mode, &c.TaskID, &c.Reason, &expiresAt); err != nil {
 			return nil, fmt.Errorf("board: scan conflict: %w", err)
 		}
+		if err := agent.ValidateReservationMode(mode); err != nil {
+			return nil, fmt.Errorf("board: scan conflict mode: %w", err)
+		}
+		c.Mode = string(mode)
 		c.ExpiresAt = time.Unix(expiresAt, 0).UTC()
 		conflicts = append(conflicts, c)
 	}
@@ -1051,6 +1087,17 @@ func scanBoardMessage(rows *sql.Rows) (agent.BoardMessage, error) {
 	msg.AckRequired = ackRequired != 0
 	msg.ReplyExpected = replyExpected != 0
 	msg.Interrupt = interrupt != 0
+	kind, err := agent.NormalizeBoardMessageKind(msg.Kind)
+	if err != nil {
+		return agent.BoardMessage{}, fmt.Errorf("board: scan message kind: %w", err)
+	}
+	msg.Kind = kind
+	if err := agent.ValidateBoardMessageStatus(msg.Status); err != nil {
+		return agent.BoardMessage{}, fmt.Errorf("board: scan message status: %w", err)
+	}
+	if err := agent.ValidateBoardMessagePriority(msg.Priority); err != nil {
+		return agent.BoardMessage{}, fmt.Errorf("board: scan message priority: %w", err)
+	}
 	return msg, nil
 }
 
@@ -1059,6 +1106,9 @@ func scanReservation(rows *sql.Rows) (agent.FileReservation, error) {
 	var expiresAt, createdAt int64
 	if err := rows.Scan(&res.ID, &res.WorkspaceID, &res.TaskID, &res.Path, &res.Holder, &res.Mode, &res.Reason, &expiresAt, &createdAt); err != nil {
 		return agent.FileReservation{}, fmt.Errorf("board: scan reservation: %w", err)
+	}
+	if err := agent.ValidateReservationMode(res.Mode); err != nil {
+		return agent.FileReservation{}, fmt.Errorf("board: scan reservation mode: %w", err)
 	}
 	res.ExpiresAt = time.Unix(expiresAt, 0).UTC()
 	res.CreatedAt = time.Unix(createdAt, 0).UTC()
@@ -1374,10 +1424,10 @@ func (s *boardSQLStore) roomTaskIDs(ctx context.Context, workspaceID, stream str
 
 func summarizeRoomPreview(body string) string {
 	body = strings.TrimSpace(body)
-	if len(body) <= 140 {
+	if utf8.RuneCountInString(body) <= 140 {
 		return body
 	}
-	return body[:140] + "..."
+	return string([]rune(body)[:140]) + "..."
 }
 
 func (s *boardSQLStore) listDerivedRoomStreams(ctx context.Context, workspaceID string) ([]string, error) {
@@ -1554,9 +1604,11 @@ func scanRoomMetadataRow(scanner interface{ Scan(dest ...any) error }) (roomMeta
 	meta.CreatedAt = time.Unix(createdAt, 0).UTC()
 	meta.UpdatedAt = time.Unix(updatedAt, 0).UTC()
 	if strings.TrimSpace(archivedAt) != "" {
-		if parsed, err := sqlutil.ScanTimestamp(archivedAt); err == nil {
-			meta.ArchivedAt = &parsed
+		parsed, err := sqlutil.ScanTimestamp(archivedAt)
+		if err != nil {
+			return roomMetadataRow{}, fmt.Errorf("board: scan room archived_at: %w", err)
 		}
+		meta.ArchivedAt = &parsed
 	}
 	return meta, nil
 }

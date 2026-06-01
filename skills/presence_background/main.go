@@ -135,18 +135,18 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		tags = append(tags, fmt.Sprintf("conversation:%s", in.ConversationID))
 	}
 
-	obj, err := rc.CASStore.Put(ctx, bytes.NewReader(imageData), "image/png", tags)
+	artifact, err := rc.PutArtifact(ctx, bytes.NewReader(imageData), "image/png", tags)
 	if err != nil {
 		return skillerr.WrapIO("store image in CAS", err)
 	}
 
 	// Cache the result only when caching is enabled and conversation_id provided
 	if in.UseCache && in.ConversationID != "" {
-		cacheBackgroundResult(ctx, rc, in.ConversationID, promptHash, obj.Digest, in.Emotion, model)
+		cacheBackgroundResult(ctx, rc, in.ConversationID, promptHash, artifact.Digest, in.Emotion, model)
 	}
 
 	return skillout.Emit(rc, command, Output{
-		ImageDigest: obj.Digest,
+		ImageDigest: artifact.Digest,
 		Prompt:      prompt,
 		Cached:      false,
 		Model:       model,

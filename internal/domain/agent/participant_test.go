@@ -3,7 +3,9 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 )
 
@@ -550,4 +552,80 @@ func TestParticipantStateCanTriggerTurnDecoupledFromPresentation(t *testing.T) {
 	if !state.CanTriggerTurn {
 		t.Error("CanTriggerTurn = false for member with transport endpoint, want true")
 	}
+}
+
+func TestParticipantStateDoesNotTriggerWithoutConcreteEndpoint(t *testing.T) {
+	state := ParticipantStateFromRoomMember(RoomMember{
+		ActorID: "claude-a",
+		DeliveryBinding: &RoomDeliveryBinding{
+			MuxBackend: "tmux",
+			MuxSession: "foxctl-collab",
+		},
+	})
+
+	if state.DeliveryCapability != DeliveryCapabilityPushRelay {
+		t.Fatalf("DeliveryCapability = %q, want %q", state.DeliveryCapability, DeliveryCapabilityPushRelay)
+	}
+	if state.TransportEndpoint != "" {
+		t.Fatalf("TransportEndpoint = %q, want empty without pane or explicit endpoint", state.TransportEndpoint)
+	}
+	if state.CanTriggerTurn {
+		t.Fatal("CanTriggerTurn = true, want false without concrete transport endpoint")
+	}
+	if state.Reason != "no transport endpoint" {
+		t.Fatalf("Reason = %q, want no transport endpoint", state.Reason)
+	}
+}
+
+func TestParticipantStatePropertyTriggerRequiresPushRelayEndpoint(t *testing.T) {
+	check := func(seed uint64) bool {
+		state := ParticipantStateFromRoomMember(participantMemberFromSeed(seed))
+		return participantStateInvariantError(state) == ""
+	}
+
+	if err := quick.Check(check, &quick.Config{MaxCount: 200}); err != nil {
+		t.Fatalf("participant trigger invariant failed: %v", err)
+	}
+}
+
+func participantMemberFromSeed(seed uint64) RoomMember {
+	backends := []string{"", "tmux", "zellij", "herdr", "unknown", " TMUX "}
+	kinds := []string{"", PaneSocketTransportKind, MuxPaneTransportKind, PiExtensionTransportKind, "unknown"}
+	sessions := []string{"", "s", " dev "}
+	panes := []string{"", "%1", "terminal_1", "w1-2"}
+	endpoints := []string{"", "/tmp/foxctl-pane/s/agent.sock", "p_21", "herdr:s:w1-2", "tmux:s:%1"}
+
+	return RoomMember{
+		ActorID: fmt.Sprintf("actor-%d", seed%17),
+		Unbound: seed&1 == 1,
+		DeliveryBinding: &RoomDeliveryBinding{
+			MuxBackend:        backends[(seed>>1)%uint64(len(backends))],
+			MuxSession:        sessions[(seed>>4)%uint64(len(sessions))],
+			MuxPaneID:         panes[(seed>>7)%uint64(len(panes))],
+			TransportEndpoint: endpoints[(seed>>10)%uint64(len(endpoints))],
+			TransportKind:     kinds[(seed>>13)%uint64(len(kinds))],
+		},
+	}
+}
+
+func participantStateInvariantError(state ParticipantState) string {
+	if state.CanTriggerTurn {
+		switch {
+		case state.Membership != MembershipActive:
+			return fmt.Sprintf("can trigger with membership %q", state.Membership)
+		case state.DeliveryCapability != DeliveryCapabilityPushRelay:
+			return fmt.Sprintf("can trigger with delivery capability %q", state.DeliveryCapability)
+		case strings.TrimSpace(state.TransportEndpoint) == "":
+			return "can trigger without transport endpoint"
+		case state.Transport == TransportNone || state.Transport == TransportUnavailable:
+			return fmt.Sprintf("can trigger with transport %q", state.Transport)
+		}
+	}
+	if state.DeliveryCapability == DeliveryCapabilityViewerInbox && state.CanTriggerTurn {
+		return "viewer/inbox participant can trigger turn"
+	}
+	if state.Transport == TransportNone && strings.TrimSpace(state.TransportEndpoint) != "" {
+		return fmt.Sprintf("transport none with endpoint %q", state.TransportEndpoint)
+	}
+	return ""
 }

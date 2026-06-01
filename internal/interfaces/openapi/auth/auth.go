@@ -82,6 +82,7 @@ func (b Basic) Apply(req *http.Request, cfg Config) error {
 // OAuth2 implements OAuth2 client credentials flow.
 type OAuth2 struct {
 	mu          sync.RWMutex
+	cacheKey    string
 	cachedToken string
 	expiresAt   time.Time
 	httpClient  *http.Client
@@ -114,10 +115,11 @@ func (o *OAuth2) Apply(req *http.Request, cfg Config) error {
 	if cfg.TokenURL == "" {
 		return fmt.Errorf("oauth2: missing token_url")
 	}
+	cacheKey := oauth2CacheKey(cfg)
 
 	// Check cached token
 	o.mu.RLock()
-	if o.cachedToken != "" && time.Now().Before(o.expiresAt) {
+	if o.cacheKey == cacheKey && o.cachedToken != "" && time.Now().Before(o.expiresAt) {
 		token := o.cachedToken
 		o.mu.RUnlock()
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -133,6 +135,7 @@ func (o *OAuth2) Apply(req *http.Request, cfg Config) error {
 
 	// Cache token with 30 second buffer before expiry
 	o.mu.Lock()
+	o.cacheKey = cacheKey
 	o.cachedToken = token
 	if expiresIn > 30 {
 		o.expiresAt = time.Now().Add(time.Duration(expiresIn-30) * time.Second)
@@ -188,6 +191,10 @@ func (o *OAuth2) exchangeCredentials(parentCtx context.Context, cfg Config) (str
 	}
 
 	return tokenResp.AccessToken, tokenResp.ExpiresIn, nil
+}
+
+func oauth2CacheKey(cfg Config) string {
+	return fmt.Sprintf("%s\x00%s\x00%s\x00%s", cfg.TokenURL, cfg.ClientID, cfg.ClientSecret, cfg.Scopes)
 }
 
 // NewStrategy returns the appropriate authentication strategy for the given type.

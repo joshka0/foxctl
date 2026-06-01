@@ -64,6 +64,71 @@ func TestTrajectory_InsertAndGet(t *testing.T) {
 	}
 }
 
+func TestTrajectory_InsertAcceptsKnownStatuses(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	defer store.Close()
+
+	statuses := []trajectory.Status{
+		trajectory.StatusOK,
+		trajectory.StatusError,
+		trajectory.StatusAborted,
+		trajectory.StatusPartial,
+	}
+
+	for _, status := range statuses {
+		t.Run(string(status), func(t *testing.T) {
+			inserted, err := store.InsertTrajectory(ctx, trajectory.Trajectory{
+				WorkspaceID: testWorkspaceID,
+				Status:      status,
+			})
+			if err != nil {
+				t.Fatalf("insert status %q: %v", status, err)
+			}
+			if inserted.Status != status {
+				t.Fatalf("inserted status = %q, want %q", inserted.Status, status)
+			}
+		})
+	}
+}
+
+func TestTrajectory_InsertRejectsInvalidStatus(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	defer store.Close()
+
+	_, err := store.InsertTrajectory(ctx, trajectory.Trajectory{
+		WorkspaceID: testWorkspaceID,
+		Status:      trajectory.Status("not-a-status"),
+		Summary:     "should not persist",
+	})
+	if err == nil {
+		t.Fatalf("expected invalid status to be rejected")
+	}
+
+	got, err := store.ListTrajectories(ctx, trajectory.ListFilter{WorkspaceID: testWorkspaceID})
+	if err != nil {
+		t.Fatalf("list trajectories: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("invalid trajectory was persisted: %+v", got)
+	}
+}
+
+func TestTrajectory_ListRejectsInvalidStatusFilter(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	defer store.Close()
+
+	_, err := store.ListTrajectories(ctx, trajectory.ListFilter{
+		WorkspaceID: testWorkspaceID,
+		Status:      trajectory.Status("not-a-status"),
+	})
+	if err == nil {
+		t.Fatalf("expected invalid status filter to be rejected")
+	}
+}
+
 func TestTrajectory_Update(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
@@ -100,6 +165,86 @@ func TestTrajectory_Update(t *testing.T) {
 	}
 	if got.ArtifactDigest != "sha256:abc123" {
 		t.Errorf("artifact_digest: got %q, want %q", got.ArtifactDigest, "sha256:abc123")
+	}
+}
+
+func TestTrajectory_UpdateRejectsInvalidStatusWithoutMutatingExisting(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	defer store.Close()
+
+	inserted, err := store.InsertTrajectory(ctx, trajectory.Trajectory{
+		WorkspaceID: testWorkspaceID,
+		Status:      trajectory.StatusPartial,
+		Summary:     "original summary",
+	})
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	inserted.Status = trajectory.Status("not-a-status")
+	inserted.Summary = "mutated summary"
+	if err := store.UpdateTrajectory(ctx, inserted); err == nil {
+		t.Fatalf("expected invalid status update to be rejected")
+	}
+
+	got, err := store.GetTrajectory(ctx, testWorkspaceID, inserted.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status != trajectory.StatusPartial {
+		t.Fatalf("status = %q, want %q", got.Status, trajectory.StatusPartial)
+	}
+	if got.Summary != "original summary" {
+		t.Fatalf("summary = %q, want original summary", got.Summary)
+	}
+}
+
+func TestTrajectory_SetOutcomeRejectsInvalidValuesWithoutMutatingExisting(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	defer store.Close()
+
+	for _, tt := range []struct {
+		name    string
+		outcome trajectory.Outcome
+	}{
+		{name: "human rating below range", outcome: trajectory.Outcome{HumanRating: intPtr(0)}},
+		{name: "human rating above range", outcome: trajectory.Outcome{HumanRating: intPtr(6)}},
+		{name: "negative tasks completed", outcome: trajectory.Outcome{TasksCompleted: -1}},
+		{name: "negative tool calls", outcome: trajectory.Outcome{ToolCallCount: -1}},
+		{name: "negative errors", outcome: trajectory.Outcome{ErrorCount: -1}},
+		{name: "negative duration", outcome: trajectory.Outcome{DurationMS: -1}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			inserted, err := store.InsertTrajectory(ctx, trajectory.Trajectory{
+				WorkspaceID: testWorkspaceID,
+				Status:      trajectory.StatusOK,
+			})
+			if err != nil {
+				t.Fatalf("insert: %v", err)
+			}
+
+			if err := store.SetOutcome(ctx, testWorkspaceID, inserted.ID, trajectory.Outcome{
+				Success:        true,
+				TasksCompleted: 1,
+				HumanRating:    intPtr(3),
+			}); err != nil {
+				t.Fatalf("set valid outcome: %v", err)
+			}
+
+			if err := store.SetOutcome(ctx, testWorkspaceID, inserted.ID, tt.outcome); err == nil {
+				t.Fatalf("expected invalid outcome to be rejected")
+			}
+
+			got, err := store.GetTrajectory(ctx, testWorkspaceID, inserted.ID)
+			if err != nil {
+				t.Fatalf("get trajectory: %v", err)
+			}
+			if got.Outcome == nil || got.Outcome.HumanRating == nil || *got.Outcome.HumanRating != 3 {
+				t.Fatalf("existing outcome was mutated: %+v", got.Outcome)
+			}
+		})
 	}
 }
 
@@ -330,6 +475,60 @@ func TestUserRequest_InsertAndGet(t *testing.T) {
 	}
 }
 
+func TestUserRequest_InsertAcceptsKnownSources(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	defer store.Close()
+
+	sources := []trajectory.Source{
+		trajectory.SourceCLI,
+		trajectory.SourceMailbox,
+		trajectory.SourceAPI,
+		trajectory.SourceViewer,
+	}
+
+	for _, source := range sources {
+		t.Run(string(source), func(t *testing.T) {
+			inserted, err := store.InsertUserRequest(ctx, trajectory.UserRequestCapture{
+				WorkspaceID: testWorkspaceID,
+				Actor:       "actor:human:user1",
+				Source:      source,
+				Text:        "test request",
+			})
+			if err != nil {
+				t.Fatalf("insert source %q: %v", source, err)
+			}
+			if inserted.Source != source {
+				t.Fatalf("inserted source = %q, want %q", inserted.Source, source)
+			}
+		})
+	}
+}
+
+func TestUserRequest_InsertRejectsInvalidSource(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	defer store.Close()
+
+	_, err := store.InsertUserRequest(ctx, trajectory.UserRequestCapture{
+		WorkspaceID: testWorkspaceID,
+		Actor:       "actor:human:user1",
+		Source:      trajectory.Source("unknown-source"),
+		Text:        "should not persist",
+	})
+	if err == nil {
+		t.Fatalf("expected invalid source to be rejected")
+	}
+
+	got, err := store.ListUserRequests(ctx, testWorkspaceID, 10)
+	if err != nil {
+		t.Fatalf("list user requests: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("invalid user request was persisted: %+v", got)
+	}
+}
+
 func TestUserRequest_List(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
@@ -429,6 +628,93 @@ func TestEvent_InsertAndList(t *testing.T) {
 	}
 }
 
+func TestEvent_InsertAcceptsKnownKinds(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	defer store.Close()
+
+	inserted, err := store.InsertTrajectory(ctx, trajectory.Trajectory{
+		WorkspaceID: testWorkspaceID,
+		Status:      trajectory.StatusOK,
+	})
+	if err != nil {
+		t.Fatalf("insert trajectory: %v", err)
+	}
+
+	kinds := []trajectory.EventKind{
+		trajectory.EventKindUserRequest,
+		trajectory.EventKindAgentThought,
+		trajectory.EventKindToolCall,
+		trajectory.EventKindToolResult,
+		trajectory.EventKindReviewRequest,
+		trajectory.EventKindReviewResult,
+		trajectory.EventKindTaskTransition,
+		trajectory.EventKindGraphSearch,
+		trajectory.EventKindSWEGrep,
+		trajectory.EventKindHookCall,
+		trajectory.EventKindHookResult,
+	}
+
+	for _, kind := range kinds {
+		t.Run(string(kind), func(t *testing.T) {
+			insertedEvent, err := store.InsertEvent(ctx, trajectory.Event{
+				TrajectoryID: inserted.ID,
+				Kind:         kind,
+			})
+			if err != nil {
+				t.Fatalf("insert event kind %q: %v", kind, err)
+			}
+			if insertedEvent.Kind != kind {
+				t.Fatalf("inserted kind = %q, want %q", insertedEvent.Kind, kind)
+			}
+		})
+	}
+}
+
+func TestEvent_InsertRejectsInvalidKind(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	defer store.Close()
+
+	inserted, err := store.InsertTrajectory(ctx, trajectory.Trajectory{
+		WorkspaceID: testWorkspaceID,
+		Status:      trajectory.StatusOK,
+	})
+	if err != nil {
+		t.Fatalf("insert trajectory: %v", err)
+	}
+
+	_, err = store.InsertEvent(ctx, trajectory.Event{
+		TrajectoryID: inserted.ID,
+		Kind:         trajectory.EventKind("unknown-kind"),
+	})
+	if err == nil {
+		t.Fatalf("expected invalid event kind to be rejected")
+	}
+
+	got, err := store.ListEvents(ctx, trajectory.EventFilter{TrajectoryID: inserted.ID})
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("invalid event was persisted: %+v", got)
+	}
+}
+
+func TestEvent_ListRejectsInvalidKindFilter(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	defer store.Close()
+
+	_, err := store.ListEvents(ctx, trajectory.EventFilter{
+		TrajectoryID: "trajectory-id",
+		Kind:         trajectory.EventKind("unknown-kind"),
+	})
+	if err == nil {
+		t.Fatalf("expected invalid event kind filter to be rejected")
+	}
+}
+
 func TestEvent_InsertBatch(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
@@ -461,6 +747,36 @@ func TestEvent_InsertBatch(t *testing.T) {
 	}
 	if len(list) != 3 {
 		t.Errorf("list: got %d, want 3", len(list))
+	}
+}
+
+func TestEvent_InsertBatchRejectsInvalidKindWithoutPersistingBatch(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	defer store.Close()
+
+	inserted, err := store.InsertTrajectory(ctx, trajectory.Trajectory{
+		WorkspaceID: testWorkspaceID,
+		Status:      trajectory.StatusOK,
+	})
+	if err != nil {
+		t.Fatalf("insert trajectory: %v", err)
+	}
+
+	events := []trajectory.Event{
+		{TrajectoryID: inserted.ID, Kind: trajectory.EventKindToolCall},
+		{TrajectoryID: inserted.ID, Kind: trajectory.EventKind("unknown-kind")},
+	}
+	if err := store.InsertEvents(ctx, events); err == nil {
+		t.Fatalf("expected invalid event kind batch to be rejected")
+	}
+
+	got, err := store.ListEvents(ctx, trajectory.EventFilter{TrajectoryID: inserted.ID})
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("invalid batch persisted events: %+v", got)
 	}
 }
 
@@ -587,4 +903,8 @@ func openTestStore(t *testing.T) trajectory.Store {
 		t.Fatalf("open store: %v", err)
 	}
 	return store
+}
+
+func intPtr(value int) *int {
+	return &value
 }

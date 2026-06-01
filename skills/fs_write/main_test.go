@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/go-playground/validator/v10"
@@ -111,6 +113,61 @@ func TestCheckWriteMode(t *testing.T) {
 	}
 }
 
+func TestParsePermissionsAllowsOnlyRegularPermissionBits(t *testing.T) {
+	tests := []struct {
+		raw     string
+		wantErr bool
+	}{
+		{raw: "0", wantErr: false},
+		{raw: "0600", wantErr: false},
+		{raw: "644", wantErr: false},
+		{raw: "0777", wantErr: false},
+		{raw: "1000", wantErr: true},
+		{raw: "1755", wantErr: true},
+		{raw: "2755", wantErr: true},
+		{raw: "4755", wantErr: true},
+		{raw: "7777", wantErr: true},
+		{raw: "0888", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.raw, func(t *testing.T) {
+			_, err := parsePermissions(tt.raw)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("parsePermissions(%q) error = %v, wantErr %v", tt.raw, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestParsePermissionsGeneratedModeBoundary(t *testing.T) {
+	prop := func(raw uint16, withLeadingZero bool) bool {
+		mode := raw & 0o7777
+		perm := fmt.Sprintf("%o", mode)
+		if withLeadingZero {
+			perm = "0" + perm
+		}
+
+		_, err := parsePermissions(perm)
+		if mode <= 0o777 {
+			if err != nil {
+				t.Logf("parsePermissions(%q) rejected regular permission %04o: %v", perm, mode, err)
+				return false
+			}
+			return true
+		}
+		if err == nil {
+			t.Logf("parsePermissions(%q) accepted mode with special bits %04o", perm, mode)
+			return false
+		}
+		return true
+	}
+
+	if err := quick.Check(prop, &quick.Config{MaxCount: 200}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRunFsWrite(t *testing.T) {
 	ctx := context.Background()
 	work := t.TempDir()
@@ -150,6 +207,32 @@ func TestRunFsWrite(t *testing.T) {
 
 	if data["bytes_written"].(float64) != 11 {
 		t.Errorf("expected 11 bytes written, got %v. Path: %v", data["bytes_written"], data["path"])
+	}
+}
+
+func TestRunFsWriteRejectsSpecialPermissionBitsWithoutCreatingFile(t *testing.T) {
+	ctx := context.Background()
+	work := t.TempDir()
+
+	stdout := &bytes.Buffer{}
+	rc := newTestRunContext(t, stdout, work)
+	defer rc.Close()
+
+	target := "setuid.sh"
+	err := run(ctx, rc, Input{
+		Path:        target,
+		Content:     "#!/bin/sh\n",
+		Mode:        "create",
+		Permissions: "4755",
+	})
+	if err == nil {
+		t.Fatalf("expected special permission bits to be rejected")
+	}
+	if _, statErr := os.Stat(filepath.Join(work, target)); !os.IsNotExist(statErr) {
+		t.Fatalf("target file stat error = %v, want not exists", statErr)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected no success envelope, got %q", stdout.String())
 	}
 }
 

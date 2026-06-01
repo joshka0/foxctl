@@ -11,7 +11,7 @@ import (
 func TestFilterToolsCodeIntel(t *testing.T) {
 	t.Parallel()
 
-	in := []rlm.Tool{
+	in := readOnlyTools([]rlm.Tool{
 		{Name: "gather_context"},
 		{Name: "gather_test_context"},
 		{Name: "gather_docs_context"},
@@ -23,7 +23,7 @@ func TestFilterToolsCodeIntel(t *testing.T) {
 		{Name: "retrieve_context"},
 		{Name: "retrieve_task"},
 		{Name: "retrieve_mixed"},
-	}
+	})
 	got := FilterTools(in, ToolProfileCodeIntel)
 	var names []string
 	for _, tool := range got {
@@ -38,7 +38,7 @@ func TestFilterToolsCodeIntel(t *testing.T) {
 func TestFilterToolsGatherContext(t *testing.T) {
 	t.Parallel()
 
-	in := []rlm.Tool{
+	in := readOnlyTools([]rlm.Tool{
 		{Name: "gather_context"},
 		{Name: "gather_test_context"},
 		{Name: "gather_docs_context"},
@@ -49,7 +49,7 @@ func TestFilterToolsGatherContext(t *testing.T) {
 		{Name: "retrieve_context"},
 		{Name: "retrieve_task"},
 		{Name: "retrieve_mixed"},
-	}
+	})
 	got := FilterTools(in, ToolProfileGatherContext)
 	var names []string
 	for _, tool := range got {
@@ -64,7 +64,7 @@ func TestFilterToolsGatherContext(t *testing.T) {
 func TestFilterToolsNativeExplorer(t *testing.T) {
 	t.Parallel()
 
-	in := []rlm.Tool{
+	in := readOnlyTools([]rlm.Tool{
 		{Name: "gather_context"},
 		{Name: "gather_test_context"},
 		{Name: "gather_docs_context"},
@@ -73,7 +73,7 @@ func TestFilterToolsNativeExplorer(t *testing.T) {
 		{Name: "code_search_ensemble"},
 		{Name: "retrieve_code"},
 		{Name: "retrieve_mixed"},
-	}
+	})
 	got := FilterTools(in, ToolProfileNativeExplorer)
 	var names []string
 	for _, tool := range got {
@@ -88,7 +88,7 @@ func TestFilterToolsNativeExplorer(t *testing.T) {
 func TestFilterToolsMemoryRecall(t *testing.T) {
 	t.Parallel()
 
-	in := []rlm.Tool{
+	in := readOnlyTools([]rlm.Tool{
 		{Name: "gather_context"},
 		{Name: "gather_test_context"},
 		{Name: "gather_docs_context"},
@@ -99,7 +99,7 @@ func TestFilterToolsMemoryRecall(t *testing.T) {
 		{Name: "retrieve_context"},
 		{Name: "retrieve_task"},
 		{Name: "retrieve_mixed"},
-	}
+	})
 	got := FilterTools(in, ToolProfileMemoryRecall)
 	var names []string
 	for _, tool := range got {
@@ -180,6 +180,13 @@ func TestDecoratePromptForScoutRole(t *testing.T) {
 	if !reflect.DeepEqual(NormalizeScoutRole("memory_timeline_scout"), ScoutRoleMemoryTimeline) {
 		t.Fatal("expected normalized scout role")
 	}
+}
+
+func readOnlyTools(tools []rlm.Tool) []rlm.Tool {
+	for i := range tools {
+		tools[i].ReadOnly = true
+	}
+	return tools
 }
 
 func TestSelectMemoryScoutRolesDefaultsToDeterministicOrder(t *testing.T) {

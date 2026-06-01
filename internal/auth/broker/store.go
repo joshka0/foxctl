@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -75,4 +76,41 @@ func ScopesHash(scopes []string, audience string) string {
 		h.Write([]byte("|" + audience))
 	}
 	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
+func validateAuthRequestForCreate(row AuthRequestRow) error {
+	if strings.TrimSpace(row.ID) == "" {
+		return fmt.Errorf("auth request id is required")
+	}
+	if strings.TrimSpace(row.TenantID) == "" {
+		return fmt.Errorf("auth request tenant_id is required")
+	}
+	if strings.TrimSpace(row.Subject) == "" {
+		return fmt.Errorf("auth request subject is required")
+	}
+	if !isKnownProvider(row.Provider) {
+		return fmt.Errorf("auth request provider %q is invalid", row.Provider)
+	}
+	if strings.TrimSpace(row.StateNonce) == "" {
+		return fmt.Errorf("auth request state nonce is required")
+	}
+	if strings.TrimSpace(row.ConversationID) == "" {
+		return fmt.Errorf("auth request conversation_id is required")
+	}
+	if row.ExpiresAtMS <= row.CreatedAtMS {
+		return fmt.Errorf("auth request expires_at_ms must be after created_at_ms")
+	}
+	if row.CompletedAtMS != nil {
+		return fmt.Errorf("auth request must be pending when created")
+	}
+	return nil
+}
+
+func isKnownProvider(provider Provider) bool {
+	switch provider {
+	case ProviderMicrosoftGraph, ProviderGoogle, ProviderGitHub:
+		return true
+	default:
+		return false
+	}
 }

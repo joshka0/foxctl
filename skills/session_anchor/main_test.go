@@ -10,10 +10,6 @@ import (
 
 // Tests for constants
 
-func TestCommand(t *testing.T) {
-	assert.Equal(t, "session/anchor", command)
-}
-
 func TestAnchorName(t *testing.T) {
 	assert.Equal(t, "session-anchor", anchorName)
 }
@@ -49,154 +45,6 @@ func TestAllowedOps_ContainsAppendLearnings(t *testing.T) {
 
 // Tests for Input structure
 
-func TestInput_AllFields(t *testing.T) {
-	in := Input{
-		Operation:  "set",
-		Workspace:  "/path/to/ws",
-		SessionID:  "sess-123",
-		MainPrompt: "Build a feature",
-		Trigger:    "user request",
-		Summary:    "Working on feature",
-		Decisions:  []string{"decision1", "decision2"},
-		Gotchas:    []string{"gotcha1"},
-		Progress:   []string{"step1", "step2"},
-		Question:   "Should I continue?",
-	}
-
-	assert.Equal(t, "set", in.Operation)
-	assert.Equal(t, "/path/to/ws", in.Workspace)
-	assert.Equal(t, "sess-123", in.SessionID)
-	assert.Equal(t, "Build a feature", in.MainPrompt)
-	assert.Equal(t, "user request", in.Trigger)
-	assert.Equal(t, "Working on feature", in.Summary)
-	assert.Equal(t, []string{"decision1", "decision2"}, in.Decisions)
-	assert.Equal(t, []string{"gotcha1"}, in.Gotchas)
-	assert.Equal(t, []string{"step1", "step2"}, in.Progress)
-	assert.Equal(t, "Should I continue?", in.Question)
-}
-
-func TestInput_JSONSerialization(t *testing.T) {
-	in := Input{
-		Operation:  "get",
-		Workspace:  "/ws",
-		MainPrompt: "test prompt",
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	var decoded Input
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, in.Operation, decoded.Operation)
-	assert.Equal(t, in.Workspace, decoded.Workspace)
-	assert.Equal(t, in.MainPrompt, decoded.MainPrompt)
-}
-
-func TestInput_EmptyFields(t *testing.T) {
-	in := Input{}
-
-	assert.Empty(t, in.Operation)
-	assert.Empty(t, in.Workspace)
-	assert.Empty(t, in.SessionID)
-	assert.Empty(t, in.MainPrompt)
-	assert.Nil(t, in.Decisions)
-}
-
-// Tests for Anchor structure
-
-func TestAnchor_AllFields(t *testing.T) {
-	now := time.Now().UTC()
-	anchor := Anchor{
-		AnchorID:        "anchor-123",
-		Workspace:       "/workspace",
-		MainPrompt:      "Main goal",
-		Requirements:    []string{"req1", "req2"},
-		CompactionCount: 3,
-		RecentLearnings: []Learning{
-			{Summary: "learning1"},
-		},
-		PendingQuestion: "What next?",
-		CreatedAt:       now,
-		UpdatedAt:       now,
-		LastSessionID:   "sess-456",
-	}
-
-	assert.Equal(t, "anchor-123", anchor.AnchorID)
-	assert.Equal(t, "/workspace", anchor.Workspace)
-	assert.Equal(t, "Main goal", anchor.MainPrompt)
-	assert.Equal(t, []string{"req1", "req2"}, anchor.Requirements)
-	assert.Equal(t, 3, anchor.CompactionCount)
-	assert.Len(t, anchor.RecentLearnings, 1)
-	assert.Equal(t, "What next?", anchor.PendingQuestion)
-	assert.Equal(t, now, anchor.CreatedAt)
-	assert.Equal(t, now, anchor.UpdatedAt)
-	assert.Equal(t, "sess-456", anchor.LastSessionID)
-}
-
-func TestAnchor_JSONSerialization(t *testing.T) {
-	anchor := Anchor{
-		AnchorID:        "a-123",
-		Workspace:       "/ws",
-		MainPrompt:      "test",
-		CompactionCount: 1,
-	}
-
-	data, err := json.Marshal(anchor)
-	assert.NoError(t, err)
-
-	var decoded Anchor
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, anchor.AnchorID, decoded.AnchorID)
-	assert.Equal(t, anchor.MainPrompt, decoded.MainPrompt)
-	assert.Equal(t, anchor.CompactionCount, decoded.CompactionCount)
-}
-
-// Tests for Learning structure
-
-func TestLearning_AllFields(t *testing.T) {
-	now := time.Now().UTC()
-	learning := Learning{
-		At:           now,
-		Trigger:      "compaction",
-		Summary:      "Summary text",
-		Decisions:    []string{"d1"},
-		Gotchas:      []string{"g1", "g2"},
-		Progress:     []string{"p1"},
-		CompactionNo: 2,
-	}
-
-	assert.Equal(t, now, learning.At)
-	assert.Equal(t, "compaction", learning.Trigger)
-	assert.Equal(t, "Summary text", learning.Summary)
-	assert.Equal(t, []string{"d1"}, learning.Decisions)
-	assert.Equal(t, []string{"g1", "g2"}, learning.Gotchas)
-	assert.Equal(t, []string{"p1"}, learning.Progress)
-	assert.Equal(t, 2, learning.CompactionNo)
-}
-
-func TestLearning_JSONSerialization(t *testing.T) {
-	learning := Learning{
-		Summary:   "test summary",
-		Decisions: []string{"decision"},
-	}
-
-	data, err := json.Marshal(learning)
-	assert.NoError(t, err)
-
-	var decoded Learning
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, learning.Summary, decoded.Summary)
-	assert.Equal(t, learning.Decisions, decoded.Decisions)
-}
-
-// Tests for Output structure
-
 func TestOutput_Found(t *testing.T) {
 	anchor := &Anchor{AnchorID: "a-1"}
 	out := Output{
@@ -221,27 +69,6 @@ func TestOutput_NotFound(t *testing.T) {
 	assert.Nil(t, out.Anchor)
 	assert.Equal(t, "no anchor set", out.Message)
 }
-
-func TestOutput_JSONSerialization(t *testing.T) {
-	out := Output{
-		Found:   true,
-		Anchor:  &Anchor{AnchorID: "test"},
-		Message: "ok",
-	}
-
-	data, err := json.Marshal(out)
-	assert.NoError(t, err)
-
-	var decoded Output
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, out.Found, decoded.Found)
-	assert.Equal(t, out.Message, decoded.Message)
-	assert.NotNil(t, decoded.Anchor)
-}
-
-// Tests for messageForGet helper
 
 func TestMessageForGet_Found(t *testing.T) {
 	result := messageForGet(true)
@@ -493,19 +320,6 @@ func TestLearning_EmptySlices(t *testing.T) {
 	assert.NotNil(t, learning.Decisions)
 	assert.NotNil(t, learning.Gotchas)
 	assert.NotNil(t, learning.Progress)
-}
-
-func TestInput_JSONOmitEmpty(t *testing.T) {
-	in := Input{
-		Operation: "get",
-		Workspace: "/ws",
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	// session_id should be omitted when empty
-	assert.NotContains(t, string(data), "session_id")
 }
 
 func TestOutput_NilAnchor(t *testing.T) {

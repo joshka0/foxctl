@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,20 +15,15 @@ import (
 
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/rs/zerolog"
 	"gopkg.in/yaml.v3"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/mcputil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
-	errs "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 )
 
 const command = "mcp/install"
-
-var logger = zerolog.New(os.Stderr).With().Timestamp().Str("skill", command).Logger()
 
 // input defines the skill input parameters for MCP server installation with multiple connection modes.
 type input struct {
@@ -55,30 +51,26 @@ func main() {
 // runMain is the main entry point with bootstrap and error handling for MCP installation.
 func runMain() error {
 	ctx := context.Background()
-	rc, err := skillmain.Bootstrap(ctx, os.Stdout)
+	rc, err := lite.Bootstrap(ctx, os.Stdout)
 	if err != nil {
-		return skillout.Fatal(os.Stdout, command, skillerr.WrapRuntime("bootstrap", err))
+		return lite.Fatal(os.Stdout, command, skillerr.WrapRuntime("bootstrap", err))
 	}
-
-	defer func() {
-		errs.Ignore(rc.Close(), "run context close")
-	}()
 
 	in, err := parseInput(os.Stdin)
 	if err != nil {
 		var skillErr *skillerr.Error
 		if errors.As(err, &skillErr) {
-			return skillout.Fatal(os.Stdout, command, skillErr)
+			return lite.Fatal(os.Stdout, command, skillErr)
 		}
-		return skillout.Fatal(os.Stdout, command, skillerr.WrapArg("parse input", err))
+		return lite.Fatal(os.Stdout, command, skillerr.WrapArg("parse input", err))
 	}
 
 	if err := run(ctx, rc, in); err != nil {
 		var skillErr *skillerr.Error
 		if errors.As(err, &skillErr) {
-			return skillout.Fatal(os.Stdout, command, skillErr)
+			return lite.Fatal(os.Stdout, command, skillErr)
 		}
-		return skillout.Fatal(os.Stdout, command, skillerr.WrapRuntime("execute", err))
+		return lite.Fatal(os.Stdout, command, skillerr.WrapRuntime("execute", err))
 	}
 	return nil
 }
@@ -97,7 +89,7 @@ func runMain() error {
 //
 // [[domain:mcp-bridge]]
 // [[protocol:mcp-protocol]]
-func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+func run(ctx context.Context, rc *lite.RunContext, in input) error {
 	var mcpClient *client.Client
 	var err error
 
@@ -121,7 +113,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 
 	defer func() {
 		if err := mcpClient.Close(); err != nil {
-			logger.Warn().Err(err).Msg("failed to close MCP client")
+			slog.Warn("failed to close MCP client", "error", err)
 		}
 	}()
 
@@ -145,11 +137,11 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 
 	// Validate output directory (must be within workspace per foxctl policy)
-	validDir, err := skillmain.ValidatePath(
+	validDir, err := lite.ValidatePath(
 		rc,
 		in.OutputDir,
-		skillmain.WithPathMessage("output directory validation failed"),
-		skillmain.WithPathHint("Provide an output_dir within the workspace or an allowed root."),
+		lite.WithPathMessage("output directory validation failed"),
+		lite.WithPathHint("Provide an output_dir within the workspace or an allowed root."),
 	)
 	if err != nil {
 		return err
@@ -158,7 +150,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	for _, tool := range toolsResult.Tools {
 
 		if err := generateSkill(validDir, tool, in); err != nil {
-			logger.Error().Err(err).Str("tool", tool.Name).Msg("failed to generate skill")
+			slog.Error("failed to generate skill", "error", err, "tool", tool.Name)
 			continue
 		}
 
@@ -167,7 +159,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 
 	// Emit success
-	return skillout.Emit(rc, command, map[string]any{
+	return lite.Emit(rc, command, map[string]any{
 		"installed": installed,
 		"count":     len(installed),
 		"path":      validDir,

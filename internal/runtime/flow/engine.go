@@ -144,7 +144,7 @@ func (e *Engine) Start(ctx context.Context, flowID string) error {
 	}
 
 	// Create a new context for this flow run.
-	runCtx, cancel := context.WithCancel(ctx)
+	runCtx, cancel := context.WithCancel(withTransformWorkspace(ctx, fl.Workspace))
 
 	// Create per-run OutputBus.
 	bus := newOutputBus(e.busSize)

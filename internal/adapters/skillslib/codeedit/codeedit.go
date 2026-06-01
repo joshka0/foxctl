@@ -320,7 +320,7 @@ func FindGoSymbols(lines []string) []SymbolInfo {
 		}
 
 		if name != "" {
-			endLine := findBraceEnd(lines, i, expander.GoBraceStyle())
+			endLine := findBraceSymbolEnd(lines, i, expander.GoBraceStyle())
 			symbols = append(symbols, SymbolInfo{
 				Name:      name,
 				Kind:      kind,
@@ -416,7 +416,7 @@ func FindJSSymbols(lines []string) []SymbolInfo {
 		}
 
 		if name != "" {
-			endLine := findBraceEnd(lines, i, expander.JSBraceStyle())
+			endLine := findBraceSymbolEnd(lines, i, expander.JSBraceStyle())
 			symbols = append(symbols, SymbolInfo{
 				Name:      name,
 				Kind:      kind,
@@ -474,6 +474,33 @@ func FindGDScriptSymbols(lines []string) []SymbolInfo {
 	}
 
 	return symbols
+}
+
+func findBraceSymbolEnd(lines []string, startLine int, style expander.BraceStyle) int {
+	if !symbolStartsBraceBlock(lines, startLine) {
+		return startLine
+	}
+	return findBraceEnd(lines, startLine, style)
+}
+
+func symbolStartsBraceBlock(lines []string, startLine int) bool {
+	if startLine < 0 || startLine >= len(lines) {
+		return false
+	}
+
+	if strings.Contains(lines[startLine], "{") {
+		return true
+	}
+
+	for i := startLine + 1; i < len(lines) && i <= startLine+3; i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if trimmed == "" || strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "/*") {
+			continue
+		}
+		return strings.HasPrefix(trimmed, "{")
+	}
+
+	return false
 }
 
 func findBraceEnd(lines []string, startLine int, style expander.BraceStyle) int {

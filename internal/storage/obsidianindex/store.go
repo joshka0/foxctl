@@ -710,7 +710,11 @@ LIMIT ?
 		hit.Snippet = compactSnippet(hit.Snippet)
 		hit.RepoPaths = splitCSV(repoPathsCSV)
 		hit.AnchorPaths = splitCSV(anchorPathsCSV)
-		hit.AnchorRoles = decodeAnchorRolesJSON(anchorRolesJSON)
+		anchorRoles, err := decodeAnchorRolesJSON(anchorRolesJSON)
+		if err != nil {
+			return nil, fmt.Errorf("obsidianindex: decode anchor roles: %w", err)
+		}
+		hit.AnchorRoles = anchorRoles
 		hit.Symbols = splitCSV(symbolsCSV)
 		out = append(out, hit)
 	}
@@ -775,7 +779,11 @@ ORDER BY path ASC
 		}
 		hit.RepoPaths = splitCSV(repoPathsCSV)
 		hit.AnchorPaths = splitCSV(anchorPathsCSV)
-		hit.AnchorRoles = decodeAnchorRolesJSON(anchorRolesJSON)
+		anchorRoles, err := decodeAnchorRolesJSON(anchorRolesJSON)
+		if err != nil {
+			return nil, fmt.Errorf("obsidianindex: decode anchor roles: %w", err)
+		}
+		hit.AnchorRoles = anchorRoles
 		hit.Symbols = splitCSV(symbolsCSV)
 		hit.Snippet = compactSnippet(bestSnippetForTerms(hit.Snippet, terms))
 		hit.Score = scoreTokenizedNoteHit(hit, strings.TrimSpace(searchText+" "+hit.Snippet), terms)
@@ -1232,14 +1240,18 @@ ORDER BY n.path ASC
 		if err := rows.Scan(&hit.Path, &hit.Title, &hit.Type, &hit.Project, &hit.Status, &hit.Trust, &hit.PrimaryAnchorPath, &anchorRolesJSON, &hit.Snippet, &repoPathsCSV, &anchorPathsCSV, &symbolsCSV, &embeddingJSON); err != nil {
 			return nil, fmt.Errorf("obsidianindex: scan semantic hit: %w", err)
 		}
-		var embedding []float32
-		if err := json.Unmarshal([]byte(embeddingJSON), &embedding); err != nil {
+		embedding, err := decodeStoredEmbeddingJSON(embeddingJSON, provider.Dimensions())
+		if err != nil {
 			return nil, fmt.Errorf("obsidianindex: decode semantic embedding: %w", err)
 		}
 		hit.Snippet = compactSnippet(hit.Snippet)
 		hit.RepoPaths = splitCSV(repoPathsCSV)
 		hit.AnchorPaths = splitCSV(anchorPathsCSV)
-		hit.AnchorRoles = decodeAnchorRolesJSON(anchorRolesJSON)
+		anchorRoles, err := decodeAnchorRolesJSON(anchorRolesJSON)
+		if err != nil {
+			return nil, fmt.Errorf("obsidianindex: decode anchor roles: %w", err)
+		}
+		hit.AnchorRoles = anchorRoles
 		hit.Symbols = splitCSV(symbolsCSV)
 		noteCandidates = append(noteCandidates, noteCandidate{hit: hit, embedding: embedding})
 	}
@@ -1273,8 +1285,8 @@ ORDER BY path ASC, chunk_index ASC
 		if err := chunkRows.Scan(&path, &chunkIndex, &heading, &text, &embeddingJSON); err != nil {
 			return nil, fmt.Errorf("obsidianindex: scan semantic chunk hit: %w", err)
 		}
-		var embedding []float32
-		if err := json.Unmarshal([]byte(embeddingJSON), &embedding); err != nil {
+		embedding, err := decodeStoredEmbeddingJSON(embeddingJSON, provider.Dimensions())
+		if err != nil {
 			return nil, fmt.Errorf("obsidianindex: decode semantic chunk embedding: %w", err)
 		}
 		chunkCandidates = append(chunkCandidates, chunkCandidate{path: path, text: text, embedding: embedding})
@@ -1714,16 +1726,37 @@ func normalizeUniqueFrontmatterPaths(paths []string) []string {
 	return out
 }
 
-func decodeAnchorRolesJSON(raw string) map[string][]string {
+func decodeAnchorRolesJSON(raw string) (map[string][]string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return nil
+		return nil, nil
 	}
 	var decoded map[string][]string
 	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
-		return nil
+		return nil, err
 	}
-	return normalizeAnchorRoles(decoded)
+	if decoded == nil {
+		return nil, fmt.Errorf("anchor roles must be a JSON object")
+	}
+	return normalizeAnchorRoles(decoded), nil
+}
+
+func decodeStoredEmbeddingJSON(raw string, dimensions int) ([]float32, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, fmt.Errorf("embedding must be a JSON array")
+	}
+	var embedding []float32
+	if err := json.Unmarshal([]byte(raw), &embedding); err != nil {
+		return nil, err
+	}
+	if embedding == nil {
+		return nil, fmt.Errorf("embedding must be a JSON array")
+	}
+	if dimensions > 0 && len(embedding) != dimensions {
+		return nil, fmt.Errorf("embedding dimensions=%d want %d", len(embedding), dimensions)
+	}
+	return embedding, nil
 }
 
 func nullable(v string) any {

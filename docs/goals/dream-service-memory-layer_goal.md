@@ -407,4 +407,3 @@ Avoid tests that only prove:
   guessing from keywords.
 - Stop if Obsidian writes cannot be made idempotent; report the state model gap
   before continuing.
-

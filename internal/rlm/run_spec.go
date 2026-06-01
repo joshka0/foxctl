@@ -227,7 +227,9 @@ func resolveRunPlanMode(requested PlanMode) (PlanMode, error) {
 func filterToolsBySet(tools []Tool, allow map[string]struct{}) []Tool {
 	out := make([]Tool, 0, len(tools))
 	for _, tool := range tools {
-		if _, ok := allow[strings.TrimSpace(tool.Name)]; ok {
+		name := strings.TrimSpace(tool.Name)
+		if _, ok := allow[name]; ok && tool.ReadOnly {
+			tool.Name = name
 			out = append(out, tool)
 		}
 	}

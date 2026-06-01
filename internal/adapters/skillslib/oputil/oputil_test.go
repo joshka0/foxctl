@@ -2,7 +2,10 @@ package oputil
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
+	"testing/quick"
 )
 
 func TestOp(t *testing.T) {
@@ -32,6 +35,7 @@ func TestValidate(t *testing.T) {
 		{"list", []string{"list", "get", "add"}, false},
 		{"LIST", []string{"list", "get", "add"}, false},
 		{"  list  ", []string{"list", "get", "add"}, false},
+		{"  LIST  ", []string{" List ", "get", "add"}, false},
 		{"delete", []string{"list", "get", "add"}, true},
 		{"", []string{"list"}, true},
 	}
@@ -47,6 +51,26 @@ func TestValidate(t *testing.T) {
 				t.Errorf("Validate() error type = %T, want *InvalidOpError", err)
 			}
 		}
+	}
+}
+
+func TestValidatePropertyNormalizesOperationAndAllowedNames(t *testing.T) {
+	ops := []string{"list", "get", "add", "remove", "sync-items"}
+
+	property := func(opSeed, allowedSeed uint8, uppercaseOp, uppercaseAllowed bool) bool {
+		op := ops[int(opSeed)%len(ops)]
+		allowed := ops[int(allowedSeed)%len(ops)]
+		rawOp := decoratedOp(op, uppercaseOp)
+		rawAllowed := decoratedOp(allowed, uppercaseAllowed)
+
+		gotAllowed := Validate(rawOp, rawAllowed) == nil
+		wantAllowed := Op(rawOp) == Op(rawAllowed)
+
+		return gotAllowed == wantAllowed
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatalf("Validate normalization property failed: %v", err)
 	}
 }
 
@@ -206,6 +230,7 @@ func TestRequireForOp(t *testing.T) {
 	}{
 		{"add", "value", []string{"add", "remove"}, false},
 		{"add", "", []string{"add", "remove"}, true},
+		{" ADD ", "", []string{" Add ", "remove"}, true},
 		{"list", "", []string{"add", "remove"}, false}, // not required for list
 		{"list", "value", []string{"add", "remove"}, false},
 	}
@@ -216,6 +241,27 @@ func TestRequireForOp(t *testing.T) {
 			t.Errorf("RequireForOp(%q, %q, %v) error = %v, wantErr = %v",
 				tt.op, tt.value, tt.requiredOps, err, tt.wantErr)
 		}
+	}
+}
+
+func TestRequireForOpPropertyNormalizesRequiredOperationNames(t *testing.T) {
+	ops := []string{"add", "remove", "publish", "sync-items"}
+
+	property := func(opSeed, requiredSeed uint8, uppercaseOp, uppercaseRequired bool) bool {
+		op := ops[int(opSeed)%len(ops)]
+		required := ops[int(requiredSeed)%len(ops)]
+		rawOp := decoratedOp(op, uppercaseOp)
+		rawRequired := decoratedOp(required, uppercaseRequired)
+
+		err := RequireForOp(rawOp, "", "path", rawRequired)
+		gotRequiresField := err != nil
+		wantRequiresField := Op(rawOp) == Op(rawRequired)
+
+		return gotRequiresField == wantRequiresField
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatalf("RequireForOp normalization property failed: %v", err)
 	}
 }
 
@@ -230,6 +276,27 @@ func TestRequireIntForOp(t *testing.T) {
 	err = RequireIntForOp("list", 0, "id", "get", "delete")
 	if err != nil {
 		t.Errorf("RequireIntForOp(list, 0) unexpected error: %v", err)
+	}
+}
+
+func TestRequireIntForOpPropertyNormalizesRequiredOperationNames(t *testing.T) {
+	ops := []string{"get", "delete", "retry", "sync-items"}
+
+	property := func(opSeed, requiredSeed uint8, uppercaseOp, uppercaseRequired bool) bool {
+		op := ops[int(opSeed)%len(ops)]
+		required := ops[int(requiredSeed)%len(ops)]
+		rawOp := decoratedOp(op, uppercaseOp)
+		rawRequired := decoratedOp(required, uppercaseRequired)
+
+		err := RequireIntForOp(rawOp, 0, "id", rawRequired)
+		gotRequiresField := err != nil
+		wantRequiresField := Op(rawOp) == Op(rawRequired)
+
+		return gotRequiresField == wantRequiresField
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatalf("RequireIntForOp normalization property failed: %v", err)
 	}
 }
 
@@ -339,4 +406,11 @@ func findSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func decoratedOp(op string, uppercase bool) string {
+	if uppercase {
+		op = strings.ToUpper(op)
+	}
+	return fmt.Sprintf(" \t%s\n", op)
 }

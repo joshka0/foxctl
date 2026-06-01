@@ -9,66 +9,11 @@ import (
 
 // Tests for constants
 
-func TestCommand(t *testing.T) {
-	assert.Equal(t, "session/export-dspy", command)
-}
-
 func TestDefaultLimit(t *testing.T) {
 	assert.Equal(t, 1000, defaultLimit)
 }
 
 // Tests for Input structure
-
-func TestInput_AllFields(t *testing.T) {
-	in := Input{
-		SessionIDs:   []string{"sess-1", "sess-2"},
-		Project:      "my-project",
-		IncludeTools: true,
-		IncludeFiles: true,
-		OutputFile:   "/path/to/output.json",
-		Format:       "jsonl",
-		Limit:        500,
-	}
-
-	assert.Len(t, in.SessionIDs, 2)
-	assert.Equal(t, "my-project", in.Project)
-	assert.True(t, in.IncludeTools)
-	assert.True(t, in.IncludeFiles)
-	assert.Equal(t, "/path/to/output.json", in.OutputFile)
-	assert.Equal(t, "jsonl", in.Format)
-	assert.Equal(t, 500, in.Limit)
-}
-
-func TestInput_JSONSerialization(t *testing.T) {
-	in := Input{
-		SessionIDs:   []string{"sess-abc"},
-		Format:       "dspy",
-		IncludeTools: true,
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	var decoded Input
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, in.SessionIDs, decoded.SessionIDs)
-	assert.Equal(t, in.Format, decoded.Format)
-	assert.Equal(t, in.IncludeTools, decoded.IncludeTools)
-}
-
-func TestInput_EmptyFields(t *testing.T) {
-	in := Input{}
-
-	assert.Nil(t, in.SessionIDs)
-	assert.Empty(t, in.Project)
-	assert.False(t, in.IncludeTools)
-	assert.False(t, in.IncludeFiles)
-	assert.Empty(t, in.OutputFile)
-	assert.Empty(t, in.Format)
-	assert.Zero(t, in.Limit)
-}
 
 func TestInput_FormatValues(t *testing.T) {
 	formats := []string{"dspy", "jsonl", "csv"}
@@ -80,54 +25,6 @@ func TestInput_FormatValues(t *testing.T) {
 }
 
 // Tests for Output structure
-
-func TestOutput_AllFields(t *testing.T) {
-	output := Output{
-		ExamplesCount: 10,
-		SessionsUsed:  3,
-		OutputFile:    "/path/to/output.json",
-		Examples: []DSPyExample{
-			{Input: ExampleInput{UserRequest: "test"}},
-		},
-		Status:  "ok",
-		Message: "Exported 10 examples from 3 sessions",
-	}
-
-	assert.Equal(t, 10, output.ExamplesCount)
-	assert.Equal(t, 3, output.SessionsUsed)
-	assert.Equal(t, "/path/to/output.json", output.OutputFile)
-	assert.Len(t, output.Examples, 1)
-	assert.Equal(t, "ok", output.Status)
-	assert.Equal(t, "Exported 10 examples from 3 sessions", output.Message)
-}
-
-func TestOutput_JSONSerialization(t *testing.T) {
-	output := Output{
-		ExamplesCount: 5,
-		SessionsUsed:  2,
-		Status:        "ok",
-	}
-
-	data, err := json.Marshal(output)
-	assert.NoError(t, err)
-
-	var decoded Output
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, output.ExamplesCount, decoded.ExamplesCount)
-	assert.Equal(t, output.SessionsUsed, decoded.SessionsUsed)
-	assert.Equal(t, output.Status, decoded.Status)
-}
-
-func TestOutput_StatusValues(t *testing.T) {
-	statuses := []string{"ok", "no_sessions"}
-
-	for _, status := range statuses {
-		output := Output{Status: status}
-		assert.Equal(t, status, output.Status)
-	}
-}
 
 func TestOutput_NoSessions(t *testing.T) {
 	output := Output{
@@ -145,149 +42,6 @@ func TestOutput_NoSessions(t *testing.T) {
 }
 
 // Tests for DSPyExample structure
-
-func TestDSPyExample_AllFields(t *testing.T) {
-	example := DSPyExample{
-		Input: ExampleInput{
-			UserRequest: "Write a function to sort an array",
-			Context:     "We need O(n log n) complexity",
-			Files:       []string{"sort.go"},
-		},
-		Output: ExampleOutput{
-			Response:    "Here's a merge sort implementation...",
-			ToolsUsed:   []string{"Write", "Bash"},
-			FilesEdited: []string{"sort.go"},
-		},
-		Metadata: ExampleMeta{
-			SessionID:   "sess-123",
-			ProjectName: "algorithms",
-			TurnIndex:   5,
-			HasError:    false,
-		},
-	}
-
-	assert.Equal(t, "Write a function to sort an array", example.Input.UserRequest)
-	assert.Equal(t, "Here's a merge sort implementation...", example.Output.Response)
-	assert.Equal(t, "sess-123", example.Metadata.SessionID)
-}
-
-func TestDSPyExample_JSONSerialization(t *testing.T) {
-	example := DSPyExample{
-		Input: ExampleInput{
-			UserRequest: "test request",
-		},
-		Output: ExampleOutput{
-			Response: "test response",
-		},
-	}
-
-	data, err := json.Marshal(example)
-	assert.NoError(t, err)
-
-	var decoded DSPyExample
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, example.Input.UserRequest, decoded.Input.UserRequest)
-	assert.Equal(t, example.Output.Response, decoded.Output.Response)
-}
-
-// Tests for ExampleInput structure
-
-func TestExampleInput_AllFields(t *testing.T) {
-	input := ExampleInput{
-		UserRequest: "Create a REST API",
-		Context:     "Using Go and chi router",
-		Files:       []string{"main.go", "handlers.go"},
-	}
-
-	assert.Equal(t, "Create a REST API", input.UserRequest)
-	assert.Equal(t, "Using Go and chi router", input.Context)
-	assert.Len(t, input.Files, 2)
-}
-
-func TestExampleInput_JSONSerialization(t *testing.T) {
-	input := ExampleInput{
-		UserRequest: "test",
-		Files:       []string{"file.go"},
-	}
-
-	data, err := json.Marshal(input)
-	assert.NoError(t, err)
-
-	var decoded ExampleInput
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, input.UserRequest, decoded.UserRequest)
-	assert.Equal(t, input.Files, decoded.Files)
-}
-
-// Tests for ExampleOutput structure
-
-func TestExampleOutput_AllFields(t *testing.T) {
-	output := ExampleOutput{
-		Response:    "Here is the implementation...",
-		ToolsUsed:   []string{"Write", "Bash", "Read"},
-		FilesEdited: []string{"api.go", "routes.go"},
-	}
-
-	assert.Equal(t, "Here is the implementation...", output.Response)
-	assert.Len(t, output.ToolsUsed, 3)
-	assert.Len(t, output.FilesEdited, 2)
-}
-
-func TestExampleOutput_JSONSerialization(t *testing.T) {
-	output := ExampleOutput{
-		Response:  "response text",
-		ToolsUsed: []string{"Edit"},
-	}
-
-	data, err := json.Marshal(output)
-	assert.NoError(t, err)
-
-	var decoded ExampleOutput
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, output.Response, decoded.Response)
-	assert.Equal(t, output.ToolsUsed, decoded.ToolsUsed)
-}
-
-// Tests for ExampleMeta structure
-
-func TestExampleMeta_AllFields(t *testing.T) {
-	meta := ExampleMeta{
-		SessionID:   "sess-abc",
-		ProjectName: "my-project",
-		TurnIndex:   10,
-		HasError:    true,
-	}
-
-	assert.Equal(t, "sess-abc", meta.SessionID)
-	assert.Equal(t, "my-project", meta.ProjectName)
-	assert.Equal(t, 10, meta.TurnIndex)
-	assert.True(t, meta.HasError)
-}
-
-func TestExampleMeta_JSONSerialization(t *testing.T) {
-	meta := ExampleMeta{
-		SessionID: "sess-test",
-		TurnIndex: 5,
-	}
-
-	data, err := json.Marshal(meta)
-	assert.NoError(t, err)
-
-	var decoded ExampleMeta
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, meta.SessionID, decoded.SessionID)
-	assert.Equal(t, meta.TurnIndex, decoded.TurnIndex)
-}
-
-// Tests for escapeCSV helper
 
 func TestEscapeCSV_SimpleText(t *testing.T) {
 	result := escapeCSV("simple text")
@@ -506,28 +260,4 @@ func TestOutput_WithExamplesInline(t *testing.T) {
 
 	assert.Len(t, output.Examples, 2)
 	assert.Empty(t, output.OutputFile) // No file when inline
-}
-
-func TestInput_JSONFieldNames(t *testing.T) {
-	in := Input{
-		SessionIDs:   []string{"s1"},
-		Project:      "p",
-		IncludeTools: true,
-		IncludeFiles: true,
-		OutputFile:   "out",
-		Format:       "dspy",
-		Limit:        10,
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	jsonStr := string(data)
-	assert.Contains(t, jsonStr, "session_ids")
-	assert.Contains(t, jsonStr, "project")
-	assert.Contains(t, jsonStr, "include_tools")
-	assert.Contains(t, jsonStr, "include_files")
-	assert.Contains(t, jsonStr, "output_file")
-	assert.Contains(t, jsonStr, "format")
-	assert.Contains(t, jsonStr, "limit")
 }

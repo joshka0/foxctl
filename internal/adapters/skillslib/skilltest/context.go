@@ -90,6 +90,10 @@ func NewTestRunContext(t *testing.T, stdout io.Writer, opts *TestContextOptions)
 		Storage: config.StorageSettings{
 			Root: storageRoot,
 		},
+		CAS: config.CASPolicy{
+			Store:  true,
+			Expose: config.ExposePolicyOff,
+		},
 	}
 
 	// Initialize CAS store if not skipped
@@ -161,6 +165,10 @@ func NewTestConfig(t *testing.T) config.Config {
 		},
 		Storage: config.StorageSettings{
 			Root: root,
+		},
+		CAS: config.CASPolicy{
+			Store:  true,
+			Expose: config.ExposePolicyOff,
 		},
 	}
 }

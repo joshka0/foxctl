@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/quick"
 )
 
 // ---------------------------------------------------------------------------
@@ -80,6 +81,12 @@ func TestRegexExtract(t *testing.T) {
 			input:  "123-abc",
 			config: `{"pattern":"(\\d+)-(\\w+)","group":2}`,
 			want:   "abc",
+		},
+		{
+			name:    "fractional numeric group returns error",
+			input:   "123-abc",
+			config:  `{"pattern":"(\\d+)-(\\w+)","group":1.5}`,
+			wantErr: true,
 		},
 		{
 			name:   "full match group 0",
@@ -651,6 +658,13 @@ func TestTransformErrorProducesGoError(t *testing.T) {
 		}
 	})
 
+	t.Run("unsupported jq recursive descent is rejected even when field exists", func(t *testing.T) {
+		_, err := jqFilterTransform(context.Background(), map[string]any{"invalid": "present"}, `{"filter":"..invalid"}`)
+		if err == nil {
+			t.Fatal("expected recursive descent path to be rejected")
+		}
+	})
+
 	t.Run("template bad syntax is error not panic", func(t *testing.T) {
 		_, err := templateTransform(context.Background(), map[string]any{"a": 1.0}, `{"template":"{{.a"}`)
 		if err == nil {
@@ -671,6 +685,30 @@ func TestTransformErrorProducesGoError(t *testing.T) {
 			t.Fatal("expected error for non-string input")
 		}
 	})
+}
+
+func TestJQFilterPropertyRejectsEmptyPathSegments(t *testing.T) {
+	t.Parallel()
+
+	cfg := &quick.Config{MaxCount: 250}
+	err := quick.Check(func(leftRaw, rightRaw uint8) bool {
+		left := fmt.Sprintf("a%d", leftRaw%32)
+		right := fmt.Sprintf("b%d", rightRaw%32)
+		filters := []string{
+			"." + left + ".." + right,
+			".." + right,
+			"." + left + ".",
+		}
+		for _, filter := range filters {
+			if _, err := parseJQPath(filter); err == nil {
+				return false
+			}
+		}
+		return true
+	}, cfg)
+	if err != nil {
+		t.Fatalf("empty jq path segment property failed: %v", err)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -771,7 +809,7 @@ func TestFileWrite(t *testing.T) {
 		config := fmt.Sprintf(`{"path":%q,"format":"raw"}`, path)
 
 		input := map[string]any{"topic": "test", "value": float64(42)}
-		out, err := fileWriteTransform(context.Background(), input, config)
+		out, err := fileWriteTransform(fileWriteContext(tmpDir), input, config)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -815,7 +853,7 @@ func TestFileWrite(t *testing.T) {
 		path := filepath.Join(tmpDir, "output.txt")
 		config := fmt.Sprintf(`{"path":%q}`, path)
 
-		out, err := fileWriteTransform(context.Background(), "hello world", config)
+		out, err := fileWriteTransform(fileWriteContext(tmpDir), "hello world", config)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -839,7 +877,7 @@ func TestFileWrite(t *testing.T) {
 		config := fmt.Sprintf(`{"path":%q,"format":"json"}`, path)
 
 		input := map[string]any{"name": "test", "count": float64(5)}
-		out, err := fileWriteTransform(context.Background(), input, config)
+		out, err := fileWriteTransform(fileWriteContext(tmpDir), input, config)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -877,7 +915,7 @@ func TestFileWrite(t *testing.T) {
 			"title": "My Report",
 			"items": []any{"alpha", "beta"},
 		}
-		out, err := fileWriteTransform(context.Background(), input, config)
+		out, err := fileWriteTransform(fileWriteContext(tmpDir), input, config)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -915,7 +953,7 @@ func TestFileWrite(t *testing.T) {
 		path := filepath.Join(tmpDir, "deep", "nested", "dir", "output.txt")
 		config := fmt.Sprintf(`{"path":%q}`, path)
 
-		out, err := fileWriteTransform(context.Background(), "nested content", config)
+		out, err := fileWriteTransform(fileWriteContext(tmpDir), "nested content", config)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -944,7 +982,7 @@ func TestFileWrite(t *testing.T) {
 			"topic": "golang",
 			"data":  "some content",
 		}
-		out, err := fileWriteTransform(context.Background(), input, config)
+		out, err := fileWriteTransform(fileWriteContext(tmpDir), input, config)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -970,7 +1008,7 @@ func TestFileWrite(t *testing.T) {
 				"name": "research",
 			},
 		}
-		out, err := fileWriteTransform(context.Background(), input, config)
+		out, err := fileWriteTransform(fileWriteContext(tmpDir), input, config)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1021,7 +1059,7 @@ func TestFileWrite(t *testing.T) {
 		path := filepath.Join(tmpDir, "output.txt")
 		config := fmt.Sprintf(`{"path":%q}`, path)
 
-		out, err := fileWriteTransform(context.Background(), "hello", config)
+		out, err := fileWriteTransform(fileWriteContext(tmpDir), "hello", config)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1046,7 +1084,7 @@ func TestFileWrite(t *testing.T) {
 		path := filepath.Join(tmpDir, "output.txt")
 		config := fmt.Sprintf(`{"path":%q}`, path)
 
-		out, err := fileWriteTransform(context.Background(), nil, config)
+		out, err := fileWriteTransform(fileWriteContext(tmpDir), nil, config)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1071,7 +1109,7 @@ func TestFileWrite(t *testing.T) {
 		config := fmt.Sprintf(`{"path":%q,"format":"markdown"}`, path)
 
 		input := []any{"alpha", "beta", "gamma"}
-		_, err := fileWriteTransform(context.Background(), input, config)
+		_, err := fileWriteTransform(fileWriteContext(tmpDir), input, config)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1104,7 +1142,7 @@ func TestFileWrite(t *testing.T) {
 				"child2": float64(42),
 			},
 		}
-		_, err := fileWriteTransform(context.Background(), input, config)
+		_, err := fileWriteTransform(fileWriteContext(tmpDir), input, config)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1133,7 +1171,7 @@ func TestFileWrite(t *testing.T) {
 		path := filepath.Join(tmpDir, "simple.txt")
 		config := fmt.Sprintf(`{"path":%q}`, path)
 
-		out, err := fileWriteTransform(context.Background(), "string input", config)
+		out, err := fileWriteTransform(fileWriteContext(tmpDir), "string input", config)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1141,6 +1179,88 @@ func TestFileWrite(t *testing.T) {
 		result := out.(fileWriteResult)
 		if result.Path != path {
 			t.Errorf("path: got %q, want %q", result.Path, path)
+		}
+	})
+
+	t.Run("unresolved path template with non-object input fails before writing", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "{{.topic}}.txt")
+		config := fmt.Sprintf(`{"path":%q}`, path)
+
+		_, err := fileWriteTransform(fileWriteContext(tmpDir), "string input", config)
+		if err == nil {
+			t.Fatal("expected unresolved path template to fail")
+		}
+
+		matches, globErr := filepath.Glob(filepath.Join(tmpDir, "*"))
+		if globErr != nil {
+			t.Fatalf("glob temp dir: %v", globErr)
+		}
+		if len(matches) != 0 {
+			t.Fatalf("unresolved path template wrote files: %v", matches)
+		}
+	})
+
+	t.Run("absolute path outside workspace is rejected before writing", func(t *testing.T) {
+		workspace := t.TempDir()
+		outside := t.TempDir()
+		path := filepath.Join(outside, "escape.txt")
+		config := fmt.Sprintf(`{"path":%q}`, path)
+
+		_, err := fileWriteTransform(fileWriteContext(workspace), "blocked", config)
+		if err == nil {
+			t.Fatal("expected path outside workspace to fail")
+		}
+		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+			t.Fatalf("outside path was written or stat failed: %v", statErr)
+		}
+	})
+
+	t.Run("parent traversal is rejected before writing", func(t *testing.T) {
+		workspace := t.TempDir()
+		outside := filepath.Join(filepath.Dir(workspace), "escape.txt")
+		config := `{"path":"../escape.txt"}`
+
+		_, err := fileWriteTransform(fileWriteContext(workspace), "blocked", config)
+		if err == nil {
+			t.Fatal("expected parent traversal to fail")
+		}
+		if _, statErr := os.Stat(outside); !os.IsNotExist(statErr) {
+			t.Fatalf("outside path was written or stat failed: %v", statErr)
+		}
+	})
+
+	t.Run("template-resolved parent traversal is rejected before writing", func(t *testing.T) {
+		workspace := t.TempDir()
+		outside := filepath.Join(filepath.Dir(workspace), "escape.txt")
+		config := `{"path":"{{.path}}"}`
+		input := map[string]any{"path": "../escape.txt"}
+
+		_, err := fileWriteTransform(fileWriteContext(workspace), input, config)
+		if err == nil {
+			t.Fatal("expected template-resolved parent traversal to fail")
+		}
+		if _, statErr := os.Stat(outside); !os.IsNotExist(statErr) {
+			t.Fatalf("outside path was written or stat failed: %v", statErr)
+		}
+	})
+
+	t.Run("symlink escape is rejected before writing", func(t *testing.T) {
+		workspace := t.TempDir()
+		outside := t.TempDir()
+		link := filepath.Join(workspace, "link")
+		if err := os.Symlink(outside, link); err != nil {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+		target := filepath.Join(link, "escape.txt")
+		config := fmt.Sprintf(`{"path":%q}`, target)
+
+		_, err := fileWriteTransform(fileWriteContext(workspace), "blocked", config)
+		if err == nil {
+			t.Fatal("expected symlink escape to fail")
+		}
+		if _, statErr := os.Stat(filepath.Join(outside, "escape.txt")); !os.IsNotExist(statErr) {
+			t.Fatalf("symlink target was written or stat failed: %v", statErr)
 		}
 	})
 
@@ -1159,7 +1279,7 @@ func TestFileWrite(t *testing.T) {
 		path := filepath.Join(tmpDir, "via-apply.txt")
 		config := fmt.Sprintf(`{"path":%q}`, path)
 
-		out, err := ApplyTransform(context.Background(), TransformFileWrite, config, "test content")
+		out, err := ApplyTransform(fileWriteContext(tmpDir), TransformFileWrite, config, "test content")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1218,6 +1338,10 @@ func TestFileWriteConfigValidation(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+func fileWriteContext(workspace string) context.Context {
+	return withTransformWorkspace(context.Background(), workspace)
+}
 
 // assertEqualJSON compares two values by serializing to JSON.
 // This handles the case where []any{1,2,3} should equal []any{1.0,2.0,3.0}

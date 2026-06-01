@@ -8,6 +8,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillcas"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 )
 
@@ -174,7 +175,7 @@ type PreviewArtifact[T any] struct {
 
 	// Artifact contains the CAS reference if items were persisted.
 	// Nil if persist=false or total <= previewLimit.
-	Artifact *skillmain.Artifact `json:"artifact,omitempty"`
+	Artifact *skillcas.Artifact `json:"artifact,omitempty"`
 }
 
 // PreviewAndPersistNDJSON previews items inline and optionally persists all items to CAS as NDJSON.
@@ -216,6 +217,24 @@ func PreviewAndPersistNDJSON[T any](
 	if previewLimit <= 0 {
 		previewLimit = rc.MaxPreview
 	}
+	var writer skillcas.Writer
+	// NoCAS disables automatic output truncation, but result-set artifacts are
+	// explicit skill output and should still be persisted when CAS is configured.
+	if rc != nil && rc.Config.CAS.Store && rc.CASStore != nil {
+		writer = rc
+	}
+	return PreviewAndPersistNDJSONContext(ctx, writer, items, previewLimit, artifactName, persist)
+}
+
+// PreviewAndPersistNDJSONContext previews items inline and optionally persists all items through a CAS writer.
+func PreviewAndPersistNDJSONContext[T any](
+	ctx context.Context,
+	writer skillcas.Writer,
+	items []T,
+	previewLimit int,
+	artifactName string,
+	persist bool,
+) (PreviewArtifact[T], error) {
 	if previewLimit <= 0 {
 		previewLimit = 100 // fallback default
 	}
@@ -236,8 +255,8 @@ func PreviewAndPersistNDJSON[T any](
 	}
 
 	// Persist to CAS if needed
-	if persist && truncated && rc.CASStore != nil {
-		artifact, err := persistNDJSON(ctx, rc, items, artifactName)
+	if persist && truncated && writer != nil {
+		artifact, err := persistNDJSON(ctx, writer, items, artifactName)
 		if err != nil {
 			return result, fmt.Errorf("persist NDJSON to CAS: %w", err)
 		}
@@ -248,7 +267,7 @@ func PreviewAndPersistNDJSON[T any](
 }
 
 // AddArtifact adds the artifact digest to the data map when present.
-func AddArtifact(data map[string]any, artifact *skillmain.Artifact) {
+func AddArtifact(data map[string]any, artifact *skillcas.Artifact) {
 	if artifact != nil && artifact.Digest != "" {
 		data["artifact"] = artifact.Digest
 	}
@@ -257,20 +276,20 @@ func AddArtifact(data map[string]any, artifact *skillmain.Artifact) {
 // persistNDJSON writes items as NDJSON to CAS.
 func persistNDJSON[T any](
 	ctx context.Context,
-	rc *skillmain.RunContext,
+	writer skillcas.Writer,
 	items []T,
 	artifactName string,
-) (skillmain.Artifact, error) {
+) (skillcas.Artifact, error) {
 	var buf bytes.Buffer
 
 	for _, item := range items {
 		line, err := json.Marshal(item)
 		if err != nil {
-			return skillmain.Artifact{}, fmt.Errorf("marshal item: %w", err)
+			return skillcas.Artifact{}, fmt.Errorf("marshal item: %w", err)
 		}
 		buf.Write(line)
 		buf.WriteByte('\n')
 	}
 
-	return skillmain.PersistBuffer(ctx, rc, &buf, "application/x-ndjson", artifactName)
+	return skillcas.PersistBuffer(ctx, writer, &buf, "application/x-ndjson", artifactName)
 }

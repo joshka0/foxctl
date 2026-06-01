@@ -109,6 +109,147 @@ func TestStore_ItemCRUD(t *testing.T) {
 	}
 }
 
+func TestStore_UpsertItemAcceptsKnownKinds(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	store, err := knowledge.Open(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	kinds := []knowledge.ItemKind{
+		knowledge.KindPack,
+		knowledge.KindAgent,
+		knowledge.KindCommand,
+	}
+
+	for _, kind := range kinds {
+		t.Run(string(kind), func(t *testing.T) {
+			created, err := store.UpsertItem(ctx, knowledge.Item{
+				Name:       "item-" + string(kind),
+				Kind:       kind,
+				SourcePath: "docs/knowledge/" + string(kind),
+			})
+			if err != nil {
+				t.Fatalf("UpsertItem kind %q: %v", kind, err)
+			}
+			if created.Kind != kind {
+				t.Fatalf("created kind = %q, want %q", created.Kind, kind)
+			}
+		})
+	}
+}
+
+func TestStore_UpsertItemRejectsInvalidKind(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	store, err := knowledge.Open(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	_, err = store.UpsertItem(ctx, knowledge.Item{
+		Name:       "invalid-kind",
+		Kind:       knowledge.ItemKind("unknown-kind"),
+		SourcePath: "docs/knowledge/invalid-kind",
+	})
+	if err == nil {
+		t.Fatalf("expected invalid item kind to be rejected")
+	}
+
+	items, err := store.ListAllItems(ctx)
+	if err != nil {
+		t.Fatalf("ListAllItems: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("invalid item was persisted: %+v", items)
+	}
+}
+
+func TestStore_UpsertItemDefaultsAndNormalizesPriority(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	store, err := knowledge.Open(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	defaulted, err := store.UpsertItem(ctx, knowledge.Item{
+		Name:       "default-priority",
+		Kind:       knowledge.KindPack,
+		SourcePath: "docs/knowledge/default-priority",
+	})
+	if err != nil {
+		t.Fatalf("UpsertItem default priority: %v", err)
+	}
+	if defaulted.Priority != "medium" {
+		t.Fatalf("default priority=%q want medium", defaulted.Priority)
+	}
+
+	normalized, err := store.UpsertItem(ctx, knowledge.Item{
+		Name:       "normalized-priority",
+		Kind:       knowledge.KindPack,
+		SourcePath: "docs/knowledge/normalized-priority",
+		Priority:   " HIGH ",
+	})
+	if err != nil {
+		t.Fatalf("UpsertItem normalized priority: %v", err)
+	}
+	if normalized.Priority != "high" {
+		t.Fatalf("normalized priority=%q want high", normalized.Priority)
+	}
+}
+
+func TestStore_UpsertItemRejectsInvalidPriority(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	store, err := knowledge.Open(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	_, err = store.UpsertItem(ctx, knowledge.Item{
+		Name:       "invalid-priority",
+		Kind:       knowledge.KindPack,
+		SourcePath: "docs/knowledge/invalid-priority",
+		Priority:   "urgent",
+	})
+	if err == nil {
+		t.Fatalf("expected invalid item priority to be rejected")
+	}
+
+	items, err := store.ListAllItems(ctx)
+	if err != nil {
+		t.Fatalf("ListAllItems: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("invalid priority item was persisted: %+v", items)
+	}
+}
+
+func TestStore_ListItemsRejectsInvalidKind(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	store, err := knowledge.Open(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	if _, err := store.ListItems(ctx, knowledge.ItemKind("unknown-kind")); err == nil {
+		t.Fatalf("expected invalid list item kind to be rejected")
+	}
+}
+
 func TestStore_Triggers(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
@@ -174,6 +315,148 @@ func TestStore_Triggers(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("expected 0 triggers after delete, got %d", len(got))
+	}
+}
+
+func TestStore_AddTriggerAcceptsKnownKinds(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	store, err := knowledge.Open(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	item, err := store.UpsertItem(ctx, knowledge.Item{
+		Name:       "trigger-kind-item",
+		Kind:       knowledge.KindPack,
+		SourcePath: "docs/knowledge/trigger-kind-item",
+	})
+	if err != nil {
+		t.Fatalf("UpsertItem: %v", err)
+	}
+
+	kinds := []knowledge.TriggerKind{
+		knowledge.TriggerKeyword,
+		knowledge.TriggerIntent,
+		knowledge.TriggerPath,
+		knowledge.TriggerContent,
+	}
+
+	for _, kind := range kinds {
+		t.Run(string(kind), func(t *testing.T) {
+			created, err := store.AddTrigger(ctx, knowledge.Trigger{
+				ItemID:      item.ID,
+				TriggerKind: kind,
+				Pattern:     "pattern-" + string(kind),
+			})
+			if err != nil {
+				t.Fatalf("AddTrigger kind %q: %v", kind, err)
+			}
+			if created.TriggerKind != kind {
+				t.Fatalf("created trigger kind = %q, want %q", created.TriggerKind, kind)
+			}
+		})
+	}
+}
+
+func TestStore_AddTriggerRejectsInvalidKind(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	store, err := knowledge.Open(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	item, err := store.UpsertItem(ctx, knowledge.Item{
+		Name:       "invalid-trigger-kind-item",
+		Kind:       knowledge.KindPack,
+		SourcePath: "docs/knowledge/invalid-trigger-kind-item",
+	})
+	if err != nil {
+		t.Fatalf("UpsertItem: %v", err)
+	}
+
+	_, err = store.AddTrigger(ctx, knowledge.Trigger{
+		ItemID:      item.ID,
+		TriggerKind: knowledge.TriggerKind("unknown-trigger-kind"),
+		Pattern:     "should-not-persist",
+	})
+	if err == nil {
+		t.Fatalf("expected invalid trigger kind to be rejected")
+	}
+
+	triggers, err := store.ListTriggers(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("ListTriggers: %v", err)
+	}
+	if len(triggers) != 0 {
+		t.Fatalf("invalid trigger was persisted: %+v", triggers)
+	}
+}
+
+func TestStore_MatchesUseSemanticPriorityOrder(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	store, err := knowledge.Open(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer store.Close()
+
+	for _, item := range []struct {
+		name     string
+		priority string
+	}{
+		{name: "low-priority", priority: "low"},
+		{name: "critical-priority", priority: "critical"},
+		{name: "medium-priority", priority: "medium"},
+		{name: "high-priority", priority: "high"},
+	} {
+		created, err := store.UpsertItem(ctx, knowledge.Item{
+			Name:       item.name,
+			Kind:       knowledge.KindPack,
+			SourcePath: "docs/knowledge/" + item.name,
+			Priority:   item.priority,
+		})
+		if err != nil {
+			t.Fatalf("UpsertItem %s: %v", item.name, err)
+		}
+		if _, err := store.AddTrigger(ctx, knowledge.Trigger{
+			ItemID:      created.ID,
+			TriggerKind: knowledge.TriggerKeyword,
+			Pattern:     "shared-keyword",
+		}); err != nil {
+			t.Fatalf("AddTrigger keyword %s: %v", item.name, err)
+		}
+		if _, err := store.AddTrigger(ctx, knowledge.Trigger{
+			ItemID:      created.ID,
+			TriggerKind: knowledge.TriggerPath,
+			Pattern:     "src/**",
+		}); err != nil {
+			t.Fatalf("AddTrigger path %s: %v", item.name, err)
+		}
+	}
+
+	want := []string{"critical-priority", "high-priority", "medium-priority", "low-priority"}
+	keywordMatches, err := store.MatchByKeyword(ctx, []string{"shared-keyword"})
+	if err != nil {
+		t.Fatalf("MatchByKeyword: %v", err)
+	}
+	if got := itemNames(keywordMatches); !equalStrings(got, want) {
+		t.Fatalf("keyword match order=%v want %v", got, want)
+	}
+
+	pathMatches, err := store.MatchByPath(ctx, "src/app/main.go")
+	if err != nil {
+		t.Fatalf("MatchByPath: %v", err)
+	}
+	if got := itemNames(pathMatches); !equalStrings(got, want) {
+		t.Fatalf("path match order=%v want %v", got, want)
 	}
 }
 
@@ -304,4 +587,24 @@ func createFile(path, content string) error {
 		return err
 	}
 	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+func itemNames(items []knowledge.Item) []string {
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		out = append(out, item.Name)
+	}
+	return out
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

@@ -163,3 +163,32 @@ func TestRunFsTreeList(t *testing.T) {
 		t.Errorf("expected at least 2 lines in list, got %d", len(listText))
 	}
 }
+
+func TestBuildTreeSkipsSymlinkEntries(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "file.txt"), []byte("safe"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("secret"), 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	if err := os.Symlink(outsideFile, filepath.Join(workspace, "secret-link.txt")); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	root, stats, err := buildTree(workspace, workspace, Input{MaxDepth: 2}, 0)
+	if err != nil {
+		t.Fatalf("buildTree: %v", err)
+	}
+	if stats.TotalFiles != 1 {
+		t.Fatalf("TotalFiles=%d want 1", stats.TotalFiles)
+	}
+	if len(root.Children) != 1 {
+		t.Fatalf("child count=%d want 1: %#v", len(root.Children), root.Children)
+	}
+	if root.Children[0].Name != "file.txt" {
+		t.Fatalf("child=%q want file.txt", root.Children[0].Name)
+	}
+}

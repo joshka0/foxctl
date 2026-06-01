@@ -60,7 +60,8 @@ func ValidatePath(rc *RunContext, candidate string, options ...PathOption) (stri
 }
 
 // ResolvePaths validates a single path, multiple paths, and/or glob patterns.
-// Glob matches are validated individually and invalid matches are skipped.
+// Glob bases are validated before expansion; matches are validated individually
+// and invalid matches are skipped.
 func ResolvePaths(rc *RunContext, singlePath string, multiplePaths []string) ([]string, error) {
 	if rc == nil || rc.PathValidator == nil {
 		return nil, skillerr.Arg("path validator not configured")
@@ -81,6 +82,9 @@ func ResolvePaths(rc *RunContext, singlePath string, multiplePaths []string) ([]
 		}
 
 		if strings.ContainsAny(pattern, "*?[") {
+			if _, err := ValidatePath(rc, globLiteralBase(pattern), WithPathMessage("glob base validation failed")); err != nil {
+				return nil, err
+			}
 			matches, err := filepath.Glob(pattern)
 			if err != nil {
 				return nil, skillerr.WrapValidation(fmt.Sprintf("invalid glob pattern %q", pattern), err)
@@ -102,4 +106,16 @@ func ResolvePaths(rc *RunContext, singlePath string, multiplePaths []string) ([]
 	}
 
 	return resolved, nil
+}
+
+func globLiteralBase(pattern string) string {
+	firstMeta := strings.IndexAny(pattern, "*?[")
+	if firstMeta < 0 {
+		return pattern
+	}
+	prefix := pattern[:firstMeta]
+	if prefix == "" {
+		return "."
+	}
+	return filepath.Dir(prefix)
 }

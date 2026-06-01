@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"testing/quick"
 )
 
 func TestSchedulerPickNext(t *testing.T) {
@@ -192,12 +193,99 @@ func TestValidateSolverStateValid(t *testing.T) {
 
 func TestValidateSolverStateKeyMismatch(t *testing.T) {
 	state := NewSolverState()
-	state.Items["wrong_key"] = WorkItem{ID: "n1", Goal: "g", Archetype: ArchetypeExplicitDAG}
+	state.Items["wrong_key"] = WorkItem{ID: "n1", Goal: "g", Archetype: ArchetypeExplicitDAG, Status: StatusPending}
 	err := ValidateSolverState(state)
 	if err == nil {
 		t.Fatal("expected key mismatch error")
 	}
 	if !strings.Contains(err.Error(), "does not match") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateSolverStateRejectsMalformedItems(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		item WorkItem
+		want string
+	}{
+		{
+			name: "empty id",
+			item: WorkItem{ID: "", Goal: "g", Archetype: ArchetypeExplicitDAG, Status: StatusPending},
+			want: "id is required",
+		},
+		{
+			name: "invalid archetype",
+			item: WorkItem{ID: "n1", Goal: "g", Archetype: "unknown", Status: StatusPending},
+			want: "invalid archetype",
+		},
+		{
+			name: "invalid status",
+			item: WorkItem{ID: "n1", Goal: "g", Archetype: ArchetypeExplicitDAG, Status: "done"},
+			want: "invalid status",
+		},
+		{
+			name: "empty dependency id",
+			item: WorkItem{ID: "n1", Goal: "g", Archetype: ArchetypeExplicitDAG, Status: StatusPending, DependsOn: []string{""}},
+			want: "empty dependency id",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := NewSolverState()
+			state.Items[tt.item.ID] = tt.item
+			err := ValidateSolverState(state)
+			if err == nil {
+				t.Fatal("expected malformed item error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error=%v want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateSolverStateRejectsGeneratedUnknownStatuses(t *testing.T) {
+	t.Parallel()
+
+	unknownStatusesFailClosed := func(raw string) bool {
+		state := NewSolverState()
+		state.Items["n1"] = WorkItem{
+			ID:        "n1",
+			Goal:      "g",
+			Archetype: ArchetypeExplicitDAG,
+			Status:    WorkItemStatus("unknown:" + raw),
+		}
+
+		err := ValidateSolverState(state)
+		return err != nil && strings.Contains(err.Error(), "invalid status")
+	}
+
+	if err := quick.Check(unknownStatusesFailClosed, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatalf("generated unknown status was accepted: %v", err)
+	}
+}
+
+func TestValidateSolverStateRejectsGeneratedUnknownArchetypes(t *testing.T) {
+	t.Parallel()
+
+	unknownArchetypesFailClosed := func(raw string) bool {
+		state := NewSolverState()
+		state.Items["n1"] = WorkItem{
+			ID:        "n1",
+			Goal:      "g",
+			Archetype: ProblemArchetype("unknown:" + raw),
+			Status:    StatusPending,
+		}
+
+		err := ValidateSolverState(state)
+		return err != nil && strings.Contains(err.Error(), "invalid archetype")
+	}
+
+	if err := quick.Check(unknownArchetypesFailClosed, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatalf("generated unknown archetype was accepted: %v", err)
 	}
 }

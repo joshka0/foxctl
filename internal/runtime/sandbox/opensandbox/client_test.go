@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 )
 
@@ -176,6 +178,134 @@ func TestRunSandboxCommandUsesResolvedExecdEndpoint(t *testing.T) {
 	if gotCommandBody.Timeout != 5000 {
 		t.Fatalf("timeout=%d want 5000", gotCommandBody.Timeout)
 	}
+}
+
+func TestShellQuotePropertyRoundTripsThroughPOSIXShell(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skipf("sh unavailable: %v", err)
+	}
+
+	prop := func(raw string) bool {
+		value := shellQuotePropertyValue(raw)
+		return shellQuoteRoundTrips(t, value)
+	}
+
+	if err := quick.Check(prop, &quick.Config{MaxCount: 200}); err != nil {
+		t.Fatalf("shell quote property failed: %v", err)
+	}
+}
+
+func TestShellQuoteRoundTripsHostileExamples(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skipf("sh unavailable: %v", err)
+	}
+
+	examples := []string{
+		"",
+		"plain",
+		"has space",
+		"quote'break",
+		"semi; echo hacked",
+		"$(echo hacked)",
+		"`echo hacked`",
+		"line\nnext",
+	}
+	for _, example := range examples {
+		t.Run(example, func(t *testing.T) {
+			if !shellQuoteRoundTrips(t, example) {
+				t.FailNow()
+			}
+		})
+	}
+}
+
+func TestStringLiteralJSONPropertyRoundTrips(t *testing.T) {
+	prop := func(raw string) bool {
+		literal := stringLiteralJSON(raw)
+		var decoded string
+		if err := json.Unmarshal([]byte(literal), &decoded); err != nil {
+			t.Logf("stringLiteralJSON(%q) produced invalid JSON %q: %v", raw, literal, err)
+			return false
+		}
+		if decoded != raw {
+			t.Logf("stringLiteralJSON(%q) decoded as %q", raw, decoded)
+			return false
+		}
+		return true
+	}
+
+	if err := quick.Check(prop, &quick.Config{MaxCount: 1000}); err != nil {
+		t.Fatalf("JSON literal property failed: %v", err)
+	}
+}
+
+func TestBuildNetworkPolicyTrimsDedupesAndAddsGitHubCompanions(t *testing.T) {
+	policy := buildNetworkPolicy(" https://github.com/example/repo.git ", []string{
+		" api.github.com ",
+		"",
+		"github.com",
+		"api.github.com",
+	})
+	if policy == nil {
+		t.Fatal("policy = nil, want deny-by-default policy")
+	}
+	if policy.DefaultAction != "deny" {
+		t.Fatalf("default action = %q, want deny", policy.DefaultAction)
+	}
+
+	targets := make([]string, 0, len(policy.Egress))
+	for _, rule := range policy.Egress {
+		if rule.Action != "allow" {
+			t.Fatalf("egress rule action = %q, want allow", rule.Action)
+		}
+		targets = append(targets, rule.Target)
+	}
+	want := []string{"api.github.com", "github.com", "codeload.github.com", "objects.githubusercontent.com"}
+	if strings.Join(targets, ",") != strings.Join(want, ",") {
+		t.Fatalf("targets = %v, want %v", targets, want)
+	}
+}
+
+func TestBuildNetworkPolicyAllowsScpLikeRepoHost(t *testing.T) {
+	policy := buildNetworkPolicy(" git@github.com:example/repo.git ", nil)
+	if policy == nil {
+		t.Fatal("policy = nil, want deny-by-default policy for scp-style repo URL")
+	}
+
+	targets := make([]string, 0, len(policy.Egress))
+	for _, rule := range policy.Egress {
+		targets = append(targets, rule.Target)
+	}
+	want := []string{"github.com", "codeload.github.com", "objects.githubusercontent.com"}
+	if strings.Join(targets, ",") != strings.Join(want, ",") {
+		t.Fatalf("targets = %v, want %v", targets, want)
+	}
+}
+
+func shellQuotePropertyValue(raw string) string {
+	value := strings.ReplaceAll(raw, "\x00", "_")
+	if len(value) > 256 {
+		value = value[:256]
+	}
+	return value
+}
+
+func shellQuoteRoundTrips(t *testing.T, value string) bool {
+	t.Helper()
+
+	script := "printf %s " + shellQuote(value)
+	//nolint:gosec // This test intentionally executes generated shell quoting to prove it is inert data.
+	cmd := exec.Command("sh", "-c", script)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Logf("shell quote round-trip command failed for %q: %v", value, err)
+		return false
+	}
+	if string(out) != value {
+		t.Logf("shellQuote(%q) round-tripped as %q", value, string(out))
+		return false
+	}
+	return true
 }
 
 func serverURLHostPath(t *testing.T, r *http.Request) string {

@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"testing/quick"
 )
 
 func TestDirectSkillForPath(t *testing.T) {
@@ -92,4 +93,127 @@ func TestBuildImpactReportPackagesIncludesReverseDeps(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("impacted packages = %v, want %v", got, want)
 	}
+
+	if !reflect.DeepEqual(report.ChangedPkgs, []string{"github.com/example/repo/internal/foo"}) {
+		t.Fatalf("changed packages = %v, want direct foo package only", report.ChangedPkgs)
+	}
+}
+
+func TestBuildImpactReportTestOnlyChangesDoNotFanOutReverseDeps(t *testing.T) {
+	allPkgs := []goListPackage{
+		{ImportPath: "github.com/example/repo/internal/foo", Dir: filepath.ToSlash("/repo/internal/foo")},
+		{ImportPath: "github.com/example/repo/internal/bar", Dir: filepath.ToSlash("/repo/internal/bar"), Deps: []string{"github.com/example/repo/internal/foo"}},
+		{ImportPath: "github.com/example/repo/cmd/app", Dir: filepath.ToSlash("/repo/cmd/app"), Deps: []string{"github.com/example/repo/internal/bar", "github.com/example/repo/internal/foo"}},
+	}
+	report := buildImpactReportWithRepoRoot("/repo", "origin/main", "HEAD", []string{"internal/foo/service_test.go"}, allPkgs, nil)
+
+	got := packageImportPaths(report.Packages)
+	want := []string{"github.com/example/repo/internal/foo"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("impacted packages = %v, want test-only package without reverse deps %v", got, want)
+	}
+
+	if !reflect.DeepEqual(report.ChangedPkgs, []string{"github.com/example/repo/internal/foo"}) {
+		t.Fatalf("changed packages = %v, want direct foo package only", report.ChangedPkgs)
+	}
+}
+
+func TestBuildImpactReportPackagesIncludesTestOnlyImports(t *testing.T) {
+	allPkgs := []goListPackage{
+		{ImportPath: "github.com/example/repo/internal/envelope", Dir: filepath.ToSlash("/repo/internal/envelope")},
+		{
+			ImportPath:  "github.com/example/repo/tests/integration",
+			Dir:         filepath.ToSlash("/repo/tests/integration"),
+			TestImports: []string{"github.com/example/repo/internal/envelope"},
+		},
+	}
+
+	report := buildImpactReportWithRepoRoot("/repo", "origin/main", "HEAD", []string{"internal/envelope/envelope.go"}, allPkgs, nil)
+
+	got := packageImportPaths(report.Packages)
+	want := []string{
+		"github.com/example/repo/internal/envelope",
+		"github.com/example/repo/tests/integration",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("impacted packages = %v, want %v", got, want)
+	}
+}
+
+func TestBuildImpactReportGlobalTriggerImpactsAllPackages(t *testing.T) {
+	allPkgs := []goListPackage{
+		{ImportPath: "github.com/example/repo/cmd/app", Dir: filepath.ToSlash("/repo/cmd/app")},
+		{ImportPath: "github.com/example/repo/internal/foo", Dir: filepath.ToSlash("/repo/internal/foo")},
+		{ImportPath: "github.com/example/repo/tests/integration", Dir: filepath.ToSlash("/repo/tests/integration")},
+	}
+
+	report := buildImpactReportWithRepoRoot("/repo", "origin/main", "HEAD", []string{"go.mod"}, allPkgs, nil)
+
+	got := packageImportPaths(report.Packages)
+	want := []string{
+		"github.com/example/repo/cmd/app",
+		"github.com/example/repo/internal/foo",
+		"github.com/example/repo/tests/integration",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("impacted packages = %v, want %v", got, want)
+	}
+}
+
+func TestPackageImpactIsOrderIndependentForTestImports(t *testing.T) {
+	base := []goListPackage{
+		{ImportPath: "github.com/example/repo/internal/envelope", Dir: filepath.ToSlash("/repo/internal/envelope")},
+		{
+			ImportPath:   "github.com/example/repo/internal/runner",
+			Dir:          filepath.ToSlash("/repo/internal/runner"),
+			Deps:         []string{"github.com/example/repo/internal/envelope"},
+			TestImports:  []string{"github.com/example/repo/internal/envelope"},
+			XTestImports: []string{"github.com/example/repo/internal/envelope"},
+		},
+		{
+			ImportPath:  "github.com/example/repo/tests/integration",
+			Dir:         filepath.ToSlash("/repo/tests/integration"),
+			TestImports: []string{"github.com/example/repo/internal/runner", "github.com/example/repo/internal/envelope"},
+		},
+	}
+	want := []string{
+		"github.com/example/repo/internal/envelope",
+		"github.com/example/repo/internal/runner",
+		"github.com/example/repo/tests/integration",
+	}
+
+	check := func(rotation uint8, duplicate bool) bool {
+		pkgs := rotatePackages(base, int(rotation))
+		if duplicate {
+			for i := range pkgs {
+				if pkgs[i].ImportPath == "github.com/example/repo/tests/integration" {
+					pkgs[i].TestImports = append(pkgs[i].TestImports, "github.com/example/repo/internal/envelope")
+				}
+			}
+		}
+		report := buildImpactReportWithRepoRoot("/repo", "origin/main", "HEAD", []string{"internal/envelope/envelope.go"}, pkgs, nil)
+		return reflect.DeepEqual(packageImportPaths(report.Packages), want)
+	}
+
+	if err := quick.Check(check, &quick.Config{MaxCount: 64}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func packageImportPaths(pkgs []packageImpact) []string {
+	out := make([]string, 0, len(pkgs))
+	for _, pkg := range pkgs {
+		out = append(out, pkg.ImportPath)
+	}
+	return out
+}
+
+func rotatePackages(pkgs []goListPackage, n int) []goListPackage {
+	if len(pkgs) == 0 {
+		return nil
+	}
+	n %= len(pkgs)
+	out := append([]goListPackage(nil), pkgs[n:]...)
+	out = append(out, pkgs[:n]...)
+	return out
 }

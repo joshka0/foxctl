@@ -22,8 +22,8 @@ stages:
 default:
   interruptible: true
   tags:
-    - foxctl
     - docker
+    - foxctl
     - k3s
 
 workflow:
@@ -42,6 +42,8 @@ build-ci-image:
   services:
     - name: docker:27-dind
       alias: docker
+      variables:
+        HEALTHCHECK_TCP_PORT: "2376"
   retry:
     max: 2
     when:
@@ -114,6 +116,11 @@ unit-tests:
 
 .race-tests-template:
   stage: check
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - if: '$RUN_FULL_RACE == "1"'
   script:
     - |
       base_ref=""
@@ -127,6 +134,13 @@ unit-tests:
       else
         make test-race-shard SHARD="$RACE_SHARD"
       fi
+
+race-tests-smoke:
+  stage: check
+  rules:
+    - if: $CI_MERGE_REQUEST_IID
+  script:
+    - make test-race-smoke
 
 race-tests-core-cmd:
   extends: .race-tests-template
@@ -203,6 +217,7 @@ typescript-frontend:
   stage: check
   image: oven/bun:1.3.14
   before_script:
+    - export PATH="/home/dev/.bun/bin:$PATH"
     - bun install --frozen-lockfile
   script:
     - bun run unused:frontend
@@ -211,8 +226,11 @@ typescript-frontend:
 build:
   stage: build
   needs:
-    - job: static-analysis
-    - job: unit-tests
+    - job: build-ci-image
+  variables:
+    GOFLAGS: "-buildvcs=false -p=2"
+    KUBERNETES_MEMORY_REQUEST: "768Mi"
+    KUBERNETES_MEMORY_LIMIT: "1536Mi"
   script:
     - make build
     - |
@@ -238,17 +256,30 @@ all-checks:
   needs:
     - job: static-analysis
     - job: unit-tests
+    - job: race-tests-smoke
+      optional: true
     - job: race-tests-core-cmd
+      optional: true
     - job: race-tests-core-internal
+      optional: true
     - job: race-tests-runtime
+      optional: true
     - job: race-tests-context-tooling
+      optional: true
     - job: race-tests-intelligence
+      optional: true
     - job: race-tests-platform-interfaces
+      optional: true
     - job: race-tests-storage
+      optional: true
     - job: race-tests-v2
+      optional: true
     - job: race-tests-skills-a-g
+      optional: true
     - job: race-tests-skills-h-o
+      optional: true
     - job: race-tests-skills-p-x
+      optional: true
     - job: integration-tests
   script:
     - echo "All checks passed"

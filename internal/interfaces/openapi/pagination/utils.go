@@ -37,7 +37,9 @@ func splitLinkHeader(header string) []string {
 			depth++
 			appendRune(&current, r)
 		case '>':
-			depth--
+			if depth > 0 {
+				depth--
+			}
 			appendRune(&current, r)
 		case ',':
 			if depth == 0 {
@@ -85,11 +87,20 @@ func parseLinkPart(part string) (string, string) {
 		}
 		key := strings.TrimSpace(pieces[0])
 		val := strings.Trim(strings.TrimSpace(pieces[1]), "\"")
-		if strings.EqualFold(key, "rel") && val == "next" {
+		if strings.EqualFold(key, "rel") && hasLinkRel(val, "next") {
 			return urlPart, "next"
 		}
 	}
 	return "", ""
+}
+
+func hasLinkRel(value, rel string) bool {
+	for _, token := range strings.Fields(value) {
+		if strings.EqualFold(token, rel) {
+			return true
+		}
+	}
+	return false
 }
 
 // detectOffsetParams auto-detects pagination parameter names from the request.

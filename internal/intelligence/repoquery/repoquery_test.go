@@ -1,7 +1,9 @@
 package repoquery
 
 import (
+	"strings"
 	"testing"
+	"testing/quick"
 
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
 )
@@ -123,6 +125,27 @@ func TestNormalizeNaturalQuery(t *testing.T) {
 	}
 }
 
+func TestNormalizeNaturalQueryPropertyProducesStableSingleSpaceText(t *testing.T) {
+	t.Parallel()
+
+	property := func(raw string) bool {
+		got := NormalizeNaturalQuery(raw)
+		if got != NormalizeNaturalQuery(got) {
+			return false
+		}
+		if got != strings.TrimSpace(got) {
+			return false
+		}
+		if strings.ContainsAny(got, "/\\\n\r\t") {
+			return false
+		}
+		return strings.Join(strings.Fields(got), " ") == got
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNewSearchRequestSanitizesNaturalQuery(t *testing.T) {
 	t.Parallel()
 
@@ -217,6 +240,38 @@ func TestMergeEdgeTypesSupportsSemanticAndAllEdgeSets(t *testing.T) {
 	}
 	if !edgeTypesContain(all, repoindex.EdgeEnforces) || !edgeTypesContain(all, repoindex.EdgeCoChangesWith) {
 		t.Fatalf("all edge set = %#v", all)
+	}
+}
+
+func TestMergeEdgeTypesPropertyDeduplicatesMergedSetsAndExplicitTypes(t *testing.T) {
+	t.Parallel()
+
+	allEdges := repoindex.AllEdgeTypes()
+	property := func(rawA, rawB uint8) bool {
+		a := allEdges[int(rawA)%len(allEdges)]
+		b := allEdges[int(rawB)%len(allEdges)]
+		got, err := MergeEdgeTypes(
+			[]string{"all"},
+			[]string{string(a), strings.ToLower(string(a)), string(b) + "," + string(a)},
+		)
+		if err != nil {
+			t.Logf("MergeEdgeTypes error: %v", err)
+			return false
+		}
+		seen := make(map[repoindex.EdgeType]struct{}, len(got))
+		for _, edgeType := range got {
+			if _, ok := seen[edgeType]; ok {
+				t.Logf("duplicate edge type %q in %#v", edgeType, got)
+				return false
+			}
+			seen[edgeType] = struct{}{}
+		}
+		_, hasA := seen[a]
+		_, hasB := seen[b]
+		return hasA && hasB
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 200}); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -1,6 +1,11 @@
 package agent
 
-import "time"
+import (
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+)
 
 const (
 	// DefaultStream is the default stream for messages.
@@ -89,6 +94,59 @@ const (
 	BoardMessageKindGuidanceUpdate BoardMessageKind = "guidance_update"
 )
 
+// ErrInvalidBoardMessageKind indicates an unknown board message kind.
+var ErrInvalidBoardMessageKind = errors.New("agent: invalid board message kind")
+
+// NormalizeBoardMessageKind defaults omitted kinds to info and rejects unknown non-empty kinds.
+func NormalizeBoardMessageKind(kind BoardMessageKind) (BoardMessageKind, error) {
+	normalized := BoardMessageKind(strings.TrimSpace(string(kind)))
+	if normalized == "" {
+		return BoardMessageKindInfo, nil
+	}
+	switch normalized {
+	case BoardMessageKindInstruction,
+		BoardMessageKindInfo,
+		BoardMessageKindAlert,
+		BoardMessageKindReviewRequest,
+		BoardMessageKindTaskUpdate,
+		BoardMessageKindLeadChange,
+		BoardMessageKindCoordinatorPulse,
+		BoardMessageKindPlanSession,
+		BoardMessageKindPlanProposal,
+		BoardMessageKindPlanQuestion,
+		BoardMessageKindPlanDecision,
+		BoardMessageKindPlanReview,
+		BoardMessageKindPlanClose,
+		BoardMessageKindInterviewSession,
+		BoardMessageKindInterviewQuestion,
+		BoardMessageKindInterviewAnswer,
+		BoardMessageKindInterviewVerify,
+		BoardMessageKindEpic,
+		BoardMessageKindEpicQuestion,
+		BoardMessageKindEpicAnswer,
+		BoardMessageKindEpicFinalize,
+		BoardMessageKindEpicUpdate,
+		BoardMessageKindEpicClose,
+		BoardMessageKindEpicCheckpoint,
+		BoardMessageKindMilestoneProposal,
+		BoardMessageKindMilestone,
+		BoardMessageKindMilestoneContract,
+		BoardMessageKindStory,
+		BoardMessageKindAcceptanceCriteria,
+		BoardMessageKindMilestoneReview,
+		BoardMessageKindMilestoneSummary,
+		BoardMessageKindStoryProposal,
+		BoardMessageKindStoryState,
+		BoardMessageKindStoryUpdate,
+		BoardMessageKindStoryValidation,
+		BoardMessageKindDeliveryLog,
+		BoardMessageKindGuidanceUpdate:
+		return normalized, nil
+	default:
+		return "", fmt.Errorf("%w: unknown board message kind %q", ErrInvalidBoardMessageKind, kind)
+	}
+}
+
 // BoardMessageStatus defines the read/ack status of a message.
 type BoardMessageStatus string
 
@@ -103,6 +161,41 @@ const (
 	// BoardMessageStatusAcked indicates the message has been acknowledged.
 	BoardMessageStatusAcked BoardMessageStatus = "acked"
 )
+
+// ErrInvalidBoardMessageStatus indicates an unknown board message read/ack state.
+var ErrInvalidBoardMessageStatus = errors.New("agent: invalid board message status")
+
+// ValidateBoardMessageStatus rejects unknown read/ack states.
+func ValidateBoardMessageStatus(status BoardMessageStatus) error {
+	switch status {
+	case BoardMessageStatusUnread, BoardMessageStatusSurfaced, BoardMessageStatusRead, BoardMessageStatusAcked:
+		return nil
+	default:
+		return fmt.Errorf("%w: unknown board message status %q", ErrInvalidBoardMessageStatus, status)
+	}
+}
+
+// ErrInvalidBoardMessagePriority indicates a priority outside the documented 1..5 range.
+var ErrInvalidBoardMessagePriority = errors.New("agent: invalid board message priority")
+
+// NormalizeBoardMessagePriority defaults omitted priority to DefaultPriority and rejects invalid explicit values.
+func NormalizeBoardMessagePriority(priority int) (int, error) {
+	if priority == 0 {
+		return DefaultPriority, nil
+	}
+	if err := ValidateBoardMessagePriority(priority); err != nil {
+		return 0, err
+	}
+	return priority, nil
+}
+
+// ValidateBoardMessagePriority rejects persisted or explicit priorities outside 1..5.
+func ValidateBoardMessagePriority(priority int) error {
+	if priority >= 1 && priority <= 5 {
+		return nil
+	}
+	return fmt.Errorf("%w: priority %d outside 1..5", ErrInvalidBoardMessagePriority, priority)
+}
 
 // BoardMessage represents a workspace-scoped message for coordination.
 // This is the richer message type per mailbox_blackboard.md spec.
@@ -134,6 +227,19 @@ const (
 	// ReservationModeShared represents a shared (non-exclusive) reservation.
 	ReservationModeShared ReservationMode = "shared"
 )
+
+// ErrInvalidReservationMode indicates an unknown file reservation locking mode.
+var ErrInvalidReservationMode = errors.New("agent: invalid reservation mode")
+
+// ValidateReservationMode rejects unknown file reservation locking modes.
+func ValidateReservationMode(mode ReservationMode) error {
+	switch mode {
+	case ReservationModeExclusive, ReservationModeShared:
+		return nil
+	default:
+		return fmt.Errorf("%w: unknown reservation mode %q", ErrInvalidReservationMode, mode)
+	}
+}
 
 // FileReservation represents an advisory lock over a file path.
 type FileReservation struct {

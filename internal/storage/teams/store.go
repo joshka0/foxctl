@@ -118,12 +118,8 @@ func (s *sqlStore) UpsertTeam(ctx context.Context, team Team) (Team, error) {
 	if team.Name == "" {
 		team.Name = team.TeamID
 	}
-	if team.PrimaryEpics == nil {
-		team.PrimaryEpics = []string{}
-	}
-	if team.Tags == nil {
-		team.Tags = []string{}
-	}
+	team.PrimaryEpics = normalizeTeamStringSlice(team.PrimaryEpics)
+	team.Tags = normalizeTeamStringSlice(team.Tags)
 
 	primaryJSON, err := json.Marshal(team.PrimaryEpics)
 	if err != nil {
@@ -435,9 +431,32 @@ func parseJSONStringSlice(src string) ([]string, error) {
 		return nil, err
 	}
 	if out == nil {
-		out = []string{}
+		return nil, fmt.Errorf("expected JSON string array")
 	}
-	return out, nil
+	return normalizeTeamStringSlice(out), nil
+}
+
+func normalizeTeamStringSlice(items []string) []string {
+	if len(items) == 0 {
+		return []string{}
+	}
+	seen := make(map[string]struct{}, len(items))
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	if len(out) == 0 {
+		return []string{}
+	}
+	return out
 }
 
 var ErrNotFound = fmt.Errorf("teams: not found")

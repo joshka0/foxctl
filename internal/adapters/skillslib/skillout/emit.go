@@ -2,20 +2,22 @@ package skillout
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"io"
-	"strings"
 
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillcas"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/domain/envelope"
-	"github.com/joshka0/foxctl/internal/platform/config"
 )
 
 // Emit writes a success envelope to stdout with standard metadata.
 func Emit(rc *skillmain.RunContext, command string, data any) error {
 	return EmitWithMeta(rc, command, data, envelope.Meta{})
+}
+
+// EmitContext writes a success envelope using a backend-neutral output context.
+func EmitContext(rc interface{ OutputWriter() io.Writer }, command string, data any) error {
+	return skillcas.EmitOK(rc, command, data)
 }
 
 // EmitWithMeta writes a success envelope with custom metadata.
@@ -30,9 +32,9 @@ func Fatal(w io.Writer, command string, err *skillerr.Error) error {
 	return envelope.Write(w, env)
 }
 
-// Artifact is an alias for skillmain.Artifact.
-// Deprecated: Use skillmain.Artifact directly.
-type Artifact = skillmain.Artifact
+// Artifact is an alias for skillcas.Artifact.
+// Deprecated: Use skillcas.Artifact directly.
+type Artifact = skillcas.Artifact
 
 // PersistJSON is an alias for skillmain.PersistJSON.
 // Deprecated: Use skillmain.PersistJSON directly.
@@ -44,30 +46,7 @@ var PersistBuffer = skillmain.PersistBuffer
 
 // BuildCASHint creates a user-friendly CAS hint for the given artifact.
 func BuildCASHint(artifact Artifact, linesPerPage int) envelope.CASHint {
-	hint := envelope.CASHint{
-		Digest:      artifact.Digest,
-		TotalBytes:  artifact.Size,
-		ContentType: artifact.Kind,
-		ReadCommand: fmt.Sprintf("foxctl cas read %s", artifact.Digest),
-		GetCommand:  fmt.Sprintf("foxctl cas get %s", artifact.Digest),
-	}
-
-	// Calculate pagination if applicable (~80 bytes per line heuristic)
-	if linesPerPage > 0 && artifact.Size > 0 {
-		bytesPerPage := linesPerPage * 80
-		if int(artifact.Size) > bytesPerPage {
-			hint.PageCount = (int(artifact.Size) + bytesPerPage - 1) / bytesPerPage
-			hint.PageSize = bytesPerPage
-			hint.ReadCommand = fmt.Sprintf("foxctl cas read %s --page-size %d", artifact.Digest, bytesPerPage)
-		}
-	}
-
-	// Detect binary content
-	if artifact.Kind != "" && !strings.HasPrefix(artifact.Kind, "text/") && artifact.Kind != "application/json" {
-		hint.IsBinary = true
-	}
-
-	return hint
+	return skillcas.BuildCASHint(artifact, linesPerPage)
 }
 
 // EmitWithCAS emits data, automatically storing large outputs in CAS.
@@ -76,56 +55,15 @@ func BuildCASHint(artifact Artifact, linesPerPage int) envelope.CASHint {
 // - ExposePolicyDigest: Include raw digest in output
 // - ExposePolicyHint: Include full retrieval hints in output
 func EmitWithCAS(ctx context.Context, rc *skillmain.RunContext, command string, data any) error {
-	// Marshal to check size
-	payload, err := json.Marshal(data)
-	if err != nil {
-		return fmt.Errorf("marshal data: %w", err)
-	}
+	return EmitWithCASContext(ctx, rc, command, data)
+}
 
-	// Check if truncation needed
-	if !rc.ShouldTruncate(len(payload)) {
-		return Emit(rc, command, data)
-	}
-
-	// Check if CAS storage is enabled
-	if !rc.ShouldStoreCAS() {
-		return Emit(rc, command, data)
-	}
-
-	// Store in CAS
-	artifact, err := PersistJSON(ctx, rc, data, command)
-	if err != nil {
-		return fmt.Errorf("persist to cas: %w", err)
-	}
-
-	// Build result based on expose policy
-	result := BuildCASResult(artifact, rc.ExposePolicy())
-
-	return Emit(rc, command, result)
+// EmitWithCASContext emits data through a backend-neutral CAS output context.
+func EmitWithCASContext(ctx context.Context, rc skillcas.OutputContext, command string, data any) error {
+	return skillcas.EmitWithCAS(ctx, rc, command, data)
 }
 
 // BuildCASResult builds the result payload based on CAS expose policy.
-func BuildCASResult(artifact Artifact, expose config.ExposePolicy) map[string]any {
-	result := map[string]any{
-		"size":      artifact.Size,
-		"truncated": true,
-	}
-
-	switch expose {
-	case config.ExposePolicyOff:
-		// Store for debugging, but don't expose in output
-		result["stored"] = true
-	case config.ExposePolicyDigest:
-		// Include raw digest
-		result["artifact"] = artifact.Digest
-	case config.ExposePolicyHint:
-		// Include full retrieval hints
-		result["artifact"] = artifact.Digest
-		result["hint"] = BuildCASHint(artifact, 50)
-	default:
-		// Default to off
-		result["stored"] = true
-	}
-
-	return result
+func BuildCASResult(artifact Artifact, expose skillcas.ExposePolicy) map[string]any {
+	return skillcas.BuildCASResult(artifact, expose)
 }

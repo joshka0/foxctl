@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -1060,6 +1062,67 @@ func TestTransformExecutorAppliesTransform(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 	_ = eng.Stop("f1")
+}
+
+func TestTransformExecutorFileWriteUsesWorkspace(t *testing.T) {
+	workspace := t.TempDir()
+	outputRel := filepath.Join("nested", "output.txt")
+	node := makeNode("file-writer", "f1", "file writer", NodeTransform,
+		fmt.Sprintf(`{"transform":"file_write","path":%q}`, outputRel))
+
+	exec := &TransformExecutor{Workspace: workspace}
+	out, err := exec.Execute(context.Background(), node, "workspace content")
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if out.Envelope.Status != envelope.StatusOK {
+		t.Fatalf("Execute status=%s error=%+v", out.Envelope.Status, out.Envelope.Error)
+	}
+	data, err := os.ReadFile(filepath.Join(workspace, outputRel))
+	if err != nil {
+		t.Fatalf("read workspace output: %v", err)
+	}
+	if string(data) != "workspace content" {
+		t.Fatalf("workspace output=%q want workspace content", string(data))
+	}
+}
+
+func TestEngineFileWriteTransformUsesFlowWorkspace(t *testing.T) {
+	workspace := t.TempDir()
+	outputRel := filepath.Join("flow-output", "result.txt")
+	store := newMockStore()
+	registry := map[NodeKind]NodeExecutor{
+		NodeSkill: newMockExecutor(func(ctx context.Context, node FlowNode, input any) (NodeOutput, error) {
+			return NodeOutput{
+				Envelope: envelope.OK("mock", "engine content"),
+				NodeID:   node.ID,
+			}, nil
+		}),
+		NodeTransform: &TransformExecutor{},
+	}
+
+	flow := makeFlow("f1", "file-write-workspace")
+	flow.Workspace = workspace
+	_, _ = store.CreateFlow(context.Background(), flow)
+	_, _ = store.AddNode(context.Background(), makeNode("source", "f1", "source", NodeSkill, `{"skill":"test/source"}`))
+	_, _ = store.AddNode(context.Background(), makeNode("writer", "f1", "writer", NodeTransform,
+		fmt.Sprintf(`{"transform":"file_write","path":%q}`, outputRel)))
+	_, _ = store.AddEdge(context.Background(), makeEdge("e1", "f1", "source", "writer", TransformPassthrough, ""))
+
+	eng := NewEngine(store, registry, 16)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := eng.Start(ctx, "f1"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer func() { _ = eng.Stop("f1") }()
+
+	outputPath := filepath.Join(workspace, outputRel)
+	require.Eventually(t, func() bool {
+		data, err := os.ReadFile(outputPath)
+		return err == nil && string(data) == "engine content"
+	}, 2*time.Second, 20*time.Millisecond)
 }
 
 // ---------------------------------------------------------------------------

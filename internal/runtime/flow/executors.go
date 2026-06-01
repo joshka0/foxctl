@@ -95,7 +95,10 @@ func (e *SkillExecutor) Execute(ctx context.Context, node FlowNode, input any) (
 
 // TransformExecutor applies a configured transform to input data.
 // It uses the transform registry to look up and execute transforms.
-type TransformExecutor struct{}
+type TransformExecutor struct {
+	// Workspace is used by transforms that touch the filesystem.
+	Workspace string
+}
 
 // Execute runs the configured transform on the input data.
 func (e *TransformExecutor) Execute(ctx context.Context, node FlowNode, input any) (NodeOutput, error) {
@@ -124,7 +127,7 @@ func (e *TransformExecutor) Execute(ctx context.Context, node FlowNode, input an
 	}
 
 	// Apply the transform.
-	result, err := ApplyTransform(ctx, kind, configStr, input)
+	result, err := ApplyTransform(withTransformWorkspace(ctx, e.Workspace), kind, configStr, input)
 	duration := time.Since(start)
 
 	if err != nil {

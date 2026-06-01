@@ -73,6 +73,9 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 	default:
 		return nil, nil, fmt.Errorf("exec runner only supports network capability \"none\" or \"egress\" (got %q)", r.Manifest.Capabilities.Network)
 	}
+	if r.Options.Timeout < 0 {
+		return nil, nil, fmt.Errorf("runner: timeout must be non-negative")
+	}
 
 	// Apply timeout only if explicitly set
 	if r.Options.Timeout > 0 {

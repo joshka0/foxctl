@@ -42,12 +42,12 @@ func Normalize(in SearchInput) SearchInput {
 
 // BuildSearchOpts builds ripgrep options with default excludes when none are provided.
 func BuildSearchOpts(in SearchInput, workspace, searchPath string, defaultExclude []string) ripgrep.SearchOpts {
-	excludeGlobs := in.GlobNot
+	excludeGlobs := cloneStrings(in.GlobNot)
 	if len(excludeGlobs) == 0 {
 		if len(defaultExclude) > 0 {
-			excludeGlobs = defaultExclude
+			excludeGlobs = cloneStrings(defaultExclude)
 		} else {
-			excludeGlobs = DefaultExcludeGlobs
+			excludeGlobs = cloneStrings(DefaultExcludeGlobs)
 		}
 	}
 
@@ -61,9 +61,16 @@ func BuildSearchOpts(in SearchInput, workspace, searchPath string, defaultExclud
 		MaxMatches:        in.MaxMatches,
 		MaxMatchesPerFile: in.MaxMatches,
 		Hidden:            in.Hidden,
-		IncludeGlobs:      in.Glob,
+		IncludeGlobs:      cloneStrings(in.Glob),
 		ExcludeGlobs:      excludeGlobs,
 	}
+}
+
+func cloneStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	return append([]string(nil), values...)
 }
 
 // RequireRipgrep ensures the ripgrep binary is available and returns a skill-friendly error when missing.

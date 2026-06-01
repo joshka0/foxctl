@@ -2,9 +2,12 @@ package events_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"sync/atomic"
 	"testing"
+	"testing/quick"
 	"time"
 
 	coreevents "github.com/joshka0/foxctl/internal/v2/core/events"
@@ -91,6 +94,167 @@ func TestEventBus_BoundedQueue_OverflowPolicy(t *testing.T) {
 	}
 }
 
+func TestEventBus_BoundedQueueOverflowProperty(t *testing.T) {
+	t.Parallel()
+
+	property := func(rawBuffer uint8, rawPublishes uint8, dropOldest bool) bool {
+		buffer := int(rawBuffer%8) + 1
+		publishes := int(rawPublishes % 24)
+		policy := runtimeevents.OverflowDropNewest
+		if dropOldest {
+			policy = runtimeevents.OverflowDropOldest
+		}
+
+		bus := runtimeevents.NewBus(runtimeevents.Config{
+			SubscriberBuffer: buffer,
+			OverflowPolicy:   policy,
+		})
+		defer bus.Close()
+
+		ch, unsubscribe := bus.Subscribe(buffer)
+		defer unsubscribe()
+
+		ids := make([]string, 0, publishes)
+		for i := 0; i < publishes; i++ {
+			id := fmt.Sprintf("evt-%03d", i)
+			ids = append(ids, id)
+			if err := bus.Publish(context.Background(), testEvent(id)); err != nil {
+				return false
+			}
+		}
+
+		gotIDs := drainIDs(ch)
+		wantIDs := expectedBufferedIDs(ids, buffer, policy)
+		if !slices.Equal(gotIDs, wantIDs) {
+			return false
+		}
+
+		overflow := max(0, publishes-buffer)
+		stats := bus.Stats()
+		if stats.Published != int64(publishes) {
+			return false
+		}
+		if stats.Dropped != int64(overflow) || stats.Overflow != int64(overflow) {
+			return false
+		}
+		if policy == runtimeevents.OverflowDropOldest {
+			return stats.Delivered == int64(publishes)
+		}
+		return stats.Delivered == int64(min(publishes, buffer))
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 128}); err != nil {
+		t.Fatalf("bounded queue overflow property failed: %v", err)
+	}
+}
+
+func TestEventBus_BlockPolicyReportsBackpressure(t *testing.T) {
+	t.Parallel()
+
+	bus := runtimeevents.NewBus(runtimeevents.Config{
+		SubscriberBuffer: 1,
+		OverflowPolicy:   runtimeevents.OverflowBlock,
+		PublishTimeout:   5 * time.Millisecond,
+	})
+	defer bus.Close()
+
+	ch, unsubscribe := bus.Subscribe(1)
+	defer unsubscribe()
+
+	if err := bus.Publish(context.Background(), testEvent("evt-1")); err != nil {
+		t.Fatalf("Publish(evt-1) error = %v", err)
+	}
+	if err := bus.Publish(context.Background(), testEvent("evt-2")); !errors.Is(err, runtimeevents.ErrBackpressure) {
+		t.Fatalf("Publish(evt-2) error = %v want %v", err, runtimeevents.ErrBackpressure)
+	}
+
+	if gotIDs := drainIDs(ch); !slices.Equal(gotIDs, []string{"evt-1"}) {
+		t.Fatalf("buffered ids=%v want [evt-1]", gotIDs)
+	}
+
+	stats := bus.Stats()
+	if stats.Published != 2 {
+		t.Fatalf("Published=%d want=2", stats.Published)
+	}
+	if stats.Delivered != 1 {
+		t.Fatalf("Delivered=%d want=1", stats.Delivered)
+	}
+	if stats.Dropped != 1 {
+		t.Fatalf("Dropped=%d want=1", stats.Dropped)
+	}
+	if stats.Overflow != 1 {
+		t.Fatalf("Overflow=%d want=1", stats.Overflow)
+	}
+	if stats.Backpressure != 1 {
+		t.Fatalf("Backpressure=%d want=1", stats.Backpressure)
+	}
+}
+
+func TestEventBus_BlockPolicyReportsContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	bus := runtimeevents.NewBus(runtimeevents.Config{
+		SubscriberBuffer: 1,
+		OverflowPolicy:   runtimeevents.OverflowBlock,
+		PublishTimeout:   time.Second,
+	})
+	defer bus.Close()
+
+	ch, unsubscribe := bus.Subscribe(1)
+	defer unsubscribe()
+
+	if err := bus.Publish(context.Background(), testEvent("evt-1")); err != nil {
+		t.Fatalf("Publish(evt-1) error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := bus.Publish(ctx, testEvent("evt-2")); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Publish(evt-2) error = %v want %v", err, context.Canceled)
+	}
+
+	if gotIDs := drainIDs(ch); !slices.Equal(gotIDs, []string{"evt-1"}) {
+		t.Fatalf("buffered ids=%v want [evt-1]", gotIDs)
+	}
+
+	stats := bus.Stats()
+	if stats.Backpressure != 1 {
+		t.Fatalf("Backpressure=%d want=1", stats.Backpressure)
+	}
+	if stats.Dropped != 1 {
+		t.Fatalf("Dropped=%d want=1", stats.Dropped)
+	}
+	if stats.Overflow != 1 {
+		t.Fatalf("Overflow=%d want=1", stats.Overflow)
+	}
+}
+
+func TestEventBus_DeliversPayloadClone(t *testing.T) {
+	t.Parallel()
+
+	bus := runtimeevents.NewBus(runtimeevents.Config{
+		SubscriberBuffer: 1,
+		OverflowPolicy:   runtimeevents.OverflowDropNewest,
+	})
+	defer bus.Close()
+
+	ch, unsubscribe := bus.Subscribe(1)
+	defer unsubscribe()
+
+	payload := []byte(`{"status":"original"}`)
+	evt := testEvent("evt-1")
+	evt.Payload = payload
+	if err := bus.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	copy(payload, []byte(`{"status":"mutated"}`))
+
+	got := <-ch
+	if string(got.Payload) != `{"status":"original"}` {
+		t.Fatalf("payload=%s want original payload copy", got.Payload)
+	}
+}
+
 func TestEventBus_NoSubscriberDeadlock(t *testing.T) {
 	t.Parallel()
 
@@ -159,6 +323,18 @@ func TestEventBus_NoSubscriberDeadlock(t *testing.T) {
 	}
 	if stats.Backpressure != 0 {
 		t.Fatalf("Backpressure=%d want=0 in drop_newest mode", stats.Backpressure)
+	}
+}
+
+func expectedBufferedIDs(ids []string, buffer int, policy runtimeevents.OverflowPolicy) []string {
+	if len(ids) <= buffer {
+		return append([]string(nil), ids...)
+	}
+	switch policy {
+	case runtimeevents.OverflowDropOldest:
+		return append([]string(nil), ids[len(ids)-buffer:]...)
+	default:
+		return append([]string(nil), ids[:buffer]...)
 	}
 }
 

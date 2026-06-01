@@ -43,25 +43,25 @@ func WalkFiles(opts ListOptions) ([]FileEntry, error) {
 		if path == baseAbs {
 			return nil
 		}
+		rel, relErr := filepath.Rel(baseAbs, path)
+		if relErr != nil {
+			return relErr
+		}
 		if info.IsDir() {
-			if shouldSkip(path, opts.Exclude) {
+			if matchesPath(path, rel, opts.Exclude) {
 				return filepath.SkipDir
 			}
 			if opts.MaxDepth > 0 {
-				rel, relErr := filepath.Rel(baseAbs, path)
-				if relErr != nil {
-					return relErr
-				}
 				if depth(rel) >= opts.MaxDepth {
 					return filepath.SkipDir
 				}
 			}
 			return nil
 		}
-		if len(opts.Include) > 0 && !matches(path, opts.Include) {
+		if len(opts.Include) > 0 && !matchesPath(path, rel, opts.Include) {
 			return nil
 		}
-		if matches(path, opts.Exclude) {
+		if matchesPath(path, rel, opts.Exclude) {
 			return nil
 		}
 		entries = append(entries, FileEntry{Path: path, Info: info})
@@ -75,12 +75,22 @@ func WalkFiles(opts ListOptions) ([]FileEntry, error) {
 }
 
 func matches(path string, globs []string) bool {
-	rel := filepath.ToSlash(path)
+	return matchesPath(path, "", globs)
+}
+
+func matchesPath(path, rel string, globs []string) bool {
+	slashPath := filepath.ToSlash(path)
+	slashRel := filepath.ToSlash(rel)
 	for _, g := range globs {
 		if ok, err := filepath.Match(g, filepath.Base(path)); err == nil && ok {
 			return true
 		}
-		if ok, err := filepath.Match(g, rel); err == nil && ok {
+		if slashRel != "" {
+			if ok, err := filepath.Match(g, slashRel); err == nil && ok {
+				return true
+			}
+		}
+		if ok, err := filepath.Match(g, slashPath); err == nil && ok {
 			return true
 		}
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
@@ -143,7 +144,7 @@ func ResolvePRNumber(owner, repo, prRef, token string) (int, error) {
 	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls?head=%s:%s&state=all", owner, repo, owner, prRef)
+	url := githubPullsByHeadURL(owner, repo, prRef)
 
 	var prs []struct {
 		Number int `json:"number"`
@@ -155,6 +156,18 @@ func ResolvePRNumber(owner, repo, prRef, token string) (int, error) {
 		return 0, skillerr.NotFoundf("no PR found for branch %q", prRef)
 	}
 	return prs[0].Number, nil
+}
+
+func githubPullsByHeadURL(owner, repo, branch string) string {
+	query := url.Values{}
+	query.Set("head", owner+":"+branch)
+	query.Set("state", "all")
+	return fmt.Sprintf(
+		"https://api.github.com/repos/%s/%s/pulls?%s",
+		url.PathEscape(owner),
+		url.PathEscape(repo),
+		query.Encode(),
+	)
 }
 
 // GitHubGET performs a GitHub API GET request and decodes JSON into v.

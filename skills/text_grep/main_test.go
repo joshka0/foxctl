@@ -130,6 +130,10 @@ func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) 
 			Jobs:  filepath.Join(state, "jobs"),
 			Cache: filepath.Join(state, "cache"),
 		},
+		CAS: config.CASPolicy{
+			Store:  true,
+			Expose: config.ExposePolicyOff,
+		},
 	}
 	rc, err := skillmain.BuildRunContext(cfg, stdout)
 	if err != nil {

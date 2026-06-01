@@ -8,20 +8,32 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skilltest"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // Test helpers
 
-func newTestContext(t *testing.T, buf *bytes.Buffer, workspace string) (*skillmain.RunContext, func()) {
+func newTestContext(t *testing.T, buf *bytes.Buffer, workspace string) (*lite.RunContext, func()) {
 	t.Helper()
-	opts := &skilltest.TestContextOptions{
-		Workspace: workspace,
+
+	t.Setenv("FOXCTL_WORKSPACE", workspace)
+	home := t.TempDir()
+	cfg := lite.LiteConfig{
+		Home:           home,
+		InlineOutputKB: 32,
+		Paths: lite.LitePaths{
+			CAS:   filepath.Join(home, "cas"),
+			Cache: filepath.Join(home, "cache"),
+		},
+		CAS: lite.LiteCASPolicy{Store: true, Expose: "off"},
 	}
-	return skilltest.NewTestRunContext(t, buf, opts)
+	rc, err := lite.BuildRunContext(cfg, buf)
+	if err != nil {
+		t.Fatalf("BuildRunContext: %v", err)
+	}
+	return rc, func() { _ = rc.Close() }
 }
 
 func decodeEnvelope(t *testing.T, buf *bytes.Buffer) map[string]any {

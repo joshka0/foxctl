@@ -13,8 +13,7 @@ import (
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/oputil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 )
 
 const command = "unity/scenes"
@@ -56,10 +55,10 @@ type indexedScene struct {
 }
 
 func main() {
-	skillmain.Main(command, run)
+	lite.Main(command, run)
 }
 
-func run(_ context.Context, rc *skillmain.RunContext, in Input) error {
+func run(_ context.Context, rc *lite.RunContext, in Input) error {
 	projectPath := strings.TrimSpace(in.ProjectPath)
 	if projectPath == "" {
 		projectPath = rc.PathValidator.Workspace()
@@ -221,7 +220,7 @@ func run(_ context.Context, rc *skillmain.RunContext, in Input) error {
 		return err
 	}
 
-	return skillout.Emit(rc, command, result)
+	return lite.Emit(rc, command, result)
 }
 
 func mutateSceneList(operation, editorBuildSettingsPath, targetScenePath string, mutator func([]Scene) ([]Scene, error)) (map[string]any, error) {

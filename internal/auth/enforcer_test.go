@@ -1,7 +1,11 @@
 package auth
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"testing"
+	"testing/quick"
 
 	"github.com/casbin/casbin/v2"
 	"github.com/joshka0/foxctl/internal/domain/identity"
@@ -147,6 +151,91 @@ p, admin, *, tool:*, execute, allow
 	}
 }
 
+func TestEnforcePropertyDenyOverridesWildcardAllow(t *testing.T) {
+	t.Parallel()
+
+	cfg := &quick.Config{MaxCount: 100}
+	err := quick.Check(func(rawResource string) bool {
+		deniedResource := "tool:" + authPolicyToken(rawResource)
+		allowedResource := deniedResource + ".allowed"
+		enforcer := mustNewEnforcer(t, fmt.Sprintf(`
+g, user:web:bob, editor, tenant-a
+p, editor, tenant-a, tool:*, execute, allow
+p, editor, tenant-a, %s, execute, deny
+`, deniedResource))
+
+		principal := identity.Principal{Platform: "web", UserID: "bob", TenantID: "tenant-a"}
+		denied, err := Enforce(enforcer, principal, deniedResource, "execute")
+		if err != nil || denied {
+			return false
+		}
+		allowed, err := Enforce(enforcer, principal, allowedResource, "execute")
+		return err == nil && allowed
+	}, cfg)
+	if err != nil {
+		t.Fatalf("deny override property failed: %v", err)
+	}
+}
+
+func TestEnforcePropertyTenantPoliciesDoNotCrossTenants(t *testing.T) {
+	t.Parallel()
+
+	cfg := &quick.Config{MaxCount: 100}
+	err := quick.Check(func(rawTenantA, rawTenantB, rawResource string) bool {
+		tenantA := "tenant-" + authPolicyToken(rawTenantA)
+		tenantB := "tenant-" + authPolicyToken(rawTenantB)
+		if tenantA == tenantB {
+			tenantB += "-other"
+		}
+		resource := "tool:" + authPolicyToken(rawResource)
+		enforcer := mustNewEnforcer(t, fmt.Sprintf(`
+g, user:web:alice, viewer, %s
+p, viewer, %s, %s, execute, allow
+`, tenantA, tenantA, resource))
+
+		principalA := identity.Principal{Platform: "web", UserID: "alice", TenantID: tenantA}
+		principalB := identity.Principal{Platform: "web", UserID: "alice", TenantID: tenantB}
+		allowedA, err := Enforce(enforcer, principalA, resource, "execute")
+		if err != nil || !allowedA {
+			return false
+		}
+		allowedB, err := Enforce(enforcer, principalB, resource, "execute")
+		return err == nil && !allowedB
+	}, cfg)
+	if err != nil {
+		t.Fatalf("tenant isolation property failed: %v", err)
+	}
+}
+
+func TestEnforcePropertyActionMustMatchPolicy(t *testing.T) {
+	t.Parallel()
+
+	cfg := &quick.Config{MaxCount: 100}
+	err := quick.Check(func(rawResource, rawAllowedAction, rawDeniedAction string) bool {
+		resource := "tool:" + authPolicyToken(rawResource)
+		allowedAction := "act-" + authPolicyToken(rawAllowedAction)
+		deniedAction := "act-" + authPolicyToken(rawDeniedAction)
+		if deniedAction == allowedAction {
+			deniedAction += "-other"
+		}
+		enforcer := mustNewEnforcer(t, fmt.Sprintf(`
+g, user:web:carol, operator, tenant-a
+p, operator, tenant-a, %s, %s, allow
+`, resource, allowedAction))
+
+		principal := identity.Principal{Platform: "web", UserID: "carol", TenantID: "tenant-a"}
+		allowed, err := Enforce(enforcer, principal, resource, allowedAction)
+		if err != nil || !allowed {
+			return false
+		}
+		denied, err := Enforce(enforcer, principal, resource, deniedAction)
+		return err == nil && !denied
+	}, cfg)
+	if err != nil {
+		t.Fatalf("action match property failed: %v", err)
+	}
+}
+
 func mustNewEnforcer(t *testing.T, policy string) *casbin.Enforcer {
 	t.Helper()
 
@@ -156,4 +245,9 @@ func mustNewEnforcer(t *testing.T, policy string) *casbin.Enforcer {
 	}
 
 	return enforcer
+}
+
+func authPolicyToken(raw string) string {
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:8])
 }

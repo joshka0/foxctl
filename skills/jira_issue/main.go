@@ -8,8 +8,7 @@ import (
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/oputil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 	jiraclient "github.com/joshka0/foxctl/internal/interfaces/jira"
 )
 
@@ -156,10 +155,10 @@ type transitionReq struct {
 }
 
 func main() {
-	skillmain.Main(command, run)
+	lite.Main(command, run)
 }
 
-func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+func run(ctx context.Context, rc *lite.RunContext, in input) error {
 	in.Operation = oputil.DefaultOp(in.Operation, "search")
 
 	client, err := jiraclient.NewClientFromEnv()
@@ -200,15 +199,15 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		return err
 	}
 
-	return skillout.Emit(rc, command, data)
+	return lite.Emit(rc, command, data)
 }
 
-func getIssue(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *getReq) (map[string]any, error) {
+func getIssue(ctx context.Context, rc *lite.RunContext, client *jiraclient.Client, req *getReq) (map[string]any, error) {
 	if req == nil || strings.TrimSpace(req.Key) == "" {
 		return nil, skillerr.Arg("get.key is required")
 	}
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.GetIssue(ctx, req.Key, req.Fields, req.Expand)
 		return callErr
@@ -220,12 +219,12 @@ func getIssue(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.
 	return result, nil
 }
 
-func listIssueLinks(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *listLinksReq) (map[string]any, error) {
+func listIssueLinks(ctx context.Context, rc *lite.RunContext, client *jiraclient.Client, req *listLinksReq) (map[string]any, error) {
 	if req == nil || strings.TrimSpace(req.Key) == "" {
 		return nil, skillerr.Arg("list_links.key is required")
 	}
 	var issue map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		issue, callErr = client.ListIssueLinks(ctx, req.Key)
 		return callErr
@@ -268,7 +267,7 @@ func listIssueLinks(ctx context.Context, rc *skillmain.RunContext, client *jirac
 	}, nil
 }
 
-func searchIssues(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *searchReq) (map[string]any, error) {
+func searchIssues(ctx context.Context, rc *lite.RunContext, client *jiraclient.Client, req *searchReq) (map[string]any, error) {
 	if req == nil {
 		req = &searchReq{}
 	}
@@ -279,7 +278,7 @@ func searchIssues(ctx context.Context, rc *skillmain.RunContext, client *jiracli
 		req.MaxResults = 25
 	}
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.SearchIssues(ctx, req.JQL, req.NextPageToken, req.MaxResults, req.Fields, req.Expand)
 		return callErr
@@ -292,7 +291,7 @@ func searchIssues(ctx context.Context, rc *skillmain.RunContext, client *jiracli
 	return result, nil
 }
 
-func listProjects(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *projectsReq) (map[string]any, error) {
+func listProjects(ctx context.Context, rc *lite.RunContext, client *jiraclient.Client, req *projectsReq) (map[string]any, error) {
 	if req == nil {
 		req = &projectsReq{}
 	}
@@ -300,7 +299,7 @@ func listProjects(ctx context.Context, rc *skillmain.RunContext, client *jiracli
 		req.MaxResults = 50
 	}
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.ListProjects(ctx, req.StartAt, req.MaxResults, req.Query)
 		return callErr
@@ -312,7 +311,7 @@ func listProjects(ctx context.Context, rc *skillmain.RunContext, client *jiracli
 	return result, nil
 }
 
-func getProject(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *projectReq) (map[string]any, error) {
+func getProject(ctx context.Context, rc *lite.RunContext, client *jiraclient.Client, req *projectReq) (map[string]any, error) {
 	if req == nil || strings.TrimSpace(req.Key) == "" {
 		return nil, skillerr.Arg("project.key is required")
 	}
@@ -320,7 +319,7 @@ func getProject(ctx context.Context, rc *skillmain.RunContext, client *jiraclien
 		req.Expand = []string{"issueTypes"}
 	}
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.GetProject(ctx, req.Key, req.Expand)
 		return callErr
@@ -332,7 +331,7 @@ func getProject(ctx context.Context, rc *skillmain.RunContext, client *jiraclien
 	return result, nil
 }
 
-func createIssue(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *createReq) (map[string]any, error) {
+func createIssue(ctx context.Context, rc *lite.RunContext, client *jiraclient.Client, req *createReq) (map[string]any, error) {
 	if req == nil {
 		return nil, skillerr.Arg("create options are required")
 	}
@@ -342,7 +341,7 @@ func createIssue(ctx context.Context, rc *skillmain.RunContext, client *jiraclie
 	}
 
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.CreateIssue(ctx, fields, req.Update)
 		return callErr
@@ -354,7 +353,7 @@ func createIssue(ctx context.Context, rc *skillmain.RunContext, client *jiraclie
 	return result, nil
 }
 
-func updateIssue(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *updateReq) (map[string]any, error) {
+func updateIssue(ctx context.Context, rc *lite.RunContext, client *jiraclient.Client, req *updateReq) (map[string]any, error) {
 	if req == nil || strings.TrimSpace(req.Key) == "" {
 		return nil, skillerr.Arg("update.key is required")
 	}
@@ -381,7 +380,7 @@ func updateIssue(ctx context.Context, rc *skillmain.RunContext, client *jiraclie
 		updateOps["labels"] = labelOps
 	}
 
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		return client.UpdateIssue(ctx, req.Key, fields, updateOps, req.NotifyUsers)
 	})
 	if err != nil {
@@ -394,7 +393,7 @@ func updateIssue(ctx context.Context, rc *skillmain.RunContext, client *jiraclie
 	}, nil
 }
 
-func listComments(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *listCommentsReq) (map[string]any, error) {
+func listComments(ctx context.Context, rc *lite.RunContext, client *jiraclient.Client, req *listCommentsReq) (map[string]any, error) {
 	if req == nil || strings.TrimSpace(req.Key) == "" {
 		return nil, skillerr.Arg("list_comments.key is required")
 	}
@@ -402,7 +401,7 @@ func listComments(ctx context.Context, rc *skillmain.RunContext, client *jiracli
 		req.MaxResults = 50
 	}
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.ListComments(ctx, req.Key, req.StartAt, req.MaxResults)
 		return callErr
@@ -415,7 +414,7 @@ func listComments(ctx context.Context, rc *skillmain.RunContext, client *jiracli
 	return result, nil
 }
 
-func addComment(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *commentReq) (map[string]any, error) {
+func addComment(ctx context.Context, rc *lite.RunContext, client *jiraclient.Client, req *commentReq) (map[string]any, error) {
 	if req == nil || strings.TrimSpace(req.Key) == "" {
 		return nil, skillerr.Arg("comment.key is required")
 	}
@@ -423,7 +422,7 @@ func addComment(ctx context.Context, rc *skillmain.RunContext, client *jiraclien
 		return nil, skillerr.Arg("comment requires body or body_adf")
 	}
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.AddComment(ctx, req.Key, req.Body, req.BodyADF, req.Visibility)
 		return callErr
@@ -436,7 +435,7 @@ func addComment(ctx context.Context, rc *skillmain.RunContext, client *jiraclien
 	return result, nil
 }
 
-func updateComment(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *updateCommentReq) (map[string]any, error) {
+func updateComment(ctx context.Context, rc *lite.RunContext, client *jiraclient.Client, req *updateCommentReq) (map[string]any, error) {
 	if req == nil || strings.TrimSpace(req.Key) == "" {
 		return nil, skillerr.Arg("update_comment.key is required")
 	}
@@ -447,7 +446,7 @@ func updateComment(ctx context.Context, rc *skillmain.RunContext, client *jiracl
 		return nil, skillerr.Arg("update_comment requires body or body_adf")
 	}
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.UpdateComment(ctx, req.Key, req.CommentID, req.Body, req.BodyADF, req.Visibility)
 		return callErr
@@ -461,14 +460,14 @@ func updateComment(ctx context.Context, rc *skillmain.RunContext, client *jiracl
 	return result, nil
 }
 
-func deleteComment(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *deleteCommentReq) (map[string]any, error) {
+func deleteComment(ctx context.Context, rc *lite.RunContext, client *jiraclient.Client, req *deleteCommentReq) (map[string]any, error) {
 	if req == nil || strings.TrimSpace(req.Key) == "" {
 		return nil, skillerr.Arg("delete_comment.key is required")
 	}
 	if strings.TrimSpace(req.CommentID) == "" {
 		return nil, skillerr.Arg("delete_comment.comment_id is required")
 	}
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		return client.DeleteComment(ctx, req.Key, req.CommentID)
 	})
 	if err != nil {
@@ -482,9 +481,9 @@ func deleteComment(ctx context.Context, rc *skillmain.RunContext, client *jiracl
 	}, nil
 }
 
-func listLinkTypes(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client) (map[string]any, error) {
+func listLinkTypes(ctx context.Context, rc *lite.RunContext, client *jiraclient.Client) (map[string]any, error) {
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.ListLinkTypes(ctx)
 		return callErr
@@ -496,7 +495,7 @@ func listLinkTypes(ctx context.Context, rc *skillmain.RunContext, client *jiracl
 	return result, nil
 }
 
-func createLink(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *linkReq) (map[string]any, error) {
+func createLink(ctx context.Context, rc *lite.RunContext, client *jiraclient.Client, req *linkReq) (map[string]any, error) {
 	if req == nil {
 		return nil, skillerr.Arg("link options are required")
 	}
@@ -506,7 +505,7 @@ func createLink(ctx context.Context, rc *skillmain.RunContext, client *jiraclien
 	if strings.TrimSpace(req.TypeName) == "" {
 		return nil, skillerr.Arg("link.type_name is required")
 	}
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		return client.CreateIssueLink(ctx, req.OutwardIssueKey, req.InwardIssueKey, req.TypeName, req.Comment, req.CommentADF)
 	})
 	if err != nil {
@@ -521,11 +520,11 @@ func createLink(ctx context.Context, rc *skillmain.RunContext, client *jiraclien
 	}, nil
 }
 
-func deleteLink(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *unlinkReq) (map[string]any, error) {
+func deleteLink(ctx context.Context, rc *lite.RunContext, client *jiraclient.Client, req *unlinkReq) (map[string]any, error) {
 	if req == nil || strings.TrimSpace(req.LinkID) == "" {
 		return nil, skillerr.Arg("unlink.link_id is required")
 	}
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		return client.DeleteIssueLink(ctx, req.LinkID)
 	})
 	if err != nil {
@@ -538,12 +537,12 @@ func deleteLink(ctx context.Context, rc *skillmain.RunContext, client *jiraclien
 	}, nil
 }
 
-func listWatchers(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *listWatchersReq) (map[string]any, error) {
+func listWatchers(ctx context.Context, rc *lite.RunContext, client *jiraclient.Client, req *listWatchersReq) (map[string]any, error) {
 	if req == nil || strings.TrimSpace(req.Key) == "" {
 		return nil, skillerr.Arg("list_watchers.key is required")
 	}
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.ListWatchers(ctx, req.Key)
 		return callErr
@@ -556,11 +555,11 @@ func listWatchers(ctx context.Context, rc *skillmain.RunContext, client *jiracli
 	return result, nil
 }
 
-func addWatcher(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *watcherReq) (map[string]any, error) {
+func addWatcher(ctx context.Context, rc *lite.RunContext, client *jiraclient.Client, req *watcherReq) (map[string]any, error) {
 	if req == nil || strings.TrimSpace(req.Key) == "" {
 		return nil, skillerr.Arg("add_watcher.key is required")
 	}
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		return client.AddWatcher(ctx, req.Key, req.AccountID)
 	})
 	if err != nil {
@@ -574,14 +573,14 @@ func addWatcher(ctx context.Context, rc *skillmain.RunContext, client *jiraclien
 	}, nil
 }
 
-func removeWatcher(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *watcherReq) (map[string]any, error) {
+func removeWatcher(ctx context.Context, rc *lite.RunContext, client *jiraclient.Client, req *watcherReq) (map[string]any, error) {
 	if req == nil || strings.TrimSpace(req.Key) == "" {
 		return nil, skillerr.Arg("remove_watcher.key is required")
 	}
 	if strings.TrimSpace(req.AccountID) == "" {
 		return nil, skillerr.Arg("remove_watcher.account_id is required")
 	}
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		return client.RemoveWatcher(ctx, req.Key, req.AccountID)
 	})
 	if err != nil {
@@ -595,12 +594,12 @@ func removeWatcher(ctx context.Context, rc *skillmain.RunContext, client *jiracl
 	}, nil
 }
 
-func listTransitions(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *listTransitionsReq) (map[string]any, error) {
+func listTransitions(ctx context.Context, rc *lite.RunContext, client *jiraclient.Client, req *listTransitionsReq) (map[string]any, error) {
 	if req == nil || strings.TrimSpace(req.Key) == "" {
 		return nil, skillerr.Arg("list_transitions.key is required")
 	}
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.ListTransitions(ctx, req.Key)
 		return callErr
@@ -613,7 +612,7 @@ func listTransitions(ctx context.Context, rc *skillmain.RunContext, client *jira
 	return result, nil
 }
 
-func transitionIssue(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *transitionReq) (map[string]any, error) {
+func transitionIssue(ctx context.Context, rc *lite.RunContext, client *jiraclient.Client, req *transitionReq) (map[string]any, error) {
 	if req == nil || strings.TrimSpace(req.Key) == "" {
 		return nil, skillerr.Arg("transition.key is required")
 	}
@@ -621,7 +620,7 @@ func transitionIssue(ctx context.Context, rc *skillmain.RunContext, client *jira
 		return nil, skillerr.Arg("transition.transition_id is required")
 	}
 
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		return client.TransitionIssue(ctx, req.Key, req.TransitionID, req.Fields, req.Update, req.Comment, req.CommentADF)
 	})
 	if err != nil {

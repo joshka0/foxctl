@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/runtime/hooks/lifecycle"
+	hookpathutil "github.com/joshka0/foxctl/internal/runtime/hooks/pathutil"
 	"github.com/joshka0/foxctl/internal/runtime/hooks/sessionmode"
 	"github.com/joshka0/foxctl/internal/storage/graph"
 	"github.com/joshka0/foxctl/internal/storage/tasks"
@@ -311,13 +311,9 @@ func LinkTaskFile(ctx context.Context, deps Dependencies, req TaskFileLinkReques
 	if filePath == "" {
 		return TaskFileLinkResponse{Decision: "approve"}, nil
 	}
-	if !filepath.IsAbs(filePath) {
-		filePath = filepath.Join(target, filePath)
-	}
-	filePath = filepath.Clean(filePath)
-	relPath := filepath.ToSlash(strings.TrimPrefix(filePath, target+string(filepath.Separator)))
-	if relPath == "" || relPath == filePath {
-		relPath = filepath.ToSlash(filepath.Base(filePath))
+	relPath := taskflowRelPath(target, filePath)
+	if relPath == "" {
+		return TaskFileLinkResponse{Decision: "approve"}, nil
 	}
 
 	taskStore, err := tasks.Open(ctx, deps.StorageRoot)
@@ -384,6 +380,10 @@ func LinkTaskFile(ctx context.Context, deps Dependencies, req TaskFileLinkReques
 		TaskID:   task.ID,
 		FilePath: relPath,
 	}, nil
+}
+
+func taskflowRelPath(workspacePath, filePath string) string {
+	return hookpathutil.ContainedRelativePath(filePath, workspacePath)
 }
 
 func linkRecentTasksToActiveEpic(ctx context.Context, storageRoot, workspacePath, sessionID string, createdCount int) error {

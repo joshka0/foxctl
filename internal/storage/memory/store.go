@@ -96,6 +96,78 @@ const (
 	maxAccessBatchNames    = 100
 )
 
+const (
+	memoryLifecycleStateCandidate   = "candidate"
+	memoryLifecycleStateActive      = "active"
+	memoryLifecycleStateStale       = "stale"
+	memoryLifecycleStateArchived    = "archived"
+	memoryLifecycleStateDeprecated  = "deprecated"
+	memoryLifecycleStateQuarantined = "quarantined"
+)
+
+const (
+	memoryReviewStatusUnreviewed       = "unreviewed"
+	memoryReviewStatusNeedsReview      = "needs_review"
+	memoryReviewStatusReviewed         = "reviewed"
+	memoryReviewStatusValidated        = "validated"
+	memoryReviewStatusFailedValidation = "failed_validation"
+)
+
+func normalizeMemoryLifecycleState(value string) (string, error) {
+	state := strings.TrimSpace(value)
+	if state == "" {
+		return memoryLifecycleStateActive, nil
+	}
+	switch state {
+	case memoryLifecycleStateCandidate,
+		memoryLifecycleStateActive,
+		memoryLifecycleStateStale,
+		memoryLifecycleStateArchived,
+		memoryLifecycleStateDeprecated,
+		memoryLifecycleStateQuarantined:
+		return state, nil
+	default:
+		return "", fmt.Errorf("memory: invalid memory lifecycle state %q", state)
+	}
+}
+
+func normalizeMemoryReviewStatus(value string) (string, error) {
+	status := strings.TrimSpace(value)
+	if status == "" {
+		return memoryReviewStatusUnreviewed, nil
+	}
+	switch status {
+	case memoryReviewStatusUnreviewed,
+		memoryReviewStatusNeedsReview,
+		memoryReviewStatusReviewed,
+		memoryReviewStatusValidated,
+		memoryReviewStatusFailedValidation:
+		return status, nil
+	default:
+		return "", fmt.Errorf("memory: invalid memory review status %q", status)
+	}
+}
+
+func validateMemoryTelemetryCounters(entry NamedEntry) error {
+	counters := []struct {
+		name  string
+		value int
+	}{
+		{name: "selected_count", value: entry.SelectedCount},
+		{name: "use_count", value: entry.UseCount},
+		{name: "success_count", value: entry.SuccessCount},
+		{name: "failure_count", value: entry.FailureCount},
+		{name: "patch_count", value: entry.PatchCount},
+		{name: "restore_count", value: entry.RestoreCount},
+	}
+	for _, counter := range counters {
+		if counter.value < 0 {
+			return fmt.Errorf("memory: %s must be non-negative", counter.name)
+		}
+	}
+	return nil
+}
+
 // Open initializes a memory-backed Store rooted at the provided filesystem path.
 // It opens the database via dbutil.OpenStoreDB, runs migrations, and configures the DB connection pool; if casPath is non-empty it also initializes a CAS store and an artifacts.Manager.
 func Open(ctx context.Context, root string, casPath string) (store *Store, err error) {
@@ -303,11 +375,15 @@ func (s *Store) Save(ctx context.Context, entry NamedEntry) (NamedEntry, error) 
 	if entry.Type == "" {
 		entry.Type = "result"
 	}
-	if strings.TrimSpace(entry.LifecycleState) == "" {
-		entry.LifecycleState = "active"
+	var err error
+	if entry.LifecycleState, err = normalizeMemoryLifecycleState(entry.LifecycleState); err != nil {
+		return NamedEntry{}, err
 	}
-	if strings.TrimSpace(entry.ReviewStatus) == "" {
-		entry.ReviewStatus = "unreviewed"
+	if entry.ReviewStatus, err = normalizeMemoryReviewStatus(entry.ReviewStatus); err != nil {
+		return NamedEntry{}, err
+	}
+	if err := validateMemoryTelemetryCounters(entry); err != nil {
+		return NamedEntry{}, err
 	}
 	entry.Workspace = ws.CanonicalID(entry.Workspace)
 
@@ -898,17 +974,21 @@ func (s *Store) UpdateLifecycle(ctx context.Context, name, workspace string, upd
 	if err != nil {
 		return NamedEntry{}, err
 	}
-	if strings.TrimSpace(entry.LifecycleState) == "" {
-		entry.LifecycleState = "active"
-	}
-	if strings.TrimSpace(entry.ReviewStatus) == "" {
-		entry.ReviewStatus = "unreviewed"
-	}
 	if state := strings.TrimSpace(update.LifecycleState); state != "" {
-		entry.LifecycleState = state
+		entry.LifecycleState, err = normalizeMemoryLifecycleState(state)
+	} else {
+		entry.LifecycleState, err = normalizeMemoryLifecycleState(entry.LifecycleState)
+	}
+	if err != nil {
+		return NamedEntry{}, err
 	}
 	if status := strings.TrimSpace(update.ReviewStatus); status != "" {
-		entry.ReviewStatus = status
+		entry.ReviewStatus, err = normalizeMemoryReviewStatus(status)
+	} else {
+		entry.ReviewStatus, err = normalizeMemoryReviewStatus(entry.ReviewStatus)
+	}
+	if err != nil {
+		return NamedEntry{}, err
 	}
 	entry.SupersededBy = strings.TrimSpace(update.SupersededBy)
 	entry.ReviewNotes = strings.TrimSpace(update.ReviewNotes)
@@ -1079,6 +1159,9 @@ func (s *Store) getWithoutTracking(ctx context.Context, name, workspace string) 
 // The embedding is stored as a JSON-encoded float32 array in the embedding BLOB column.
 func (s *Store) UpdateEmbedding(ctx context.Context, name, workspace string, embedding []float32) error {
 	workspace = ws.CanonicalID(workspace)
+	if len(embedding) == 0 {
+		return fmt.Errorf("memory: embedding must not be empty")
+	}
 	// Verify entry exists
 	_, err := s.Get(ctx, name, workspace)
 	if err != nil {
@@ -1104,6 +1187,26 @@ func (s *Store) UpdateEmbedding(ctx context.Context, name, workspace string, emb
 	}
 
 	return nil
+}
+
+func decodeStoredEmbeddingJSON(raw []byte, expectedDimensions int) ([]float32, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var embedding []float32
+	if err := json.Unmarshal(raw, &embedding); err != nil {
+		return nil, err
+	}
+	if embedding == nil {
+		return nil, fmt.Errorf("embedding must be a JSON array")
+	}
+	if len(embedding) == 0 {
+		return nil, fmt.Errorf("embedding must not be empty")
+	}
+	if expectedDimensions > 0 && len(embedding) != expectedDimensions {
+		return nil, fmt.Errorf("embedding dimensions=%d expected=%d", len(embedding), expectedDimensions)
+	}
+	return embedding, nil
 }
 
 // SyncSymbolEmbeddingsOptions configures sync from symbol_embeddings into named_memory.
@@ -1171,6 +1274,16 @@ func (s *Store) SyncSymbolEmbeddings(ctx context.Context, embeddingDBPath string
 		}
 	}
 
+	validationWhere := strings.ReplaceAll(
+		strings.Join(where, " AND "),
+		"(embedding IS NULL OR LENGTH(embedding) = 0)",
+		"(named_memory.embedding IS NULL OR LENGTH(named_memory.embedding) = 0)",
+	)
+	syncMetadata, err := validateSQLiteSymbolEmbeddingsForSync(ctx, conn, validationWhere, args)
+	if err != nil {
+		return 0, err
+	}
+
 	stmt := fmt.Sprintf(`
 UPDATE named_memory
 SET embedding = (
@@ -1196,25 +1309,68 @@ WHERE %s
 	if err != nil {
 		return 0, fmt.Errorf("memory: sync embeddings: rows affected: %w", err)
 	}
-	if updated > 0 {
-		var model sql.NullString
-		var dimensions sql.NullInt64
-		err := conn.QueryRowContext(ctx, `
-SELECT model, dimensions
-FROM embeddb.symbol_embeddings
-WHERE workspace_id = $1
-LIMIT 1
-`, workspaceID).Scan(&model, &dimensions)
-		if err != nil && !dbutil.IsNoRows(err) {
-			return 0, fmt.Errorf("memory: sync embeddings metadata: %w", err)
-		}
-		if err == nil && dimensions.Valid {
-			if err := s.ensureEmbeddingMetadata(ctx, workspaceID, strings.TrimSpace(model.String), int(dimensions.Int64)); err != nil {
-				return 0, err
-			}
+	if updated > 0 && syncMetadata.dimensions > 0 {
+		if err := s.ensureEmbeddingMetadata(ctx, workspaceID, syncMetadata.model, syncMetadata.dimensions); err != nil {
+			return 0, err
 		}
 	}
 	return int(updated), nil
+}
+
+type sqliteSymbolEmbeddingSyncMetadata struct {
+	model      string
+	dimensions int
+}
+
+func validateSQLiteSymbolEmbeddingsForSync(ctx context.Context, conn *sql.Conn, where string, args []any) (sqliteSymbolEmbeddingSyncMetadata, error) {
+	query := fmt.Sprintf(`
+SELECT
+	replace(named_memory.name, 'symbol://' || named_memory.workspace || '/', '') AS symbol_id,
+	e.embedding,
+	e.model,
+	e.dimensions
+FROM named_memory
+JOIN embeddb.symbol_embeddings e
+	ON e.workspace_id = named_memory.workspace
+	AND e.symbol_id = replace(named_memory.name, 'symbol://' || named_memory.workspace || '/', '')
+WHERE %s
+`, where)
+
+	rows, err := conn.QueryContext(ctx, query, args...)
+	if err != nil {
+		return sqliteSymbolEmbeddingSyncMetadata{}, fmt.Errorf("memory: sync embeddings: validate queued embeddings: %w", err)
+	}
+	defer func() {
+		errs.Ignore(rows.Close(), "close queued symbol embedding validation rows")
+	}()
+
+	var metadata sqliteSymbolEmbeddingSyncMetadata
+	for rows.Next() {
+		var symbolID string
+		var embeddingJSON []byte
+		var model sql.NullString
+		var dimensions sql.NullInt64
+		if err := rows.Scan(&symbolID, &embeddingJSON, &model, &dimensions); err != nil {
+			return sqliteSymbolEmbeddingSyncMetadata{}, fmt.Errorf("memory: sync embeddings: scan queued embedding: %w", err)
+		}
+
+		expectedDimensions := 0
+		if dimensions.Valid {
+			expectedDimensions = int(dimensions.Int64)
+		}
+		embedding, err := decodeStoredEmbeddingJSON(embeddingJSON, expectedDimensions)
+		if err != nil {
+			return sqliteSymbolEmbeddingSyncMetadata{}, fmt.Errorf("memory: sync embeddings: decode %s: %w", symbolID, err)
+		}
+		if metadata.dimensions == 0 {
+			metadata.model = strings.TrimSpace(model.String)
+			metadata.dimensions = len(embedding)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return sqliteSymbolEmbeddingSyncMetadata{}, fmt.Errorf("memory: sync embeddings: validate queued embedding rows: %w", err)
+	}
+	return metadata, nil
 }
 
 // GetEmbedding retrieves the embedding vector for a named memory entry.
@@ -1236,9 +1392,17 @@ func (s *Store) GetEmbedding(ctx context.Context, name, workspace string) ([]flo
 		return nil, nil
 	}
 
-	var embedding []float32
-	if err := json.Unmarshal(embeddingJSON, &embedding); err != nil {
-		return nil, fmt.Errorf("memory: unmarshal embedding: %w", err)
+	expectedDimensions := 0
+	meta, err := s.GetEmbeddingMetadata(ctx, workspace)
+	if err != nil {
+		return nil, err
+	}
+	if meta != nil {
+		expectedDimensions = meta.Dimensions
+	}
+	embedding, err := decodeStoredEmbeddingJSON(embeddingJSON, expectedDimensions)
+	if err != nil {
+		return nil, fmt.Errorf("memory: decode stored embedding: %w", err)
 	}
 
 	return embedding, nil
@@ -1435,21 +1599,12 @@ func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedd
 		var embeddingJSON []byte
 
 		if err := scanEntryValues(rows, &entry, &embeddingJSON); err != nil {
-			continue
+			return nil, fmt.Errorf("memory: search similar scan entry: %w", err)
 		}
 
-		if len(embeddingJSON) == 0 {
-			continue
-		}
-
-		var embedding []float32
-		if err := json.Unmarshal(embeddingJSON, &embedding); err != nil {
-			continue
-		}
-
-		// Skip entries with mismatched dimensions
-		if len(embedding) != len(queryEmbedding) {
-			continue
+		embedding, err := decodeStoredEmbeddingJSON(embeddingJSON, len(queryEmbedding))
+		if err != nil {
+			return nil, fmt.Errorf("memory: search similar decode embedding for %q: %w", entry.Name, err)
 		}
 
 		candidates = append(candidates, entryWithEmbedding{entry: entry, embedding: embedding})
@@ -1554,21 +1709,12 @@ func (s *Store) SearchSimilarByType(ctx context.Context, workspace, entryType st
 		var embeddingJSON []byte
 
 		if err := scanEntryValues(rows, &entry, &embeddingJSON); err != nil {
-			continue
+			return nil, fmt.Errorf("memory: search similar by type scan entry: %w", err)
 		}
 
-		if len(embeddingJSON) == 0 {
-			continue
-		}
-
-		var embedding []float32
-		if err := json.Unmarshal(embeddingJSON, &embedding); err != nil {
-			continue
-		}
-
-		// Skip entries with mismatched dimensions
-		if len(embedding) != len(queryEmbedding) {
-			continue
+		embedding, err := decodeStoredEmbeddingJSON(embeddingJSON, len(queryEmbedding))
+		if err != nil {
+			return nil, fmt.Errorf("memory: search similar by type decode embedding for %q: %w", entry.Name, err)
 		}
 
 		candidates = append(candidates, entryWithEmbedding{entry: entry, embedding: embedding})
@@ -1698,6 +1844,9 @@ func scanEntryValues(scanner entryScanner, entry *NamedEntry, extra ...any) erro
 	if err := scanner.Scan(dest...); err != nil {
 		return err
 	}
+	if err := validateMemoryTelemetryCounters(*entry); err != nil {
+		return fmt.Errorf("scan telemetry: %w", err)
+	}
 	if err := sqlutil.ScanJSON(digests, &entry.Digests); err != nil {
 		return fmt.Errorf("scan digests: %w", err)
 	}
@@ -1717,14 +1866,26 @@ func scanEntryValues(scanner entryScanner, entry *NamedEntry, extra ...any) erro
 	if sessionID.Valid {
 		entry.SessionID = sessionID.String
 	}
-	entry.LifecycleState = "active"
-	if lifecycleState.Valid && strings.TrimSpace(lifecycleState.String) != "" {
-		entry.LifecycleState = lifecycleState.String
+	entry.LifecycleState, err = normalizeMemoryLifecycleState("")
+	if err != nil {
+		return fmt.Errorf("scan lifecycle_state: %w", err)
+	}
+	if lifecycleState.Valid {
+		entry.LifecycleState, err = normalizeMemoryLifecycleState(lifecycleState.String)
+		if err != nil {
+			return fmt.Errorf("scan lifecycle_state: %w", err)
+		}
 	}
 	entry.Pinned = pinned != 0
-	entry.ReviewStatus = "unreviewed"
-	if reviewStatus.Valid && strings.TrimSpace(reviewStatus.String) != "" {
-		entry.ReviewStatus = reviewStatus.String
+	entry.ReviewStatus, err = normalizeMemoryReviewStatus("")
+	if err != nil {
+		return fmt.Errorf("scan review_status: %w", err)
+	}
+	if reviewStatus.Valid {
+		entry.ReviewStatus, err = normalizeMemoryReviewStatus(reviewStatus.String)
+		if err != nil {
+			return fmt.Errorf("scan review_status: %w", err)
+		}
 	}
 	if supersededBy.Valid {
 		entry.SupersededBy = supersededBy.String

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
 )
@@ -416,17 +417,41 @@ func boundedLimit(value, def, max int) int {
 	return value
 }
 
-func ids(in Input, fallback string) []string {
+func ids(in Input, fallback string) ([]string, error) {
 	out := make([]string, 0, len(in.IDs)+1)
 	for _, id := range in.IDs {
 		if trimmed := strings.TrimSpace(id); trimmed != "" {
-			out = append(out, trimmed)
+			token, err := idListToken(trimmed)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, token)
 		}
 	}
 	if len(out) == 0 && strings.TrimSpace(fallback) != "" {
-		out = append(out, strings.TrimSpace(fallback))
+		token, err := idListToken(fallback)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, token)
 	}
-	return out
+	return out, nil
+}
+
+func idListToken(value string) (string, error) {
+	token := strings.TrimSpace(value)
+	if token == "" {
+		return "", skillerr.Arg("id must be non-empty")
+	}
+	for _, r := range token {
+		if r == ',' || unicode.IsControl(r) {
+			return "", skillerr.Arg(
+				"id must be a single list token",
+				skillerr.WithHint("Pass multiple IDs as separate ids array elements, not as one comma-delimited string."),
+			)
+		}
+	}
+	return token, nil
 }
 
 func require(value, message, hint string) error {
@@ -434,6 +459,49 @@ func require(value, message, hint string) error {
 		return skillerr.Arg(message, skillerr.WithHint(hint))
 	}
 	return nil
+}
+
+func requirePathToken(value, field, message, hint string) (string, error) {
+	if err := require(value, message, hint); err != nil {
+		return "", err
+	}
+	return pathToken(value, field, hint)
+}
+
+func pathToken(value, field, hint string) (string, error) {
+	token := strings.TrimSpace(value)
+	if token == "" {
+		return "", skillerr.Arg(
+			field+" must be a non-empty path segment",
+			skillerr.WithHint(hint),
+		)
+	}
+	for _, r := range token {
+		if r == '/' || r == '\\' || unicode.IsControl(r) {
+			return "", skillerr.Arg(
+				field+" must be a single path segment",
+				skillerr.WithHint(hint),
+			)
+		}
+	}
+	return token, nil
+}
+
+func requireFieldArgumentToken(value, field, message, hint string) (string, error) {
+	if err := require(value, message, hint); err != nil {
+		return "", err
+	}
+	token := strings.TrimSpace(value)
+	for _, r := range token {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '.' {
+			continue
+		}
+		return "", skillerr.Arg(
+			field+" must be a single field argument token",
+			skillerr.WithHint(hint),
+		)
+	}
+	return token, nil
 }
 
 func asMap(raw any) map[string]any {

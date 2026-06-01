@@ -81,10 +81,11 @@ func main() {
 //
 // [[domain:code-statistics-analysis]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
-	// Apply defaults
-	if in.BreakdownBy == "" {
-		in.BreakdownBy = "language"
+	breakdownBy, err := normalizeBreakdownBy(in.BreakdownBy)
+	if err != nil {
+		return err
 	}
+	in.BreakdownBy = breakdownBy
 
 	// Resolve workspace and search path
 	workspace, searchPath, err := skillmain.ResolvePath(rc, in.Path)
@@ -255,6 +256,18 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, data)
 }
 
+func normalizeBreakdownBy(value string) (string, error) {
+	if value == "" {
+		return "language", nil
+	}
+	switch value {
+	case "language", "directory", "extension":
+		return value, nil
+	default:
+		return "", skillerr.Arg("invalid breakdown_by: "+value, skillerr.WithHint("Use one of: language, directory, extension."))
+	}
+}
+
 // detectLanguage determines the programming language from file extension and name.
 func detectLanguage(ext, name string) string {
 	langMap := map[string]string{
@@ -327,26 +340,20 @@ func countLines(path, lang string) (total, code, blank, comments int, err error)
 			continue
 		}
 
-		// Block comments
-		if commentPrefixes.blockStart != "" && commentPrefixes.blockEnd != "" {
-			if strings.Contains(line, commentPrefixes.blockStart) {
-				inBlockComment = true
+		lineWithoutBlockComments, hadBlockComment := stripBlockComments(line, commentPrefixes, &inBlockComment)
+		if lineWithoutBlockComments == "" {
+			if hadBlockComment {
 				comments++
-				continue
+			} else {
+				code++
 			}
-			if inBlockComment {
-				comments++
-				if strings.Contains(line, commentPrefixes.blockEnd) {
-					inBlockComment = false
-				}
-				continue
-			}
+			continue
 		}
 
 		// Line comments
 		isComment := false
 		for _, prefix := range commentPrefixes.line {
-			if strings.HasPrefix(line, prefix) {
+			if strings.HasPrefix(lineWithoutBlockComments, prefix) {
 				isComment = true
 				break
 			}
@@ -364,6 +371,45 @@ func countLines(path, lang string) (total, code, blank, comments int, err error)
 	}
 
 	return total, code, blank, comments, nil
+}
+
+func stripBlockComments(line string, style commentStyle, inBlockComment *bool) (string, bool) {
+	if style.blockStart == "" || style.blockEnd == "" {
+		return line, false
+	}
+
+	var out strings.Builder
+	hadComment := false
+	remaining := line
+	for {
+		if *inBlockComment {
+			hadComment = true
+			end := strings.Index(remaining, style.blockEnd)
+			if end < 0 {
+				return strings.TrimSpace(out.String()), hadComment
+			}
+			*inBlockComment = false
+			remaining = remaining[end+len(style.blockEnd):]
+			continue
+		}
+
+		start := strings.Index(remaining, style.blockStart)
+		if start < 0 {
+			out.WriteString(remaining)
+			return strings.TrimSpace(out.String()), hadComment
+		}
+
+		out.WriteString(remaining[:start])
+		hadComment = true
+		remaining = remaining[start+len(style.blockStart):]
+
+		end := strings.Index(remaining, style.blockEnd)
+		if end < 0 {
+			*inBlockComment = true
+			return strings.TrimSpace(out.String()), hadComment
+		}
+		remaining = remaining[end+len(style.blockEnd):]
+	}
 }
 
 // commentStyle defines comment prefixes and block delimiters for a language.

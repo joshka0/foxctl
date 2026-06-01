@@ -11,8 +11,7 @@ import (
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/oputil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 )
 
 const command = "unity/input"
@@ -77,10 +76,10 @@ type Binding struct {
 }
 
 func main() {
-	skillmain.Main(command, run)
+	lite.Main(command, run)
 }
 
-func run(_ context.Context, rc *skillmain.RunContext, in Input) error {
+func run(_ context.Context, rc *lite.RunContext, in Input) error {
 	op := oputil.Op(in.Operation)
 	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOperations, ", "))
 	if op == "" {
@@ -130,10 +129,10 @@ func run(_ context.Context, rc *skillmain.RunContext, in Input) error {
 		return err
 	}
 
-	return skillout.Emit(rc, command, result)
+	return lite.Emit(rc, command, result)
 }
 
-func resolveProjectPath(rc *skillmain.RunContext, projectPath string) (string, error) {
+func resolveProjectPath(rc *lite.RunContext, projectPath string) (string, error) {
 	resolved := strings.TrimSpace(projectPath)
 	if resolved == "" {
 		resolved = rc.PathValidator.Workspace()

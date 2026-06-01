@@ -76,6 +76,16 @@ const (
 	ReviewStatusFailedValidation ReviewStatus = "failed_validation"
 )
 
+func (s ReviewStatus) IsValid() bool {
+	switch s {
+	case ReviewStatusUnreviewed, ReviewStatusNeedsReview, ReviewStatusReviewed,
+		ReviewStatusValidated, ReviewStatusFailedValidation:
+		return true
+	default:
+		return false
+	}
+}
+
 type TemporalEnvelope struct {
 	ObservedAt         string `json:"observed_at,omitempty"`
 	IngestedAt         string `json:"ingested_at,omitempty"`
@@ -176,7 +186,7 @@ func RecordFromNamedEntry(entry storage.NamedEntry, opts NamedEntryOptions) Reco
 		lifecycleState = LifecycleStateActive
 	}
 	reviewStatus := ReviewStatus(strings.TrimSpace(entry.ReviewStatus))
-	if reviewStatus == "" {
+	if !reviewStatus.IsValid() {
 		reviewStatus = ReviewStatusUnreviewed
 	}
 	fileRefs := dedupeStrings(opts.FileRefs)

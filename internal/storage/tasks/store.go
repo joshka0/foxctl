@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -168,6 +169,15 @@ const (
 	StatusCanceled = "canceled"
 )
 
+func validateTaskStatus(status string) error {
+	switch status {
+	case StatusPending, StatusInProgress, StatusReadyForReview, StatusCompleted, StatusBlocked, StatusCanceled:
+		return nil
+	default:
+		return fmt.Errorf("tasks: invalid task status %q", status)
+	}
+}
+
 const (
 	taskBusyRetryWindow = 2 * time.Second
 	taskBusyRetryStep   = 50 * time.Millisecond
@@ -184,6 +194,15 @@ const (
 	// ReviewStatusStale indicates a review was invalidated by new writes.
 	ReviewStatusStale = "stale"
 )
+
+func validateTaskReviewStatus(status string) error {
+	switch status {
+	case "", ReviewStatusOK, ReviewStatusFailed, ReviewStatusPending, ReviewStatusStale:
+		return nil
+	default:
+		return fmt.Errorf("tasks: invalid task review status %q", status)
+	}
+}
 
 // Epic represents a higher-level goal that groups related tasks.
 // Epics persist across sessions and provide continuity for multi-session work.
@@ -207,6 +226,15 @@ const (
 	// EpicStatusArchived indicates the epic is no longer relevant.
 	EpicStatusArchived = "archived"
 )
+
+func validateEpicStatus(status string) error {
+	switch status {
+	case EpicStatusActive, EpicStatusCompleted, EpicStatusArchived:
+		return nil
+	default:
+		return fmt.Errorf("tasks: invalid epic status %q", status)
+	}
+}
 
 type sqlStore struct {
 	db    *sql.DB
@@ -423,6 +451,12 @@ func (s *sqlStore) Add(ctx context.Context, t Task) (Task, error) {
 	if t.Status == "" {
 		t.Status = StatusPending
 	}
+	if err := validateTaskStatus(t.Status); err != nil {
+		return Task{}, err
+	}
+	if err := validateTaskReviewStatus(t.LastReviewStatus); err != nil {
+		return Task{}, err
+	}
 	if t.CreatedAt.IsZero() {
 		t.CreatedAt = timeutil.NowUTC()
 	}
@@ -505,6 +539,12 @@ func (s *sqlStore) AddSubtask(ctx context.Context, parentID string, t Task) (Tas
 	}
 	if t.Status == "" {
 		t.Status = StatusPending
+	}
+	if err := validateTaskStatus(t.Status); err != nil {
+		return Task{}, err
+	}
+	if err := validateTaskReviewStatus(t.LastReviewStatus); err != nil {
+		return Task{}, err
 	}
 	if t.CreatedAt.IsZero() {
 		t.CreatedAt = timeutil.NowUTC()
@@ -612,6 +652,12 @@ func (s *sqlStore) Update(ctx context.Context, t Task) (Task, error) {
 	}
 	if t.DependsOn == nil {
 		t.DependsOn = []string{}
+	}
+	if err := validateTaskStatus(t.Status); err != nil {
+		return Task{}, err
+	}
+	if err := validateTaskReviewStatus(t.LastReviewStatus); err != nil {
+		return Task{}, err
 	}
 	normalizeTaskCompletionFields(&t)
 
@@ -816,6 +862,9 @@ func (s *sqlStore) SetActive(ctx context.Context, workspaceID, taskID string) (T
 	if err != nil {
 		return Task{}, err
 	}
+	if t.WorkspaceID != workspaceID {
+		return Task{}, fmt.Errorf("tasks: task %q is in workspace %q, active workspace is %q", taskID, t.WorkspaceID, workspaceID)
+	}
 
 	_, err = s.db.ExecContext(ctx, `
 INSERT INTO active_tasks (workspace_id, task_id) VALUES ($1, $2)
@@ -962,6 +1011,11 @@ func (s *sqlStore) SetPageRanks(ctx context.Context, ranks map[string]float64) e
 	if len(ranks) == 0 {
 		return nil
 	}
+	for id, rank := range ranks {
+		if math.IsNaN(rank) || math.IsInf(rank, 0) {
+			return fmt.Errorf("tasks: invalid pagerank for %s: %v", id, rank)
+		}
+	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -1038,6 +1092,10 @@ func scanTask(row *sql.Row) (Task, error) {
 	t.Entities = dbutil.ScanJSONArrayMust(entitiesJSON.String)
 	t.Keywords = dbutil.ScanJSONArrayMust(keywordsJSON.String)
 
+	if err := validateScannedTask(t); err != nil {
+		return Task{}, err
+	}
+
 	t.CreatedAt = timeutil.MustParseRFC3339Nano(createdAtStr)
 	if completedAtStr.Valid {
 		ct := timeutil.MustParseRFC3339Nano(completedAtStr.String)
@@ -1081,6 +1139,9 @@ func (s *sqlStore) AddEpic(ctx context.Context, e Epic) (Epic, error) {
 	if e.Status == "" {
 		e.Status = EpicStatusActive
 	}
+	if err := validateEpicStatus(e.Status); err != nil {
+		return Epic{}, err
+	}
 	if e.CreatedAt.IsZero() {
 		e.CreatedAt = timeutil.NowUTC()
 	}
@@ -1112,6 +1173,9 @@ FROM epics WHERE id = $1`, id)
 
 // UpdateEpic updates an existing epic.
 func (s *sqlStore) UpdateEpic(ctx context.Context, e Epic) (Epic, error) {
+	if err := validateEpicStatus(e.Status); err != nil {
+		return Epic{}, err
+	}
 	var completedAt *string
 	if e.CompletedAt != nil {
 		s := timeutil.FormatRFC3339Nano(*e.CompletedAt)
@@ -1172,7 +1236,15 @@ WHERE a.workspace_id = $1 AND a.session_id = $2`, workspaceID, sessionID)
 // SetActiveEpic sets the active epic for a workspace.
 func (s *sqlStore) SetActiveEpic(ctx context.Context, workspaceID, sessionID, epicID string) error {
 	workspaceID = ws.CanonicalID(workspaceID)
-	_, err := s.db.ExecContext(ctx, `
+	epic, err := s.GetEpic(ctx, epicID)
+	if err != nil {
+		return fmt.Errorf("tasks: active epic %q: %w", epicID, err)
+	}
+	if epic.WorkspaceID != workspaceID {
+		return fmt.Errorf("tasks: epic %q is in workspace %q, active workspace is %q", epicID, epic.WorkspaceID, workspaceID)
+	}
+
+	_, err = s.db.ExecContext(ctx, `
 INSERT INTO active_epics (workspace_id, session_id, epic_id) VALUES ($1, $2, $3)
 ON CONFLICT(workspace_id, session_id) DO UPDATE SET epic_id = excluded.epic_id`, workspaceID, sessionID, epicID)
 	if err != nil {
@@ -1214,9 +1286,28 @@ FROM tasks WHERE epic_id = $1 ORDER BY created_at ASC`, epicID)
 
 // LinkTaskToEpic associates a task with an epic.
 func (s *sqlStore) LinkTaskToEpic(ctx context.Context, taskID, epicID string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE tasks SET epic_id = $1 WHERE id = $2`, epicID, taskID)
+	task, err := s.Get(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("tasks: link task %q: %w", taskID, err)
+	}
+	epic, err := s.GetEpic(ctx, epicID)
+	if err != nil {
+		return fmt.Errorf("tasks: link epic %q: %w", epicID, err)
+	}
+	if task.WorkspaceID != epic.WorkspaceID {
+		return fmt.Errorf("tasks: task %q is in workspace %q, epic %q is in workspace %q", taskID, task.WorkspaceID, epicID, epic.WorkspaceID)
+	}
+
+	res, err := s.db.ExecContext(ctx, `UPDATE tasks SET epic_id = $1 WHERE id = $2`, epicID, taskID)
 	if err != nil {
 		return fmt.Errorf("tasks: link to epic: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("tasks: link to epic rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("tasks: task %q not found", taskID)
 	}
 	return nil
 }
@@ -1275,6 +1366,9 @@ func scanEpic(row *sql.Row) (Epic, error) {
 
 	e.Goal = goal.String
 	e.SessionID = sessionID.String
+	if err := validateEpicStatus(e.Status); err != nil {
+		return Epic{}, err
+	}
 	e.CreatedAt = timeutil.MustParseRFC3339Nano(createdAtStr)
 	if completedAtStr.Valid {
 		ct := timeutil.MustParseRFC3339Nano(completedAtStr.String)
@@ -1299,6 +1393,9 @@ func scanEpicRow(rows *sql.Rows) (Epic, error) {
 
 	e.Goal = goal.String
 	e.SessionID = sessionID.String
+	if err := validateEpicStatus(e.Status); err != nil {
+		return Epic{}, err
+	}
 	e.CreatedAt = timeutil.MustParseRFC3339Nano(createdAtStr)
 	if completedAtStr.Valid {
 		ct := timeutil.MustParseRFC3339Nano(completedAtStr.String)
@@ -1354,6 +1451,10 @@ func scanTaskRow(rows *sql.Rows) (Task, error) {
 	t.Entities = dbutil.ScanJSONArrayMust(entitiesJSON.String)
 	t.Keywords = dbutil.ScanJSONArrayMust(keywordsJSON.String)
 
+	if err := validateScannedTask(t); err != nil {
+		return Task{}, err
+	}
+
 	t.CreatedAt = timeutil.MustParseRFC3339Nano(createdAtStr)
 	if completedAtStr.Valid {
 		ct := timeutil.MustParseRFC3339Nano(completedAtStr.String)
@@ -1384,6 +1485,13 @@ func scanTaskRow(rows *sql.Rows) (Task, error) {
 	t.DependsOn = dbutil.ScanJSONArrayMust(dependsOnJSON)
 
 	return t, nil
+}
+
+func validateScannedTask(t Task) error {
+	if err := validateTaskStatus(t.Status); err != nil {
+		return err
+	}
+	return validateTaskReviewStatus(t.LastReviewStatus)
 }
 
 func retryTaskBusy(ctx context.Context, fn func() error) error {

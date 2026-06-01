@@ -1,6 +1,9 @@
 package history
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 type HistoryQuestionID string
 
@@ -350,13 +353,17 @@ func compactSummaryText(text string, max int) string {
 
 func truncateInline(text string, max int) string {
 	text = strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
-	if max <= 0 || len(text) <= max {
+	if max <= 0 {
 		return text
 	}
-	if max <= 1 {
-		return text[:max]
+	if utf8.RuneCountInString(text) <= max {
+		return text
 	}
-	return text[:max-1] + "…"
+	runes := []rune(text)
+	if max <= 1 {
+		return string(runes[:max])
+	}
+	return string(runes[:max-1]) + "…"
 }
 
 func normalizeObjectiveLabel(label, fallback string) string {

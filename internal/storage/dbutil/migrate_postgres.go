@@ -96,34 +96,117 @@ func queryColumnExists(ctx context.Context, db *sql.DB, query, table, column str
 }
 
 // sanitizeSQLIdentifier ensures a string is safe to use as a SQL identifier.
-// Only allows alphanumeric, underscore, and dot (for schema-qualified names).
+// Allows either one identifier or one schema-qualified identifier.
 func sanitizeSQLIdentifier(s string) (string, error) {
 	if s == "" {
 		return "", fmt.Errorf("identifier must not be empty")
 	}
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.') {
-			return "", fmt.Errorf("identifier %q contains unsafe character %q at position %d", s, string(c), i)
+	parts := strings.Split(s, ".")
+	if len(parts) > 2 {
+		return "", fmt.Errorf("identifier %q has too many qualification segments", s)
+	}
+	for _, part := range parts {
+		if err := validateSQLIdentifierPart(part); err != nil {
+			return "", fmt.Errorf("identifier %q is unsafe: %w", s, err)
 		}
 	}
 	return s, nil
 }
 
-// sanitizeSQLType validates a SQL type string.
-// Allows common SQL types: alphanumeric, spaces, parentheses (for e.g. "VARCHAR(255)"), and commas.
-func sanitizeSQLType(s string) (string, error) {
-	if s == "" {
-		return "", fmt.Errorf("type must not be empty")
+func validateSQLIdentifierPart(part string) error {
+	if part == "" {
+		return fmt.Errorf("identifier segment must not be empty")
 	}
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
-			c == '_' || c == ' ' || c == '(' || c == ')' || c == ',') {
-			return "", fmt.Errorf("type %q contains unsafe character %q at position %d", s, string(c), i)
+	if len(part) > 64 {
+		return fmt.Errorf("identifier segment %q is too long", part)
+	}
+	if !isSQLIdentifierStart(part[0]) {
+		return fmt.Errorf("identifier segment %q must start with a letter or underscore", part)
+	}
+	for i := 1; i < len(part); i++ {
+		if !isSQLIdentifierChar(part[i]) {
+			return fmt.Errorf("identifier segment %q contains unsafe character %q at position %d", part, string(part[i]), i)
 		}
 	}
-	return s, nil
+	return nil
+}
+
+func isSQLIdentifierStart(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
+}
+
+func isSQLIdentifierChar(c byte) bool {
+	return isSQLIdentifierStart(c) || (c >= '0' && c <= '9')
+}
+
+// sanitizeSQLType validates a SQL type string.
+// Allows a known column type with optional size/precision and optional nullability.
+func sanitizeSQLType(s string) (string, error) {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" {
+		return "", fmt.Errorf("type must not be empty")
+	}
+
+	fields := strings.Fields(trimmed)
+	if len(fields) == 0 {
+		return "", fmt.Errorf("type must not be empty")
+	}
+	if !isAllowedSQLTypeBase(fields[0]) {
+		return "", fmt.Errorf("type %q is not an allowed column type", s)
+	}
+	switch len(fields) {
+	case 1:
+		return trimmed, nil
+	case 2:
+		if strings.EqualFold(fields[1], "NULL") {
+			return trimmed, nil
+		}
+	case 3:
+		if strings.EqualFold(fields[1], "NOT") && strings.EqualFold(fields[2], "NULL") {
+			return trimmed, nil
+		}
+	}
+	return "", fmt.Errorf("type %q has unsupported modifiers", s)
+}
+
+func isAllowedSQLTypeBase(s string) bool {
+	name := s
+	if open := strings.IndexByte(s, '('); open >= 0 {
+		if !strings.HasSuffix(s, ")") {
+			return false
+		}
+		name = s[:open]
+		params := s[open+1 : len(s)-1]
+		if !isSQLTypeParameterList(params) {
+			return false
+		}
+	}
+	switch strings.ToUpper(name) {
+	case "BIGINT", "BIGSERIAL", "BLOB", "BOOL", "BOOLEAN", "BYTEA",
+		"CHAR", "DATE", "DECIMAL", "DOUBLE", "INTEGER", "JSON",
+		"JSONB", "NUMERIC", "REAL", "SERIAL", "SMALLINT", "TEXT",
+		"TIME", "TIMESTAMP", "TIMESTAMPTZ", "UUID", "VARCHAR", "VECTOR":
+		return true
+	default:
+		return false
+	}
+}
+
+func isSQLTypeParameterList(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, part := range strings.Split(s, ",") {
+		if part == "" {
+			return false
+		}
+		for i := 0; i < len(part); i++ {
+			if part[i] < '0' || part[i] > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // sanitizeDefaultValue validates a SQL default value against a strict whitelist.
@@ -131,41 +214,40 @@ func sanitizeSQLType(s string) (string, error) {
 //   - Boolean/null keywords: TRUE, FALSE, NULL
 //   - Timestamp keywords: CURRENT_TIMESTAMP, CURRENT_DATE, CURRENT_TIME
 //   - Numeric literals: 0, 1, -1, 3.14
-//   - Single-quoted string literals: ”, 'hello', 'it”s' (balanced, no nested injection)
+//   - Single-quoted string literals with doubled quote escapes.
 //   - Simple function calls: NOW(), datetime('now')
 func sanitizeDefaultValue(s string) (string, error) {
-	if s == "" {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" {
 		return "", fmt.Errorf("default value must not be empty")
 	}
-	trimmed := strings.TrimSpace(s)
 	upper := strings.ToUpper(trimmed)
 
 	// Allow boolean/null keywords
 	if upper == "TRUE" || upper == "FALSE" || upper == "NULL" {
-		return s, nil
+		return trimmed, nil
 	}
 
 	// Allow timestamp keywords
 	if upper == "CURRENT_TIMESTAMP" || upper == "CURRENT_DATE" || upper == "CURRENT_TIME" {
-		return s, nil
+		return trimmed, nil
 	}
 
 	// Allow numeric values (digits, optional leading sign, optional decimal point)
 	if isNumericLiteral(trimmed) {
-		return s, nil
+		return trimmed, nil
 	}
 
 	// Allow single-quoted string literals with balanced quotes
 	if len(trimmed) >= 2 && trimmed[0] == '\'' {
 		if isValidQuotedString(trimmed) {
-			return s, nil
+			return trimmed, nil
 		}
 		return "", fmt.Errorf("default value %q has unbalanced or invalid single quotes", s)
 	}
 
-	// Allow simple function calls: identifier(args) where args are literals or quoted strings
-	if isSimpleFunctionCall(trimmed) {
-		return s, nil
+	if isAllowedDefaultFunction(trimmed) {
+		return trimmed, nil
 	}
 
 	return "", fmt.Errorf("default value %q is not a valid literal or allowed function call", s)
@@ -199,7 +281,7 @@ func isNumericLiteral(s string) bool {
 }
 
 // isValidQuotedString checks if s is a properly balanced single-quoted SQL string.
-// Escaped quotes are represented as ” (two single quotes).
+// Escaped quotes are represented as two single quotes.
 func isValidQuotedString(s string) bool {
 	if len(s) < 2 || s[0] != '\'' {
 		return false
@@ -213,11 +295,20 @@ func isValidQuotedString(s string) bool {
 				i += 2 // skip escaped quote
 				continue
 			}
-			// This is the closing quote — it must be the last character
+			// This is the closing quote; it must be the last character.
 			return i == len(s)-1
 		}
-		// Reject characters that could be used for injection
+		// Reject statement separators and comment tokens even inside defaults.
 		if s[i] == ';' {
+			return false
+		}
+		if s[i] == '-' && i+1 < len(s) && s[i+1] == '-' {
+			return false
+		}
+		if s[i] == '/' && i+1 < len(s) && s[i+1] == '*' {
+			return false
+		}
+		if s[i] == '*' && i+1 < len(s) && s[i+1] == '/' {
 			return false
 		}
 		i++
@@ -226,44 +317,13 @@ func isValidQuotedString(s string) bool {
 	return false
 }
 
-// isSimpleFunctionCall checks if s matches pattern: IDENTIFIER(ARGS)
-// where IDENTIFIER is alphanumeric+underscore and ARGS contains only safe characters.
-func isSimpleFunctionCall(s string) bool {
-	// Find opening paren
-	parenIdx := strings.IndexByte(s, '(')
-	if parenIdx <= 0 || s[len(s)-1] != ')' {
+func isAllowedDefaultFunction(s string) bool {
+	switch strings.ToLower(s) {
+	case "now()", "datetime('now')":
+		return true
+	default:
 		return false
 	}
-
-	// Validate function name: alphanumeric + underscore
-	name := s[:parenIdx]
-	for i := 0; i < len(name); i++ {
-		c := name[i]
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
-			return false
-		}
-	}
-
-	// Validate args: no semicolons, no double-dashes, no unbalanced quotes
-	args := s[parenIdx+1 : len(s)-1]
-	for i := 0; i < len(args); i++ {
-		c := args[i]
-		if c == ';' {
-			return false
-		}
-		if c == '-' && i+1 < len(args) && args[i+1] == '-' {
-			return false
-		}
-	}
-
-	// If args contain quotes, they must be balanced
-	quoteCount := 0
-	for i := 0; i < len(args); i++ {
-		if args[i] == '\'' {
-			quoteCount++
-		}
-	}
-	return quoteCount%2 == 0
 }
 
 // containsCI is a case-insensitive substring check.

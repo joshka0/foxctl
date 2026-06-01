@@ -120,22 +120,31 @@ type MigrationConfig struct {
 func (c *Config) Validate() error {
 	switch c.Driver {
 	case DriverFile:
-		if c.File.Path == "" {
+		if strings.TrimSpace(c.File.Path) == "" {
 			return errors.New("cas: file path is required")
 		}
 	case DriverSQLite:
-		if c.SQLite.DBPath == "" {
+		if strings.TrimSpace(c.SQLite.DBPath) == "" {
 			return errors.New("cas: sqlite db_path is required")
 		}
+		if c.SQLite.BlobThreshold < 0 {
+			return errors.New("cas: sqlite blob_threshold cannot be negative")
+		}
+		if c.SQLite.BusyTimeout < 0 {
+			return errors.New("cas: sqlite busy_timeout cannot be negative")
+		}
 	case DriverTurso:
-		if c.Turso.URL == "" {
+		if strings.TrimSpace(c.Turso.URL) == "" {
 			return errors.New("cas: turso url is required")
 		}
-		if c.Turso.AuthToken == "" {
+		if strings.TrimSpace(c.Turso.AuthToken) == "" {
 			return errors.New("cas: turso auth_token is required")
 		}
+		if c.Turso.BlobThreshold < 0 {
+			return errors.New("cas: turso blob_threshold cannot be negative")
+		}
 	case DriverS3:
-		if c.S3.Bucket == "" {
+		if strings.TrimSpace(c.S3.Bucket) == "" {
 			return errors.New("cas: s3 bucket is required")
 		}
 	case "":

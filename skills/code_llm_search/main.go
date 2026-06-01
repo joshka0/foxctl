@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"sort"
@@ -17,11 +18,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rs/zerolog"
-
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 )
 
 // Command is the envelope command for this skill.
@@ -159,15 +157,15 @@ type RankingProvider interface {
 
 // main is the skill entry point for code/llm_search.
 func main() {
-	skillmain.Main(Command, skillmain.Chain(
+	lite.Main(Command, lite.Chain(
 		run,
-		skillmain.WithDynamicTimeout[Input](func(in Input) time.Duration {
+		lite.WithDynamicTimeout[Input](func(in Input) time.Duration {
 			if in.Limits.Timeout > 0 {
 				return in.Limits.Timeout
 			}
 			return DefaultTimeout
 		}),
-		skillmain.WithRecover[Input](),
+		lite.WithRecover[Input](),
 	))
 }
 
@@ -216,7 +214,7 @@ func detectAvailableProviders(keys APIKeys) []string {
 //
 // [[domain:llm-code-search-ranking]]
 // [[protocol:multi-provider-llm-ranking]]
-func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+func run(ctx context.Context, rc *lite.RunContext, in Input) error {
 	// FC/IS: Load API keys at boundary
 	apiKeys := LoadAPIKeys()
 
@@ -236,14 +234,14 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	start := time.Now()
-	logger := zerolog.New(os.Stderr).With().Timestamp().Logger()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
 	// Create providers
 	providers := make([]RankingProvider, 0, len(in.Providers))
 	for _, name := range in.Providers {
 		p, err := createProvider(name, apiKeys)
 		if err != nil {
-			logger.Warn().Err(err).Str("provider", name).Msg("failed to create provider")
+			logger.Warn("failed to create provider", "provider", name, "error", err)
 			continue
 		}
 		providers = append(providers, p)
@@ -269,7 +267,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 			}
 
 			var scores []ProviderScore
-			err := skillmain.GuardCall(rc, skillmain.BreakerLLMProvider, ctx, func(ctx context.Context) error {
+			err := lite.GuardCall(ctx, lite.BreakerLLMProvider, func(ctx context.Context) error {
 				var e error
 				scores, e = provider.RankCandidates(ctx, in.Question, in.Candidates)
 				return e
@@ -322,14 +320,15 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		ProviderResults:  providerResults,
 	}
 
-	logger.Info().
-		Str("skill", Command).
-		Int("candidates", len(rankedCandidates)).
-		Strs("providers", providersUsed).
-		Int64("duration_ms", output.Summary.DurationMS).
-		Msg("llm_search_complete")
+	logger.Info(
+		"llm_search_complete",
+		"skill", Command,
+		"candidates", len(rankedCandidates),
+		"providers", providersUsed,
+		"duration_ms", output.Summary.DurationMS,
+	)
 
-	return skillout.Emit(rc, Command, output)
+	return lite.Emit(rc, Command, output)
 }
 
 // mergeProviderResults combines scores from all providers with averaging and ranking.

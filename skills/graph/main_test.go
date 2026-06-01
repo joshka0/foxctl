@@ -236,7 +236,7 @@ func TestGraph_AddNode_WithMetadata(t *testing.T) {
 		Workspace: rc.Workspace,
 		AddNode: &addNodeRequest{
 			NodeID:      "func:main.Handler",
-			NodeType:    "function",
+			NodeType:    string(graph.NodeTypeSymbol),
 			Title:       "Handler",
 			CurrentPath: "src/main.go",
 			Metadata: map[string]string{
@@ -677,8 +677,8 @@ func TestGraph_TopNodes_FilterByType(t *testing.T) {
 
 	// Add nodes of different types
 	for _, node := range []addNodeRequest{
-		{NodeID: "file:a.go", NodeType: "file", Title: "a.go"},
-		{NodeID: "func:Handler", NodeType: "function", Title: "Handler"},
+		{NodeID: "file:a.go", NodeType: string(graph.NodeTypeFile), Title: "a.go"},
+		{NodeID: "func:Handler", NodeType: string(graph.NodeTypeSymbol), Title: "Handler"},
 	} {
 		in := input{
 			Operation: "add_node",
@@ -695,7 +695,7 @@ func TestGraph_TopNodes_FilterByType(t *testing.T) {
 		Operation: "top_nodes",
 		Workspace: rc.Workspace,
 		TopNodes: &topNodesReq{
-			NodeType: "function",
+			NodeType: string(graph.NodeTypeSymbol),
 		},
 	}
 
@@ -715,8 +715,8 @@ func TestGraph_TopNodes_FilterByType(t *testing.T) {
 	// All returned nodes should be functions
 	for _, n := range nodes {
 		node := n.(map[string]any)
-		if node["node_type"] != "function" {
-			t.Errorf("expected node_type 'function', got %v", node["node_type"])
+		if node["node_type"] != string(graph.NodeTypeSymbol) {
+			t.Errorf("expected node_type %q, got %v", graph.NodeTypeSymbol, node["node_type"])
 		}
 	}
 }

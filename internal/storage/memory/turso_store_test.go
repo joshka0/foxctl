@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/context/memorycore"
@@ -151,6 +152,243 @@ func TestTursoLocalStorePreservesLifecycleAndTelemetryAcrossReadPaths(t *testing
 		t.Fatalf("Relevant returned no entries")
 	}
 	assertTursoLifecycleTelemetry(t, relevant[0].Entry, validatedAt, telemetryAt)
+}
+
+func TestTursoLocalStoreRejectsInvalidMemoryLifecycleUpdateWithoutMutatingEntry(t *testing.T) {
+	ctx := context.Background()
+	store := openLocalTursoOrSkip(t, ctx)
+	defer func() { _ = store.Close() }()
+
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2026-05-04T12:00:00Z"},"error":{}}`)
+	if _, err := store.SaveResult(ctx, SaveOptions{
+		Name:      "alpha",
+		Type:      "decision",
+		Workspace: "ws",
+		Summary:   "alpha summary",
+		Result:    result,
+	}); err != nil {
+		t.Fatalf("save alpha: %v", err)
+	}
+
+	_, err := store.UpdateLifecycle(ctx, "alpha", "ws", LifecycleUpdate{
+		LifecycleState: "trusted",
+		ReviewStatus:   "reviewed",
+		SupersededBy:   "beta",
+		ReviewNotes:    "should not persist",
+	})
+	if err == nil {
+		t.Fatal("expected invalid lifecycle state error")
+	}
+	if !strings.Contains(err.Error(), "invalid memory lifecycle state") {
+		t.Fatalf("error=%v want invalid memory lifecycle state", err)
+	}
+
+	got, err := store.Get(ctx, "alpha", "ws")
+	if err != nil {
+		t.Fatalf("get alpha: %v", err)
+	}
+	if got.LifecycleState != "active" || got.ReviewStatus != "unreviewed" || got.SupersededBy != "" || got.ReviewNotes != "" {
+		t.Fatalf("invalid lifecycle update mutated entry: %#v", got)
+	}
+}
+
+func TestTursoLocalStoreRejectsInvalidMemoryReviewUpdateWithoutMutatingEntry(t *testing.T) {
+	ctx := context.Background()
+	store := openLocalTursoOrSkip(t, ctx)
+	defer func() { _ = store.Close() }()
+
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2026-05-04T12:00:00Z"},"error":{}}`)
+	if _, err := store.SaveResult(ctx, SaveOptions{
+		Name:      "alpha",
+		Type:      "decision",
+		Workspace: "ws",
+		Summary:   "alpha summary",
+		Result:    result,
+	}); err != nil {
+		t.Fatalf("save alpha: %v", err)
+	}
+
+	_, err := store.UpdateLifecycle(ctx, "alpha", "ws", LifecycleUpdate{
+		LifecycleState: "stale",
+		ReviewStatus:   "trusted",
+		SupersededBy:   "beta",
+		ReviewNotes:    "should not persist",
+	})
+	if err == nil {
+		t.Fatal("expected invalid review status error")
+	}
+	if !strings.Contains(err.Error(), "invalid memory review status") {
+		t.Fatalf("error=%v want invalid memory review status", err)
+	}
+
+	got, err := store.Get(ctx, "alpha", "ws")
+	if err != nil {
+		t.Fatalf("get alpha: %v", err)
+	}
+	if got.LifecycleState != "active" || got.ReviewStatus != "unreviewed" || got.SupersededBy != "" || got.ReviewNotes != "" {
+		t.Fatalf("invalid review update mutated entry: %#v", got)
+	}
+}
+
+func TestTursoLocalSaveRejectsGeneratedUnknownMemoryLifecycleStates(t *testing.T) {
+	ctx := context.Background()
+	store := openLocalTursoOrSkip(t, ctx)
+	defer func() { _ = store.Close() }()
+
+	rejectsUnknownLifecycleState := func(raw string) bool {
+		_, err := store.Save(ctx, NamedEntry{
+			Name:           "generated-invalid-lifecycle",
+			Type:           "result",
+			Workspace:      "ws",
+			Summary:        "invalid lifecycle should fail closed",
+			Result:         []byte(`{"ok":true}`),
+			LifecycleState: "unknown:" + raw,
+		})
+		entries, listErr := store.List(ctx, "ws", 10)
+		return err != nil &&
+			strings.Contains(err.Error(), "invalid memory lifecycle state") &&
+			listErr == nil &&
+			len(entries) == 0
+	}
+
+	if err := quick.Check(rejectsUnknownLifecycleState, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("generated unknown lifecycle state was accepted: %v", err)
+	}
+}
+
+func TestTursoLocalSaveRejectsGeneratedUnknownMemoryReviewStatuses(t *testing.T) {
+	ctx := context.Background()
+	store := openLocalTursoOrSkip(t, ctx)
+	defer func() { _ = store.Close() }()
+
+	rejectsUnknownReviewStatus := func(raw string) bool {
+		_, err := store.Save(ctx, NamedEntry{
+			Name:         "generated-invalid-review",
+			Type:         "result",
+			Workspace:    "ws",
+			Summary:      "invalid review should fail closed",
+			Result:       []byte(`{"ok":true}`),
+			ReviewStatus: "unknown:" + raw,
+		})
+		entries, listErr := store.List(ctx, "ws", 10)
+		return err != nil &&
+			strings.Contains(err.Error(), "invalid memory review status") &&
+			listErr == nil &&
+			len(entries) == 0
+	}
+
+	if err := quick.Check(rejectsUnknownReviewStatus, &quick.Config{MaxCount: 100}); err != nil {
+		t.Fatalf("generated unknown review status was accepted: %v", err)
+	}
+}
+
+func TestTursoLocalReadsRejectCorruptPersistedLifecycleMetadata(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name        string
+		column      string
+		value       string
+		wantMessage string
+	}{
+		{
+			name:        "lifecycle state",
+			column:      "lifecycle_state",
+			value:       "trusted",
+			wantMessage: "invalid memory lifecycle state",
+		},
+		{
+			name:        "review status",
+			column:      "review_status",
+			value:       "trusted",
+			wantMessage: "invalid memory review status",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := openLocalTursoOrSkip(t, ctx)
+			defer func() { _ = store.Close() }()
+
+			result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2026-05-04T12:00:00Z"},"error":{}}`)
+			if _, err := store.SaveResult(ctx, SaveOptions{
+				Name:      "alpha",
+				Type:      "decision",
+				Workspace: "ws",
+				Summary:   "alpha summary",
+				Result:    result,
+			}); err != nil {
+				t.Fatalf("save alpha: %v", err)
+			}
+			if _, err := store.db.ExecContext(ctx, "UPDATE named_memory SET "+tt.column+" = ? WHERE name = ? AND workspace = ?", tt.value, "alpha", "ws"); err != nil {
+				t.Fatalf("corrupt %s: %v", tt.column, err)
+			}
+
+			if _, err := store.Get(ctx, "alpha", "ws"); err == nil || !strings.Contains(err.Error(), tt.wantMessage) {
+				t.Fatalf("Get() error=%v, want %s", err, tt.wantMessage)
+			}
+			if _, err := store.List(ctx, "ws", 10); err == nil || !strings.Contains(err.Error(), tt.wantMessage) {
+				t.Fatalf("List() error=%v, want %s", err, tt.wantMessage)
+			}
+		})
+	}
+}
+
+func TestTursoLocalSaveRejectsNegativeMemoryTelemetryCounters(t *testing.T) {
+	ctx := context.Background()
+	store := openLocalTursoOrSkip(t, ctx)
+	defer func() { _ = store.Close() }()
+
+	_, err := store.Save(ctx, NamedEntry{
+		Name:          "negative-telemetry",
+		Type:          "decision",
+		Workspace:     "ws",
+		Summary:       "negative telemetry should fail before write",
+		Result:        []byte(`{"ok":true}`),
+		SelectedCount: -1,
+	})
+	if err == nil || !strings.Contains(err.Error(), "selected_count") || !strings.Contains(err.Error(), "must be non-negative") {
+		t.Fatalf("Save() error=%v, want selected_count non-negative error", err)
+	}
+}
+
+func TestTursoLocalReadsRejectNegativePersistedTelemetryCounters(t *testing.T) {
+	ctx := context.Background()
+
+	for _, column := range []string{
+		"selected_count",
+		"use_count",
+		"success_count",
+		"failure_count",
+		"patch_count",
+		"restore_count",
+	} {
+		t.Run(column, func(t *testing.T) {
+			store := openLocalTursoOrSkip(t, ctx)
+			defer func() { _ = store.Close() }()
+
+			result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2026-05-04T12:00:00Z"},"error":{}}`)
+			if _, err := store.SaveResult(ctx, SaveOptions{
+				Name:      "alpha",
+				Type:      "decision",
+				Workspace: "ws",
+				Summary:   "alpha summary",
+				Result:    result,
+			}); err != nil {
+				t.Fatalf("save alpha: %v", err)
+			}
+			if _, err := store.db.ExecContext(ctx, "UPDATE named_memory SET "+column+" = ? WHERE name = ? AND workspace = ?", -1, "alpha", "ws"); err != nil {
+				t.Fatalf("corrupt %s: %v", column, err)
+			}
+
+			if _, err := store.Get(ctx, "alpha", "ws"); err == nil || !strings.Contains(err.Error(), column) {
+				t.Fatalf("Get() error=%v, want it to name %s", err, column)
+			}
+			if _, err := store.List(ctx, "ws", 10); err == nil || !strings.Contains(err.Error(), column) {
+				t.Fatalf("List() error=%v, want it to name %s", err, column)
+			}
+		})
+	}
 }
 
 func TestTursoLocalRecordAccessBatchUpdatesAccessOnly(t *testing.T) {
@@ -312,6 +550,27 @@ func TestTursoLocalVectorSearchResultsProjectToCanonicalMemoryRecord(t *testing.
 
 	results, err = store.SearchSimilarMultiWorkspace(ctx, []string{"ws"}, embedding, 10)
 	assertVectorSearchRecord("SearchSimilarMultiWorkspace", results, err)
+}
+
+func TestTursoSaveWithEmbeddingRejectsInvalidMemoryLifecycleMetadataBeforeVectorWrite(t *testing.T) {
+	ctx := context.Background()
+	store := openLocalTursoOrSkip(t, ctx)
+	defer func() { _ = store.Close() }()
+
+	_, err := store.SaveWithEmbedding(ctx, NamedEntry{
+		Name:           "invalid-vector-lifecycle",
+		Type:           "decision",
+		Workspace:      "ws",
+		Summary:        "invalid vector lifecycle should fail before write",
+		Result:         []byte(`{"ok":true}`),
+		LifecycleState: "trusted",
+	}, []float32{1, 0, 0, 0}, "test-model")
+	if err == nil {
+		t.Fatal("expected invalid lifecycle state error")
+	}
+	if !strings.Contains(err.Error(), "invalid memory lifecycle state") {
+		t.Fatalf("error=%v want invalid memory lifecycle state", err)
+	}
 }
 
 func TestTursoLocalStoreSearchSimilar4096Dimensions(t *testing.T) {

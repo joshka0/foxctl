@@ -3,8 +3,12 @@ package sessions_test
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"math"
+	"math/rand"
+	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/storage"
@@ -877,6 +881,75 @@ func TestSession_SetStatus(t *testing.T) {
 	}
 	if got.Status != storage.SessionStatusOK {
 		t.Errorf("status: got %q, want %q", got.Status, storage.SessionStatusOK)
+	}
+}
+
+func TestSession_RejectsUnknownStatus(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	defer store.Close()
+
+	if _, err := store.Save(ctx, storage.Session{
+		ID:            "sess-invalid-status",
+		WorkspacePath: "/workspace",
+		Status:        "paused",
+	}); !errors.Is(err, sessions.ErrInvalidStatus) {
+		t.Fatalf("Save() error = %v, want ErrInvalidStatus", err)
+	}
+
+	if _, err := store.Save(ctx, storage.Session{
+		ID:            "sess-valid-status",
+		WorkspacePath: "/workspace",
+		Status:        storage.SessionStatusRunning,
+	}); err != nil {
+		t.Fatalf("save valid session: %v", err)
+	}
+
+	if err := store.SetStatus(ctx, "sess-valid-status", "paused"); !errors.Is(err, sessions.ErrInvalidStatus) {
+		t.Fatalf("SetStatus() error = %v, want ErrInvalidStatus", err)
+	}
+	if err := store.SetStatusWithError(ctx, "sess-valid-status", "paused", "should not persist"); !errors.Is(err, sessions.ErrInvalidStatus) {
+		t.Fatalf("SetStatusWithError() error = %v, want ErrInvalidStatus", err)
+	}
+
+	got, err := store.Get(ctx, "sess-valid-status")
+	if err != nil {
+		t.Fatalf("get valid session: %v", err)
+	}
+	if got.Status != storage.SessionStatusRunning {
+		t.Fatalf("status = %q, want %q", got.Status, storage.SessionStatusRunning)
+	}
+	if !got.EndedAt.IsZero() {
+		t.Fatalf("EndedAt = %v, want zero after rejected status updates", got.EndedAt)
+	}
+	if got.ErrorMessage != "" {
+		t.Fatalf("ErrorMessage = %q, want empty after rejected status updates", got.ErrorMessage)
+	}
+}
+
+func TestSession_SaveRejectsUnknownStatusProperty(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	defer store.Close()
+
+	err := quick.Check(func(raw string) bool {
+		switch strings.TrimSpace(raw) {
+		case "", storage.SessionStatusRunning, storage.SessionStatusOK, storage.SessionStatusError, storage.SessionStatusCanceled:
+			return true
+		}
+
+		_, err := store.Save(ctx, storage.Session{
+			ID:            "sess-status-property",
+			WorkspacePath: "/workspace",
+			Status:        raw,
+		})
+		return errors.Is(err, sessions.ErrInvalidStatus)
+	}, &quick.Config{
+		MaxCount: 200,
+		Rand:     rand.New(rand.NewSource(1)),
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

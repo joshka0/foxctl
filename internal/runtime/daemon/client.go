@@ -13,9 +13,12 @@ import (
 
 const EnvDaemonSocketPath = "FOXCTL_DAEMON_SOCKET"
 
+const defaultCallTimeout = 30 * time.Second
+
 // Client connects to the daemon over Unix socket.
 type Client struct {
-	socketPath string
+	socketPath  string
+	callTimeout time.Duration
 }
 
 // NewClient creates a new daemon client.
@@ -31,7 +34,8 @@ type Client struct {
 //	OutputFields: *Client
 func NewClient() *Client {
 	return &Client{
-		socketPath: SocketPath(),
+		socketPath:  SocketPath(),
+		callTimeout: defaultCallTimeout,
 	}
 }
 
@@ -400,8 +404,11 @@ func (c *Client) call(method string, params any) (*Response, error) {
 	}
 	defer conn.Close()
 
-	// Set timeouts
-	if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+	timeout := c.callTimeout
+	if timeout <= 0 {
+		timeout = defaultCallTimeout
+	}
+	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
 		return nil, fmt.Errorf("set deadline: %w", err)
 	}
 

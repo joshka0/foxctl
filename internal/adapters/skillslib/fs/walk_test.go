@@ -1,9 +1,11 @@
 package fs
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/quick"
 )
 
 func TestMatches(t *testing.T) {
@@ -101,4 +103,78 @@ func TestWalkFiles(t *testing.T) {
 	if len(entries) != 2 {
 		t.Fatalf("expected 2 entries, got %d", len(entries))
 	}
+}
+
+func TestWalkFilesMatchesBaseRelativeIncludeAndExcludeGlobs(t *testing.T) {
+	tmp := t.TempDir()
+	files := []string{
+		filepath.Join(tmp, "root.go"),
+		filepath.Join(tmp, "src", "main.go"),
+		filepath.Join(tmp, "src", "generated.go"),
+		filepath.Join(tmp, "src", "readme.md"),
+	}
+	for _, f := range files {
+		if err := os.MkdirAll(filepath.Dir(f), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(f, []byte("data"), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+
+	entries, err := WalkFiles(ListOptions{
+		BasePath: tmp,
+		Include:  []string{"src/*.go"},
+		Exclude:  []string{"src/generated.go"},
+	})
+	if err != nil {
+		t.Fatalf("WalkFiles: %v", err)
+	}
+	if got := entryRelPaths(t, tmp, entries); len(got) != 1 || got[0] != "src/main.go" {
+		t.Fatalf("entries = %v, want [src/main.go]", got)
+	}
+}
+
+func TestWalkFilesGeneratedRelativeIncludeStaysUnderMatchedSubtree(t *testing.T) {
+	prop := func(seed uint8) bool {
+		tmp := t.TempDir()
+		dir := fmt.Sprintf("src%d", seed)
+		matched := filepath.Join(tmp, dir, "same.go")
+		unmatched := filepath.Join(tmp, "same.go")
+		for _, f := range []string{matched, unmatched} {
+			if err := os.MkdirAll(filepath.Dir(f), 0o755); err != nil {
+				t.Logf("mkdir: %v", err)
+				return false
+			}
+			if err := os.WriteFile(f, []byte("data"), 0o644); err != nil {
+				t.Logf("write: %v", err)
+				return false
+			}
+		}
+
+		include := filepath.ToSlash(filepath.Join(dir, "*.go"))
+		entries, err := WalkFiles(ListOptions{BasePath: tmp, Include: []string{include}})
+		if err != nil {
+			t.Logf("WalkFiles: %v", err)
+			return false
+		}
+		got := entryRelPaths(t, tmp, entries)
+		return len(got) == 1 && got[0] == filepath.ToSlash(filepath.Join(dir, "same.go"))
+	}
+	if err := quick.Check(prop, &quick.Config{MaxCount: 50}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func entryRelPaths(t *testing.T, base string, entries []FileEntry) []string {
+	t.Helper()
+	paths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		rel, err := filepath.Rel(base, entry.Path)
+		if err != nil {
+			t.Fatalf("rel path: %v", err)
+		}
+		paths = append(paths, filepath.ToSlash(rel))
+	}
+	return paths
 }

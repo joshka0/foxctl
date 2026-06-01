@@ -15,45 +15,55 @@ func planReddit(baseURL string, in Input) (callPlan, error) {
 
 	switch in.Operation {
 	case "subreddit_listing":
-		if err := require(in.Subreddit, "subreddit is required for subreddit_listing", "Pass subreddit without the r/ prefix."); err != nil {
+		subreddit, err := requirePathToken(in.Subreddit, "subreddit", "subreddit is required for subreddit_listing", "Pass subreddit without the r/ prefix or path separators.")
+		if err != nil {
 			return callPlan{}, err
 		}
 		sort := redditSort(in.Sort, "hot")
-		route = "/r/" + in.Subreddit + "/" + sort
+		sort, err = pathToken(sort, "sort", "Pass a Reddit listing sort such as hot, new, top, rising, or controversial.")
+		if err != nil {
+			return callPlan{}, err
+		}
+		route = "/r/" + subreddit + "/" + sort
 		addIf(q, "t", in.TimeFilter)
 	case "subreddit_search":
-		if err := require(in.Subreddit, "subreddit is required for subreddit_search", "Pass subreddit without the r/ prefix."); err != nil {
+		subreddit, err := requirePathToken(in.Subreddit, "subreddit", "subreddit is required for subreddit_search", "Pass subreddit without the r/ prefix or path separators.")
+		if err != nil {
 			return callPlan{}, err
 		}
 		if err := require(in.Query, "query is required for subreddit_search", "Pass query for Reddit search."); err != nil {
 			return callPlan{}, err
 		}
-		route = "/r/" + in.Subreddit + "/search"
+		route = "/r/" + subreddit + "/search"
 		q.Set("q", in.Query)
 		q.Set("restrict_sr", "1")
 		addIf(q, "sort", redditSort(in.Sort, "relevance"))
 		addIf(q, "t", in.TimeFilter)
 	case "post_comments":
-		if err := require(in.PostID, "post_id is required for post_comments", "Pass the Reddit article ID without the t3_ prefix."); err != nil {
+		postID, err := requirePathToken(strings.TrimPrefix(in.PostID, "t3_"), "post_id", "post_id is required for post_comments", "Pass the Reddit article ID without the t3_ prefix or path separators.")
+		if err != nil {
 			return callPlan{}, err
 		}
-		route = "/comments/" + strings.TrimPrefix(in.PostID, "t3_")
+		route = "/comments/" + postID
 		addIf(q, "sort", redditSort(in.Sort, "confidence"))
 	case "user_submitted":
-		if err := require(in.Username, "username is required for user_submitted", "Pass username without u/ prefix."); err != nil {
+		username, err := requirePathToken(in.Username, "username", "username is required for user_submitted", "Pass username without u/ prefix or path separators.")
+		if err != nil {
 			return callPlan{}, err
 		}
-		route = "/user/" + in.Username + "/submitted"
+		route = "/user/" + username + "/submitted"
 	case "user_comments":
-		if err := require(in.Username, "username is required for user_comments", "Pass username without u/ prefix."); err != nil {
+		username, err := requirePathToken(in.Username, "username", "username is required for user_comments", "Pass username without u/ prefix or path separators.")
+		if err != nil {
 			return callPlan{}, err
 		}
-		route = "/user/" + in.Username + "/comments"
+		route = "/user/" + username + "/comments"
 	case "subreddit_about":
-		if err := require(in.Subreddit, "subreddit is required for subreddit_about", "Pass subreddit without the r/ prefix."); err != nil {
+		subreddit, err := requirePathToken(in.Subreddit, "subreddit", "subreddit is required for subreddit_about", "Pass subreddit without the r/ prefix or path separators.")
+		if err != nil {
 			return callPlan{}, err
 		}
-		route = "/r/" + in.Subreddit + "/about"
+		route = "/r/" + subreddit + "/about"
 		q = url.Values{}
 	default:
 		return callPlan{}, unsupportedOperation("reddit", in.Operation, "subreddit_listing, subreddit_search, post_comments, user_submitted, user_comments, subreddit_about")

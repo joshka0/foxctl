@@ -84,6 +84,35 @@ func (s *sqlStore) Close() error {
 	return s.close()
 }
 
+type jobScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanJob(scanner jobScanner) (types.Job, error) {
+	var job types.Job
+	var created, updated, expires string
+	if err := scanner.Scan(&job.ID, &job.Command, &job.ArgsJSON, &job.ArgsHash, &job.State, &job.ResultPath, &job.Error, &created, &updated, &expires); err != nil {
+		return types.Job{}, fmt.Errorf("jobs: scan: %w", err)
+	}
+	if err := types.ValidateState(job.State); err != nil {
+		return types.Job{}, err
+	}
+	var parseErr error
+	job.CreatedAt, parseErr = sqlutil.ScanTimestamp(created)
+	if parseErr != nil {
+		return types.Job{}, fmt.Errorf("jobs: scan created_at: %w", parseErr)
+	}
+	job.UpdatedAt, parseErr = sqlutil.ScanTimestamp(updated)
+	if parseErr != nil {
+		return types.Job{}, fmt.Errorf("jobs: scan updated_at: %w", parseErr)
+	}
+	job.ExpiresAt, parseErr = sqlutil.ScanTimestamp(expires)
+	if parseErr != nil {
+		return types.Job{}, fmt.Errorf("jobs: scan expires_at: %w", parseErr)
+	}
+	return job, nil
+}
+
 func (s *sqlStore) List(ctx context.Context, limit int) ([]types.Job, error) {
 	if limit <= 0 {
 		limit = 100
@@ -102,23 +131,9 @@ func (s *sqlStore) List(ctx context.Context, limit int) ([]types.Job, error) {
 
 	var jobs []types.Job
 	for rows.Next() {
-		var job types.Job
-		var created, updated, expires string
-		if err := rows.Scan(&job.ID, &job.Command, &job.ArgsJSON, &job.ArgsHash, &job.State, &job.ResultPath, &job.Error, &created, &updated, &expires); err != nil {
-			return nil, fmt.Errorf("jobs: scan: %w", err)
-		}
-		var parseErr error
-		job.CreatedAt, parseErr = sqlutil.ScanTimestamp(created)
-		if parseErr != nil {
-			return nil, fmt.Errorf("jobs: scan created_at: %w", parseErr)
-		}
-		job.UpdatedAt, parseErr = sqlutil.ScanTimestamp(updated)
-		if parseErr != nil {
-			return nil, fmt.Errorf("jobs: scan updated_at: %w", parseErr)
-		}
-		job.ExpiresAt, parseErr = sqlutil.ScanTimestamp(expires)
-		if parseErr != nil {
-			return nil, fmt.Errorf("jobs: scan expires_at: %w", parseErr)
+		job, err := scanJob(rows)
+		if err != nil {
+			return nil, err
 		}
 		jobs = append(jobs, job)
 	}
@@ -129,26 +144,12 @@ func (s *sqlStore) Get(ctx context.Context, id string) (types.Job, error) {
 	row := s.db.QueryRowContext(ctx, `
 	        SELECT id, command, args_json, args_hash, state, result_path, error, created_at, updated_at, expires_at
 	        FROM jobs WHERE id = $1`, id)
-	var job types.Job
-	var created, updated, expires string
-	if err := row.Scan(&job.ID, &job.Command, &job.ArgsJSON, &job.ArgsHash, &job.State, &job.ResultPath, &job.Error, &created, &updated, &expires); err != nil {
+	job, err := scanJob(row)
+	if err != nil {
 		if errorsIsNoRows(err) {
 			return types.Job{}, types.ErrNotFound
 		}
 		return types.Job{}, fmt.Errorf("jobs: get: %w", err)
-	}
-	var parseErr error
-	job.CreatedAt, parseErr = sqlutil.ScanTimestamp(created)
-	if parseErr != nil {
-		return types.Job{}, fmt.Errorf("jobs: scan created_at: %w", parseErr)
-	}
-	job.UpdatedAt, parseErr = sqlutil.ScanTimestamp(updated)
-	if parseErr != nil {
-		return types.Job{}, fmt.Errorf("jobs: scan updated_at: %w", parseErr)
-	}
-	job.ExpiresAt, parseErr = sqlutil.ScanTimestamp(expires)
-	if parseErr != nil {
-		return types.Job{}, fmt.Errorf("jobs: scan expires_at: %w", parseErr)
 	}
 	return job, nil
 }
@@ -159,6 +160,9 @@ func (s *sqlStore) InsertJob(ctx context.Context, job types.Job) error {
 	// at the same millisecond, they could theoretically produce the same ID.
 	// When this happens (rows == 0), we treat the existing job as valid since
 	// the caller will proceed with their job ID which already exists in the DB.
+	if err := types.ValidateState(job.State); err != nil {
+		return err
+	}
 	if job.ExpiresAt.IsZero() && !job.CreatedAt.IsZero() {
 		job.ExpiresAt = job.CreatedAt.Add(types.DefaultMaxJobAge)
 	}
@@ -297,26 +301,12 @@ func (s *sqlStore) FindDuplicateJob(ctx context.Context, argsHash string) (types
 	        ORDER BY created_at DESC
 	        LIMIT 1`, argsHash)
 
-	var job types.Job
-	var created, updated, expires string
-	if err := row.Scan(&job.ID, &job.Command, &job.ArgsJSON, &job.ArgsHash, &job.State, &job.ResultPath, &job.Error, &created, &updated, &expires); err != nil {
+	job, err := scanJob(row)
+	if err != nil {
 		if errorsIsNoRows(err) {
 			return types.Job{}, types.ErrNotFound
 		}
 		return types.Job{}, fmt.Errorf("jobs: find duplicate: %w", err)
-	}
-	var parseErr error
-	job.CreatedAt, parseErr = sqlutil.ScanTimestamp(created)
-	if parseErr != nil {
-		return types.Job{}, fmt.Errorf("jobs: scan created_at: %w", parseErr)
-	}
-	job.UpdatedAt, parseErr = sqlutil.ScanTimestamp(updated)
-	if parseErr != nil {
-		return types.Job{}, fmt.Errorf("jobs: scan updated_at: %w", parseErr)
-	}
-	job.ExpiresAt, parseErr = sqlutil.ScanTimestamp(expires)
-	if parseErr != nil {
-		return types.Job{}, fmt.Errorf("jobs: scan expires_at: %w", parseErr)
 	}
 	return job, nil
 }
@@ -336,6 +326,9 @@ func (s *sqlStore) FindDuplicateJob(ctx context.Context, argsHash string) (types
 // [[invariant:args-hash-uniqueness-dedupes-identical-jobs]]
 // [[protocol:job-state-machine]]
 func (s *sqlStore) FindOrInsertJob(ctx context.Context, job types.Job) (types.Job, bool, error) {
+	if err := types.ValidateState(job.State); err != nil {
+		return types.Job{}, false, err
+	}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return types.Job{}, false, fmt.Errorf("jobs: begin transaction: %w", err)
@@ -351,19 +344,8 @@ func (s *sqlStore) FindOrInsertJob(ctx context.Context, job types.Job) (types.Jo
 	        ORDER BY created_at DESC
 	        LIMIT 1`, job.ArgsHash)
 
-	var existing types.Job
-	var created, updated, expires string
-	scanErr := row.Scan(&existing.ID, &existing.Command, &existing.ArgsJSON, &existing.ArgsHash, &existing.State, &existing.ResultPath, &existing.Error, &created, &updated, &expires)
+	existing, scanErr := scanJob(row)
 	if scanErr == nil {
-		var parseErr error
-		existing.CreatedAt, parseErr = sqlutil.ScanTimestamp(created)
-		if parseErr != nil {
-			return types.Job{}, false, fmt.Errorf("jobs: scan created_at: %w", parseErr)
-		}
-		existing.UpdatedAt, parseErr = sqlutil.ScanTimestamp(updated)
-		if parseErr != nil {
-			return types.Job{}, false, fmt.Errorf("jobs: scan updated_at: %w", parseErr)
-		}
 		if err := tx.Commit(); err != nil {
 			return types.Job{}, false, fmt.Errorf("jobs: commit transaction: %w", err)
 		}
@@ -450,11 +432,11 @@ func validSourceStates(target types.State) []types.State {
 	case types.StateRunning:
 		return []types.State{types.StateQueued, types.StateRunning}
 	case types.StateOK:
-		return []types.State{types.StateRunning, types.StateOK}
+		return []types.State{types.StateRunning}
 	case types.StateError:
-		return []types.State{types.StateQueued, types.StateRunning, types.StateError}
+		return []types.State{types.StateQueued, types.StateRunning}
 	case types.StateCanceled:
-		return []types.State{types.StateQueued, types.StateRunning, types.StateCanceled}
+		return []types.State{types.StateQueued, types.StateRunning}
 	default:
 		return []types.State{}
 	}

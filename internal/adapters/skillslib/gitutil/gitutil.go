@@ -7,8 +7,14 @@ import (
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 )
+
+// PathValidator is the narrow interface ResolveRepoPath needs from a run context.
+// Both run context variants expose a *policy.PathValidator that satisfies this
+// interface.
+type PathValidator interface {
+	ValidatePath(path string) (string, error)
+}
 
 // RequireGit ensures git is available in PATH and returns its resolved path.
 func RequireGit() (string, error) {
@@ -23,12 +29,15 @@ func RequireGit() (string, error) {
 	return gitPath, nil
 }
 
-// ResolveRepoPath validates and resolves a repo path using the run context.
-func ResolveRepoPath(rc *skillmain.RunContext, path string) (string, error) {
+// ResolveRepoPath validates and resolves a repo path using the given validator.
+func ResolveRepoPath(v PathValidator, path string) (string, error) {
+	if v == nil {
+		return "", skillerr.Arg("path validator not configured")
+	}
 	if path == "" {
 		path = "."
 	}
-	valid, err := rc.PathValidator.ValidatePath(path)
+	valid, err := v.ValidatePath(path)
 	if err != nil {
 		return "", skillerr.Arg(
 			fmt.Sprintf("path validation failed for %q: %v", path, err),

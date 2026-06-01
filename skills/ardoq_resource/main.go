@@ -10,8 +10,7 @@ import (
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/oputil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 	ardoqclient "github.com/joshka0/foxctl/internal/interfaces/ardoq"
 )
 
@@ -87,10 +86,10 @@ type singleUpsertReq struct {
 }
 
 func main() {
-	skillmain.Main(command, run)
+	lite.Main(command, run)
 }
 
-func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+func run(ctx context.Context, rc *lite.RunContext, in input) error {
 	in.Operation = oputil.DefaultOp(in.Operation, "list_workspaces")
 
 	client, err := newClient(in)
@@ -128,7 +127,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	if err != nil {
 		return err
 	}
-	return skillout.Emit(rc, command, formatted)
+	return lite.Emit(rc, command, formatted)
 }
 
 func newClient(in input) (*ardoqclient.Client, error) {
@@ -139,14 +138,14 @@ func newClient(in input) (*ardoqclient.Client, error) {
 	})
 }
 
-func listWorkspaces(ctx context.Context, rc *skillmain.RunContext, client *ardoqclient.Client, req *workspacesReq) (map[string]any, error) {
+func listWorkspaces(ctx context.Context, rc *lite.RunContext, client *ardoqclient.Client, req *workspacesReq) (map[string]any, error) {
 	query := map[string]any{}
 	if req != nil {
 		query = cloneMap(req.Query)
 		addNonEmpty(query, "name", req.Name)
 	}
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.ListWorkspaces(ctx, query)
 		return callErr
@@ -158,12 +157,12 @@ func listWorkspaces(ctx context.Context, rc *skillmain.RunContext, client *ardoq
 	return result, nil
 }
 
-func getWorkspace(ctx context.Context, rc *skillmain.RunContext, client *ardoqclient.Client, req *idReq) (map[string]any, error) {
+func getWorkspace(ctx context.Context, rc *lite.RunContext, client *ardoqclient.Client, req *idReq) (map[string]any, error) {
 	if req == nil || strings.TrimSpace(req.ID) == "" {
 		return nil, skillerr.Arg("workspace.id is required")
 	}
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.GetWorkspace(ctx, req.ID)
 		return callErr
@@ -175,12 +174,12 @@ func getWorkspace(ctx context.Context, rc *skillmain.RunContext, client *ardoqcl
 	return result, nil
 }
 
-func getWorkspaceContext(ctx context.Context, rc *skillmain.RunContext, client *ardoqclient.Client, req *idReq) (map[string]any, error) {
+func getWorkspaceContext(ctx context.Context, rc *lite.RunContext, client *ardoqclient.Client, req *idReq) (map[string]any, error) {
 	if req == nil || strings.TrimSpace(req.ID) == "" {
 		return nil, skillerr.Arg("context.id is required")
 	}
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.GetWorkspaceContext(ctx, req.ID)
 		return callErr
@@ -192,7 +191,7 @@ func getWorkspaceContext(ctx context.Context, rc *skillmain.RunContext, client *
 	return result, nil
 }
 
-func listComponents(ctx context.Context, rc *skillmain.RunContext, client *ardoqclient.Client, req *componentsReq) (map[string]any, error) {
+func listComponents(ctx context.Context, rc *lite.RunContext, client *ardoqclient.Client, req *componentsReq) (map[string]any, error) {
 	query := map[string]any{}
 	if req != nil {
 		query = cloneMap(req.Query)
@@ -202,7 +201,7 @@ func listComponents(ctx context.Context, rc *skillmain.RunContext, client *ardoq
 		addNonEmpty(query, "componentKey", req.ComponentKey)
 	}
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.ListComponents(ctx, query)
 		return callErr
@@ -214,12 +213,12 @@ func listComponents(ctx context.Context, rc *skillmain.RunContext, client *ardoq
 	return result, nil
 }
 
-func getComponent(ctx context.Context, rc *skillmain.RunContext, client *ardoqclient.Client, req *idReq) (map[string]any, error) {
+func getComponent(ctx context.Context, rc *lite.RunContext, client *ardoqclient.Client, req *idReq) (map[string]any, error) {
 	if req == nil || strings.TrimSpace(req.ID) == "" {
 		return nil, skillerr.Arg("component.id is required")
 	}
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.GetComponent(ctx, req.ID)
 		return callErr
@@ -231,7 +230,7 @@ func getComponent(ctx context.Context, rc *skillmain.RunContext, client *ardoqcl
 	return result, nil
 }
 
-func listReferences(ctx context.Context, rc *skillmain.RunContext, client *ardoqclient.Client, req *referencesReq) (map[string]any, error) {
+func listReferences(ctx context.Context, rc *lite.RunContext, client *ardoqclient.Client, req *referencesReq) (map[string]any, error) {
 	query := map[string]any{}
 	if req != nil {
 		query = cloneMap(req.Query)
@@ -244,7 +243,7 @@ func listReferences(ctx context.Context, rc *skillmain.RunContext, client *ardoq
 		}
 	}
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.ListReferences(ctx, query)
 		return callErr
@@ -256,12 +255,12 @@ func listReferences(ctx context.Context, rc *skillmain.RunContext, client *ardoq
 	return result, nil
 }
 
-func getReference(ctx context.Context, rc *skillmain.RunContext, client *ardoqclient.Client, req *idReq) (map[string]any, error) {
+func getReference(ctx context.Context, rc *lite.RunContext, client *ardoqclient.Client, req *idReq) (map[string]any, error) {
 	if req == nil || strings.TrimSpace(req.ID) == "" {
 		return nil, skillerr.Arg("reference.id is required")
 	}
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.GetReference(ctx, req.ID)
 		return callErr
@@ -273,7 +272,7 @@ func getReference(ctx context.Context, rc *skillmain.RunContext, client *ardoqcl
 	return result, nil
 }
 
-func inventory(ctx context.Context, rc *skillmain.RunContext, client *ardoqclient.Client, req *inventoryReq) (map[string]any, error) {
+func inventory(ctx context.Context, rc *lite.RunContext, client *ardoqclient.Client, req *inventoryReq) (map[string]any, error) {
 	if req == nil {
 		req = &inventoryReq{}
 	}
@@ -301,7 +300,7 @@ func inventory(ctx context.Context, rc *skillmain.RunContext, client *ardoqclien
 	}, nil
 }
 
-func ownerLookup(ctx context.Context, rc *skillmain.RunContext, client *ardoqclient.Client, req *ownerLookupReq) (map[string]any, error) {
+func ownerLookup(ctx context.Context, rc *lite.RunContext, client *ardoqclient.Client, req *ownerLookupReq) (map[string]any, error) {
 	if req == nil {
 		return nil, skillerr.Arg("owner_lookup options are required")
 	}
@@ -929,12 +928,12 @@ func stringSliceText(value any) string {
 	}
 }
 
-func batch(ctx context.Context, rc *skillmain.RunContext, client *ardoqclient.Client, req *batchReq) (map[string]any, error) {
+func batch(ctx context.Context, rc *lite.RunContext, client *ardoqclient.Client, req *batchReq) (map[string]any, error) {
 	if req == nil || len(req.Body) == 0 {
 		return nil, skillerr.Arg("batch.body is required")
 	}
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.Batch(ctx, req.Body)
 		return callErr
@@ -949,7 +948,7 @@ func batch(ctx context.Context, rc *skillmain.RunContext, client *ardoqclient.Cl
 	return result, nil
 }
 
-func upsert(ctx context.Context, rc *skillmain.RunContext, client *ardoqclient.Client, section string, req *singleUpsertReq) (map[string]any, error) {
+func upsert(ctx context.Context, rc *lite.RunContext, client *ardoqclient.Client, section string, req *singleUpsertReq) (map[string]any, error) {
 	if req == nil {
 		return nil, skillerr.Arg(fmt.Sprintf("upsert_%s options are required", singular(section)))
 	}
@@ -978,7 +977,7 @@ func upsert(ctx context.Context, rc *skillmain.RunContext, client *ardoqclient.C
 	}
 
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.Batch(ctx, payload)
 		return callErr
@@ -1010,9 +1009,9 @@ func addNonEmpty(query map[string]any, key, value string) {
 	}
 }
 
-func fetchWorkspaces(ctx context.Context, rc *skillmain.RunContext, client *ardoqclient.Client) ([]map[string]any, error) {
+func fetchWorkspaces(ctx context.Context, rc *lite.RunContext, client *ardoqclient.Client) ([]map[string]any, error) {
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.ListWorkspaces(ctx, nil)
 		return callErr
@@ -1023,9 +1022,9 @@ func fetchWorkspaces(ctx context.Context, rc *skillmain.RunContext, client *ardo
 	return objectValues(result), nil
 }
 
-func fetchComponents(ctx context.Context, rc *skillmain.RunContext, client *ardoqclient.Client) ([]map[string]any, error) {
+func fetchComponents(ctx context.Context, rc *lite.RunContext, client *ardoqclient.Client) ([]map[string]any, error) {
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.ListComponents(ctx, nil)
 		return callErr
@@ -1036,9 +1035,9 @@ func fetchComponents(ctx context.Context, rc *skillmain.RunContext, client *ardo
 	return objectValues(result), nil
 }
 
-func fetchReferences(ctx context.Context, rc *skillmain.RunContext, client *ardoqclient.Client) ([]map[string]any, error) {
+func fetchReferences(ctx context.Context, rc *lite.RunContext, client *ardoqclient.Client) ([]map[string]any, error) {
 	var result map[string]any
-	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+	err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 		var callErr error
 		result, callErr = client.ListReferences(ctx, nil)
 		return callErr
@@ -1239,13 +1238,13 @@ func ownerReferenceTypeNames(req *ownerLookupReq) map[string]bool {
 	return out
 }
 
-func referenceTypeName(ctx context.Context, rc *skillmain.RunContext, client *ardoqclient.Client, cache map[string]map[int]string, workspaceID string, typeID int) (string, error) {
+func referenceTypeName(ctx context.Context, rc *lite.RunContext, client *ardoqclient.Client, cache map[string]map[int]string, workspaceID string, typeID int) (string, error) {
 	if workspaceID == "" {
 		return fmt.Sprintf("%d", typeID), nil
 	}
 	if cache[workspaceID] == nil {
 		var contextResult map[string]any
-		err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+		err := lite.GuardCall(ctx, lite.BreakerHTTP, func(ctx context.Context) error {
 			var callErr error
 			contextResult, callErr = client.GetWorkspaceContext(ctx, workspaceID)
 			return callErr

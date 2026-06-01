@@ -18,8 +18,7 @@ import (
 	lsphelpers "github.com/joshka0/foxctl/internal/adapters/skillslib/lsp"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/oputil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/sliceutil"
 	errs "github.com/joshka0/foxctl/internal/platform/errors"
 	"github.com/joshka0/foxctl/internal/platform/lsp/jsonrpc"
@@ -85,15 +84,15 @@ type LSPClient struct {
 
 // main is the skill entry point for lsp/tsserver with comprehensive TypeScript/JavaScript language server capabilities.
 func main() {
-	skillmain.Main(command, skillmain.Chain(
+	lite.Main(command, lite.Chain(
 		run,
-		skillmain.WithDynamicTimeout[input](func(in input) time.Duration {
+		lite.WithDynamicTimeout[input](func(in input) time.Duration {
 			if in.Timeout > 0 {
 				return time.Duration(in.Timeout) * time.Second
 			}
 			return defaultTimeout
 		}),
-		skillmain.WithRecover[input](),
+		lite.WithRecover[input](),
 	))
 }
 
@@ -104,14 +103,14 @@ func main() {
 //	Purpose: Provide TypeScript/JavaScript language server operations (definition, references, symbols) via typescript-language-server
 //	Keywords: lsp/tsserver, typescript_language_server, javascript_language_server, json_rpc, code_navigation, symbol_search
 //	Related: newLSPClient, LSPClient.definition, LSPClient.references, LSPClient.documentSymbols, detectLanguage
-//	Flow: validate input → check server availability → create LSP client → initialize server → open file → execute operation → emit results
+//	Flow: validate input -> check server availability -> create LSP client -> initialize server -> open file -> execute operation -> emit results
 //	Resources: typescript-language-server process; JSON-RPC client
 //	Events: tsserver-definition, tsserver-references, tsserver-symbols
 //	OutputFields: operation, definition, references, symbols, count
 //
 // [[domain:lsp-operations]]
 // [[protocol:tsserver-integration]]
-func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+func run(ctx context.Context, rc *lite.RunContext, in input) error {
 	// Apply defaults
 	if in.MaxResults <= 0 {
 		in.MaxResults = 50
@@ -151,7 +150,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 
 	// Open the file if needed
 	if in.File != "" {
-		filePath := lsphelpers.ResolvePath(workspace, in.File)
+		filePath, err := resolveInputFile(workspace, in.File)
+		if err != nil {
+			return err
+		}
 		if err := client.openFile(ctx, filePath); err != nil {
 			return err
 		}
@@ -321,7 +323,10 @@ func (c *LSPClient) definition(ctx context.Context, workspace string, in input) 
 		return nil, skillerr.Arg("definition requires file and line")
 	}
 
-	filePath := lsphelpers.ResolvePath(workspace, in.File)
+	filePath, err := resolveInputFile(workspace, in.File)
+	if err != nil {
+		return nil, err
+	}
 	params := map[string]any{
 		"textDocument": map[string]any{
 			"uri": "file://" + filePath,
@@ -365,7 +370,10 @@ func (c *LSPClient) references(ctx context.Context, workspace string, in input) 
 		return nil, skillerr.Arg("references requires file and line")
 	}
 
-	filePath := lsphelpers.ResolvePath(workspace, in.File)
+	filePath, err := resolveInputFile(workspace, in.File)
+	if err != nil {
+		return nil, err
+	}
 	params := map[string]any{
 		"textDocument": map[string]any{
 			"uri": "file://" + filePath,
@@ -407,7 +415,10 @@ func (c *LSPClient) documentSymbols(ctx context.Context, workspace string, in in
 		return nil, skillerr.Arg("symbols requires file")
 	}
 
-	filePath := lsphelpers.ResolvePath(workspace, in.File)
+	filePath, err := resolveInputFile(workspace, in.File)
+	if err != nil {
+		return nil, err
+	}
 	params := map[string]any{
 		"textDocument": map[string]any{
 			"uri": "file://" + filePath,
@@ -453,6 +464,18 @@ func (c *LSPClient) documentSymbols(ctx context.Context, workspace string, in in
 	}
 
 	return syms, nil
+}
+
+func resolveInputFile(workspace, file string) (string, error) {
+	filePath, err := lsphelpers.ResolvePath(workspace, file)
+	if err != nil {
+		return "", skillerr.Arg(
+			"file path must stay within the workspace",
+			skillerr.WithCause(err),
+			skillerr.WithHint("Provide a relative file path or an absolute path under the workspace."),
+		)
+	}
+	return filePath, nil
 }
 
 // workspaceSymbols searches workspace symbols using LSP workspace/symbol request with query matching.
@@ -507,6 +530,6 @@ func detectLanguage(path string) string {
 }
 
 // writeOutput emits the final skill results with operation-specific data and counts.
-func writeOutput(rc *skillmain.RunContext, out output) error {
-	return skillout.Emit(rc, command, out)
+func writeOutput(rc *lite.RunContext, out output) error {
+	return lite.Emit(rc, command, out)
 }

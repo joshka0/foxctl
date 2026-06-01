@@ -3,7 +3,10 @@ package pagination
 import (
 	"net/http"
 	"net/url"
+	"strconv"
+	"strings"
 	"testing"
+	"testing/quick"
 )
 
 func TestLinkPagination(t *testing.T) {
@@ -361,6 +364,67 @@ func TestParseNextLink(t *testing.T) {
 	}
 	if next != "https://api.example.com?page=2" {
 		t.Fatalf("unexpected next link %q", next)
+	}
+}
+
+func TestParseNextLinkAcceptsRelTokenListsCaseInsensitively(t *testing.T) {
+	header := `<https://api.example.com?page=1>; rel="prev", <https://api.example.com?page=2>; rel="PREV NEXT"; type="application/json"`
+	next, ok := parseNextLink(header)
+	if !ok {
+		t.Fatal("expected next link detected from rel token list")
+	}
+	if next != "https://api.example.com?page=2" {
+		t.Fatalf("next=%q want page 2", next)
+	}
+}
+
+func TestParseNextLinkGeneratedPreservesURLWithEncodedComma(t *testing.T) {
+	cfg := &quick.Config{MaxCount: 100}
+
+	err := quick.Check(func(rawPage uint16, rawCursor uint16) bool {
+		page := int(rawPage%500) + 1
+		cursor := "cursor%2C" + strconv.Itoa(int(rawCursor))
+		nextURL := "https://api.example.com/items?page=" + strconv.Itoa(page) + "&cursor=" + cursor
+		header := `<https://api.example.com/items?page=1>; rel="prev", <` + nextURL + `>; rel="next", <https://api.example.com/items?page=999>; rel="last"`
+
+		got, ok := parseNextLink(header)
+		if !ok {
+			t.Logf("next link not detected in %q", header)
+			return false
+		}
+		if got != nextURL {
+			t.Logf("next link=%q want %q", got, nextURL)
+			return false
+		}
+		return true
+	}, cfg)
+	if err != nil {
+		t.Fatalf("generated next link property failed: %v", err)
+	}
+}
+
+func TestParseNextLinkGeneratedIgnoresMalformedClosingAnglesBeforeNext(t *testing.T) {
+	cfg := &quick.Config{MaxCount: 100}
+
+	err := quick.Check(func(rawExtraClosers uint8, rawPage uint16) bool {
+		extraClosers := int(rawExtraClosers%5) + 1
+		page := int(rawPage%500) + 1
+		nextURL := "https://api.example.com/items?page=" + strconv.Itoa(page)
+		header := `<https://api.example.com/items?page=1>` + strings.Repeat(">", extraClosers) + `; rel="prev", <` + nextURL + `>; rel="next"`
+
+		got, ok := parseNextLink(header)
+		if !ok {
+			t.Logf("next link not detected in %q", header)
+			return false
+		}
+		if got != nextURL {
+			t.Logf("next link=%q want %q", got, nextURL)
+			return false
+		}
+		return true
+	}, cfg)
+	if err != nil {
+		t.Fatalf("malformed closing angle property failed: %v", err)
 	}
 }
 

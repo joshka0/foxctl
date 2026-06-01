@@ -14,8 +14,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/textutil"
 )
 
@@ -38,7 +37,7 @@ type skillInfo struct {
 
 // main is the skill entry point for skill/inspect with comprehensive skill analysis capabilities.
 func main() {
-	skillmain.Main(command, run)
+	lite.Main(command, run)
 }
 
 // run orchestrates skill inspection with multiple view modes including manifest, types, API, implementation, and examples.
@@ -55,7 +54,7 @@ func main() {
 //
 // [[domain:skill-introspection]]
 // [[protocol:skill-view-dispatch]]
-func run(_ context.Context, rc *skillmain.RunContext, in input) error {
+func run(_ context.Context, rc *lite.RunContext, in input) error {
 	// Validation (moved from parseInput)
 	if in.SkillName == "" {
 		return fmt.Errorf("skill_name is required")
@@ -95,7 +94,7 @@ func run(_ context.Context, rc *skillmain.RunContext, in input) error {
 		return err
 	}
 
-	return skillout.Emit(rc, command, data)
+	return lite.Emit(rc, command, data)
 }
 
 // findSkill locates a skill directory by name and returns metadata including file paths.

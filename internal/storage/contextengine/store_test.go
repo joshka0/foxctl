@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -232,6 +233,41 @@ func mustPutProjection(t *testing.T, s Store, ctx context.Context, id, ws, pType
 	t.Helper()
 	if err := s.PutProjection(ctx, id, ws, pType, version, taskID, events, payload, genAt, expAt); err != nil {
 		t.Fatalf("PutProjection %s: %v", id, err)
+	}
+}
+
+func corruptStoredValue(t *testing.T, s Store, query string, args ...any) {
+	t.Helper()
+	store, ok := s.(*sqliteStore)
+	if !ok {
+		t.Fatalf("expected *sqliteStore, got %T", s)
+	}
+	result, err := store.db.ExecContext(context.Background(), query, args...)
+	if err != nil {
+		t.Fatalf("corrupt stored value: %v", err)
+	}
+	if affected, err := result.RowsAffected(); err == nil && affected != 1 {
+		t.Fatalf("corrupt stored value affected %d rows, want 1", affected)
+	}
+}
+
+func requireDecodeColumnError(t *testing.T, operation string, err error, column string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("%s: expected decode error for %s", operation, column)
+	}
+	if !strings.Contains(err.Error(), column) {
+		t.Fatalf("%s: expected error to mention %s, got %v", operation, column, err)
+	}
+}
+
+func requireReadErrorContains(t *testing.T, operation string, err error, want string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("%s: expected read error containing %q", operation, want)
+	}
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("%s: expected error containing %q, got %v", operation, want, err)
 	}
 }
 
@@ -1501,6 +1537,302 @@ func TestStore_FeedbackWithUsedRefs(t *testing.T) {
 	}
 }
 
+func TestStore_RejectsCorruptPersistedProvenanceJSON(t *testing.T) {
+	t.Run("claim source refs", func(t *testing.T) {
+		s := openTestStore(t)
+		ctx := context.Background()
+
+		claim := testClaim("c1", "ws-1", contextengine.ClaimStatusCandidate)
+		claim.SourceRefs = []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "foo.go"}}
+		mustUpsertClaim(t, s, ctx, claim)
+		corruptStoredValue(t, s, "UPDATE memory_claims SET source_refs = ? WHERE id = ?", "{", "c1")
+
+		_, err := s.GetClaim(ctx, "c1")
+		requireDecodeColumnError(t, "GetClaim", err, "source_refs")
+		_, err = s.ListClaims(ctx, ClaimFilter{WorkspaceID: "ws-1"})
+		requireDecodeColumnError(t, "ListClaims", err, "source_refs")
+	})
+
+	t.Run("staleness caused events", func(t *testing.T) {
+		s := openTestStore(t)
+		ctx := context.Background()
+
+		ref := contextengine.EvidenceRef{Type: contextengine.RefTypePath, Ref: "foo.go"}
+		marker := testStalenessMarker("m1", "ws-1", ref, contextengine.StalenessStatusDirty)
+		marker.CausedByEvents = []string{"evt-1", "evt-2"}
+		mustUpsertStaleness(t, s, ctx, marker)
+		corruptStoredValue(t, s, "UPDATE staleness_markers SET caused_by_events = ? WHERE id = ?", "{", "m1")
+
+		_, err := s.GetStaleness(ctx, "m1")
+		requireDecodeColumnError(t, "GetStaleness", err, "caused_by_events")
+		_, err = s.ListStaleness(ctx, StalenessFilter{WorkspaceID: "ws-1"})
+		requireDecodeColumnError(t, "ListStaleness", err, "caused_by_events")
+	})
+
+	t.Run("projection generated events", func(t *testing.T) {
+		s := openTestStore(t)
+		ctx := context.Background()
+
+		payload := map[string]string{"key": "value"}
+		mustPutProjection(t, s, ctx, "proj-1", "ws-1", "top_of_mind", 1, "task-1", []string{"evt-1"}, payload, now(), time.Time{})
+		corruptStoredValue(t, s, "UPDATE projections SET generated_from_events = ? WHERE workspace_id = ? AND id = ?", "{", "ws-1", "proj-1")
+
+		_, _, _, _, _, _, _, err := s.GetProjection(ctx, "ws-1", "proj-1")
+		requireDecodeColumnError(t, "GetProjection", err, "generated_from_events")
+		_, err = s.ListProjections(ctx, ProjectionFilter{WorkspaceID: "ws-1"})
+		requireDecodeColumnError(t, "ListProjections", err, "generated_from_events")
+	})
+
+	t.Run("episode sub episode ids", func(t *testing.T) {
+		s := openTestStore(t)
+		ctx := context.Background()
+
+		ep := testEpisode("ep-1", "ws-1", "test query", contextengine.LaneMixed)
+		ep.SubEpisodeIDs = []string{"ep-child"}
+		mustRecordEpisode(t, s, ctx, ep)
+		corruptStoredValue(t, s, "UPDATE retrieval_episodes SET sub_episode_ids = ? WHERE id = ?", "{", "ep-1")
+
+		_, err := s.GetRetrievalEpisode(ctx, "ep-1")
+		requireDecodeColumnError(t, "GetRetrievalEpisode", err, "sub_episode_ids")
+		_, err = s.ListRetrievalEpisodes(ctx, RetrievalEpisodeFilter{WorkspaceID: "ws-1"})
+		requireDecodeColumnError(t, "ListRetrievalEpisodes", err, "sub_episode_ids")
+	})
+
+	t.Run("feedback used refs", func(t *testing.T) {
+		s := openTestStore(t)
+		ctx := context.Background()
+
+		ep := testEpisode("ep-1", "ws-1", "test query", contextengine.LaneCode)
+		mustRecordEpisode(t, s, ctx, ep)
+		fb := testFeedback("fb-1", "ws-1", "ep-1", contextengine.RetrievalFeedbackKindEvidenceUsed)
+		fb.UsedRefs = []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "foo.go"}}
+		mustRecordFeedback(t, s, ctx, fb)
+		corruptStoredValue(t, s, "UPDATE retrieval_feedback SET used_refs = ? WHERE id = ?", "{", "fb-1")
+
+		_, err := s.GetRetrievalFeedback(ctx, "fb-1")
+		requireDecodeColumnError(t, "GetRetrievalFeedback", err, "used_refs")
+		_, err = s.ListRetrievalFeedback(ctx, RetrievalFeedbackFilter{WorkspaceID: "ws-1"})
+		requireDecodeColumnError(t, "ListRetrievalFeedback", err, "used_refs")
+	})
+}
+
+func TestStore_RejectsCorruptPersistedDomainValues(t *testing.T) {
+	t.Run("event kind", func(t *testing.T) {
+		s := openTestStore(t)
+		ctx := context.Background()
+
+		mustAppendEvent(t, s, ctx, testEvent("evt-1", "ws-1", contextengine.EventKindCodeChangedDirty))
+		corruptStoredValue(t, s, "UPDATE context_events SET kind = ? WHERE id = ?", "bogus", "evt-1")
+
+		_, err := s.ListEvents(ctx, EventFilter{WorkspaceID: "ws-1"})
+		requireReadErrorContains(t, "ListEvents", err, "unknown kind")
+	})
+
+	t.Run("pack lane", func(t *testing.T) {
+		s := openTestStore(t)
+		ctx := context.Background()
+
+		mustPutEvidencePack(t, s, ctx, testPack("pack-1", "ws-1", "test query", contextengine.LaneCode))
+		corruptStoredValue(t, s, "UPDATE evidence_packs SET lane = ? WHERE id = ?", "bogus", "pack-1")
+
+		_, err := s.GetEvidencePack(ctx, "pack-1")
+		requireReadErrorContains(t, "GetEvidencePack", err, "unknown lane")
+	})
+
+	t.Run("node type", func(t *testing.T) {
+		s := openTestStore(t)
+		ctx := context.Background()
+
+		ref := contextengine.EvidenceRef{Type: contextengine.RefTypePath, Ref: "foo.go"}
+		mustPutEvidenceNode(t, s, ctx, testNode("node-1", "ws-1", ref))
+		corruptStoredValue(t, s, "UPDATE evidence_nodes SET node_type = ? WHERE id = ?", "bogus", "node-1")
+
+		_, err := s.GetEvidenceNode(ctx, "node-1")
+		requireReadErrorContains(t, "GetEvidenceNode", err, "unknown node_type")
+		_, err = s.ListEvidenceNodes(ctx, "ws-1", ref, 10)
+		requireReadErrorContains(t, "ListEvidenceNodes", err, "unknown node_type")
+	})
+
+	t.Run("claim status", func(t *testing.T) {
+		s := openTestStore(t)
+		ctx := context.Background()
+
+		mustUpsertClaim(t, s, ctx, testClaim("c1", "ws-1", contextengine.ClaimStatusCandidate))
+		corruptStoredValue(t, s, "UPDATE memory_claims SET status = ? WHERE id = ?", "bogus", "c1")
+
+		_, err := s.GetClaim(ctx, "c1")
+		requireReadErrorContains(t, "GetClaim", err, "unknown status")
+		_, err = s.ListClaims(ctx, ClaimFilter{WorkspaceID: "ws-1"})
+		requireReadErrorContains(t, "ListClaims", err, "unknown status")
+	})
+
+	t.Run("impact edge kind", func(t *testing.T) {
+		s := openTestStore(t)
+		ctx := context.Background()
+
+		from := contextengine.EvidenceRef{Type: contextengine.RefTypePath, Ref: "from.go"}
+		to := contextengine.EvidenceRef{Type: contextengine.RefTypePath, Ref: "to.go"}
+		mustPutImpactEdge(t, s, ctx, testImpactEdge("edge-1", "ws-1", from, to))
+		corruptStoredValue(t, s, "UPDATE impact_edges SET kind = ? WHERE id = ?", "bogus", "edge-1")
+
+		_, err := s.ListImpactEdges(ctx, ImpactFilter{WorkspaceID: "ws-1"})
+		requireReadErrorContains(t, "ListImpactEdges", err, "unknown kind")
+		_, err = s.ReverseImpact(ctx, "ws-1", to)
+		requireReadErrorContains(t, "ReverseImpact", err, "unknown kind")
+	})
+
+	t.Run("staleness status", func(t *testing.T) {
+		s := openTestStore(t)
+		ctx := context.Background()
+
+		ref := contextengine.EvidenceRef{Type: contextengine.RefTypePath, Ref: "foo.go"}
+		mustUpsertStaleness(t, s, ctx, testStalenessMarker("m1", "ws-1", ref, contextengine.StalenessStatusDirty))
+		corruptStoredValue(t, s, "UPDATE staleness_markers SET status = ? WHERE id = ?", "bogus", "m1")
+
+		_, err := s.GetStaleness(ctx, "m1")
+		requireReadErrorContains(t, "GetStaleness", err, "unknown status")
+		_, err = s.ListStaleness(ctx, StalenessFilter{WorkspaceID: "ws-1"})
+		requireReadErrorContains(t, "ListStaleness", err, "unknown status")
+	})
+
+	t.Run("episode lane", func(t *testing.T) {
+		s := openTestStore(t)
+		ctx := context.Background()
+
+		mustRecordEpisode(t, s, ctx, testEpisode("ep-1", "ws-1", "test query", contextengine.LaneCode))
+		corruptStoredValue(t, s, "UPDATE retrieval_episodes SET lane = ? WHERE id = ?", "bogus", "ep-1")
+
+		_, err := s.GetRetrievalEpisode(ctx, "ep-1")
+		requireReadErrorContains(t, "GetRetrievalEpisode", err, "unknown lane")
+		_, err = s.ListRetrievalEpisodes(ctx, RetrievalEpisodeFilter{WorkspaceID: "ws-1"})
+		requireReadErrorContains(t, "ListRetrievalEpisodes", err, "unknown lane")
+	})
+
+	t.Run("feedback kind", func(t *testing.T) {
+		s := openTestStore(t)
+		ctx := context.Background()
+
+		mustRecordEpisode(t, s, ctx, testEpisode("ep-1", "ws-1", "test query", contextengine.LaneCode))
+		mustRecordFeedback(t, s, ctx, testFeedback("fb-1", "ws-1", "ep-1", contextengine.RetrievalFeedbackKindEvidenceUsed))
+		corruptStoredValue(t, s, "UPDATE retrieval_feedback SET kind = ? WHERE id = ?", "bogus", "fb-1")
+
+		_, err := s.GetRetrievalFeedback(ctx, "fb-1")
+		requireReadErrorContains(t, "GetRetrievalFeedback", err, "unknown kind")
+		_, err = s.ListRetrievalFeedback(ctx, RetrievalFeedbackFilter{WorkspaceID: "ws-1"})
+		requireReadErrorContains(t, "ListRetrievalFeedback", err, "unknown kind")
+	})
+}
+
+func TestStore_RejectsCorruptPersistedTimestamps(t *testing.T) {
+	t.Run("event created_at", func(t *testing.T) {
+		s := openTestStore(t)
+		ctx := context.Background()
+
+		mustAppendEvent(t, s, ctx, testEvent("evt-1", "ws-1", contextengine.EventKindCodeChangedDirty))
+		corruptStoredValue(t, s, "UPDATE context_events SET created_at = ? WHERE id = ?", "not-a-time", "evt-1")
+
+		_, err := s.ListEvents(ctx, EventFilter{WorkspaceID: "ws-1"})
+		requireReadErrorContains(t, "ListEvents", err, "created_at")
+	})
+
+	t.Run("node last_seen", func(t *testing.T) {
+		s := openTestStore(t)
+		ctx := context.Background()
+
+		ref := contextengine.EvidenceRef{Type: contextengine.RefTypePath, Ref: "foo.go"}
+		mustPutEvidenceNode(t, s, ctx, testNode("node-1", "ws-1", ref))
+		corruptStoredValue(t, s, "UPDATE evidence_nodes SET last_seen = ? WHERE id = ?", "not-a-time", "node-1")
+
+		_, err := s.GetEvidenceNode(ctx, "node-1")
+		requireReadErrorContains(t, "GetEvidenceNode", err, "last_seen")
+		_, err = s.ListEvidenceNodes(ctx, "ws-1", ref, 10)
+		requireReadErrorContains(t, "ListEvidenceNodes", err, "last_seen")
+	})
+
+	t.Run("claim updated_at", func(t *testing.T) {
+		s := openTestStore(t)
+		ctx := context.Background()
+
+		mustUpsertClaim(t, s, ctx, testClaim("c1", "ws-1", contextengine.ClaimStatusCandidate))
+		corruptStoredValue(t, s, "UPDATE memory_claims SET updated_at = ? WHERE id = ?", "not-a-time", "c1")
+
+		_, err := s.GetClaim(ctx, "c1")
+		requireReadErrorContains(t, "GetClaim", err, "updated_at")
+		_, err = s.ListClaims(ctx, ClaimFilter{WorkspaceID: "ws-1"})
+		requireReadErrorContains(t, "ListClaims", err, "updated_at")
+	})
+
+	t.Run("impact edge created_at", func(t *testing.T) {
+		s := openTestStore(t)
+		ctx := context.Background()
+
+		from := contextengine.EvidenceRef{Type: contextengine.RefTypePath, Ref: "from.go"}
+		to := contextengine.EvidenceRef{Type: contextengine.RefTypePath, Ref: "to.go"}
+		mustPutImpactEdge(t, s, ctx, testImpactEdge("edge-1", "ws-1", from, to))
+		corruptStoredValue(t, s, "UPDATE impact_edges SET created_at = ? WHERE id = ?", "not-a-time", "edge-1")
+
+		_, err := s.ListImpactEdges(ctx, ImpactFilter{WorkspaceID: "ws-1"})
+		requireReadErrorContains(t, "ListImpactEdges", err, "created_at")
+		_, err = s.ReverseImpact(ctx, "ws-1", to)
+		requireReadErrorContains(t, "ReverseImpact", err, "created_at")
+	})
+
+	t.Run("staleness updated_at", func(t *testing.T) {
+		s := openTestStore(t)
+		ctx := context.Background()
+
+		ref := contextengine.EvidenceRef{Type: contextengine.RefTypePath, Ref: "foo.go"}
+		mustUpsertStaleness(t, s, ctx, testStalenessMarker("m1", "ws-1", ref, contextengine.StalenessStatusDirty))
+		corruptStoredValue(t, s, "UPDATE staleness_markers SET updated_at = ? WHERE id = ?", "not-a-time", "m1")
+
+		_, err := s.GetStaleness(ctx, "m1")
+		requireReadErrorContains(t, "GetStaleness", err, "updated_at")
+		_, err = s.ListStaleness(ctx, StalenessFilter{WorkspaceID: "ws-1"})
+		requireReadErrorContains(t, "ListStaleness", err, "updated_at")
+	})
+
+	t.Run("projection generated_at", func(t *testing.T) {
+		s := openTestStore(t)
+		ctx := context.Background()
+
+		payload := map[string]string{"key": "value"}
+		mustPutProjection(t, s, ctx, "proj-1", "ws-1", "top_of_mind", 1, "task-1", []string{"evt-1"}, payload, now(), time.Time{})
+		corruptStoredValue(t, s, "UPDATE projections SET generated_at = ? WHERE workspace_id = ? AND id = ?", "not-a-time", "ws-1", "proj-1")
+
+		_, _, _, _, _, _, _, err := s.GetProjection(ctx, "ws-1", "proj-1")
+		requireReadErrorContains(t, "GetProjection", err, "generated_at")
+		_, err = s.ListProjections(ctx, ProjectionFilter{WorkspaceID: "ws-1"})
+		requireReadErrorContains(t, "ListProjections", err, "generated_at")
+	})
+
+	t.Run("episode created_at", func(t *testing.T) {
+		s := openTestStore(t)
+		ctx := context.Background()
+
+		mustRecordEpisode(t, s, ctx, testEpisode("ep-1", "ws-1", "test query", contextengine.LaneCode))
+		corruptStoredValue(t, s, "UPDATE retrieval_episodes SET created_at = ? WHERE id = ?", "not-a-time", "ep-1")
+
+		_, err := s.GetRetrievalEpisode(ctx, "ep-1")
+		requireReadErrorContains(t, "GetRetrievalEpisode", err, "created_at")
+		_, err = s.ListRetrievalEpisodes(ctx, RetrievalEpisodeFilter{WorkspaceID: "ws-1"})
+		requireReadErrorContains(t, "ListRetrievalEpisodes", err, "created_at")
+	})
+
+	t.Run("feedback created_at", func(t *testing.T) {
+		s := openTestStore(t)
+		ctx := context.Background()
+
+		mustRecordEpisode(t, s, ctx, testEpisode("ep-1", "ws-1", "test query", contextengine.LaneCode))
+		mustRecordFeedback(t, s, ctx, testFeedback("fb-1", "ws-1", "ep-1", contextengine.RetrievalFeedbackKindEvidenceUsed))
+		corruptStoredValue(t, s, "UPDATE retrieval_feedback SET created_at = ? WHERE id = ?", "not-a-time", "fb-1")
+
+		_, err := s.GetRetrievalFeedback(ctx, "fb-1")
+		requireReadErrorContains(t, "GetRetrievalFeedback", err, "created_at")
+		_, err = s.ListRetrievalFeedback(ctx, RetrievalFeedbackFilter{WorkspaceID: "ws-1"})
+		requireReadErrorContains(t, "ListRetrievalFeedback", err, "created_at")
+	})
+}
+
 // ========== Sort events deterministically ==========
 
 func TestStore_EventsDeterministic(t *testing.T) {
@@ -1756,6 +2088,22 @@ func TestStore_EvidenceNodeWithMetadata(t *testing.T) {
 	if got.Metadata["source"] != "test" {
 		t.Errorf("expected metadata source=test, got %v", got.Metadata["source"])
 	}
+}
+
+func TestStore_RejectsCorruptEvidenceNodeMetadata(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	ref := contextengine.EvidenceRef{Type: contextengine.RefTypePath, Ref: "foo.go"}
+	node := testNode("node-1", "ws-1", ref)
+	node.Metadata = map[string]any{"source": "test"}
+	mustPutEvidenceNode(t, s, ctx, node)
+	corruptStoredValue(t, s, "UPDATE evidence_nodes SET metadata = ? WHERE id = ?", "{", "node-1")
+
+	_, err := s.GetEvidenceNode(ctx, "node-1")
+	requireDecodeColumnError(t, "GetEvidenceNode", err, "metadata")
+	_, err = s.ListEvidenceNodes(ctx, "ws-1", ref, 10)
+	requireDecodeColumnError(t, "ListEvidenceNodes", err, "metadata")
 }
 
 func TestStore_ClaimWithScope(t *testing.T) {

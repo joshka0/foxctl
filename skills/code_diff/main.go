@@ -333,14 +333,22 @@ func computeStats(hunks []diffHunk, oldTotal, newTotal int) diffStats {
 	stats.TotalChanges = stats.LinesAdded + stats.LinesRemoved
 	stats.LinesChanged = min(stats.LinesAdded, stats.LinesRemoved)
 
-	// Calculate similarity
-	commonLines := min(oldTotal, newTotal) - stats.TotalChanges/2
-	maxLines := max(oldTotal, newTotal)
-	if maxLines > 0 {
-		stats.Similarity = float64(commonLines) / float64(maxLines) * 100
-	}
+	stats.Similarity = computeSimilarity(stats.LinesAdded, stats.LinesRemoved, oldTotal, newTotal)
 
 	return stats
+}
+
+func computeSimilarity(linesAdded, linesRemoved, oldTotal, newTotal int) float64 {
+	maxLines := max(oldTotal, newTotal)
+	if maxLines == 0 {
+		return 100
+	}
+	changedLines := max(linesAdded, linesRemoved)
+	if changedLines > maxLines {
+		changedLines = maxLines
+	}
+	unchangedLines := maxLines - changedLines
+	return float64(unchangedLines) / float64(maxLines) * 100
 }
 
 // generateUnifiedDiff formats hunks into unified diff string format.

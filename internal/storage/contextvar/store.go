@@ -152,6 +152,9 @@ func (s *sqlStore) Put(ctx context.Context, params PutParams) (*Variable, error)
 	if params.ContentType == "" {
 		params.ContentType = "json"
 	}
+	if params.TTL < 0 {
+		return nil, errors.New("contextvar: ttl must be non-negative")
+	}
 
 	// Marshal value to JSON
 	valueJSON, err := json.Marshal(params.Value)
@@ -294,9 +297,11 @@ func (s *sqlStore) scanVariable(row *sql.Row) (*Variable, error) {
 	}
 
 	v.Scope = Scope(scopeStr)
-	if valueJSON.Valid {
-		v.ValueJSON = json.RawMessage(valueJSON.String)
+	decodedValue, err := decodeValueJSON(valueJSON)
+	if err != nil {
+		return nil, fmt.Errorf("contextvar: scan: %w", err)
 	}
+	v.ValueJSON = decodedValue
 	if valueCAS.Valid {
 		v.ValueCAS = valueCAS.String
 	}
@@ -319,6 +324,17 @@ func (s *sqlStore) scanVariable(row *sql.Row) (*Variable, error) {
 	// Note: embedding deserialization would need float32 conversion
 
 	return &v, nil
+}
+
+func decodeValueJSON(value sql.NullString) (json.RawMessage, error) {
+	if !value.Valid {
+		return nil, nil
+	}
+	raw := json.RawMessage(value.String)
+	if !json.Valid(raw) {
+		return nil, fmt.Errorf("invalid value_json")
+	}
+	return raw, nil
 }
 
 func (s *sqlStore) Query(ctx context.Context, params QueryParams) (*QueryResult, error) {
@@ -472,9 +488,11 @@ func (s *sqlStore) scanRow(rows *sql.Rows) (Variable, error) {
 	}
 
 	v.Scope = Scope(scopeStr)
-	if valueJSON.Valid {
-		v.ValueJSON = json.RawMessage(valueJSON.String)
+	decodedValue, err := decodeValueJSON(valueJSON)
+	if err != nil {
+		return Variable{}, fmt.Errorf("contextvar: scan row: %w", err)
 	}
+	v.ValueJSON = decodedValue
 	if valueCAS.Valid {
 		v.ValueCAS = valueCAS.String
 	}

@@ -99,7 +99,7 @@ func (s *PostgresStore) DeleteExpiredTokens(ctx context.Context, beforeMS int64)
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("authbroker: nil db")
 	}
-	res, err := s.db.ExecContext(ctx, `DELETE FROM oauth_tokens WHERE expires_at_ms < $1`, beforeMS)
+	res, err := s.db.ExecContext(ctx, `DELETE FROM oauth_tokens WHERE expires_at_ms <= $1`, beforeMS)
 	if err != nil {
 		return 0, fmt.Errorf("authbroker: delete expired tokens: %w", err)
 	}
@@ -116,6 +116,9 @@ func (s *PostgresStore) CreateAuthRequest(ctx context.Context, row AuthRequestRo
 	}
 	if row.CreatedAtMS == 0 {
 		row.CreatedAtMS = s.clock.Now().UTC().UnixMilli()
+	}
+	if err := validateAuthRequestForCreate(row); err != nil {
+		return fmt.Errorf("authbroker: create auth request: %w", err)
 	}
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO oauth_auth_requests (
@@ -199,8 +202,8 @@ func (s *PostgresStore) CompleteAuthRequest(ctx context.Context, id string, comp
 	res, err := s.db.ExecContext(ctx, `
 UPDATE oauth_auth_requests
 SET completed_at_ms = $1
-WHERE id = $2
-`, completedAtMS, id)
+WHERE id = $2 AND completed_at_ms IS NULL AND expires_at_ms > $3
+`, completedAtMS, id, completedAtMS)
 	if err != nil {
 		return fmt.Errorf("authbroker: complete auth request: %w", err)
 	}
@@ -209,7 +212,25 @@ WHERE id = $2
 		return fmt.Errorf("authbroker: complete auth request rows affected: %w", err)
 	}
 	if n == 0 {
-		return fmt.Errorf("authbroker: auth request %q not found", id)
+		var existingCompleted sql.NullInt64
+		var expiresAtMS int64
+		if err := s.db.QueryRowContext(ctx, `
+SELECT completed_at_ms, expires_at_ms
+FROM oauth_auth_requests
+WHERE id = $1
+`, id).Scan(&existingCompleted, &expiresAtMS); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("authbroker: auth request %q not found", id)
+			}
+			return fmt.Errorf("authbroker: inspect auth request completion: %w", err)
+		}
+		if existingCompleted.Valid {
+			return fmt.Errorf("authbroker: auth request %q already completed", id)
+		}
+		if completedAtMS >= expiresAtMS {
+			return fmt.Errorf("authbroker: auth request %q expired", id)
+		}
+		return fmt.Errorf("authbroker: auth request %q is not pending", id)
 	}
 	return nil
 }
@@ -218,7 +239,7 @@ func (s *PostgresStore) DeleteExpiredAuthRequests(ctx context.Context, beforeMS 
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("authbroker: nil db")
 	}
-	res, err := s.db.ExecContext(ctx, `DELETE FROM oauth_auth_requests WHERE expires_at_ms < $1`, beforeMS)
+	res, err := s.db.ExecContext(ctx, `DELETE FROM oauth_auth_requests WHERE expires_at_ms <= $1`, beforeMS)
 	if err != nil {
 		return 0, fmt.Errorf("authbroker: delete expired auth requests: %w", err)
 	}

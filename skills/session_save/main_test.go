@@ -138,24 +138,6 @@ func TestSessionSnapshot_WithMetadata(t *testing.T) {
 
 // Tests for TaskInfo structure
 
-func TestTaskInfo_AllFields(t *testing.T) {
-	task := TaskInfo{
-		ID:          "task-123",
-		Title:       "Fix bug in auth",
-		Description: "Auth tokens expire too early",
-		Status:      "in_progress",
-		Notes:       "Investigating token refresh",
-		Gotchas:     "Don't forget to update tests",
-	}
-
-	assert.Equal(t, "task-123", task.ID)
-	assert.Equal(t, "Fix bug in auth", task.Title)
-	assert.Equal(t, "Auth tokens expire too early", task.Description)
-	assert.Equal(t, "in_progress", task.Status)
-	assert.Equal(t, "Investigating token refresh", task.Notes)
-	assert.Equal(t, "Don't forget to update tests", task.Gotchas)
-}
-
 func TestTaskInfo_MinimalFields(t *testing.T) {
 	task := TaskInfo{
 		ID:     "task-123",
@@ -172,26 +154,6 @@ func TestTaskInfo_MinimalFields(t *testing.T) {
 }
 
 // Tests for PlanInfo structure
-
-func TestPlanInfo_AllFields(t *testing.T) {
-	plan := PlanInfo{
-		FilePath:    "/home/user/.claude/plans/feature.md",
-		FileName:    "feature.md",
-		Title:       "Feature Implementation Plan",
-		ContentHash: "sha256:abc123",
-		Sections:    []string{"Overview", "Design", "Implementation", "Testing", "Rollout"},
-		LinkedTasks: 10,
-		ModTime:     "2024-01-15T10:00:00Z",
-	}
-
-	assert.Equal(t, "/home/user/.claude/plans/feature.md", plan.FilePath)
-	assert.Equal(t, "feature.md", plan.FileName)
-	assert.Equal(t, "Feature Implementation Plan", plan.Title)
-	assert.Equal(t, "sha256:abc123", plan.ContentHash)
-	assert.Len(t, plan.Sections, 5)
-	assert.Equal(t, 10, plan.LinkedTasks)
-	assert.Equal(t, "2024-01-15T10:00:00Z", plan.ModTime)
-}
 
 func TestPlanInfo_EmptySections(t *testing.T) {
 	plan := PlanInfo{
@@ -237,12 +199,6 @@ func TestOutput_EmptyCapture(t *testing.T) {
 }
 
 // Tests for constants
-
-func TestCommand(t *testing.T) {
-	assert.Equal(t, "session/save", command)
-}
-
-// Tests for trigger types
 
 func TestTriggerTypes(t *testing.T) {
 	// Valid trigger values

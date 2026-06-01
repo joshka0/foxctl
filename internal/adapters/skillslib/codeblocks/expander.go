@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	codeexpander "github.com/joshka0/foxctl/internal/intelligence/codecontext/expander"
 	"github.com/joshka0/foxctl/internal/platform/fsutil"
@@ -578,14 +579,64 @@ func (e *Expander) findGoBlock(lines []string, lineIdx int) (int, int, string, s
 		return e.findGenericBlock(lines, lineIdx)
 	}
 
-	// Find end using brace matching
-	endLine := e.findBraceEnd(lines, headerLine)
+	endLine := e.findGoSymbolEnd(lines, headerLine)
 	if lineIdx < startLine || lineIdx > endLine {
 		return e.findGenericBlock(lines, lineIdx)
 	}
 	startLine, endLine = clampRange(startLine, endLine, lineIdx, e.maxBlockLines, headerLine)
 
 	return startLine, endLine, header, symbolName, symbolKind
+}
+
+func (e *Expander) findGoSymbolEnd(lines []string, headerLine int) int {
+	if symbolStartsBraceBlock(lines, headerLine) {
+		return e.findBraceEnd(lines, headerLine)
+	}
+	return e.findGoNonBraceDeclarationEnd(lines, headerLine)
+}
+
+func symbolStartsBraceBlock(lines []string, startLine int) bool {
+	if startLine < 0 || startLine >= len(lines) {
+		return false
+	}
+	if strings.Contains(lines[startLine], "{") {
+		return true
+	}
+	for i := startLine + 1; i < len(lines) && i <= startLine+3; i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if trimmed == "" || strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "/*") {
+			continue
+		}
+		return strings.HasPrefix(trimmed, "{")
+	}
+	return false
+}
+
+func (e *Expander) findGoNonBraceDeclarationEnd(lines []string, startLine int) int {
+	endLine := startLine
+	maxLines := e.maxBlockLines
+	if maxLines <= 0 {
+		maxLines = len(lines)
+	}
+	for i := startLine + 1; i < len(lines) && (i-startLine) < maxLines; i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if trimmed == "" {
+			break
+		}
+		if isGoTopLevelDeclarationStart(trimmed) {
+			break
+		}
+		endLine = i
+	}
+	return endLine
+}
+
+func isGoTopLevelDeclarationStart(trimmed string) bool {
+	return strings.HasPrefix(trimmed, "func ") ||
+		strings.HasPrefix(trimmed, "type ") ||
+		strings.HasPrefix(trimmed, "var ") ||
+		strings.HasPrefix(trimmed, "const ") ||
+		strings.HasPrefix(trimmed, "import ")
 }
 
 // Python patterns
@@ -1667,10 +1718,21 @@ func IndentLevel(line string) int {
 
 // TrimLine truncates a line to the specified limit.
 func TrimLine(line string, limit int) string {
+	if limit < 0 {
+		limit = 0
+	}
 	if len(line) <= limit {
 		return line
 	}
-	return line[:limit] + "..."
+	end := 0
+	for end < len(line) {
+		_, size := utf8.DecodeRuneInString(line[end:])
+		if end+size > limit {
+			break
+		}
+		end += size
+	}
+	return line[:end] + "..."
 }
 
 func matchLinesFor(match RawMatch) []int {

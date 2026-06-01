@@ -128,6 +128,9 @@ func cleanMatchPath(workspace, file string) (string, bool) {
 	if clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
 		return "", false
 	}
+	if workspace != "" && !pathResolvesInsideWorkspace(workspace, filepath.Join(workspace, clean)) {
+		return "", false
+	}
 	return clean, true
 }
 
@@ -135,32 +138,80 @@ func relToWorkspace(workspace, absPath string) (string, bool) {
 	if workspace == "" {
 		return "", false
 	}
-	wsClean := filepath.Clean(workspace)
+	wsClean, err := filepath.Abs(filepath.Clean(workspace))
+	if err != nil {
+		return "", false
+	}
 	absClean := filepath.Clean(absPath)
-	combos := [][2]string{{wsClean, absClean}}
-	wsReal, wsErr := filepath.EvalSymlinks(wsClean)
-	absReal, absErr := filepath.EvalSymlinks(absClean)
-	if wsErr == nil {
-		combos = append(combos, [2]string{wsReal, absClean})
-		if absErr == nil {
-			combos = append(combos, [2]string{wsReal, absReal})
+	if !filepath.IsAbs(absClean) {
+		var absErr error
+		absClean, absErr = filepath.Abs(absClean)
+		if absErr != nil {
+			return "", false
 		}
 	}
-	if absErr == nil {
-		combos = append(combos, [2]string{wsClean, absReal})
+	if !pathResolvesInsideWorkspace(wsClean, absClean) {
+		return "", false
 	}
-	for _, combo := range combos {
-		rel, err := filepath.Rel(combo[0], combo[1])
-		if err != nil {
-			continue
+
+	for _, base := range workspacePathBases(wsClean) {
+		rel, err := filepath.Rel(base, absClean)
+		if err == nil && isUsableWorkspaceRel(rel) {
+			return rel, true
 		}
-		if rel == "." {
-			continue
+	}
+	if absReal, err := filepath.EvalSymlinks(absClean); err == nil {
+		wsReal, wsErr := filepath.EvalSymlinks(wsClean)
+		if wsErr != nil {
+			wsReal = wsClean
 		}
-		if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-			continue
+		rel, err := filepath.Rel(wsReal, absReal)
+		if err == nil && isUsableWorkspaceRel(rel) {
+			return rel, true
 		}
-		return rel, true
 	}
 	return "", false
+}
+
+func pathResolvesInsideWorkspace(workspace, path string) bool {
+	wsClean, err := filepath.Abs(filepath.Clean(workspace))
+	if err != nil {
+		return false
+	}
+	pathClean, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		return false
+	}
+	pathReal, pathErr := filepath.EvalSymlinks(pathClean)
+	if pathErr != nil {
+		for _, base := range workspacePathBases(wsClean) {
+			rel, relErr := filepath.Rel(base, pathClean)
+			if relErr == nil && isWorkspaceRel(rel) {
+				return true
+			}
+		}
+		return false
+	}
+	wsReal, wsErr := filepath.EvalSymlinks(wsClean)
+	if wsErr != nil {
+		wsReal = wsClean
+	}
+	rel, err := filepath.Rel(wsReal, pathReal)
+	return err == nil && isWorkspaceRel(rel)
+}
+
+func workspacePathBases(workspace string) []string {
+	bases := []string{workspace}
+	if real, err := filepath.EvalSymlinks(workspace); err == nil && real != workspace {
+		bases = append(bases, real)
+	}
+	return bases
+}
+
+func isUsableWorkspaceRel(rel string) bool {
+	return rel != "." && isWorkspaceRel(rel)
+}
+
+func isWorkspaceRel(rel string) bool {
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }

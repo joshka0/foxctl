@@ -13,6 +13,7 @@ import (
 	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/runtime/hooks/lifecycle"
+	hookpathutil "github.com/joshka0/foxctl/internal/runtime/hooks/pathutil"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -205,23 +206,24 @@ func IndexEditedFile(ctx context.Context, deps Dependencies, req LiveIndexReques
 		strings.TrimSpace(req.Payload.ToolInput.FilePath),
 		strings.TrimSpace(req.Payload.ToolInput.Path),
 	)
-	if filePath == "" || !isSupportedLiveIndexFile(filePath) || shouldSkipLiveIndexPath(filePath) {
+	relPath := hookpathutil.ContainedRelativePath(filePath, target)
+	if relPath == "" || !isSupportedLiveIndexFile(relPath) || shouldSkipLiveIndexPath(relPath) {
 		return response, nil
 	}
-	response.FilePath = filePath
+	response.FilePath = relPath
 	if deps.RunSkill == nil {
 		return response, nil
 	}
 
 	var env incrementalIndexEnvelope
 	if err := deps.RunSkill(ctx, "code/incremental_index", map[string]any{
-		"file":        filePath,
+		"file":        relPath,
 		"symbols":     true,
 		"embed":       false,
 		"embed_queue": liveIndexEmbedQueueEnabled(),
 	}, target, &env); err != nil {
 		if envEnabled("FOXCTL_LIVE_INDEX_DEBUG") {
-			response.Warnings = append(response.Warnings, fmt.Sprintf("index failed for %s: %v", filePath, err))
+			response.Warnings = append(response.Warnings, fmt.Sprintf("index failed for %s: %v", relPath, err))
 		}
 		return response, nil
 	}
@@ -233,7 +235,7 @@ func IndexEditedFile(ctx context.Context, deps Dependencies, req LiveIndexReques
 		return response, nil
 	}
 
-	filename := filepath.Base(filePath)
+	filename := filepath.Base(relPath)
 	if response.SymbolsDeleted > 0 {
 		response.Context = fmt.Sprintf(
 			"Indexed **%d** symbols (+%d removed) from `%s` (%dms)",
@@ -269,15 +271,16 @@ func DiagnoseEditedFile(ctx context.Context, deps Dependencies, req LSPDiagnosti
 	if filePath == "" {
 		return response, nil
 	}
-	absPath := filePath
-	if !filepath.IsAbs(absPath) {
-		absPath = filepath.Join(target, filePath)
+	relPath := hookpathutil.ContainedRelativePath(filePath, target)
+	if relPath == "" {
+		return response, nil
 	}
+	absPath := filepath.Join(target, filepath.FromSlash(relPath))
 	info, err := os.Stat(absPath)
 	if err != nil || info.IsDir() {
 		return response, nil
 	}
-	response.FilePath = filePath
+	response.FilePath = relPath
 
 	diagnostics, err := collectDiagnostics(ctx, deps, target, absPath)
 	if err != nil {
@@ -288,7 +291,7 @@ func DiagnoseEditedFile(ctx context.Context, deps Dependencies, req LSPDiagnosti
 	}
 
 	response.Diagnostics = diagnostics
-	response.Context = fmt.Sprintf("**LSP Diagnostics** for `%s`:\n```\n%s\n```", filepath.Base(filePath), strings.Join(diagnostics, "\n"))
+	response.Context = fmt.Sprintf("**LSP Diagnostics** for `%s`:\n```\n%s\n```", filepath.Base(relPath), strings.Join(diagnostics, "\n"))
 	return response, nil
 }
 

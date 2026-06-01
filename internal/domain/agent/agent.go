@@ -2,6 +2,8 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -19,6 +21,19 @@ const (
 	// StateError indicates agent encountered a fatal error.
 	StateError State = "error"
 )
+
+// ErrInvalidState is returned when an agent lifecycle state is not recognized.
+var ErrInvalidState = errors.New("agent: invalid state")
+
+// ValidateState rejects states outside the documented agent lifecycle.
+func ValidateState(state State) error {
+	switch state {
+	case StateStarting, StateRunning, StateStopped, StateError:
+		return nil
+	default:
+		return fmt.Errorf("%w: unknown state %q", ErrInvalidState, state)
+	}
+}
 
 // ExecutionMode defines how an agent processes work.
 type ExecutionMode string
@@ -237,6 +252,54 @@ type FilesystemPolicy struct {
 	To   string `json:"to,omitempty"`
 }
 
+// ValidatePolicy rejects resource and access policies that cannot be enforced safely.
+func ValidatePolicy(p Policy) error {
+	if p.CPU < 0 {
+		return fmt.Errorf("agent: policy cpu must be non-negative")
+	}
+	if p.MemoryMB < 0 {
+		return fmt.Errorf("agent: policy memory must be non-negative")
+	}
+	if p.MaxOutputKB < 0 {
+		return fmt.Errorf("agent: policy max output must be non-negative")
+	}
+	if timeout := strings.TrimSpace(p.Timeout); timeout != "" {
+		duration, err := time.ParseDuration(timeout)
+		if err != nil {
+			return fmt.Errorf("agent: policy timeout %q is invalid", p.Timeout)
+		}
+		if duration <= 0 {
+			return fmt.Errorf("agent: policy timeout must be positive")
+		}
+	}
+
+	network := strings.TrimSpace(p.Network)
+	switch network {
+	case "", "none", "egress":
+	default:
+		return fmt.Errorf("agent: policy network %q is invalid", p.Network)
+	}
+	if network == "none" && len(p.EgressAllow) > 0 {
+		return fmt.Errorf("agent: policy egress allow requires network egress")
+	}
+
+	for i, fs := range p.Filesystem {
+		policyType := strings.TrimSpace(fs.Type)
+		switch policyType {
+		case "workdir", "ro":
+			if strings.TrimSpace(fs.From) == "" {
+				return fmt.Errorf("agent: filesystem policy %d requires from", i)
+			}
+			if strings.TrimSpace(fs.To) == "" {
+				return fmt.Errorf("agent: filesystem policy %d requires to", i)
+			}
+		default:
+			return fmt.Errorf("agent: filesystem policy %d type %q is invalid", i, fs.Type)
+		}
+	}
+	return nil
+}
+
 // Quotas defines resource limits for a namespace.
 type Quotas struct {
 	Namespace         string `json:"ns"`
@@ -260,12 +323,20 @@ type QuotaConsumption struct {
 
 // MarshalPolicyJSON serializes a policy to JSON bytes.
 func MarshalPolicyJSON(p Policy) ([]byte, error) {
+	if err := ValidatePolicy(p); err != nil {
+		return nil, err
+	}
 	return json.Marshal(p)
 }
 
 // UnmarshalPolicyJSON deserializes a policy from JSON bytes.
 func UnmarshalPolicyJSON(data []byte) (Policy, error) {
 	var p Policy
-	err := json.Unmarshal(data, &p)
-	return p, err
+	if err := json.Unmarshal(data, &p); err != nil {
+		return Policy{}, err
+	}
+	if err := ValidatePolicy(p); err != nil {
+		return Policy{}, err
+	}
+	return p, nil
 }

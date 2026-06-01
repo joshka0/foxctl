@@ -50,6 +50,10 @@ func CASHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 			httpError(w, http.StatusBadRequest, "missing digest")
 			return
 		}
+		if !validCASDigest(digest) {
+			httpError(w, http.StatusBadRequest, "invalid digest")
+			return
+		}
 
 		action := ""
 		if len(parts) == 2 {
@@ -336,10 +340,23 @@ func normalizeCASDigest(digest string) string {
 	if digest == "" {
 		return ""
 	}
+	digest = strings.ToLower(digest)
 	if !strings.HasPrefix(digest, "sha256:") {
 		digest = "sha256:" + digest
 	}
 	return digest
+}
+
+func validCASDigest(digest string) bool {
+	if len(digest) != len("sha256:")+64 || !strings.HasPrefix(digest, "sha256:") {
+		return false
+	}
+	for _, ch := range digest[len("sha256:"):] {
+		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func readCASPage(reader io.Reader, page, pageSize int) ([]byte, int64, error) {

@@ -46,6 +46,11 @@ func RelativePath(path, workspaceRoot string) string {
 	return platformpath.RelativePath(path, workspaceRoot)
 }
 
+// ContainedRelativePath returns a slash-separated path relative to workspaceRoot.
+func ContainedRelativePath(path, workspaceRoot string) string {
+	return platformpath.ContainedRelativePath(path, workspaceRoot)
+}
+
 // IsUnderWorkspace checks if a path is under the workspace root.
 func IsUnderWorkspace(path, workspaceRoot string) bool {
 	return platformpath.IsUnderWorkspace(path, workspaceRoot)

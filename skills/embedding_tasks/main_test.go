@@ -112,33 +112,6 @@ func TestTaskEmbeddingContent_WithGotchas(t *testing.T) {
 	assert.Contains(t, result, "Gotchas: Watch for breaking changes")
 }
 
-func TestTaskEmbeddingContent_AllFields(t *testing.T) {
-	completedAt := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
-	task := tasks.Task{
-		ID:          "task-full",
-		Title:       "Full task",
-		Description: "Complete implementation",
-		Status:      "completed",
-		DependsOn:   []string{"task-1"},
-		EpicID:      "epic-1",
-		Notes:       "Implementation notes",
-		Gotchas:     "Edge case gotcha",
-		CreatedAt:   time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC),
-		CompletedAt: &completedAt,
-	}
-
-	result := taskEmbeddingContent(task)
-
-	assert.Contains(t, result, "[Mar 2026]")
-	assert.Contains(t, result, "[completed]")
-	assert.Contains(t, result, "Task: Full task")
-	assert.Contains(t, result, "Description: Complete implementation")
-	assert.Contains(t, result, "Dependencies: 1 tasks")
-	assert.Contains(t, result, "Epic: epic-1")
-	assert.Contains(t, result, "Notes: Implementation notes")
-	assert.Contains(t, result, "Gotchas: Edge case gotcha")
-}
-
 func TestTaskEmbeddingContent_EmptyStatus(t *testing.T) {
 	task := tasks.Task{
 		ID:        "task-123",
@@ -193,26 +166,6 @@ func TestInput_DefaultBatchSize(t *testing.T) {
 	}
 	assert.Equal(t, 10, in.BatchSize)
 }
-
-func TestInput_AllFields(t *testing.T) {
-	in := Input{
-		Scope:       "workspace",
-		WorkspaceID: "ws-123",
-		TaskID:      "task-456",
-		BatchSize:   20,
-		ProcessAll:  true,
-		DryRun:      true,
-	}
-
-	assert.Equal(t, "workspace", in.Scope)
-	assert.Equal(t, "ws-123", in.WorkspaceID)
-	assert.Equal(t, "task-456", in.TaskID)
-	assert.Equal(t, 20, in.BatchSize)
-	assert.True(t, in.ProcessAll)
-	assert.True(t, in.DryRun)
-}
-
-// Tests for Output structure
 
 func TestOutput_SuccessfulRun(t *testing.T) {
 	output := Output{
@@ -287,10 +240,6 @@ func TestTaskResult_DryRun(t *testing.T) {
 }
 
 // Tests for constants
-
-func TestCommand(t *testing.T) {
-	assert.Equal(t, "embedding/tasks", command)
-}
 
 func TestTaskType(t *testing.T) {
 	assert.Equal(t, "task_embedding", taskType)

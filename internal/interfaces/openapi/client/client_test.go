@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/interfaces/openapi/client"
@@ -159,6 +162,195 @@ func TestExecuteReturnsHTTPError(t *testing.T) {
 	}
 	if body["error"] != "invalid" {
 		t.Fatalf("unexpected body: %#v", body)
+	}
+}
+
+func TestExecuteClassifiesHTTPStatusContracts(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		status int
+		code   string
+	}{
+		{name: "unauthorized", status: http.StatusUnauthorized, code: "EAUTH"},
+		{name: "forbidden", status: http.StatusForbidden, code: "EAUTH"},
+		{name: "not_found", status: http.StatusNotFound, code: "ENOTFOUND"},
+		{name: "request_timeout", status: http.StatusRequestTimeout, code: "ETIMEOUT"},
+		{name: "rate_limited", status: http.StatusTooManyRequests, code: "ERATELIMIT"},
+		{name: "bad_request", status: http.StatusBadRequest, code: "EARG"},
+		{name: "server_error", status: http.StatusInternalServerError, code: "ERUNTIME"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.status)
+				if err := json.NewEncoder(w).Encode(map[string]any{"status": tt.status}); err != nil {
+					t.Fatalf("encode response: %v", err)
+				}
+			})
+
+			cfg := config.Config{InlineOutputKB: 64, MaxCaptureKB: 1024}
+			casStore := newTestCAS(t)
+			httpClient := &http.Client{Transport: &handlerTransport{handler: handler}}
+			c := client.New(cfg, casStore, client.WithHTTPClient(httpClient))
+
+			req, err := http.NewRequest(http.MethodGet, "http://mock", nil)
+			if err != nil {
+				t.Fatalf("new request: %v", err)
+			}
+
+			resp, execErr := c.Execute(context.Background(), req)
+			if execErr == nil {
+				t.Fatalf("expected error for status %d", tt.status)
+			}
+			clientErr, ok := execErr.(*client.Error)
+			if !ok {
+				t.Fatalf("expected *client.Error, got %T", execErr)
+			}
+			if clientErr.Code != tt.code {
+				t.Fatalf("status %d code=%s want %s", tt.status, clientErr.Code, tt.code)
+			}
+			if resp == nil || clientErr.Response != resp {
+				t.Fatalf("expected returned response attached to error")
+			}
+			if resp.StatusCode != tt.status {
+				t.Fatalf("status=%d want %d", resp.StatusCode, tt.status)
+			}
+		})
+	}
+}
+
+func TestExecuteMaxCaptureBoundary(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		size    int
+		wantErr string
+	}{
+		{name: "at_limit_allowed", size: 1024},
+		{name: "over_limit_rejected", size: 1025, wantErr: "EOUTPUT_TOO_LARGE"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			payload := bytes.Repeat([]byte("x"), tt.size)
+			handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/plain")
+				if _, err := w.Write(payload); err != nil {
+					t.Fatalf("write payload: %v", err)
+				}
+			})
+
+			cfg := config.Config{InlineOutputKB: 2, MaxCaptureKB: 1}
+			casStore := newTestCAS(t)
+			httpClient := &http.Client{Transport: &handlerTransport{handler: handler}}
+			c := client.New(cfg, casStore, client.WithHTTPClient(httpClient))
+
+			req, err := http.NewRequest(http.MethodGet, "http://mock", nil)
+			if err != nil {
+				t.Fatalf("new request: %v", err)
+			}
+
+			resp, execErr := c.Execute(context.Background(), req)
+			if tt.wantErr == "" {
+				if execErr != nil {
+					t.Fatalf("execute: %v", execErr)
+				}
+				body, ok := resp.Body.(string)
+				if !ok {
+					t.Fatalf("expected string body, got %T", resp.Body)
+				}
+				if len(body) != tt.size {
+					t.Fatalf("body size=%d want %d", len(body), tt.size)
+				}
+				return
+			}
+
+			if execErr == nil {
+				t.Fatalf("expected %s", tt.wantErr)
+			}
+			if resp != nil {
+				t.Fatalf("expected no processed response on capture limit error")
+			}
+			clientErr, ok := execErr.(*client.Error)
+			if !ok {
+				t.Fatalf("expected *client.Error, got %T", execErr)
+			}
+			if clientErr.Code != tt.wantErr {
+				t.Fatalf("code=%s want %s", clientErr.Code, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestExecutePreviewFirstKeysPropertySortedAndLimited(t *testing.T) {
+	t.Parallel()
+
+	var payload []byte
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write(payload); err != nil {
+			t.Fatalf("write payload: %v", err)
+		}
+	})
+
+	cfg := config.Config{InlineOutputKB: 64, MaxCaptureKB: 1024}
+	casStore := newTestCAS(t)
+	httpClient := &http.Client{Transport: &handlerTransport{handler: handler}}
+	c := client.New(cfg, casStore, client.WithHTTPClient(httpClient))
+
+	check := func(seed uint64) bool {
+		record := make(map[string]any, 8)
+		for i := 0; i < 8; i++ {
+			part := byte(seed >> (i * 8))
+			record[fmt.Sprintf("k%03d_%02d", part, i)] = i
+		}
+		var err error
+		payload, err = json.Marshal(record)
+		if err != nil {
+			return false
+		}
+
+		req, err := http.NewRequest(http.MethodGet, "http://mock", nil)
+		if err != nil {
+			return false
+		}
+		resp, execErr := c.Execute(context.Background(), req)
+		if execErr != nil || resp == nil {
+			return false
+		}
+
+		keys := resp.Preview.FirstKeys
+		if len(keys) > 5 || !sort.StringsAreSorted(keys) {
+			return false
+		}
+		sample, ok := resp.Preview.SampleRecord.(map[string]any)
+		if !ok || len(sample) != len(keys) {
+			return false
+		}
+		for _, key := range keys {
+			if _, ok := record[key]; !ok {
+				return false
+			}
+			if _, ok := sample[key]; !ok {
+				return false
+			}
+		}
+		return true
+	}
+
+	if err := quick.Check(check, &quick.Config{MaxCount: 50}); err != nil {
+		t.Fatalf("preview first keys property failed: %v", err)
 	}
 }
 

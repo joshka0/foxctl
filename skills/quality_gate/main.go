@@ -7,8 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 )
 
 const command = "quality/gate"
@@ -90,10 +89,10 @@ type policy struct {
 
 // main is the skill entry point for quality/gate.
 func main() {
-	skillmain.Main(command, run)
+	lite.Main(command, run)
 }
 
-func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+func run(ctx context.Context, rc *lite.RunContext, in input) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -191,7 +190,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return skillout.Emit(rc, command, data)
+	return lite.Emit(rc, command, data)
 }
 
 func resolvePolicy(in policyInput) (policy, map[string]struct{}) {

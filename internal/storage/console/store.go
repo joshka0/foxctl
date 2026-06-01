@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/storage/sqlutil"
@@ -166,14 +167,11 @@ func (s *SQLiteStore) Get(ctx context.Context, consoleID string) (ConsoleSession
 	}
 
 	session.SessionID = sessionID.String
-	session.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt)
-	session.LastAttachedAt, _ = sqlutil.ScanTimestamp(lastAttached)
-
-	if metaJSON.Valid && metaJSON.String != "" {
-		if err := json.Unmarshal([]byte(metaJSON.String), &session.Meta); err != nil {
-			// Log but don't fail - meta is optional
-			session.Meta = nil
-		}
+	if err := parseSessionTimestamps(&session, createdAt, lastAttached); err != nil {
+		return ConsoleSession{}, err
+	}
+	if err := scanSessionMeta(&session, metaJSON); err != nil {
+		return ConsoleSession{}, err
 	}
 
 	return session, nil
@@ -317,13 +315,12 @@ func scanSessions(rows *sql.Rows) ([]ConsoleSession, error) {
 		}
 
 		session.SessionID = sessionID.String
-		session.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt)
-		session.LastAttachedAt, _ = sqlutil.ScanTimestamp(lastAttached)
+		if err := parseSessionTimestamps(&session, createdAt, lastAttached); err != nil {
+			return nil, err
+		}
 
-		if metaJSON.Valid && metaJSON.String != "" {
-			if err := json.Unmarshal([]byte(metaJSON.String), &session.Meta); err != nil {
-				session.Meta = nil
-			}
+		if err := scanSessionMeta(&session, metaJSON); err != nil {
+			return nil, err
 		}
 
 		sessions = append(sessions, session)
@@ -334,6 +331,45 @@ func scanSessions(rows *sql.Rows) ([]ConsoleSession, error) {
 	}
 
 	return sessions, nil
+}
+
+func parseSessionTimestamps(session *ConsoleSession, createdAt, lastAttachedAt string) error {
+	var err error
+	session.CreatedAt, err = sqlutil.ScanTimestamp(createdAt)
+	if err != nil {
+		return fmt.Errorf("console: scan session created_at: %w", err)
+	}
+	session.LastAttachedAt, err = sqlutil.ScanTimestamp(lastAttachedAt)
+	if err != nil {
+		return fmt.Errorf("console: scan session last_attached_at: %w", err)
+	}
+	return nil
+}
+
+func scanSessionMeta(session *ConsoleSession, metaJSON sql.NullString) error {
+	if !metaJSON.Valid || metaJSON.String == "" {
+		return nil
+	}
+	meta, err := decodeSessionMetaJSON(metaJSON.String)
+	if err != nil {
+		return fmt.Errorf("console: scan session meta: %w", err)
+	}
+	session.Meta = meta
+	return nil
+}
+
+func decodeSessionMetaJSON(raw string) (map[string]any, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(raw), &meta); err != nil {
+		return nil, err
+	}
+	if meta == nil {
+		return nil, fmt.Errorf("session meta must be a JSON object")
+	}
+	return meta, nil
 }
 
 // nullString converts a string to sql.NullString.

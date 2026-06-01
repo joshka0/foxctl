@@ -113,7 +113,7 @@ var securityPatterns = []securityPattern{
 		Category:       "sensitive_data",
 		Severity:       "critical",
 		CWE:            "CWE-798",
-		Regex:          regexp.MustCompile(`(password|passwd|pwd)\s*=\s*["'][^"']{4,}["']`),
+		Regex:          regexp.MustCompile(`(?i)(password|passwd|pwd)\s*=\s*["'][^"']{4,}["']`),
 		Issue:          "Hardcoded password",
 		Description:    "Password hardcoded in source code",
 		Recommendation: "Load from environment variables or secure vault",
@@ -124,7 +124,7 @@ var securityPatterns = []securityPattern{
 		Category:       "sensitive_data",
 		Severity:       "critical",
 		CWE:            "CWE-798",
-		Regex:          regexp.MustCompile(`(api[_-]?key|apikey|api[_-]?secret)\s*[=:]\s*["'][^"']{8,}["']`),
+		Regex:          regexp.MustCompile(`(?i)(api[_-]?key|apikey|api[_-]?secret)\s*[=:]\s*["'][^"']{8,}["']`),
 		Issue:          "Hardcoded API key",
 		Description:    "API key hardcoded in source code",
 		Recommendation: "Use environment variables or secrets management",
@@ -135,7 +135,7 @@ var securityPatterns = []securityPattern{
 		Category:       "sensitive_data",
 		Severity:       "critical",
 		CWE:            "CWE-798",
-		Regex:          regexp.MustCompile(`(secret[_-]?key|private[_-]?key)\s*[=:]\s*["'][^"']{16,}["']`),
+		Regex:          regexp.MustCompile(`(?i)(secret[_-]?key|private[_-]?key)\s*[=:]\s*["'][^"']{16,}["']`),
 		Issue:          "Hardcoded secret key",
 		Description:    "Secret key hardcoded in source code",
 		Recommendation: "Use secure key management system",
@@ -490,12 +490,7 @@ func scanFile(path, workspace string, in input) ([]vulnerability, error) {
 			if pattern.Regex.MatchString(line) {
 				snippet := strings.TrimSpace(line)
 				if pattern.Category == "sensitive_data" {
-					// Redact sensitive data
-					if len(snippet) > 20 {
-						snippet = snippet[:10] + "...[REDACTED]..." + snippet[len(snippet)-10:]
-					} else {
-						snippet = "[REDACTED]"
-					}
+					snippet = redactSensitiveSnippet(snippet, pattern)
 				} else if len(snippet) > 100 {
 					snippet = snippet[:100] + "..."
 				}
@@ -520,6 +515,31 @@ func scanFile(path, workspace string, in input) ([]vulnerability, error) {
 	}
 
 	return vulns, nil
+}
+
+func redactSensitiveSnippet(snippet string, pattern securityPattern) string {
+	redacted := pattern.Regex.ReplaceAllStringFunc(snippet, redactSensitiveMatch)
+	if redacted == snippet {
+		return "[REDACTED]"
+	}
+	if len(redacted) > 100 {
+		return redacted[:100] + "..."
+	}
+	return redacted
+}
+
+func redactSensitiveMatch(match string) string {
+	firstQuote := strings.IndexAny(match, `"'`)
+	if firstQuote == -1 {
+		return "[REDACTED]"
+	}
+
+	lastQuote := strings.LastIndexAny(match, `"'`)
+	if lastQuote <= firstQuote {
+		return match[:firstQuote+1] + "[REDACTED]"
+	}
+
+	return match[:firstQuote+1] + "[REDACTED]" + match[lastQuote:]
 }
 
 // selectPatterns filters security patterns based on scan mode and category selection.

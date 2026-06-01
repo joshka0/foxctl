@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/storage/dbutil"
@@ -582,6 +583,14 @@ func TestTurnStore_SaveArtifact_IdempotentAndStableRefLookup(t *testing.T) {
 	}
 	if len(got.Embedding) != 3 {
 		t.Fatalf("embedding length=%d want 3", len(got.Embedding))
+	}
+
+	mixedCase, err := store.GetArtifact(ctx, " turn-003 ", " EMBEDDING ", " v1 ")
+	if err != nil {
+		t.Fatalf("GetArtifact(mixed case type) error = %v", err)
+	}
+	if mixedCase.Ref != got.Ref {
+		t.Fatalf("mixed case artifact ref=%q want %q", mixedCase.Ref, got.Ref)
 	}
 
 	byRef, err := store.GetArtifactByRef(ctx, "turn/turn-003/artifact/embedding/v1")
@@ -1249,4 +1258,85 @@ func TestParseArtifactRef(t *testing.T) {
 	if !errors.Is(err, ErrInvalidArtifactRef) {
 		t.Fatalf("ParseArtifactRef(invalid) error=%v want ErrInvalidArtifactRef", err)
 	}
+}
+
+func TestArtifactRefRoundTripProperty(t *testing.T) {
+	t.Parallel()
+
+	property := func(turnSeed, typeSeed, versionSeed string) bool {
+		turnID := artifactRefComponent("turn", turnSeed)
+		artifactType := artifactRefComponent("TYPE", typeSeed)
+		artifactVersion := artifactRefComponent("v", versionSeed)
+
+		ref := BuildArtifactRef(" "+turnID+" ", " "+artifactType+" ", " "+artifactVersion+" ")
+		wantRef := "turn/" + turnID + "/artifact/" + strings.ToLower(artifactType) + "/" + artifactVersion
+		if ref != wantRef {
+			t.Logf("BuildArtifactRef()=%q want %q", ref, wantRef)
+			return false
+		}
+
+		gotTurnID, gotArtifactType, gotArtifactVersion, err := ParseArtifactRef(" " + ref + " ")
+		if err != nil {
+			t.Logf("ParseArtifactRef(%q) error=%v", ref, err)
+			return false
+		}
+		if gotTurnID != turnID || gotArtifactType != strings.ToLower(artifactType) || gotArtifactVersion != artifactVersion {
+			t.Logf("ParseArtifactRef(%q)=%q,%q,%q", ref, gotTurnID, gotArtifactType, gotArtifactVersion)
+			return false
+		}
+		return true
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 500}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestParseArtifactRefCanonicalizesTypeAndRejectsAmbiguousComponents(t *testing.T) {
+	t.Parallel()
+
+	_, artifactType, _, err := ParseArtifactRef("turn/turn-xyz/artifact/Learning/v2")
+	if err != nil {
+		t.Fatalf("ParseArtifactRef(uppercase type) error=%v", err)
+	}
+	if artifactType != ArtifactTypeLearning {
+		t.Fatalf("artifact type=%q want %q", artifactType, ArtifactTypeLearning)
+	}
+
+	tests := []string{
+		"turn/turn/with/slash/artifact/learning/v1",
+		"turn/turn-1/artifact/learn/ing/v1",
+		"turn/turn-1/artifact/learning/v1/extra",
+		"turn/turn-1/artifact/learning/v1#fragment",
+		"turn//artifact/learning/v1",
+		"turn/turn-1/artifact//v1",
+		"turn/turn-1/artifact/learning/",
+	}
+	for _, ref := range tests {
+		ref := ref
+		t.Run(ref, func(t *testing.T) {
+			t.Parallel()
+
+			_, _, _, err := ParseArtifactRef(ref)
+			if !errors.Is(err, ErrInvalidArtifactRef) {
+				t.Fatalf("ParseArtifactRef(%q) error=%v want ErrInvalidArtifactRef", ref, err)
+			}
+		})
+	}
+}
+
+func artifactRefComponent(prefix, seed string) string {
+	const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
+	if seed == "" {
+		return prefix
+	}
+	var b strings.Builder
+	b.WriteString(prefix)
+	for _, r := range seed {
+		b.WriteByte(alphabet[int(r)%len(alphabet)])
+		if b.Len() >= 24 {
+			break
+		}
+	}
+	return b.String()
 }

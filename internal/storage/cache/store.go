@@ -148,6 +148,10 @@ func (s *Store) Put(ctx context.Context, entry Entry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if err := validateEntryIdentity(entry); err != nil {
+		return err
+	}
+
 	now := timeutil.NowUTC()
 	if entry.CreatedAt.IsZero() {
 		entry.CreatedAt = now
@@ -203,24 +207,8 @@ func (s *Store) Get(ctx context.Context, key string) (Entry, bool, error) {
 	}
 	metrics.Global().RecordCacheHit()
 
-	// Parse digests with proper error handling
-	if err := sqlutil.ScanJSON(digests, &entry.Digests); err != nil {
-		return Entry{}, false, fmt.Errorf("cache: scan digests: %w", err)
-	}
-
-	// Parse timestamps with proper error handling
-	var err error
-	entry.CreatedAt, err = sqlutil.ScanTimestamp(created)
-	if err != nil {
-		return Entry{}, false, fmt.Errorf("cache: scan created_at: %w", err)
-	}
-	entry.ExpiresAt, err = sqlutil.ScanTimestamp(expires)
-	if err != nil {
-		return Entry{}, false, fmt.Errorf("cache: scan expires_at: %w", err)
-	}
-	entry.LastAccessed, err = sqlutil.ScanTimestamp(last)
-	if err != nil {
-		return Entry{}, false, fmt.Errorf("cache: scan last_accessed: %w", err)
+	if err := decodeEntryFields(&entry, digests, created, expires, last, "scan"); err != nil {
+		return Entry{}, false, err
 	}
 
 	// refresh access metadata (best-effort)
@@ -275,23 +263,8 @@ func (s *Store) Recent(ctx context.Context, workspace string, limit int) ([]Entr
 			return nil, fmt.Errorf("cache: scan recent: %w", err)
 		}
 
-		// Parse digests with proper error handling
-		if err := sqlutil.ScanJSON(digests, &entry.Digests); err != nil {
-			return nil, fmt.Errorf("cache: scan recent digests: %w", err)
-		}
-
-		// Parse timestamps with proper error handling
-		entry.CreatedAt, err = sqlutil.ScanTimestamp(created)
-		if err != nil {
-			return nil, fmt.Errorf("cache: scan recent created_at: %w", err)
-		}
-		entry.ExpiresAt, err = sqlutil.ScanTimestamp(expires)
-		if err != nil {
-			return nil, fmt.Errorf("cache: scan recent expires_at: %w", err)
-		}
-		entry.LastAccessed, err = sqlutil.ScanTimestamp(last)
-		if err != nil {
-			return nil, fmt.Errorf("cache: scan recent last_accessed: %w", err)
+		if err := decodeEntryFields(&entry, digests, created, expires, last, "scan recent"); err != nil {
+			return nil, err
 		}
 
 		entries = append(entries, entry)
@@ -379,7 +352,7 @@ func BuildKey(manifest skill.Manifest, input []byte, extraDigests []string) (str
 	if err != nil {
 		return "", err
 	}
-	digests := append([]string{}, extraDigests...)
+	digests := normalizeCacheKeyDigests(extraDigests)
 	sort.Strings(digests)
 
 	h := sha256.New()
@@ -409,6 +382,23 @@ func BuildKey(manifest skill.Manifest, input []byte, extraDigests []string) (str
 	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
 }
 
+func normalizeCacheKeyDigests(digests []string) []string {
+	seen := make(map[string]struct{}, len(digests))
+	out := make([]string, 0, len(digests))
+	for _, digest := range digests {
+		digest = strings.TrimSpace(digest)
+		if digest == "" {
+			continue
+		}
+		if _, ok := seen[digest]; ok {
+			continue
+		}
+		seen[digest] = struct{}{}
+		out = append(out, digest)
+	}
+	return out
+}
+
 func canonicalArgs(input []byte) ([]byte, error) {
 	if len(strings.TrimSpace(string(input))) == 0 {
 		return canonicaljson.Marshal(map[string]any{})
@@ -426,7 +416,7 @@ func (s *Store) evictExpired(ctx context.Context) error {
 	defer s.mu.Unlock()
 
 	now := timeutil.FormatNowUTC()
-	rows, err := s.db.QueryContext(ctx, `SELECT cache_key, digests FROM auto_cache WHERE expires_at <= $1`, now)
+	rows, err := s.db.QueryContext(ctx, `SELECT cache_key, digests, expires_at FROM auto_cache WHERE expires_at <= $1`, now)
 	if err != nil {
 		return fmt.Errorf("cache: select expired: %w", err)
 	}
@@ -441,8 +431,12 @@ func (s *Store) evictExpired(ctx context.Context) error {
 	for rows.Next() {
 		var d doomed
 		var digests string
-		if err := rows.Scan(&d.key, &digests); err != nil {
+		var expires string
+		if err := rows.Scan(&d.key, &digests, &expires); err != nil {
 			return fmt.Errorf("cache: scan expired: %w", err)
+		}
+		if _, err := scanRequiredTimestamp(expires, "scan expired expires_at"); err != nil {
+			return err
 		}
 		if err := sqlutil.ScanJSON(digests, &d.digests); err != nil {
 			return fmt.Errorf("cache: scan expired digests: %w", err)
@@ -460,6 +454,54 @@ func (s *Store) evictExpired(ctx context.Context) error {
 		s.unpinDigests(ctx, d.digests)
 	}
 	return nil
+}
+
+func validateEntryIdentity(entry Entry) error {
+	if strings.TrimSpace(entry.CacheKey) == "" {
+		return fmt.Errorf("cache: missing cache_key")
+	}
+	if strings.TrimSpace(entry.SkillName) == "" {
+		return fmt.Errorf("cache: missing skill_name")
+	}
+	if strings.TrimSpace(entry.SkillVersion) == "" {
+		return fmt.Errorf("cache: missing skill_version")
+	}
+	return nil
+}
+
+func decodeEntryFields(entry *Entry, digests, created, expires, last, context string) error {
+	if entry.HitCount < 0 {
+		return fmt.Errorf("cache: %s hit_count: must be non-negative", context)
+	}
+	if err := sqlutil.ScanJSON(digests, &entry.Digests); err != nil {
+		return fmt.Errorf("cache: %s digests: %w", context, err)
+	}
+
+	var err error
+	entry.CreatedAt, err = scanRequiredTimestamp(created, context+" created_at")
+	if err != nil {
+		return err
+	}
+	entry.ExpiresAt, err = scanRequiredTimestamp(expires, context+" expires_at")
+	if err != nil {
+		return err
+	}
+	entry.LastAccessed, err = scanRequiredTimestamp(last, context+" last_accessed")
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func scanRequiredTimestamp(raw, field string) (time.Time, error) {
+	if strings.TrimSpace(raw) == "" {
+		return time.Time{}, fmt.Errorf("cache: %s: missing timestamp", field)
+	}
+	ts, err := sqlutil.ScanTimestamp(raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("cache: %s: %w", field, err)
+	}
+	return ts, nil
 }
 
 func (s *Store) pinDigests(ctx context.Context, digests []string) {

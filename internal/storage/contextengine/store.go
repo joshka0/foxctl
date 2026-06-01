@@ -177,6 +177,44 @@ func (s *sqliteStore) now() time.Time {
 	return s.clock.Now().UTC()
 }
 
+func decodeEvidenceRefs(column, raw string) ([]contextengine.EvidenceRef, error) {
+	var refs []contextengine.EvidenceRef
+	if err := json.Unmarshal([]byte(raw), &refs); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", column, err)
+	}
+	return refs, nil
+}
+
+func decodeStringSlice(column, raw string) ([]string, error) {
+	var values []string
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", column, err)
+	}
+	return values, nil
+}
+
+func decodeMetadata(column, raw string) (map[string]any, error) {
+	var metadata map[string]any
+	if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", column, err)
+	}
+	return metadata, nil
+}
+
+func decodeTime(column, raw string) (time.Time, error) {
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	t, err := time.Parse(time.RFC3339Nano, raw)
+	if err == nil {
+		return t, nil
+	}
+	if t, fallbackErr := time.Parse(time.RFC3339, raw); fallbackErr == nil {
+		return t, nil
+	}
+	return time.Time{}, fmt.Errorf("decode %s: %w", column, err)
+}
+
 // --- Events (append-only) ---
 
 func (s *sqliteStore) AppendEvent(ctx context.Context, event contextengine.ContextEvent) (contextengine.ContextEvent, error) {
@@ -263,9 +301,12 @@ func (s *sqliteStore) ListEvents(ctx context.Context, filter EventFilter) ([]con
 		if err := json.Unmarshal([]byte(dataJSON), &e.Data); err != nil {
 			return nil, fmt.Errorf("contextengine: unmarshal data: %w", err)
 		}
-		e.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
+		e.CreatedAt, err = decodeTime("created_at", createdAt)
 		if err != nil {
-			e.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+			return nil, fmt.Errorf("contextengine: scan event: %w", err)
+		}
+		if err := e.Validate(); err != nil {
+			return nil, fmt.Errorf("contextengine: scan event: %w", err)
 		}
 		events = append(events, e)
 	}
@@ -359,6 +400,9 @@ func (s *sqliteStore) GetEvidencePack(ctx context.Context, id string) (contexten
 	if err := json.Unmarshal([]byte(metadataJSON), &pack.Metadata); err != nil {
 		return contextengine.EvidencePack{}, fmt.Errorf("contextengine: unmarshal metadata: %w", err)
 	}
+	if err := pack.Validate(); err != nil {
+		return contextengine.EvidencePack{}, fmt.Errorf("contextengine: get pack: %w", err)
+	}
 	// Pack doesn't have CreatedAt in the domain type; skip returning it
 	return pack, nil
 }
@@ -445,15 +489,19 @@ func (s *sqliteStore) ListEvidenceNodes(ctx context.Context, workspaceID string,
 		node.NodeType = contextengine.EvidenceNodeType(nodeType)
 		node.Ref = contextengine.EvidenceRef{Type: contextengine.RefType(refType), Ref: refValue}
 		node.Grounding = contextengine.Grounding(grounding)
-		node.FirstSeen, _ = time.Parse(time.RFC3339Nano, firstSeen)
-		if node.FirstSeen.IsZero() {
-			node.FirstSeen, _ = time.Parse(time.RFC3339, firstSeen)
+		node.FirstSeen, err = decodeTime("first_seen", firstSeen)
+		if err != nil {
+			return nil, fmt.Errorf("contextengine: scan node: %w", err)
 		}
-		node.LastSeen, _ = time.Parse(time.RFC3339Nano, lastSeen)
-		if node.LastSeen.IsZero() {
-			node.LastSeen, _ = time.Parse(time.RFC3339, lastSeen)
+		node.LastSeen, err = decodeTime("last_seen", lastSeen)
+		if err != nil {
+			return nil, fmt.Errorf("contextengine: scan node: %w", err)
 		}
-		_ = json.Unmarshal([]byte(metadataJSON), &node.Metadata)
+		metadata, err := decodeMetadata("metadata", metadataJSON)
+		if err != nil {
+			return nil, fmt.Errorf("contextengine: scan node: %w", err)
+		}
+		node.Metadata = metadata
 
 		if casDigest != "" && s.cas != nil {
 			data, cerr := s.cas.Get(ctx, casDigest)
@@ -462,6 +510,9 @@ func (s *sqliteStore) ListEvidenceNodes(ctx context.Context, workspaceID string,
 			}
 		} else {
 			node.Statement = statement
+		}
+		if err := node.Validate(); err != nil {
+			return nil, fmt.Errorf("contextengine: scan node: %w", err)
 		}
 		nodes = append(nodes, node)
 	}
@@ -481,15 +532,20 @@ func (s *sqliteStore) scanNode(row *sql.Row) (contextengine.EvidenceNode, error)
 	node.NodeType = contextengine.EvidenceNodeType(nodeType)
 	node.Ref = contextengine.EvidenceRef{Type: contextengine.RefType(refType), Ref: refValue}
 	node.Grounding = contextengine.Grounding(grounding)
-	node.FirstSeen, _ = time.Parse(time.RFC3339Nano, firstSeen)
-	if node.FirstSeen.IsZero() {
-		node.FirstSeen, _ = time.Parse(time.RFC3339, firstSeen)
+	var err error
+	node.FirstSeen, err = decodeTime("first_seen", firstSeen)
+	if err != nil {
+		return contextengine.EvidenceNode{}, fmt.Errorf("contextengine: scan node: %w", err)
 	}
-	node.LastSeen, _ = time.Parse(time.RFC3339Nano, lastSeen)
-	if node.LastSeen.IsZero() {
-		node.LastSeen, _ = time.Parse(time.RFC3339, lastSeen)
+	node.LastSeen, err = decodeTime("last_seen", lastSeen)
+	if err != nil {
+		return contextengine.EvidenceNode{}, fmt.Errorf("contextengine: scan node: %w", err)
 	}
-	_ = json.Unmarshal([]byte(metadataJSON), &node.Metadata)
+	metadata, err := decodeMetadata("metadata", metadataJSON)
+	if err != nil {
+		return contextengine.EvidenceNode{}, fmt.Errorf("contextengine: scan node: %w", err)
+	}
+	node.Metadata = metadata
 
 	if casDigest != "" && s.cas != nil {
 		data, err := s.cas.Get(context.Background(), casDigest)
@@ -498,6 +554,9 @@ func (s *sqliteStore) scanNode(row *sql.Row) (contextengine.EvidenceNode, error)
 		}
 	} else {
 		node.Statement = statement
+	}
+	if err := node.Validate(); err != nil {
+		return contextengine.EvidenceNode{}, fmt.Errorf("contextengine: scan node: %w", err)
 	}
 	return node, nil
 }
@@ -603,14 +662,21 @@ func (s *sqliteStore) ListClaims(ctx context.Context, filter ClaimFilter) ([]con
 			return nil, fmt.Errorf("contextengine: scan claim: %w", err)
 		}
 		claim.Status = contextengine.ClaimStatus(status)
-		_ = json.Unmarshal([]byte(refsJSON), &claim.SourceRefs)
-		claim.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
-		if claim.CreatedAt.IsZero() {
-			claim.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		refs, err := decodeEvidenceRefs("source_refs", refsJSON)
+		if err != nil {
+			return nil, fmt.Errorf("contextengine: scan claim: %w", err)
 		}
-		claim.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
-		if claim.UpdatedAt.IsZero() {
-			claim.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
+		claim.SourceRefs = refs
+		claim.CreatedAt, err = decodeTime("created_at", createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("contextengine: scan claim: %w", err)
+		}
+		claim.UpdatedAt, err = decodeTime("updated_at", updatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("contextengine: scan claim: %w", err)
+		}
+		if err := claim.Validate(); err != nil {
+			return nil, fmt.Errorf("contextengine: scan claim: %w", err)
 		}
 		claims = append(claims, claim)
 	}
@@ -631,14 +697,21 @@ func (s *sqliteStore) scanClaim(row *sql.Row) (contextengine.MemoryClaim, error)
 		return contextengine.MemoryClaim{}, fmt.Errorf("contextengine: scan claim: %w", err)
 	}
 	claim.Status = contextengine.ClaimStatus(status)
-	_ = json.Unmarshal([]byte(refsJSON), &claim.SourceRefs)
-	claim.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
-	if claim.CreatedAt.IsZero() {
-		claim.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+	refs, err := decodeEvidenceRefs("source_refs", refsJSON)
+	if err != nil {
+		return contextengine.MemoryClaim{}, fmt.Errorf("contextengine: scan claim: %w", err)
 	}
-	claim.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
-	if claim.UpdatedAt.IsZero() {
-		claim.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
+	claim.SourceRefs = refs
+	claim.CreatedAt, err = decodeTime("created_at", createdAt)
+	if err != nil {
+		return contextengine.MemoryClaim{}, fmt.Errorf("contextengine: scan claim: %w", err)
+	}
+	claim.UpdatedAt, err = decodeTime("updated_at", updatedAt)
+	if err != nil {
+		return contextengine.MemoryClaim{}, fmt.Errorf("contextengine: scan claim: %w", err)
+	}
+	if err := claim.Validate(); err != nil {
+		return contextengine.MemoryClaim{}, fmt.Errorf("contextengine: scan claim: %w", err)
 	}
 	return claim, nil
 }
@@ -735,9 +808,13 @@ func (s *sqliteStore) scanEdges(rows *sql.Rows) ([]contextengine.ImpactEdge, err
 		edge.From = contextengine.EvidenceRef{Type: contextengine.RefType(fromType), Ref: fromRef}
 		edge.To = contextengine.EvidenceRef{Type: contextengine.RefType(toType), Ref: toRef}
 		edge.Kind = contextengine.ImpactEdgeKind(kind)
-		edge.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
-		if edge.CreatedAt.IsZero() {
-			edge.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		parsedAt, err := decodeTime("created_at", createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("contextengine: scan edge: %w", err)
+		}
+		edge.CreatedAt = parsedAt
+		if err := edge.Validate(); err != nil {
+			return nil, fmt.Errorf("contextengine: scan edge: %w", err)
 		}
 		edges = append(edges, edge)
 	}
@@ -831,14 +908,21 @@ func (s *sqliteStore) ListStaleness(ctx context.Context, filter StalenessFilter)
 		}
 		marker.TargetRef = contextengine.EvidenceRef{Type: contextengine.RefType(targetType), Ref: targetValue}
 		marker.Status = contextengine.StalenessStatus(status)
-		_ = json.Unmarshal([]byte(causedJSON), &marker.CausedByEvents)
-		marker.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
-		if marker.CreatedAt.IsZero() {
-			marker.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		events, err := decodeStringSlice("caused_by_events", causedJSON)
+		if err != nil {
+			return nil, fmt.Errorf("contextengine: scan staleness: %w", err)
 		}
-		marker.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
-		if marker.UpdatedAt.IsZero() {
-			marker.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
+		marker.CausedByEvents = events
+		marker.CreatedAt, err = decodeTime("created_at", createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("contextengine: scan staleness: %w", err)
+		}
+		marker.UpdatedAt, err = decodeTime("updated_at", updatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("contextengine: scan staleness: %w", err)
+		}
+		if err := marker.Validate(); err != nil {
+			return nil, fmt.Errorf("contextengine: scan staleness: %w", err)
 		}
 		markers = append(markers, marker)
 	}
@@ -858,14 +942,21 @@ func (s *sqliteStore) scanStaleness(row *sql.Row) (contextengine.StalenessMarker
 	}
 	marker.TargetRef = contextengine.EvidenceRef{Type: contextengine.RefType(targetType), Ref: targetValue}
 	marker.Status = contextengine.StalenessStatus(status)
-	_ = json.Unmarshal([]byte(causedJSON), &marker.CausedByEvents)
-	marker.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
-	if marker.CreatedAt.IsZero() {
-		marker.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+	events, err := decodeStringSlice("caused_by_events", causedJSON)
+	if err != nil {
+		return contextengine.StalenessMarker{}, fmt.Errorf("contextengine: scan staleness: %w", err)
 	}
-	marker.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt)
-	if marker.UpdatedAt.IsZero() {
-		marker.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
+	marker.CausedByEvents = events
+	marker.CreatedAt, err = decodeTime("created_at", createdAt)
+	if err != nil {
+		return contextengine.StalenessMarker{}, fmt.Errorf("contextengine: scan staleness: %w", err)
+	}
+	marker.UpdatedAt, err = decodeTime("updated_at", updatedAt)
+	if err != nil {
+		return contextengine.StalenessMarker{}, fmt.Errorf("contextengine: scan staleness: %w", err)
+	}
+	if err := marker.Validate(); err != nil {
+		return contextengine.StalenessMarker{}, fmt.Errorf("contextengine: scan staleness: %w", err)
 	}
 	return marker, nil
 }
@@ -927,17 +1018,19 @@ func (s *sqliteStore) GetProjection(ctx context.Context, workspaceID, id string)
 		return "", 0, "", nil, nil, time.Time{}, time.Time{}, fmt.Errorf("contextengine: get projection: %w", err)
 	}
 
-	var events []string
-	_ = json.Unmarshal([]byte(eventsJSON), &events)
+	events, err := decodeStringSlice("generated_from_events", eventsJSON)
+	if err != nil {
+		return "", 0, "", nil, nil, time.Time{}, time.Time{}, fmt.Errorf("contextengine: get projection: %w", err)
+	}
 	payload := json.RawMessage(payloadStr)
 
-	ga, _ := time.Parse(time.RFC3339Nano, generatedAt)
-	if ga.IsZero() {
-		ga, _ = time.Parse(time.RFC3339, generatedAt)
+	ga, err := decodeTime("generated_at", generatedAt)
+	if err != nil {
+		return "", 0, "", nil, nil, time.Time{}, time.Time{}, fmt.Errorf("contextengine: get projection: %w", err)
 	}
-	ea, _ := time.Parse(time.RFC3339Nano, expiresAt)
-	if ea.IsZero() {
-		ea, _ = time.Parse(time.RFC3339, expiresAt)
+	ea, err := decodeTime("expires_at", expiresAt)
+	if err != nil {
+		return "", 0, "", nil, nil, time.Time{}, time.Time{}, fmt.Errorf("contextengine: get projection: %w", err)
 	}
 
 	return projectionType, version, taskID, events, payload, ga, ea, nil
@@ -983,19 +1076,23 @@ func (s *sqliteStore) ListProjections(ctx context.Context, filter ProjectionFilt
 			&eventsJSON, &payloadStr, &generatedAt, &expiresAt, &createdAt); err != nil {
 			return nil, fmt.Errorf("contextengine: scan projection: %w", err)
 		}
-		_ = json.Unmarshal([]byte(eventsJSON), &r.GeneratedFromEvents)
+		events, err := decodeStringSlice("generated_from_events", eventsJSON)
+		if err != nil {
+			return nil, fmt.Errorf("contextengine: scan projection: %w", err)
+		}
+		r.GeneratedFromEvents = events
 		r.Payload = json.RawMessage(payloadStr)
-		r.GeneratedAt, _ = time.Parse(time.RFC3339Nano, generatedAt)
-		if r.GeneratedAt.IsZero() {
-			r.GeneratedAt, _ = time.Parse(time.RFC3339, generatedAt)
+		r.GeneratedAt, err = decodeTime("generated_at", generatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("contextengine: scan projection: %w", err)
 		}
-		r.ExpiresAt, _ = time.Parse(time.RFC3339Nano, expiresAt)
-		if r.ExpiresAt.IsZero() {
-			r.ExpiresAt, _ = time.Parse(time.RFC3339, expiresAt)
+		r.ExpiresAt, err = decodeTime("expires_at", expiresAt)
+		if err != nil {
+			return nil, fmt.Errorf("contextengine: scan projection: %w", err)
 		}
-		r.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
-		if r.CreatedAt.IsZero() {
-			r.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		r.CreatedAt, err = decodeTime("created_at", createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("contextengine: scan projection: %w", err)
 		}
 		results = append(results, r)
 	}
@@ -1061,10 +1158,17 @@ func scanRetrievalEpisode(row rowScanner) (contextengine.RetrievalEpisode, error
 		return contextengine.RetrievalEpisode{}, err
 	}
 	episode.Lane = contextengine.EvidenceLane(lane)
-	_ = json.Unmarshal([]byte(subsJSON), &episode.SubEpisodeIDs)
-	episode.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
-	if episode.CreatedAt.IsZero() {
-		episode.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+	subs, err := decodeStringSlice("sub_episode_ids", subsJSON)
+	if err != nil {
+		return contextengine.RetrievalEpisode{}, fmt.Errorf("contextengine: scan episode: %w", err)
+	}
+	episode.SubEpisodeIDs = subs
+	episode.CreatedAt, err = decodeTime("created_at", createdAt)
+	if err != nil {
+		return contextengine.RetrievalEpisode{}, fmt.Errorf("contextengine: scan episode: %w", err)
+	}
+	if err := episode.Validate(); err != nil {
+		return contextengine.RetrievalEpisode{}, fmt.Errorf("contextengine: scan episode: %w", err)
 	}
 	return episode, nil
 }
@@ -1163,10 +1267,17 @@ func scanRetrievalFeedback(row rowScanner) (contextengine.RetrievalFeedback, err
 		return contextengine.RetrievalFeedback{}, err
 	}
 	feedback.Kind = contextengine.RetrievalFeedbackKind(kind)
-	_ = json.Unmarshal([]byte(refsJSON), &feedback.UsedRefs)
-	feedback.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
-	if feedback.CreatedAt.IsZero() {
-		feedback.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+	refs, err := decodeEvidenceRefs("used_refs", refsJSON)
+	if err != nil {
+		return contextengine.RetrievalFeedback{}, fmt.Errorf("contextengine: scan feedback: %w", err)
+	}
+	feedback.UsedRefs = refs
+	feedback.CreatedAt, err = decodeTime("created_at", createdAt)
+	if err != nil {
+		return contextengine.RetrievalFeedback{}, fmt.Errorf("contextengine: scan feedback: %w", err)
+	}
+	if err := feedback.Validate(); err != nil {
+		return contextengine.RetrievalFeedback{}, fmt.Errorf("contextengine: scan feedback: %w", err)
 	}
 	return feedback, nil
 }

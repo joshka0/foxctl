@@ -2,6 +2,7 @@ package searchindex
 
 import (
 	"context"
+	"math"
 	"testing"
 )
 
@@ -333,6 +334,63 @@ func TestStoreEmbeddingMetadataValidation(t *testing.T) {
 
 	if _, err := store.VectorRecall(testCtx, workspace, []float32{1, 0}, VectorRecallOptions{EmbeddingModel: "model-a"}); err == nil {
 		t.Fatal("expected vector recall dimension mismatch error")
+	}
+}
+
+func TestStoreUpsertRejectsNonFiniteEmbeddingWithoutPartialMetadata(t *testing.T) {
+	testCtx := context.Background()
+
+	tests := []struct {
+		name      string
+		embedding []float32
+	}{
+		{name: "nan", embedding: []float32{float32(math.NaN()), 0.2, 0.3}},
+		{name: "positive infinity", embedding: []float32{float32(math.Inf(1)), 0.2, 0.3}},
+		{name: "negative infinity", embedding: []float32{float32(math.Inf(-1)), 0.2, 0.3}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store, err := Open(testCtx, t.TempDir())
+			if err != nil {
+				t.Fatalf("open search index: %v", err)
+			}
+			defer func() { _ = store.Close() }()
+
+			workspace := "ws-non-finite-" + tt.name
+			err = store.Upsert(testCtx, Document{
+				ID:             "search://" + workspace + "/symbol/a",
+				WorkspaceID:    workspace,
+				Scope:          ScopeCode,
+				Kind:           KindSymbol,
+				GroupKey:       "alpha.go",
+				Path:           "alpha.go",
+				Title:          "alpha",
+				Summary:        "alpha document",
+				SearchText:     "alpha function",
+				Embedding:      tt.embedding,
+				EmbeddingModel: "model-a",
+			})
+			if err == nil {
+				t.Fatalf("expected non-finite embedding %s to be rejected", tt.name)
+			}
+
+			count, err := store.CountWorkspace(testCtx, workspace)
+			if err != nil {
+				t.Fatalf("CountWorkspace() error = %v", err)
+			}
+			if count != 0 {
+				t.Fatalf("persisted %d document(s) for rejected embedding", count)
+			}
+
+			meta, err := store.GetEmbeddingMetadata(testCtx, workspace)
+			if err != nil {
+				t.Fatalf("GetEmbeddingMetadata() error = %v", err)
+			}
+			if meta != nil {
+				t.Fatalf("persisted metadata for rejected embedding: %+v", meta)
+			}
+		})
 	}
 }
 

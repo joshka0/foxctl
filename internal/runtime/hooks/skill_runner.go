@@ -101,13 +101,27 @@ func parseSkillOutput(data []byte) (Output, error) {
 		return NewApprove("skill completed", nil), nil
 	}
 
-	if env, err := protocol.DecodeEnvelope(data); err == nil && env.Version != 0 {
+	if declaresEnvelopeVersion(data) {
+		env, err := protocol.DecodeEnvelope(data)
+		if err != nil {
+			return Output{}, fmt.Errorf("invalid envelope: %w", err)
+		}
+		if err := protocol.Validate(env); err != nil {
+			return Output{}, fmt.Errorf("invalid envelope: %w", err)
+		}
 		if env.Status == envelope.StatusError {
 			return Output{}, protocol.EnvelopeStatusErrorFromEnvelope(env)
 		}
 		if payload, ok := maputil.AsStringMap(env.Data); ok {
 			if hookRaw, ok := payload["hook_output"]; ok {
-				if hookOutput, ok := decodeHookOutput(hookRaw); ok && hookOutput.Decision != "" {
+				hookOutput, err := decodeHookOutput(hookRaw)
+				if err != nil {
+					return Output{}, fmt.Errorf("invalid hook_output: %w", err)
+				}
+				if hookOutput.Decision != "" {
+					if !hookOutput.Decision.IsValid() {
+						return Output{}, fmt.Errorf("invalid hook decision %q", hookOutput.Decision)
+					}
 					return hookOutput, nil
 				}
 			}
@@ -125,6 +139,9 @@ func parseSkillOutput(data []byte) (Output, error) {
 
 	// If it has a decision, it's a valid hook output
 	if out.Decision != "" {
+		if !out.Decision.IsValid() {
+			return Output{}, fmt.Errorf("invalid hook decision %q", out.Decision)
+		}
 		return out, nil
 	}
 
@@ -132,22 +149,31 @@ func parseSkillOutput(data []byte) (Output, error) {
 	return NewApprove("skill completed", nil), nil
 }
 
-func decodeHookOutput(value any) (Output, bool) {
+func declaresEnvelopeVersion(data []byte) bool {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return false
+	}
+	_, ok := payload["version"]
+	return ok
+}
+
+func decodeHookOutput(value any) (Output, error) {
 	switch v := value.(type) {
 	case Output:
-		return v, v.Decision != ""
+		return v, nil
 	case map[string]any:
 		payload, err := json.Marshal(v)
 		if err != nil {
-			return Output{}, false
+			return Output{}, err
 		}
 		var out Output
 		if err := json.Unmarshal(payload, &out); err != nil {
-			return Output{}, false
+			return Output{}, err
 		}
-		return out, out.Decision != ""
+		return out, nil
 	default:
-		return Output{}, false
+		return Output{}, fmt.Errorf("expected object, got %T", value)
 	}
 }
 

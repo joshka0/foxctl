@@ -1,6 +1,7 @@
 package optimization
 
 import (
+	"math"
 	"strings"
 	"unicode"
 )
@@ -22,6 +23,10 @@ type PromptJudgeWeights struct {
 
 // Normalize adjusts weights to sum to 1 when positive.
 func (w *PromptJudgeWeights) Normalize() {
+	w.TargetSimilarity = promptJudgeUsableWeight(w.TargetSimilarity)
+	w.QuerySimilarity = promptJudgeUsableWeight(w.QuerySimilarity)
+	w.LengthQuality = promptJudgeUsableWeight(w.LengthQuality)
+
 	sum := w.TargetSimilarity + w.QuerySimilarity + w.LengthQuality
 	if sum <= 0 {
 		return
@@ -29,6 +34,13 @@ func (w *PromptJudgeWeights) Normalize() {
 	w.TargetSimilarity /= sum
 	w.QuerySimilarity /= sum
 	w.LengthQuality /= sum
+}
+
+func promptJudgeUsableWeight(value float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+		return 0
+	}
+	return value
 }
 
 // DefaultPromptJudgeWeights returns the initial heuristic weighting.

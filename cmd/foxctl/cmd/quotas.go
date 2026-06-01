@@ -133,15 +133,7 @@ func runQuotasShow(cmd *cobra.Command, args []string) error {
 
 func runQuotasSet(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
-	cfg := config.MustFromContext(ctx)
 	ns := args[0]
-
-	// Open quotas store
-	quotasStore, err := quotas.Open(ctx, cfg.Storage.Root)
-	if err != nil {
-		return writeErrorEnvelope(cmd, "quotas/set", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open quotas store: %v", err))
-	}
-	defer func() { errs.Ignore(quotasStore.Close(), "close quotas store") }()
 
 	// Create quotas
 	q := agent.Quotas{
@@ -152,6 +144,18 @@ func runQuotasSet(cmd *cobra.Command, args []string) error {
 		LLMCallsPerMin:    quotasSetLLMPerMin,
 		EgressBytesPerMin: quotasSetEgressPerMin,
 	}
+	if err := quotas.ValidateLimits(q); err != nil {
+		return writeErrorEnvelope(cmd, "quotas/set", string(protocol.ErrorCodeEARG), err.Error())
+	}
+
+	cfg := config.MustFromContext(ctx)
+
+	// Open quotas store
+	quotasStore, err := quotas.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "quotas/set", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open quotas store: %v", err))
+	}
+	defer func() { errs.Ignore(quotasStore.Close(), "close quotas store") }()
 
 	// Try to update first, if not found then set
 	err = quotasStore.Update(ctx, ns, q)

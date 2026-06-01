@@ -2,8 +2,14 @@ package skillout
 
 import (
 	"bytes"
+	"context"
+	"io"
 	"strings"
 	"testing"
+
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/storage/cas"
 )
 
 func TestEmitPreview(t *testing.T) {
@@ -168,5 +174,48 @@ func TestDefaultPreviewOpts(t *testing.T) {
 	}
 	if opts.TruncateMsg == "" {
 		t.Error("TruncateMsg should not be empty")
+	}
+}
+
+func TestPreviewAndPersistNDJSONPersistsResultArtifactWhenNoCASDisablesTruncation(t *testing.T) {
+	ctx := context.Background()
+	store, err := cas.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("new cas store: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close cas store: %v", err)
+		}
+	})
+
+	rc := &skillmain.RunContext{
+		Config: config.Config{
+			CAS: config.CASPolicy{Store: true},
+		},
+		CASStore:   store,
+		MaxPreview: 2,
+		NoCAS:      true,
+	}
+
+	result, err := PreviewAndPersistNDJSON(ctx, rc, []int{1, 2, 3}, 0, "numbers", true)
+	if err != nil {
+		t.Fatalf("PreviewAndPersistNDJSON returned error: %v", err)
+	}
+	if result.Artifact == nil || result.Artifact.Digest == "" {
+		t.Fatalf("expected result artifact despite NoCAS, got %+v", result.Artifact)
+	}
+
+	reader, _, err := store.Get(ctx, result.Artifact.Digest)
+	if err != nil {
+		t.Fatalf("read artifact: %v", err)
+	}
+	defer reader.Close()
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read artifact body: %v", err)
+	}
+	if got := strings.TrimSpace(string(body)); got != "1\n2\n3" {
+		t.Fatalf("artifact body = %q, want NDJSON numbers", got)
 	}
 }

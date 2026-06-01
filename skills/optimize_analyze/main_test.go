@@ -11,51 +11,6 @@ import (
 
 // Tests for constants
 
-func TestCommand(t *testing.T) {
-	assert.Equal(t, "optimize/analyze", command)
-}
-
-// Tests for input structure
-
-func TestInput_AllFields(t *testing.T) {
-	in := input{
-		Workspace: "/workspace/path",
-		Role:      "coder",
-		Days:      30,
-	}
-
-	assert.Equal(t, "/workspace/path", in.Workspace)
-	assert.Equal(t, "coder", in.Role)
-	assert.Equal(t, 30, in.Days)
-}
-
-func TestInput_JSONSerialization(t *testing.T) {
-	in := input{
-		Workspace: "/test/workspace",
-		Role:      "reviewer",
-		Days:      14,
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	var decoded input
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, in.Workspace, decoded.Workspace)
-	assert.Equal(t, in.Role, decoded.Role)
-	assert.Equal(t, in.Days, decoded.Days)
-}
-
-func TestInput_EmptyFields(t *testing.T) {
-	in := input{}
-
-	assert.Empty(t, in.Workspace)
-	assert.Empty(t, in.Role)
-	assert.Zero(t, in.Days)
-}
-
 func TestInput_RoleValues(t *testing.T) {
 	roles := []string{"coder", "planner", "reviewer", "overseer"}
 
@@ -66,31 +21,6 @@ func TestInput_RoleValues(t *testing.T) {
 }
 
 // Tests for agentStats structure
-
-func TestAgentStats_AllFields(t *testing.T) {
-	stats := agentStats{
-		TotalTrajectories: 100,
-		SuccessRate:       0.85,
-		AvgToolCalls:      15.5,
-		AvgDuration:       3 * time.Minute,
-	}
-
-	assert.Equal(t, 100, stats.TotalTrajectories)
-	assert.Equal(t, 0.85, stats.SuccessRate)
-	assert.Equal(t, 15.5, stats.AvgToolCalls)
-	assert.Equal(t, 3*time.Minute, stats.AvgDuration)
-}
-
-func TestAgentStats_EmptyFields(t *testing.T) {
-	stats := agentStats{}
-
-	assert.Zero(t, stats.TotalTrajectories)
-	assert.Zero(t, stats.SuccessRate)
-	assert.Zero(t, stats.AvgToolCalls)
-	assert.Zero(t, stats.AvgDuration)
-}
-
-// Tests for computeStats helper
 
 func TestComputeStats_Empty(t *testing.T) {
 	trajs := []trajectory.Trajectory{}

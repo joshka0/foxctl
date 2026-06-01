@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"testing/quick"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/platform/config"
@@ -346,6 +348,140 @@ func TestReplaceMultipleOperations(t *testing.T) {
 	if string(modified) != expected {
 		t.Fatalf("expected %q, got %q", expected, string(modified))
 	}
+}
+
+func TestReplaceRejectsEmptyOperationPatternWithoutMutatingFile(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	work := filepath.Join(tmp, "workspace")
+	if err := os.MkdirAll(work, 0o755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	content := "abc\n"
+	testFile := filepath.Join(work, "test.txt")
+	if err := os.WriteFile(testFile, []byte(content), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	buf := &bytes.Buffer{}
+	rc := newTestRunnerContext(t, buf, work)
+	t.Cleanup(func() {
+		if err := rc.Close(); err != nil {
+			t.Fatalf("close runner context: %v", err)
+		}
+	})
+
+	err := run(ctx, rc, input{
+		Paths: []string{testFile},
+		Operations: []operation{
+			{Pattern: "", Replacement: "X", Literal: true},
+		},
+		MaxFiles: 100,
+	})
+	if err == nil {
+		t.Fatal("expected empty operation pattern to be rejected")
+	}
+
+	got, readErr := os.ReadFile(testFile)
+	if readErr != nil {
+		t.Fatalf("read file: %v", readErr)
+	}
+	if string(got) != content {
+		t.Fatalf("invalid operation mutated file: got %q want %q", string(got), content)
+	}
+}
+
+func TestBuildReplacerPropertyRejectsWhitespaceOnlyPatterns(t *testing.T) {
+	err := quick.Check(func(raw string, literal bool) bool {
+		if strings.TrimSpace(raw) != "" {
+			return true
+		}
+		_, err := buildReplacer(operation{Pattern: raw, Replacement: "x", Literal: literal}, false, false, false)
+		return err != nil
+	}, &quick.Config{MaxCount: 100})
+	if err != nil {
+		t.Fatalf("whitespace pattern property failed: %v", err)
+	}
+}
+
+func FuzzBuildReplacerMaintainsReplacementInvariants(f *testing.F) {
+	seeds := []struct {
+		pattern         string
+		replacement     string
+		content         string
+		literal         bool
+		caseInsensitive bool
+		wordBoundary    bool
+		multiline       bool
+	}{
+		{pattern: "fox", replacement: "cat", content: "fox fox\n", literal: true},
+		{pattern: "fox", replacement: "$0hound", content: "fox\nFOX\n", caseInsensitive: true},
+		{pattern: `(?m)^name=(.*)$`, replacement: "name=$1_test", content: "name=fox\nother=true\n", multiline: true},
+		{pattern: "id", replacement: "ID", content: "grid id identity\n", wordBoundary: true},
+		{pattern: "", replacement: "x", content: "abc", literal: true},
+		{pattern: "[", replacement: "x", content: "abc"},
+	}
+	for _, seed := range seeds {
+		f.Add(seed.pattern, seed.replacement, seed.content, seed.literal, seed.caseInsensitive, seed.wordBoundary, seed.multiline)
+	}
+
+	f.Fuzz(func(t *testing.T, pattern, replacement, content string, literal, caseInsensitive, wordBoundary, multiline bool) {
+		const (
+			maxPatternLen     = 1024
+			maxReplacementLen = 512
+			maxContentLen     = 2048
+			maxOutputGrowth   = 1 << 20
+		)
+		if len(pattern) > maxPatternLen || len(replacement) > maxReplacementLen || len(content) > maxContentLen {
+			t.Skip("input too large for focused text replacement fuzzing")
+		}
+
+		r, err := buildReplacer(operation{
+			Pattern:     pattern,
+			Replacement: replacement,
+			Literal:     literal,
+		}, caseInsensitive, wordBoundary, multiline)
+		if strings.TrimSpace(pattern) == "" {
+			if err == nil {
+				t.Fatalf("empty or whitespace-only pattern compiled successfully")
+			}
+			return
+		}
+		if err != nil {
+			return
+		}
+
+		var wantModified string
+		var wantCount int
+		switch typed := r.(type) {
+		case *literalReplacer:
+			wantCount = strings.Count(content, pattern)
+			if wantCount*len(replacement) > maxOutputGrowth {
+				t.Skip("literal replacement output too large for focused fuzzing")
+			}
+			wantModified = strings.ReplaceAll(content, pattern, replacement)
+		case *regexReplacer:
+			wantCount = len(typed.pattern.FindAllStringIndex(content, -1))
+			if wantCount*len(replacement) > maxOutputGrowth {
+				t.Skip("regex replacement output too large for focused fuzzing")
+			}
+			wantModified = typed.pattern.ReplaceAllString(content, replacement)
+		default:
+			t.Fatalf("unexpected replacer type %T", r)
+		}
+
+		matched := r.Match(content)
+		modified, count := r.Replace(content)
+		if count != wantCount {
+			t.Fatalf("replacement count = %d, want %d", count, wantCount)
+		}
+		if modified != wantModified {
+			t.Fatalf("replacement output = %q, want %q", modified, wantModified)
+		}
+		if matched != (wantCount > 0) {
+			t.Fatalf("match result = %v, want %v", matched, wantCount > 0)
+		}
+	})
 }
 
 func TestReplaceBinarySkip(t *testing.T) {

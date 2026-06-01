@@ -250,12 +250,16 @@ func extractArtifactFromRawJSON(raw json.RawMessage) (string, bool, error) {
 	if len(raw) == 0 {
 		return "", true, nil
 	}
+	var direct string
+	if err := json.Unmarshal(raw, &direct); err == nil {
+		return strings.TrimSpace(direct), true, nil
+	}
 	var decoded map[string]any
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		return "", true, fmt.Errorf("decode artifact raw message: %w", err)
 	}
 	if artifact, ok := decoded["artifact"].(string); ok && artifact != "" {
-		return artifact, true, nil
+		return strings.TrimSpace(artifact), true, nil
 	}
 	return "", true, nil
 }
@@ -421,6 +425,9 @@ func statusCodeFromJSONRaw(raw json.RawMessage) (int, bool) {
 	var decoded any
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		return 0, false
+	}
+	if code, ok := parseStatusCodeValue(decoded); ok {
+		return code, true
 	}
 	return statusCodeFromSummary(decoded)
 }

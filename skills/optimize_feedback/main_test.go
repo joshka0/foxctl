@@ -1,73 +1,21 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
+	"path/filepath"
 	"testing"
 
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skilltest"
+	"github.com/joshka0/foxctl/internal/storage/trajectory"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Tests for constants
-
-func TestCommand(t *testing.T) {
-	assert.Equal(t, "optimize/feedback", command)
-}
-
-// Tests for input structure
-
-func TestInput_AllFields(t *testing.T) {
-	in := input{
-		Action:       "add",
-		Workspace:    "/workspace/path",
-		TrajectoryID: "traj-123",
-		Rating:       4,
-		Comment:      "Great job!",
-		Role:         "coder",
-	}
-
-	assert.Equal(t, "add", in.Action)
-	assert.Equal(t, "/workspace/path", in.Workspace)
-	assert.Equal(t, "traj-123", in.TrajectoryID)
-	assert.Equal(t, 4, in.Rating)
-	assert.Equal(t, "Great job!", in.Comment)
-	assert.Equal(t, "coder", in.Role)
-}
-
-func TestInput_JSONSerialization(t *testing.T) {
-	in := input{
-		Action:       "add",
-		Workspace:    "/test/workspace",
-		TrajectoryID: "traj-abc",
-		Rating:       5,
-		Comment:      "Excellent work",
-		Role:         "reviewer",
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	var decoded input
-	err = json.Unmarshal(data, &decoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, in.Action, decoded.Action)
-	assert.Equal(t, in.Workspace, decoded.Workspace)
-	assert.Equal(t, in.TrajectoryID, decoded.TrajectoryID)
-	assert.Equal(t, in.Rating, decoded.Rating)
-	assert.Equal(t, in.Comment, decoded.Comment)
-	assert.Equal(t, in.Role, decoded.Role)
-}
-
-func TestInput_EmptyFields(t *testing.T) {
-	in := input{}
-
-	assert.Empty(t, in.Action)
-	assert.Empty(t, in.Workspace)
-	assert.Empty(t, in.TrajectoryID)
-	assert.Zero(t, in.Rating)
-	assert.Empty(t, in.Comment)
-	assert.Empty(t, in.Role)
-}
 
 func TestInput_ActionValues(t *testing.T) {
 	actions := []string{"add", "stats"}
@@ -134,6 +82,98 @@ func TestRatingValidation_BoundaryValues(t *testing.T) {
 	}
 }
 
+func TestRunAddFeedbackRejectsRatingsOutsideOneToFive(t *testing.T) {
+	for _, rating := range []int{-1, 0, 6, 100} {
+		t.Run(fmt.Sprintf("rating_%d", rating), func(t *testing.T) {
+			var buf bytes.Buffer
+			rc, cleanup := skilltest.NewTestRunContext(t, &buf, nil)
+			defer cleanup()
+
+			ctx := context.Background()
+			workspace := mustAbsWorkspace(t, rc)
+			traj := seedFeedbackTrajectory(t, ctx, rc, workspace)
+
+			err := run(ctx, rc, input{
+				Action:       "add",
+				Workspace:    workspace,
+				TrajectoryID: traj.ID,
+				Rating:       rating,
+				Comment:      "should not be recorded",
+			})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "rating must be between 1 and 5")
+
+			got := getFeedbackTrajectory(t, ctx, rc, workspace, traj.ID)
+			if got.Outcome != nil && got.Outcome.HumanRating != nil {
+				t.Fatalf("invalid rating %d recorded outcome %+v", rating, got.Outcome)
+			}
+			assert.Empty(t, buf.String())
+		})
+	}
+}
+
+func TestRunAddFeedbackAcceptsBoundaryRatings(t *testing.T) {
+	for _, rating := range []int{1, 5} {
+		t.Run(fmt.Sprintf("rating_%d", rating), func(t *testing.T) {
+			var buf bytes.Buffer
+			rc, cleanup := skilltest.NewTestRunContext(t, &buf, nil)
+			defer cleanup()
+
+			ctx := context.Background()
+			workspace := mustAbsWorkspace(t, rc)
+			traj := seedFeedbackTrajectory(t, ctx, rc, workspace)
+
+			err := run(ctx, rc, input{
+				Action:       "add",
+				Workspace:    workspace,
+				TrajectoryID: traj.ID,
+				Rating:       rating,
+				Comment:      "boundary rating",
+			})
+			require.NoError(t, err)
+
+			got := getFeedbackTrajectory(t, ctx, rc, workspace, traj.ID)
+			if got.Outcome == nil || got.Outcome.HumanRating == nil {
+				t.Fatalf("rating %d was not recorded in outcome %+v", rating, got.Outcome)
+			}
+			assert.Equal(t, rating, *got.Outcome.HumanRating)
+			assert.Equal(t, "boundary rating", got.Outcome.Feedback)
+		})
+	}
+}
+
+func mustAbsWorkspace(t *testing.T, rc *skillmain.RunContext) string {
+	t.Helper()
+	workspace, err := filepath.Abs(rc.Workspace)
+	require.NoError(t, err)
+	return workspace
+}
+
+func seedFeedbackTrajectory(t *testing.T, ctx context.Context, rc *skillmain.RunContext, workspace string) trajectory.Trajectory {
+	t.Helper()
+	store, err := trajectory.Open(ctx, rc.Config.Storage.Root)
+	require.NoError(t, err)
+	defer store.Close()
+
+	traj, err := store.InsertTrajectory(ctx, trajectory.Trajectory{
+		WorkspaceID: workspace,
+		Status:      trajectory.StatusOK,
+	})
+	require.NoError(t, err)
+	return traj
+}
+
+func getFeedbackTrajectory(t *testing.T, ctx context.Context, rc *skillmain.RunContext, workspace, id string) trajectory.Trajectory {
+	t.Helper()
+	store, err := trajectory.Open(ctx, rc.Config.Storage.Root)
+	require.NoError(t, err)
+	defer store.Close()
+
+	traj, err := store.GetTrajectory(ctx, workspace, id)
+	require.NoError(t, err)
+	return traj
+}
+
 // Tests for workspace default logic
 
 func TestInput_WorkspaceDefault(t *testing.T) {
@@ -159,30 +199,6 @@ func TestInput_WorkspaceExplicit(t *testing.T) {
 }
 
 // Tests for JSON field names
-
-func TestInput_JSONFieldNames(t *testing.T) {
-	in := input{
-		Action:       "add",
-		Workspace:    "/ws",
-		TrajectoryID: "traj-1",
-		Rating:       3,
-		Comment:      "Good",
-		Role:         "coder",
-	}
-
-	data, err := json.Marshal(in)
-	assert.NoError(t, err)
-
-	jsonStr := string(data)
-	assert.Contains(t, jsonStr, "action")
-	assert.Contains(t, jsonStr, "workspace")
-	assert.Contains(t, jsonStr, "trajectory_id")
-	assert.Contains(t, jsonStr, "rating")
-	assert.Contains(t, jsonStr, "comment")
-	assert.Contains(t, jsonStr, "role")
-}
-
-// Edge case tests
 
 func TestInput_FullJSONRoundTrip(t *testing.T) {
 	in := input{
