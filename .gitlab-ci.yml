@@ -18,6 +18,7 @@ stages:
   - prepare
   - check
   - build
+  - verify
 
 default:
   interruptible: true
@@ -95,7 +96,7 @@ static-analysis:
     - make check-large-files
     - make check-tech-debt
 
-unit-tests:
+unit-tests-core:
   stage: check
   variables:
     CGO_ENABLED: "0"
@@ -108,9 +109,28 @@ unit-tests:
         base_ref="$(git merge-base HEAD "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME")"
       fi
       if [ -n "$base_ref" ] && [ "$CI_COMMIT_BRANCH" != "main" ]; then
-        make test-short-impacted BASE_REF="$base_ref" HEAD_REF=HEAD 2>&1 | tee test-output.txt
+        make test-short-core-impacted BASE_REF="$base_ref" HEAD_REF=HEAD 2>&1 | tee test-output.txt
       else
-        go test -short -v -count=1 -timeout 20m ./... 2>&1 | tee test-output.txt
+        make test-short-core 2>&1 | tee test-output.txt
+      fi
+    - grep -E '(^--- |ok\s+|FAIL\s+|panic)' test-output.txt | head -100 || true
+
+unit-tests-skills:
+  stage: check
+  variables:
+    CGO_ENABLED: "0"
+  script:
+    - |
+      base_ref=""
+      if [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ] && git cat-file -e "$CI_MERGE_REQUEST_DIFF_BASE_SHA^{commit}" >/dev/null 2>&1; then
+        base_ref="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+      elif [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ] && git rev-parse --verify "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" >/dev/null 2>&1; then
+        base_ref="$(git merge-base HEAD "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME")"
+      fi
+      if [ -n "$base_ref" ] && [ "$CI_COMMIT_BRANCH" != "main" ]; then
+        make test-short-skills-impacted BASE_REF="$base_ref" HEAD_REF=HEAD 2>&1 | tee test-output.txt
+      else
+        make test-short-skills 2>&1 | tee test-output.txt
       fi
     - grep -E '(^--- |ok\s+|FAIL\s+|panic)' test-output.txt | head -100 || true
 
@@ -135,64 +155,64 @@ unit-tests:
         make test-race-shard SHARD="$RACE_SHARD"
       fi
 
-race-tests-smoke:
+race-core-smoke:
   stage: check
   rules:
     - if: $CI_MERGE_REQUEST_IID
   script:
     - make test-race-smoke
 
-race-tests-core-cmd:
+race-core-cmd:
   extends: .race-tests-template
   variables:
     RACE_SHARD: core-cmd
 
-race-tests-core-internal:
+race-core-internal:
   extends: .race-tests-template
   variables:
     RACE_SHARD: core-internal
 
-race-tests-runtime:
+race-core-runtime:
   extends: .race-tests-template
   variables:
     RACE_SHARD: runtime
 
-race-tests-context-tooling:
+race-platform-context-tooling:
   extends: .race-tests-template
   variables:
     RACE_SHARD: context-tooling
 
-race-tests-intelligence:
+race-platform-intelligence:
   extends: .race-tests-template
   variables:
     RACE_SHARD: intelligence
 
-race-tests-platform-interfaces:
+race-platform-interfaces:
   extends: .race-tests-template
   variables:
     RACE_SHARD: platform-interfaces
 
-race-tests-storage:
+race-platform-storage:
   extends: .race-tests-template
   variables:
     RACE_SHARD: storage
 
-race-tests-v2:
+race-platform-v2:
   extends: .race-tests-template
   variables:
     RACE_SHARD: v2
 
-race-tests-skills-a-g:
+race-skills-a-g:
   extends: .race-tests-template
   variables:
     RACE_SHARD: skills-a-g
 
-race-tests-skills-h-o:
+race-skills-h-o:
   extends: .race-tests-template
   variables:
     RACE_SHARD: skills-h-o
 
-race-tests-skills-p-x:
+race-skills-p-x:
   extends: .race-tests-template
   variables:
     RACE_SHARD: skills-p-x
@@ -223,7 +243,7 @@ typescript-frontend:
     - bun run unused:frontend
 
 # --- Stage: build ---
-build:
+build-core:
   stage: build
   needs:
     - job: build-ci-image
@@ -233,6 +253,20 @@ build:
     KUBERNETES_MEMORY_LIMIT: "1536Mi"
   script:
     - make build
+  artifacts:
+    paths:
+      - bin/foxctl
+    expire_in: 7 days
+
+build-skills:
+  stage: build
+  needs:
+    - job: build-ci-image
+  variables:
+    GOFLAGS: "-buildvcs=false -p=2"
+    KUBERNETES_MEMORY_REQUEST: "768Mi"
+    KUBERNETES_MEMORY_LIMIT: "1536Mi"
+  script:
     - |
       base_ref=""
       if [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ] && git cat-file -e "$CI_MERGE_REQUEST_DIFF_BASE_SHA^{commit}" >/dev/null 2>&1; then
@@ -245,41 +279,47 @@ build:
       else
         make skills-build
       fi
-    - go run ./scripts/checkmanifests
-  artifacts:
-    paths:
-      - bin/foxctl
-    expire_in: 7 days
 
-all-checks:
+validate-manifests:
   stage: build
   needs:
+    - job: build-ci-image
+  script:
+    - go run ./scripts/checkmanifests
+
+all-checks:
+  stage: verify
+  needs:
     - job: static-analysis
-    - job: unit-tests
-    - job: race-tests-smoke
+    - job: unit-tests-core
+    - job: unit-tests-skills
+    - job: race-core-smoke
       optional: true
-    - job: race-tests-core-cmd
+    - job: race-core-cmd
       optional: true
-    - job: race-tests-core-internal
+    - job: race-core-internal
       optional: true
-    - job: race-tests-runtime
+    - job: race-core-runtime
       optional: true
-    - job: race-tests-context-tooling
+    - job: race-platform-context-tooling
       optional: true
-    - job: race-tests-intelligence
+    - job: race-platform-intelligence
       optional: true
-    - job: race-tests-platform-interfaces
+    - job: race-platform-interfaces
       optional: true
-    - job: race-tests-storage
+    - job: race-platform-storage
       optional: true
-    - job: race-tests-v2
+    - job: race-platform-v2
       optional: true
-    - job: race-tests-skills-a-g
+    - job: race-skills-a-g
       optional: true
-    - job: race-tests-skills-h-o
+    - job: race-skills-h-o
       optional: true
-    - job: race-tests-skills-p-x
+    - job: race-skills-p-x
       optional: true
     - job: integration-tests
+    - job: build-core
+    - job: build-skills
+    - job: validate-manifests
   script:
     - echo "All checks passed"

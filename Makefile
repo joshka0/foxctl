@@ -46,7 +46,7 @@ SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 CGO_SKILLS :=
 OPTIONAL_CGO_SKILLS :=
 
-.PHONY: fmt lint static-analysis install-git-hooks typecheck lsp-check vet test test-race test-race-smoke test-race-shard test-race-impacted test-race-changed test-race-shard-impacted test-integration test-integration-package test-integration-impacted test-integration-cmd test-integration-golden test-integration-rlm mutation-critical mutation-critical-list mutation-critical-dry-run cover check-coverage check-coverage-strict check-doc-links check-large-files check-tech-debt check-duplication test-timing build build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-impact skills-dependency-audit skills-build-impacted packages-impact test-short-impacted skills-install skills-install-cgo skills-install-all skills-test completions init go-tui-build go-tui-spawn go-tui-agent go-tui go-tui-smoke tui ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean benchmark-manifest bench-go bench-orientation gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-foxctl-package eval-code-search-praze-infra eval-code-search-foxctl-repo-grounded eval-code-search-foxctl-change-impact eval-code-search-foxctl-trace-symbol eval-code-search-foxctl-bridge-esoteric eval-retrieval-foxctl eval-retrieval-foxctl-mixed eval-retrieval-foxctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
+.PHONY: fmt lint static-analysis install-git-hooks typecheck lsp-check vet test test-race test-race-smoke test-race-shard test-race-impacted test-race-changed test-race-shard-impacted test-integration test-integration-package test-integration-impacted test-integration-cmd test-integration-golden test-integration-rlm mutation-critical mutation-critical-list mutation-critical-dry-run cover check-coverage check-coverage-strict check-doc-links check-large-files check-tech-debt check-duplication test-timing build build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-impact skills-dependency-audit skills-build-impacted packages-impact test-short-core test-short-core-impacted test-short-skills test-short-skills-impacted test-short-impacted skills-install skills-install-cgo skills-install-all skills-test completions init go-tui-build go-tui-spawn go-tui-agent go-tui go-tui-smoke tui ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean benchmark-manifest bench-go bench-orientation gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-foxctl-package eval-code-search-praze-infra eval-code-search-foxctl-repo-grounded eval-code-search-foxctl-change-impact eval-code-search-foxctl-trace-symbol eval-code-search-foxctl-bridge-esoteric eval-retrieval-foxctl eval-retrieval-foxctl-mixed eval-retrieval-foxctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
 
 fmt:
 	@echo "Running gofumpt"
@@ -119,6 +119,30 @@ test:
 test-short:
 	@if [ -n "$(GOCACHE_DIR)" ]; then mkdir -p "$(GOCACHE_DIR)"; fi
 	@$(GO_CMD) test -short ./...
+
+test-short-core:
+	@if [ -n "$(GOCACHE_DIR)" ]; then mkdir -p "$(GOCACHE_DIR)"; fi
+	@set -euo pipefail; \
+		pkgs="$$( $(GO_CMD) list ./... | grep -Ev '^github.com/joshka0/foxctl/skills(/|$$)' | paste -sd' ' - )"; \
+		if [ -z "$$pkgs" ]; then \
+			echo "No core packages"; \
+			exit 0; \
+		fi; \
+		pkg_count="$$( printf '%s\n' "$$pkgs" | wc -w | tr -d ' ' )"; \
+		echo "Testing $$pkg_count core packages"; \
+		$(GO_CMD) test -short -v -count=1 -timeout 20m $$pkgs
+
+test-short-skills:
+	@if [ -n "$(GOCACHE_DIR)" ]; then mkdir -p "$(GOCACHE_DIR)"; fi
+	@set -euo pipefail; \
+		pkgs="$$( $(GO_CMD) list ./skills/... | paste -sd' ' - )"; \
+		if [ -z "$$pkgs" ]; then \
+			echo "No skill packages"; \
+			exit 0; \
+		fi; \
+		pkg_count="$$( printf '%s\n' "$$pkgs" | wc -w | tr -d ' ' )"; \
+		echo "Testing $$pkg_count skill packages"; \
+		$(GO_CMD) test -short -v -count=1 -timeout 20m $$pkgs
 
 mutation-critical:
 	@GO="$(GO)" MUTATION_PACKAGES="$(MUTATION_PACKAGES)" MUTATION_REPORT_DIR="$(MUTATION_REPORT_DIR)" MUTATION_CONFIRM="$(MUTATION_CONFIRM)" MUTATION_TMPDIR="$(MUTATION_TMPDIR)" MUTATION_KEEP_TMP="$(MUTATION_KEEP_TMP)" MUTATION_THRESHOLD_EFFICACY="$(MUTATION_THRESHOLD_EFFICACY)" MUTATION_THRESHOLD_MCOVER="$(MUTATION_THRESHOLD_MCOVER)" ./scripts/mutation_critical.sh --run
@@ -828,6 +852,36 @@ endif
 			exit 0; \
 		fi; \
 		echo "Testing impacted packages: $$pkgs"; \
+		$(GO_CMD) test -short -v -count=1 -timeout 20m $$pkgs
+
+test-short-core-impacted:
+ifndef BASE_REF
+	$(error BASE_REF is required. Usage: make test-short-core-impacted BASE_REF=origin/main [HEAD_REF=HEAD])
+endif
+	@set -euo pipefail; \
+		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
+		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -Ev '^github.com/joshka0/foxctl/skills(/|$$)|^github.com/joshka0/foxctl/tests/integration(/|$$)|^github.com/joshka0/foxctl/tests/golden/trajectories(/|$$)' || true )"; \
+		pkgs="$$( printf '%s\n' "$$pkgs" | sed '/^$$/d' | paste -sd' ' - )"; \
+		if [ -z "$$pkgs" ]; then \
+			echo "No impacted core packages"; \
+			exit 0; \
+		fi; \
+		echo "Testing impacted core packages: $$pkgs"; \
+		$(GO_CMD) test -short -v -count=1 -timeout 20m $$pkgs
+
+test-short-skills-impacted:
+ifndef BASE_REF
+	$(error BASE_REF is required. Usage: make test-short-skills-impacted BASE_REF=origin/main [HEAD_REF=HEAD])
+endif
+	@set -euo pipefail; \
+		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
+		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -E '^github.com/joshka0/foxctl/skills(/|$$)' || true )"; \
+		pkgs="$$( printf '%s\n' "$$pkgs" | sed '/^$$/d' | paste -sd' ' - )"; \
+		if [ -z "$$pkgs" ]; then \
+			echo "No impacted skill packages"; \
+			exit 0; \
+		fi; \
+		echo "Testing impacted skill packages: $$pkgs"; \
 		$(GO_CMD) test -short -v -count=1 -timeout 20m $$pkgs
 
 skills-install: skills-build-all build
