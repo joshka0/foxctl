@@ -217,7 +217,7 @@ race-skills-p-x:
   variables:
     RACE_SHARD: skills-p-x
 
-integration-tests:
+integration-package:
   stage: check
   script:
     - |
@@ -228,9 +228,57 @@ integration-tests:
         base_ref="$(git merge-base HEAD "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME")"
       fi
       if [ -n "$base_ref" ] && [ "$CI_COMMIT_BRANCH" != "main" ]; then
-        make test-integration-impacted BASE_REF="$base_ref" HEAD_REF=HEAD
+        make test-integration-package-impacted BASE_REF="$base_ref" HEAD_REF=HEAD
       else
-        make test-integration
+        make test-integration-package
+      fi
+
+integration-cmd:
+  stage: check
+  script:
+    - |
+      base_ref=""
+      if [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ] && git cat-file -e "$CI_MERGE_REQUEST_DIFF_BASE_SHA^{commit}" >/dev/null 2>&1; then
+        base_ref="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+      elif [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ] && git rev-parse --verify "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" >/dev/null 2>&1; then
+        base_ref="$(git merge-base HEAD "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME")"
+      fi
+      if [ -n "$base_ref" ] && [ "$CI_COMMIT_BRANCH" != "main" ]; then
+        make test-integration-cmd-impacted BASE_REF="$base_ref" HEAD_REF=HEAD
+      else
+        make test-integration-cmd
+      fi
+
+integration-golden:
+  stage: check
+  script:
+    - |
+      base_ref=""
+      if [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ] && git cat-file -e "$CI_MERGE_REQUEST_DIFF_BASE_SHA^{commit}" >/dev/null 2>&1; then
+        base_ref="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+      elif [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ] && git rev-parse --verify "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" >/dev/null 2>&1; then
+        base_ref="$(git merge-base HEAD "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME")"
+      fi
+      if [ -n "$base_ref" ] && [ "$CI_COMMIT_BRANCH" != "main" ]; then
+        make test-integration-golden-impacted BASE_REF="$base_ref" HEAD_REF=HEAD
+      else
+        make test-integration-golden
+      fi
+
+integration-rlm:
+  stage: check
+  script:
+    - |
+      base_ref=""
+      if [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ] && git cat-file -e "$CI_MERGE_REQUEST_DIFF_BASE_SHA^{commit}" >/dev/null 2>&1; then
+        base_ref="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+      elif [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ] && git rev-parse --verify "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" >/dev/null 2>&1; then
+        base_ref="$(git merge-base HEAD "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME")"
+      fi
+      if [ -n "$base_ref" ] && [ "$CI_COMMIT_BRANCH" != "main" ]; then
+        make test-integration-rlm-impacted BASE_REF="$base_ref" HEAD_REF=HEAD
+      else
+        make test-integration-rlm
       fi
 
 typescript-frontend:
@@ -317,7 +365,10 @@ all-checks:
       optional: true
     - job: race-skills-p-x
       optional: true
-    - job: integration-tests
+    - job: integration-package
+    - job: integration-cmd
+    - job: integration-golden
+    - job: integration-rlm
     - job: build-core
     - job: build-skills
     - job: validate-manifests
