@@ -10,14 +10,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"sort"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/rs/zerolog"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
@@ -235,14 +234,14 @@ func run(ctx context.Context, rc *lite.RunContext, in Input) error {
 	}
 
 	start := time.Now()
-	logger := zerolog.New(os.Stderr).With().Timestamp().Logger()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
 	// Create providers
 	providers := make([]RankingProvider, 0, len(in.Providers))
 	for _, name := range in.Providers {
 		p, err := createProvider(name, apiKeys)
 		if err != nil {
-			logger.Warn().Err(err).Str("provider", name).Msg("failed to create provider")
+			logger.Warn("failed to create provider", "provider", name, "error", err)
 			continue
 		}
 		providers = append(providers, p)
@@ -321,12 +320,13 @@ func run(ctx context.Context, rc *lite.RunContext, in Input) error {
 		ProviderResults:  providerResults,
 	}
 
-	logger.Info().
-		Str("skill", Command).
-		Int("candidates", len(rankedCandidates)).
-		Strs("providers", providersUsed).
-		Int64("duration_ms", output.Summary.DurationMS).
-		Msg("llm_search_complete")
+	logger.Info(
+		"llm_search_complete",
+		"skill", Command,
+		"candidates", len(rankedCandidates),
+		"providers", providersUsed,
+		"duration_ms", output.Summary.DurationMS,
+	)
 
 	return lite.Emit(rc, Command, output)
 }
