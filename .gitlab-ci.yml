@@ -428,7 +428,9 @@ integration-package:
 
 integration-cmd:
   stage: check
-  needs: *post_fast_check_needs
+  needs:
+    - job: integration-package
+      optional: true
   rules: *go_change_rules
   script:
     - |
@@ -446,7 +448,9 @@ integration-cmd:
 
 integration-golden:
   stage: check
-  needs: *post_fast_check_needs
+  needs:
+    - job: integration-cmd
+      optional: true
   rules: *go_change_rules
   script:
     - |
@@ -464,7 +468,9 @@ integration-golden:
 
 integration-rlm:
   stage: check
-  needs: *post_fast_check_needs
+  needs:
+    - job: integration-golden
+      optional: true
   rules: *go_change_rules
   script:
     - |
