@@ -250,6 +250,13 @@ func (s *Service) startLeaderLease(ctx context.Context) error {
 		s.deviceID = deviceID
 		s.isLeader = true
 		s.leaderMu.Unlock()
+		s.leaderWorkersMu.Lock()
+		defer s.leaderWorkersMu.Unlock()
+		select {
+		case <-s.shutdownCh:
+			return nil
+		default:
+		}
 		return s.startLeaderWorkers(ctx)
 	}
 
@@ -323,6 +330,11 @@ func (s *Service) transitionLeader(ctx context.Context, leader bool) {
 	s.leaderMu.Unlock()
 
 	if leader {
+		select {
+		case <-s.shutdownCh:
+			return
+		default:
+		}
 		fmt.Fprintf(os.Stderr, "daemon: leader lease acquired; starting leader workers\n")
 		if err := s.startLeaderWorkers(ctx); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: leader workers start error: %v\n", err)
