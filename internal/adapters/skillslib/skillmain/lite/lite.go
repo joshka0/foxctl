@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillcas"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
 	"github.com/joshka0/foxctl/internal/domain/policy"
 	"github.com/joshka0/foxctl/internal/platform/workspace"
@@ -56,6 +57,9 @@ type RunContext struct {
 	// Stdout is the output writer (usually os.Stdout).
 	Stdout io.Writer
 
+	// CASWriter stores large outputs when injected by a custom entrypoint.
+	CASWriter skillcas.Writer
+
 	// Now returns the current time (injectable for testing).
 	Now func() time.Time
 
@@ -71,6 +75,11 @@ func (rc *RunContext) InlineLimit() int {
 	return rc.InlineKB * 1024
 }
 
+// OutputWriter returns the envelope output writer for capability-based helpers.
+func (rc *RunContext) OutputWriter() io.Writer {
+	return rc.Stdout
+}
+
 // ShouldTruncate returns true if data exceeds the inline limit and NoCAS is false.
 func (rc *RunContext) ShouldTruncate(dataSize int) bool {
 	if rc.NoCAS {
@@ -78,6 +87,24 @@ func (rc *RunContext) ShouldTruncate(dataSize int) bool {
 	}
 	inlineLimit := rc.InlineLimit()
 	return inlineLimit > 0 && dataSize > inlineLimit
+}
+
+// ShouldStoreCAS returns true when CAS output persistence is configured and injected.
+func (rc *RunContext) ShouldStoreCAS() bool {
+	return rc != nil && !rc.NoCAS && rc.Config.CAS.Store && rc.CASWriter != nil
+}
+
+// CASExposePolicy returns the backend-neutral CAS expose policy.
+func (rc *RunContext) CASExposePolicy() skillcas.ExposePolicy {
+	return skillcas.ExposePolicy(rc.Config.CAS.Expose)
+}
+
+// PutArtifact stores content through the injected CAS writer.
+func (rc *RunContext) PutArtifact(ctx context.Context, r io.Reader, kind string, tags []string) (skillcas.Artifact, error) {
+	if rc == nil || rc.CASWriter == nil {
+		return skillcas.Artifact{}, fmt.Errorf("lite: cas writer not configured")
+	}
+	return rc.CASWriter.PutArtifact(ctx, r, kind, tags)
 }
 
 // Close is present for parity with the full skillmain.RunContext.

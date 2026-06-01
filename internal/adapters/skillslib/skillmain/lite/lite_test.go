@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillcas"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
 )
 
@@ -204,6 +206,48 @@ func TestRunContextInlineLimitAndShouldTruncate(t *testing.T) {
 				t.Fatalf("ShouldTruncate(%d) = %v, want %v", tt.size, got, tt.want)
 			}
 		})
+	}
+}
+
+type liteFakeCASWriter struct{}
+
+func (liteFakeCASWriter) PutArtifact(_ context.Context, r io.Reader, kind string, _ []string) (skillcas.Artifact, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return skillcas.Artifact{}, err
+	}
+	return skillcas.Artifact{Digest: "sha256:lite", Size: int64(len(data)), Kind: kind}, nil
+}
+
+func TestRunContextCASCapability(t *testing.T) {
+	rc := &RunContext{
+		Config: LiteConfig{CAS: LiteCASPolicy{Store: true, Expose: "hint"}},
+		Stdout: &bytes.Buffer{},
+	}
+
+	if rc.ShouldStoreCAS() {
+		t.Fatal("ShouldStoreCAS should be false without an injected writer")
+	}
+	if rc.CASExposePolicy() != skillcas.ExposePolicyHint {
+		t.Fatalf("CASExposePolicy() = %q, want hint", rc.CASExposePolicy())
+	}
+
+	rc.CASWriter = liteFakeCASWriter{}
+	if !rc.ShouldStoreCAS() {
+		t.Fatal("ShouldStoreCAS should be true with store enabled and an injected writer")
+	}
+
+	artifact, err := rc.PutArtifact(context.Background(), strings.NewReader("lite content"), "text/plain", nil)
+	if err != nil {
+		t.Fatalf("PutArtifact returned error: %v", err)
+	}
+	if artifact.Size != int64(len("lite content")) || artifact.Kind != "text/plain" {
+		t.Fatalf("artifact = %+v, want text/plain artifact with size", artifact)
+	}
+
+	rc.NoCAS = true
+	if rc.ShouldStoreCAS() {
+		t.Fatal("ShouldStoreCAS should be false when NoCAS is set")
 	}
 }
 

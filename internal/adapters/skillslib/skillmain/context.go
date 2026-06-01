@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillcas"
 	"github.com/joshka0/foxctl/internal/domain/policy"
 	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/runtime/execution/circuitbreaker"
@@ -97,9 +98,14 @@ func (rc *RunContext) InlineLimit() int {
 	return rc.InlineKB * 1024
 }
 
+// OutputWriter returns the envelope output writer for capability-based helpers.
+func (rc *RunContext) OutputWriter() io.Writer {
+	return rc.Stdout
+}
+
 // ShouldStoreCAS returns true if CAS storage is enabled.
 func (rc *RunContext) ShouldStoreCAS() bool {
-	return !rc.NoCAS && rc.Config.CAS.Store
+	return rc != nil && !rc.NoCAS && rc.Config.CAS.Store && rc.CASStore != nil
 }
 
 // ExposePolicy returns the CAS expose policy from config.
@@ -107,12 +113,25 @@ func (rc *RunContext) ExposePolicy() config.ExposePolicy {
 	return rc.Config.CAS.Expose
 }
 
-// Artifact describes a stored CAS object.
-type Artifact struct {
-	Digest string
-	Size   int64
-	Kind   string
+// CASExposePolicy returns the backend-neutral CAS expose policy.
+func (rc *RunContext) CASExposePolicy() skillcas.ExposePolicy {
+	return skillcas.ExposePolicy(rc.Config.CAS.Expose)
 }
+
+// PutArtifact stores content in CAS through the backend-neutral writer contract.
+func (rc *RunContext) PutArtifact(ctx context.Context, r io.Reader, kind string, tags []string) (skillcas.Artifact, error) {
+	if rc == nil || rc.CASStore == nil {
+		return skillcas.Artifact{}, fmt.Errorf("skillmain: cas store not configured")
+	}
+	obj, err := rc.CASStore.Put(ctx, r, kind, tags)
+	if err != nil {
+		return skillcas.Artifact{}, fmt.Errorf("skillmain: cas put: %w", err)
+	}
+	return skillcas.Artifact{Digest: obj.Digest, Size: obj.Size, Kind: obj.Kind}, nil
+}
+
+// Artifact describes a stored CAS object.
+type Artifact = skillcas.Artifact
 
 // PersistJSON marshals value to JSON and stores it in CAS.
 func PersistJSON(ctx context.Context, rc *RunContext, value any, tags ...string) (Artifact, error) {
@@ -125,12 +144,9 @@ func PersistJSON(ctx context.Context, rc *RunContext, value any, tags ...string)
 
 // PersistBuffer streams the provided buffer into CAS.
 func PersistBuffer(ctx context.Context, rc *RunContext, buf *bytes.Buffer, kind string, tags ...string) (Artifact, error) {
-	if buf == nil {
-		return Artifact{}, fmt.Errorf("skillmain: persist buffer: nil buffer")
-	}
-	obj, err := rc.CASStore.Put(ctx, bytes.NewReader(buf.Bytes()), kind, tags)
+	artifact, err := skillcas.PersistBuffer(ctx, rc, buf, kind, tags...)
 	if err != nil {
-		return Artifact{}, fmt.Errorf("skillmain: cas put: %w", err)
+		return Artifact{}, fmt.Errorf("skillmain: persist buffer: %w", err)
 	}
-	return Artifact{Digest: obj.Digest, Size: obj.Size, Kind: obj.Kind}, nil
+	return artifact, nil
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/diffutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillcas"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 )
@@ -65,14 +66,9 @@ func ApplyFile(ctx context.Context, rc *skillmain.RunContext, path string, opts 
 			if len(tags) == 0 {
 				tags = []string{"backup"}
 			}
-			obj, err := rc.CASStore.Put(ctx, bytes.NewReader(originalBytes), "text/plain", tags)
+			artifact, err := skillcas.PersistBuffer(ctx, rc, bytes.NewBuffer(originalBytes), "text/plain", tags...)
 			if err != nil {
 				return FileResult{}, skillerr.WrapIO("backup to CAS", err)
-			}
-			artifact := skillmain.Artifact{
-				Digest: obj.Digest,
-				Size:   obj.Size,
-				Kind:   obj.Kind,
 			}
 			result.BackupDigest = artifact.Digest
 			result.BackupArtifact = &artifact

@@ -2,10 +2,13 @@ package skillout
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"strings"
 	"testing"
 
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillcas"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 )
 
@@ -102,5 +105,93 @@ func TestArtifactJSON(t *testing.T) {
 
 	if decoded != artifact {
 		t.Errorf("round-trip failed: got %+v, want %+v", decoded, artifact)
+	}
+}
+
+type fakeOutputContext struct {
+	stdout       bytes.Buffer
+	store        bool
+	expose       skillcas.ExposePolicy
+	stored       []byte
+	storedKind   string
+	storedTags   []string
+	truncateOver int
+}
+
+func (c *fakeOutputContext) OutputWriter() io.Writer {
+	return &c.stdout
+}
+
+func (c *fakeOutputContext) ShouldTruncate(dataSize int) bool {
+	return c.truncateOver > 0 && dataSize > c.truncateOver
+}
+
+func (c *fakeOutputContext) ShouldStoreCAS() bool {
+	return c.store
+}
+
+func (c *fakeOutputContext) CASExposePolicy() skillcas.ExposePolicy {
+	return c.expose
+}
+
+func (c *fakeOutputContext) PutArtifact(_ context.Context, r io.Reader, kind string, tags []string) (skillcas.Artifact, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return skillcas.Artifact{}, err
+	}
+	c.stored = data
+	c.storedKind = kind
+	c.storedTags = append([]string(nil), tags...)
+	return skillcas.Artifact{Digest: "sha256:stored", Size: int64(len(data)), Kind: kind}, nil
+}
+
+func TestEmitWithCASContextStoresTruncatedOutput(t *testing.T) {
+	rc := &fakeOutputContext{
+		store:        true,
+		expose:       skillcas.ExposePolicyDigest,
+		truncateOver: 8,
+	}
+
+	err := EmitWithCASContext(context.Background(), rc, "test/large", map[string]string{"result": "large output"})
+	if err != nil {
+		t.Fatalf("EmitWithCASContext returned error: %v", err)
+	}
+
+	output := rc.stdout.String()
+	if !strings.Contains(output, `"artifact":"sha256:stored"`) {
+		t.Fatalf("expected artifact digest in output, got: %s", output)
+	}
+	if strings.Contains(output, "large output") {
+		t.Fatalf("expected large payload to be replaced by CAS result, got: %s", output)
+	}
+	if rc.storedKind != "application/json" {
+		t.Fatalf("storedKind = %q, want application/json", rc.storedKind)
+	}
+	if got := strings.Join(rc.storedTags, ","); got != "test/large" {
+		t.Fatalf("storedTags = %q, want test/large", got)
+	}
+	if !json.Valid(rc.stored) {
+		t.Fatalf("stored content is not valid JSON: %q", rc.stored)
+	}
+}
+
+func TestEmitWithCASContextFallsBackInlineWhenStoreDisabled(t *testing.T) {
+	rc := &fakeOutputContext{
+		store:        false,
+		expose:       skillcas.ExposePolicyDigest,
+		truncateOver: 8,
+	}
+
+	err := EmitWithCASContext(context.Background(), rc, "test/large", map[string]string{"result": "large output"})
+	if err != nil {
+		t.Fatalf("EmitWithCASContext returned error: %v", err)
+	}
+
+	output := rc.stdout.String()
+	if !strings.Contains(output, "large output") {
+		t.Fatalf("expected inline payload when CAS storage is disabled, got: %s", output)
+	}
+	if len(rc.stored) != 0 {
+		t.Fatalf("stored content should be empty when CAS storage is disabled")
 	}
 }

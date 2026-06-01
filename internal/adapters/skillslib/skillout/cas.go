@@ -3,9 +3,8 @@ package skillout
 import (
 	"bytes"
 	"context"
-	"fmt"
-	"strings"
 
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillcas"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/domain/envelope"
 )
@@ -14,17 +13,13 @@ import (
 const DefaultCASHintLines = 50
 
 // DefaultCASHint builds a CAS hint with the default pagination size.
-func DefaultCASHint(artifact skillmain.Artifact) envelope.CASHint {
+func DefaultCASHint(artifact skillcas.Artifact) envelope.CASHint {
 	return BuildCASHint(artifact, DefaultCASHintLines)
 }
 
 // FormatCASHint returns a consistent hint for retrieving large outputs from CAS.
 func FormatCASHint(label, digest string) string {
-	label = strings.TrimSpace(label)
-	if label == "" {
-		return fmt.Sprintf("Full output stored in CAS; fetch via: foxctl cas get %s", digest)
-	}
-	return fmt.Sprintf("Full %s stored in CAS; fetch via: foxctl cas get %s", label, digest)
+	return skillcas.FormatCASHint(label, digest)
 }
 
 // PersistJSONWithHint stores JSON in CAS and returns a retrieval hint.
@@ -35,9 +30,20 @@ func PersistJSONWithHint(
 	tag string,
 	hintLines int,
 ) (skillmain.Artifact, *envelope.CASHint, error) {
-	artifact, err := skillmain.PersistJSON(ctx, rc, payload, tag)
+	return PersistJSONWithHintContext(ctx, rc, payload, tag, hintLines)
+}
+
+// PersistJSONWithHintContext stores JSON through a CAS writer and returns a retrieval hint.
+func PersistJSONWithHintContext(
+	ctx context.Context,
+	writer skillcas.Writer,
+	payload any,
+	tag string,
+	hintLines int,
+) (skillcas.Artifact, *envelope.CASHint, error) {
+	artifact, err := skillcas.PersistJSON(ctx, writer, payload, tag)
 	if err != nil {
-		return skillmain.Artifact{}, nil, err
+		return skillcas.Artifact{}, nil, err
 	}
 	hint := BuildCASHint(artifact, hintLines)
 	return artifact, &hint, nil
@@ -52,9 +58,21 @@ func PersistBufferWithHint(
 	tag string,
 	hintLines int,
 ) (skillmain.Artifact, *envelope.CASHint, error) {
-	artifact, err := skillmain.PersistBuffer(ctx, rc, buf, kind, tag)
+	return PersistBufferWithHintContext(ctx, rc, buf, kind, tag, hintLines)
+}
+
+// PersistBufferWithHintContext stores a buffer through a CAS writer and returns a retrieval hint.
+func PersistBufferWithHintContext(
+	ctx context.Context,
+	writer skillcas.Writer,
+	buf *bytes.Buffer,
+	kind string,
+	tag string,
+	hintLines int,
+) (skillcas.Artifact, *envelope.CASHint, error) {
+	artifact, err := skillcas.PersistBuffer(ctx, writer, buf, kind, tag)
 	if err != nil {
-		return skillmain.Artifact{}, nil, err
+		return skillcas.Artifact{}, nil, err
 	}
 	hint := BuildCASHint(artifact, hintLines)
 	return artifact, &hint, nil

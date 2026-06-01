@@ -84,7 +84,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	kind := detectKind(validPath)
-	obj, err := rc.CASStore.Put(ctx, file, kind, []string{"fs_read"})
+	artifact, err := rc.PutArtifact(ctx, file, kind, []string{"fs_read"})
 	if err != nil {
 		return skillerr.WrapIO("cas put "+validPath, err)
 	}
@@ -107,16 +107,15 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 	data := map[string]any{
 		"path":              validPath,
-		"size_bytes":        obj.Size,
+		"size_bytes":        artifact.Size,
 		"mode":              info.Mode().String(),
 		"mod_time":          info.ModTime().UTC().Format(time.RFC3339),
 		"max_preview_bytes": limit,
 		"preview_bytes":     len(previewBytes),
 		"binary":            !isText,
-		"artifact":          obj.Digest,
-		"truncated":         more || obj.Size > int64(len(previewBytes)),
+		"artifact":          artifact.Digest,
+		"truncated":         more || artifact.Size > int64(len(previewBytes)),
 	}
-	artifact := skillmain.Artifact{Digest: obj.Digest, Size: obj.Size, Kind: obj.Kind}
 	data["cas_hint"] = skillout.DefaultCASHint(artifact)
 	if isText {
 		preview := string(previewBytes)
@@ -129,7 +128,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if !isText {
 		data["hint"] = "content stored in CAS; fetch via foxctl cas get <digest>"
 	}
-	data["summary"] = fmt.Sprintf("Read %d bytes from %s", obj.Size, filepath.Base(validPath))
+	data["summary"] = fmt.Sprintf("Read %d bytes from %s", artifact.Size, filepath.Base(validPath))
 
 	return skillout.Emit(rc, "fs/read", data)
 }

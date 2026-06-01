@@ -55,7 +55,8 @@ This goal is for the current extraction-prep MR. It must not move skills into a 
 - `skills/fs_apply_edit`: `helper-needed` / defer. Its shared edit helper takes full `skillmain.RunContext` and supports CAS backup hints, so it needs a deliberate helper split before lite conversion.
 - `skills/presence_character`: `helper-needed` / defer. It reads full config storage settings, which are intentionally absent from `LiteConfig`.
 - `skills/repo_index_build` and `skills/repo_index_enrich_summaries`: `keep-core` / defer. They are store-less wrappers, but their protocol decoding currently pulls storage/intelligence packages transitively, so the dependency audit is not quiet.
-- CAS-heavy and persistence-heavy skills remain out of scope for this MR unless a separate helper phase is approved. Examples include skills using `skillout.PersistBuffer`, `EmitWithCAS`, `PreviewAndPersist*`, `rc.CAS`, or `rc.MaxPreview`.
+- CAS output producers now have a narrow helper phase in progress/completed: `internal/adapters/skillslib/skillcas` defines the backend-neutral writer, artifact, expose policy, hint, and truncation-result contract. Full `skillmain.RunContext` adapts the existing store to that contract, while lite can accept an injected writer without importing storage/runtime/intelligence/context.
+- CAS-heavy skills are still not automatic lite-conversion candidates. Writer-only paths can migrate to `skillcas`, but read/cache-heavy skills using `Get`, `Head`, pinning, GC, storage providers, runtime, observability, or intelligence remain `keep-core` until a separate contract is designed for those capabilities.
 
 ## Constraints
 - Preserve observable behavior and envelope shape for converted skills.
@@ -119,6 +120,11 @@ This goal is for the current extraction-prep MR. It must not move skills into a 
 - `go test ./internal/adapters/skillslib/skillmain/lite` passes.
 - Forbidden dependency checks are quiet for every converted skill.
 - `make static-analysis` passes.
+- CAS writer contract checks pass:
+  ```sh
+  go test ./internal/adapters/skillslib/... ./skills/...
+  go list -deps ./internal/adapters/skillslib/skillmain/lite | rg '^github.com/joshka0/foxctl/internal/(storage|runtime|intelligence|context)' || true
+  ```
 - No generated binaries or build artifacts are staged.
 - Branch is pushed to GitLab.
 - Final self-review lists residual risks and whether any extraction work remains outside this MR.

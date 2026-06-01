@@ -243,18 +243,18 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		tags = append(tags, fmt.Sprintf("rewrite_model:%s", rewriteModelUsed))
 	}
 
-	obj, err := rc.CASStore.Put(ctx, bytes.NewReader(audioData), audioKind, tags)
+	artifact, err := rc.PutArtifact(ctx, bytes.NewReader(audioData), audioKind, tags)
 	if err != nil {
 		return skillerr.WrapIO("store audio in CAS", err)
 	}
 
 	// Cache the result only when caching is enabled and conversation_id provided
 	if in.UseCache && in.ConversationID != "" {
-		cacheVoiceResult(ctx, rc, in.ConversationID, textHash, provider, voiceID, obj.Digest, model, durationMS)
+		cacheVoiceResult(ctx, rc, in.ConversationID, textHash, provider, voiceID, artifact.Digest, model, durationMS)
 	}
 
 	return skillout.Emit(rc, command, Output{
-		AudioDigest:    obj.Digest,
+		AudioDigest:    artifact.Digest,
 		DurationMS:     durationMS,
 		Cached:         false,
 		Model:          model,

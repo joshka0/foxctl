@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillcas"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
@@ -220,18 +221,17 @@ func emitSuccess(ctx context.Context, rc *skillmain.RunContext, action string, d
 	}
 
 	if len(dataBytes) > inlineLimit {
-		// Store in CAS
-		obj, err := rc.CASStore.Put(ctx, bytes.NewReader(dataBytes), "application/json", []string{"godot", action})
+		artifact, err := skillcas.PersistBuffer(ctx, rc, bytes.NewBuffer(dataBytes), "application/json", "godot", action)
 		if err != nil {
 			return skillerr.WrapIO("cas put", err)
 		}
 
-		result["artifact"] = obj.Digest
-		result["artifact_size_bytes"] = obj.Size
+		result["artifact"] = artifact.Digest
+		result["artifact_size_bytes"] = artifact.Size
 
 		// Remove full result, keep only summary
 		delete(result, "result")
-		result["hint"] = skillout.FormatCASHint("result", obj.Digest)
+		result["hint"] = skillout.FormatCASHint("result", artifact.Digest)
 	}
 
 	return skillout.Emit(rc, skillName, result)
