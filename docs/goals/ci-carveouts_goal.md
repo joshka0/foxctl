@@ -77,6 +77,9 @@ signal, and avoid coverage theater.
    - `repo-hygiene`, `docs-links`, and `all-checks` run on a light image so
      docs-only/frontend-only pipelines are not coupled to a skipped per-commit
      Go CI image.
+   - Light/Bun checks run independently during prepare, while integration,
+     race-smoke, and build lanes avoid a post-image pod burst that exceeds the
+     dev runner memory quota.
    - Decision note:
      `~/docs/plans/decision-notes/ci-carveouts/2026-06-01-impact-aware-rules.md`
 
