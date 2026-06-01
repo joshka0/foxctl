@@ -17,8 +17,7 @@ import (
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/sliceutil"
 	"github.com/joshka0/foxctl/internal/platform/lsp/gopls"
 )
@@ -130,15 +129,15 @@ type output struct {
 
 // main is the skill entry point for lsp/gopls with comprehensive Go language server capabilities.
 func main() {
-	skillmain.Main("lsp/gopls", skillmain.Chain(
+	lite.Main("lsp/gopls", lite.Chain(
 		run,
-		skillmain.WithDynamicTimeout[Input](func(in Input) time.Duration {
+		lite.WithDynamicTimeout[Input](func(in Input) time.Duration {
 			if in.Timeout > 0 {
 				return time.Duration(in.Timeout) * time.Second
 			}
 			return defaultTimeout
 		}),
-		skillmain.WithRecover[Input](),
+		lite.WithRecover[Input](),
 	))
 }
 
@@ -156,7 +155,7 @@ func main() {
 //
 // [[domain:lsp-operations]]
 // [[protocol:gopls-integration]]
-func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+func run(ctx context.Context, rc *lite.RunContext, in Input) error {
 	// Apply defaults and normalize LSP-style parameters
 	normalizeInput(&in)
 
@@ -164,7 +163,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 	// Validate file path if provided to prevent path traversal attacks
 	if in.File != "" {
-		if _, err := skillmain.ValidatePath(rc, in.File, skillmain.WithPathMessage("invalid file path")); err != nil {
+		if _, err := lite.ValidatePath(rc, in.File, lite.WithPathMessage("invalid file path")); err != nil {
 			return err
 		}
 	}
@@ -206,7 +205,7 @@ func normalizeInput(in *Input) {
 }
 
 // runWithDaemon uses the persistent gopls daemon for fast LSP operations with connection reuse and fallback handling.
-func runWithDaemon(ctx context.Context, rc *skillmain.RunContext, workspace string, in Input) error {
+func runWithDaemon(ctx context.Context, rc *lite.RunContext, workspace string, in Input) error {
 	daemon, err := gopls.GetDaemon(ctx, workspace)
 	if err != nil {
 		// Fall back to CLI mode if daemon fails to start
@@ -275,11 +274,11 @@ func runWithDaemon(ctx context.Context, rc *skillmain.RunContext, workspace stri
 		out.Count = len(refs)
 	}
 
-	return skillout.Emit(rc, "lsp/gopls", out)
+	return lite.Emit(rc, "lsp/gopls", out)
 }
 
 // runWithCLI uses the traditional gopls CLI for all operations with slower but comprehensive support and fallback reliability.
-func runWithCLI(ctx context.Context, rc *skillmain.RunContext, workspace string, in Input) error {
+func runWithCLI(ctx context.Context, rc *lite.RunContext, workspace string, in Input) error {
 	// Check gopls availability
 	goplsPath, err := executil.RequireTool("gopls", "install gopls (go install golang.org/x/tools/gopls@latest)")
 	if err != nil {
@@ -354,7 +353,7 @@ func runWithCLI(ctx context.Context, rc *skillmain.RunContext, workspace string,
 		out.Count = len(diags)
 	}
 
-	return skillout.Emit(rc, "lsp/gopls", out)
+	return lite.Emit(rc, "lsp/gopls", out)
 }
 
 // runDefinition executes gopls definition command to find symbol definitions with location parsing and error handling.

@@ -15,8 +15,7 @@ import (
 	lsphelpers "github.com/joshka0/foxctl/internal/adapters/skillslib/lsp"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/oputil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/sliceutil"
 	errs "github.com/joshka0/foxctl/internal/platform/errors"
 	"github.com/joshka0/foxctl/internal/platform/lsp/jsonrpc"
@@ -94,19 +93,19 @@ type LSPClient struct {
 }
 
 func main() {
-	skillmain.Main(command, skillmain.Chain(
+	lite.Main(command, lite.Chain(
 		run,
-		skillmain.WithDynamicTimeout[input](func(in input) time.Duration {
+		lite.WithDynamicTimeout[input](func(in input) time.Duration {
 			if in.Timeout > 0 {
 				return time.Duration(in.Timeout) * time.Second
 			}
 			return defaultTimeout
 		}),
-		skillmain.WithRecover[input](),
+		lite.WithRecover[input](),
 	))
 }
 
-func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+func run(ctx context.Context, rc *lite.RunContext, in input) error {
 	// Apply defaults
 	if in.MaxResults <= 0 {
 		in.MaxResults = 50
@@ -607,6 +606,6 @@ func (c *LSPClient) diagnostics(_ context.Context, _ string, in input) ([]Diagno
 	)
 }
 
-func writeOutput(rc *skillmain.RunContext, out output) error {
-	return skillout.Emit(rc, command, out)
+func writeOutput(rc *lite.RunContext, out output) error {
+	return lite.Emit(rc, command, out)
 }
