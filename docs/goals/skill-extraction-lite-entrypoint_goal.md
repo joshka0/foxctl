@@ -35,6 +35,9 @@ This goal is for the current extraction-prep MR. It must not move skills into a 
   - `skills/lsp_gopls`
   - `skills/lsp_pylsp`
   - `skills/lsp_tsserver`
+  - `skills/git_worktree`
+  - `skills/mcp_bridge`
+  - `skills/mcp_install`
 - Current docs:
   - `docs/architecture/skill-pack-split-analysis.md`
   - `docs/architecture/skill-pack-split-analysis-pi.md`
@@ -47,11 +50,9 @@ This goal is for the current extraction-prep MR. It must not move skills into a 
 - Pi and Hermes should do most implementation slices through `herdr` panes; the integrator owns scope, review, commits, pushes, and CI/MR follow-up.
 
 ## Current Classification Notes
-- `skills/skill_inspect`, `skills/build_godot`, `skills/build_unity`, `skills/quality_gate`, `skills/setup_install`, `skills/html_edit`, `skills/jira_board`, `skills/jira_issue`, `skills/heartwood_action`, `skills/heartwood_state`, `skills/unity_input`, `skills/unity_packages`, `skills/unity_scenes`, `skills/x402_payment`, `skills/ardoq_resource`, `skills/ci_checks`, `skills/setup_foxctl_mode`, `skills/code_llm_search`, `skills/lsp_gopls`, `skills/lsp_pylsp`, and `skills/lsp_tsserver`: converted in this goal; dependency checks are quiet.
+- `skills/skill_inspect`, `skills/build_godot`, `skills/build_unity`, `skills/quality_gate`, `skills/setup_install`, `skills/html_edit`, `skills/jira_board`, `skills/jira_issue`, `skills/heartwood_action`, `skills/heartwood_state`, `skills/unity_input`, `skills/unity_packages`, `skills/unity_scenes`, `skills/x402_payment`, `skills/ardoq_resource`, `skills/ci_checks`, `skills/setup_foxctl_mode`, `skills/code_llm_search`, `skills/lsp_gopls`, `skills/lsp_pylsp`, `skills/lsp_tsserver`, `skills/git_worktree`, `skills/mcp_bridge`, and `skills/mcp_install`: converted in this goal; dependency checks are quiet.
 - `skills/agent_handbook`: `helper-needed` / defer. The skill itself is simple, but it imports `internal/runtime/agentpolicy`; converting it would violate the lite package boundary until agent policy types move to a non-runtime package or a narrow stable type surface is introduced.
 - `skills/fs_apply_edit`: `helper-needed` / defer. Its shared edit helper takes full `skillmain.RunContext` and supports CAS backup hints, so it needs a deliberate helper split before lite conversion.
-- `skills/git_worktree`: `helper-needed` / defer. `gitutil.ResolveRepoPath` still takes full `skillmain.RunContext`; convert after that helper accepts a narrow path-validation interface or lite context.
-- `skills/mcp_bridge` and `skills/mcp_install`: `helper-needed` / defer. They use custom bootstrap/error handling, and `mcp_bridge` logs through `rc.Logger`, which lite intentionally omits.
 - `skills/presence_character`: `helper-needed` / defer. It reads full config storage settings, which are intentionally absent from `LiteConfig`.
 - `skills/repo_index_build` and `skills/repo_index_enrich_summaries`: `keep-core` / defer. They are store-less wrappers, but their protocol decoding currently pulls storage/intelligence packages transitively, so the dependency audit is not quiet.
 - CAS-heavy and persistence-heavy skills remain out of scope for this MR unless a separate helper phase is approved. Examples include skills using `skillout.PersistBuffer`, `EmitWithCAS`, `PreviewAndPersist*`, `rc.CAS`, or `rc.MaxPreview`.

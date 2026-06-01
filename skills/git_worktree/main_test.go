@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/gitutil"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 	"github.com/joshka0/foxctl/internal/domain/policy"
 )
 
@@ -73,7 +73,7 @@ func TestAddWorktreeRejectsOptionLikeBranchBeforeGitCreatesTarget(t *testing.T) 
 	repo := initGitRepo(t, gitPath)
 	workspace := filepath.Dir(repo)
 	target := filepath.Join(workspace, "bad-worktree")
-	rc := &skillmain.RunContext{PathValidator: testPathValidator(t, workspace)}
+	rc := &lite.RunContext{PathValidator: testPathValidator(t, workspace)}
 
 	_, err := addWorktree(ctx, rc, gitPath, repo, input{
 		Path:      target,

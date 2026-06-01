@@ -78,7 +78,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		in.Limit = 10
 	}
 
-	repoPath, err := gitutil.ResolveRepoPath(rc, in.RepoPath)
+	repoPath, err := gitutil.ResolveRepoPath(rc.PathValidator, in.RepoPath)
 	if err != nil {
 		return err
 	}

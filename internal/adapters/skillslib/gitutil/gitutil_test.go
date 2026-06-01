@@ -7,22 +7,20 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/domain/policy"
 )
 
 func TestResolveRepoPathRequiresPathValidator(t *testing.T) {
 	tests := []struct {
 		name string
-		rc   *skillmain.RunContext
+		v    PathValidator
 	}{
-		{name: "nil context", rc: nil},
-		{name: "nil validator", rc: &skillmain.RunContext{}},
+		{name: "nil validator", v: nil},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := ResolveRepoPath(tt.rc, "."); err == nil {
+			if _, err := ResolveRepoPath(tt.v, "."); err == nil {
 				t.Fatal("expected error")
 			}
 		})
@@ -31,9 +29,9 @@ func TestResolveRepoPathRequiresPathValidator(t *testing.T) {
 
 func TestResolveRepoPathUsesWorkspaceDefaultAndRejectsEscapes(t *testing.T) {
 	workspace := t.TempDir()
-	rc := &skillmain.RunContext{PathValidator: testPathValidator(t, workspace)}
+	pv := testPathValidator(t, workspace)
 
-	got, err := ResolveRepoPath(rc, "")
+	got, err := ResolveRepoPath(pv, "")
 	if err != nil {
 		t.Fatalf("ResolveRepoPath empty: %v", err)
 	}
@@ -41,7 +39,7 @@ func TestResolveRepoPathUsesWorkspaceDefaultAndRejectsEscapes(t *testing.T) {
 		t.Fatalf("default repo path=%q want workspace %q", got, workspace)
 	}
 
-	if _, err := ResolveRepoPath(rc, filepath.Join(workspace, "..", "outside")); err == nil {
+	if _, err := ResolveRepoPath(pv, filepath.Join(workspace, "..", "outside")); err == nil {
 		t.Fatal("expected escaping path to be rejected")
 	}
 }

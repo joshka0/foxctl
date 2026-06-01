@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -15,9 +16,7 @@ import (
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/mcputil"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
-	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
-	errs "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain/lite"
 )
 
 const command = "mcp/bridge"
@@ -74,28 +73,25 @@ func runMain() error {
 	flag.Parse()
 
 	ctx := context.Background()
-	rc, err := skillmain.Bootstrap(ctx, os.Stdout)
+	rc, err := lite.Bootstrap(ctx, os.Stdout)
 	if err != nil {
-		return skillout.Fatal(os.Stdout, command, skillerr.WrapRuntime("bootstrap", err))
+		return lite.Fatal(os.Stdout, command, skillerr.WrapRuntime("bootstrap", err))
 	}
-	defer func() {
-		errs.Ignore(rc.Close(), "run context close")
-	}()
 
 	in, err := parseInput(os.Stdin, serverCmd, serverURL, toolName, serverArgs, serverEnv, serverHeaders)
 	if err != nil {
 		var skillErr *skillerr.Error
 		if errors.As(err, &skillErr) {
-			return skillout.Fatal(os.Stdout, command, skillErr)
+			return lite.Fatal(os.Stdout, command, skillErr)
 		}
-		return skillout.Fatal(os.Stdout, command, skillerr.WrapArg("parse input", err))
+		return lite.Fatal(os.Stdout, command, skillerr.WrapArg("parse input", err))
 	}
 	if err := run(ctx, rc, in); err != nil {
 		var skillErr *skillerr.Error
 		if errors.As(err, &skillErr) {
-			return skillout.Fatal(os.Stdout, command, skillErr)
+			return lite.Fatal(os.Stdout, command, skillErr)
 		}
-		return skillout.Fatal(os.Stdout, command, skillerr.WrapRuntime("execute", err))
+		return lite.Fatal(os.Stdout, command, skillerr.WrapRuntime("execute", err))
 	}
 	return nil
 }
@@ -114,7 +110,7 @@ func runMain() error {
 //
 // [[domain:mcp-bridge]]
 // [[protocol:mcp-protocol]]
-func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+func run(ctx context.Context, rc *lite.RunContext, in input) error {
 	var mcpClient *client.Client
 	var err error
 
@@ -138,7 +134,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	defer func() {
 		if err := mcpClient.Close(); err != nil {
 			// Log close error but don't fail the operation.
-			rc.Logger.Warn().Err(err).Msg("mcp bridge: failed to close MCP client")
+			slog.Warn("mcp bridge: failed to close MCP client", "error", err)
 		}
 	}()
 
@@ -163,7 +159,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		"content":  toolResult.Content,
 	}
 
-	return skillout.Emit(rc, command, data)
+	return lite.Emit(rc, command, data)
 }
 
 // parseInput parses input from stdin and command-line flags supporting both tool mode and legacy mode.
