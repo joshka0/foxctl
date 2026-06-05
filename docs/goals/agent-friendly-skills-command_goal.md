@@ -124,8 +124,8 @@ The intended behavior is:
   - Required parameters absent from guides.
   - `--strict` non-zero exit with a report envelope.
 - Confirm `make skills-doctor-changed BASE_REF=<base> HEAD_REF=HEAD` gates only
-  impacted skills and `make skills-doctor` remains advisory for the global
-  report.
+  directly changed skill directories and `make skills-doctor` remains advisory
+  for the global report.
 
 ### 2. Tighten Tests
 - Remove redundant or overlapping tests if they make the suite harder to read.

@@ -100,8 +100,8 @@ foxctl skills doctor <skill> --strict
 The doctor checks manifest validity, guide presence, guide freshness relative to
 `skill.yaml`, copy-pasteable command examples, and required parameter coverage.
 
-CI enforces the same strict contract only for changed skills, using the existing
-impact analyzer:
+CI enforces the same strict contract only for skills with files changed directly
+under `skills/<dir>/...`:
 
 ```bash
 make skills-doctor-changed BASE_REF=origin/main HEAD_REF=HEAD

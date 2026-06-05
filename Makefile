@@ -824,7 +824,15 @@ ifndef BASE_REF
 	$(error BASE_REF is required. Usage: make skills-doctor-changed BASE_REF=origin/main [HEAD_REF=HEAD])
 endif
 	@set -euo pipefail; \
-		skills="$$( $(GO_CMD) run ./scripts/skills_impact --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
+		skills="$$( git diff --name-only "$(BASE_REF)" "$(HEAD_REF)" -- skills \
+			| sed -n 's#^skills/\([^/][^/]*\)/.*#\1#p' \
+			| sort -u \
+			| while IFS= read -r name; do \
+				if [ -f "skills/$$name/skill.yaml" ]; then \
+					printf '%s\n' "$$name"; \
+				fi; \
+			done \
+			| paste -sd' ' - )"; \
 		if [ -z "$$skills" ]; then \
 			echo "No changed skills"; \
 			exit 0; \
