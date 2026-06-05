@@ -7,6 +7,7 @@ import (
 
 	"github.com/joshka0/foxctl/internal/platform/config"
 	errs "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/protocol"
 	memstore "github.com/joshka0/foxctl/internal/storage/memory"
 )
@@ -52,11 +53,19 @@ func rememberResult(ctx context.Context, cfg config.Config, opts RememberOptions
 	_, err = store.SaveResult(ctx, memstore.SaveOptions{
 		Name:      name,
 		Type:      opts.Type,
-		Workspace: opts.Workspace,
+		Workspace: rememberWorkspaceID(opts.Workspace),
 		Summary:   summary,
 		Result:    opts.Result,
 	})
 	return err
+}
+
+func rememberWorkspaceID(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || workspace.LooksLikeID(value) {
+		return value
+	}
+	return workspace.ExplicitIDOrSelector(value)
 }
 
 func summarizeResult(result []byte) string {

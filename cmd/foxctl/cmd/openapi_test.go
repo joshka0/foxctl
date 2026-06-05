@@ -17,7 +17,7 @@ import (
 
 func TestOpenAPIImportCommandStoresSpec(t *testing.T) {
 	cfg := setupOpenAPITestConfig(t)
-	workspaceID := workspace.ID(cfg.Home)
+	workspaceID := workspace.ExplicitID(cfg.Home)
 	ctx := context.Background()
 
 	// seed directories for cas/memory

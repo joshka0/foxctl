@@ -3,8 +3,10 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/joho/godotenv"
@@ -25,6 +27,13 @@ var rootCmd = &cobra.Command{
 	},
 }
 
+const rootAgentStartHere = `Start here (for AI agents):
+  foxctl skills
+  foxctl skills search "<task>"
+  foxctl skills get foxctl
+  foxctl skills get <name>
+  foxctl skills path [name]`
+
 var (
 	configPath     string
 	initConfigOnce sync.Once
@@ -38,6 +47,7 @@ func Execute(ctx context.Context) error {
 
 func init() {
 	cobra.OnInitialize(initConfig)
+	rootCmd.SetHelpFunc(foxctlHelp)
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "Path to a config file (default: ~/.foxctl/config.yaml)")
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
 		if _, ok := config.FromContext(cmd.Context()); ok {
@@ -63,6 +73,85 @@ func init() {
 		ctx = logging.WithContext(ctx, logger)
 		cmd.SetContext(ctx)
 		return nil
+	}
+}
+
+func foxctlHelp(cmd *cobra.Command, _ []string) {
+	if cmd.CommandPath() != "foxctl" {
+		writeDefaultHelp(cmd)
+		return
+	}
+	writeRootHelp(cmd)
+}
+
+func writeDefaultHelp(cmd *cobra.Command) {
+	out := cmd.OutOrStdout()
+	if desc := strings.TrimRight(cmd.Long, " \t\r\n"); desc != "" {
+		fmt.Fprintln(out, desc)
+		fmt.Fprintln(out)
+	} else if desc := strings.TrimRight(cmd.Short, " \t\r\n"); desc != "" {
+		fmt.Fprintln(out, desc)
+		fmt.Fprintln(out)
+	}
+	if cmd.Runnable() || cmd.HasSubCommands() {
+		fmt.Fprint(out, cmd.UsageString())
+	}
+}
+
+func writeRootHelp(cmd *cobra.Command) {
+	out := cmd.OutOrStdout()
+	if desc := strings.TrimRight(cmd.Long, " \t\r\n"); desc != "" {
+		fmt.Fprintln(out, desc)
+		fmt.Fprintln(out)
+	} else if desc := strings.TrimRight(cmd.Short, " \t\r\n"); desc != "" {
+		fmt.Fprintln(out, desc)
+		fmt.Fprintln(out)
+	}
+
+	if cmd.Runnable() || cmd.HasAvailableSubCommands() {
+		fmt.Fprintln(out, "Usage:")
+		if cmd.Runnable() {
+			fmt.Fprintf(out, "  %s\n", cmd.UseLine())
+		}
+		if cmd.HasAvailableSubCommands() {
+			fmt.Fprintf(out, "  %s [command]\n", cmd.CommandPath())
+		}
+		fmt.Fprintln(out)
+	}
+
+	fmt.Fprintln(out, rootAgentStartHere)
+
+	if cmd.HasAvailableSubCommands() {
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Available Commands:")
+		for _, subcmd := range cmd.Commands() {
+			if subcmd.IsAvailableCommand() || subcmd.Name() == "help" {
+				fmt.Fprintf(out, "  %-*s %s\n", cmd.NamePadding(), subcmd.Name(), subcmd.Short)
+			}
+		}
+	}
+	if cmd.HasAvailableLocalFlags() {
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Flags:")
+		fmt.Fprintln(out, strings.TrimRight(cmd.LocalFlags().FlagUsages(), " \t\r\n"))
+	}
+	if cmd.HasAvailableInheritedFlags() {
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Global Flags:")
+		fmt.Fprintln(out, strings.TrimRight(cmd.InheritedFlags().FlagUsages(), " \t\r\n"))
+	}
+	if cmd.HasHelpSubCommands() {
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Additional help topics:")
+		for _, subcmd := range cmd.Commands() {
+			if subcmd.IsAdditionalHelpTopicCommand() {
+				fmt.Fprintf(out, "  %-*s %s\n", cmd.CommandPathPadding(), subcmd.CommandPath(), subcmd.Short)
+			}
+		}
+	}
+	if cmd.HasAvailableSubCommands() {
+		fmt.Fprintln(out)
+		fmt.Fprintf(out, "Use %q for more information about a command.\n", cmd.CommandPath()+" [command] --help")
 	}
 }
 

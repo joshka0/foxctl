@@ -52,7 +52,7 @@ func TestCuratorRunApplyRequiresConfirmation(t *testing.T) {
 
 func TestCuratorReportLatestReadsPersistedReport(t *testing.T) {
 	cfg := setupMemoryTestEnv(t)
-	workspaceID := workspace.ID(cfg.Home)
+	workspaceID := workspace.ExplicitID(cfg.Home)
 	store, err := memstore.Open(context.Background(), cfg.Storage.Root, cfg.Paths.CAS)
 	if err != nil {
 		t.Fatalf("open memory store: %v", err)

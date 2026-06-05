@@ -18,7 +18,7 @@ import (
 func TestErrorsCommandUsesObservabilityEvents(t *testing.T) {
 	obsDir := t.TempDir()
 	workspaceRoot := t.TempDir()
-	workspaceID := workspace.ID(workspaceRoot)
+	workspaceID := workspace.ExplicitID(workspaceRoot)
 	now := time.Now().UTC()
 	observabilityEvents := []observability.Event{
 		{

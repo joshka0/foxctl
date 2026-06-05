@@ -46,7 +46,7 @@ SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 CGO_SKILLS :=
 OPTIONAL_CGO_SKILLS :=
 
-.PHONY: fmt lint static-analysis install-git-hooks typecheck lsp-check vet test test-race test-race-smoke test-race-shard test-race-impacted test-race-changed test-race-shard-impacted test-integration test-integration-package test-integration-package-impacted test-integration-impacted test-integration-cmd test-integration-cmd-impacted test-integration-golden test-integration-golden-impacted test-integration-rlm test-integration-rlm-impacted mutation-critical mutation-critical-list mutation-critical-dry-run cover check-coverage check-coverage-strict check-doc-links check-large-files check-tech-debt repo-hygiene check-duplication test-timing build build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-impact skills-dependency-audit skills-build-impacted packages-impact test-short-core test-short-core-impacted test-short-skills test-short-skills-impacted test-short-impacted skills-install skills-install-cgo skills-install-all skills-test completions init go-tui-build go-tui-spawn go-tui-agent go-tui go-tui-smoke tui ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean benchmark-manifest bench-go bench-orientation gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-foxctl-package eval-code-search-praze-infra eval-code-search-foxctl-repo-grounded eval-code-search-foxctl-change-impact eval-code-search-foxctl-trace-symbol eval-code-search-foxctl-bridge-esoteric eval-retrieval-foxctl eval-retrieval-foxctl-mixed eval-retrieval-foxctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
+.PHONY: fmt lint static-analysis install-git-hooks typecheck lsp-check vet test test-race test-race-smoke test-race-shard test-race-impacted test-race-changed test-race-shard-impacted test-integration test-integration-package test-integration-package-impacted test-integration-impacted test-integration-cmd test-integration-cmd-impacted test-integration-golden test-integration-golden-impacted test-integration-rlm test-integration-rlm-impacted mutation-critical mutation-critical-list mutation-critical-dry-run cover check-coverage check-coverage-strict check-doc-links check-large-files check-tech-debt repo-hygiene check-duplication test-timing build build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-impact skills-dependency-audit skills-doctor skills-doctor-changed skills-build-impacted packages-impact test-short-core test-short-core-impacted test-short-skills test-short-skills-impacted test-short-impacted skills-install skills-install-cgo skills-install-all skills-test completions init go-tui-build go-tui-spawn go-tui-agent go-tui go-tui-smoke tui ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean benchmark-manifest bench-go bench-orientation gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-foxctl-package eval-code-search-praze-infra eval-code-search-foxctl-repo-grounded eval-code-search-foxctl-change-impact eval-code-search-foxctl-trace-symbol eval-code-search-foxctl-bridge-esoteric eval-retrieval-foxctl eval-retrieval-foxctl-mixed eval-retrieval-foxctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
 
 fmt:
 	@echo "Running gofumpt"
@@ -815,6 +815,24 @@ packages-impact:
 
 BASE_REF ?=
 HEAD_REF ?= HEAD
+
+skills-doctor: build
+	@bin/$(BINARY) skills doctor
+
+skills-doctor-changed: build
+ifndef BASE_REF
+	$(error BASE_REF is required. Usage: make skills-doctor-changed BASE_REF=origin/main [HEAD_REF=HEAD])
+endif
+	@set -euo pipefail; \
+		skills="$$( $(GO_CMD) run ./scripts/skills_impact --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
+		if [ -z "$$skills" ]; then \
+			echo "No changed skills"; \
+			exit 0; \
+		fi; \
+		echo "Checking changed skill guides: $$skills"; \
+		for name in $$skills; do \
+			bin/$(BINARY) skills doctor "./skills/$$name" --strict; \
+		done
 
 skills-build-impacted:
 ifndef BASE_REF

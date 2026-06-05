@@ -83,6 +83,60 @@ func TestSkillsListCommandListsInstalledSkills(t *testing.T) {
 	}
 }
 
+func TestSkillsDefaultCommandListsInstalledSkills(t *testing.T) {
+	cfg := installTextGrepManifestOnly(t)
+
+	cmd := newSkillsCommand()
+	cmd.SetContext(config.WithContext(context.Background(), cfg))
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("skills default: %v (stderr=%s)", err, stderr.String())
+	}
+
+	var env envelope.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("decode default envelope: %v", err)
+	}
+	if env.Command != "foxctl.skills.list" {
+		t.Fatalf("expected list command envelope, got %s", env.Command)
+	}
+	skills, ok := env.Data.(map[string]any)["skills"].([]any)
+	if !ok {
+		t.Fatalf("expected skills array in response: %T", env.Data)
+	}
+	if len(skills) < 1 {
+		t.Fatalf("expected at least one skill, got %d", len(skills))
+	}
+}
+
+func TestSkillsDefaultCommandSupportsCompactList(t *testing.T) {
+	cfg := installTextGrepManifestOnly(t)
+
+	cmd := newSkillsCommand()
+	cmd.SetContext(config.WithContext(context.Background(), cfg))
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"--compact"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("skills --compact: %v (stderr=%s)", err, stderr.String())
+	}
+
+	got := stdout.String()
+	if !strings.Contains(got, "text/grep") || !strings.Contains(got, "Recursive regex search") {
+		t.Fatalf("compact list missing skill summary:\n%s", got)
+	}
+	if strings.HasPrefix(strings.TrimSpace(got), "{") {
+		t.Fatalf("compact list should not emit JSON envelope:\n%s", got)
+	}
+}
+
 func TestSkillsDescribeCommandProvidesDetails(t *testing.T) {
 	cfg := installTextGrepManifestOnly(t)
 
@@ -188,6 +242,98 @@ func TestSkillsSearchCommandMatchesByName(t *testing.T) {
 	}
 	if len(skills) != 1 {
 		t.Fatalf("expected one match, got %d", len(skills))
+	}
+	first := skills[0].(map[string]any)
+	nextSteps, ok := first["next_steps"].([]any)
+	if !ok || len(nextSteps) == 0 {
+		t.Fatalf("expected search result next_steps, got %#v", first["next_steps"])
+	}
+	if got := nextSteps[0].(string); got != "foxctl skills get text/grep" {
+		t.Fatalf("unexpected first next step: %s", got)
+	}
+}
+
+func TestSkillsSearchCommandSupportsCompactOutput(t *testing.T) {
+	cfg := installTextGrepManifestOnly(t)
+
+	cmd := newSkillsSearchCommand()
+	cmd.SetContext(config.WithContext(context.Background(), cfg))
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"grep", "--compact"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("skills search compact: %v (stderr=%s)", err, stderr.String())
+	}
+
+	got := stdout.String()
+	if !strings.Contains(got, "text/grep") || !strings.Contains(got, "foxctl skills get text/grep") {
+		t.Fatalf("compact search missing next step:\n%s", got)
+	}
+	if strings.HasPrefix(strings.TrimSpace(got), "{") {
+		t.Fatalf("compact search should not emit JSON envelope:\n%s", got)
+	}
+}
+
+func TestSkillsDoctorReportsGuideDrift(t *testing.T) {
+	cfg := installTextGrepManifestOnly(t)
+	t.Setenv("FOXCTL_SKILLS_PATH", cfg.Paths.Skills)
+	guidePath := filepath.Join(cfg.Paths.Skills, "text_grep", "SKILL.md")
+	if err := os.WriteFile(guidePath, []byte("# text/grep\n\nfoxctl skills run text/grep\n"), 0o644); err != nil {
+		t.Fatalf("write guide: %v", err)
+	}
+
+	cmd := newSkillsDoctorCommand()
+	cmd.SetContext(config.WithContext(context.Background(), cfg))
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"text/grep"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("skills doctor: %v (stderr=%s)", err, stderr.String())
+	}
+
+	data := decodeEnvelopeData(t, stdout.Bytes())
+	if data["ok"] != false {
+		t.Fatalf("expected doctor to report drift, got %#v", data)
+	}
+	issues := data["issues"].([]any)
+	if len(issues) == 0 {
+		t.Fatalf("expected at least one drift issue")
+	}
+	found := false
+	for _, raw := range issues {
+		issue := raw.(map[string]any)
+		if issue["code"] == "guide_missing_required_parameter" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected missing required parameter issue, got %#v", issues)
+	}
+}
+
+func TestSkillsDoctorStrictReturnsErrorOnDrift(t *testing.T) {
+	cfg := installTextGrepManifestOnly(t)
+	t.Setenv("FOXCTL_SKILLS_PATH", cfg.Paths.Skills)
+
+	cmd := newSkillsDoctorCommand()
+	cmd.SetContext(config.WithContext(context.Background(), cfg))
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"text/grep", "--strict"})
+
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected strict doctor to return an error")
+	}
+	if !strings.Contains(stdout.String(), `"ok":false`) {
+		t.Fatalf("strict doctor should still write report envelope, got:\n%s", stdout.String())
 	}
 }
 

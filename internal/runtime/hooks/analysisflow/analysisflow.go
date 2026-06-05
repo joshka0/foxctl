@@ -80,7 +80,7 @@ type impactEnvelope struct {
 }
 
 func AnalyzeEditedFile(ctx context.Context, deps Dependencies, req Request) (Response, error) {
-	target := workspace.Normalize(workspace.Detect(strings.TrimSpace(req.Workspace)))
+	target := resolveRequestWorkspace(req.Workspace)
 	if target == "" {
 		return Response{}, fmt.Errorf("detect workspace")
 	}
@@ -150,7 +150,7 @@ func AnalyzeEditedFile(ctx context.Context, deps Dependencies, req Request) (Res
 }
 
 func AnalyzeSemanticAnchors(ctx context.Context, req Request) (SemanticAnchorResponse, error) {
-	target := workspace.Normalize(workspace.Detect(strings.TrimSpace(req.Workspace)))
+	target := resolveRequestWorkspace(req.Workspace)
 	if target == "" {
 		return SemanticAnchorResponse{}, fmt.Errorf("detect workspace")
 	}
@@ -198,6 +198,14 @@ func AnalyzeSemanticAnchors(ctx context.Context, req Request) (SemanticAnchorRes
 	response.GraphDiff = graphDiff
 	response.Context = buildSemanticAnchorContext(extracted.Occurrences, warnings, testContracts, graphDiff, neighbors)
 	return response, nil
+}
+
+func resolveRequestWorkspace(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return workspace.Normalize(workspace.Detect(""))
+	}
+	return workspace.Normalize(value)
 }
 
 func isCodeFile(path string) bool {

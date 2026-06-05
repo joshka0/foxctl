@@ -16,7 +16,7 @@ import (
 func TestObsEventsCommandQueriesNonErrorEvents(t *testing.T) {
 	obsDir := t.TempDir()
 	workspaceRoot := t.TempDir()
-	workspaceID := workspace.ID(workspaceRoot)
+	workspaceID := workspace.ExplicitID(workspaceRoot)
 	now := time.Now().UTC()
 	writeErrorsTestEvents(t, obsDir, []observability.Event{
 		{
@@ -71,7 +71,7 @@ func TestObsEventsCommandQueriesNonErrorEvents(t *testing.T) {
 func TestObsSymbolMetricsCommandSummarizesFunctionSizes(t *testing.T) {
 	obsDir := t.TempDir()
 	workspaceRoot := t.TempDir()
-	workspaceID := workspace.ID(workspaceRoot)
+	workspaceID := workspace.ExplicitID(workspaceRoot)
 	now := time.Now().UTC()
 	writeErrorsTestEvents(t, obsDir, []observability.Event{
 		symbolMetricTestEvent(now.Add(-3*time.Minute), workspaceID, "a.go", "A", "function", 10, 18),
