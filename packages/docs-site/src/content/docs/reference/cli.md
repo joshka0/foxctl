@@ -16,6 +16,7 @@ The foxctl CLI is organized by job, not by binary implementation. Each command f
 | `foxctl room` | Durable room messages, tasks, and coordination | [Rooms](/collaboration/rooms/) |
 | `foxctl obsidian` | ContextWiki vault graph, bridge, and index refresh | [Obsidian bridge](/context/obsidian-bridge/) |
 | `foxctl context` | Context summaries and evidence import | [ContextWiki](/context/contextwiki/) |
+| `foxctl dream` | Detached transcript dreaming into durable memory with optional Obsidian notes and memory blur | [Memory and continuity](/memory/continuity/) |
 | `foxctl mcp` | MCP status and serving | [Providers and MCP](/integrations/providers-and-mcp/) |
 | `foxctl openapi` | OpenAPI-backed provider integration | [OpenAPI and plugins](/integrations/openapi-and-plugins/) |
 | `foxctl shell` | Structured read-only command-shaped retrieval | — |

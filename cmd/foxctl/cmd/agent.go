@@ -1650,6 +1650,7 @@ func runAgentRunWithRoute(cmd *cobra.Command, args []string) error {
 	opts := agentdaemon.Options{
 		AgentID:                agentRecord.ID, // Use resolved ID
 		StorageRoot:            cfg.Storage.Root,
+		Config:                 cfg,
 		WorkspaceRoot:          workspaceRoot,
 		RepoIndexWorkspaceRoot: runRepoIndexWorkspace,
 		PollInterval:           500 * time.Millisecond,

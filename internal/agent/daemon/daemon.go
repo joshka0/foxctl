@@ -20,6 +20,7 @@ import (
 	"github.com/joshka0/foxctl/internal/agent/types"
 	"github.com/joshka0/foxctl/internal/context/companion"
 	"github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedding"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
 	llmproviders "github.com/joshka0/foxctl/internal/providers/llm"
 	"github.com/joshka0/foxctl/internal/runtime/engine"
@@ -51,6 +52,7 @@ type daemonStores struct {
 	bbStore              blackboard.Store
 	contextvarStore      contextvar.Store // for companion service RLM context
 	namedMemoryStore     storage.MemoryStore
+	embeddingStore       *embedding.Store
 	sessionsStore        *sessions.Store
 	companionMemory      *companion.ConversationMemory // nil if disabled
 	companionMemoryDB    *sql.DB                       // need to close this too
@@ -126,6 +128,21 @@ func openDaemonStores(ctx context.Context, root string, opts Options) (*daemonSt
 	}
 	stores.sessionsStore = sessionsStore
 
+	memoryStore, memErr := memorystore.Open(ctx, root, "")
+	if memErr != nil {
+		log.Warn().Err(memErr).Msg("open named memory store failed; memory embedding drain disabled")
+	} else {
+		stores.namedMemoryStore = memoryStore
+	}
+
+	embeddingQueueRoot := embeddingQueueRootForOptions(root, opts)
+	embeddingStore, err := embedding.OpenStore(ctx, embeddingQueueRoot)
+	if err != nil {
+		log.Warn().Err(err).Str("root", embeddingQueueRoot).Msg("open embedding queue store failed; memory embedding drain disabled")
+	} else {
+		stores.embeddingStore = embeddingStore
+	}
+
 	promptVariantStore, err := optimization.OpenPromptVariantStore(ctx, root)
 	if err != nil {
 		log.Warn().Err(err).Msg("open prompt variant store failed; continuing without optimized prompt variants")
@@ -135,13 +152,6 @@ func openDaemonStores(ctx context.Context, root string, opts Options) (*daemonSt
 
 	// Open companion memory if enabled
 	if opts.EnableCompanionMemory {
-		memoryStore, memErr := memorystore.Open(ctx, root, "")
-		if memErr != nil {
-			log.Warn().Err(memErr).Msg("open named memory store failed; continuing without workspace memory recall")
-		} else {
-			stores.namedMemoryStore = memoryStore
-		}
-
 		dbPath := filepath.Join(root, "companion.db")
 		db, closeFn, err := dbutil.OpenStoreDB(ctx, root, "COMPANION", filepath.Base(dbPath), nil) // schema managed by NewConversationMemory
 		if err != nil {
@@ -237,6 +247,9 @@ func (s *daemonStores) Close() {
 	}
 	if s.namedMemoryStore != nil {
 		_ = s.namedMemoryStore.Close()
+	}
+	if s.embeddingStore != nil {
+		_ = s.embeddingStore.Close()
 	}
 	if s.sessionsStore != nil {
 		_ = s.sessionsStore.Close()
@@ -441,30 +454,32 @@ func Run(ctx context.Context, opts Options) error {
 
 	// 7. Enter poll loop
 	return runPollLoop(ctx, pollDeps{
-		opts:         opts,
-		logger:       logger,
-		agentRecord:  agentRecord,
-		agentStore:   stores.agentStore,
-		mailboxStore: stores.mailboxStore,
-		dedupeStore:  dedupeStore,
-		companionSvc: companionSvc,
-		cancelCtx:    cancelCtx,
-		optCtx:       optCtx,
-		endTick:      &endTickRequested,
+		opts:                   opts,
+		logger:                 logger,
+		agentRecord:            agentRecord,
+		agentStore:             stores.agentStore,
+		mailboxStore:           stores.mailboxStore,
+		dedupeStore:            dedupeStore,
+		companionSvc:           companionSvc,
+		cancelCtx:              cancelCtx,
+		optCtx:                 optCtx,
+		endTick:                &endTickRequested,
+		memoryEmbeddingDrainer: newMemoryEmbeddingDrainer(stores, opts),
 	})
 }
 
 type pollDeps struct {
-	opts         Options
-	logger       zerolog.Logger
-	agentRecord  agent.Agent
-	agentStore   storagents.Store
-	mailboxStore mailbox.Store
-	dedupeStore  DedupeStore
-	companionSvc ChatService // non-nil for companion agents
-	cancelCtx    *CancelContext
-	optCtx       *OptimizationContext
-	endTick      *atomic.Bool
+	opts                   Options
+	logger                 zerolog.Logger
+	agentRecord            agent.Agent
+	agentStore             storagents.Store
+	mailboxStore           mailbox.Store
+	dedupeStore            DedupeStore
+	companionSvc           ChatService // non-nil for companion agents
+	cancelCtx              *CancelContext
+	optCtx                 *OptimizationContext
+	endTick                *atomic.Bool
+	memoryEmbeddingDrainer *memoryEmbeddingDrainer
 }
 
 // initOptimization initializes optimization stores and pattern collector if enabled.
@@ -739,6 +754,11 @@ func processPollTick(ctx context.Context, deps pollDeps) error {
 	if currentAgent.State == agent.StateStopped {
 		deps.logger.Info().Msg("agent state is stopped, exiting daemon")
 		return errAgentStopped
+	}
+
+	if deps.memoryEmbeddingDrainer != nil {
+		result := deps.memoryEmbeddingDrainer.Drain(ctx)
+		logMemoryEmbeddingDrainResult(deps.logger, result)
 	}
 
 	pollTypes := []agent.MessageType{

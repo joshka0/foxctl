@@ -14,6 +14,7 @@ import (
 	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/storage/dbutil"
 	"github.com/joshka0/foxctl/internal/storage/queue"
+	"github.com/joshka0/foxctl/internal/storage/sqlutil"
 )
 
 const embeddingQueueTable = "embedding_queue_jobs"
@@ -655,6 +656,39 @@ func (s *Store) StatsKind(ctx context.Context, kind embedqueue.TaskKind) (*Queue
 // StatsInWorkspaceKind summarizes queue state for one workspace/group and task kind.
 func (s *Store) StatsInWorkspaceKind(ctx context.Context, workspaceID string, kind embedqueue.TaskKind) (*QueueStats, error) {
 	return s.stats(ctx, strings.TrimSpace(workspaceID), string(kind))
+}
+
+// ClaimableCountInWorkspaceKind counts jobs that ClaimNextInWorkspaceKind could
+// claim now, excluding future-scheduled retries.
+func (s *Store) ClaimableCountInWorkspaceKind(ctx context.Context, workspaceID string, kind embedqueue.TaskKind) (int, error) {
+	nowStr := sqlutil.FormatTimestamp(time.Now().UTC())
+	clauses := []string{"state IN ('queued', 'retry')", "(scheduled_at IS NULL OR scheduled_at <= ?)"}
+	args := []any{nowStr}
+	if workspaceID = strings.TrimSpace(workspaceID); workspaceID != "" {
+		clauses = append(clauses, "group_id = ?")
+		args = append(args, workspaceID)
+	}
+	if predicate, predicateArgs := embeddingPayloadKindPredicate(kind); predicate != "" {
+		clauses = append(clauses, predicate)
+		args = append(args, predicateArgs...)
+	}
+	var count int
+	query := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", embeddingQueueTable, strings.Join(clauses, " AND "))
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("embedding: count claimable jobs: %w", err)
+	}
+	return count, nil
+}
+
+func embeddingPayloadKindPredicate(kind embedqueue.TaskKind) (string, []any) {
+	raw := strings.TrimSpace(string(kind))
+	if raw == "" {
+		return "", nil
+	}
+	if kind == embedqueue.TaskKindSymbol {
+		return "CASE WHEN json_valid(payload) THEN (json_extract(payload, '$.kind') = ? OR json_type(payload, '$.kind') IS NULL) ELSE 0 END", []any{raw}
+	}
+	return "CASE WHEN json_valid(payload) THEN json_extract(payload, '$.kind') = ? ELSE 0 END", []any{raw}
 }
 
 func (s *Store) stats(ctx context.Context, workspaceID, kind string) (*QueueStats, error) {

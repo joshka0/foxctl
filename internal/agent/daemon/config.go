@@ -6,6 +6,8 @@ import (
 
 	"github.com/joshka0/foxctl/internal/agent/optimization"
 	"github.com/joshka0/foxctl/internal/context/companion"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedding"
+	"github.com/joshka0/foxctl/internal/platform/config"
 )
 
 // OptimizationContext holds optimization components for handler use.
@@ -32,6 +34,9 @@ type ChatService interface {
 type Options struct {
 	AgentID     string
 	StorageRoot string
+	// Config carries already-loaded process configuration into daemon-owned
+	// background workers without reloading config from daemon internals.
+	Config config.Config
 	// WorkspaceRoot is the absolute path used for filesystem-bound tool access.
 	WorkspaceRoot string
 	// RepoIndexWorkspaceRoot optionally overrides the workspace key used to open
@@ -83,4 +88,14 @@ type Options struct {
 
 	// CompanionService overrides the default companion service (tests/injections).
 	CompanionService ChatService
+
+	// MemoryEmbedderFactory overrides memory embedding provider construction for
+	// daemon memory queue drain tests.
+	MemoryEmbedderFactory func(context.Context, config.Config) (embedding.MemoryEmbedder, int, error)
+	// MemoryEmbeddingBatchSize bounds memory embedding queue jobs processed per
+	// daemon poll tick. Defaults to a small value when zero.
+	MemoryEmbeddingBatchSize int
+	// MemoryEmbeddingRecoverStaleAfter requeues running memory jobs older than
+	// this duration before each drain pass. Defaults conservatively when zero.
+	MemoryEmbeddingRecoverStaleAfter time.Duration
 }

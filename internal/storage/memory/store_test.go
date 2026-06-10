@@ -288,6 +288,102 @@ func TestSearchAndUpdate(t *testing.T) {
 	}
 }
 
+func TestSearchMatchesTermsInsidePunctuatedFileText(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
+
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
+	if _, err := store.SaveFromResult(ctx, "edit:auth", "semantic_fact", "ws", "auth.go: Remember to validate state before token exchange", result); err != nil {
+		t.Fatalf("save memory: %v", err)
+	}
+
+	results, err := store.Search(ctx, "ws", "auth", 10)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(results) != 1 || results[0].Entry.Name != "edit:auth" {
+		t.Fatalf("expected punctuated file text search result, got %#v", results)
+	}
+}
+
+func TestSearchIgnoresStopWordOnlyQuery(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
+
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
+	if _, err := store.SaveFromResult(ctx, "common-token-memory", "semantic_fact", "ws", "Works with existing recall records.", result); err != nil {
+		t.Fatalf("save memory: %v", err)
+	}
+
+	results, err := store.Search(ctx, "ws", "with", 10)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("Search returned %d results for stop-word-only query, want 0: %#v", len(results), results)
+	}
+}
+
+func TestSearchUsesAtomicTextEntitiesAndKeywords(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
+
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
+	if _, err := store.SaveFromResult(ctx, "plain-memory", "semantic_fact", "ws", "plain summary", result); err != nil {
+		t.Fatalf("save plain memory: %v", err)
+	}
+	if _, err := store.SaveFromResult(ctx, "atomic-memory", "semantic_fact", "ws", "generic summary", result); err != nil {
+		t.Fatalf("save atomic memory: %v", err)
+	}
+	if err := store.UpdateAtomic(
+		ctx, "atomic-memory", "ws",
+		"Use the local embedder for repository retrieval checks.",
+		[]string{"RepositoryMemory", "Embedder"},
+		[]string{"retrieval", "reranker"},
+	); err != nil {
+		t.Fatalf("update atomic: %v", err)
+	}
+
+	results, err := store.Search(ctx, "ws", "embedder reranker", 10)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("Search returned %d results, want 1: %#v", len(results), results)
+	}
+	entry := results[0].Entry
+	if entry.Name != "atomic-memory" {
+		t.Fatalf("Search returned %q, want atomic-memory", entry.Name)
+	}
+	if entry.AtomicText == "" || !containsString(entry.Entities, "Embedder") || !containsString(entry.Keywords, "reranker") {
+		t.Fatalf("atomic fields were not projected in search result: %#v", entry)
+	}
+}
+
 func TestUpdateLifecyclePersistsNamedMemoryState(t *testing.T) {
 	ctx := context.Background()
 	store, err := Open(ctx, t.TempDir(), "")
@@ -1660,4 +1756,13 @@ func TestUpsertBehavior(t *testing.T) {
 	}
 
 	_ = entry1 // Avoid unused variable
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
