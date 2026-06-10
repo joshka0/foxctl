@@ -18,6 +18,7 @@ stages:
   - prepare
   - check
   - build
+  - verify
 
 default:
   interruptible: true
@@ -34,11 +35,168 @@ workflow:
     - if: $CI_MERGE_REQUEST_IID
     - if: $CI_COMMIT_TAG
 
+.ci-image-change-paths: &ci_image_change_paths
+  - .gitlab-ci.yml
+  - .golangci.yml
+  - deploy/docker/**/*
+  - Makefile
+  - go.mod
+  - go.sum
+  - cmd/**/*
+  - internal/**/*
+  - plugins/**/*
+  - scripts/**/*.go
+  - scripts/checkmanifests/**/*
+  - skills/**/*
+  - tests/**/*
+
+.go-core-change-paths: &go_core_change_paths
+  - .gitlab-ci.yml
+  - .golangci.yml
+  - deploy/docker/**/*
+  - Makefile
+  - go.mod
+  - go.sum
+  - cmd/**/*
+  - internal/**/*
+  - plugins/**/*
+  - scripts/**/*.go
+  - tests/**/*
+
+.skill-change-paths: &skill_change_paths
+  - .gitlab-ci.yml
+  - deploy/docker/**/*
+  - Makefile
+  - go.mod
+  - go.sum
+  - internal/**/*
+  - scripts/**/*.go
+  - scripts/skill_dependency_audit/**/*
+  - scripts/skills_impact/**/*
+  - skills/**/*
+  - tests/**/*
+
+.go-format-change-paths: &go_format_change_paths
+  - .gitlab-ci.yml
+  - Makefile
+  - go.mod
+  - go.sum
+  - cmd/**/*
+  - internal/**/*
+  - plugins/**/*
+  - scripts/**/*.go
+  - skills/**/*
+  - tests/**/*
+
+.manifest-change-paths: &manifest_change_paths
+  - .gitlab-ci.yml
+  - deploy/docker/**/*
+  - Makefile
+  - internal/domain/policy/**/*
+  - internal/domain/skill/**/*
+  - scripts/checkmanifests/**/*
+  - skills/**/skill.yaml
+
+.race-smoke-change-paths: &race_smoke_change_paths
+  - .gitlab-ci.yml
+  - deploy/docker/**/*
+  - Makefile
+  - go.mod
+  - go.sum
+  - cmd/**/*
+  - internal/**/*
+
+.frontend-change-paths: &frontend_change_paths
+  - .gitlab-ci.yml
+  - Makefile
+  - bun.lock
+  - bunfig.toml
+  - package.json
+  - tsconfig.json
+  - packages/data/**/*
+  - packages/foxterm/**/*
+  - packages/gui-agent/**/*
+  - packages/gui-auth-gateway/**/*
+  - scripts/**/*.ts
+  - scripts/**/*.mjs
+  - internal/interfaces/web/**/*
+
+.docs-site-change-paths: &docs_site_change_paths
+  - .gitlab-ci.yml
+  - bun.lock
+  - bunfig.toml
+  - package.json
+  - packages/docs-site/**/*
+
+.docs-change-paths: &docs_change_paths
+  - .gitlab-ci.yml
+  - AGENTS.md
+  - CLAUDE.md
+  - README.md
+  - CONTRIBUTING.md
+  - docs/**/*.md
+  - scripts/check_doc_links.sh
+
+.go-change-rules: &go_change_rules
+  - if: '$CI_COMMIT_BRANCH == "main"'
+  - if: '$CI_COMMIT_TAG'
+  - if: '$CI_MERGE_REQUEST_IID'
+    changes: *go_core_change_paths
+
+.skill-change-rules: &skill_change_rules
+  - if: '$CI_COMMIT_BRANCH == "main"'
+  - if: '$CI_COMMIT_TAG'
+  - if: '$CI_MERGE_REQUEST_IID'
+    changes: *skill_change_paths
+
+.go-format-change-rules: &go_format_change_rules
+  - if: '$CI_COMMIT_BRANCH == "main"'
+  - if: '$CI_COMMIT_TAG'
+  - if: '$CI_MERGE_REQUEST_IID'
+    changes: *go_format_change_paths
+
+.light-check-template:
+  # Intentionally no Go toolchain. Use only for shell/Python checks and verify
+  # Jobs that must still run when the per-commit CI image is skipped.
+  image: python:3.13
+  needs: []
+  before_script: []
+  variables:
+    KUBERNETES_MEMORY_REQUEST: "128Mi"
+    KUBERNETES_MEMORY_LIMIT: "512Mi"
+    KUBERNETES_HELPER_MEMORY_REQUEST: "128Mi"
+    KUBERNETES_HELPER_MEMORY_LIMIT: "256Mi"
+
+.bun-check-template:
+  image: oven/bun:1.3.14
+  needs: []
+  before_script:
+    - export PATH="/home/dev/.bun/bin:$PATH"
+    - bun install --frozen-lockfile
+  variables:
+    KUBERNETES_MEMORY_REQUEST: "512Mi"
+    KUBERNETES_MEMORY_LIMIT: "1536Mi"
+    KUBERNETES_HELPER_MEMORY_REQUEST: "128Mi"
+    KUBERNETES_HELPER_MEMORY_LIMIT: "256Mi"
+
+.post-fast-check-needs: &post_fast_check_needs
+  - job: format-check
+    optional: true
+  - job: unit-tests-core
+    optional: true
+  - job: unit-tests-skills
+    optional: true
+
 # --- Stage: prepare ---
-# Rebuilds CI image only when infra files change. All downstream stages wait.
+# Builds the per-commit CI image used by Go-backed downstream Jobs.
 build-ci-image:
   stage: prepare
   image: docker:27
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_MERGE_REQUEST_IID'
+      changes: *ci_image_change_paths
   services:
     - name: docker:27-dind
       alias: docker
@@ -81,7 +239,26 @@ build-ci-image:
     - retry_cmd 3 10 docker push ${CI_IMAGE}
 
 # --- Stage: check (all jobs run in parallel via DAG) ---
-static-analysis:
+format-check:
+  stage: check
+  rules: *go_format_change_rules
+  script:
+    - make fmt
+    - git -c core.filemode=false diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
+
+go-lint:
+  stage: check
+  rules: *go_change_rules
+  script:
+    - |
+      if [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ]; then
+        git fetch --no-tags origin \
+          "+refs/heads/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}:refs/remotes/origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}"
+      fi
+    - GOGC=50 GOMEMLIMIT=1800MiB make lint GOLANGCI_TIMEOUT=30m GOLANGCI_FLAGS='--concurrency=1' LINT_TARGETS='./cmd/... ./internal/... ./plugins/... ./scripts/... ./tests/...'
+
+repo-hygiene:
+  extends: .light-check-template
   stage: check
   script:
     - |
@@ -89,14 +266,22 @@ static-analysis:
         git fetch --no-tags origin \
           "+refs/heads/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}:refs/remotes/origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}"
       fi
-    - make fmt
-    - git -c core.filemode=false diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
-    - GOGC=50 GOMEMLIMIT=1800MiB make lint GOLANGCI_TIMEOUT=30m GOLANGCI_FLAGS='--concurrency=1' LINT_TARGETS='./cmd/... ./internal/... ./plugins/... ./scripts/... ./tests/...'
-    - make check-large-files
-    - make check-tech-debt
+    - make repo-hygiene
 
-unit-tests:
+docs-links:
+  extends: .light-check-template
   stage: check
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_MERGE_REQUEST_IID'
+      changes: *docs_change_paths
+  script:
+    - make check-doc-links
+
+unit-tests-core:
+  stage: check
+  rules: *go_change_rules
   variables:
     CGO_ENABLED: "0"
   script:
@@ -108,11 +293,51 @@ unit-tests:
         base_ref="$(git merge-base HEAD "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME")"
       fi
       if [ -n "$base_ref" ] && [ "$CI_COMMIT_BRANCH" != "main" ]; then
-        make test-short-impacted BASE_REF="$base_ref" HEAD_REF=HEAD 2>&1 | tee test-output.txt
+        make test-short-core-impacted BASE_REF="$base_ref" HEAD_REF=HEAD 2>&1 | tee test-output.txt
       else
-        go test -short -v -count=1 -timeout 20m ./... 2>&1 | tee test-output.txt
+        make test-short-core 2>&1 | tee test-output.txt
       fi
     - grep -E '(^--- |ok\s+|FAIL\s+|panic)' test-output.txt | head -100 || true
+
+unit-tests-skills:
+  stage: check
+  rules: *skill_change_rules
+  variables:
+    CGO_ENABLED: "0"
+  script:
+    - |
+      base_ref=""
+      if [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ] && git cat-file -e "$CI_MERGE_REQUEST_DIFF_BASE_SHA^{commit}" >/dev/null 2>&1; then
+        base_ref="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+      elif [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ] && git rev-parse --verify "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" >/dev/null 2>&1; then
+        base_ref="$(git merge-base HEAD "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME")"
+      fi
+      if [ -n "$base_ref" ] && [ "$CI_COMMIT_BRANCH" != "main" ]; then
+        make test-short-skills-impacted BASE_REF="$base_ref" HEAD_REF=HEAD 2>&1 | tee test-output.txt
+      else
+        make test-short-skills 2>&1 | tee test-output.txt
+      fi
+    - grep -E '(^--- |ok\s+|FAIL\s+|panic)' test-output.txt | head -100 || true
+
+skill-guide-drift:
+  stage: check
+  rules: *skill_change_rules
+  variables:
+    CGO_ENABLED: "0"
+    GOFLAGS: "-buildvcs=false -p=2"
+  script:
+    - |
+      base_ref=""
+      if [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ] && git cat-file -e "$CI_MERGE_REQUEST_DIFF_BASE_SHA^{commit}" >/dev/null 2>&1; then
+        base_ref="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+      elif [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ] && git rev-parse --verify "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" >/dev/null 2>&1; then
+        base_ref="$(git merge-base HEAD "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME")"
+      fi
+      if [ -n "$base_ref" ] && [ "$CI_COMMIT_BRANCH" != "main" ]; then
+        make skills-doctor-changed BASE_REF="$base_ref" HEAD_REF=HEAD
+      else
+        make skills-doctor
+      fi
 
 .race-tests-template:
   stage: check
@@ -135,70 +360,78 @@ unit-tests:
         make test-race-shard SHARD="$RACE_SHARD"
       fi
 
-race-tests-smoke:
+race-core-smoke:
   stage: check
+  needs: *post_fast_check_needs
   rules:
-    - if: $CI_MERGE_REQUEST_IID
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - if: '$RUN_FULL_RACE == "1"'
+    - if: '$CI_MERGE_REQUEST_IID'
+      changes: *race_smoke_change_paths
   script:
     - make test-race-smoke
 
-race-tests-core-cmd:
+race-core-cmd:
   extends: .race-tests-template
   variables:
     RACE_SHARD: core-cmd
 
-race-tests-core-internal:
+race-core-internal:
   extends: .race-tests-template
   variables:
     RACE_SHARD: core-internal
 
-race-tests-runtime:
+race-core-runtime:
   extends: .race-tests-template
   variables:
     RACE_SHARD: runtime
 
-race-tests-context-tooling:
+race-platform-context-tooling:
   extends: .race-tests-template
   variables:
     RACE_SHARD: context-tooling
 
-race-tests-intelligence:
+race-platform-intelligence:
   extends: .race-tests-template
   variables:
     RACE_SHARD: intelligence
 
-race-tests-platform-interfaces:
+race-platform-interfaces:
   extends: .race-tests-template
   variables:
     RACE_SHARD: platform-interfaces
 
-race-tests-storage:
+race-platform-storage:
   extends: .race-tests-template
   variables:
     RACE_SHARD: storage
 
-race-tests-v2:
+race-platform-v2:
   extends: .race-tests-template
   variables:
     RACE_SHARD: v2
 
-race-tests-skills-a-g:
+race-skills-a-g:
   extends: .race-tests-template
   variables:
     RACE_SHARD: skills-a-g
 
-race-tests-skills-h-o:
+race-skills-h-o:
   extends: .race-tests-template
   variables:
     RACE_SHARD: skills-h-o
 
-race-tests-skills-p-x:
+race-skills-p-x:
   extends: .race-tests-template
   variables:
     RACE_SHARD: skills-p-x
 
-integration-tests:
+integration-package:
   stage: check
+  needs: *post_fast_check_needs
+  rules: *go_change_rules
   script:
     - |
       base_ref=""
@@ -208,31 +441,119 @@ integration-tests:
         base_ref="$(git merge-base HEAD "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME")"
       fi
       if [ -n "$base_ref" ] && [ "$CI_COMMIT_BRANCH" != "main" ]; then
-        make test-integration-impacted BASE_REF="$base_ref" HEAD_REF=HEAD
+        make test-integration-package-impacted BASE_REF="$base_ref" HEAD_REF=HEAD
       else
-        make test-integration
+        make test-integration-package
+      fi
+
+integration-cmd:
+  stage: check
+  needs:
+    - job: integration-package
+      optional: true
+  rules: *go_change_rules
+  script:
+    - |
+      base_ref=""
+      if [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ] && git cat-file -e "$CI_MERGE_REQUEST_DIFF_BASE_SHA^{commit}" >/dev/null 2>&1; then
+        base_ref="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+      elif [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ] && git rev-parse --verify "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" >/dev/null 2>&1; then
+        base_ref="$(git merge-base HEAD "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME")"
+      fi
+      if [ -n "$base_ref" ] && [ "$CI_COMMIT_BRANCH" != "main" ]; then
+        make test-integration-cmd-impacted BASE_REF="$base_ref" HEAD_REF=HEAD
+      else
+        make test-integration-cmd
+      fi
+
+integration-golden:
+  stage: check
+  needs:
+    - job: integration-cmd
+      optional: true
+  rules: *go_change_rules
+  script:
+    - |
+      base_ref=""
+      if [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ] && git cat-file -e "$CI_MERGE_REQUEST_DIFF_BASE_SHA^{commit}" >/dev/null 2>&1; then
+        base_ref="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+      elif [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ] && git rev-parse --verify "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" >/dev/null 2>&1; then
+        base_ref="$(git merge-base HEAD "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME")"
+      fi
+      if [ -n "$base_ref" ] && [ "$CI_COMMIT_BRANCH" != "main" ]; then
+        make test-integration-golden-impacted BASE_REF="$base_ref" HEAD_REF=HEAD
+      else
+        make test-integration-golden
+      fi
+
+integration-rlm:
+  stage: check
+  needs:
+    - job: integration-golden
+      optional: true
+  rules: *go_change_rules
+  script:
+    - |
+      base_ref=""
+      if [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ] && git cat-file -e "$CI_MERGE_REQUEST_DIFF_BASE_SHA^{commit}" >/dev/null 2>&1; then
+        base_ref="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+      elif [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ] && git rev-parse --verify "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" >/dev/null 2>&1; then
+        base_ref="$(git merge-base HEAD "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME")"
+      fi
+      if [ -n "$base_ref" ] && [ "$CI_COMMIT_BRANCH" != "main" ]; then
+        make test-integration-rlm-impacted BASE_REF="$base_ref" HEAD_REF=HEAD
+      else
+        make test-integration-rlm
       fi
 
 typescript-frontend:
+  extends: .bun-check-template
   stage: check
-  image: oven/bun:1.3.14
-  before_script:
-    - export PATH="/home/dev/.bun/bin:$PATH"
-    - bun install --frozen-lockfile
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_MERGE_REQUEST_IID'
+      changes: *frontend_change_paths
   script:
     - bun run unused:frontend
 
-# --- Stage: build ---
-build:
-  stage: build
+docs-site:
+  extends: .bun-check-template
+  stage: check
   needs:
-    - job: build-ci-image
+    - job: typescript-frontend
+      optional: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_MERGE_REQUEST_IID'
+      changes: *docs_site_change_paths
+  script:
+    - bun run check:docs
+
+# --- Stage: build ---
+build-core:
+  stage: build
+  rules: *go_change_rules
   variables:
     GOFLAGS: "-buildvcs=false -p=2"
     KUBERNETES_MEMORY_REQUEST: "768Mi"
     KUBERNETES_MEMORY_LIMIT: "1536Mi"
   script:
     - make build
+  artifacts:
+    paths:
+      - bin/foxctl
+    expire_in: 7 days
+
+build-skills:
+  stage: build
+  rules: *skill_change_rules
+  variables:
+    GOFLAGS: "-buildvcs=false -p=2"
+    KUBERNETES_MEMORY_REQUEST: "768Mi"
+    KUBERNETES_MEMORY_LIMIT: "1536Mi"
+  script:
     - |
       base_ref=""
       if [ -n "$CI_MERGE_REQUEST_DIFF_BASE_SHA" ] && git cat-file -e "$CI_MERGE_REQUEST_DIFF_BASE_SHA^{commit}" >/dev/null 2>&1; then
@@ -245,41 +566,75 @@ build:
       else
         make skills-build
       fi
+
+validate-manifests:
+  stage: build
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_MERGE_REQUEST_IID'
+      changes: *manifest_change_paths
+  script:
     - go run ./scripts/checkmanifests
-  artifacts:
-    paths:
-      - bin/foxctl
-    expire_in: 7 days
 
 all-checks:
-  stage: build
+  extends: .light-check-template
+  stage: verify
   needs:
-    - job: static-analysis
-    - job: unit-tests
-    - job: race-tests-smoke
+    - job: format-check
       optional: true
-    - job: race-tests-core-cmd
+    - job: go-lint
       optional: true
-    - job: race-tests-core-internal
+    - job: repo-hygiene
+    - job: docs-links
       optional: true
-    - job: race-tests-runtime
+    - job: unit-tests-core
       optional: true
-    - job: race-tests-context-tooling
+    - job: unit-tests-skills
       optional: true
-    - job: race-tests-intelligence
+    - job: skill-guide-drift
       optional: true
-    - job: race-tests-platform-interfaces
+    - job: race-core-smoke
       optional: true
-    - job: race-tests-storage
+    - job: race-core-cmd
       optional: true
-    - job: race-tests-v2
+    - job: race-core-internal
       optional: true
-    - job: race-tests-skills-a-g
+    - job: race-core-runtime
       optional: true
-    - job: race-tests-skills-h-o
+    - job: race-platform-context-tooling
       optional: true
-    - job: race-tests-skills-p-x
+    - job: race-platform-intelligence
       optional: true
-    - job: integration-tests
+    - job: race-platform-interfaces
+      optional: true
+    - job: race-platform-storage
+      optional: true
+    - job: race-platform-v2
+      optional: true
+    - job: race-skills-a-g
+      optional: true
+    - job: race-skills-h-o
+      optional: true
+    - job: race-skills-p-x
+      optional: true
+    - job: integration-package
+      optional: true
+    - job: integration-cmd
+      optional: true
+    - job: integration-golden
+      optional: true
+    - job: integration-rlm
+      optional: true
+    - job: typescript-frontend
+      optional: true
+    - job: docs-site
+      optional: true
+    - job: build-core
+      optional: true
+    - job: build-skills
+      optional: true
+    - job: validate-manifests
+      optional: true
   script:
     - echo "All checks passed"

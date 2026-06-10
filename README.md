@@ -41,6 +41,8 @@ git clone <repo-url> foxctl && cd foxctl
 # Verify
 foxctl version
 foxctl skills list
+foxctl skills get foxctl
+foxctl skills search "code search" --compact
 foxctl mcp status
 
 # Search your codebase

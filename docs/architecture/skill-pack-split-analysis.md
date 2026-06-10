@@ -568,9 +568,9 @@ Evaluate each misc candidate individually. Priority order:
 
 ```
 foxctl CI
-├── race-tests-skills-a-g   (skills/a through skills/g)
-├── race-tests-skills-h-o   (skills/h through skills/o)
-├── race-tests-skills-p-x   (skills/p through skills/x)
+├── race-skills-a-g         (skills/a through skills/g)
+├── race-skills-h-o         (skills/h through skills/o)
+├── race-skills-p-x         (skills/p through skills/x)
 ├── skills-build            (build all skills)
 ├── skills-build-impacted   (build only changed skills)
 └── integration tests       (end-to-end skill execution)
@@ -580,9 +580,9 @@ foxctl CI
 
 ```
 foxctl CI (core)
-├── race-tests-skills-a-g   (reduced: intelligence + session + context skills)
-├── race-tests-skills-h-o   (reduced: hooks + memory + optimization skills)
-├── race-tests-skills-p-x   (reduced: remaining core skills)
+├── race-skills-a-g         (reduced: intelligence + session + context skills)
+├── race-skills-h-o         (reduced: hooks + memory + optimization skills)
+├── race-skills-p-x         (reduced: remaining core skills)
 ├── skills-build            (build core skills only)
 ├── skills-build-impacted   (build only changed core skills)
 ├── pack-integration-smoke  (verify installed packs are loadable)

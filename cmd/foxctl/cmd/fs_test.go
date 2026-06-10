@@ -10,6 +10,7 @@ import (
 
 	"github.com/joshka0/foxctl/internal/domain/envelope"
 	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/platform/workspace"
 	memstore "github.com/joshka0/foxctl/internal/storage/memory"
 )
 
@@ -99,6 +100,7 @@ func TestFSReadCommandRemember(t *testing.T) {
 	if workspacePath == "" {
 		workspacePath = workdir
 	}
+	workspaceID := workspace.ExplicitID(workspacePath)
 
 	store, err := memstore.Open(context.Background(), cfg.Storage.Root, cfg.Paths.CAS)
 	if err != nil {
@@ -110,9 +112,9 @@ func TestFSReadCommandRemember(t *testing.T) {
 		}
 	})
 
-	entry, err := store.Get(context.Background(), "snapshot", workspacePath)
+	entry, err := store.Get(context.Background(), "snapshot", workspaceID)
 	if err != nil {
-		t.Fatalf("memory entry missing for workspace %s: %v", workspacePath, err)
+		t.Fatalf("memory entry missing for workspace %s: %v", workspaceID, err)
 	}
 	if entry.Name != "snapshot" {
 		t.Fatalf("unexpected memory name %s", entry.Name)

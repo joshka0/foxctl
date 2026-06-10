@@ -98,6 +98,66 @@ func TestDetectNoMarker(t *testing.T) {
 	}
 }
 
+func TestDetectFromPathIgnoresWorkspaceEnv(t *testing.T) {
+	envWorkspace := t.TempDir()
+	explicitWorkspace := t.TempDir()
+	if err := os.Mkdir(filepath.Join(explicitWorkspace, ".git"), 0o755); err != nil {
+		t.Fatalf("create explicit workspace marker: %v", err)
+	}
+	t.Setenv("FOXCTL_WORKSPACE", envWorkspace)
+
+	if got := Detect(explicitWorkspace); got != envWorkspace {
+		t.Fatalf("Detect should honor FOXCTL_WORKSPACE, got %q want %q", got, envWorkspace)
+	}
+	if got := DetectFromPath(explicitWorkspace); got != explicitWorkspace {
+		t.Fatalf("DetectFromPath should use explicit path, got %q want %q", got, explicitWorkspace)
+	}
+}
+
+func TestDetectFromPathIgnoresInheritedTempRootFoxctlMarker(t *testing.T) {
+	parent := t.TempDir()
+	tempRoot := filepath.Join(parent, "tmp")
+	if err := os.MkdirAll(filepath.Join(tempRoot, ".foxctl"), 0o755); err != nil {
+		t.Fatalf("create temp root marker: %v", err)
+	}
+	t.Setenv("TMPDIR", tempRoot)
+
+	child := filepath.Join(tempRoot, "workspace", "subdir")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatalf("create child workspace: %v", err)
+	}
+
+	if got := DetectFromPath(child); got != child {
+		t.Fatalf("DetectFromPath(%q) = %q, want %q", child, got, child)
+	}
+	if got := DetectFromPath(tempRoot); got != tempRoot {
+		t.Fatalf("DetectFromPath(%q) = %q, want temp root marker", tempRoot, got)
+	}
+}
+
+func TestExplicitIDIgnoresWorkspaceEnvAndAncestorMarkers(t *testing.T) {
+	envWorkspace := t.TempDir()
+	parent := t.TempDir()
+	if err := os.Mkdir(filepath.Join(parent, ".foxctl"), 0o755); err != nil {
+		t.Fatalf("create ancestor workspace marker: %v", err)
+	}
+	explicitWorkspace := filepath.Join(parent, "child")
+	if err := os.Mkdir(explicitWorkspace, 0o755); err != nil {
+		t.Fatalf("create explicit workspace: %v", err)
+	}
+	t.Setenv("FOXCTL_WORKSPACE", envWorkspace)
+
+	if got, want := ExplicitID(explicitWorkspace), PathIdentity(explicitWorkspace); got != want {
+		t.Fatalf("ExplicitID(%q) = %q, want %q", explicitWorkspace, got, want)
+	}
+}
+
+func TestExplicitIDOrSelectorPreservesOpaqueWorkspaceID(t *testing.T) {
+	if got := ExplicitIDOrSelector("workspace-a"); got != "workspace-a" {
+		t.Fatalf("ExplicitIDOrSelector opaque = %q, want workspace-a", got)
+	}
+}
+
 func TestDetectEmptyStart(t *testing.T) {
 	// When start is empty, should use cwd
 	result := Detect("")
