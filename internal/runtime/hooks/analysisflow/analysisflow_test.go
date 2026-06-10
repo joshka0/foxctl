@@ -140,6 +140,34 @@ func Build() {}
 	}
 }
 
+func TestAnalyzeSemanticAnchorsExplicitWorkspaceIgnoresWorkspaceEnv(t *testing.T) {
+	t.Setenv("FOXCTL_SEMANTIC_ANCHORS_HOOK", "1")
+	t.Setenv("FOXCTL_WORKSPACE", t.TempDir())
+	workspace := t.TempDir()
+	writeFile(t, workspace, "internal/demo_test.go", `package demo
+
+func TestBuild(t *testing.T) {}
+`)
+	writeFile(t, workspace, "internal/demo.go", `package demo
+
+// [[test:internal/demo_test.go]]
+func Build() {}
+`)
+
+	resp, err := AnalyzeSemanticAnchors(context.Background(), Request{
+		Workspace: workspace,
+		Payload: Payload{ToolInput: struct {
+			FilePath string `json:"file_path,omitempty"`
+		}{FilePath: "internal/demo.go"}},
+	})
+	if err != nil {
+		t.Fatalf("AnalyzeSemanticAnchors: %v", err)
+	}
+	if !strings.Contains(resp.Context, "Semantic anchors") || len(resp.GraphDiff) == 0 {
+		t.Fatalf("expected explicit workspace semantic anchor context, got context=%q graph=%+v", resp.Context, resp.GraphDiff)
+	}
+}
+
 func TestAnalyzeSemanticAnchorsWarnsTrustCriticalAnchorWithoutLinkedTests(t *testing.T) {
 	t.Setenv("FOXCTL_SEMANTIC_ANCHORS_HOOK", "1")
 	workspace := t.TempDir()

@@ -69,7 +69,7 @@ func runSearchIndexStats(cmd *cobra.Command, workspace string) error {
 		_ = store.Close()
 	}()
 
-	workspaceID := workspaceutil.ID(absWorkspace)
+	workspaceID := workspaceutil.ExplicitID(absWorkspace)
 	stats, err := store.WorkspaceStats(ctx, workspaceID)
 	if err != nil {
 		return writeSearchIndexError(cmd, "EIO", err.Error())

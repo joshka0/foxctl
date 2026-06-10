@@ -48,6 +48,20 @@ func TestCompletionBash(t *testing.T) {
 	}
 }
 
+func TestCompletionBashIncludesSkillsGetAndPath(t *testing.T) {
+	out := runCompletion(t, "bash")
+	for _, want := range []string{
+		`commands+=("skills")`,
+		"_foxctl_skills_doctor()",
+		"_foxctl_skills_get()",
+		"_foxctl_skills_path()",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("bash completion missing %q", want)
+		}
+	}
+}
+
 func TestCompletionZsh(t *testing.T) {
 	if out := runCompletion(t, "zsh"); out == "" {
 		t.Fatal("expected zsh completion output")

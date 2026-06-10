@@ -65,6 +65,15 @@ Source of truth: `internal/domain/skill/manifest.go`.
 
 | Need | Command |
 |------|---------|
+| Discover available agent guides and skill workflows | `foxctl skills` or `foxctl skills list` |
+| Fit installed skills into a small context window | `foxctl skills --compact` |
+| Find likely skills for a task with next-step commands | `foxctl skills search "<task>"` or `foxctl skills search "<task>" --compact` |
+| Read the core foxctl onboarding guide | `foxctl skills get foxctl` |
+| Read a specific skill guide | `foxctl skills get <skill>` |
+| Print the local skills root or a skill directory | `foxctl skills path [skill]` |
+| Check guide/manifest drift before review or CI | `foxctl skills doctor [skill] --strict` |
+| Run the advisory global drift report | `make skills-doctor` |
+| Gate only changed skills against strict drift rules | `make skills-doctor-changed BASE_REF=origin/main HEAD_REF=HEAD` |
 | Job history, dedupe, async, or trajectory capture | `foxctl run <skill> --input '<json>'` |
 | Sandbox-safe or hook-style execution without job persistence | `foxctl run <skill> --ephemeral --input '<json>'` |
 | Direct parameter flags generated from `skill.yaml` | `foxctl skills run <skill> --param value` |
@@ -75,6 +84,35 @@ Direct skill binaries read JSON on stdin through `skillmain.Main`; they do not
 parse CLI flags or files themselves. The `foxctl run` and `foxctl skills run`
 wrappers are responsible for loading files, extracting envelope data, and
 merging parameter flags into JSON.
+
+## Skill Drift Guardrails
+
+Treat `skill.yaml` as the feature contract and `SKILL.md` as the agent-facing
+workflow contract. When a skill gains parameters, changes command behavior, or
+moves directories, update both in the same change.
+
+Run this before review for a specific skill:
+
+```bash
+foxctl skills doctor <skill> --strict
+```
+
+The doctor checks manifest validity, guide presence, guide freshness relative to
+`skill.yaml`, copy-pasteable command examples, and required parameter coverage.
+
+CI enforces the same strict contract only for skills with files changed directly
+under `skills/<dir>/...`:
+
+```bash
+make skills-doctor-changed BASE_REF=origin/main HEAD_REF=HEAD
+```
+
+The global report remains advisory while existing installed skills are brought
+up to the strict guide contract:
+
+```bash
+make skills-doctor
+```
 
 ## Related Docs
 

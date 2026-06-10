@@ -20,7 +20,7 @@ import (
 
 func TestMemoryRecentAndCacheCommands(t *testing.T) {
 	cfg := setupMemoryTestEnv(t)
-	workspaceID := workspace.ID(cfg.Home)
+	workspaceID := workspace.ExplicitID(cfg.Home)
 	ctx := context.Background()
 
 	cacheStore, err := cache.Open(ctx, cfg.Paths.Cache, cache.Options{
@@ -81,7 +81,7 @@ func TestMemoryRecentAndCacheCommands(t *testing.T) {
 
 func TestMemoryListAndGetCommands(t *testing.T) {
 	cfg := setupMemoryTestEnv(t)
-	workspaceID := workspace.ID(cfg.Home)
+	workspaceID := workspace.ExplicitID(cfg.Home)
 	ctx := context.Background()
 	store, err := memstore.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
 	if err != nil {
@@ -112,7 +112,7 @@ func TestMemoryListAndGetCommands(t *testing.T) {
 
 func TestMemoryPutCommand(t *testing.T) {
 	cfg := setupMemoryTestEnv(t)
-	workspaceID := workspace.ID(cfg.Home)
+	workspaceID := workspace.ExplicitID(cfg.Home)
 	payload := `{"version":1,"status":"ok","command":"test","data":{"value":1},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`
 	runMemoryCommand(
 		t, cfg, newMemoryPutCommand(),
@@ -146,11 +146,11 @@ func TestMemoryPutCommandUsesWorkspaceFlag(t *testing.T) {
 	if err := os.MkdirAll(explicitWorkspace, 0o755); err != nil {
 		t.Fatalf("mkdir explicit workspace: %v", err)
 	}
-	expectedWorkspaceID := workspace.ID(explicitWorkspace)
+	expectedWorkspaceID := workspace.ExplicitID(explicitWorkspace)
 	if expectedWorkspaceID != workspace.PathIdentity(explicitWorkspace) {
 		t.Fatalf("test setup expected path-derived workspace ID, got %s", expectedWorkspaceID)
 	}
-	if expectedWorkspaceID == workspace.ID(cfg.Home) {
+	if expectedWorkspaceID == workspace.ExplicitID(cfg.Home) {
 		t.Fatalf("test setup expected distinct workspace IDs, got %s for both", expectedWorkspaceID)
 	}
 	payload := `{"version":1,"status":"ok","command":"test","data":{"value":1},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`
@@ -176,14 +176,14 @@ func TestMemoryPutCommandUsesWorkspaceFlag(t *testing.T) {
 	if _, err := store.Get(context.Background(), "scoped", expectedWorkspaceID); err != nil {
 		t.Fatalf("expected memory under explicit workspace %s: %v", expectedWorkspaceID, err)
 	}
-	if _, err := store.Get(context.Background(), "scoped", workspace.ID(cfg.Home)); err == nil {
+	if _, err := store.Get(context.Background(), "scoped", workspace.ExplicitID(cfg.Home)); err == nil {
 		t.Fatalf("memory unexpectedly stored under default workspace")
 	}
 }
 
 func TestMemorySearchAndRelevantCommands(t *testing.T) {
 	cfg := setupMemoryTestEnv(t)
-	workspaceID := workspace.ID(cfg.Home)
+	workspaceID := workspace.ExplicitID(cfg.Home)
 	ctx := context.Background()
 	store, err := memstore.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
 	if err != nil {
@@ -219,7 +219,7 @@ func TestMemorySearchAndRelevantCommands(t *testing.T) {
 
 func TestMemoryStatsCommand(t *testing.T) {
 	cfg := setupMemoryTestEnv(t)
-	workspaceID := workspace.ID(cfg.Home)
+	workspaceID := workspace.ExplicitID(cfg.Home)
 	ctx := context.Background()
 
 	cacheStore, err := cache.Open(ctx, cfg.Paths.Cache, cache.Options{
@@ -280,7 +280,7 @@ func TestMemoryStatsCommand(t *testing.T) {
 
 func TestMemoryMigrateBackendCopiesSQLiteToTurso(t *testing.T) {
 	cfg := setupMemoryTestEnv(t)
-	workspaceID := workspace.ID(cfg.Home)
+	workspaceID := workspace.ExplicitID(cfg.Home)
 	ctx := context.Background()
 
 	source, err := memstore.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
@@ -456,7 +456,7 @@ func TestMemoryUpdateMissingArgs(t *testing.T) {
 
 func TestMemoryDeleteSuccess(t *testing.T) {
 	cfg := setupMemoryTestEnv(t)
-	workspaceID := workspace.ID(cfg.Home)
+	workspaceID := workspace.ExplicitID(cfg.Home)
 	ctx := context.Background()
 
 	// Create a memory entry first

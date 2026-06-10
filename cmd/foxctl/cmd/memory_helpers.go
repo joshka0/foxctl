@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/platform/workspace"
@@ -25,6 +26,9 @@ func resolveWorkspace(cfg config.Config, override string) string {
 
 func resolveWorkspaceID(cfg config.Config, override string) string {
 	root := resolveWorkspace(cfg, override)
+	if strings.TrimSpace(override) != "" {
+		return workspace.ExplicitIDOrSelector(root)
+	}
 	return workspace.ID(root)
 }
 
