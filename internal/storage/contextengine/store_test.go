@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -287,6 +288,30 @@ func TestStore_ListEvents_FilterWorkspace(t *testing.T) {
 	}
 }
 
+func TestStore_ListEvents_FilterID(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	mustAppendEvent(t, s, ctx, testEvent("evt-1", "ws-1", contextengine.EventKindCodeChangedDirty))
+	mustAppendEvent(t, s, ctx, testEvent("evt-2", "ws-1", contextengine.EventKindCodeCommitted))
+
+	events, err := s.ListEvents(ctx, EventFilter{WorkspaceID: "ws-1", ID: "evt-2"})
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	if len(events) != 1 || events[0].ID != "evt-2" {
+		t.Fatalf("events=%v want evt-2", eventIDsForTest(events))
+	}
+}
+
+func eventIDsForTest(events []contextengine.ContextEvent) []string {
+	ids := make([]string, 0, len(events))
+	for _, event := range events {
+		ids = append(ids, event.ID)
+	}
+	return ids
+}
+
 // ========== VAL-STORE-003: List events filters by kind ==========
 
 func TestStore_ListEvents_FilterKind(t *testing.T) {
@@ -445,6 +470,33 @@ func TestStore_UpsertClaim_Update(t *testing.T) {
 	}
 }
 
+func TestStore_UpsertClaim_UpdatePersistsScope(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	claim := testClaim("claim-scope-update", "ws-1", contextengine.ClaimStatusCandidate)
+	mustUpsertClaim(t, s, ctx, claim)
+
+	claim.Scope = contextengine.ClaimScope{
+		Path:      "internal/context/contextplane/autonomous_memory_drafts.go",
+		TaskID:    "task-apply",
+		SessionID: "session-apply",
+	}
+	if _, err := s.UpsertClaim(ctx, claim); err != nil {
+		t.Fatalf("UpsertClaim scoped update: %v", err)
+	}
+
+	retrieved, err := s.GetClaim(ctx, claim.ID)
+	if err != nil {
+		t.Fatalf("GetClaim: %v", err)
+	}
+	if retrieved.Scope.Path != claim.Scope.Path ||
+		retrieved.Scope.TaskID != claim.Scope.TaskID ||
+		retrieved.Scope.SessionID != claim.Scope.SessionID {
+		t.Fatalf("scope=%#v want %#v", retrieved.Scope, claim.Scope)
+	}
+}
+
 // ========== VAL-STORE-009: List claims filters by workspace and status ==========
 
 func TestStore_ListClaims_Filter(t *testing.T) {
@@ -464,6 +516,85 @@ func TestStore_ListClaims_Filter(t *testing.T) {
 	}
 }
 
+func TestStore_ListClaims_FiltersTaskAndSessionScope(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	taskClaim := testClaim("task-claim", "ws-1", contextengine.ClaimStatusCandidate)
+	taskClaim.Scope.TaskID = "task-1"
+	sessionClaim := testClaim("session-claim", "ws-1", contextengine.ClaimStatusCandidate)
+	sessionClaim.Scope.SessionID = "session-1"
+	otherClaim := testClaim("other-claim", "ws-1", contextengine.ClaimStatusCandidate)
+	otherClaim.Scope.TaskID = "task-2"
+
+	mustUpsertClaim(t, s, ctx, taskClaim)
+	mustUpsertClaim(t, s, ctx, sessionClaim)
+	mustUpsertClaim(t, s, ctx, otherClaim)
+
+	claims, err := s.ListClaims(ctx, ClaimFilter{
+		WorkspaceID: "ws-1",
+		Status:      contextengine.ClaimStatusCandidate,
+		TaskID:      "task-1",
+	})
+	if err != nil {
+		t.Fatalf("ListClaims task scoped: %v", err)
+	}
+	if len(claims) != 1 || claims[0].ID != "task-claim" {
+		t.Fatalf("task scoped claims=%v want task-claim", claimIDsForTest(claims))
+	}
+
+	claims, err = s.ListClaims(ctx, ClaimFilter{
+		WorkspaceID: "ws-1",
+		Status:      contextengine.ClaimStatusCandidate,
+		SessionID:   "session-1",
+	})
+	if err != nil {
+		t.Fatalf("ListClaims session scoped: %v", err)
+	}
+	if len(claims) != 1 || claims[0].ID != "session-claim" {
+		t.Fatalf("session scoped claims=%v want session-claim", claimIDsForTest(claims))
+	}
+}
+
+func TestStore_ListClaims_OrdersSameTimestampClaimsByID(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	for _, id := range []string{"claim-b", "claim-a", "claim-c"} {
+		claim := testClaim(id, "ws-1", contextengine.ClaimStatusCandidate)
+		claim.Scope.TaskID = "task-order"
+		mustUpsertClaim(t, s, ctx, claim)
+	}
+
+	claims, err := s.ListClaims(ctx, ClaimFilter{
+		WorkspaceID: "ws-1",
+		Status:      contextengine.ClaimStatusCandidate,
+		TaskID:      "task-order",
+	})
+	if err != nil {
+		t.Fatalf("ListClaims: %v", err)
+	}
+	if len(claims) != 3 {
+		t.Fatalf("claims=%v want 3 claims", claimIDsForTest(claims))
+	}
+	for _, claim := range claims {
+		if !claim.UpdatedAt.Equal(claims[0].UpdatedAt) {
+			t.Fatalf("test setup produced mixed updated_at values: %v", claims)
+		}
+	}
+	if got, want := claimIDsForTest(claims), []string{"claim-a", "claim-b", "claim-c"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("claim order=%v want %v", got, want)
+	}
+}
+
+func claimIDsForTest(claims []contextengine.MemoryClaim) []string {
+	ids := make([]string, 0, len(claims))
+	for _, claim := range claims {
+		ids = append(ids, claim.ID)
+	}
+	return ids
+}
+
 // ========== Index verification tests ==========
 
 func assertIndexUsed(t *testing.T, s Store, ctx context.Context, query string, args ...any) {
@@ -477,6 +608,35 @@ func assertIndexUsed(t *testing.T, s Store, ctx context.Context, query string, a
 	if !containsIndex(plan) {
 		t.Errorf("expected index usage in query plan, got: %s", plan)
 	}
+}
+
+func assertNamedIndexUsedWithoutTempSort(t *testing.T, s Store, ctx context.Context, indexName, query string, args ...any) {
+	t.Helper()
+	plan, err := s.ExplainQueryPlan(ctx, query, args...)
+	if err != nil {
+		t.Fatalf("EXPLAIN QUERY PLAN: %v", err)
+	}
+	t.Logf("plan: %s", plan)
+	if !strings.Contains(plan, indexName) {
+		t.Errorf("expected query plan to use %s, got: %s", indexName, plan)
+	}
+	if strings.Contains(strings.ToUpper(plan), "TEMP B-TREE") {
+		t.Errorf("expected index to satisfy ordering without temp sort, got: %s", plan)
+	}
+}
+
+const listClaimsPlanSelect = `SELECT id, workspace_id, claim_type, status,
+		scope_path, scope_task_id, scope_session_id,
+		summary, confidence, blast_radius,
+		source_refs, source_event_id, superseded_by, reason,
+		created_at, updated_at
+		FROM memory_claims WHERE 1=1`
+
+func assertListClaimsPlanUsesIndexWithoutTempSort(t *testing.T, s Store, ctx context.Context, indexName, where string, args ...any) {
+	t.Helper()
+	args = append(args, 10)
+	assertNamedIndexUsedWithoutTempSort(t, s, ctx, indexName,
+		listClaimsPlanSelect+where+" ORDER BY updated_at DESC, id ASC LIMIT ?", args...)
 }
 
 func containsIndex(plan string) bool {
@@ -548,6 +708,30 @@ func TestStore_Index_ClaimStatus(t *testing.T) {
 	ctx := context.Background()
 	assertIndexUsed(t, s, ctx,
 		"SELECT * FROM memory_claims WHERE workspace_id = ? AND status = ?", "ws-1", "current")
+}
+
+func TestStore_ExplainQueryPlanReportsTempSortRows(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	plan, err := s.ExplainQueryPlan(ctx,
+		"SELECT id FROM memory_claims WHERE workspace_id = ? ORDER BY summary", "ws-1")
+	if err != nil {
+		t.Fatalf("ExplainQueryPlan: %v", err)
+	}
+	if !strings.Contains(strings.ToUpper(plan), "TEMP B-TREE") {
+		t.Fatalf("plan=%q missing temp sort row", plan)
+	}
+}
+
+func TestStore_Index_ClaimsListOrder(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	assertListClaimsPlanUsesIndexWithoutTempSort(t, s, ctx, "idx_claims_status_updated",
+		" AND workspace_id = ? AND status = ?", "ws-1", "current")
+	assertListClaimsPlanUsesIndexWithoutTempSort(t, s, ctx, "idx_claims_task_status_updated",
+		" AND workspace_id = ? AND status = ? AND scope_task_id = ?", "ws-1", "current", "task-1")
+	assertListClaimsPlanUsesIndexWithoutTempSort(t, s, ctx, "idx_claims_session_status_updated",
+		" AND workspace_id = ? AND status = ? AND scope_session_id = ?", "ws-1", "current", "session-1")
 }
 
 // VAL-STORE-016
@@ -1021,6 +1205,54 @@ func TestStore_SchemaMigrationIdempotent(t *testing.T) {
 	}
 }
 
+func TestStore_SchemaMigrationReplacesLegacyClaimOrderIndexes(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	ctx := context.Background()
+	if err := Migrate(ctx, db); err != nil {
+		t.Fatalf("first migrate: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE INDEX idx_claims_status ON memory_claims(workspace_id, status);
+		CREATE INDEX idx_claims_task_status ON memory_claims(workspace_id, scope_task_id, status);
+		CREATE INDEX idx_claims_session_status ON memory_claims(workspace_id, scope_session_id, status);
+	`); err != nil {
+		t.Fatalf("create legacy indexes: %v", err)
+	}
+
+	if err := Migrate(ctx, db); err != nil {
+		t.Fatalf("second migrate: %v", err)
+	}
+
+	for _, name := range []string{"idx_claims_status", "idx_claims_task_status", "idx_claims_session_status"} {
+		if indexExists(t, db, name) {
+			t.Fatalf("legacy index %s still exists", name)
+		}
+	}
+	for _, name := range []string{"idx_claims_status_updated", "idx_claims_task_status_updated", "idx_claims_session_status_updated"} {
+		if !indexExists(t, db, name) {
+			t.Fatalf("ordered index %s missing", name)
+		}
+	}
+}
+
+func indexExists(t *testing.T, db *sql.DB, name string) bool {
+	t.Helper()
+	var found string
+	err := db.QueryRow("SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?", name).Scan(&found)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false
+	}
+	if err != nil {
+		t.Fatalf("query index %s: %v", name, err)
+	}
+	return true
+}
+
 // ========== VAL-STORE-041: Evidence pack upsert ==========
 
 func TestStore_EvidencePackUpsert(t *testing.T) {
@@ -1247,6 +1479,58 @@ func TestStore_ListRetrievalEpisodes(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].ID != "ep-mid" {
 		t.Fatalf("expected ep-mid only, got %#v", got)
+	}
+}
+
+func TestStore_RecordRetrievalFeedbackWithEffects_PersistsRevalidation(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+
+	claim := testClaim("claim-feedback-effects", "ws-1", contextengine.ClaimStatusCurrent)
+	mustUpsertClaim(t, s, ctx, claim)
+	mustRecordEpisode(t, s, ctx, testEpisode("ep-feedback-effects", "ws-1", "test query", contextengine.LaneMemory))
+
+	feedback := testFeedback("fb-feedback-effects", "ws-1", "ep-feedback-effects", contextengine.RetrievalFeedbackKindAnswerCorrected)
+	feedback.UsedRefs = []contextengine.EvidenceRef{{Type: contextengine.RefTypeMemoryClaim, Ref: claim.ID}}
+	feedback.CorrectionStmt = "The retrieved claim needs review"
+
+	if _, err := contextengine.RecordRetrievalFeedbackWithEffects(ctx, s, feedback); err != nil {
+		t.Fatalf("RecordRetrievalFeedbackWithEffects: %v", err)
+	}
+	if _, err := contextengine.RecordRetrievalFeedbackWithEffects(ctx, s, feedback); err != nil {
+		t.Fatalf("retry RecordRetrievalFeedbackWithEffects: %v", err)
+	}
+
+	gotClaim, err := s.GetClaim(ctx, claim.ID)
+	if err != nil {
+		t.Fatalf("GetClaim: %v", err)
+	}
+	if gotClaim.Status != contextengine.ClaimStatusNeedsRevalidation {
+		t.Fatalf("claim status=%q want %q", gotClaim.Status, contextengine.ClaimStatusNeedsRevalidation)
+	}
+
+	target := contextengine.EvidenceRef{Type: contextengine.RefTypeMemoryClaim, Ref: claim.ID}
+	markers, err := s.ListStaleness(ctx, StalenessFilter{
+		WorkspaceID: "ws-1",
+		TargetRef:   &target,
+		Status:      contextengine.StalenessStatusNeedsRevalidation,
+	})
+	if err != nil {
+		t.Fatalf("ListStaleness: %v", err)
+	}
+	if len(markers) != 1 {
+		t.Fatalf("needs_revalidation markers=%d want 1", len(markers))
+	}
+
+	events, err := s.ListEvents(ctx, EventFilter{WorkspaceID: "ws-1", Kind: contextengine.EventKindAnswerCorrected})
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("derived events=%d want 1", len(events))
+	}
+	if events[0].Data["feedback_id"] != feedback.ID {
+		t.Fatalf("feedback_id data=%v want %q", events[0].Data["feedback_id"], feedback.ID)
 	}
 }
 

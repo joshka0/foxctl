@@ -21,6 +21,7 @@ const (
 	EventKindAnswerCorrected        ContextEventKind = "answer.corrected"
 	EventKindMemoryClaimProposed    ContextEventKind = "memory.claim_proposed"
 	EventKindMemoryClaimPromoted    ContextEventKind = "memory.claim_promoted"
+	EventKindMemoryClaimRevalidate  ContextEventKind = "memory.claim_revalidation_requested"
 	EventKindMemoryClaimInvalidated ContextEventKind = "memory.claim_invalidated"
 	EventKindProjectionGenerated    ContextEventKind = "projection.generated"
 )
@@ -32,7 +33,7 @@ func (k ContextEventKind) IsValid() bool {
 		EventKindCodeCommitted, EventKindTaskChanged, EventKindSessionTurnCaptured,
 		EventKindToolEvidenceProduced, EventKindRetrievalExecuted, EventKindRetrievalMissed,
 		EventKindAnswerCorrected, EventKindMemoryClaimProposed, EventKindMemoryClaimPromoted,
-		EventKindMemoryClaimInvalidated, EventKindProjectionGenerated:
+		EventKindMemoryClaimRevalidate, EventKindMemoryClaimInvalidated, EventKindProjectionGenerated:
 		return true
 	default:
 		return false

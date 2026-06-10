@@ -33,6 +33,7 @@ type GatherContextRequest struct {
 type GatherContextDeps struct {
 	CodeSearch    CodeSearchFunc
 	MemoryQuery   MemoryQueryFunc
+	MemoryPacks   ContextPackFunc
 	ContextQuery  ContextQueryFunc
 	ContextPacks  ContextPackFunc
 	TaskQuery     TaskQueryFunc
@@ -211,6 +212,10 @@ func retrieveGatherPacks(ctx context.Context, cfg LaneConfig, deps GatherContext
 				packs = append(packs, sessionPack)
 			}
 		}
+		packs, err = appendGatherMemoryPacks(ctx, cfg, deps, req, packs, query)
+		if err != nil {
+			return nil, err
+		}
 		if deps.ContextPacks != nil {
 			extraPacks, extraErr := deps.ContextPacks(ctx, cfg.WorkspaceID, query, req.Limit)
 			if extraErr != nil {
@@ -267,8 +272,27 @@ func retrieveGatherPacks(ctx context.Context, cfg LaneConfig, deps GatherContext
 			}
 		}
 		packs = append(packs, pack)
+		if lane == LaneMemory {
+			packs, err = appendGatherMemoryPacks(ctx, cfg, deps, req, packs, query)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 	return packs, nil
+}
+
+func appendGatherMemoryPacks(ctx context.Context, cfg LaneConfig, deps GatherContextDeps, req GatherContextRequest, packs []EvidencePack, query string) ([]EvidencePack, error) {
+	if deps.MemoryPacks == nil {
+		return packs, nil
+	}
+	memoryPacks, err := deps.MemoryPacks(ctx, cfg.WorkspaceID, query, req.Limit)
+	if err != nil {
+		if _, ok := err.(LaneError); !ok {
+			return nil, err
+		}
+	}
+	return appendNonEmptyEvidencePacks(packs, memoryPacks...), nil
 }
 
 func gatherRetrievalQuery(query string, requiredEvidence []string) string {

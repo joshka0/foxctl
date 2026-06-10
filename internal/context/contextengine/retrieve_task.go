@@ -173,5 +173,27 @@ func taskContextToNodes(tc *TaskContext, cfg LaneConfig) []EvidenceNode {
 		})
 	}
 
+	// Add related memory claim refs as secondary nodes. The task lane emits
+	// typed pointers; claim bodies remain loadable through load_evidence_ref
+	// and retrievable through the memory lane.
+	for _, ref := range tc.RelatedClaims {
+		if err := ValidateEvidenceRef(ref); err != nil {
+			continue
+		}
+		nodes = append(nodes, EvidenceNode{
+			ID:          cfg.IDGen(),
+			WorkspaceID: cfg.WorkspaceID,
+			NodeType:    EvidenceNodeTypeTask,
+			Ref:         ref,
+			Statement:   refTitle(ref),
+			Confidence:  0.68,
+			Grounding:   GroundingLoaded,
+			Metadata: map[string]any{
+				"task_id": tc.TaskID,
+				"role":    "related_claim",
+			},
+		})
+	}
+
 	return nodes
 }

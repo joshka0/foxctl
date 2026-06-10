@@ -521,6 +521,118 @@ func TestApplyInvalidation_DirtyEditNoClaimPromotion(t *testing.T) {
 	}
 }
 
+func TestApplyInvalidation_DirtyEditMarksOnlyRelatedCurrentClaims(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	store := NewMemoryStore()
+	ctx := context.Background()
+	related := MemoryClaim{
+		ID:          "claim-related",
+		WorkspaceID: "ws-1",
+		ClaimType:   "fact",
+		Status:      ClaimStatusCurrent,
+		SourceRefs:  []EvidenceRef{{Type: RefTypePath, Ref: "src/auth.go"}},
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	edgeRelated := MemoryClaim{
+		ID:          "claim-edge-related",
+		WorkspaceID: "ws-1",
+		ClaimType:   "fact",
+		Status:      ClaimStatusCurrent,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	unrelated := MemoryClaim{
+		ID:          "claim-unrelated",
+		WorkspaceID: "ws-1",
+		ClaimType:   "fact",
+		Status:      ClaimStatusCurrent,
+		SourceRefs:  []EvidenceRef{{Type: RefTypePath, Ref: "src/billing.go"}},
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	candidate := MemoryClaim{
+		ID:          "claim-candidate",
+		WorkspaceID: "ws-1",
+		ClaimType:   "fact",
+		Status:      ClaimStatusCandidate,
+		SourceRefs:  []EvidenceRef{{Type: RefTypePath, Ref: "src/auth.go"}},
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	for _, claim := range []MemoryClaim{related, edgeRelated, unrelated, candidate} {
+		if _, err := store.UpsertClaim(ctx, claim); err != nil {
+			t.Fatalf("upsert claim %s: %v", claim.ID, err)
+		}
+	}
+	if _, err := store.PutImpactEdge(ctx, ImpactEdge{
+		ID:          "edge-dirty-related",
+		WorkspaceID: "ws-1",
+		From:        EvidenceRef{Type: RefTypePath, Ref: "src/auth.go"},
+		To:          EvidenceRef{Type: RefTypeMemoryClaim, Ref: edgeRelated.ID},
+		Kind:        ImpactEdgeKindGeneratedFrom,
+		CreatedAt:   now,
+	}); err != nil {
+		t.Fatalf("put related impact edge: %v", err)
+	}
+
+	event := ContextEvent{
+		ID:          "evt-dirty-related",
+		WorkspaceID: "ws-1",
+		Kind:        EventKindCodeChangedDirty,
+		Source:      "test",
+		Refs:        []EvidenceRef{{Type: RefTypePath, Ref: "src/auth.go"}},
+		CreatedAt:   now,
+	}
+	if err := ApplyInvalidation(ctx, store, event); err != nil {
+		t.Fatalf("ApplyInvalidation: %v", err)
+	}
+
+	gotRelated, err := store.GetClaim(ctx, related.ID)
+	if err != nil {
+		t.Fatalf("get related claim: %v", err)
+	}
+	if gotRelated.Status != ClaimStatusNeedsRevalidation {
+		t.Fatalf("related claim status=%q want %q", gotRelated.Status, ClaimStatusNeedsRevalidation)
+	}
+	gotEdgeRelated, err := store.GetClaim(ctx, edgeRelated.ID)
+	if err != nil {
+		t.Fatalf("get edge-related claim: %v", err)
+	}
+	if gotEdgeRelated.Status != ClaimStatusNeedsRevalidation {
+		t.Fatalf("edge-related claim status=%q want %q", gotEdgeRelated.Status, ClaimStatusNeedsRevalidation)
+	}
+	gotUnrelated, err := store.GetClaim(ctx, unrelated.ID)
+	if err != nil {
+		t.Fatalf("get unrelated claim: %v", err)
+	}
+	if gotUnrelated.Status != ClaimStatusCurrent {
+		t.Fatalf("unrelated claim status=%q want %q", gotUnrelated.Status, ClaimStatusCurrent)
+	}
+	gotCandidate, err := store.GetClaim(ctx, candidate.ID)
+	if err != nil {
+		t.Fatalf("get candidate claim: %v", err)
+	}
+	if gotCandidate.Status != ClaimStatusCandidate {
+		t.Fatalf("candidate claim status=%q want %q", gotCandidate.Status, ClaimStatusCandidate)
+	}
+
+	target := EvidenceRef{Type: RefTypeMemoryClaim, Ref: related.ID}
+	markers, err := store.ListStaleness(ctx, StalenessFilter{
+		WorkspaceID: "ws-1",
+		TargetRef:   &target,
+		Status:      StalenessStatusNeedsRevalidation,
+	})
+	if err != nil {
+		t.Fatalf("list related claim markers: %v", err)
+	}
+	if len(markers) != 1 {
+		t.Fatalf("related claim markers=%d want 1", len(markers))
+	}
+}
+
 func TestApplyInvalidation_CommitAllowsClaimPromotion(t *testing.T) {
 	t.Parallel()
 	// VAL-IMPL-015: Commit allows claim promotion through PromotionPolicy.
@@ -969,6 +1081,15 @@ func (g *StubImpactGraph) ClaimsForRef(ref EvidenceRef) []MemoryClaim {
 		}
 	}
 	return result
+}
+
+func (g *StubImpactGraph) ClaimByID(id string) (MemoryClaim, bool) {
+	for _, c := range g.claims {
+		if c.ID == id {
+			return c, true
+		}
+	}
+	return MemoryClaim{}, false
 }
 
 func (g *StubImpactGraph) AllClaims() []MemoryClaim {

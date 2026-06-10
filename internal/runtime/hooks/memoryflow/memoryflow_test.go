@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
+	"time"
 	"unicode/utf8"
 
 	"github.com/joshka0/foxctl/internal/context/contextengine"
@@ -120,6 +121,7 @@ func TestHandleLifecycleEditCapture(t *testing.T) {
 	cfg.Storage.Root = storageRoot
 	cfg.Paths.CAS = casRoot
 	workspaceRoot := t.TempDir()
+	t.Setenv("FOXCTL_WORKSPACE", workspaceRoot)
 	resp, err := HandleLifecycle(context.Background(), Dependencies{
 		Config: cfg,
 	}, LifecycleRequest{
@@ -169,6 +171,7 @@ func TestHandleLifecycleEditCaptureRejectsEscapingPath(t *testing.T) {
 	cfg.Storage.Root = storageRoot
 	cfg.Paths.CAS = casRoot
 	workspaceRoot := t.TempDir()
+	t.Setenv("FOXCTL_WORKSPACE", workspaceRoot)
 	outsidePath := filepath.Join(filepath.Dir(workspaceRoot), "outside.go")
 	resp, err := HandleLifecycle(context.Background(), Dependencies{
 		Config: cfg,
@@ -221,7 +224,180 @@ func TestHandleLifecycleEditCaptureRejectsEscapingPath(t *testing.T) {
 		t.Fatalf("list dirty events: %v", err)
 	}
 	if len(events) != 0 {
-		t.Fatalf("dirty events for escaping edit = %d, want 0", len(events))
+		t.Fatalf("dirty events for escaping edit = %d, want 0: %#v", len(events), events)
+	}
+}
+
+func TestHandleLifecycleEditMarksOnlyRelatedCurrentClaims(t *testing.T) {
+	ctx := context.Background()
+	storageRoot := t.TempDir()
+	cfg := config.Config{}
+	cfg.Storage.Root = storageRoot
+	cfg.Paths.CAS = filepath.Join(storageRoot, "cas")
+	workspaceRoot := t.TempDir()
+	t.Setenv("FOXCTL_WORKSPACE", workspaceRoot)
+	workspaceID := workspace.ID(workspaceRoot)
+	now := time.Date(2026, 6, 4, 9, 30, 0, 0, time.UTC)
+
+	eventStore, err := ctxengstore.Open(ctx, storageRoot)
+	if err != nil {
+		t.Fatalf("open contextengine store: %v", err)
+	}
+	related := contextengine.MemoryClaim{
+		ID:          "claim-memoryflow-related",
+		WorkspaceID: workspaceID,
+		ClaimType:   "fact",
+		Status:      contextengine.ClaimStatusCurrent,
+		SourceRefs:  []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "internal/auth.go"}},
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	edgeRelated := contextengine.MemoryClaim{
+		ID:          "claim-memoryflow-edge-related",
+		WorkspaceID: workspaceID,
+		ClaimType:   "fact",
+		Status:      contextengine.ClaimStatusCurrent,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	unrelated := contextengine.MemoryClaim{
+		ID:          "claim-memoryflow-unrelated",
+		WorkspaceID: workspaceID,
+		ClaimType:   "fact",
+		Status:      contextengine.ClaimStatusCurrent,
+		SourceRefs:  []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "internal/billing.go"}},
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	candidate := contextengine.MemoryClaim{
+		ID:          "claim-memoryflow-candidate",
+		WorkspaceID: workspaceID,
+		ClaimType:   "fact",
+		Status:      contextengine.ClaimStatusCandidate,
+		SourceRefs:  []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "internal/auth.go"}},
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	for _, claim := range []contextengine.MemoryClaim{related, edgeRelated, unrelated, candidate} {
+		if _, err := eventStore.UpsertClaim(ctx, claim); err != nil {
+			t.Fatalf("upsert claim %s: %v", claim.ID, err)
+		}
+	}
+	if _, err := eventStore.PutImpactEdge(ctx, contextengine.ImpactEdge{
+		ID:          "edge-memoryflow-related",
+		WorkspaceID: workspaceID,
+		From:        contextengine.EvidenceRef{Type: contextengine.RefTypePath, Ref: "internal/auth.go"},
+		To:          contextengine.EvidenceRef{Type: contextengine.RefTypeMemoryClaim, Ref: edgeRelated.ID},
+		Kind:        contextengine.ImpactEdgeKindGeneratedFrom,
+		CreatedAt:   now,
+	}); err != nil {
+		t.Fatalf("put related impact edge: %v", err)
+	}
+	if err := eventStore.Close(); err != nil {
+		t.Fatalf("close seeded contextengine store: %v", err)
+	}
+
+	resp, err := HandleLifecycle(ctx, Dependencies{Config: cfg}, LifecycleRequest{
+		Workspace: workspaceRoot,
+		Payload: LifecyclePayload{
+			ToolName: "Edit",
+			ToolInput: struct {
+				FilePath  string       `json:"file_path,omitempty"`
+				Path      string       `json:"path,omitempty"`
+				OldString string       `json:"old_string,omitempty"`
+				NewString string       `json:"new_string,omitempty"`
+				Content   string       `json:"content,omitempty"`
+				Operation string       `json:"operation,omitempty"`
+				Name      string       `json:"name,omitempty"`
+				Todos     []ClaudeTodo `json:"todos,omitempty"`
+			}{
+				FilePath:  filepath.Join(workspaceRoot, "internal", "auth.go"),
+				OldString: "old auth flow",
+				NewString: "new auth flow",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("HandleLifecycle: %v", err)
+	}
+	if resp.Decision != "approve" {
+		t.Fatalf("decision=%q", resp.Decision)
+	}
+
+	eventStore, err = ctxengstore.Open(ctx, storageRoot)
+	if err != nil {
+		t.Fatalf("reopen contextengine store: %v", err)
+	}
+	defer eventStore.Close()
+	events, err := eventStore.ListEvents(ctx, contextengine.EventFilter{
+		WorkspaceID: workspaceID,
+		Kind:        contextengine.EventKindCodeChangedDirty,
+	})
+	if err != nil {
+		t.Fatalf("list dirty events: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("dirty events=%d want 1", len(events))
+	}
+	if len(events[0].Refs) != 1 || contextengine.FormatEvidenceRef(events[0].Refs[0]) != "path:internal/auth.go" {
+		t.Fatalf("dirty event refs=%#v want path:internal/auth.go", events[0].Refs)
+	}
+
+	gotRelated, err := eventStore.GetClaim(ctx, related.ID)
+	if err != nil {
+		t.Fatalf("get related claim: %v", err)
+	}
+	if gotRelated.Status != contextengine.ClaimStatusNeedsRevalidation {
+		t.Fatalf("related claim status=%q want %q", gotRelated.Status, contextengine.ClaimStatusNeedsRevalidation)
+	}
+	gotEdgeRelated, err := eventStore.GetClaim(ctx, edgeRelated.ID)
+	if err != nil {
+		t.Fatalf("get edge-related claim: %v", err)
+	}
+	if gotEdgeRelated.Status != contextengine.ClaimStatusNeedsRevalidation {
+		t.Fatalf("edge-related claim status=%q want %q", gotEdgeRelated.Status, contextengine.ClaimStatusNeedsRevalidation)
+	}
+	gotUnrelated, err := eventStore.GetClaim(ctx, unrelated.ID)
+	if err != nil {
+		t.Fatalf("get unrelated claim: %v", err)
+	}
+	if gotUnrelated.Status != contextengine.ClaimStatusCurrent {
+		t.Fatalf("unrelated claim status=%q want %q", gotUnrelated.Status, contextengine.ClaimStatusCurrent)
+	}
+	gotCandidate, err := eventStore.GetClaim(ctx, candidate.ID)
+	if err != nil {
+		t.Fatalf("get candidate claim: %v", err)
+	}
+	if gotCandidate.Status != contextengine.ClaimStatusCandidate {
+		t.Fatalf("candidate claim status=%q want %q", gotCandidate.Status, contextengine.ClaimStatusCandidate)
+	}
+}
+
+func TestEmitDirtyEditEventSkipsEmptyFilePath(t *testing.T) {
+	ctx := context.Background()
+	storageRoot := t.TempDir()
+	cfg := config.Config{}
+	cfg.Storage.Root = storageRoot
+	workspaceRoot := t.TempDir()
+
+	if err := emitDirtyEditEvent(ctx, cfg, workspaceRoot, LifecyclePayload{ToolName: "Edit"}); err != nil {
+		t.Fatalf("emitDirtyEditEvent: %v", err)
+	}
+
+	eventStore, err := ctxengstore.Open(ctx, storageRoot)
+	if err != nil {
+		t.Fatalf("open contextengine store: %v", err)
+	}
+	defer eventStore.Close()
+	events, err := eventStore.ListEvents(ctx, contextengine.EventFilter{
+		WorkspaceID: workspace.ID(workspaceRoot),
+		Kind:        contextengine.EventKindCodeChangedDirty,
+	})
+	if err != nil {
+		t.Fatalf("list dirty events: %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("dirty events=%d want 0", len(events))
 	}
 }
 

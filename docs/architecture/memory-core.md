@@ -6,8 +6,8 @@
 |------|-------|
 | Status | Current |
 | Canonical scope | Agent memory record contract, retrieval lanes, lifecycle, curator trust gates |
-| Canonical packages | `internal/context/memorycore`, `internal/storage/memory`, `skills/memory_query`, `skills/memory_curator_report` |
-| Last reviewed | 2026-05-05 |
+| Canonical packages | `internal/context/memorycore`, `internal/storage/memory`, `internal/intelligence/retrieval/memoryrecall`, `skills/memory_query`, `skills/memory_curator_report` |
+| Last reviewed | 2026-06-02 |
 
 ## Core Model
 
@@ -102,7 +102,8 @@ The agent-facing read path is:
 
 ```text
 agent/task query
-  -> memory/query
+  -> memory/query or RLM retrieve_memory
+  -> shared named-memory recall
   -> named memory + context claims
   -> canonical memorycore records
   -> lifecycle/trust/provenance filtering
@@ -133,6 +134,27 @@ episodic trace
 stale evidence
 quarantined evidence
 ```
+
+## Shared Named-Memory Recall
+
+Named-memory recall is centralized in
+`internal/intelligence/retrieval/memoryrecall`. The module is the shared
+retrieval interface for `memory/query` and RLM `retrieve_memory`, so both
+surfaces use the same lexical, vector, fusion, lifecycle, and evidence-shaping
+rules.
+
+Lexical recall uses the named-memory atomic fields: summary, atomic text,
+entities, and keywords. Stop-word filtering removes low-signal query terms
+before lexical matching so common words do not dominate retrieval scores.
+
+RLM memory recall should return evidence-backed records. It should not silently
+expand nearby session or context content without preserving a memory ID, source
+lane, lifecycle label, and score for the evidence it used.
+
+LongMem-style ingestion must keep benchmark metadata out of searchable and
+embedded fields. Conversation content can populate summary, atomic text,
+entities, and keywords; expected answers, evidence labels, case IDs, and eval
+metadata belong only in provenance or artifact sidecars.
 
 ## Memory Decay Ranking
 

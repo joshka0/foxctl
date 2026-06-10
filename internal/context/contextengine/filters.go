@@ -11,6 +11,7 @@ import (
 
 // EventFilter constrains a ListEvents query.
 type EventFilter struct {
+	ID          string
 	WorkspaceID string
 	Kind        ContextEventKind
 	TaskID      string
@@ -23,6 +24,8 @@ type EventFilter struct {
 type ClaimFilter struct {
 	WorkspaceID string
 	Status      ClaimStatus
+	TaskID      string
+	SessionID   string
 	Limit       int
 	Offset      int
 }

@@ -154,8 +154,13 @@ CREATE INDEX IF NOT EXISTS idx_nodes_workspace         ON evidence_nodes(workspa
 CREATE INDEX IF NOT EXISTS idx_nodes_ref               ON evidence_nodes(ref_type, ref_value);
 
 -- Memory claims indexes
+DROP INDEX IF EXISTS idx_claims_status;
+DROP INDEX IF EXISTS idx_claims_task_status;
+DROP INDEX IF EXISTS idx_claims_session_status;
 CREATE INDEX IF NOT EXISTS idx_claims_workspace        ON memory_claims(workspace_id);
-CREATE INDEX IF NOT EXISTS idx_claims_status           ON memory_claims(workspace_id, status);
+CREATE INDEX IF NOT EXISTS idx_claims_status_updated   ON memory_claims(workspace_id, status, updated_at DESC, id ASC);
+CREATE INDEX IF NOT EXISTS idx_claims_task_status_updated ON memory_claims(workspace_id, scope_task_id, status, updated_at DESC, id ASC);
+CREATE INDEX IF NOT EXISTS idx_claims_session_status_updated ON memory_claims(workspace_id, scope_session_id, status, updated_at DESC, id ASC);
 
 -- Staleness markers indexes
 CREATE INDEX IF NOT EXISTS idx_staleness_workspace     ON staleness_markers(workspace_id);
@@ -178,7 +183,7 @@ CREATE INDEX IF NOT EXISTS idx_feedback_episode        ON retrieval_feedback(wor
 `
 
 // Migrate runs the schema DDL against the database.
-// It is safe to call multiple times (all DDL uses IF NOT EXISTS).
+// It is safe to call multiple times.
 func Migrate(ctx context.Context, db *sql.DB) error {
 	if _, err := db.ExecContext(ctx, schemaDDL); err != nil {
 		return fmt.Errorf("contextengine: migrate: %w", err)

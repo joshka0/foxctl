@@ -60,9 +60,9 @@ type MemoryQueryFunc func(ctx context.Context, workspaceID, query string) ([]Mem
 // ContextQueryFunc retrieves the current TopOfMind/ContextPacket for the context lane.
 type ContextQueryFunc func(ctx context.Context, workspaceID string) (*ContextPacket, error)
 
-// ContextPackFunc retrieves additional context-lane EvidencePacks for a query.
-// Implementations can adapt ContextWiki retrieval, vault-backed notes, or other
-// workspace context sources without changing the basic ContextPacket contract.
+// ContextPackFunc retrieves additional EvidencePacks for a query.
+// Implementations can adapt ContextWiki retrieval, vault-backed notes, memory
+// recall, or other workspace context sources without changing lane contracts.
 type ContextPackFunc func(ctx context.Context, workspaceID, query string, limit int) ([]EvidencePack, error)
 
 // TaskQueryFunc retrieves task contexts for the task lane.

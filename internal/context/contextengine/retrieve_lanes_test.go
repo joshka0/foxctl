@@ -494,6 +494,53 @@ func TestRetrieveTask_IncludesTaskContextNode(t *testing.T) {
 	}
 }
 
+func TestRetrieveTask_IncludesRelatedClaimRefs(t *testing.T) {
+	resetTestIDCounter()
+	cfg := testLaneConfig()
+
+	taskQueryFn := func(_ context.Context, _, _ string) (*TaskContext, error) {
+		return &TaskContext{
+			WorkspaceID: "ws-test",
+			TaskID:      "task-42",
+			Objective:   "Continue agent memory wiring",
+			RelatedClaims: []EvidenceRef{
+				{Type: RefTypeMemoryClaim, Ref: "claim-task-1", Title: "Task-scoped candidate"},
+			},
+			ProjectionMeta: ProjectionMeta{
+				ProjectionID:      "proj-1",
+				ProjectionType:    "task_context",
+				ProjectionVersion: 1,
+				WorkspaceID:       "ws-test",
+			},
+		}, nil
+	}
+	taskListFn := func(_ context.Context, _ string) ([]string, error) {
+		return nil, nil
+	}
+
+	pack, err := RetrieveTask(context.Background(), cfg, taskQueryFn, taskListFn, "task-42", "agent memory")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	found := false
+	for _, node := range pack.Nodes {
+		if node.Ref.Type != RefTypeMemoryClaim || node.Ref.Ref != "claim-task-1" {
+			continue
+		}
+		found = true
+		if node.Metadata["role"] != "related_claim" {
+			t.Fatalf("metadata=%v want related_claim role", node.Metadata)
+		}
+		if node.Metadata["task_id"] != "task-42" {
+			t.Fatalf("metadata=%v want task_id", node.Metadata)
+		}
+	}
+	if !found {
+		t.Fatalf("nodes=%v missing related claim ref", pack.Nodes)
+	}
+}
+
 // --- VAL-RETR-005: retrieve_mixed fans out to all four lanes ---
 
 func TestRetrieveMixed_FansOutToAllLanes(t *testing.T) {
