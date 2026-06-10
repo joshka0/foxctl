@@ -38,9 +38,11 @@ import (
 
 // retrieveLaneInput is the shared input shape for the 5 retrieval composite tools.
 type retrieveLaneInput struct {
-	Query  string `json:"query"`
-	Limit  int    `json:"limit,omitempty"`
-	TaskID string `json:"task_id,omitempty"`
+	Query          string   `json:"query"`
+	Limit          int      `json:"limit,omitempty"`
+	TaskID         string   `json:"task_id,omitempty"`
+	SessionID      string   `json:"session_id,omitempty"`
+	MemoryStatuses []string `json:"memory_statuses,omitempty"`
 }
 
 // gatherContextInput is the input shape for gather_context.
@@ -63,6 +65,10 @@ type gatherContextInput struct {
 	GraphMode            string                              `json:"graph_mode,omitempty"`
 }
 
+type gatherContextOptions struct {
+	MemoryCoverageRepair bool
+}
+
 type codeSearchRequestOptions struct {
 	Languages        []string
 	PathPrefixes     []string
@@ -77,7 +83,36 @@ type loadEvidenceRefInput struct {
 	MaxTokens int    `json:"max_tokens,omitempty"`
 }
 
-const defaultLoadEvidenceRefMaxTokens = 4096
+type aggregateEvidenceRefsInput struct {
+	Query                string                              `json:"query"`
+	Refs                 []string                            `json:"refs"`
+	RequiredEvidence     []string                            `json:"required_evidence,omitempty"`
+	CoverageRequirements []contextengine.CoverageRequirement `json:"coverage_requirements,omitempty"`
+	MaxRefs              int                                 `json:"max_refs,omitempty"`
+	MaxTextChars         int                                 `json:"max_text_chars,omitempty"`
+	MaxTokensPerRef      int                                 `json:"max_tokens_per_ref,omitempty"`
+}
+
+type evidenceLedgerInput struct {
+	Query                string                              `json:"query"`
+	Refs                 []string                            `json:"refs"`
+	RequiredEvidence     []string                            `json:"required_evidence,omitempty"`
+	CoverageRequirements []contextengine.CoverageRequirement `json:"coverage_requirements,omitempty"`
+	MaxRefs              int                                 `json:"max_refs,omitempty"`
+	MaxTextChars         int                                 `json:"max_text_chars,omitempty"`
+	MaxTokensPerRef      int                                 `json:"max_tokens_per_ref,omitempty"`
+}
+
+const (
+	defaultLoadEvidenceRefMaxTokens           = 4096
+	defaultGatherMemoryContextMaxContextChars = 24000
+	defaultContextEvidenceDigestMaxClaims     = 6
+	defaultContextEvidenceDigestMaxClaimChars = 360
+	defaultAggregateEvidenceMaxRefs           = 12
+	defaultAggregateEvidenceMaxTextChars      = 480
+	defaultAggregateEvidenceLoadMaxTokens     = 1200
+	defaultAggregateEvidenceScanMaxTokens     = 6000
+)
 
 // laneRetrievalStore is a no-op fallback when the SQLite store is unavailable.
 // Episodes are recorded best-effort; a missing store must never break retrieval.
@@ -96,8 +131,8 @@ func (a *ReadOnlyAdapter) laneConfig() contextengine.LaneConfig {
 	if a.ceStore != nil {
 		store = a.ceStore
 	}
-	wsID := ""
-	if a.workspaceRoot != "" {
+	wsID := strings.TrimSpace(a.workspaceID)
+	if wsID == "" && a.workspaceRoot != "" {
 		wsID = ws.ID(a.workspaceRoot)
 	}
 	return contextengine.LaneConfig{
@@ -6259,12 +6294,14 @@ func (a *ReadOnlyAdapter) memoryQueryFn(limit int) contextengine.MemoryQueryFunc
 }
 
 func (a *ReadOnlyAdapter) memoryQueryFnForStatuses(limit int, statuses []contextengine.ClaimStatus) contextengine.MemoryQueryFunc {
+	return a.memoryQueryFnForStatusesAndScope(limit, statuses, contextengine.MemoryQueryScope{})
+}
+
+func (a *ReadOnlyAdapter) memoryQueryFnForStatusesAndScope(limit int, statuses []contextengine.ClaimStatus, scope contextengine.MemoryQueryScope) contextengine.MemoryQueryFunc {
 	return func(ctx context.Context, workspaceID, query string) ([]contextengine.MemoryClaim, error) {
+		effectiveStatuses := contextengine.EffectiveMemoryQueryStatuses(statuses, scope)
 		if a.ceStore == nil {
 			return nil, nil
-		}
-		if len(statuses) == 0 {
-			statuses = []contextengine.ClaimStatus{contextengine.ClaimStatusCurrent}
 		}
 		// Fetch with no SQL-side query filtering; ClaimFilter does not yet
 		// support substring search. We fetch up to a generous cap then
@@ -6281,15 +6318,7 @@ func (a *ReadOnlyAdapter) memoryQueryFnForStatuses(limit int, statuses []context
 		}
 		claims := make([]contextengine.MemoryClaim, 0, fetchLimit)
 		seen := map[string]struct{}{}
-		for _, status := range statuses {
-			found, err := a.ceStore.ListClaims(ctx, ctxengstore.ClaimFilter{
-				WorkspaceID: workspaceID,
-				Status:      status,
-				Limit:       fetchLimit,
-			})
-			if err != nil {
-				return nil, err
-			}
+		appendClaims := func(found []contextengine.MemoryClaim) {
 			for _, claim := range found {
 				if _, ok := seen[claim.ID]; ok {
 					continue
@@ -6298,21 +6327,61 @@ func (a *ReadOnlyAdapter) memoryQueryFnForStatuses(limit int, statuses []context
 				claims = append(claims, claim)
 			}
 		}
-		q := strings.TrimSpace(strings.ToLower(query))
-		if q == "" {
-			if limit > 0 && len(claims) > limit {
-				return claims[:limit], nil
+		for _, status := range effectiveStatuses {
+			if strings.TrimSpace(scope.TaskID) != "" {
+				found, err := a.ceStore.ListClaims(ctx, ctxengstore.ClaimFilter{
+					WorkspaceID: workspaceID,
+					Status:      status,
+					TaskID:      strings.TrimSpace(scope.TaskID),
+					Limit:       fetchLimit,
+				})
+				if err != nil {
+					return nil, err
+				}
+				appendClaims(found)
 			}
-			return claims, nil
+			if strings.TrimSpace(scope.SessionID) != "" {
+				found, err := a.ceStore.ListClaims(ctx, ctxengstore.ClaimFilter{
+					WorkspaceID: workspaceID,
+					Status:      status,
+					SessionID:   strings.TrimSpace(scope.SessionID),
+					Limit:       fetchLimit,
+				})
+				if err != nil {
+					return nil, err
+				}
+				appendClaims(found)
+			}
+			if !scope.HasScope() || status == contextengine.ClaimStatusCurrent {
+				found, err := a.ceStore.ListClaims(ctx, ctxengstore.ClaimFilter{
+					WorkspaceID: workspaceID,
+					Status:      status,
+					Limit:       fetchLimit,
+				})
+				if err != nil {
+					return nil, err
+				}
+				appendClaims(found)
+			}
+		}
+		q := strings.TrimSpace(query)
+		if q == "" && !scope.HasScope() {
+			if bounded := contextengine.LimitMemoryQueryClaims(claims, limit); len(bounded) > 0 {
+				return bounded, nil
+			}
+			return nil, nil
 		}
 		filtered := make([]contextengine.MemoryClaim, 0, len(claims))
 		for _, c := range claims {
-			if claimMatchesQuery(c, q) {
+			if contextengine.ClaimVisibleForMemoryQuery(c, q, scope) {
 				filtered = append(filtered, c)
 				if limit > 0 && len(filtered) >= limit {
 					break
 				}
 			}
+		}
+		if len(filtered) == 0 {
+			return nil, nil
 		}
 		return filtered, nil
 	}
@@ -6350,27 +6419,6 @@ func cleanStringList(raw []string) []string {
 		out = append(out, item)
 	}
 	return out
-}
-
-// claimMatchesQuery reports whether any of the claim's searchable text
-// fields contain the lowercased substring q. Caller must lowercase q.
-func claimMatchesQuery(c contextengine.MemoryClaim, q string) bool {
-	if q == "" {
-		return true
-	}
-	if strings.Contains(strings.ToLower(c.Summary), q) {
-		return true
-	}
-	if strings.Contains(strings.ToLower(c.ClaimType), q) {
-		return true
-	}
-	if strings.Contains(strings.ToLower(c.Reason), q) {
-		return true
-	}
-	if strings.Contains(strings.ToLower(c.Scope.Path), q) {
-		return true
-	}
-	return false
 }
 
 // contextQueryFn returns a ContextQueryFunc that synthesizes a ContextPacket
@@ -6488,9 +6536,94 @@ func (a *ReadOnlyAdapter) taskQueryFn() contextengine.TaskQueryFunc {
 		if workspaceID != "" && t.WorkspaceID != "" && t.WorkspaceID != workspaceID {
 			return nil, nil
 		}
-		tc := adapters.ConvertTask(t)
+		tc := a.taskContextFromTask(ctx, t, workspaceID)
 		return &tc, nil
 	}
+}
+
+func (a *ReadOnlyAdapter) taskContextFromTask(ctx context.Context, task tasks.Task, workspaceID string) contextengine.TaskContext {
+	tc := adapters.ConvertTask(task)
+	if strings.TrimSpace(tc.WorkspaceID) == "" {
+		tc.WorkspaceID = strings.TrimSpace(workspaceID)
+	}
+	if strings.TrimSpace(tc.WorkspaceID) == "" {
+		tc.WorkspaceID = a.laneConfig().WorkspaceID
+	}
+	tc.RelatedClaims = appendUniqueEvidenceRefsEnv(tc.RelatedClaims, a.taskClaimRefs(ctx, tc.WorkspaceID, tc.TaskID, 20)...)
+	return tc
+}
+
+func (a *ReadOnlyAdapter) taskClaimRefs(ctx context.Context, workspaceID, taskID string, limit int) []contextengine.EvidenceRef {
+	if a.ceStore == nil || strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(taskID) == "" {
+		return nil
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	statuses := []contextengine.ClaimStatus{
+		contextengine.ClaimStatusCandidate,
+		contextengine.ClaimStatusCurrent,
+		contextengine.ClaimStatusNeedsRevalidation,
+	}
+	refs := make([]contextengine.EvidenceRef, 0, limit)
+	seen := map[string]struct{}{}
+	for _, status := range statuses {
+		claims, err := a.ceStore.ListClaims(ctx, ctxengstore.ClaimFilter{
+			WorkspaceID: workspaceID,
+			Status:      status,
+			TaskID:      strings.TrimSpace(taskID),
+			Limit:       limit,
+		})
+		if err != nil {
+			continue
+		}
+		for _, claim := range claims {
+			id := strings.TrimSpace(claim.ID)
+			if id == "" {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			refs = append(refs, contextengine.EvidenceRef{
+				Type:        contextengine.RefTypeMemoryClaim,
+				Ref:         id,
+				WorkspaceID: workspaceID,
+				Title:       claim.Summary,
+			})
+			if len(refs) >= limit {
+				return refs
+			}
+		}
+	}
+	return refs
+}
+
+func appendUniqueEvidenceRefsEnv(base []contextengine.EvidenceRef, extra ...contextengine.EvidenceRef) []contextengine.EvidenceRef {
+	out := append([]contextengine.EvidenceRef(nil), base...)
+	seen := map[string]struct{}{}
+	for _, ref := range out {
+		key := contextengine.FormatEvidenceRef(ref)
+		if key != "" {
+			seen[key] = struct{}{}
+		}
+	}
+	for _, ref := range extra {
+		if err := contextengine.ValidateEvidenceRef(ref); err != nil {
+			continue
+		}
+		key := contextengine.FormatEvidenceRef(ref)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, ref)
+	}
+	return out
 }
 
 // taskListFn returns a TaskListFunc backed by the tasks SQLite store. It lists
@@ -6798,11 +6931,71 @@ func (a *ReadOnlyAdapter) retrieveMemory(ctx context.Context, args json.RawMessa
 		limit = 10
 	}
 	cfg := a.laneConfig()
-	pack, err := contextengine.RetrieveMemory(ctx, cfg, a.memoryQueryFn(limit), strings.TrimSpace(input.Query))
+	query := strings.TrimSpace(input.Query)
+	scope := contextengine.MemoryQueryScope{
+		TaskID:    input.TaskID,
+		SessionID: input.SessionID,
+	}
+	statuses := parseMemoryClaimStatuses(input.MemoryStatuses)
+	pack, err := contextengine.RetrieveMemory(ctx, cfg, a.memoryQueryFnForStatusesAndScope(limit, statuses, scope), query)
 	if err != nil {
 		return nil, err
 	}
+	if !scope.HasScope() && contextengine.MemoryQueryAllowsNamedFallback(contextengine.EffectiveMemoryQueryStatuses(statuses, scope)) {
+		namedPack, ok, err := a.retrieveNamedMemory(ctx, cfg, query, limit)
+		if ok {
+			if err != nil {
+				if ctx.Err() != nil {
+					return nil, err
+				}
+				ensurePackMetadataEnv(&pack)
+				pack.Metadata["named_memory_error"] = err.Error()
+			} else if len(pack.Nodes) == 0 && (len(namedPack.Nodes) > 0 || namedMemoryPackSuppressesFallback(namedPack)) {
+				return packToMap(namedPack), nil
+			} else {
+				mergeNamedMemoryPackIntoContextPack(&pack, namedPack, limit)
+			}
+		}
+	}
 	return packToMap(pack), nil
+}
+
+func mergeNamedMemoryPackIntoContextPack(pack *contextengine.EvidencePack, namedPack contextengine.EvidencePack, limit int) {
+	if pack == nil {
+		return
+	}
+	ensurePackMetadataEnv(pack)
+	if len(namedPack.Nodes) > 0 {
+		remaining := len(namedPack.Nodes)
+		if limit > 0 {
+			remaining = limit - len(pack.Nodes)
+		}
+		if remaining > 0 {
+			if remaining > len(namedPack.Nodes) {
+				remaining = len(namedPack.Nodes)
+			}
+			pack.Nodes = append(pack.Nodes, namedPack.Nodes[:remaining]...)
+		}
+		pack.Metadata["named_memory_hits"] = len(namedPack.Nodes)
+		pack.Metadata["named_memory_search_method"] = namedPack.Metadata["search_method"]
+		pack.Metadata["named_memory_episode_id"] = namedPack.Metadata["episode_id"]
+	}
+	if suppressed := intFromAnyEnv(namedPack.Metadata["suppressed_by_lifecycle"]); suppressed > 0 {
+		pack.Metadata["named_memory_suppressed_by_lifecycle"] = suppressed
+	}
+}
+
+func ensurePackMetadataEnv(pack *contextengine.EvidencePack) {
+	if pack.Metadata == nil {
+		pack.Metadata = map[string]any{}
+	}
+}
+
+func namedMemoryPackSuppressesFallback(pack contextengine.EvidencePack) bool {
+	if len(pack.Nodes) > 0 || pack.Metadata == nil {
+		return false
+	}
+	return intFromAnyEnv(pack.Metadata["suppressed_by_lifecycle"]) > 0
 }
 
 func (a *ReadOnlyAdapter) retrieveContext(ctx context.Context, args json.RawMessage) (map[string]any, error) {
@@ -6840,6 +7033,43 @@ func (a *ReadOnlyAdapter) gatherContext(ctx context.Context, args json.RawMessag
 	return a.gatherContextWithInput(ctx, input)
 }
 
+func (a *ReadOnlyAdapter) gatherMemoryContext(ctx context.Context, args json.RawMessage) (map[string]any, error) {
+	var input gatherContextInput
+	if err := json.Unmarshal(args, &input); err != nil {
+		return nil, err
+	}
+	input = applyGatherMemoryContextDefaults(input)
+	if len(input.RequiredEvidence) == 0 && len(input.CoverageRequirements) == 0 {
+		plan, err := buildContextQueryPlan(planContextQueryInput{
+			Question: input.Query,
+			Goal:     input.Goal,
+			Lanes:    input.Lanes,
+			Limit:    input.Limit,
+		})
+		if err != nil {
+			return nil, err
+		}
+		input.RequiredEvidence = append([]string(nil), plan.RequiredEvidence...)
+		input.CoverageRequirements = append([]contextengine.CoverageRequirement(nil), plan.CoverageRequirements...)
+	}
+	return a.gatherContextWithOptions(ctx, input, gatherContextOptions{MemoryCoverageRepair: true})
+}
+
+func applyGatherMemoryContextDefaults(input gatherContextInput) gatherContextInput {
+	if strings.TrimSpace(input.Goal) == "" {
+		input.Goal = "recall"
+	}
+	input.Lanes = []string{"memory"}
+	input.SourceProfiles = []string{string(contextengine.SourceProfileMemory)}
+	if strings.TrimSpace(input.ResponseMode) == "" {
+		input.ResponseMode = "answer_surface"
+	}
+	if input.MaxContextChars <= 0 {
+		input.MaxContextChars = defaultGatherMemoryContextMaxContextChars
+	}
+	return input
+}
+
 func (a *ReadOnlyAdapter) gatherTestContext(ctx context.Context, args json.RawMessage) (map[string]any, error) {
 	var input gatherContextInput
 	if err := json.Unmarshal(args, &input); err != nil {
@@ -6870,6 +7100,10 @@ func (a *ReadOnlyAdapter) gatherDocsContext(ctx context.Context, args json.RawMe
 }
 
 func (a *ReadOnlyAdapter) gatherContextWithInput(ctx context.Context, input gatherContextInput) (map[string]any, error) {
+	return a.gatherContextWithOptions(ctx, input, gatherContextOptions{})
+}
+
+func (a *ReadOnlyAdapter) gatherContextWithOptions(ctx context.Context, input gatherContextInput, options gatherContextOptions) (map[string]any, error) {
 	limit := input.Limit
 	if limit <= 0 {
 		limit = 10
@@ -6898,9 +7132,18 @@ func (a *ReadOnlyAdapter) gatherContextWithInput(ctx context.Context, input gath
 		ExcludedPaths:    input.ExcludedPaths,
 		RequiredEvidence: providerRequiredEvidence,
 	})
+	memoryStatuses := parseMemoryClaimStatuses(input.MemoryStatuses)
+	memoryScope := contextengine.MemoryQueryScope{
+		TaskID: input.TaskID,
+	}
 	bundle, err := contextengine.GatherContext(ctx, cfg, contextengine.GatherContextDeps{
-		CodeSearch:    a.codeSearchFnForTaskWithRequired(limit, input.TaskType, providerRequiredEvidence, codeOptions, sourceProfiles...),
-		MemoryQuery:   a.memoryQueryFnForStatuses(limit, parseMemoryClaimStatuses(input.MemoryStatuses)),
+		CodeSearch:  a.codeSearchFnForTaskWithRequired(limit, input.TaskType, providerRequiredEvidence, codeOptions, sourceProfiles...),
+		MemoryQuery: a.memoryQueryFnForStatusesAndScope(limit, memoryStatuses, memoryScope),
+		MemoryPacks: a.namedMemoryGatherPacksFn(memoryStatuses, memoryScope, namedMemoryGatherOptions{
+			CoverageRepair:       options.MemoryCoverageRepair,
+			RequiredEvidence:     providerRequiredEvidence,
+			CoverageRequirements: req.CoverageRequirements,
+		}),
 		ContextQuery:  a.contextQueryFn(),
 		ContextPacks:  a.contextPacksFn(limit),
 		TaskQuery:     a.taskQueryFn(),
@@ -7286,7 +7529,10 @@ func (a *ReadOnlyAdapter) retrieveMixed(ctx context.Context, args json.RawMessag
 	pack, err := contextengine.RetrieveMixed(
 		ctx, cfg,
 		a.codeSearchFn(limit),
-		a.memoryQueryFn(limit),
+		a.memoryQueryFnForStatusesAndScope(limit, parseMemoryClaimStatuses(input.MemoryStatuses), contextengine.MemoryQueryScope{
+			TaskID:    input.TaskID,
+			SessionID: input.SessionID,
+		}),
 		a.contextQueryFn(),
 		a.taskQueryFn(),
 		a.taskListFn(query),
@@ -7347,11 +7593,18 @@ func (a *ReadOnlyAdapter) loadEvidenceRef(ctx context.Context, args json.RawMess
 		if err != nil {
 			return map[string]any{"ref": refStr, "loaded": false, "error": err.Error()}, nil
 		}
+		workspaceID := strings.TrimSpace(a.laneConfig().WorkspaceID)
+		if workspaceID != "" && strings.TrimSpace(claim.WorkspaceID) != workspaceID {
+			return map[string]any{"ref": refStr, "loaded": false, "error": "claim not found in workspace"}, nil
+		}
 		return boundLoadedEvidenceRef(refStr, map[string]any{
 			"ref":    refStr,
 			"loaded": true,
 			"claim":  claim,
 		}, input.MaxTokens), nil
+	case contextengine.RefTypeNamedMemory:
+		out, err := a.loadNamedMemoryEvidence(ctx, refStr, ref.Ref)
+		return boundLoadedEvidenceRef(refStr, out, input.MaxTokens), err
 	case contextengine.RefTypeEvent:
 		out, err := a.loadEventEvidence(ctx, refStr, ref.Ref)
 		return boundLoadedEvidenceRef(refStr, out, input.MaxTokens), err
@@ -7376,6 +7629,1246 @@ func (a *ReadOnlyAdapter) loadEvidenceRef(ctx context.Context, args json.RawMess
 	}
 }
 
+func (a *ReadOnlyAdapter) aggregateEvidenceRefs(ctx context.Context, args json.RawMessage) (map[string]any, error) {
+	var input aggregateEvidenceRefsInput
+	if err := json.Unmarshal(args, &input); err != nil {
+		return nil, err
+	}
+	input.Query = strings.TrimSpace(input.Query)
+	if input.Query == "" {
+		return nil, fmt.Errorf("query is required")
+	}
+	input.Refs = uniqueNonEmptyStringsEnv(input.Refs)
+	if len(input.Refs) == 0 {
+		return nil, fmt.Errorf("refs is required")
+	}
+	if input.MaxRefs <= 0 {
+		input.MaxRefs = defaultAggregateEvidenceMaxRefs
+	}
+	if input.MaxTextChars <= 0 {
+		input.MaxTextChars = defaultAggregateEvidenceMaxTextChars
+	}
+	if input.MaxTokensPerRef <= 0 {
+		input.MaxTokensPerRef = defaultAggregateEvidenceLoadMaxTokens
+	}
+	if len(input.RequiredEvidence) == 0 && len(input.CoverageRequirements) == 0 {
+		plan, err := buildContextQueryPlan(planContextQueryInput{
+			Question: input.Query,
+			Goal:     "recall",
+			Limit:    input.MaxRefs,
+		})
+		if err != nil {
+			return nil, err
+		}
+		input.RequiredEvidence = append([]string(nil), plan.RequiredEvidence...)
+		input.CoverageRequirements = append([]contextengine.CoverageRequirement(nil), plan.CoverageRequirements...)
+	}
+	refs := input.Refs
+	if len(refs) > input.MaxRefs {
+		refs = refs[:input.MaxRefs]
+	}
+	loaded := make([]aggregateLoadedEvidenceRef, 0, len(refs))
+	for _, ref := range refs {
+		out, err := a.loadEvidenceRef(ctx, mustJSON(map[string]any{
+			"ref":        ref,
+			"max_tokens": aggregateEvidenceScanMaxTokens(input.MaxTokensPerRef),
+		}))
+		item := aggregateLoadedEvidenceRef{
+			Ref:     ref,
+			Loaded:  boolFromAnyEnv(out["loaded"]),
+			Error:   strings.TrimSpace(fmt.Sprint(out["error"])),
+			Payload: out,
+		}
+		if err != nil {
+			item.Error = err.Error()
+		}
+		item.Text = aggregateEvidencePayloadTextForQuery(out, input.Query, input.MaxTextChars)
+		loaded = append(loaded, item)
+	}
+	return aggregateLoadedEvidenceRefs(input, loaded), nil
+}
+
+func (a *ReadOnlyAdapter) evidenceLedger(ctx context.Context, args json.RawMessage) (map[string]any, error) {
+	var input evidenceLedgerInput
+	if err := json.Unmarshal(args, &input); err != nil {
+		return nil, err
+	}
+	input.Query = strings.TrimSpace(input.Query)
+	if input.Query == "" {
+		return nil, fmt.Errorf("query is required")
+	}
+	input.Refs = uniqueNonEmptyStringsEnv(input.Refs)
+	if len(input.Refs) == 0 {
+		return nil, fmt.Errorf("refs is required")
+	}
+	if input.MaxRefs <= 0 {
+		input.MaxRefs = defaultAggregateEvidenceMaxRefs
+	}
+	if input.MaxTextChars <= 0 {
+		input.MaxTextChars = defaultAggregateEvidenceMaxTextChars
+	}
+	if input.MaxTokensPerRef <= 0 {
+		input.MaxTokensPerRef = defaultAggregateEvidenceLoadMaxTokens
+	}
+	plan, err := buildContextQueryPlan(planContextQueryInput{
+		Question: input.Query,
+		Goal:     "recall",
+		Limit:    input.MaxRefs,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(input.RequiredEvidence) == 0 && len(input.CoverageRequirements) == 0 {
+		input.RequiredEvidence = append([]string(nil), plan.RequiredEvidence...)
+		input.CoverageRequirements = append([]contextengine.CoverageRequirement(nil), plan.CoverageRequirements...)
+	}
+	refs := input.Refs
+	if len(refs) > input.MaxRefs {
+		refs = refs[:input.MaxRefs]
+	}
+	loaded := make([]aggregateLoadedEvidenceRef, 0, len(refs))
+	for _, ref := range refs {
+		out, err := a.loadEvidenceRef(ctx, mustJSON(map[string]any{
+			"ref":        ref,
+			"max_tokens": aggregateEvidenceScanMaxTokens(input.MaxTokensPerRef),
+		}))
+		item := aggregateLoadedEvidenceRef{
+			Ref:     ref,
+			Loaded:  boolFromAnyEnv(out["loaded"]),
+			Error:   strings.TrimSpace(fmt.Sprint(out["error"])),
+			Payload: out,
+		}
+		if err != nil {
+			item.Error = err.Error()
+		}
+		item.Text = evidenceLedgerPayloadTextForQuery(out, input.Query, input.MaxTextChars)
+		loaded = append(loaded, item)
+	}
+	return buildEvidenceLedger(input, loaded, plan), nil
+}
+
+type aggregateLoadedEvidenceRef struct {
+	Ref     string
+	Loaded  bool
+	Error   string
+	Text    string
+	Payload map[string]any
+}
+
+type aggregateEvidenceSlot struct {
+	ID       string
+	Kind     string
+	Label    string
+	Terms    []string
+	Required bool
+}
+
+type evidenceLedgerValues struct {
+	Durations []string
+	Dates     []string
+	Locations []string
+	Money     []string
+	Numbers   []string
+	Items     []string
+}
+
+func aggregateLoadedEvidenceRefs(input aggregateEvidenceRefsInput, loaded []aggregateLoadedEvidenceRef) map[string]any {
+	slots := aggregateEvidenceSlots(input)
+	requiredTerms := aggregateEvidenceRequiredTerms(input)
+	refSummaries := make([]map[string]any, 0, len(loaded))
+	claims := make([]map[string]any, 0, len(loaded))
+	slotSupport := map[string][]map[string]any{}
+	loadedCount := 0
+	for _, item := range loaded {
+		if item.Loaded {
+			loadedCount++
+		}
+		refSummary := map[string]any{
+			"ref":    item.Ref,
+			"loaded": item.Loaded,
+		}
+		if item.Error != "" && item.Error != "<nil>" {
+			refSummary["error"] = item.Error
+		}
+		refSummaries = append(refSummaries, refSummary)
+		text := strings.TrimSpace(item.Text)
+		if text == "" {
+			continue
+		}
+		matchedTerms := aggregateMatchedTerms(text, requiredTerms)
+		matchedSlots := aggregateMatchedSlots(text, slots)
+		support := "loaded"
+		if len(matchedSlots) > 0 {
+			support = "slot"
+		} else if len(matchedTerms) > 0 {
+			support = "term"
+		}
+		claim := map[string]any{
+			"ref":           item.Ref,
+			"text":          limitContextEvidenceDigestText(text, input.MaxTextChars),
+			"support":       support,
+			"matched_terms": matchedTerms,
+			"matched_slots": matchedSlots,
+		}
+		claims = append(claims, claim)
+		for _, slotID := range matchedSlots {
+			slotSupport[slotID] = append(slotSupport[slotID], map[string]any{
+				"ref":  item.Ref,
+				"text": claim["text"],
+			})
+		}
+	}
+	slotMaps, missingSlots := aggregateEvidenceSlotMaps(slots, slotSupport)
+	return map[string]any{
+		"schema_version": "evidence_ref_aggregate/v1",
+		"query":          input.Query,
+		"ref_count":      len(input.Refs),
+		"loaded_count":   loadedCount,
+		"refs":           refSummaries,
+		"claims":         claims,
+		"slots":          slotMaps,
+		"answer_outline": map[string]any{
+			"supported_claims": aggregateClaimTextsBySupport(claims, "slot", "term"),
+			"loaded_claims":    aggregateClaimTextsBySupport(claims, "loaded"),
+			"missing_slots":    missingSlots,
+			"guidance":         "Synthesize across supported_claims; use loaded_claims as partial context only, and do not claim missing slots as proven.",
+		},
+	}
+}
+
+func buildEvidenceLedger(input evidenceLedgerInput, loaded []aggregateLoadedEvidenceRef, plan contextQueryPlanOutput) map[string]any {
+	aggInput := aggregateEvidenceRefsInput{
+		Query:                input.Query,
+		Refs:                 input.Refs,
+		RequiredEvidence:     input.RequiredEvidence,
+		CoverageRequirements: input.CoverageRequirements,
+		MaxTextChars:         input.MaxTextChars,
+	}
+	answerType := strings.TrimSpace(plan.AnswerType)
+	if answerType == "" {
+		answerType = classifyContextQueryAnswerType(input.Query)
+	}
+	slots := aggregateEvidenceSlots(aggInput)
+	requiredTerms := aggregateEvidenceRequiredTerms(aggInput)
+	acceptedRows := []map[string]any{}
+	rejectedRows := []map[string]any{}
+	acceptedRefs := []string{}
+	rejectedRefs := []string{}
+	acceptedSlotSupport := map[string][]map[string]any{}
+	supportedValues := []string{}
+	supportedItems := []string{}
+	for _, item := range loaded {
+		text := strings.TrimSpace(item.Text)
+		matchedTerms := aggregateMatchedTerms(text, requiredTerms)
+		matchedSlots := evidenceLedgerMatchedSlots(text, slots)
+		values := extractEvidenceLedgerValues(text)
+		status, reason := classifyEvidenceLedgerRow(answerType, slots, len(requiredTerms), matchedTerms, matchedSlots, values, item)
+		row := map[string]any{
+			"ref":           item.Ref,
+			"status":        status,
+			"reason":        reason,
+			"loaded":        item.Loaded,
+			"text":          limitContextEvidenceDigestText(text, input.MaxTextChars),
+			"matched_terms": matchedTerms,
+			"matched_slots": matchedSlots,
+			"answer_values": evidenceLedgerValuesMap(values),
+		}
+		if item.Error != "" && item.Error != "<nil>" {
+			row["error"] = item.Error
+		}
+		if status == "accept" {
+			acceptedRows = append(acceptedRows, row)
+			acceptedRefs = appendUniqueStringEnv(acceptedRefs, item.Ref)
+			for _, slotID := range matchedSlots {
+				acceptedSlotSupport[slotID] = append(acceptedSlotSupport[slotID], map[string]any{
+					"ref":  item.Ref,
+					"text": row["text"],
+				})
+			}
+			supportedValues = appendUniqueStringsEnv(supportedValues, evidenceLedgerAnswerValues(answerType, values)...)
+			supportedItems = appendUniqueStringsEnv(supportedItems, values.Items...)
+		} else {
+			rejectedRows = append(rejectedRows, row)
+			rejectedRefs = appendUniqueStringEnv(rejectedRefs, item.Ref)
+		}
+	}
+	slotMaps, missingSlots := evidenceLedgerSlotMaps(slots, acceptedSlotSupport, answerType, len(supportedValues) > 0)
+	fallbackCalls := evidenceLedgerFallbackCalls(plan, missingSlots)
+	needsFallback := len(missingSlots) > 0 || len(acceptedRows) == 0
+	return map[string]any{
+		"schema_version":        "evidence_ledger/v1",
+		"query":                 input.Query,
+		"answer_type":           answerType,
+		"ref_count":             len(input.Refs),
+		"loaded_count":          countLoadedEvidenceRefs(loaded),
+		"ready":                 !needsFallback,
+		"needs_fallback":        needsFallback,
+		"accepted_refs":         acceptedRefs,
+		"rejected_refs":         rejectedRefs,
+		"accepted_rows":         acceptedRows,
+		"rejected_rows":         rejectedRows,
+		"slots":                 slotMaps,
+		"fallback_queries":      evidenceLedgerFallbackQueries(fallbackCalls),
+		"fallback_gather_calls": fallbackCalls,
+		"answer_outline": map[string]any{
+			"supported_values": supportedValues,
+			"supported_items":  supportedItems,
+			"missing_slots":    missingSlots,
+			"guidance":         "Use only accepted_rows for final factual claims. Do not use rejected_rows as answers. If needs_fallback is true, run the fallback query that targets the missing slot before refusing or finalizing.",
+		},
+	}
+}
+
+func classifyEvidenceLedgerRow(answerType string, slots []aggregateEvidenceSlot, requiredTermCount int, matchedTerms, matchedSlots []string, values evidenceLedgerValues, item aggregateLoadedEvidenceRef) (string, string) {
+	if !item.Loaded {
+		return "reject", firstNonEmpty(item.Error, "ref did not load")
+	}
+	if strings.TrimSpace(item.Text) == "" {
+		return "reject", "loaded ref has no usable evidence text"
+	}
+	directAnswer := evidenceLedgerHasAnswerValue(answerType, values)
+	conceptMatches := evidenceLedgerConceptSlotMatches(slots, matchedSlots)
+	threshold := evidenceLedgerRequiredTermThreshold(requiredTermCount)
+	strongTermMatch := len(matchedTerms) >= threshold
+	strongSlotMatch := len(conceptMatches) >= evidenceLedgerRequiredConceptThreshold(slots)
+	if evidenceLedgerRequiresDirectAnswer(answerType) && !directAnswer {
+		return "reject", "required anchors are present but the requested answer slot is not directly stated"
+	}
+	if evidenceLedgerRequiresDirectAnswer(answerType) {
+		if strongSlotMatch {
+			return "accept", "directly covers required evidence and exposes the requested answer slot"
+		}
+		return "reject", "answer value is present but too many required anchors are missing"
+	}
+	if (strongTermMatch || strongSlotMatch) && (directAnswer || answerType == "fact" || answerType == "comparison") {
+		if directAnswer {
+			return "accept", "directly covers required evidence and exposes the requested answer slot"
+		}
+		return "accept", "covers required evidence for a factual answer"
+	}
+	if !strongTermMatch && !strongSlotMatch {
+		return "reject", "topical or adjacent evidence; required anchors are missing"
+	}
+	return "reject", "required anchors are present but the requested answer slot is not directly stated"
+}
+
+func evidenceLedgerMatchedSlots(text string, slots []aggregateEvidenceSlot) []string {
+	out := []string{}
+	normalized := strings.ToLower(text)
+	for _, slot := range slots {
+		if evidenceLedgerSlotMatches(normalized, slot) {
+			out = appendUniqueStringEnv(out, slot.ID)
+		}
+	}
+	return out
+}
+
+func evidenceLedgerSlotMatches(normalizedText string, slot aggregateEvidenceSlot) bool {
+	if slot.Kind == "answer_slot" {
+		return len(aggregateMatchedTerms(normalizedText, slot.Terms)) > 0
+	}
+	terms := splitContextEvidenceTerms(slot.Label)
+	if len(terms) == 0 {
+		terms = aggregateEvidenceTerms(slot.Terms)
+	}
+	required := []string{}
+	for _, term := range terms {
+		term = normalizeContextEvidenceTerm(term)
+		if term == "" || contextQuestionStopwords[term] {
+			continue
+		}
+		required = appendUniqueStringEnv(required, term)
+	}
+	if len(required) == 0 {
+		return len(aggregateMatchedTerms(normalizedText, slot.Terms)) > 0
+	}
+	for _, term := range required {
+		if !strings.Contains(normalizedText, term) {
+			return false
+		}
+	}
+	return true
+}
+
+func evidenceLedgerRequiredTermThreshold(requiredTermCount int) int {
+	if requiredTermCount <= 1 {
+		return 1
+	}
+	return 2
+}
+
+func evidenceLedgerRequiredConceptThreshold(slots []aggregateEvidenceSlot) int {
+	requiredConcepts := []string{}
+	for _, slot := range slots {
+		if slot.Required && slot.Kind != "answer_slot" {
+			label := normalizeContextEvidenceTerm(firstNonEmpty(slot.Label, strings.Join(slot.Terms, " ")))
+			if label == "" {
+				label = slot.ID
+			}
+			requiredConcepts = appendUniqueStringEnv(requiredConcepts, label)
+		}
+	}
+	count := len(requiredConcepts)
+	if count <= 1 {
+		return 1
+	}
+	if count <= 3 {
+		return 2
+	}
+	threshold := (count*3 + 4) / 5
+	return maxInt(2, threshold)
+}
+
+func evidenceLedgerRequiresDirectAnswer(answerType string) bool {
+	switch answerType {
+	case "count", "list", "location", "duration", "temporal":
+		return true
+	default:
+		return false
+	}
+}
+
+func evidenceLedgerConceptSlotMatches(slots []aggregateEvidenceSlot, matchedSlots []string) []string {
+	out := []string{}
+	for _, id := range matchedSlots {
+		for _, slot := range slots {
+			if slot.ID == id && slot.Kind != "answer_slot" {
+				label := normalizeContextEvidenceTerm(firstNonEmpty(slot.Label, strings.Join(slot.Terms, " ")))
+				if label == "" {
+					label = id
+				}
+				out = appendUniqueStringEnv(out, label)
+			}
+		}
+	}
+	return out
+}
+
+func evidenceLedgerHasAnswerValue(answerType string, values evidenceLedgerValues) bool {
+	switch answerType {
+	case "duration":
+		return len(values.Durations) > 0
+	case "temporal":
+		return len(values.Dates) > 0 || len(values.Durations) > 0
+	case "location":
+		return len(values.Locations) > 0
+	case "count":
+		return len(values.Items) > 0 || len(values.Numbers) > 0
+	case "list":
+		return len(values.Items) > 0
+	case "comparison":
+		return len(values.Numbers) > 0 || len(values.Money) > 0 || len(values.Durations) > 0
+	default:
+		return true
+	}
+}
+
+func evidenceLedgerAnswerValues(answerType string, values evidenceLedgerValues) []string {
+	switch answerType {
+	case "duration":
+		return values.Durations
+	case "temporal":
+		return appendUniqueStringsEnv(append([]string{}, values.Dates...), values.Durations...)
+	case "location":
+		return values.Locations
+	case "count":
+		if len(values.Items) > 0 {
+			return values.Items
+		}
+		return values.Numbers
+	case "list":
+		return values.Items
+	case "comparison":
+		out := appendUniqueStringsEnv(append([]string{}, values.Money...), values.Durations...)
+		return appendUniqueStringsEnv(out, values.Numbers...)
+	default:
+		return []string{}
+	}
+}
+
+func evidenceLedgerSlotMaps(slots []aggregateEvidenceSlot, support map[string][]map[string]any, answerType string, directAnswerCovered bool) ([]map[string]any, []string) {
+	out := make([]map[string]any, 0, len(slots))
+	missing := []string{}
+	for _, slot := range slots {
+		items := support[slot.ID]
+		status := "missing"
+		if len(items) > 0 || (slot.Kind == "answer_slot" && directAnswerCovered) {
+			status = "covered"
+		} else if slot.Required {
+			missing = appendUniqueStringEnv(missing, firstNonEmpty(slot.Label, slot.ID))
+		}
+		mapped := map[string]any{
+			"id":            slot.ID,
+			"kind":          slot.Kind,
+			"label":         slot.Label,
+			"required":      slot.Required,
+			"status":        status,
+			"terms":         append([]string(nil), slot.Terms...),
+			"support_count": len(items),
+		}
+		if len(items) > 0 {
+			mapped["support"] = items
+		}
+		out = append(out, mapped)
+	}
+	return out, missing
+}
+
+func evidenceLedgerFallbackCalls(plan contextQueryPlanOutput, missingSlots []string) []map[string]any {
+	out := make([]map[string]any, 0, len(plan.FallbackProbes))
+	for _, probe := range plan.FallbackProbes {
+		if strings.TrimSpace(probe.Query) == "" {
+			continue
+		}
+		out = append(out, map[string]any{
+			"query":                 probe.Query,
+			"goal":                  probe.Goal,
+			"required_evidence":     append([]string(nil), probe.RequiredEvidence...),
+			"coverage_requirements": probe.CoverageRequirements,
+			"limit":                 probe.Limit,
+			"lanes":                 append([]string(nil), probe.Lanes...),
+			"response_mode":         probe.ResponseMode,
+			"missing_slots":         append([]string(nil), missingSlots...),
+		})
+	}
+	return out
+}
+
+func evidenceLedgerFallbackQueries(calls []map[string]any) []string {
+	out := []string{}
+	for _, call := range calls {
+		out = appendUniqueStringEnv(out, strings.TrimSpace(fmt.Sprint(call["query"])))
+	}
+	return out
+}
+
+func countLoadedEvidenceRefs(loaded []aggregateLoadedEvidenceRef) int {
+	count := 0
+	for _, item := range loaded {
+		if item.Loaded {
+			count++
+		}
+	}
+	return count
+}
+
+func evidenceLedgerValuesMap(values evidenceLedgerValues) map[string]any {
+	return map[string]any{
+		"durations": values.Durations,
+		"dates":     values.Dates,
+		"locations": values.Locations,
+		"money":     values.Money,
+		"numbers":   values.Numbers,
+		"items":     values.Items,
+	}
+}
+
+func aggregateEvidenceSlots(input aggregateEvidenceRefsInput) []aggregateEvidenceSlot {
+	out := make([]aggregateEvidenceSlot, 0, len(input.CoverageRequirements)+len(input.RequiredEvidence))
+	seen := map[string]struct{}{}
+	add := func(slot aggregateEvidenceSlot) {
+		slot.ID = strings.TrimSpace(slot.ID)
+		slot.Kind = strings.TrimSpace(slot.Kind)
+		slot.Label = strings.TrimSpace(slot.Label)
+		slot.Terms = aggregateEvidenceTerms(append(slot.Terms, slot.Label))
+		if slot.ID == "" {
+			slot.ID = stableAggregateEvidenceID(slot.Kind, slot.Label, slot.Terms)
+		}
+		if slot.Kind == "" {
+			slot.Kind = "concept"
+		}
+		if slot.Label == "" && len(slot.Terms) > 0 {
+			slot.Label = strings.Join(slot.Terms, " ")
+		}
+		if slot.ID == "" || len(slot.Terms) == 0 {
+			return
+		}
+		if _, ok := seen[slot.ID]; ok {
+			return
+		}
+		seen[slot.ID] = struct{}{}
+		out = append(out, slot)
+	}
+	for _, req := range input.CoverageRequirements {
+		add(aggregateEvidenceSlot{
+			ID:       req.ID,
+			Kind:     req.Kind,
+			Label:    req.Label,
+			Terms:    req.Terms,
+			Required: req.Required,
+		})
+	}
+	for _, evidence := range input.RequiredEvidence {
+		add(aggregateEvidenceSlot{
+			Kind:     "concept",
+			Label:    evidence,
+			Terms:    []string{evidence},
+			Required: true,
+		})
+	}
+	return out
+}
+
+func aggregateEvidenceRequiredTerms(input aggregateEvidenceRefsInput) []string {
+	values := append([]string(nil), input.RequiredEvidence...)
+	for _, req := range input.CoverageRequirements {
+		values = append(values, req.Label)
+		values = append(values, req.Terms...)
+	}
+	return aggregateEvidenceTerms(values)
+}
+
+func aggregateEvidenceTerms(values []string) []string {
+	out := []string{}
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value == "" {
+			continue
+		}
+		out = appendUniqueStringEnv(out, value)
+		for _, part := range regexp.MustCompile(`[^a-z0-9$./_-]+`).Split(value, -1) {
+			part = strings.TrimSpace(part)
+			if len(part) < 3 {
+				continue
+			}
+			out = appendUniqueStringEnv(out, part)
+		}
+	}
+	return out
+}
+
+func stableAggregateEvidenceID(kind, label string, terms []string) string {
+	parts := aggregateEvidenceTerms([]string{kind, label, strings.Join(terms, " ")})
+	if len(parts) == 0 {
+		return ""
+	}
+	if len(parts) > 4 {
+		parts = parts[:4]
+	}
+	return strings.Join(parts, "_")
+}
+
+func aggregateMatchedTerms(text string, terms []string) []string {
+	normalized := strings.ToLower(text)
+	out := []string{}
+	for _, term := range terms {
+		term = strings.ToLower(strings.TrimSpace(term))
+		if term == "" {
+			continue
+		}
+		if strings.Contains(normalized, term) {
+			out = appendUniqueStringEnv(out, term)
+		}
+	}
+	return out
+}
+
+func aggregateMatchedSlots(text string, slots []aggregateEvidenceSlot) []string {
+	out := []string{}
+	for _, slot := range slots {
+		if len(aggregateMatchedTerms(text, slot.Terms)) > 0 {
+			out = appendUniqueStringEnv(out, slot.ID)
+		}
+	}
+	return out
+}
+
+func aggregateEvidenceSlotMaps(slots []aggregateEvidenceSlot, support map[string][]map[string]any) ([]map[string]any, []string) {
+	out := make([]map[string]any, 0, len(slots))
+	missing := []string{}
+	for _, slot := range slots {
+		items := support[slot.ID]
+		status := "missing"
+		if len(items) > 0 {
+			status = "covered"
+		} else if slot.Required {
+			missing = appendUniqueStringEnv(missing, firstNonEmpty(slot.Label, slot.ID))
+		}
+		mapped := map[string]any{
+			"id":            slot.ID,
+			"kind":          slot.Kind,
+			"label":         slot.Label,
+			"required":      slot.Required,
+			"status":        status,
+			"terms":         append([]string(nil), slot.Terms...),
+			"support_count": len(items),
+		}
+		if len(items) > 0 {
+			mapped["support"] = items
+		}
+		out = append(out, mapped)
+	}
+	return out, missing
+}
+
+func aggregateClaimTextsBySupport(claims []map[string]any, supportValues ...string) []string {
+	allowed := map[string]struct{}{}
+	for _, value := range supportValues {
+		allowed[value] = struct{}{}
+	}
+	out := []string{}
+	for _, claim := range claims {
+		support := strings.TrimSpace(fmt.Sprint(claim["support"]))
+		if _, ok := allowed[support]; !ok {
+			continue
+		}
+		text := strings.TrimSpace(fmt.Sprint(claim["text"]))
+		if text != "" {
+			out = append(out, text)
+		}
+		if len(out) >= 8 {
+			break
+		}
+	}
+	return out
+}
+
+func aggregateEvidencePayloadTextForQuery(payload map[string]any, query string, maxChars int) string {
+	parts := []string{}
+	collectAggregateEvidenceStrings(payload, &parts, 0)
+	return evidencePayloadTextForQuery(parts, query, maxChars)
+}
+
+func evidenceLedgerPayloadText(payload map[string]any, maxChars int) string {
+	parts := []string{}
+	collectEvidenceLedgerAssertionStrings(payload, &parts, 0)
+	return evidencePayloadTextFromParts(parts, maxChars)
+}
+
+func evidenceLedgerPayloadTextForQuery(payload map[string]any, query string, maxChars int) string {
+	parts := []string{}
+	collectEvidenceLedgerAssertionStrings(payload, &parts, 0)
+	return evidencePayloadTextForQuery(parts, query, maxChars)
+}
+
+func aggregateEvidenceScanMaxTokens(maxTokens int) int {
+	if maxTokens < defaultAggregateEvidenceScanMaxTokens {
+		return defaultAggregateEvidenceScanMaxTokens
+	}
+	return maxTokens
+}
+
+func evidencePayloadTextFromParts(parts []string, maxChars int) string {
+	parts = uniqueNonEmptyStringsEnv(parts)
+	if len(parts) > 12 {
+		parts = parts[:12]
+	}
+	return limitContextEvidenceDigestText(strings.Join(parts, "\n"), maxChars)
+}
+
+type evidencePayloadSnippet struct {
+	Text        string
+	Score       int
+	SourceIndex int
+	Start       int
+}
+
+func evidencePayloadTextForQuery(parts []string, query string, maxChars int) string {
+	parts = uniqueNonEmptyStringsEnv(parts)
+	if strings.TrimSpace(query) == "" || len(parts) == 0 {
+		return evidencePayloadTextFromParts(parts, maxChars)
+	}
+	terms := evidencePayloadQueryTerms(query)
+	if len(terms) == 0 {
+		return evidencePayloadTextFromParts(parts, maxChars)
+	}
+	answerType := classifyContextQueryAnswerType(query)
+	windowChars := evidencePayloadSnippetWindowChars(maxChars)
+	snippets := []evidencePayloadSnippet{}
+	for sourceIndex, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		lower := strings.ToLower(part)
+		for _, start := range evidencePayloadSnippetPositions(part, lower, terms, answerType) {
+			text := evidencePayloadSnippetAround(part, start, windowChars)
+			score := evidencePayloadSnippetScore(text, terms, answerType)
+			if score <= 0 {
+				continue
+			}
+			snippets = append(snippets, evidencePayloadSnippet{
+				Text:        text,
+				Score:       score,
+				SourceIndex: sourceIndex,
+				Start:       start,
+			})
+		}
+	}
+	if len(snippets) == 0 {
+		return evidencePayloadTextFromParts(parts, maxChars)
+	}
+	sort.SliceStable(snippets, func(i, j int) bool {
+		if snippets[i].Score != snippets[j].Score {
+			return snippets[i].Score > snippets[j].Score
+		}
+		if snippets[i].SourceIndex != snippets[j].SourceIndex {
+			return snippets[i].SourceIndex < snippets[j].SourceIndex
+		}
+		return snippets[i].Start < snippets[j].Start
+	})
+	selected := []string{}
+	seen := map[string]struct{}{}
+	usedChars := 0
+	for _, snippet := range snippets {
+		text := strings.TrimSpace(snippet.Text)
+		if text == "" {
+			continue
+		}
+		key := evidencePayloadSnippetDedupeKey(text)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		extra := len(text)
+		if len(selected) > 0 {
+			extra++
+		}
+		if maxChars > 0 && usedChars+extra > maxChars {
+			remaining := maxChars - usedChars
+			if len(selected) > 0 {
+				remaining--
+			}
+			if remaining < 96 {
+				continue
+			}
+			text = limitContextEvidenceDigestText(text, remaining)
+			extra = len(text)
+			if len(selected) > 0 {
+				extra++
+			}
+		}
+		selected = append(selected, text)
+		seen[key] = struct{}{}
+		usedChars += extra
+		if len(selected) >= 4 {
+			break
+		}
+	}
+	if len(selected) == 0 {
+		return evidencePayloadTextFromParts(parts, maxChars)
+	}
+	return strings.Join(selected, "\n")
+}
+
+func evidencePayloadQueryTerms(query string) []string {
+	out := []string{}
+	baseTerms := splitContextEvidenceTerms(query)
+	add := func(term string) {
+		term = strings.ToLower(strings.TrimSpace(term))
+		if term == "" {
+			return
+		}
+		if !strings.HasPrefix(term, "$") && len(term) < 3 {
+			return
+		}
+		if contextQuestionStopwords[term] {
+			return
+		}
+		switch term {
+		case "where", "when", "what", "which", "long", "duration", "time", "answer", "fact", "facts":
+			return
+		}
+		out = appendUniqueStringEnv(out, term)
+	}
+	for i, term := range baseTerms {
+		add(term)
+		if i+1 < len(baseTerms) {
+			add(term + " " + baseTerms[i+1])
+		}
+	}
+	for _, term := range aggregateEvidenceTerms([]string{query}) {
+		if strings.Contains(term, " ") && len(splitContextEvidenceTerms(term)) > 3 {
+			continue
+		}
+		add(term)
+	}
+	return out
+}
+
+func evidencePayloadSnippetPositions(text, lower string, terms []string, answerType string) []int {
+	positions := []int{}
+	for _, term := range terms {
+		start := 0
+		count := 0
+		for start < len(lower) && count < 16 {
+			idx := strings.Index(lower[start:], term)
+			if idx < 0 {
+				break
+			}
+			absolute := start + idx
+			positions = appendEvidencePayloadPosition(positions, absolute)
+			start = absolute + maxInt(1, len(term))
+			count++
+		}
+	}
+	for _, pattern := range evidencePayloadAnswerPatterns(answerType, text) {
+		for _, match := range pattern.FindAllStringIndex(text, 16) {
+			if len(match) == 2 {
+				positions = appendEvidencePayloadPosition(positions, match[0])
+			}
+		}
+	}
+	return positions
+}
+
+func evidencePayloadAnswerPatterns(answerType, query string) []*regexp.Regexp {
+	switch answerType {
+	case "duration":
+		return []*regexp.Regexp{evidenceLedgerDurationPattern}
+	case "temporal":
+		return []*regexp.Regexp{evidenceLedgerDatePattern, evidenceLedgerDurationPattern}
+	case "location":
+		return []*regexp.Regexp{evidenceLedgerLocationPattern, evidenceLedgerMoneyPattern}
+	case "count", "comparison":
+		return []*regexp.Regexp{evidenceLedgerNumberPattern, evidenceLedgerMoneyPattern, evidenceLedgerScalePattern}
+	default:
+		if strings.Contains(query, "$") {
+			return []*regexp.Regexp{evidenceLedgerMoneyPattern}
+		}
+		return nil
+	}
+}
+
+func appendEvidencePayloadPosition(positions []int, position int) []int {
+	if position < 0 {
+		return positions
+	}
+	for _, existing := range positions {
+		if existing == position {
+			return positions
+		}
+	}
+	return append(positions, position)
+}
+
+func evidencePayloadSnippetWindowChars(maxChars int) int {
+	if maxChars <= 0 {
+		return 360
+	}
+	if maxChars <= 180 {
+		return maxChars
+	}
+	return minIntEnv(260, maxInt(140, (maxChars/2)-8))
+}
+
+func evidencePayloadSnippetAround(text string, position, maxChars int) string {
+	text = strings.TrimSpace(text)
+	if maxChars <= 0 || len(text) <= maxChars {
+		return text
+	}
+	if position < 0 {
+		position = 0
+	}
+	if position > len(text) {
+		position = len(text)
+	}
+	start := position - maxChars/2
+	if start < 0 {
+		start = 0
+	}
+	end := start + maxChars
+	if end > len(text) {
+		end = len(text)
+		start = maxInt(0, end-maxChars)
+	}
+	snippet := strings.TrimSpace(text[start:end])
+	if start > 0 {
+		snippet = "..." + snippet
+	}
+	if end < len(text) {
+		snippet = strings.TrimSpace(snippet) + "..."
+	}
+	return snippet
+}
+
+func evidencePayloadSnippetScore(text string, terms []string, answerType string) int {
+	lower := strings.ToLower(text)
+	score := 0
+	for _, term := range terms {
+		if strings.Contains(lower, term) {
+			score += 3
+			if strings.Contains(term, " ") {
+				score += 2
+			}
+		}
+	}
+	if evidenceLedgerDurationPattern.MatchString(text) {
+		score += 4
+		if answerType == "duration" || answerType == "temporal" {
+			score += 8
+		}
+	}
+	if evidenceLedgerDatePattern.MatchString(text) {
+		score += 3
+		if answerType == "temporal" {
+			score += 7
+		}
+	}
+	if evidenceLedgerMoneyPattern.MatchString(text) {
+		score += 3
+	}
+	if evidenceLedgerLocationPattern.MatchString(text) {
+		score += 3
+		if answerType == "location" {
+			score += 8
+		}
+	}
+	if evidenceLedgerScalePattern.MatchString(text) {
+		score += 5
+	}
+	return score
+}
+
+func evidencePayloadSnippetDedupeKey(text string) string {
+	text = strings.ToLower(strings.TrimSpace(text))
+	if len(text) > 96 {
+		text = text[:96]
+	}
+	return text
+}
+
+func collectAggregateEvidenceStrings(value any, out *[]string, depth int) {
+	if depth > 5 || len(*out) >= 32 {
+		return
+	}
+	switch typed := value.(type) {
+	case string:
+		text := strings.TrimSpace(typed)
+		if aggregateEvidenceUsefulText(text) {
+			*out = append(*out, text)
+		}
+	case []any:
+		for _, item := range typed {
+			collectAggregateEvidenceStrings(item, out, depth+1)
+		}
+	case []string:
+		for _, item := range typed {
+			collectAggregateEvidenceStrings(item, out, depth+1)
+		}
+	case map[string]any:
+		for _, key := range []string{"atomic_text", "summary", "content", "statement", "text", "description", "notes", "title", "value", "entities", "keywords"} {
+			if item, ok := typed[key]; ok {
+				collectAggregateEvidenceStrings(item, out, depth+1)
+			}
+		}
+		for _, key := range []string{"named_memory", "claim", "task_context", "task", "session", "event", "tool_call", "artifact", "trajectory", "result"} {
+			if item, ok := typed[key]; ok {
+				collectAggregateEvidenceStrings(item, out, depth+1)
+			}
+		}
+	}
+}
+
+func collectEvidenceLedgerAssertionStrings(value any, out *[]string, depth int) {
+	if depth > 5 || len(*out) >= 32 {
+		return
+	}
+	switch typed := value.(type) {
+	case string:
+		text := strings.TrimSpace(typed)
+		if aggregateEvidenceUsefulText(text) {
+			*out = append(*out, text)
+		}
+	case []any:
+		for _, item := range typed {
+			collectEvidenceLedgerAssertionStrings(item, out, depth+1)
+		}
+	case []string:
+		for _, item := range typed {
+			collectEvidenceLedgerAssertionStrings(item, out, depth+1)
+		}
+	case map[string]any:
+		for _, key := range []string{"atomic_text", "content", "statement", "text", "notes", "value"} {
+			if item, ok := typed[key]; ok {
+				collectEvidenceLedgerAssertionStrings(item, out, depth+1)
+			}
+		}
+		for _, key := range []string{"named_memory", "claim", "task_context", "task", "session", "event", "tool_call", "artifact", "trajectory", "result"} {
+			if item, ok := typed[key]; ok {
+				collectEvidenceLedgerAssertionStrings(item, out, depth+1)
+			}
+		}
+	}
+}
+
+func aggregateEvidenceUsefulText(text string) bool {
+	if len(text) < 3 {
+		return false
+	}
+	lower := strings.ToLower(text)
+	switch lower {
+	case "true", "false", "<nil>":
+		return false
+	}
+	if strings.HasPrefix(lower, "path:") || strings.HasPrefix(lower, "named_memory:") || strings.HasPrefix(lower, "memory_claim:") {
+		return false
+	}
+	return true
+}
+
+var (
+	evidenceLedgerDurationPattern = regexp.MustCompile(`(?i)\b\d+(?:\.\d+)?\s*(?:minutes?|mins?|hours?|hrs?|days?|weeks?|months?|years?)\b(?:\s+each\s+way)?`)
+	evidenceLedgerDatePattern     = regexp.MustCompile(`(?i)\b(?:today|yesterday|tomorrow|last\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|week|month|year)|next\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|week|month|year)|(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{1,2}(?:,\s*\d{4})?|\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{2,4})\b`)
+	evidenceLedgerMoneyPattern    = regexp.MustCompile(`(?i)(?:\$\s*\d+(?:\.\d+)?|\b\d+(?:\.\d+)?\s*(?:dollars?|usd)\b)`)
+	evidenceLedgerNumberPattern   = regexp.MustCompile(`(?i)\b\d+(?:\.\d+)?\b`)
+	evidenceLedgerScalePattern    = regexp.MustCompile(`(?i)\b\d+/\d+\s*(?:scale\s*)?(?:[A-Z0-9][A-Za-z0-9.'-]*(?:\s+[A-Z0-9][A-Za-z0-9.'-]*){0,5})`)
+	evidenceLedgerLocationPattern = regexp.MustCompile(`(?i:\b(?:at|in|from|through|near|inside|outside|via|to|by|was|is))\s+([A-Z][A-Za-z0-9&'.-]*(?:\s+[A-Z][A-Za-z0-9&'.-]*){0,4})`)
+)
+
+func extractEvidenceLedgerValues(text string) evidenceLedgerValues {
+	text = strings.TrimSpace(text)
+	values := evidenceLedgerValues{
+		Durations: uniqueNonEmptyStringsEnv(evidenceLedgerDurationPattern.FindAllString(text, -1)),
+		Dates:     uniqueNonEmptyStringsEnv(evidenceLedgerDatePattern.FindAllString(text, -1)),
+		Money:     uniqueNonEmptyStringsEnv(evidenceLedgerMoneyPattern.FindAllString(text, -1)),
+		Numbers:   uniqueNonEmptyStringsEnv(evidenceLedgerNumberPattern.FindAllString(text, -1)),
+	}
+	values.Locations = extractEvidenceLedgerLocations(text)
+	values.Items = extractEvidenceLedgerItems(text, values.Locations)
+	return values
+}
+
+func extractEvidenceLedgerLocations(text string) []string {
+	out := []string{}
+	for _, match := range evidenceLedgerLocationPattern.FindAllStringSubmatch(text, -1) {
+		if len(match) < 2 {
+			continue
+		}
+		value := evidenceLedgerCleanLocationValue(match[1])
+		if !evidenceLedgerCapitalizedValueUseful(value) {
+			continue
+		}
+		out = appendUniqueStringEnv(out, value)
+		if len(out) >= 12 {
+			break
+		}
+	}
+	return out
+}
+
+func evidenceLedgerCleanLocationValue(value string) string {
+	value = strings.Trim(value, " \t\n\r.,;:!?()[]{}\"")
+	words := strings.Fields(value)
+	for len(words) > 0 && evidenceLedgerLocationNoiseWord(words[len(words)-1]) {
+		words = words[:len(words)-1]
+	}
+	for len(words) > 0 && evidenceLedgerLocationNoiseWord(words[0]) {
+		words = words[1:]
+	}
+	return strings.Join(words, " ")
+}
+
+func evidenceLedgerLocationNoiseWord(value string) bool {
+	switch strings.ToLower(strings.Trim(value, " \t\n\r.,;:!?()[]{}\"")) {
+	case "checkout", "counter", "store", "location", "place", "last", "next",
+		"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+		"january", "february", "march", "april", "may", "june", "july", "august",
+		"september", "october", "november", "december":
+		return true
+	default:
+		return false
+	}
+}
+
+func evidenceLedgerCapitalizedValueUseful(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) < 3 {
+		return false
+	}
+	lower := strings.ToLower(value)
+	if strings.HasPrefix(lower, "memory/") || strings.HasPrefix(lower, "longmem") {
+		return false
+	}
+	first := strings.ToLower(strings.Fields(value)[0])
+	switch first {
+	case "i", "the", "that", "this", "user", "assistant", "summary", "result", "true", "false", "question", "answer", "evidence", "based", "use", "do", "if", "when", "where", "what", "how":
+		return false
+	default:
+		return true
+	}
+}
+
+func extractEvidenceLedgerItems(text string, capitalized []string) []string {
+	out := []string{}
+	for _, value := range evidenceLedgerScalePattern.FindAllString(text, -1) {
+		value = strings.Trim(value, " \t\n\r.,;:!?()[]{}\"")
+		out = appendUniqueStringEnv(out, value)
+	}
+	for _, value := range capitalized {
+		if evidenceLedgerCapitalizedValueUseful(value) {
+			out = appendUniqueStringEnv(out, value)
+		}
+	}
+	if len(out) > 12 {
+		return out[:12]
+	}
+	return out
+}
+
+func uniqueNonEmptyStringsEnv(values []string) []string {
+	out := []string{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		out = appendUniqueStringEnv(out, value)
+	}
+	return out
+}
+
+func boolFromAnyEnv(value any) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.EqualFold(strings.TrimSpace(typed), "true")
+	default:
+		return false
+	}
+}
+
+func (a *ReadOnlyAdapter) loadNamedMemoryEvidence(ctx context.Context, refStr, name string) (map[string]any, error) {
+	if strings.TrimSpace(a.cfg.Storage.Root) == "" {
+		return map[string]any{"ref": refStr, "loaded": false, "error": "memory store unavailable"}, nil
+	}
+	memStore, err := memorystore.OpenWithConfig(ctx, a.cfg)
+	if err != nil {
+		return map[string]any{"ref": refStr, "loaded": false, "error": err.Error()}, nil
+	}
+	defer func() { _ = memStore.Close() }()
+
+	entry, err := memStore.Get(ctx, strings.TrimSpace(name), a.laneConfig().WorkspaceID)
+	if err != nil {
+		return map[string]any{"ref": refStr, "loaded": false, "error": err.Error()}, nil
+	}
+	body := map[string]any{
+		"name":            entry.Name,
+		"id":              entry.ID,
+		"type":            entry.Type,
+		"workspace":       entry.Workspace,
+		"summary":         entry.Summary,
+		"atomic_text":     entry.AtomicText,
+		"entities":        entry.Entities,
+		"keywords":        entry.Keywords,
+		"lifecycle_state": entry.LifecycleState,
+		"review_status":   entry.ReviewStatus,
+	}
+	if len(entry.Result) > 0 {
+		var decoded any
+		if err := json.Unmarshal(entry.Result, &decoded); err == nil {
+			body["result"] = decoded
+		} else {
+			body["result"] = string(entry.Result)
+		}
+	}
+	return map[string]any{
+		"ref":          refStr,
+		"loaded":       true,
+		"named_memory": body,
+	}, nil
+}
+
 func (a *ReadOnlyAdapter) loadTaskEvidence(ctx context.Context, refStr, taskID string) (map[string]any, error) {
 	if a.taskStore == nil {
 		return map[string]any{"ref": refStr, "loaded": false, "error": "task store unavailable"}, nil
@@ -7384,7 +8877,7 @@ func (a *ReadOnlyAdapter) loadTaskEvidence(ctx context.Context, refStr, taskID s
 	if err != nil {
 		return map[string]any{"ref": refStr, "loaded": false, "error": err.Error()}, nil
 	}
-	taskContext := adapters.ConvertTask(task)
+	taskContext := a.taskContextFromTask(ctx, task, task.WorkspaceID)
 	return map[string]any{
 		"ref":          refStr,
 		"loaded":       true,
@@ -7705,6 +9198,7 @@ func contextBundleAnswerSurfaceToMap(bundle contextengine.ContextBundle) map[str
 		"categories":        bundle.Categories,
 		"integration_edges": bundle.IntegrationEdges,
 		"coverage_report":   bundle.CoverageReport,
+		"evidence_digest":   buildContextEvidenceDigest(bundle),
 		"path_set":          pathSet,
 		"facts_to_copy":     buildContextFactsToCopy(bundle),
 		"load_queue":        buildContextLoadQueue(bundle),
@@ -8252,6 +9746,208 @@ func buildContextFactsToCopy(bundle contextengine.ContextBundle) []map[string]an
 		})
 	}
 	return out
+}
+
+func buildContextEvidenceDigest(bundle contextengine.ContextBundle) map[string]any {
+	claims := buildContextEvidenceDigestClaims(bundle, defaultContextEvidenceDigestMaxClaims)
+	slots := buildContextEvidenceDigestSlots(bundle)
+	return map[string]any{
+		"schema_version": "context_evidence_digest/v1",
+		"claims":         claims,
+		"slots":          slots,
+		"missing":        append([]contextengine.ContextGap(nil), bundle.Missing...),
+		"conflicts":      append([]contextengine.ContextConflict(nil), bundle.Conflicts...),
+		"load_refs":      contextEvidenceDigestLoadRefs(claims, slots, 12),
+	}
+}
+
+func buildContextEvidenceDigestClaims(bundle contextengine.ContextBundle, limit int) []map[string]any {
+	if limit <= 0 {
+		limit = len(bundle.Facts)
+	}
+	out := make([]map[string]any, 0, minInt(limit, len(bundle.Facts)))
+	for _, fact := range bundle.Facts {
+		text := limitContextEvidenceDigestText(fact.Fact, defaultContextEvidenceDigestMaxClaimChars)
+		if text == "" {
+			continue
+		}
+		loadRefs := formattedEvidenceRefs(fact.Refs)
+		item := map[string]any{
+			"text":       text,
+			"kind":       string(fact.Kind),
+			"support":    string(fact.Status),
+			"confidence": fact.Confidence,
+			"load_refs":  loadRefs,
+		}
+		if coverageIDs := contextEvidenceDigestCoverageIDs(fact.Metadata); len(coverageIDs) > 0 {
+			item["coverage_ids"] = coverageIDs
+		}
+		for _, key := range []string{"source", "source_profile", "candidate_role", "evidence_class", "fact_kind"} {
+			if value := selectedPathMetadataString(fact.Metadata, key); value != "" {
+				item[key] = value
+			}
+		}
+		out = append(out, item)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func buildContextEvidenceDigestSlots(bundle contextengine.ContextBundle) []map[string]any {
+	if bundle.CoverageReport == nil || len(bundle.CoverageReport.Requirements) == 0 {
+		return []map[string]any{}
+	}
+	evidenceByID := map[string]contextengine.EvidenceNode{}
+	for _, node := range bundle.Evidence {
+		evidenceByID[node.ID] = node
+	}
+	coveredByRequirement := map[string][]contextengine.PathCoverage{}
+	for _, covered := range bundle.CoverageReport.Covered {
+		coveredByRequirement[covered.RequirementID] = append(coveredByRequirement[covered.RequirementID], covered)
+	}
+	missing := map[string]struct{}{}
+	for _, id := range bundle.CoverageReport.Missing {
+		missing[id] = struct{}{}
+	}
+	out := make([]map[string]any, 0, len(bundle.CoverageReport.Requirements))
+	for _, req := range bundle.CoverageReport.Requirements {
+		status := "missing"
+		if _, ok := missing[req.ID]; !ok && len(coveredByRequirement[req.ID]) > 0 {
+			status = "covered"
+		}
+		item := map[string]any{
+			"id":       req.ID,
+			"kind":     req.Kind,
+			"label":    req.Label,
+			"required": req.Required,
+			"status":   status,
+			"terms":    append([]string(nil), req.Terms...),
+		}
+		support := contextEvidenceDigestSlotSupport(coveredByRequirement[req.ID], evidenceByID)
+		if len(support) > 0 {
+			item["support"] = support
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func contextEvidenceDigestSlotSupport(covered []contextengine.PathCoverage, evidenceByID map[string]contextengine.EvidenceNode) []map[string]any {
+	out := make([]map[string]any, 0, len(covered))
+	for _, item := range covered {
+		support := map[string]any{
+			"path":  item.Path,
+			"score": item.Score,
+		}
+		loadRefs := []string{}
+		for _, evidenceID := range item.EvidenceIDs {
+			node, ok := evidenceByID[evidenceID]
+			if !ok {
+				continue
+			}
+			if ref := contextengine.FormatEvidenceRef(node.Ref); ref != "" {
+				loadRefs = appendUniqueStringEnv(loadRefs, ref)
+			}
+		}
+		if len(loadRefs) > 0 {
+			support["load_refs"] = loadRefs
+		}
+		out = append(out, support)
+	}
+	return out
+}
+
+func contextEvidenceDigestCoverageIDs(metadata map[string]any) []string {
+	out := metadataStringSliceEnv(metadata, "coverage_requirement_ids")
+	if id := selectedPathMetadataString(metadata, "coverage_requirement_id"); id != "" {
+		out = appendUniqueStringEnv(out, id)
+	}
+	return out
+}
+
+func contextEvidenceDigestLoadRefs(claims []map[string]any, slots []map[string]any, limit int) []string {
+	out := []string{}
+	addRefs := func(value any) {
+		for _, ref := range anyStringSliceEnv(value) {
+			out = appendUniqueStringEnv(out, ref)
+			if limit > 0 && len(out) >= limit {
+				return
+			}
+		}
+	}
+	for _, claim := range claims {
+		addRefs(claim["load_refs"])
+		if limit > 0 && len(out) >= limit {
+			return out
+		}
+	}
+	for _, slot := range slots {
+		for _, support := range anyMapSliceEnv(slot["support"]) {
+			addRefs(support["load_refs"])
+			if limit > 0 && len(out) >= limit {
+				return out
+			}
+		}
+	}
+	return out
+}
+
+func formattedEvidenceRefs(refs []contextengine.EvidenceRef) []string {
+	out := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if formatted := contextengine.FormatEvidenceRef(ref); formatted != "" {
+			out = appendUniqueStringEnv(out, formatted)
+		}
+	}
+	return out
+}
+
+func limitContextEvidenceDigestText(value string, maxChars int) string {
+	value = strings.TrimSpace(value)
+	if maxChars <= 0 || len(value) <= maxChars {
+		return value
+	}
+	runes := []rune(value)
+	if len(runes) <= maxChars {
+		return value
+	}
+	return strings.TrimSpace(string(runes[:maxChars])) + "..."
+}
+
+func anyStringSliceEnv(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		return append([]string(nil), typed...)
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text := strings.TrimSpace(fmt.Sprint(item)); text != "" {
+				out = append(out, text)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func anyMapSliceEnv(value any) []map[string]any {
+	switch typed := value.(type) {
+	case []map[string]any:
+		return typed
+	case []any:
+		out := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			if mapped, ok := item.(map[string]any); ok {
+				out = append(out, mapped)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func buildContextLoadQueue(bundle contextengine.ContextBundle) []map[string]any {

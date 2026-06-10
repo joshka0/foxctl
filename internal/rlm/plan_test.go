@@ -63,8 +63,8 @@ func TestBuildPlanStagedCodeRetrievalUsesCompositeTools(t *testing.T) {
 	}
 	// Staged phases must only reference composite tools.
 	composites := map[string]struct{}{
-		"gather_context": {}, "retrieve_code": {}, "retrieve_memory": {}, "retrieve_context": {},
-		"retrieve_task": {}, "retrieve_mixed": {}, "load_evidence_ref": {},
+		"plan_context_query": {}, "gather_memory_context": {}, "gather_context": {}, "retrieve_code": {}, "retrieve_memory": {}, "retrieve_context": {},
+		"retrieve_task": {}, "retrieve_mixed": {}, "load_evidence_ref": {}, "aggregate_evidence_refs": {}, "evidence_ledger": {},
 	}
 	for _, phase := range plan.Phases {
 		for _, tool := range phase.AllowedTools {
@@ -81,7 +81,7 @@ func TestBuildPlanStagedCodeRetrievalUsesCompositeTools(t *testing.T) {
 	if !reflect.DeepEqual(plan.Phases[0].RequireOneOf, []string{"gather_context"}) {
 		t.Fatalf("discovery require_one_of=%v", plan.Phases[0].RequireOneOf)
 	}
-	if !reflect.DeepEqual(plan.Phases[1].RequireOneOf, []string{"load_evidence_ref"}) {
+	if !reflect.DeepEqual(plan.Phases[1].RequireOneOf, []string{"aggregate_evidence_refs", "evidence_ledger", "load_evidence_ref"}) {
 		t.Fatalf("inspection require_one_of=%v", plan.Phases[1].RequireOneOf)
 	}
 }
@@ -97,8 +97,8 @@ func TestBuildPlanStagedMemoryRecallUsesCompositeTools(t *testing.T) {
 		t.Fatalf("phases=%d want 2", len(plan.Phases))
 	}
 	composites := map[string]struct{}{
-		"gather_context": {}, "retrieve_code": {}, "retrieve_memory": {}, "retrieve_context": {},
-		"retrieve_task": {}, "retrieve_mixed": {}, "load_evidence_ref": {},
+		"plan_context_query": {}, "gather_memory_context": {}, "gather_context": {}, "retrieve_code": {}, "retrieve_memory": {}, "retrieve_context": {},
+		"retrieve_task": {}, "retrieve_mixed": {}, "load_evidence_ref": {}, "aggregate_evidence_refs": {}, "evidence_ledger": {},
 	}
 	for _, phase := range plan.Phases {
 		for _, tool := range phase.AllowedTools {
@@ -106,6 +106,12 @@ func TestBuildPlanStagedMemoryRecallUsesCompositeTools(t *testing.T) {
 				t.Errorf("phase %q allowed_tool %q is not a composite", phase.Name, tool)
 			}
 		}
+	}
+	if !reflect.DeepEqual(plan.Phases[0].RequireOneOf, []string{"gather_memory_context", "gather_context"}) {
+		t.Fatalf("memory recall require_one_of=%v want gather_memory_context/gather_context", plan.Phases[0].RequireOneOf)
+	}
+	if !reflect.DeepEqual(plan.Phases[1].RequireOneOf, []string{"evidence_ledger"}) {
+		t.Fatalf("memory verification require_one_of=%v want evidence_ledger", plan.Phases[1].RequireOneOf)
 	}
 }
 

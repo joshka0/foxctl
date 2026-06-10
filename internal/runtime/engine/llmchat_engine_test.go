@@ -639,6 +639,210 @@ func TestLLMChatEngine_Run_WithToolCall(t *testing.T) {
 	}
 }
 
+func TestLLMChatEngine_Run_AnthropicCompatToolCalls(t *testing.T) {
+	callCount := 0
+	var secondRequest map[string]any
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if r.URL.Path != "/anthropic/v1/messages" {
+			t.Fatalf("path=%q want /anthropic/v1/messages", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
+			t.Fatalf("authorization header=%q", got)
+		}
+		if got := r.Header.Get("anthropic-version"); got == "" {
+			t.Fatalf("missing anthropic-version header")
+		}
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if callCount == 1 {
+			if req["system"] != "Use tools before answering." {
+				t.Fatalf("system=%v", req["system"])
+			}
+			tools, ok := req["tools"].([]any)
+			if !ok || len(tools) != 1 {
+				t.Fatalf("tools=%#v", req["tools"])
+			}
+			tool := tools[0].(map[string]any)
+			if tool["name"] != "retrieve_memory" {
+				t.Fatalf("tool=%#v", tool)
+			}
+			choice := req["tool_choice"].(map[string]any)
+			if choice["type"] != "any" {
+				t.Fatalf("tool_choice=%#v", choice)
+			}
+			_, _ = w.Write([]byte(`{
+				"id":"msg-tool",
+				"type":"message",
+				"role":"assistant",
+				"content":[{
+					"type":"tool_use",
+					"id":"toolu_1",
+					"name":"retrieve_memory",
+					"input":{"query":"qwen embedder"}
+				}],
+				"stop_reason":"tool_use",
+				"usage":{"input_tokens":12,"output_tokens":6}
+			}`))
+			return
+		}
+		secondRequest = req
+		_, _ = w.Write([]byte(`{
+			"id":"msg-final",
+			"type":"message",
+			"role":"assistant",
+			"content":[{"type":"text","text":"The queue uses Qwen."}],
+			"stop_reason":"end_turn",
+			"usage":{"input_tokens":20,"output_tokens":5}
+		}`))
+	})
+
+	var gotArgs json.RawMessage
+	mockExecutor := &MockToolExecutor{
+		ExecuteFn: func(ctx context.Context, name string, args json.RawMessage) (string, error) {
+			gotArgs = append([]byte(nil), args...)
+			if name != "retrieve_memory" {
+				t.Fatalf("tool name=%q", name)
+			}
+			return `{"nodes":[{"text":"Qwen embedding queue"}]}`, nil
+		},
+	}
+	engine := &LLMChatEngine{
+		config: LLMChatConfig{
+			Provider:      "anthropic_compat",
+			APIKey:        "test-key",
+			BaseURL:       "http://mock/anthropic",
+			AuthMode:      "bearer",
+			AuthPrefix:    "Bearer ",
+			Model:         "MiniMax-M3",
+			MaxIterations: 4,
+			ToolChoice:    json.RawMessage(`"required"`),
+		},
+		client:     &http.Client{Transport: &handlerTransport{handler: handler}},
+		toolRunner: NewToolRunner(mockExecutor, nil, ToolRunnerConfig{}),
+	}
+
+	output, err := engine.Run(context.Background(), EngineInput{
+		SystemPrompt: "Use tools before answering.",
+		Messages:     []Message{{Role: RoleUser, Content: "Which embedder?"}},
+		Tools: []ToolDef{{
+			Name:        "retrieve_memory",
+			Description: "Recall memory",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}}}`),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if output.AssistantText != "The queue uses Qwen." {
+		t.Fatalf("assistant text=%q", output.AssistantText)
+	}
+	if len(output.ToolCalls) != 1 || output.ToolCalls[0].Name != "retrieve_memory" {
+		t.Fatalf("tool calls=%+v", output.ToolCalls)
+	}
+	if strings.TrimSpace(string(gotArgs)) != `{"query":"qwen embedder"}` {
+		t.Fatalf("tool args=%s", gotArgs)
+	}
+	messages, ok := secondRequest["messages"].([]any)
+	if !ok || len(messages) != 3 {
+		t.Fatalf("second messages=%#v", secondRequest["messages"])
+	}
+	toolResultMsg := messages[2].(map[string]any)
+	if toolResultMsg["role"] != "user" {
+		t.Fatalf("tool result role=%#v", toolResultMsg)
+	}
+	content := toolResultMsg["content"].([]any)
+	resultBlock := content[0].(map[string]any)
+	if resultBlock["type"] != "tool_result" || resultBlock["tool_use_id"] != "toolu_1" {
+		t.Fatalf("tool result block=%#v", resultBlock)
+	}
+	if len(output.Iterations) != 2 {
+		t.Fatalf("iterations=%d want 2", len(output.Iterations))
+	}
+	if output.Iterations[0].FinishReason != "tool_calls" {
+		t.Fatalf("iteration[0]=%+v", output.Iterations[0])
+	}
+}
+
+func TestAnthropicMessagesURL(t *testing.T) {
+	tests := []struct {
+		name string
+		base string
+		want string
+	}{
+		{
+			name: "vendor anthropic suffix",
+			base: "https://api.minimax.io/anthropic",
+			want: "https://api.minimax.io/anthropic/v1/messages",
+		},
+		{
+			name: "base already v1",
+			base: "https://api.kimi.com/coding/v1",
+			want: "https://api.kimi.com/coding/v1/messages",
+		},
+		{
+			name: "messages endpoint",
+			base: "https://api.anthropic.com/v1/messages",
+			want: "https://api.anthropic.com/v1/messages",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := anthropicMessagesURL(tt.base); got != tt.want {
+				t.Fatalf("anthropicMessagesURL(%q)=%q want %q", tt.base, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLLMChatEngine_Run_AnthropicCompatKimiCodingSetsUserAgent(t *testing.T) {
+	var gotPath string
+	var gotUserAgent string
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotUserAgent = r.Header.Get("User-Agent")
+		_, _ = w.Write([]byte(`{
+			"id":"msg-kimi",
+			"type":"message",
+			"role":"assistant",
+			"content":[{"type":"text","text":"ok"}],
+			"stop_reason":"end_turn",
+			"usage":{"input_tokens":4,"output_tokens":1}
+		}`))
+	})
+	engine := &LLMChatEngine{
+		config: LLMChatConfig{
+			Provider:      "anthropic_compat",
+			APIKey:        "test-key",
+			BaseURL:       "https://api.kimi.com/coding",
+			AuthMode:      "bearer",
+			AuthPrefix:    "Bearer ",
+			Model:         "kimi-k2-thinking",
+			MaxIterations: 1,
+		},
+		client: &http.Client{Transport: &handlerTransport{handler: handler}},
+	}
+
+	output, err := engine.Run(context.Background(), EngineInput{
+		Messages: []Message{{Role: RoleUser, Content: "reply ok"}},
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if output.AssistantText != "ok" {
+		t.Fatalf("assistant text=%q", output.AssistantText)
+	}
+	if gotPath != "/coding/v1/messages" {
+		t.Fatalf("request path=%q want /coding/v1/messages", gotPath)
+	}
+	if gotUserAgent != "claude-code/0.1.0" {
+		t.Fatalf("User-Agent=%q want claude-code/0.1.0", gotUserAgent)
+	}
+}
+
 func TestExtractFinalAnswerJSONPayload(t *testing.T) {
 	tests := []struct {
 		name string
@@ -1236,6 +1440,7 @@ func TestBaseURLForProvider(t *testing.T) {
 		{"groq", "https://api.groq.com/openai/v1"},
 		{"openai", "https://api.openai.com/v1"},
 		{"openai_compat", "https://api.openai.com/v1"},
+		{"anthropic_compat", "https://api.anthropic.com"},
 		{"", "https://api.openai.com/v1"},
 	}
 
@@ -1244,6 +1449,16 @@ func TestBaseURLForProvider(t *testing.T) {
 			got := baseURLForProvider(tt.provider)
 			if got != tt.want {
 				t.Errorf("baseURLForProvider(%q) = %q, want %q", tt.provider, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeEngineProvider_AnthropicCompatAliases(t *testing.T) {
+	for _, provider := range []string{"anthropic-compatible", "anthropic_compat", "anthropic-messages"} {
+		t.Run(provider, func(t *testing.T) {
+			if got := normalizeEngineProvider(provider); got != "anthropic_compat" {
+				t.Fatalf("normalizeEngineProvider(%q)=%q want anthropic_compat", provider, got)
 			}
 		})
 	}

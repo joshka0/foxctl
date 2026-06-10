@@ -46,6 +46,7 @@ func newEvalCommand() *cobra.Command {
 	cmd.AddCommand(newEvalCodeSearchEnsembleCommand())
 	cmd.AddCommand(newEvalGatherContextCommand())
 	cmd.AddCommand(newEvalLongCoTCommand())
+	cmd.AddCommand(newEvalLongmemCommand())
 	return cmd
 }
 

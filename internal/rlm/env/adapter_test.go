@@ -15,12 +15,15 @@ import (
 	"github.com/joshka0/foxctl/internal/context/contextplane"
 	"github.com/joshka0/foxctl/internal/domain/skill"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+	"github.com/joshka0/foxctl/internal/intelligence/retrieval/memoryrecall"
 	"github.com/joshka0/foxctl/internal/platform/config"
 	ws "github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/rlm"
 	"github.com/joshka0/foxctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/storage"
 	"github.com/joshka0/foxctl/internal/storage/cas"
 	ctxengstore "github.com/joshka0/foxctl/internal/storage/contextengine"
+	memorystore "github.com/joshka0/foxctl/internal/storage/memory"
 	"github.com/joshka0/foxctl/internal/storage/obsidianindex"
 	"github.com/joshka0/foxctl/internal/storage/sessions"
 	taskstore "github.com/joshka0/foxctl/internal/storage/tasks"
@@ -61,6 +64,606 @@ signature:
 	return dir
 }
 
+func TestPlanContextQueryBuildsTargetedMemoryPlan(t *testing.T) {
+	t.Parallel()
+
+	adapter := &ReadOnlyAdapter{}
+	out, err := adapter.ExecuteInternal(context.Background(), "plan_context_query", mustJSON(map[string]any{
+		"question": "Where did I redeem a $5 coupon on coffee creamer?",
+		"lanes":    []string{"memory"},
+	}))
+	if err != nil {
+		t.Fatalf("plan_context_query: %v", err)
+	}
+	var plan contextQueryPlanOutput
+	body, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal output: %v", err)
+	}
+	if err := json.Unmarshal(body, &plan); err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	if plan.SchemaVersion != contextQueryPlanSchemaVersion {
+		t.Fatalf("schema_version=%q", plan.SchemaVersion)
+	}
+	if plan.AnswerType != "location" {
+		t.Fatalf("answer_type=%q want location", plan.AnswerType)
+	}
+	for _, want := range []string{"$5", "coffee creamer", "redeem", "coupon"} {
+		if !containsString(plan.RequiredEvidence, want) {
+			t.Fatalf("required_evidence=%v missing %q", plan.RequiredEvidence, want)
+		}
+	}
+	if plan.GatherContext.ResponseMode != "answer_surface" {
+		t.Fatalf("response_mode=%q", plan.GatherContext.ResponseMode)
+	}
+	if got := plan.GatherContext.Lanes; !reflect.DeepEqual(got, []string{"memory"}) {
+		t.Fatalf("lanes=%v want memory", got)
+	}
+	if len(plan.GatherContext.CoverageRequirements) == 0 {
+		t.Fatal("expected coverage requirements")
+	}
+	if plan.GatherContext.CoverageRequirements[0].Label != "answer location" {
+		t.Fatalf("first coverage label=%q", plan.GatherContext.CoverageRequirements[0].Label)
+	}
+	if len(plan.FallbackProbes) == 0 {
+		t.Fatal("expected fallback probes")
+	}
+	checks := strings.Join(plan.SufficiencyChecks, "\n")
+	if !strings.Contains(checks, "load every candidate ref") || !strings.Contains(checks, "directly states") {
+		t.Fatalf("sufficiency_checks=%v", plan.SufficiencyChecks)
+	}
+}
+
+func TestPlanContextQueryPreservesGenericLanePlan(t *testing.T) {
+	t.Parallel()
+
+	adapter := &ReadOnlyAdapter{}
+	out, err := adapter.ExecuteInternal(context.Background(), "plan_context_query", mustJSON(map[string]any{
+		"question": "Which subsystem handles retry backoff for embedding jobs?",
+		"goal":     "debug",
+		"lanes":    []string{"task", "code", "bogus", "task"},
+		"limit":    4,
+	}))
+	if err != nil {
+		t.Fatalf("plan_context_query: %v", err)
+	}
+	var plan contextQueryPlanOutput
+	body, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal output: %v", err)
+	}
+	if err := json.Unmarshal(body, &plan); err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	if plan.GatherContext.Goal != "debug" {
+		t.Fatalf("goal=%q want debug", plan.GatherContext.Goal)
+	}
+	if plan.GatherContext.Limit != 4 {
+		t.Fatalf("limit=%d want 4", plan.GatherContext.Limit)
+	}
+	if got := plan.GatherContext.Lanes; !reflect.DeepEqual(got, []string{"task", "code"}) {
+		t.Fatalf("lanes=%v want task,code", got)
+	}
+	for _, want := range []string{"retry backoff", "embedding jobs"} {
+		if !containsString(plan.RequiredEvidence, want) {
+			t.Fatalf("required_evidence=%v missing %q", plan.RequiredEvidence, want)
+		}
+	}
+}
+
+func TestNamedMemoryGatherQueriesAddsCoverageRepairProbes(t *testing.T) {
+	t.Parallel()
+
+	got := namedMemoryGatherQueries("Where is the receipt?", namedMemoryGatherOptions{
+		CoverageRepair:   true,
+		RequiredEvidence: []string{"receipt", "vendor"},
+		CoverageRequirements: []contextengine.CoverageRequirement{
+			{ID: "answer-location", Kind: "answer_slot", Label: "answer location", Terms: []string{"location"}},
+			{ID: "vendor", Kind: "concept", Label: "coffee shop", Terms: []string{"receipt", "vendor"}},
+		},
+	})
+	want := []string{"Where is the receipt?", "coffee shop receipt vendor", "receipt", "vendor"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("repair queries=%v want %v", got, want)
+	}
+
+	got = namedMemoryGatherQueries("Where is the receipt?", namedMemoryGatherOptions{
+		CoverageRepair:   false,
+		RequiredEvidence: []string{"receipt"},
+	})
+	if !reflect.DeepEqual(got, []string{"Where is the receipt?"}) {
+		t.Fatalf("non-repair queries=%v", got)
+	}
+}
+
+func TestNamedMemoryEvidencePathIsStablePseudoPath(t *testing.T) {
+	t.Parallel()
+
+	got := namedMemoryEvidencePath("longmem://ABC_def.123")
+	if got != "memory/longmem-abc_def.123" {
+		t.Fatalf("namedMemoryEvidencePath()=%q", got)
+	}
+}
+
+func TestApplyGatherMemoryContextDefaultsUsesBoundedMemoryRecall(t *testing.T) {
+	t.Parallel()
+
+	got := applyGatherMemoryContextDefaults(gatherContextInput{
+		Query:           "Where did I redeem the coupon?",
+		Lanes:           []string{"code", "memory"},
+		SourceProfiles:  []string{"repo_code"},
+		MaxContextChars: 0,
+	})
+	if got.Goal != "recall" {
+		t.Fatalf("goal=%q want recall", got.Goal)
+	}
+	if !reflect.DeepEqual(got.Lanes, []string{"memory"}) {
+		t.Fatalf("lanes=%v want memory only", got.Lanes)
+	}
+	if !reflect.DeepEqual(got.SourceProfiles, []string{string(contextengine.SourceProfileMemory)}) {
+		t.Fatalf("source_profiles=%v want memory only", got.SourceProfiles)
+	}
+	if got.ResponseMode != "answer_surface" {
+		t.Fatalf("response_mode=%q want answer_surface", got.ResponseMode)
+	}
+	if got.MaxContextChars != defaultGatherMemoryContextMaxContextChars {
+		t.Fatalf("max_context_chars=%d want %d", got.MaxContextChars, defaultGatherMemoryContextMaxContextChars)
+	}
+
+	got = applyGatherMemoryContextDefaults(gatherContextInput{
+		Goal:            "investigate",
+		ResponseMode:    "compact",
+		MaxContextChars: 3000,
+	})
+	if got.Goal != "investigate" {
+		t.Fatalf("explicit goal overwritten: %q", got.Goal)
+	}
+	if got.ResponseMode != "compact" {
+		t.Fatalf("explicit response_mode overwritten: %q", got.ResponseMode)
+	}
+	if got.MaxContextChars != 3000 {
+		t.Fatalf("explicit max_context_chars overwritten: %d", got.MaxContextChars)
+	}
+}
+
+func TestBuildContextEvidenceDigestGroupsClaimsSlotsAndLoadRefs(t *testing.T) {
+	t.Parallel()
+
+	ref := contextengine.EvidenceRef{Type: contextengine.RefTypeNamedMemory, Ref: "longmem://target-memory", WorkspaceID: "ws-test"}
+	digest := buildContextEvidenceDigest(contextengine.ContextBundle{
+		Evidence: []contextengine.EvidenceNode{{
+			ID:          "evidence-1",
+			WorkspaceID: "ws-test",
+			NodeType:    contextengine.EvidenceNodeTypeMemory,
+			Ref:         ref,
+			Statement:   "Target checkout used the coupon.",
+			Confidence:  0.91,
+			Grounding:   contextengine.GroundingIndexed,
+		}},
+		Facts: []contextengine.ContextFact{{
+			ID:          "fact-1",
+			WorkspaceID: "ws-test",
+			Kind:        contextengine.EvidenceNodeTypeMemory,
+			Fact:        "Target checkout used the coupon.",
+			Refs:        []contextengine.EvidenceRef{ref},
+			EvidenceIDs: []string{"evidence-1"},
+			Confidence:  0.91,
+			Grounding:   contextengine.GroundingIndexed,
+			Status:      contextengine.ContextFactStatusSupported,
+			Metadata: map[string]any{
+				"source_profile":          string(contextengine.SourceProfileMemory),
+				"coverage_requirement_id": "answer-location",
+			},
+		}},
+		CoverageReport: &contextengine.CoverageReport{
+			Requirements: []contextengine.CoverageRequirement{{
+				ID:       "answer-location",
+				Kind:     "answer_slot",
+				Label:    "answer location",
+				Terms:    []string{"location"},
+				Required: true,
+			}},
+			Covered: []contextengine.PathCoverage{{
+				RequirementID: "answer-location",
+				Path:          "memory/longmem-target-memory",
+				EvidenceIDs:   []string{"evidence-1"},
+				Score:         0.91,
+			}},
+		},
+	})
+
+	claims := digest["claims"].([]map[string]any)
+	if len(claims) != 1 || claims[0]["text"] != "Target checkout used the coupon." {
+		t.Fatalf("claims=%v", claims)
+	}
+	if !containsString(claims[0]["load_refs"].([]string), "named_memory:longmem://target-memory") {
+		t.Fatalf("claim load_refs=%v", claims[0]["load_refs"])
+	}
+	if !containsString(claims[0]["coverage_ids"].([]string), "answer-location") {
+		t.Fatalf("claim coverage_ids=%v", claims[0]["coverage_ids"])
+	}
+
+	slots := digest["slots"].([]map[string]any)
+	if len(slots) != 1 || slots[0]["status"] != "covered" {
+		t.Fatalf("slots=%v", slots)
+	}
+	support := slots[0]["support"].([]map[string]any)
+	if len(support) != 1 || !containsString(support[0]["load_refs"].([]string), "named_memory:longmem://target-memory") {
+		t.Fatalf("slot support=%v", support)
+	}
+	if !containsString(digest["load_refs"].([]string), "named_memory:longmem://target-memory") {
+		t.Fatalf("digest load_refs=%v", digest["load_refs"])
+	}
+	if got := limitContextEvidenceDigestText("abcdef", 3); got != "abc..." {
+		t.Fatalf("limitContextEvidenceDigestText()=%q", got)
+	}
+}
+
+func TestAggregateLoadedEvidenceRefsGroupsSupportedClaimsAndSlots(t *testing.T) {
+	t.Parallel()
+
+	out := aggregateLoadedEvidenceRefs(aggregateEvidenceRefsInput{
+		Query: "Where did I redeem a coupon?",
+		Refs:  []string{"named_memory:target", "named_memory:other"},
+		CoverageRequirements: []contextengine.CoverageRequirement{{
+			ID:       "answer-location",
+			Kind:     "answer_slot",
+			Label:    "answer location",
+			Terms:    []string{"Target"},
+			Required: true,
+		}},
+		RequiredEvidence: []string{"coupon"},
+		MaxTextChars:     120,
+	}, []aggregateLoadedEvidenceRef{
+		{
+			Ref:    "named_memory:target",
+			Loaded: true,
+			Text:   "I used the coupon through Target checkout for coffee creamer.",
+		},
+		{
+			Ref:    "named_memory:other",
+			Loaded: true,
+			Text:   "I bought coffee at a local cafe.",
+		},
+	})
+
+	if out["schema_version"] != "evidence_ref_aggregate/v1" {
+		t.Fatalf("schema_version=%v", out["schema_version"])
+	}
+	if out["loaded_count"] != 2 {
+		t.Fatalf("loaded_count=%v want 2", out["loaded_count"])
+	}
+	claims := out["claims"].([]map[string]any)
+	if len(claims) != 2 {
+		t.Fatalf("claims=%v", claims)
+	}
+	if claims[0]["support"] != "slot" {
+		t.Fatalf("first claim support=%v want slot", claims[0]["support"])
+	}
+	if !containsString(claims[0]["matched_slots"].([]string), "answer-location") {
+		t.Fatalf("first claim matched_slots=%v", claims[0]["matched_slots"])
+	}
+	slots := out["slots"].([]map[string]any)
+	if len(slots) == 0 || slots[0]["status"] != "covered" {
+		t.Fatalf("slots=%v", slots)
+	}
+	outline := out["answer_outline"].(map[string]any)
+	if got := outline["supported_claims"].([]string); len(got) == 0 || !strings.Contains(got[0], "Target checkout") {
+		t.Fatalf("supported_claims=%v", got)
+	}
+	if got := outline["missing_slots"].([]string); len(got) != 0 {
+		t.Fatalf("missing_slots=%v want empty", got)
+	}
+}
+
+func TestAggregateLoadedEvidenceRefsReportsMissingRequiredSlots(t *testing.T) {
+	t.Parallel()
+
+	out := aggregateLoadedEvidenceRefs(aggregateEvidenceRefsInput{
+		Query: "Where did I redeem a pharmacy coupon?",
+		Refs:  []string{"named_memory:target"},
+		CoverageRequirements: []contextengine.CoverageRequirement{{
+			ID:       "answer-location",
+			Kind:     "answer_slot",
+			Label:    "pharmacy",
+			Terms:    []string{"pharmacy"},
+			Required: true,
+		}},
+		MaxTextChars: 120,
+	}, []aggregateLoadedEvidenceRef{{
+		Ref:    "named_memory:target",
+		Loaded: true,
+		Text:   "I used the grocery coupon through Target checkout.",
+	}})
+
+	slots := out["slots"].([]map[string]any)
+	if len(slots) != 1 || slots[0]["status"] != "missing" {
+		t.Fatalf("slots=%v", slots)
+	}
+	outline := out["answer_outline"].(map[string]any)
+	if got := outline["missing_slots"].([]string); !containsString(got, "pharmacy") {
+		t.Fatalf("missing_slots=%v want pharmacy", got)
+	}
+}
+
+func TestBuildEvidenceLedgerAcceptsDirectLocationEvidence(t *testing.T) {
+	t.Parallel()
+
+	question := "Where did I redeem a $5 coupon on coffee creamer?"
+	plan, err := buildContextQueryPlan(planContextQueryInput{Question: question, Goal: "recall", Limit: 4})
+	if err != nil {
+		t.Fatalf("build plan: %v", err)
+	}
+	out := buildEvidenceLedger(evidenceLedgerInput{
+		Query:                question,
+		Refs:                 []string{"named_memory:target", "named_memory:near-miss"},
+		RequiredEvidence:     plan.RequiredEvidence,
+		CoverageRequirements: plan.CoverageRequirements,
+		MaxTextChars:         200,
+	}, []aggregateLoadedEvidenceRef{
+		{
+			Ref:    "named_memory:target",
+			Loaded: true,
+			Text:   "I redeemed a $5 coupon on coffee creamer through Target checkout last Sunday.",
+		},
+		{
+			Ref:    "named_memory:near-miss",
+			Loaded: true,
+			Text:   "I bought coffee at a local cafe and talked about grocery coupons.",
+		},
+	}, plan)
+
+	if out["schema_version"] != "evidence_ledger/v1" {
+		t.Fatalf("schema_version=%v", out["schema_version"])
+	}
+	if out["ready"] != true || out["needs_fallback"] != false {
+		t.Fatalf("ready=%v needs_fallback=%v output=%v", out["ready"], out["needs_fallback"], out)
+	}
+	accepted := out["accepted_rows"].([]map[string]any)
+	if len(accepted) != 1 || accepted[0]["ref"] != "named_memory:target" {
+		t.Fatalf("accepted_rows=%v", accepted)
+	}
+	values := accepted[0]["answer_values"].(map[string]any)
+	if !containsString(values["locations"].([]string), "Target") {
+		t.Fatalf("locations=%v missing Target", values["locations"])
+	}
+	rejected := out["rejected_rows"].([]map[string]any)
+	if len(rejected) != 1 || rejected[0]["ref"] != "named_memory:near-miss" {
+		t.Fatalf("rejected_rows=%v", rejected)
+	}
+	outline := out["answer_outline"].(map[string]any)
+	if !containsString(outline["supported_values"].([]string), "Target") {
+		t.Fatalf("supported_values=%v missing Target", outline["supported_values"])
+	}
+}
+
+func TestBuildEvidenceLedgerReportsFallbackForMissingSlot(t *testing.T) {
+	t.Parallel()
+
+	question := "Where did I redeem a pharmacy coupon?"
+	plan, err := buildContextQueryPlan(planContextQueryInput{Question: question, Goal: "recall", Limit: 4})
+	if err != nil {
+		t.Fatalf("build plan: %v", err)
+	}
+	out := buildEvidenceLedger(evidenceLedgerInput{
+		Query:                question,
+		Refs:                 []string{"named_memory:near-miss"},
+		RequiredEvidence:     plan.RequiredEvidence,
+		CoverageRequirements: plan.CoverageRequirements,
+		MaxTextChars:         200,
+	}, []aggregateLoadedEvidenceRef{{
+		Ref:    "named_memory:near-miss",
+		Loaded: true,
+		Text:   "I used the grocery coupon through Target checkout.",
+	}}, plan)
+
+	if out["ready"] != false || out["needs_fallback"] != true {
+		t.Fatalf("ready=%v needs_fallback=%v output=%v", out["ready"], out["needs_fallback"], out)
+	}
+	if accepted := out["accepted_rows"].([]map[string]any); len(accepted) != 0 {
+		t.Fatalf("accepted_rows=%v want none", accepted)
+	}
+	outline := out["answer_outline"].(map[string]any)
+	if missing := outline["missing_slots"].([]string); len(missing) == 0 {
+		t.Fatalf("missing_slots=%v want missing slot", missing)
+	}
+	if fallback := out["fallback_queries"].([]string); len(fallback) == 0 {
+		t.Fatalf("fallback_queries=%v want targeted fallback", fallback)
+	}
+}
+
+func TestBuildEvidenceLedgerExtractsDurationValues(t *testing.T) {
+	t.Parallel()
+
+	question := "How long is my daily commute to work?"
+	plan, err := buildContextQueryPlan(planContextQueryInput{Question: question, Goal: "recall", Limit: 4})
+	if err != nil {
+		t.Fatalf("build plan: %v", err)
+	}
+	out := buildEvidenceLedger(evidenceLedgerInput{
+		Query:                question,
+		Refs:                 []string{"named_memory:commute"},
+		RequiredEvidence:     plan.RequiredEvidence,
+		CoverageRequirements: plan.CoverageRequirements,
+		MaxTextChars:         200,
+	}, []aggregateLoadedEvidenceRef{{
+		Ref:    "named_memory:commute",
+		Loaded: true,
+		Text:   "I have been listening to audiobooks during my daily commute, which takes 45 minutes each way.",
+	}}, plan)
+
+	accepted := out["accepted_rows"].([]map[string]any)
+	if len(accepted) != 1 {
+		t.Fatalf("accepted_rows=%v want commute evidence accepted", accepted)
+	}
+	values := accepted[0]["answer_values"].(map[string]any)
+	if !containsString(values["durations"].([]string), "45 minutes each way") {
+		t.Fatalf("durations=%v missing commute duration", values["durations"])
+	}
+	outline := out["answer_outline"].(map[string]any)
+	if !containsString(outline["supported_values"].([]string), "45 minutes each way") {
+		t.Fatalf("supported_values=%v missing duration", outline["supported_values"])
+	}
+}
+
+func TestEvidenceLedgerPayloadTextForQuerySelectsLateDurationSnippet(t *testing.T) {
+	t.Parallel()
+
+	question := "How long is my daily commute to work?"
+	text := evidenceLedgerPayloadTextForQuery(map[string]any{
+		"loaded": true,
+		"named_memory": map[string]any{
+			"atomic_text": strings.Repeat("Earlier we discussed errands, budgets, and unrelated plans. ", 120) +
+				"I have been listening to audiobooks during my daily commute, which takes 45 minutes each way.",
+		},
+	}, question, 260)
+
+	if !strings.Contains(text, "45 minutes each way") {
+		t.Fatalf("text=%q missing late duration", text)
+	}
+	if !strings.Contains(text, "daily commute") {
+		t.Fatalf("text=%q missing query anchor", text)
+	}
+}
+
+func TestEvidenceLedgerPayloadTextForQueryCombinesSeparatedLocationAnchors(t *testing.T) {
+	t.Parallel()
+
+	question := "Where did I redeem a $5 coupon on coffee creamer?"
+	text := evidenceLedgerPayloadTextForQuery(map[string]any{
+		"loaded": true,
+		"named_memory": map[string]any{
+			"atomic_text": "I redeemed a $5 coupon through Target checkout." +
+				strings.Repeat(" We talked about unrelated errands and pantry inventory.", 80) +
+				" The coupon was for coffee creamer in my grocery cart.",
+		},
+	}, question, 420)
+
+	for _, want := range []string{"$5 coupon", "Target", "coffee creamer"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("text=%q missing %q", text, want)
+		}
+	}
+
+	plan, err := buildContextQueryPlan(planContextQueryInput{Question: question, Goal: "recall", Limit: 4})
+	if err != nil {
+		t.Fatalf("build plan: %v", err)
+	}
+	out := buildEvidenceLedger(evidenceLedgerInput{
+		Query:                question,
+		Refs:                 []string{"named_memory:target"},
+		RequiredEvidence:     plan.RequiredEvidence,
+		CoverageRequirements: plan.CoverageRequirements,
+		MaxTextChars:         420,
+	}, []aggregateLoadedEvidenceRef{{
+		Ref:    "named_memory:target",
+		Loaded: true,
+		Text:   text,
+	}}, plan)
+	accepted := out["accepted_rows"].([]map[string]any)
+	if len(accepted) != 1 {
+		t.Fatalf("accepted_rows=%v want location evidence accepted", accepted)
+	}
+	values := accepted[0]["answer_values"].(map[string]any)
+	if !containsString(values["locations"].([]string), "Target") {
+		t.Fatalf("locations=%v missing Target", values["locations"])
+	}
+}
+
+func TestBuildEvidenceLedgerRejectsPartialAnchorLocationEvidence(t *testing.T) {
+	t.Parallel()
+
+	question := "Where did I redeem a $5 coupon on coffee creamer?"
+	plan, err := buildContextQueryPlan(planContextQueryInput{Question: question, Goal: "recall", Limit: 4})
+	if err != nil {
+		t.Fatalf("build plan: %v", err)
+	}
+	out := buildEvidenceLedger(evidenceLedgerInput{
+		Query:                question,
+		Refs:                 []string{"named_memory:partial"},
+		RequiredEvidence:     plan.RequiredEvidence,
+		CoverageRequirements: plan.CoverageRequirements,
+		MaxTextChars:         200,
+	}, []aggregateLoadedEvidenceRef{{
+		Ref:    "named_memory:partial",
+		Loaded: true,
+		Text:   "I used a $5 coupon through Target checkout.",
+	}}, plan)
+
+	if accepted := out["accepted_rows"].([]map[string]any); len(accepted) != 0 {
+		t.Fatalf("accepted_rows=%v want none for partial anchors", accepted)
+	}
+	if out["needs_fallback"] != true {
+		t.Fatalf("needs_fallback=%v want true", out["needs_fallback"])
+	}
+}
+
+func TestEvidenceLedgerIgnoresMetadataOnlyAnswerValues(t *testing.T) {
+	t.Parallel()
+
+	question := "Where did I redeem a $5 coupon on coffee creamer?"
+	plan, err := buildContextQueryPlan(planContextQueryInput{Question: question, Goal: "recall", Limit: 4})
+	if err != nil {
+		t.Fatalf("build plan: %v", err)
+	}
+	text := evidenceLedgerPayloadText(map[string]any{
+		"loaded": true,
+		"named_memory": map[string]any{
+			"summary":     "Target checkout, $5 coupon, coffee creamer, redeem",
+			"entities":    []any{"Target", "coffee creamer"},
+			"keywords":    []any{"$5", "coupon", "redeem"},
+			"atomic_text": "I had a grocery reminder.",
+		},
+	}, 300)
+	out := buildEvidenceLedger(evidenceLedgerInput{
+		Query:                question,
+		Refs:                 []string{"named_memory:metadata"},
+		RequiredEvidence:     plan.RequiredEvidence,
+		CoverageRequirements: plan.CoverageRequirements,
+		MaxTextChars:         300,
+	}, []aggregateLoadedEvidenceRef{{
+		Ref:    "named_memory:metadata",
+		Loaded: true,
+		Text:   text,
+	}}, plan)
+
+	if strings.Contains(text, "Target") || strings.Contains(text, "coffee creamer") {
+		t.Fatalf("ledger text should not include metadata-only terms: %q", text)
+	}
+	if accepted := out["accepted_rows"].([]map[string]any); len(accepted) != 0 {
+		t.Fatalf("accepted_rows=%v want none for metadata-only answer values", accepted)
+	}
+}
+
+func TestBuildEvidenceLedgerRejectsBareNumberDuration(t *testing.T) {
+	t.Parallel()
+
+	question := "How long is my daily commute to work?"
+	plan, err := buildContextQueryPlan(planContextQueryInput{Question: question, Goal: "recall", Limit: 4})
+	if err != nil {
+		t.Fatalf("build plan: %v", err)
+	}
+	out := buildEvidenceLedger(evidenceLedgerInput{
+		Query:                question,
+		Refs:                 []string{"named_memory:route"},
+		RequiredEvidence:     plan.RequiredEvidence,
+		CoverageRequirements: plan.CoverageRequirements,
+		MaxTextChars:         200,
+	}, []aggregateLoadedEvidenceRef{{
+		Ref:    "named_memory:route",
+		Loaded: true,
+		Text:   "My daily commute to work uses Route 66.",
+	}}, plan)
+
+	if accepted := out["accepted_rows"].([]map[string]any); len(accepted) != 0 {
+		t.Fatalf("accepted_rows=%v want none for bare number duration", accepted)
+	}
+	if out["needs_fallback"] != true {
+		t.Fatalf("needs_fallback=%v want true", out["needs_fallback"])
+	}
+}
+
 func TestMergeCodeSearchHitsAnnotatesRoleBuckets(t *testing.T) {
 	hits := mergeCodeSearchHitsWithOptions(
 		4, codeSearchRequestOptions{}, nil,
@@ -95,6 +698,583 @@ func TestMergeCodeSearchHitsAnnotatesRoleBuckets(t *testing.T) {
 		if !stringSliceHas(buckets, want) {
 			t.Fatalf("expected role bucket %q in %v", want, buckets)
 		}
+	}
+}
+
+func TestRetrieveMemoryUsesNamedMemoryRecall(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+	workspaceID := ws.ID(workspace)
+
+	store, err := memorystore.Open(ctx, storageRoot, "")
+	if err != nil {
+		t.Fatalf("memory open: %v", err)
+	}
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2026-05-04T12:00:00Z"},"error":{}}`)
+	if _, err := store.SaveFromResult(ctx, "rlm-atomic-memory", "semantic_fact", workspaceID, "generic summary", result); err != nil {
+		t.Fatalf("save memory: %v", err)
+	}
+	if err := store.UpdateAtomic(
+		ctx, "rlm-atomic-memory", workspaceID,
+		"Use the local Cedar embedder for project recall checks.",
+		[]string{"ProjectRecall", "Cedar"},
+		[]string{"continuity", "indexer"},
+	); err != nil {
+		t.Fatalf("update atomic: %v", err)
+	}
+	if _, err := store.SaveFromResult(ctx, "rlm-quarantined-memory", "semantic_fact", workspaceID, "generic summary", result); err != nil {
+		t.Fatalf("save quarantined memory: %v", err)
+	}
+	if err := store.UpdateAtomic(
+		ctx, "rlm-quarantined-memory", workspaceID,
+		"Use the local Cedar embedder for quarantined project recall checks.",
+		[]string{"ProjectRecall", "Cedar"},
+		[]string{"continuity", "indexer"},
+	); err != nil {
+		t.Fatalf("update quarantined atomic: %v", err)
+	}
+	if _, err := store.UpdateLifecycle(ctx, "rlm-quarantined-memory", workspaceID, memorystore.LifecycleUpdate{
+		LifecycleState: "quarantined",
+	}); err != nil {
+		t.Fatalf("quarantine memory: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close memory store: %v", err)
+	}
+
+	ceStore, err := ctxengstore.Open(ctx, storageRoot)
+	if err != nil {
+		t.Fatalf("contextengine open: %v", err)
+	}
+	t.Cleanup(func() { _ = ceStore.Close() })
+
+	adapter := NewReadOnlyAdapter(config.Config{Storage: config.StorageSettings{Root: storageRoot}}, workspace, "", nil, rlm.Environment{})
+	adapter.SetContextEngineStore(ceStore)
+	out, err := adapter.ExecuteInternal(ctx, "retrieve_memory", mustJSON(map[string]any{
+		"query": "cedar indexer",
+		"limit": 3,
+	}))
+	if err != nil {
+		t.Fatalf("retrieve_memory: %v", err)
+	}
+	if out["lane"] != "memory" {
+		t.Fatalf("lane=%v want memory", out["lane"])
+	}
+	metadata := out["metadata"].(map[string]any)
+	if metadata["source"] != "named_memory" {
+		t.Fatalf("metadata=%v want named_memory source", metadata)
+	}
+	nodes := out["nodes"].([]map[string]any)
+	if len(nodes) != 1 {
+		t.Fatalf("nodes=%v want one named-memory result", out["nodes"])
+	}
+	if nodes[0]["ref_type"] != string(contextengine.RefTypeNamedMemory) {
+		t.Fatalf("node=%v want named_memory ref type", nodes[0])
+	}
+	if nodes[0]["ref_value"] != "rlm-atomic-memory" {
+		t.Fatalf("node=%v want rlm-atomic-memory", nodes[0])
+	}
+	if !strings.Contains(strings.ToLower(nodes[0]["statement"].(string)), "cedar") {
+		t.Fatalf("statement=%q missing atomic text", nodes[0]["statement"])
+	}
+	nodeMetadata := nodes[0]["metadata"].(map[string]any)
+	if nodeMetadata["search_method"] != memoryrecall.MethodBM25 {
+		t.Fatalf("node metadata=%v want bm25 fallback", nodeMetadata)
+	}
+	if metadata["episode_id"] == "" {
+		t.Fatalf("metadata=%v missing episode_id", metadata)
+	}
+	persisted, err := ceStore.GetEvidencePack(ctx, out["id"].(string))
+	if err != nil {
+		t.Fatalf("get persisted evidence pack: %v", err)
+	}
+	if persisted.Metadata["episode_id"] == "" {
+		t.Fatalf("persisted metadata=%v missing episode_id", persisted.Metadata)
+	}
+
+	loaded, err := adapter.ExecuteInternal(ctx, "load_evidence_ref", mustJSON(map[string]any{
+		"ref": "named_memory:rlm-atomic-memory",
+	}))
+	if err != nil {
+		t.Fatalf("load named memory: %v", err)
+	}
+	if loaded["loaded"] != true {
+		t.Fatalf("load named memory loaded=%v out=%v", loaded["loaded"], loaded)
+	}
+	memoryBody := loaded["named_memory"].(map[string]any)
+	if memoryBody["name"] != "rlm-atomic-memory" || !strings.Contains(strings.ToLower(memoryBody["atomic_text"].(string)), "cedar") {
+		t.Fatalf("named memory body=%v", memoryBody)
+	}
+}
+
+func TestGatherContextMemoryLaneSurfacesNamedMemoryRecall(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+	workspaceID := ws.ID(workspace)
+
+	store, err := memorystore.Open(ctx, storageRoot, "")
+	if err != nil {
+		t.Fatalf("memory open: %v", err)
+	}
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2026-05-04T12:00:00Z"},"error":{}}`)
+	if _, err := store.SaveFromResult(ctx, "rlm-atomic-memory", "semantic_fact", workspaceID, "generic summary", result); err != nil {
+		t.Fatalf("save memory: %v", err)
+	}
+	if err := store.UpdateAtomic(
+		ctx, "rlm-atomic-memory", workspaceID,
+		"Use the local Cedar embedder for project recall checks.",
+		[]string{"ProjectRecall", "Cedar"},
+		[]string{"continuity", "indexer"},
+	); err != nil {
+		t.Fatalf("update atomic: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close memory store: %v", err)
+	}
+
+	ceStore, err := ctxengstore.Open(ctx, storageRoot)
+	if err != nil {
+		t.Fatalf("contextengine open: %v", err)
+	}
+	t.Cleanup(func() { _ = ceStore.Close() })
+
+	adapter := NewReadOnlyAdapter(config.Config{Storage: config.StorageSettings{Root: storageRoot}}, workspace, "", nil, rlm.Environment{})
+	adapter.SetContextEngineStore(ceStore)
+	out, err := adapter.ExecuteInternal(ctx, "gather_context", mustJSON(map[string]any{
+		"query":         "cedar indexer",
+		"lanes":         []string{"memory"},
+		"limit":         3,
+		"response_mode": "answer_surface",
+	}))
+	if err != nil {
+		t.Fatalf("gather_context: %v", err)
+	}
+	if out["schema_version"] != "context_answer_surface/v2" {
+		t.Fatalf("schema_version=%v output=%v", out["schema_version"], out)
+	}
+	if out["answerable"] != true {
+		t.Fatalf("answerable=%v output=%v", out["answerable"], out)
+	}
+	body, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal output: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, "named_memory:rlm-atomic-memory") {
+		t.Fatalf("answer surface missing named-memory load ref:\n%s", text)
+	}
+	if !strings.Contains(strings.ToLower(text), "cedar") {
+		t.Fatalf("answer surface missing named-memory fact text:\n%s", text)
+	}
+}
+
+func TestLoadEvidenceRefNamedMemoryMissingReturnsStructuredError(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+
+	adapter := NewReadOnlyAdapter(config.Config{Storage: config.StorageSettings{Root: storageRoot}}, workspace, "", nil, rlm.Environment{})
+	out, err := adapter.ExecuteInternal(ctx, "load_evidence_ref", mustJSON(map[string]any{
+		"ref": "named_memory:missing-memory",
+	}))
+	if err != nil {
+		t.Fatalf("load missing named memory: %v", err)
+	}
+	if out["loaded"] != false {
+		t.Fatalf("loaded=%v want false, out=%v", out["loaded"], out)
+	}
+	if strings.TrimSpace(out["error"].(string)) == "" {
+		t.Fatalf("out=%v missing structured error", out)
+	}
+}
+
+func TestRetrieveMemoryUsesWorkspaceIDOverride(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+	tenantID := "ws-project-tenant"
+
+	store, err := memorystore.Open(ctx, storageRoot, "")
+	if err != nil {
+		t.Fatalf("memory open: %v", err)
+	}
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2026-05-04T12:00:00Z"},"error":{}}`)
+	if _, err := store.SaveFromResult(ctx, "tenant-memory", "semantic_fact", tenantID, "tenant summary", result); err != nil {
+		t.Fatalf("save memory: %v", err)
+	}
+	if err := store.UpdateAtomic(
+		ctx, "tenant-memory", tenantID,
+		"The tenant-specific continuity marker is lapis.",
+		[]string{"ProjectRecall"},
+		[]string{"lapis"},
+	); err != nil {
+		t.Fatalf("update atomic: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close memory store: %v", err)
+	}
+
+	adapter := NewReadOnlyAdapter(config.Config{Storage: config.StorageSettings{Root: storageRoot}}, workspace, "", nil, rlm.Environment{})
+	adapter.SetWorkspaceID(tenantID)
+	out, err := adapter.ExecuteInternal(ctx, "retrieve_memory", mustJSON(map[string]any{
+		"query": "lapis marker",
+		"limit": 3,
+	}))
+	if err != nil {
+		t.Fatalf("retrieve_memory: %v", err)
+	}
+	nodes := out["nodes"].([]map[string]any)
+	if len(nodes) != 1 || nodes[0]["ref_value"] != "tenant-memory" {
+		t.Fatalf("nodes=%v want tenant-memory from override workspace", nodes)
+	}
+	if nodes[0]["ref_type"] != string(contextengine.RefTypeNamedMemory) {
+		t.Fatalf("node=%v want named_memory ref type", nodes[0])
+	}
+	if out["workspace_id"] != tenantID {
+		t.Fatalf("workspace_id=%v want %s", out["workspace_id"], tenantID)
+	}
+}
+
+func TestRetrieveMemoryKeepsContextClaimsWhenNamedMemorySuppressesMatches(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+	workspaceID := ws.ID(workspace)
+
+	memStore, err := memorystore.Open(ctx, storageRoot, "")
+	if err != nil {
+		t.Fatalf("memory open: %v", err)
+	}
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2026-05-04T12:00:00Z"},"error":{}}`)
+	if _, err := memStore.SaveFromResult(ctx, "rlm-quarantined-only", "semantic_fact", workspaceID, "generic summary", result); err != nil {
+		t.Fatalf("save memory: %v", err)
+	}
+	if err := memStore.UpdateAtomic(
+		ctx, "rlm-quarantined-only", workspaceID,
+		"Use the local Cedar embedder for project recall checks.",
+		[]string{"ProjectRecall", "Cedar"},
+		[]string{"continuity", "indexer"},
+	); err != nil {
+		t.Fatalf("update atomic: %v", err)
+	}
+	if _, err := memStore.UpdateLifecycle(ctx, "rlm-quarantined-only", workspaceID, memorystore.LifecycleUpdate{
+		LifecycleState: "quarantined",
+	}); err != nil {
+		t.Fatalf("quarantine memory: %v", err)
+	}
+	if err := memStore.Close(); err != nil {
+		t.Fatalf("close memory store: %v", err)
+	}
+
+	ceStore, err := ctxengstore.Open(ctx, storageRoot)
+	if err != nil {
+		t.Fatalf("contextengine open: %v", err)
+	}
+	t.Cleanup(func() { _ = ceStore.Close() })
+	if _, err := ceStore.UpsertClaim(ctx, contextengine.MemoryClaim{
+		ID:          "legacy-claim-cedar",
+		WorkspaceID: workspaceID,
+		ClaimType:   "semantic_fact",
+		Status:      contextengine.ClaimStatusCurrent,
+		Summary:     "Legacy context claim says Cedar indexer should pass.",
+		Confidence:  0.95,
+	}); err != nil {
+		t.Fatalf("upsert legacy claim: %v", err)
+	}
+
+	adapter := NewReadOnlyAdapter(config.Config{Storage: config.StorageSettings{Root: storageRoot}}, workspace, "", nil, rlm.Environment{})
+	adapter.SetContextEngineStore(ceStore)
+	out, err := adapter.ExecuteInternal(ctx, "retrieve_memory", mustJSON(map[string]any{
+		"query": "cedar indexer",
+		"limit": 3,
+	}))
+	if err != nil {
+		t.Fatalf("retrieve_memory: %v", err)
+	}
+	metadata := out["metadata"].(map[string]any)
+	nodes := out["nodes"].([]map[string]any)
+	if len(nodes) != 1 || nodes[0]["ref_value"] != "legacy-claim-cedar" {
+		t.Fatalf("nodes=%v want contextengine claim despite named-memory suppression", nodes)
+	}
+	if nodes[0]["ref_type"] != string(contextengine.RefTypeMemoryClaim) {
+		t.Fatalf("node=%v want memory_claim ref type", nodes[0])
+	}
+	if got := metadata["named_memory_suppressed_by_lifecycle"].(int); got != 1 {
+		t.Fatalf("metadata=%v want one lifecycle suppression", metadata)
+	}
+}
+
+func TestRetrieveMemoryFusesContextClaimsWithNamedMemory(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+	workspaceID := ws.ID(workspace)
+
+	memStore, err := memorystore.Open(ctx, storageRoot, "")
+	if err != nil {
+		t.Fatalf("memory open: %v", err)
+	}
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2026-05-04T12:00:00Z"},"error":{}}`)
+	if _, err := memStore.SaveFromResult(ctx, "rlm-atomic-memory", "semantic_fact", workspaceID, "generic summary", result); err != nil {
+		t.Fatalf("save memory: %v", err)
+	}
+	if err := memStore.UpdateAtomic(
+		ctx, "rlm-atomic-memory", workspaceID,
+		"Use the local Cedar embedder for project recall checks.",
+		[]string{"ProjectRecall", "Cedar"},
+		[]string{"continuity", "indexer"},
+	); err != nil {
+		t.Fatalf("update atomic: %v", err)
+	}
+	if err := memStore.Close(); err != nil {
+		t.Fatalf("close memory store: %v", err)
+	}
+
+	ceStore, err := ctxengstore.Open(ctx, storageRoot)
+	if err != nil {
+		t.Fatalf("contextengine open: %v", err)
+	}
+	t.Cleanup(func() { _ = ceStore.Close() })
+	if _, err := ceStore.UpsertClaim(ctx, contextengine.MemoryClaim{
+		ID:          "claim-cedar",
+		WorkspaceID: workspaceID,
+		ClaimType:   "semantic_fact",
+		Status:      contextengine.ClaimStatusCurrent,
+		Summary:     "Contextengine claim says Cedar indexer should pass.",
+		Confidence:  0.95,
+	}); err != nil {
+		t.Fatalf("upsert contextengine claim: %v", err)
+	}
+
+	adapter := NewReadOnlyAdapter(config.Config{Storage: config.StorageSettings{Root: storageRoot}}, workspace, "", nil, rlm.Environment{})
+	adapter.SetContextEngineStore(ceStore)
+	out, err := adapter.ExecuteInternal(ctx, "retrieve_memory", mustJSON(map[string]any{
+		"query": "cedar indexer",
+		"limit": 5,
+	}))
+	if err != nil {
+		t.Fatalf("retrieve_memory: %v", err)
+	}
+	nodes := out["nodes"].([]map[string]any)
+	if !nodesContainTypedRef(nodes, contextengine.RefTypeMemoryClaim, "claim-cedar") {
+		t.Fatalf("nodes=%v missing contextengine claim", nodes)
+	}
+	if !nodesContainTypedRef(nodes, contextengine.RefTypeNamedMemory, "rlm-atomic-memory") {
+		t.Fatalf("nodes=%v missing named-memory hit", nodes)
+	}
+}
+
+func TestRetrieveMemoryPrioritizesCurrentClaimOverScopedCandidateAtLimit(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+	workspaceID := ws.ID(workspace)
+
+	ceStore, err := ctxengstore.Open(ctx, storageRoot)
+	if err != nil {
+		t.Fatalf("contextengine open: %v", err)
+	}
+	t.Cleanup(func() { _ = ceStore.Close() })
+	if _, err := ceStore.UpsertClaim(ctx, contextengine.MemoryClaim{
+		ID:          "claim-current-basalt",
+		WorkspaceID: workspaceID,
+		ClaimType:   "semantic_fact",
+		Status:      contextengine.ClaimStatusCurrent,
+		Summary:     "The reviewed current memory says basalt is the recall marker.",
+		Confidence:  0.95,
+	}); err != nil {
+		t.Fatalf("upsert current claim: %v", err)
+	}
+	if _, err := ceStore.UpsertClaim(ctx, contextengine.MemoryClaim{
+		ID:          "claim-task-candidate-unrelated",
+		WorkspaceID: workspaceID,
+		ClaimType:   "semantic_fact",
+		Status:      contextengine.ClaimStatusCandidate,
+		Scope: contextengine.ClaimScope{
+			TaskID: "task-priority",
+		},
+		Summary:    "Task-scoped candidate memory should remain visible without hiding reviewed facts.",
+		Confidence: 0.52,
+	}); err != nil {
+		t.Fatalf("upsert candidate claim: %v", err)
+	}
+
+	adapter := NewReadOnlyAdapter(config.Config{Storage: config.StorageSettings{Root: storageRoot}}, workspace, "", nil, rlm.Environment{})
+	adapter.SetContextEngineStore(ceStore)
+	out, err := adapter.ExecuteInternal(ctx, "retrieve_memory", mustJSON(map[string]any{
+		"query":   "basalt",
+		"task_id": "task-priority",
+		"limit":   1,
+	}))
+	if err != nil {
+		t.Fatalf("retrieve_memory: %v", err)
+	}
+	nodes := out["nodes"].([]map[string]any)
+	if len(nodes) != 1 || nodes[0]["ref_value"] != "claim-current-basalt" {
+		t.Fatalf("nodes=%v want current claim before unrelated scoped candidate", nodes)
+	}
+}
+
+func TestRetrieveMemoryFallsBackWhenNamedMemoryHasNoCandidates(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+	workspaceID := ws.ID(workspace)
+
+	memStore, err := memorystore.Open(ctx, storageRoot, "")
+	if err != nil {
+		t.Fatalf("memory open: %v", err)
+	}
+	if err := memStore.Close(); err != nil {
+		t.Fatalf("close memory store: %v", err)
+	}
+
+	ceStore, err := ctxengstore.Open(ctx, storageRoot)
+	if err != nil {
+		t.Fatalf("contextengine open: %v", err)
+	}
+	t.Cleanup(func() { _ = ceStore.Close() })
+	if _, err := ceStore.UpsertClaim(ctx, contextengine.MemoryClaim{
+		ID:          "legacy-claim-cedar",
+		WorkspaceID: workspaceID,
+		ClaimType:   "semantic_fact",
+		Status:      contextengine.ClaimStatusCurrent,
+		Summary:     "Legacy context claim says Cedar indexer should pass.",
+		Confidence:  0.95,
+	}); err != nil {
+		t.Fatalf("upsert legacy claim: %v", err)
+	}
+
+	adapter := NewReadOnlyAdapter(config.Config{Storage: config.StorageSettings{Root: storageRoot}}, workspace, "", nil, rlm.Environment{})
+	adapter.SetContextEngineStore(ceStore)
+	out, err := adapter.ExecuteInternal(ctx, "retrieve_memory", mustJSON(map[string]any{
+		"query": "cedar indexer",
+		"limit": 3,
+	}))
+	if err != nil {
+		t.Fatalf("retrieve_memory: %v", err)
+	}
+	nodes := out["nodes"].([]map[string]any)
+	if len(nodes) != 1 || nodes[0]["ref_value"] != "legacy-claim-cedar" {
+		t.Fatalf("nodes=%v want fallback legacy claim", nodes)
+	}
+}
+
+func TestMemoryStatusesAllowNamedMemoryOnlyForCurrent(t *testing.T) {
+	if !contextengine.MemoryQueryAllowsNamedFallback([]contextengine.ClaimStatus{contextengine.ClaimStatusCurrent}) {
+		t.Fatal("current status should allow named-memory fallback")
+	}
+	if contextengine.MemoryQueryAllowsNamedFallback([]contextengine.ClaimStatus{contextengine.ClaimStatusCandidate}) {
+		t.Fatal("candidate-only status should not allow named-memory fallback")
+	}
+	if contextengine.MemoryQueryAllowsNamedFallback([]contextengine.ClaimStatus{contextengine.ClaimStatusSuperseded}) {
+		t.Fatal("superseded-only status should not allow named-memory fallback")
+	}
+}
+
+func TestDefaultMemoryQueryStatusesIncludesScopedCandidates(t *testing.T) {
+	unscoped := contextengine.EffectiveMemoryQueryStatuses(nil, contextengine.MemoryQueryScope{})
+	if len(unscoped) != 1 || unscoped[0] != contextengine.ClaimStatusCurrent {
+		t.Fatalf("unscoped statuses=%v want current", unscoped)
+	}
+
+	scoped := contextengine.EffectiveMemoryQueryStatuses(nil, contextengine.MemoryQueryScope{TaskID: "task-1"})
+	want := []contextengine.ClaimStatus{
+		contextengine.ClaimStatusCurrent,
+		contextengine.ClaimStatusCandidate,
+		contextengine.ClaimStatusNeedsRevalidation,
+	}
+	if len(scoped) != len(want) {
+		t.Fatalf("scoped statuses=%v want %v", scoped, want)
+	}
+	for i := range want {
+		if scoped[i] != want[i] {
+			t.Fatalf("scoped statuses=%v want %v", scoped, want)
+		}
+	}
+}
+
+func TestMemoryQueryPolicyKeepsScopedCandidatesVisible(t *testing.T) {
+	claim := contextengine.MemoryClaim{
+		ID:        "claim-task-candidate",
+		Status:    contextengine.ClaimStatusCandidate,
+		Summary:   "Does not mention the query words",
+		ClaimType: "semantic_fact",
+		Scope: contextengine.ClaimScope{
+			TaskID: "task-1",
+		},
+	}
+	if !contextengine.ClaimVisibleForMemoryQuery(claim, "unrelated query", contextengine.MemoryQueryScope{TaskID: "task-1"}) {
+		t.Fatal("task-scoped candidate claim should be visible despite query mismatch")
+	}
+	if contextengine.ClaimVisibleForMemoryQuery(claim, "unrelated query", contextengine.MemoryQueryScope{TaskID: "task-2"}) {
+		t.Fatal("candidate claim in another task should not be visible")
+	}
+	if contextengine.ClaimVisibleForMemoryQuery(claim, "unrelated query", contextengine.MemoryQueryScope{}) {
+		t.Fatal("unscoped query should not see unmatched candidate claims")
+	}
+}
+
+func TestNamedMemoryRecallPackUsesSharedSimilarityAndTextSurface(t *testing.T) {
+	id := 0
+	cfg := contextengine.LaneConfig{
+		IDGen: func() string {
+			id++
+			switch id {
+			case 1:
+				return "ce-pack"
+			case 2:
+				return "ce-node"
+			default:
+				return "ce-extra"
+			}
+		},
+		Clock:       func() time.Time { return time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC) },
+		WorkspaceID: "ws-test",
+	}
+	adapter := &ReadOnlyAdapter{}
+	response := memoryrecall.QueryResponse{
+		Method: memoryrecall.MethodBM25,
+		Entries: []storage.ScoredEntry{
+			{
+				Entry: storage.NamedEntry{
+					ID:             "weak-id",
+					Name:           "weak-memory",
+					Type:           "semantic_fact",
+					AtomicText:     "Weak Cedar memory should not surface.",
+					LifecycleState: "active",
+				},
+				Score: memoryrecall.DefaultMinSimilarity - 0.01,
+			},
+			{
+				Entry: storage.NamedEntry{
+					ID:             "strong-id",
+					Name:           "strong-memory",
+					Type:           "semantic_fact",
+					AtomicText:     "Use the local Cedar embedder for project recall checks.",
+					Entities:       []string{"ProjectRecall", "Cedar"},
+					Keywords:       []string{"continuity", "indexer"},
+					LifecycleState: "active",
+				},
+				Score: memoryrecall.DefaultMinSimilarity,
+			},
+		},
+	}
+
+	pack := adapter.namedMemoryRecallPack(context.Background(), cfg, "cedar indexer", response, time.Millisecond)
+
+	if len(pack.Nodes) != 1 {
+		t.Fatalf("nodes=%v want one threshold-passing node", pack.Nodes)
+	}
+	node := pack.Nodes[0]
+	if node.Ref.Ref != "strong-memory" {
+		t.Fatalf("node ref=%q want strong-memory", node.Ref.Ref)
+	}
+	statement := strings.ToLower(node.Statement)
+	if !strings.Contains(statement, "cedar") || !strings.Contains(statement, "indexer") {
+		t.Fatalf("statement=%q missing shared atomic/tag text", node.Statement)
 	}
 }
 
@@ -690,6 +1870,279 @@ func TestReadOnlyAdapterLoadEvidenceRefLoadsTaskAndBoundsPath(t *testing.T) {
 	}
 }
 
+func TestReadOnlyAdapterLoadEvidenceRefRejectsMemoryClaimFromOtherWorkspace(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+
+	ceStore, err := ctxengstore.Open(ctx, storageRoot)
+	if err != nil {
+		t.Fatalf("contextengine open: %v", err)
+	}
+	t.Cleanup(func() { _ = ceStore.Close() })
+	if _, err := ceStore.UpsertClaim(ctx, contextengine.MemoryClaim{
+		ID:          "claim-other-workspace",
+		WorkspaceID: "other-workspace",
+		ClaimType:   "semantic_fact",
+		Status:      contextengine.ClaimStatusCurrent,
+		Summary:     "This claim belongs to another workspace.",
+		Confidence:  0.9,
+	}); err != nil {
+		t.Fatalf("upsert other workspace claim: %v", err)
+	}
+
+	adapter := NewReadOnlyAdapter(config.Config{Storage: config.StorageSettings{Root: storageRoot}}, workspace, "", nil, rlm.Environment{})
+	adapter.SetContextEngineStore(ceStore)
+	out, err := adapter.ExecuteInternal(ctx, "load_evidence_ref", mustJSON(map[string]any{
+		"ref": "memory_claim:claim-other-workspace",
+	}))
+	if err != nil {
+		t.Fatalf("load evidence ref: %v", err)
+	}
+	if out["loaded"] != false {
+		t.Fatalf("loaded=%v want false for cross-workspace claim: %v", out["loaded"], out)
+	}
+	if _, ok := out["claim"]; ok {
+		t.Fatalf("cross-workspace load leaked claim body: %v", out)
+	}
+}
+
+func TestReadOnlyAdapterRetrievesTaskScopedCandidateClaims(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+	workspaceID := ws.ID(workspace)
+
+	taskStore, err := taskstore.Open(ctx, storageRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = taskStore.Close() })
+	_, err = taskStore.Add(ctx, taskstore.Task{
+		ID:          "task-claim-wiring",
+		WorkspaceID: workspaceID,
+		Title:       "Wire candidate memory claims",
+		Status:      taskstore.StatusInProgress,
+		ScopePath:   "internal/context/contextengine",
+		CreatedAt:   time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ceStore, err := ctxengstore.Open(ctx, storageRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ceStore.Close() })
+	_, err = ceStore.UpsertClaim(ctx, contextengine.MemoryClaim{
+		ID:          "claim-scoped-candidate",
+		WorkspaceID: workspaceID,
+		ClaimType:   "semantic_fact",
+		Status:      contextengine.ClaimStatusCandidate,
+		Scope: contextengine.ClaimScope{
+			TaskID: "task-claim-wiring",
+		},
+		Summary:    "Task-local claim about the memory claim wiring slice.",
+		Confidence: 0.62,
+		SourceRefs: []contextengine.EvidenceRef{{
+			Type: contextengine.RefTypeToolCall,
+			Ref:  "tool-call-1",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ceStore.UpsertClaim(ctx, contextengine.MemoryClaim{
+		ID:          "claim-unscoped-candidate",
+		WorkspaceID: workspaceID,
+		ClaimType:   "semantic_fact",
+		Status:      contextengine.ClaimStatusCandidate,
+		Summary:     "Unscoped planner handoff candidate that must not leak into task scope.",
+		Confidence:  0.62,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ceStore.UpsertClaim(ctx, contextengine.MemoryClaim{
+		ID:          "claim-session-candidate",
+		WorkspaceID: workspaceID,
+		ClaimType:   "semantic_fact",
+		Status:      contextengine.ClaimStatusCandidate,
+		Scope: contextengine.ClaimScope{
+			SessionID: "session-claim-wiring",
+		},
+		Summary:    "Session-local candidate for the memory claim wiring slice.",
+		Confidence: 0.62,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ceStore.UpsertClaim(ctx, contextengine.MemoryClaim{
+		ID:          "claim-other-session",
+		WorkspaceID: workspaceID,
+		ClaimType:   "semantic_fact",
+		Status:      contextengine.ClaimStatusCandidate,
+		Scope: contextengine.ClaimScope{
+			SessionID: "session-other",
+		},
+		Summary:    "Other session planner handoff candidate that must not leak into session scope.",
+		Confidence: 0.62,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	adapter := NewReadOnlyAdapter(config.Config{Storage: config.StorageSettings{Root: storageRoot}}, workspace, "", nil, rlm.Environment{})
+	adapter.SetTaskStore(taskStore)
+	adapter.SetContextEngineStore(ceStore)
+
+	out, err := adapter.ExecuteInternal(ctx, "retrieve_memory", mustJSON(map[string]any{
+		"query":   "planner handoff",
+		"task_id": "task-claim-wiring",
+		"limit":   5,
+	}))
+	if err != nil {
+		t.Fatalf("retrieve_memory: %v", err)
+	}
+	nodes := out["nodes"].([]map[string]any)
+	if !nodesContainRefValue(nodes, "claim-scoped-candidate") {
+		t.Fatalf("nodes=%v missing task-scoped candidate claim", nodes)
+	}
+	if nodesContainRefValue(nodes, "claim-unscoped-candidate") {
+		t.Fatalf("nodes=%v included unrelated unscoped candidate claim", nodes)
+	}
+	if nodesContainRefValue(nodes, "claim-session-candidate") {
+		t.Fatalf("nodes=%v included session-scoped candidate in task query", nodes)
+	}
+
+	out, err = adapter.ExecuteInternal(ctx, "retrieve_memory", mustJSON(map[string]any{
+		"query":      "planner handoff",
+		"session_id": "session-claim-wiring",
+		"limit":      5,
+	}))
+	if err != nil {
+		t.Fatalf("retrieve_memory session scoped: %v", err)
+	}
+	nodes = out["nodes"].([]map[string]any)
+	if !nodesContainRefValue(nodes, "claim-session-candidate") {
+		t.Fatalf("nodes=%v missing session-scoped candidate claim", nodes)
+	}
+	if nodesContainRefValue(nodes, "claim-other-session") || nodesContainRefValue(nodes, "claim-unscoped-candidate") {
+		t.Fatalf("nodes=%v included claim outside session scope", nodes)
+	}
+
+	out, err = adapter.ExecuteInternal(ctx, "retrieve_memory", mustJSON(map[string]any{
+		"query":      "planner handoff",
+		"task_id":    "task-claim-wiring",
+		"session_id": "session-claim-wiring",
+		"limit":      5,
+	}))
+	if err != nil {
+		t.Fatalf("retrieve_memory task and session scoped: %v", err)
+	}
+	nodes = out["nodes"].([]map[string]any)
+	if !nodesContainRefValue(nodes, "claim-scoped-candidate") || !nodesContainRefValue(nodes, "claim-session-candidate") {
+		t.Fatalf("nodes=%v missing task or session scoped candidate", nodes)
+	}
+	if nodesContainRefValue(nodes, "claim-other-session") || nodesContainRefValue(nodes, "claim-unscoped-candidate") {
+		t.Fatalf("nodes=%v included claim outside combined scope", nodes)
+	}
+
+	out, err = adapter.ExecuteInternal(ctx, "retrieve_task", mustJSON(map[string]any{
+		"query":   "planner handoff",
+		"task_id": "task-claim-wiring",
+		"limit":   5,
+	}))
+	if err != nil {
+		t.Fatalf("retrieve_task: %v", err)
+	}
+	nodes = out["nodes"].([]map[string]any)
+	if !nodesContainRefValue(nodes, "claim-scoped-candidate") {
+		t.Fatalf("task nodes=%v missing related claim ref", nodes)
+	}
+}
+
+func TestReadOnlyAdapterGatherContextIncludesTaskScopedCandidateClaims(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+	workspaceID := ws.ID(workspace)
+
+	ceStore, err := ctxengstore.Open(ctx, storageRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ceStore.Close() })
+	_, err = ceStore.UpsertClaim(ctx, contextengine.MemoryClaim{
+		ID:          "claim-gather-scoped-candidate",
+		WorkspaceID: workspaceID,
+		ClaimType:   "semantic_fact",
+		Status:      contextengine.ClaimStatusCandidate,
+		Scope: contextengine.ClaimScope{
+			TaskID: "task-gather-scope",
+		},
+		Summary:    "Task-scoped candidate memory should join gather_context.",
+		Confidence: 0.62,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	adapter := NewReadOnlyAdapter(config.Config{Storage: config.StorageSettings{Root: storageRoot}}, workspace, "", nil, rlm.Environment{
+		Tools: []rlm.Tool{{Name: "gather_context", ReadOnly: true}},
+	})
+	adapter.SetContextEngineStore(ceStore)
+	out, err := adapter.ExecuteInternal(ctx, "gather_context", mustJSON(map[string]any{
+		"query":         "query text that does not match",
+		"task_id":       "task-gather-scope",
+		"lanes":         []string{"memory"},
+		"limit":         5,
+		"response_mode": "full",
+	}))
+	if err != nil {
+		t.Fatalf("gather_context: %v", err)
+	}
+	body, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal output: %v", err)
+	}
+	var bundle contextengine.ContextBundle
+	if err := json.Unmarshal(body, &bundle); err != nil {
+		t.Fatalf("decode bundle: %v", err)
+	}
+	if !bundleEvidenceContainsRef(bundle, contextengine.RefTypeMemoryClaim, "claim-gather-scoped-candidate") {
+		t.Fatalf("gather_context evidence missing scoped candidate claim: %#v", bundle.Evidence)
+	}
+}
+
+func nodesContainRefValue(nodes []map[string]any, refValue string) bool {
+	for _, node := range nodes {
+		if node["ref_value"] == refValue {
+			return true
+		}
+	}
+	return false
+}
+
+func nodesContainTypedRef(nodes []map[string]any, refType contextengine.RefType, refValue string) bool {
+	for _, node := range nodes {
+		if node["ref_type"] == string(refType) && node["ref_value"] == refValue {
+			return true
+		}
+	}
+	return false
+}
+
+func bundleEvidenceContainsRef(bundle contextengine.ContextBundle, refType contextengine.RefType, refValue string) bool {
+	for _, node := range bundle.Evidence {
+		if node.Ref.Type == refType && node.Ref.Ref == refValue {
+			return true
+		}
+	}
+	return false
+}
+
 func TestReadOnlyAdapterLoadEvidenceRefLoadsSymbolAndContextEvent(t *testing.T) {
 	ctx := context.Background()
 	workspace := t.TempDir()
@@ -977,6 +2430,9 @@ func TestReadOnlyAdapterGatherContextAnswerSurfaceOmitsRawEvidence(t *testing.T)
 	}
 	if out["answer_candidates"] == nil {
 		t.Fatalf("answer_surface missing answer_candidates: %v", out)
+	}
+	if digest, ok := out["evidence_digest"].(map[string]any); !ok || digest["schema_version"] != "context_evidence_digest/v1" {
+		t.Fatalf("answer_surface missing evidence_digest: %v", out)
 	}
 	if out["schema_version"] != "context_answer_surface/v2" {
 		t.Fatalf("schema_version=%v output=%v", out["schema_version"], out)

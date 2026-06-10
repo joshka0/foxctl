@@ -308,6 +308,7 @@ func TestReadOnlyAdapterGatherContextCanIncludeCandidateMemory(t *testing.T) {
 		WorkspaceID: workspaceID,
 		ClaimType:   "assumption",
 		Status:      contextengine.ClaimStatusCandidate,
+		Scope:       contextengine.ClaimScope{TaskID: "task-candidate-memory"},
 		Summary:     "Candidate memory should remain an untrusted ContextFact.",
 		Confidence:  0.6,
 		CreatedAt:   now,
@@ -324,11 +325,11 @@ func TestReadOnlyAdapterGatherContextCanIncludeCandidateMemory(t *testing.T) {
 	})
 	adapter.SetContextEngineStore(ceStore)
 	out, err := adapter.Execute(ctx, "gather_context", mustJSON(map[string]any{
-		"query":           "Candidate memory",
-		"lanes":           []string{"memory"},
-		"memory_statuses": []string{"candidate"},
-		"limit":           5,
-		"response_mode":   "full",
+		"query":         "Candidate memory",
+		"task_id":       "task-candidate-memory",
+		"lanes":         []string{"memory"},
+		"limit":         5,
+		"response_mode": "full",
 	}))
 	if err != nil {
 		t.Fatalf("gather_context: %v", err)

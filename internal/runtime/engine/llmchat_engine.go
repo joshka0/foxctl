@@ -25,8 +25,8 @@ type HookContext struct {
 	WorkspaceRoot string
 }
 
-// LLMChatEngine implements AgentEngine using OpenAI-compatible chat completions.
-// Supports OpenRouter, Groq, OpenAI, and other compatible providers.
+// LLMChatEngine implements AgentEngine using chat-completion style transports.
+// Supports OpenAI-compatible providers, Anthropic-compatible providers, and Bedrock.
 type LLMChatEngine struct {
 	config        LLMChatConfig
 	client        *http.Client
@@ -39,7 +39,7 @@ type LLMChatEngine struct {
 // LLMChatConfig configures the LLM chat engine.
 type LLMChatConfig struct {
 	// Provider is the LLM provider: "openrouter", "groq", "openai",
-	// "openai_compat", "lmstudio", or "bedrock".
+	// "openai_compat", "anthropic_compat", "lmstudio", or "bedrock".
 	Provider string
 
 	// APIKey is the API key for the provider.
@@ -827,6 +827,9 @@ func (e *LLMChatEngine) callLLM(ctx context.Context, messages []oaiMessage, tool
 	if e.bedrockClient != nil {
 		return e.bedrockClient.Converse(ctx, e.config.Model, messages, tools, e.config.Temperature, e.config.MaxTokens)
 	}
+	if e.config.Provider == "anthropic_compat" {
+		return e.callAnthropicCompat(ctx, messages, tools)
+	}
 
 	reqBody := oaiRequest{
 		Model:       e.config.Model,
@@ -1263,6 +1266,8 @@ func baseURLForProvider(provider string) string {
 			return url
 		}
 		return "http://localhost:1234/v1"
+	case "anthropic_compat":
+		return "https://api.anthropic.com"
 	case "bedrock":
 		return "" // Uses AWS SDK, not HTTP base URL
 	default:
@@ -1274,6 +1279,8 @@ func normalizeEngineProvider(provider string) string {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "openai-compatible", "openai_compat":
 		return "openai_compat"
+	case "anthropic-compatible", "anthropic_compat", "anthropic-messages":
+		return "anthropic_compat"
 	default:
 		return strings.ToLower(strings.TrimSpace(provider))
 	}

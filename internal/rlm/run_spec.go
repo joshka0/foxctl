@@ -82,11 +82,15 @@ func ResolveToolPolicy(available []Tool, profile string) (ToolPolicy, error) {
 		// allow bounded ref inspection only for verification. Raw lane tools
 		// require explicit debug profiles.
 		allow := map[string]struct{}{
-			"gather_context":       {},
-			"gather_test_context":  {},
-			"gather_docs_context":  {},
-			"expand_context_graph": {},
-			"load_evidence_ref":    {},
+			"plan_context_query":      {},
+			"gather_context":          {},
+			"gather_memory_context":   {},
+			"gather_test_context":     {},
+			"gather_docs_context":     {},
+			"expand_context_graph":    {},
+			"load_evidence_ref":       {},
+			"aggregate_evidence_refs": {},
+			"evidence_ledger":         {},
 		}
 		tools := filterToolsBySet(available, allow)
 		return ToolPolicy{
@@ -98,13 +102,17 @@ func ResolveToolPolicy(available []Tool, profile string) (ToolPolicy, error) {
 		// Code debug: certified context first, then bounded inspection, then
 		// direct repo controller/raw code lane for retrieval diagnostics.
 		allow := map[string]struct{}{
-			"gather_context":       {},
-			"gather_test_context":  {},
-			"gather_docs_context":  {},
-			"expand_context_graph": {},
-			"load_evidence_ref":    {},
-			"code_search_ensemble": {},
-			"retrieve_code":        {},
+			"plan_context_query":      {},
+			"gather_context":          {},
+			"gather_memory_context":   {},
+			"gather_test_context":     {},
+			"gather_docs_context":     {},
+			"expand_context_graph":    {},
+			"load_evidence_ref":       {},
+			"aggregate_evidence_refs": {},
+			"evidence_ledger":         {},
+			"code_search_ensemble":    {},
+			"retrieve_code":           {},
 		}
 		tools := filterToolsBySet(available, allow)
 		return ToolPolicy{
@@ -116,13 +124,17 @@ func ResolveToolPolicy(available []Tool, profile string) (ToolPolicy, error) {
 		// Memory/context debug: certified context first, then raw memory and
 		// ContextWiki/context lanes for diagnostics.
 		allow := map[string]struct{}{
-			"gather_context":       {},
-			"gather_test_context":  {},
-			"gather_docs_context":  {},
-			"expand_context_graph": {},
-			"load_evidence_ref":    {},
-			"retrieve_memory":      {},
-			"retrieve_context":     {},
+			"plan_context_query":      {},
+			"gather_context":          {},
+			"gather_memory_context":   {},
+			"gather_test_context":     {},
+			"gather_docs_context":     {},
+			"expand_context_graph":    {},
+			"load_evidence_ref":       {},
+			"aggregate_evidence_refs": {},
+			"evidence_ledger":         {},
+			"retrieve_memory":         {},
+			"retrieve_context":        {},
 		}
 		tools := filterToolsBySet(available, allow)
 		return ToolPolicy{
@@ -132,11 +144,15 @@ func ResolveToolPolicy(available []Tool, profile string) (ToolPolicy, error) {
 		}, nil
 	case ToolProfileFullDebug:
 		allow := map[string]struct{}{
+			"plan_context_query":       {},
 			"expand_context_graph":     {},
 			"gather_context":           {},
+			"gather_memory_context":    {},
 			"gather_test_context":      {},
 			"gather_docs_context":      {},
 			"load_evidence_ref":        {},
+			"aggregate_evidence_refs":  {},
+			"evidence_ledger":          {},
 			"code_search_ensemble":     {},
 			"retrieve_code":            {},
 			"retrieve_memory":          {},

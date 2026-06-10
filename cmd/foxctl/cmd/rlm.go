@@ -55,6 +55,15 @@ func newRLMRunCommand() *cobra.Command {
 	var extractSolution bool
 	var optTraceOut string
 	var trajectoryOut string
+	var answerFeedbackID string
+	var answerFeedbackEpisodeID string
+	var answerFeedbackKind string
+	var answerFeedbackQuery string
+	var answerFeedbackUsedRefs []string
+	var answerFeedbackUseAnswerRefs bool
+	var answerFeedbackGap string
+	var answerFeedbackCorrection string
+	var answerFeedbackDryRun bool
 
 	cmd := &cobra.Command{
 		Use:   "run",
@@ -69,10 +78,11 @@ func newRLMRunCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			workspaceRoot := resolveContextWorkspace(workspacePath)
 			task := rlm.Task{
 				Prompt:        inputPrompt,
 				WorkspaceID:   "",
-				WorkspaceRoot: resolveContextWorkspace(workspacePath),
+				WorkspaceRoot: workspaceRoot,
 				MaxDepth:      maxDepth,
 				MaxIterations: maxIterations,
 				MaxSubcalls:   maxSubcalls,
@@ -149,12 +159,29 @@ func newRLMRunCommand() *cobra.Command {
 			if runErr != nil {
 				return runErr
 			}
+			answerFeedback, err := recordRLMAnswerFeedback(cmd.Context(), ceStore, workspaceRoot, task, result, rlmAnswerFeedbackOptions{
+				ID:             answerFeedbackID,
+				EpisodeID:      answerFeedbackEpisodeID,
+				Kind:           answerFeedbackKind,
+				Query:          answerFeedbackQuery,
+				UsedRefs:       answerFeedbackUsedRefs,
+				UseAnswerRefs:  answerFeedbackUseAnswerRefs,
+				GapStmt:        answerFeedbackGap,
+				CorrectionStmt: answerFeedbackCorrection,
+				DryRun:         answerFeedbackDryRun,
+			})
+			if err != nil {
+				return err
+			}
 			responseData := map[string]any{
 				"task":        task,
 				"environment": env,
 				"result":      result,
 				"mode":        mode,
 				"run_spec":    spec,
+			}
+			if answerFeedback != nil {
+				responseData["answer_feedback"] = answerFeedback
 			}
 			if traceOutPath != "" {
 				responseData["optimizer_trace"] = map[string]any{
@@ -170,7 +197,7 @@ func newRLMRunCommand() *cobra.Command {
 	cmd.Flags().StringVar(&workspacePath, "workspace", "", "Workspace path (default: current workspace)")
 	cmd.Flags().StringVar(&vaultPath, "vault-path", "", "Optional vault path for knowledge-plane bootstrap")
 	cmd.Flags().StringVar(&executor, "executor", "inspect", "Executor mode: inspect, llm, or repl")
-	cmd.Flags().StringVar(&llmProvider, "llm-provider", "", "LLM provider override (e.g. lmstudio, openai, openrouter)")
+	cmd.Flags().StringVar(&llmProvider, "llm-provider", "", "LLM provider override (e.g. lmstudio, openai, openrouter, anthropic_compat)")
 	cmd.Flags().StringVar(&llmModel, "llm-model", "", "LLM model override")
 	cmd.Flags().StringVar(&llmBaseURL, "llm-base-url", "", "LLM base URL override")
 	cmd.Flags().StringVar(&llmAPIKey, "llm-api-key", "", "LLM API key override")
@@ -184,6 +211,15 @@ func newRLMRunCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&extractSolution, "extract-solution", false, "For --executor repl, return only the final solution = ... line when present")
 	cmd.Flags().StringVar(&optTraceOut, "opt-trace-out", "", "Append one optimizer-ready JSONL trace record per run")
 	cmd.Flags().StringVar(&trajectoryOut, "trajectory-out", "", "Alias for --opt-trace-out (append optimizer-ready JSONL trace records)")
+	cmd.Flags().StringVar(&answerFeedbackID, "answer-feedback-id", "", "Retrieval feedback ID for answer-used evidence refs (default: deterministic)")
+	cmd.Flags().StringVar(&answerFeedbackEpisodeID, "answer-feedback-episode-id", "", "Retrieval episode ID for explicit answer feedback")
+	cmd.Flags().StringVar(&answerFeedbackKind, "answer-feedback-kind", "", "Opt in to record answer_used_evidence_refs as retrieval feedback with this kind")
+	cmd.Flags().StringVar(&answerFeedbackQuery, "answer-feedback-query", "", "Retrieval feedback query (default: prompt)")
+	cmd.Flags().StringSliceVar(&answerFeedbackUsedRefs, "answer-feedback-used-ref", nil, "Explicit evidence ref actually used in the answer (repeatable)")
+	cmd.Flags().BoolVar(&answerFeedbackUseAnswerRefs, "answer-feedback-use-answer-refs", false, "Use answer_used_evidence_refs metadata as informational answer feedback refs; lifecycle feedback requires --answer-feedback-used-ref")
+	cmd.Flags().StringVar(&answerFeedbackGap, "answer-feedback-gap", "", "Gap statement for gap_created answer feedback")
+	cmd.Flags().StringVar(&answerFeedbackCorrection, "answer-feedback-correction", "", "Correction statement for answer_corrected answer feedback")
+	cmd.Flags().BoolVar(&answerFeedbackDryRun, "answer-feedback-dry-run", false, "Preview answer feedback without persisting it")
 	cmd.Flags().IntVar(&maxDepth, "max-depth", 1, "Maximum recursion depth")
 	cmd.Flags().IntVar(&maxIterations, "max-iterations", 8, "Maximum root iterations")
 	cmd.Flags().IntVar(&maxSubcalls, "max-subcalls", 8, "Maximum subcalls")
