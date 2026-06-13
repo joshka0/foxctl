@@ -7850,6 +7850,35 @@ func buildEvidenceLedger(input evidenceLedgerInput, loaded []aggregateLoadedEvid
 	}
 	slots := aggregateEvidenceSlots(aggInput)
 	requiredTerms := aggregateEvidenceRequiredTerms(aggInput)
+
+	rows := make([]evidenceLedgerRow, 0, len(loaded))
+	anyAccepted := false
+	for _, item := range loaded {
+		text := strings.TrimSpace(item.Text)
+		r := evidenceLedgerRow{
+			item:         item,
+			text:         text,
+			matchedTerms: aggregateMatchedTerms(text, requiredTerms),
+			matchedSlots: evidenceLedgerMatchedSlots(text, slots),
+			values:       extractEvidenceLedgerValues(text),
+		}
+		r.status, r.reason = classifyEvidenceLedgerRow(answerType, slots, len(requiredTerms), r.matchedTerms, r.matchedSlots, r.values, item)
+		if r.status == "accept" {
+			anyAccepted = true
+		}
+		rows = append(rows, r)
+	}
+
+	// Cross-ref evidence composition: when no single ref qualifies on its own
+	// but the union of refs covers the required anchors and a ref directly
+	// states the requested answer value, accept the answer-bearing ref(s) and
+	// credit the sibling refs that supply the anchor coverage. This is what
+	// recovers answers that depend on separated conversational context.
+	composedConceptSupport := map[string][]map[string]any{}
+	if !anyAccepted && evidenceLedgerRequiresDirectAnswer(answerType) {
+		composeCrossRefEvidence(rows, slots, answerType, input.MaxTextChars, composedConceptSupport)
+	}
+
 	acceptedRows := []map[string]any{}
 	rejectedRows := []map[string]any{}
 	acceptedRefs := []string{}
@@ -7857,39 +7886,43 @@ func buildEvidenceLedger(input evidenceLedgerInput, loaded []aggregateLoadedEvid
 	acceptedSlotSupport := map[string][]map[string]any{}
 	supportedValues := []string{}
 	supportedItems := []string{}
-	for _, item := range loaded {
-		text := strings.TrimSpace(item.Text)
-		matchedTerms := aggregateMatchedTerms(text, requiredTerms)
-		matchedSlots := evidenceLedgerMatchedSlots(text, slots)
-		values := extractEvidenceLedgerValues(text)
-		status, reason := classifyEvidenceLedgerRow(answerType, slots, len(requiredTerms), matchedTerms, matchedSlots, values, item)
+	for _, r := range rows {
 		row := map[string]any{
-			"ref":           item.Ref,
-			"status":        status,
-			"reason":        reason,
-			"loaded":        item.Loaded,
-			"text":          limitContextEvidenceDigestText(text, input.MaxTextChars),
-			"matched_terms": matchedTerms,
-			"matched_slots": matchedSlots,
-			"answer_values": evidenceLedgerValuesMap(values),
+			"ref":           r.item.Ref,
+			"status":        r.status,
+			"reason":        r.reason,
+			"loaded":        r.item.Loaded,
+			"text":          limitContextEvidenceDigestText(r.text, input.MaxTextChars),
+			"matched_terms": r.matchedTerms,
+			"matched_slots": r.matchedSlots,
+			"answer_values": evidenceLedgerValuesMap(r.values),
 		}
-		if item.Error != "" && item.Error != "<nil>" {
-			row["error"] = item.Error
+		if r.item.Error != "" && r.item.Error != "<nil>" {
+			row["error"] = r.item.Error
 		}
-		if status == "accept" {
+		if r.status == "accept" {
 			acceptedRows = append(acceptedRows, row)
-			acceptedRefs = appendUniqueStringEnv(acceptedRefs, item.Ref)
-			for _, slotID := range matchedSlots {
+			acceptedRefs = appendUniqueStringEnv(acceptedRefs, r.item.Ref)
+			for _, slotID := range r.matchedSlots {
 				acceptedSlotSupport[slotID] = append(acceptedSlotSupport[slotID], map[string]any{
-					"ref":  item.Ref,
+					"ref":  r.item.Ref,
 					"text": row["text"],
 				})
 			}
-			supportedValues = appendUniqueStringsEnv(supportedValues, evidenceLedgerAnswerValues(answerType, values)...)
-			supportedItems = appendUniqueStringsEnv(supportedItems, values.Items...)
+			supportedValues = appendUniqueStringsEnv(supportedValues, evidenceLedgerAnswerValues(answerType, r.values)...)
+			supportedItems = appendUniqueStringsEnv(supportedItems, r.values.Items...)
 		} else {
 			rejectedRows = append(rejectedRows, row)
-			rejectedRefs = appendUniqueStringEnv(rejectedRefs, item.Ref)
+			rejectedRefs = appendUniqueStringEnv(rejectedRefs, r.item.Ref)
+		}
+	}
+	// Credit cross-ref anchor coverage so composed answers report covered slots
+	// instead of spurious fallbacks. Dedupe by ref to avoid inflating support.
+	for slotID, entries := range composedConceptSupport {
+		for _, entry := range entries {
+			if !evidenceLedgerSlotSupportHasRef(acceptedSlotSupport[slotID], entry["ref"]) {
+				acceptedSlotSupport[slotID] = append(acceptedSlotSupport[slotID], entry)
+			}
 		}
 	}
 	slotMaps, missingSlots := evidenceLedgerSlotMaps(slots, acceptedSlotSupport, answerType, len(supportedValues) > 0)
@@ -7917,6 +7950,99 @@ func buildEvidenceLedger(input evidenceLedgerInput, loaded []aggregateLoadedEvid
 			"guidance":         "Use only accepted_rows for final factual claims. Do not use rejected_rows as answers. If needs_fallback is true, run the fallback query that targets the missing slot before refusing or finalizing.",
 		},
 	}
+}
+
+// evidenceLedgerRow is the per-ref working state of the evidence ledger: the
+// loaded ref plus its matched terms/slots, extracted values, and the
+// classification verdict. It is mutated in place by cross-ref composition.
+type evidenceLedgerRow struct {
+	item         aggregateLoadedEvidenceRef
+	text         string
+	matchedTerms []string
+	matchedSlots []string
+	values       evidenceLedgerValues
+	status       string
+	reason       string
+}
+
+// composeCrossRefEvidence implements cross-ref evidence composition. It only
+// runs when the per-ref pass accepted nothing and the answer type needs a
+// direct value. When the union of all loaded refs covers the required anchor
+// concepts (the same threshold the per-ref pass uses) and at least one ref
+// directly states the requested answer value, it flips those answer-bearing
+// rows to "accept" and returns, via conceptSupportOut, which sibling refs
+// supply the anchor coverage so the assembled slot map reports covered.
+//
+// The union-coverage guard keeps this strictly more permissive only where it
+// is safe: a single ref that already cleared the concept threshold would have
+// been accepted by the per-ref pass, so composition can only fire when
+// complementary refs combine to exceed any one ref. Distractor-only ref sets
+// (no ref states the answer value, or the union still misses anchors) stay
+// rejected, preserving the per-ref fallback behavior.
+func composeCrossRefEvidence(rows []evidenceLedgerRow, slots []aggregateEvidenceSlot, answerType string, maxTextChars int, conceptSupportOut map[string][]map[string]any) {
+	unionConcepts := []string{}
+	conceptSupport := map[string][]map[string]any{}
+	for i := range rows {
+		r := &rows[i]
+		if !r.item.Loaded {
+			continue
+		}
+		for _, label := range evidenceLedgerConceptSlotMatches(slots, r.matchedSlots) {
+			unionConcepts = appendUniqueStringEnv(unionConcepts, label)
+		}
+		for _, slotID := range r.matchedSlots {
+			if !evidenceLedgerSlotIsConcept(slots, slotID) {
+				continue
+			}
+			conceptSupport[slotID] = append(conceptSupport[slotID], map[string]any{
+				"ref":  r.item.Ref,
+				"text": limitContextEvidenceDigestText(r.text, maxTextChars),
+			})
+		}
+	}
+	if len(unionConcepts) < evidenceLedgerRequiredConceptThreshold(slots) {
+		return
+	}
+	composed := false
+	for i := range rows {
+		r := &rows[i]
+		if r.status == "accept" || !r.item.Loaded {
+			continue
+		}
+		if evidenceLedgerHasAnswerValue(answerType, r.values) {
+			r.status = "accept"
+			r.reason = "answer value stated here; required anchors covered by related evidence across refs (cross-ref composition)"
+			composed = true
+		}
+	}
+	if !composed {
+		return
+	}
+	for slotID, entries := range conceptSupport {
+		conceptSupportOut[slotID] = entries
+	}
+}
+
+// evidenceLedgerSlotIsConcept reports whether slotID names a concept (anchor)
+// slot rather than the answer slot.
+func evidenceLedgerSlotIsConcept(slots []aggregateEvidenceSlot, slotID string) bool {
+	for _, slot := range slots {
+		if slot.ID == slotID {
+			return slot.Kind != "answer_slot"
+		}
+	}
+	return false
+}
+
+// evidenceLedgerSlotSupportHasRef reports whether a slot's support list already
+// credits the given ref, used to dedupe composed anchor support.
+func evidenceLedgerSlotSupportHasRef(entries []map[string]any, ref any) bool {
+	for _, entry := range entries {
+		if entry["ref"] == ref {
+			return true
+		}
+	}
+	return false
 }
 
 func classifyEvidenceLedgerRow(answerType string, slots []aggregateEvidenceSlot, requiredTermCount int, matchedTerms, matchedSlots []string, values evidenceLedgerValues, item aggregateLoadedEvidenceRef) (string, string) {
