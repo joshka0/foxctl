@@ -20,6 +20,9 @@ At the time this report was written:
 - Branch: `feat/ci-core-skills-split`
 - Tracked files changed before committing: 65
 - Untracked files before committing: 26
+  - These 65/26 figures are a pre-commit working-tree snapshot. The committed
+    stack below totals `99 files changed` against `main`; the difference is the
+    snapshot timing, not a discrepancy in the work.
 - Deleted tracked files before committing:
   - `internal/intelligence/indexing/embedding/worker.go`
   - `internal/storage/memory/search.go`
@@ -160,7 +163,12 @@ artifact file is gone.
 
 ## Main Risks
 
-- `internal/rlm/env/tool_exec.go` and its tests remain very large.
+- `internal/rlm/env/tool_exec.go` is **10,000 lines** in a single file on the
+  RLM environment path. This is the headline structural risk of the worktree,
+  not just a style nit. There is no co-located `tool_exec_test.go`; coverage for
+  this file is spread across `adapter_test.go`, `tools_test.go`,
+  `tool_profiles_test.go`, and others, so the split in "Recommended Next Slice"
+  step 1 must also untangle which tests exercise the extracted helpers.
 - The ledger still depends on regex/slot heuristics and can false reject unusual
   phrasing.
 - Final synthesis guardrails are prompt-level; there is not yet a
