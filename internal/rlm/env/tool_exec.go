@@ -101,7 +101,19 @@ type evidenceLedgerInput struct {
 	MaxRefs              int                                 `json:"max_refs,omitempty"`
 	MaxTextChars         int                                 `json:"max_text_chars,omitempty"`
 	MaxTokensPerRef      int                                 `json:"max_tokens_per_ref,omitempty"`
+
+	// semanticSlotMatch, when set by the shell, augments substring slot
+	// matching with embedding-based semantic matching so synonymous evidence
+	// ("plastic model airplane kit" for a "model kits" slot) is recognized.
+	// Unexported so JSON unmarshaling of tool args never populates it; nil
+	// keeps the deterministic substring-only behavior used by unit tests.
+	semanticSlotMatch evidenceLedgerSlotMatcher
 }
+
+// evidenceLedgerSlotMatcher reports whether an evidence text semantically
+// satisfies a concept slot. The shell supplies an embedding-backed
+// implementation; the functional core treats it as an opaque, optional signal.
+type evidenceLedgerSlotMatcher func(text string, slot aggregateEvidenceSlot) bool
 
 const (
 	defaultLoadEvidenceRefMaxTokens           = 4096
@@ -7744,7 +7756,54 @@ func (a *ReadOnlyAdapter) evidenceLedger(ctx context.Context, args json.RawMessa
 		item.Text = evidenceLedgerPayloadTextForQuery(out, input.Query, input.MaxTextChars)
 		loaded = append(loaded, item)
 	}
+	input.semanticSlotMatch = a.evidenceLedgerSlotMatcher(ctx)
 	return buildEvidenceLedger(input, loaded, plan), nil
+}
+
+// evidenceLedgerSemanticMatchThreshold is the normalized cosine ([0,1])
+// at/above which an evidence text is treated as semantically satisfying a
+// concept slot. Tunable; calibrate against live LongMem traces.
+const evidenceLedgerSemanticMatchThreshold = 0.74
+
+// evidenceLedgerSlotMatcher builds an embedding-backed slot matcher for the
+// evidence ledger, or nil when no embedding provider is available (in which
+// case the ledger falls back to substring matching). Embeddings are memoized
+// per build so each distinct slot phrase and evidence text is embedded once.
+func (a *ReadOnlyAdapter) evidenceLedgerSlotMatcher(ctx context.Context) evidenceLedgerSlotMatcher {
+	provider, err := semantic.NewProviderForScope(semantic.ScopeMemory, a.cfg)
+	if err != nil || provider == nil {
+		return nil
+	}
+	cache := map[string][]float32{}
+	embed := func(s string) []float32 {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return nil
+		}
+		if vec, ok := cache[s]; ok {
+			return vec
+		}
+		vec, err := provider.Embed(ctx, s)
+		if err != nil {
+			cache[s] = nil
+			return nil
+		}
+		cache[s] = vec
+		return vec
+	}
+	return func(text string, slot aggregateEvidenceSlot) bool {
+		phrase := strings.TrimSpace(firstNonEmpty(slot.Label, strings.Join(slot.Terms, " ")))
+		if phrase == "" {
+			return false
+		}
+		textVec := embed(text)
+		slotVec := embed(phrase)
+		if len(textVec) == 0 || len(slotVec) == 0 || len(textVec) != len(slotVec) {
+			return false
+		}
+		score := (vector.Cosine(textVec, slotVec) + 1) / 2
+		return score >= evidenceLedgerSemanticMatchThreshold
+	}
 }
 
 type aggregateLoadedEvidenceRef struct {
@@ -7861,6 +7920,9 @@ func buildEvidenceLedger(input evidenceLedgerInput, loaded []aggregateLoadedEvid
 			matchedTerms: aggregateMatchedTerms(text, requiredTerms),
 			matchedSlots: evidenceLedgerMatchedSlots(text, slots),
 			values:       extractEvidenceLedgerValues(text),
+		}
+		if input.semanticSlotMatch != nil {
+			r.matchedSlots = evidenceLedgerAddSemanticSlots(text, slots, r.matchedSlots, input.semanticSlotMatch)
 		}
 		r.status, r.reason = classifyEvidenceLedgerRow(answerType, slots, len(requiredTerms), r.matchedTerms, r.matchedSlots, r.values, item)
 		if r.status == "accept" {
@@ -8076,6 +8138,33 @@ func classifyEvidenceLedgerRow(answerType string, slots []aggregateEvidenceSlot,
 		return "reject", "topical or adjacent evidence; required anchors are missing"
 	}
 	return "reject", "required anchors are present but the requested answer slot is not directly stated"
+}
+
+// evidenceLedgerAddSemanticSlots augments the substring-matched slot IDs with
+// concept slots the matcher recognizes semantically. It only consults the
+// matcher for concept slots not already matched by substring, so substring hits
+// stay authoritative and the embedding work is bounded to the residual slots.
+func evidenceLedgerAddSemanticSlots(text string, slots []aggregateEvidenceSlot, matched []string, matcher evidenceLedgerSlotMatcher) []string {
+	if matcher == nil || strings.TrimSpace(text) == "" {
+		return matched
+	}
+	already := make(map[string]struct{}, len(matched))
+	for _, id := range matched {
+		already[id] = struct{}{}
+	}
+	out := matched
+	for _, slot := range slots {
+		if slot.Kind == "answer_slot" {
+			continue
+		}
+		if _, ok := already[slot.ID]; ok {
+			continue
+		}
+		if matcher(text, slot) {
+			out = appendUniqueStringEnv(out, slot.ID)
+		}
+	}
+	return out
 }
 
 func evidenceLedgerMatchedSlots(text string, slots []aggregateEvidenceSlot) []string {
