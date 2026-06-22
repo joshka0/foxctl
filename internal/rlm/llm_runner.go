@@ -815,6 +815,12 @@ func buildSynthesisPrompt(query string, candidatePaths, evidenceRefs, acceptedLe
 	var b strings.Builder
 	b.WriteString(strings.TrimSpace(query))
 	b.WriteString("\n\nWrite the final answer using only the verified evidence from the staged phases.")
+	// Enumeration guidance for count/list questions: the model must enumerate
+	// each evidence piece before stating the count. This prevents undercounting
+	// when multiple evidence pieces each carry one item.
+	if synthesisQueryIsEnumeration(query) {
+		b.WriteString("\n\nThis question asks for a count or list. Before answering, enumerate each distinct item you find in the evidence. State the total count only after listing all items.")
+	}
 	if len(candidatePaths) > 0 {
 		b.WriteString("\nCandidate paths: ")
 		b.WriteString(strings.Join(shortenRefs(candidatePaths, 10), ", "))
@@ -834,6 +840,30 @@ func buildSynthesisPrompt(query string, candidatePaths, evidenceRefs, acceptedLe
 		b.WriteString("\nNo accepted ledger evidence was collected. Do not answer from surfaced or rejected evidence; state that verified evidence is insufficient.")
 	}
 	return b.String()
+}
+
+// synthesisQueryIsEnumeration detects whether a question asks for a count or
+// list of items, requiring enumeration before answering. This is a prompt
+// enrichment signal, not a routing/classification heuristic — the answer type
+// classification lives in context_query_plan.go.
+func synthesisQueryIsEnumeration(query string) bool {
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" {
+		return false
+	}
+	// Check for count-style questions.
+	for _, marker := range []string{"how many", "how much", "number of", "count of", "total number"} {
+		if strings.Contains(q, marker) {
+			return true
+		}
+	}
+	// Check for list-style questions.
+	for _, marker := range []string{"list all", "what items", "which items", "what are all"} {
+		if strings.Contains(q, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func toolSignature(schema json.RawMessage) string {

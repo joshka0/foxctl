@@ -46,6 +46,28 @@ func TestExtractFallbackProbeQueriesCappedAt3(t *testing.T) {
 	}
 }
 
+func TestSynthesisQueryIsEnumeration(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		query string
+		want  bool
+	}{
+		{"How many items of clothing do I need to pick up?", true},
+		{"How many days passed between visits?", true},
+		{"What is the total number of meetings?", true},
+		{"List all the projects I worked on", true},
+		{"What degree did I graduate with?", false},
+		{"Where did I redeem a coupon?", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := synthesisQueryIsEnumeration(tt.query); got != tt.want {
+			t.Fatalf("synthesisQueryIsEnumeration(%q)=%v want %v", tt.query, got, tt.want)
+		}
+	}
+}
+
 func contains(slice []string, value string) bool {
 	for _, s := range slice {
 		if s == value {
