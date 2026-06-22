@@ -29,6 +29,27 @@ Each row is a committed slice. Score is answer-mode correct/total (1/4 baseline)
 | 4 | REQUIRED_DATA fallback re-query | — | — | — | — | — | done |
 | 5 | HyDE decomposition + named-memory first-class lane | — | — | — | — | — | done |
 | 6 | hybrid eval DefaultDeps + scorecard harness | — | — | — | — | — | done |
+| live-1 | first live answer-mode smoke (4 cases, glm-5.2, BM25) | FAIL | PASS | FAIL | FAIL | 1/4 | 2026-06-22 |
+
+## Live Smoke Results — 2026-06-22
+
+4-case smoke (degree, clothing-count, video-editing, MoMA-temporal). Answer-mode
+via glm-5.2 through local Z.AI proxy. BM25-only retrieval (embeddings not yet
+drained for this workspace).
+
+| Case | Result | Latency | Evidence | Root Cause if FAIL |
+|------|--------|---------|----------|--------------------|
+| degree (e47becba) | PASS | 12.3s | 1/1 | — |
+| clothing (0a995998) | FAIL | 11.5s | 3/3 | answer text mismatch (strict substring scoring) |
+| video-edit (8a2466db) | FAIL | 19.9s | 1/1 | answer phrasing mismatch (strict substring scoring) |
+| MoMA (gpt4_59149c77) | FAIL | 26.0s | 2/2 | model unable to compute date arithmetic from evidence |
+
+Evidence retrieval: 4/4 found, hit@5=100%, MRR=1.0 (all evidence surfaced).
+Answer accuracy: 1/4 (strict substring match).
+
+Key improvement vs baseline: all 4 cases now find their evidence (baseline had
+3/4 retrieval misses). Remaining failures are answer-quality + scoring issues,
+not retrieval issues.
 
 ## Running the Harness
 
