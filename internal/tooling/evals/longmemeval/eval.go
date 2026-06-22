@@ -202,7 +202,8 @@ type Deps struct {
 
 // DefaultDeps returns Deps wired against the package's own loaders and the
 // BM25-only path of memoryrecall.Search. The caller still supplies
-// OpenMemory and OpenQueue for the underlying stores.
+// OpenMemory and OpenQueue for the underlying stores. For hybrid
+// (vector+lexical) retrieval, use HybridDeps with an embedder.
 func DefaultDeps(openMemory func(context.Context, string) (storage.MemoryStore, error), openQueue func(context.Context, string) (*embedding.Store, error)) Deps {
 	return Deps{
 		LoadCases:  LoadCases,
@@ -215,6 +216,40 @@ func DefaultDeps(openMemory func(context.Context, string) (storage.MemoryStore, 
 				Workspace: workspaceID,
 				Query:     query,
 				Limit:     limit,
+			})
+		},
+		Now:        time.Now,
+		MemoryName: memoryName,
+	}
+}
+
+// HybridDeps returns Deps wired with a hybrid (vector+BM25) search path. The
+// embedFn is called per query to produce a vector embedding; when it fails or
+// returns empty, the search silently falls back to BM25-only. Use this in
+// production eval runs to exercise the full retrieval pipeline.
+func HybridDeps(
+	openMemory func(context.Context, string) (storage.MemoryStore, error),
+	openQueue func(context.Context, string) (*embedding.Store, error),
+	embedFn func(ctx context.Context, query string) ([]float32, error),
+) Deps {
+	return Deps{
+		LoadCases:  LoadCases,
+		BuildPlan:  BuildPlan,
+		ApplyPlan:  ApplyPlan,
+		OpenMemory: openMemory,
+		OpenQueue:  openQueue,
+		SearchMemory: func(ctx context.Context, store storage.MemoryStore, workspaceID, query string, limit int) (memoryrecall.QueryResponse, error) {
+			var embedding []float32
+			var embedErr error
+			if embedFn != nil {
+				embedding, embedErr = embedFn(ctx, query)
+			}
+			return memoryrecall.Search(ctx, store, memoryrecall.QueryRequest{
+				Workspace:      workspaceID,
+				Query:          query,
+				QueryEmbedding: embedding,
+				EmbeddingError: embedErr,
+				Limit:          limit,
 			})
 		},
 		Now:        time.Now,

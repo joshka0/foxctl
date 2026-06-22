@@ -1129,3 +1129,56 @@ db-backup-clean:
 		rm -rf "$$dir"; \
 	done; \
 	echo "Cleanup complete"
+
+# LongMem eval harness — per-slice regression tracking.
+# Dataset path and workspace can be overridden from env.
+LONGMEM_DATASET ?= /tmp/foxctl-hydra-longmem/longmemeval_s_cleaned.json
+LONGMEM_WORKSPACE ?= /home/dev/repos/foxctl
+LONGMEM_ARTIFACT_DIR ?= /tmp/foxctl-longmem-artifacts
+LONGMEM_ANSWER_PROVIDER ?= $(shell echo $$LONGMEM_ANSWER_PROVIDER)
+LONGMEM_ANSWER_MODEL ?= $(shell echo $$LONGMEM_ANSWER_MODEL)
+
+.PHONY: longmem-slice-retrieval longmem-slice-answer longmem-slice-test
+
+# Retrieval-only mode: deterministic, no LLM calls. Tests BM25 hit@K + MRR.
+longmem-slice-retrieval:
+	@mkdir -p $(LONGMEM_ARTIFACT_DIR)
+	@echo "Running LongMem retrieval-only eval..."
+	@./bin/foxctl eval longmem \
+		--dataset $(LONGMEM_DATASET) \
+		--workspace $(LONGMEM_WORKSPACE) \
+		--mode ingest \
+		--mode queue-status \
+		--mode retrieval \
+		--artifact-dir $(LONGMEM_ARTIFACT_DIR)/retrieval \
+		--suite "slice-retrieval" \
+		|| { echo "FATAL: longmem retrieval eval failed"; exit 1; }
+	@echo "Artifacts: $(LONGMEM_ARTIFACT_DIR)/retrieval/"
+
+# Answer-mode: requires RLM model config. Tests answer accuracy + evidence.
+longmem-slice-answer:
+	@mkdir -p $(LONGMEM_ARTIFACT_DIR)
+	@test -f $(LONGMEM_DATASET) || { echo "ERROR: dataset not found at $(LONGMEM_DATASET). Set LONGMEM_DATASET."; exit 1; }
+	@echo "Running LongMem answer-mode eval..."
+	@./bin/foxctl eval longmem \
+		--dataset $(LONGMEM_DATASET) \
+		--workspace $(LONGMEM_WORKSPACE) \
+		--mode ingest \
+		--mode queue-status \
+		--mode answer \
+		--artifact-dir $(LONGMEM_ARTIFACT_DIR)/answer \
+		--suite "slice-answer" \
+		--answer-strategy retrieve-memory \
+		$(if $(LONGMEM_ANSWER_PROVIDER),--answer-provider $(LONGMEM_ANSWER_PROVIDER)) \
+		$(if $(LONGMEM_ANSWER_MODEL),--answer-model $(LONGMEM_ANSWER_MODEL)) \
+		|| { echo "FATAL: longmem answer eval failed"; exit 1; }
+	@echo "Artifacts: $(LONGMEM_ARTIFACT_DIR)/answer/"
+
+# Unit-test regression for longmem packages (no external deps).
+longmem-slice-test:
+	@echo "Running longmemeval + memoryrecall + rlm env focused tests..."
+	@$(GO_CMD) test -count=1 \
+		./internal/tooling/evals/longmemeval/... \
+		./internal/intelligence/retrieval/memoryrecall/... \
+		-run 'TestBuildPlan|TestRunAnswerMode|TestApplyPlan|TestSearch|TestScore|TestLeakage|TestEvidence|TestCoupon|TestFeedback' \
+		-v
