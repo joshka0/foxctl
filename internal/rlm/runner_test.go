@@ -91,6 +91,51 @@ func TestClassifySynthesisAnswerType(t *testing.T) {
 	}
 }
 
+func TestCollectSynthesisDates(t *testing.T) {
+	t.Parallel()
+
+	input := []string{
+		"visited MoMA on October 15, 2024 for a guided tour",
+		"attended the Ancient Civilizations exhibit at the Met on October 22, 2024",
+	}
+	got := collectSynthesisDates(input)
+	if len(got) != 2 {
+		t.Fatalf("got %d dates: %v, want 2", len(got), got)
+	}
+	if got[0] != "October 15, 2024" {
+		t.Fatalf("got[0]=%q want %q", got[0], "October 15, 2024")
+	}
+	if got[1] != "October 22, 2024" {
+		t.Fatalf("got[1]=%q want %q", got[1], "October 22, 2024")
+	}
+}
+
+func TestCollectSynthesisDatesMultipleFormats(t *testing.T) {
+	t.Parallel()
+
+	input := []string{
+		"wrote on 2024-10-15 and also Oct 15th, then 10/22/2024 and 15 Oct 2024",
+	}
+	got := collectSynthesisDates(input)
+	// Should find at least 4 distinct date formats.
+	if len(got) < 4 {
+		t.Fatalf("got %d dates: %v, want >= 4", len(got), got)
+	}
+}
+
+func TestCollectSynthesisDatesEmpty(t *testing.T) {
+	t.Parallel()
+
+	got := collectSynthesisDates(nil)
+	if len(got) != 0 {
+		t.Fatalf("expected empty, got %v", got)
+	}
+	got = collectSynthesisDates([]string{"no dates here"})
+	if len(got) != 0 {
+		t.Fatalf("expected empty for text without dates, got %v", got)
+	}
+}
+
 func contains(slice []string, value string) bool {
 	for _, s := range slice {
 		if s == value {

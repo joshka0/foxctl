@@ -822,9 +822,21 @@ func buildSynthesisPrompt(query string, candidatePaths, evidenceRefs, acceptedLe
 		b.WriteString("\n\nThis question asks for a count or list. Before answering, enumerate each distinct item you find in the evidence. State the total count only after listing all items.")
 	}
 	// Temporal reasoning guidance: for duration/date-arithmetic questions,
-	// instruct the model to extract dates from evidence and compute the interval.
+	// extract dates deterministically from evidence and inject them so the
+	// model only does arithmetic, not date parsing.
 	if at := classifySynthesisAnswerType(query); at == "temporal" || at == "duration" {
-		b.WriteString("\n\nThis question requires temporal reasoning. Extract any dates or time references from the evidence. If you find two dates, compute the interval between them (in days, weeks, or months as appropriate). Express the answer as a specific number.")
+		dates := collectSynthesisDates(acceptedLedgerEvidence)
+		if len(dates) > 0 {
+			b.WriteString("\n\nThis question requires temporal reasoning. The following dates were extracted from the evidence:\n")
+			for _, d := range dates {
+				b.WriteString("- ")
+				b.WriteString(d)
+				b.WriteString("\n")
+			}
+			b.WriteString("Compute the interval between the relevant dates. Express the answer as a specific number of days.")
+		} else {
+			b.WriteString("\n\nThis question requires temporal reasoning. Extract any dates or time references from the evidence. If you find two dates, compute the interval between them (in days, weeks, or months as appropriate). Express the answer as a specific number.")
+		}
 	}
 	if len(candidatePaths) > 0 {
 		b.WriteString("\nCandidate paths: ")
@@ -893,6 +905,43 @@ func classifySynthesisAnswerType(query string) string {
 		return "temporal"
 	}
 	return "fact"
+}
+
+// synthesisDatePattern matches common date formats in conversational evidence:
+//   - "October 15, 2024" / "Oct 15, 2024" / "October 15 2024"
+//   - "15 October 2024" / "15 Oct 2024"
+//   - "2024-10-15" / "10/15/2024" / "15/10/2024"
+//   - "October 15th" / "Oct 15th"
+var synthesisDatePattern = regexp.MustCompile(`(?i)\b(?:` +
+	`(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s*\d{4}` + // "October 15, 2024"
+	`|\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{4}` + // "15 October 2024"
+	`|\d{4}-\d{1,2}-\d{1,2}` + // "2024-10-15"
+	`|\d{1,2}/\d{1,2}/\d{4}` + // "10/15/2024"
+	`|(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s*\d{4})?` + // "October 15th" (no year)
+	`)\b`)
+
+// collectSynthesisDates extracts date strings from accepted ledger evidence
+// text. Returns deduplicated dates in order of first appearance. Used to
+// inject dates into the synthesis prompt so the model does arithmetic, not
+// date parsing.
+func collectSynthesisDates(rows []string) []string {
+	seen := make(map[string]struct{})
+	out := make([]string, 0, len(rows)*2)
+	for _, row := range rows {
+		for _, match := range synthesisDatePattern.FindAllString(row, -1) {
+			match = strings.TrimSpace(match)
+			if match == "" {
+				continue
+			}
+			key := strings.ToLower(match)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, match)
+		}
+	}
+	return out
 }
 
 func toolSignature(schema json.RawMessage) string {
