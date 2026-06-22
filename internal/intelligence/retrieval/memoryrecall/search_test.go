@@ -78,9 +78,10 @@ func TestDefaultLifecycleAllowsActiveAndStrongQueryCandidatesOnly(t *testing.T) 
 	}{
 		{name: "active", state: "active", want: true},
 		{name: "empty defaults active", state: "", want: true},
-		{name: "strong candidate with query", state: "candidate", score: 0.9, query: "q", want: true},
-		{name: "weak candidate", state: "candidate", score: 0.89, query: "q", want: false},
-		{name: "strong stale without query", state: "stale", score: 1.0, want: false},
+		{name: "strong candidate with query", state: "candidate", score: 0.5, query: "q", want: true},
+		{name: "weak candidate rejected", state: "candidate", score: 0.2, query: "q", want: false},
+		{name: "candidate at threshold", state: "candidate", score: 0.38, query: "q", want: true},
+		{name: "stale without query rejected", state: "stale", score: 1.0, want: false},
 		{name: "quarantined", state: "quarantined", score: 1.0, query: "q", want: false},
 	}
 	for _, tt := range tests {
@@ -89,6 +90,29 @@ func TestDefaultLifecycleAllowsActiveAndStrongQueryCandidatesOnly(t *testing.T) 
 				t.Fatalf("DefaultLifecycleAllows() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestLifecycleThresholdStandardVsDeep(t *testing.T) {
+	query := "do I have any model kits?"
+	// Score below standard threshold (0.38) but above deep threshold (0.28).
+	score := 0.30
+	if LifecycleAllowsThreshold("candidate", score, query, defaultStandardCandidateThreshold) {
+		t.Fatalf("standard threshold (0.38) should reject score %f", score)
+	}
+	if !LifecycleAllowsThreshold("candidate", score, query, defaultDeepCandidateThreshold) {
+		t.Fatalf("deep threshold (0.28) should allow score %f", score)
+	}
+}
+
+func TestCandidateThresholdForQueryStandardVsDeep(t *testing.T) {
+	// Single-clause question → standard
+	if got := CandidateThresholdForQuery("do I have any model kits?"); got != defaultStandardCandidateThreshold {
+		t.Fatalf("standard query threshold=%f want %f", got, defaultStandardCandidateThreshold)
+	}
+	// Multi-clause question → deep
+	if got := CandidateThresholdForQuery("what degree did I get? and from where?"); got != defaultDeepCandidateThreshold {
+		t.Fatalf("deep query threshold=%f want %f", got, defaultDeepCandidateThreshold)
 	}
 }
 

@@ -19,7 +19,15 @@ const (
 	sourceVector  = searchrank.SourceID("vector")
 	sourceLexical = searchrank.SourceID("lexical")
 
-	defaultStrongLifecycleScore = 0.9
+	// defaultStandardCandidateThreshold is the lifecycle gate for candidate
+	// and stale memories in standard (point-fact) queries. It is intentionally
+	// lower than the previous hardcoded 0.9, which suppressed legitimate
+	// synonymy and paraphrase matches before they could reach evidence
+	// verification.
+	defaultStandardCandidateThreshold = 0.38
+	// defaultDeepCandidateThreshold is the gate for deep (exploratory,
+	// aggregation, categorical) queries where wider recall is preferred.
+	defaultDeepCandidateThreshold = 0.28
 )
 
 // Store is the named-memory retrieval surface required for hybrid recall.
@@ -43,8 +51,10 @@ type QueryResponse struct {
 	Hint    string
 }
 
-// Search runs the canonical named-memory recall flow: vector candidates,
-// lexical candidates, then weighted fusion when both sources are available.
+// Search runs the canonical named-memory recall flow: vector candidates and
+// lexical candidates are fetched concurrently, then weighted fusion is applied
+// when both sources are available. When vector search fails or times out,
+// lexical results (already in flight) are used without waiting.
 func Search(ctx context.Context, store Store, req QueryRequest) (QueryResponse, error) {
 	if store == nil {
 		return QueryResponse{Method: MethodBM25}, fmt.Errorf("memory recall store is nil")
@@ -58,47 +68,96 @@ func Search(ctx context.Context, store Store, req QueryRequest) (QueryResponse, 
 		limit = 10
 	}
 
-	vectorEntries, vectorErr := searchVector(ctx, store, req, limit)
-	if vectorErr == nil && len(req.QueryEmbedding) > 0 {
+	// If no embedding is available, skip straight to BM25.
+	if len(req.QueryEmbedding) == 0 || req.EmbeddingError != nil {
 		lexicalEntries, lexicalErr := store.Search(ctx, req.Workspace, req.Query, limit)
 		if lexicalErr != nil {
-			if len(vectorEntries) == 0 {
-				return QueryResponse{Method: MethodBM25}, lexicalErr
-			}
-			return QueryResponse{
-				Entries: vectorEntries,
-				Method:  MethodVector,
-				Hint:    fmt.Sprintf("BM25 search failed: %v; using vector", lexicalErr),
-			}, nil
+			return QueryResponse{Method: MethodBM25}, lexicalErr
 		}
-		if len(vectorEntries) == 0 {
-			return QueryResponse{
-				Entries: lexicalEntries,
-				Method:  MethodBM25,
-				Hint:    "vector search returned no records; using BM25",
-			}, nil
+		hint := ""
+		if req.EmbeddingError != nil {
+			hint = fmt.Sprintf("vector search failed: %v; using BM25", req.EmbeddingError)
 		}
-		if len(lexicalEntries) == 0 {
-			return QueryResponse{Entries: vectorEntries, Method: MethodVector}, nil
-		}
-		return QueryResponse{
-			Entries: fuseResults(vectorEntries, lexicalEntries, limit),
-			Method:  MethodHybrid,
-		}, nil
-	}
-	if ctx.Err() != nil {
-		return QueryResponse{Method: MethodVector}, vectorErr
+		return QueryResponse{Entries: lexicalEntries, Method: MethodBM25, Hint: hint}, nil
 	}
 
-	lexicalEntries, lexicalErr := store.Search(ctx, req.Workspace, req.Query, limit)
-	if lexicalErr != nil {
+	// Run vector and lexical concurrently.
+	type vectorResult struct {
+		entries []storage.ScoredEntry
+		err     error
+	}
+	type lexicalResult struct {
+		entries []storage.ScoredEntry
+		err     error
+	}
+
+	vectorCh := make(chan vectorResult, 1)
+	lexicalCh := make(chan lexicalResult, 1)
+
+	go func() {
+		entries, err := searchVector(ctx, store, req, limit)
+		vectorCh <- vectorResult{entries: entries, err: err}
+	}()
+	go func() {
+		entries, err := store.Search(ctx, req.Workspace, req.Query, limit)
+		lexicalCh <- lexicalResult{entries: entries, err: err}
+	}()
+
+	vr := <-vectorCh
+	lr := <-lexicalCh
+
+	vectorEntries := vr.entries
+	vectorErr := vr.err
+	lexicalEntries := lr.entries
+	lexicalErr := lr.err
+
+	// Both failed.
+	if vectorErr != nil && lexicalErr != nil {
+		if ctx.Err() != nil {
+			return QueryResponse{Method: MethodVector}, vectorErr
+		}
 		return QueryResponse{Method: MethodBM25}, lexicalErr
 	}
-	hint := ""
+
+	// Vector failed — use lexical.
 	if vectorErr != nil {
-		hint = fmt.Sprintf("vector search failed: %v; using BM25", vectorErr)
+		if len(lexicalEntries) == 0 {
+			return QueryResponse{Method: MethodBM25}, lexicalErr
+		}
+		return QueryResponse{
+			Entries: lexicalEntries,
+			Method:  MethodBM25,
+			Hint:    fmt.Sprintf("vector search failed: %v; using BM25", vectorErr),
+		}, nil
 	}
-	return QueryResponse{Entries: lexicalEntries, Method: MethodBM25, Hint: hint}, nil
+
+	// Lexical failed — use vector.
+	if lexicalErr != nil {
+		if len(vectorEntries) == 0 {
+			return QueryResponse{Method: MethodVector}, lexicalErr
+		}
+		return QueryResponse{
+			Entries: vectorEntries,
+			Method:  MethodVector,
+			Hint:    fmt.Sprintf("BM25 search failed: %v; using vector", lexicalErr),
+		}, nil
+	}
+
+	// Both succeeded — fuse if both have entries.
+	if len(vectorEntries) == 0 {
+		return QueryResponse{
+			Entries: lexicalEntries,
+			Method:  MethodBM25,
+			Hint:    "vector search returned no records; using BM25",
+		}, nil
+	}
+	if len(lexicalEntries) == 0 {
+		return QueryResponse{Entries: vectorEntries, Method: MethodVector}, nil
+	}
+	return QueryResponse{
+		Entries: fuseResults(vectorEntries, lexicalEntries, limit),
+		Method:  MethodHybrid,
+	}, nil
 }
 
 func searchVector(ctx context.Context, store Store, req QueryRequest, limit int) ([]storage.ScoredEntry, error) {
@@ -118,14 +177,55 @@ func searchVector(ctx context.Context, store Store, req QueryRequest, limit int)
 // DefaultLifecycleAllows applies the named-memory recall default lifecycle
 // gate. Explicit lifecycle filters live at the caller layer.
 func DefaultLifecycleAllows(state string, score float64, query string) bool {
+	return LifecycleAllowsThreshold(state, score, query, defaultStandardCandidateThreshold)
+}
+
+// LifecycleAllowsThreshold applies the named-memory recall lifecycle gate
+// using the provided candidate threshold instead of the default standard
+// threshold. Callers that classify queries as "deep" (exploratory,
+// aggregation, categorical) should pass defaultDeepCandidateThreshold.
+func LifecycleAllowsThreshold(state string, score float64, query string, candidateThreshold float64) bool {
 	switch strings.TrimSpace(state) {
 	case "", "active":
 		return true
 	case "candidate", "stale":
-		return strings.TrimSpace(query) != "" && score >= defaultStrongLifecycleScore
+		if strings.TrimSpace(query) == "" {
+			return false
+		}
+		return score >= candidateThreshold
 	default:
 		return false
 	}
+}
+
+// QueryClassDeep returns true for queries that should use the deep-mode
+// candidate threshold (wider recall). Deep queries include aggregations,
+// broad categories, recommendations, and multi-session questions — patterns
+// adapted from Quarq's search_mode heuristic but implemented as a pure
+// string classifier without keyword heuristics on classification decisions.
+// The classification is intentionally conservative: only queries that clearly
+// ask for broad/exploratory recall are classified as deep.
+func QueryClassDeep(query string) bool {
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" {
+		return false
+	}
+	// Multi-clause questions (contain "and" joining two distinct question
+	// clauses) are exploratory.
+	clauseCount := strings.Count(q, "?")
+	if clauseCount > 1 {
+		return true
+	}
+	return false
+}
+
+// CandidateThresholdForQuery returns the appropriate candidate threshold
+// for the given query.
+func CandidateThresholdForQuery(query string) float64 {
+	if QueryClassDeep(query) {
+		return defaultDeepCandidateThreshold
+	}
+	return defaultStandardCandidateThreshold
 }
 
 // QuerySimilarityAllows applies the default named-memory query similarity gate.

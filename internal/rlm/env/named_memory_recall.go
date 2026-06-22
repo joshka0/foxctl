@@ -113,7 +113,7 @@ func (a *ReadOnlyAdapter) namedMemoryGatherPacksFn(statuses []contextengine.Clai
 }
 
 func namedMemoryGatherQueries(query string, options namedMemoryGatherOptions) []string {
-	out := make([]string, 0, 6)
+	out := make([]string, 0, 8)
 	add := func(value string) {
 		value = strings.TrimSpace(value)
 		if value == "" {
@@ -126,7 +126,10 @@ func namedMemoryGatherQueries(query string, options namedMemoryGatherOptions) []
 		}
 		out = append(out, value)
 	}
-	add(query)
+	// HyDE decomposition (Slice 5): widen recall with relational sub-queries.
+	for _, probe := range memoryrecall.DecomposeQuery(query) {
+		add(probe)
+	}
 	if !options.CoverageRepair {
 		return out
 	}
@@ -135,13 +138,13 @@ func namedMemoryGatherQueries(query string, options namedMemoryGatherOptions) []
 			continue
 		}
 		add(strings.TrimSpace(strings.Join(append([]string{req.Label}, req.Terms...), " ")))
-		if len(out) >= 6 {
+		if len(out) >= 8 {
 			return out
 		}
 	}
 	for _, evidence := range options.RequiredEvidence {
 		add(evidence)
-		if len(out) >= 6 {
+		if len(out) >= 8 {
 			return out
 		}
 	}
@@ -176,7 +179,7 @@ func (a *ReadOnlyAdapter) namedMemoryRecallPack(ctx context.Context, cfg context
 		if !memoryrecall.QuerySimilarityAllows(scored.Score, query, memoryrecall.DefaultMinSimilarity) {
 			continue
 		}
-		if !memoryrecall.DefaultLifecycleAllows(entry.LifecycleState, scored.Score, query) {
+		if !memoryrecall.LifecycleAllowsThreshold(entry.LifecycleState, scored.Score, query, memoryrecall.CandidateThresholdForQuery(query)) {
 			suppressedLifecycle++
 			continue
 		}
