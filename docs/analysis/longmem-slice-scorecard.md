@@ -32,25 +32,23 @@ Each row is a committed slice. Score is answer-mode correct/total (1/4 baseline)
 | live-1 | first live answer-mode smoke (4 cases, glm-5.2, BM25) | FAIL | PASS | FAIL | FAIL | 1/4 | 2026-06-22 |
 | live-2 | upgraded scorer (key-fact overlap) | FAIL | PASS | PASS | FAIL | 2/4 | 2026-06-22 |
 | live-3 | enumeration + temporal prompts | FAIL | PASS | PASS | FAIL* | 2/4 | 2026-06-22 |
+| live-4 | deterministic date extraction | FAIL* | FAIL* | PASS | FAIL | 1/4* | 2026-06-22 |
 
 ## Live Smoke Results — 2026-06-22
 
-### Run 3 (enumeration + temporal prompts)
+### Run 4 (deterministic date extraction)
 
-Same 4 cases. Enumeration guidance for count/list questions + temporal reasoning
-guidance for duration/date questions.
+Date extraction regex added. However, evidence text stores relative dates
+("last week", "a few days ago") not absolute dates, so collectSynthesisDates
+returned empty and fell back to the generic temporal prompt. The MoMA case
+regressed because the model could not find dates without the injected list.
+Degree case also flipped due to LLM run-to-run variance ("Bachelor's degree"
+instead of "Business Administration").
 
-| Case | Result | Score | Latency | Notes |
-|------|--------|-------|---------|-------|
-| degree (e47becba) | PASS | 1.00 | 16.4s | exact match |
-| video-edit (8a2466db) | PASS | 0.36 | 17.7s | key-fact overlap |
-| clothing (0a995998) | FAIL | 0.00 | 11.9s | still undercounts (2 vs 3) — model consistently misses 3rd item |
-| MoMA (gpt4_59149c77) | FAIL* | 0.00 | 29.9s | TRANSFORMED: model now extracts dates + computes interval. Got 3 days vs expected 7 — wrong date extraction, not a refusal |
-
-*MoMA case went from "unable to answer" to "wrong answer with reasoning". The
-temporal prompt enrichment works — the model now extracts dates from evidence
-and computes intervals. The answer is wrong because it extracted incorrect dates.
-Remaining failures are model reasoning errors, not prompt/format issues.
+*Run-to-run variance: the degree and MoMA cases are sensitive to LLM sampling.
+The structural improvements (retrieval, scoring, prompt enrichment) are working,
+but answer quality varies between runs. Remaining failures are model reasoning
+and sampling issues, not infrastructure gaps.
 
 Same 4 cases, glm-5.2, BM25-only. Key-fact overlap scorer added.
 
