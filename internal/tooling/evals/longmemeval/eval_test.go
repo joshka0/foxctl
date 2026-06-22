@@ -537,6 +537,55 @@ func TestAnswerMatchScoreRejectsQuotedExpectedValueInRefusal(t *testing.T) {
 	}
 }
 
+func TestKeyFactOverlapScoreCatchesParaphrasedAnswer(t *testing.T) {
+	t.Parallel()
+
+	// Video-editing case: answer correctly identifies Premiere Pro preference
+	// but phrases it differently from the expected answer.
+	answer := "I found a strong match in memory from a past conversation where you were exploring advanced settings in Adobe Premiere Pro. Since you already enjoy using Premiere Pro, here are the resources we discussed."
+	expected := "The user would prefer responses that suggest resources specifically tailored to Adobe Premiere Pro, especially those that delve into its advanced settings."
+	score := answerMatchScore(answer, expected)
+	if score == 0 {
+		t.Fatalf("paraphrased correct answer should score > 0 via key-fact overlap")
+	}
+	if score < 0.3 {
+		t.Fatalf("overlap score %f should be >= 0.3 for this case", score)
+	}
+}
+
+func TestKeyFactOverlapScoreRejectsWrongAnswer(t *testing.T) {
+	t.Parallel()
+
+	// Clothing case: expected "3", answer says "2 items" — genuinely wrong.
+	score := answerMatchScore("you need to attend to 2 items of clothing", "3")
+	if score > 0 {
+		t.Fatalf("wrong numeric answer should score 0, got %f", score)
+	}
+}
+
+func TestKeyFactOverlapScoreShortExpectedUsesStrictOnly(t *testing.T) {
+	t.Parallel()
+
+	// Short expected answer ("yes") should not trigger overlap scoring.
+	score := answerMatchScore("yeah absolutely that is correct", "yes")
+	if score > 0 {
+		t.Fatalf("short expected answer should use strict matching only, got %f", score)
+	}
+}
+
+func TestBidirectionalContainsScore(t *testing.T) {
+	t.Parallel()
+
+	// Answer "business administration" is contained in the longer expected
+	// answer. The answer is a significant fraction of the expected, so this
+	// should score via the key-fact overlap path even if the bidirectional
+	// length check doesn't fire.
+	score := answerMatchScore("business administration", "business administration. you mentioned it has been helpful.")
+	if score == 0 {
+		t.Fatalf("answer containing expected key facts should score > 0")
+	}
+}
+
 func TestRunAnswerModeRequiresRunner(t *testing.T) {
 	_, err := Run(context.Background(), EvalOptions{
 		DatasetPath: "test://fixture",

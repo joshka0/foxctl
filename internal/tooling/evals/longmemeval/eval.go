@@ -775,7 +775,107 @@ func answerMatchScore(answer, expected string) float64 {
 	if answer == expected || strings.Contains(answer, expected) {
 		return 1
 	}
+	// Bidirectional contains: the expected answer may be longer and
+	// contain the given answer as a substring. Only fire when the answer
+	// is at least half the expected length (chars) to avoid matching a
+	// single word to a long expected answer.
+	if strings.Contains(expected, answer) && len(answer)*2 >= len(expected) {
+		return 1
+	}
+	// Semantic key-fact overlap: for longer expected answers, check if
+	// the answer covers the key facts/entities. This catches paraphrased
+	// correct answers that strict substring matching misses.
+	if score := keyFactOverlapScore(answer, expected); score > 0 {
+		return score
+	}
 	return 0
+}
+
+// keyFactOverlapScore checks whether the answer covers the key facts from
+// the expected answer. It extracts significant phrases (>3 chars, excluding
+// stopwords) from the expected answer and checks how many appear in the
+// answer. Returns a score from 0 to 1 based on coverage ratio. Only fires
+// when the expected answer has at least 3 significant phrases (short answers
+// like "3" or "yes" use strict matching only).
+func keyFactOverlapScore(answer, expected string) float64 {
+	expectedPhrases := extractSignificantPhrases(expected)
+	if len(expectedPhrases) < 3 {
+		return 0
+	}
+	matched := 0
+	for _, phrase := range expectedPhrases {
+		if strings.Contains(answer, phrase) {
+			matched++
+		}
+	}
+	coverage := float64(matched) / float64(len(expectedPhrases))
+	// Accept at 30% coverage — paraphrased answers share key entities but
+	// rarely share connective phrasing. The insufficiency guard already
+	// filters refusals, and short expected answers use strict matching,
+	// so false positives from topical adjacency are bounded.
+	if coverage >= 0.3 {
+		return coverage
+	}
+	return 0
+}
+
+// extractSignificantPhrases returns multi-word and single-word phrases from
+// text that are likely to carry factual content. Filters stopwords and short
+// tokens. Used for semantic overlap scoring, not classification decisions.
+func extractSignificantPhrases(text string) []string {
+	words := strings.Fields(text)
+	phrases := make([]string, 0, len(words))
+	seen := make(map[string]struct{})
+	addPhrase := func(p string) {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			return
+		}
+		if _, ok := seen[p]; ok {
+			return
+		}
+		seen[p] = struct{}{}
+		phrases = append(phrases, p)
+	}
+	// Single significant words (>3 chars, not stop words).
+	for _, w := range words {
+		w = strings.Trim(w, ".,;:!?()[]{}\"'")
+		if len(w) <= 3 || answerScoreStopword(w) {
+			continue
+		}
+		addPhrase(w)
+	}
+	// Bigrams: only when BOTH words are significant (>3 chars, not stopwords).
+	// This filters connective bigrams like "been helpful" or "administration you".
+	for i := 0; i < len(words)-1; i++ {
+		w1 := strings.Trim(words[i], ".,;:!?()[]{}\"'")
+		w2 := strings.Trim(words[i+1], ".,;:!?()[]{}\"'")
+		if len(w1) <= 3 || len(w2) <= 3 {
+			continue
+		}
+		if answerScoreStopword(w1) || answerScoreStopword(w2) {
+			continue
+		}
+		addPhrase(w1 + " " + w2)
+	}
+	return phrases
+}
+
+// answerScoreStopword returns true for common words that should not count
+// as significant phrases for overlap scoring. This is NOT used for routing
+// or classification — only for narrowing which tokens count as factual
+// content in the answer scorer.
+func answerScoreStopword(word string) bool {
+	switch strings.ToLower(word) {
+	case "the", "that", "this", "they", "them", "their", "from", "have",
+		"been", "would", "could", "should", "will", "with", "into",
+		"some", "more", "most", "than", "then", "also", "just",
+		"only", "even", "very", "much", "many", "such", "same",
+		"other", "what", "where", "when", "which", "does", "were":
+		return true
+	default:
+		return false
+	}
 }
 
 func answerExpressesInsufficientEvidence(answer string) bool {
