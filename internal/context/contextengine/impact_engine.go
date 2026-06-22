@@ -559,7 +559,34 @@ func ApplyInvalidation(ctx context.Context, store InvalidationStore, event Conte
 		}
 
 	case EventKindMemoryClaimPromoted:
-		// Supersede old claims
+		// Promote candidate claims referenced directly by the event, then
+		// supersede old current claims surfaced via impact markers.
+		for _, ref := range event.Refs {
+			if ref.Type != RefTypeMemoryClaim {
+				continue
+			}
+			claim, err := store.GetClaim(ctx, ref.Ref)
+			if err != nil {
+				continue
+			}
+			switch claim.Status {
+			case ClaimStatusCandidate:
+				promoted, err := ApplyClaimTransition(claim, ClaimStatusCurrent, "promoted by accepted evidence: "+event.ID, now)
+				if err != nil {
+					continue
+				}
+				if _, upsertErr := store.UpsertClaim(ctx, promoted); upsertErr != nil {
+					_ = upsertErr // best-effort
+				}
+			case ClaimStatusCurrent:
+				// Already current; nothing to do for this ref.
+			default:
+				// Skip non-candidate, non-current claims (needs_revalidation,
+				// stale, superseded, rejected). Let them be handled by their
+				// own lifecycle paths — promotion should not supersede them.
+			}
+		}
+		// Also process impact markers (claims surfaced via graph traversal).
 		for _, marker := range markers {
 			if marker.TargetRef.Type == RefTypeMemoryClaim {
 				claim, err := store.GetClaim(ctx, marker.TargetRef.Ref)

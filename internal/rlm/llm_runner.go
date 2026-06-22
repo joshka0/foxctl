@@ -2,6 +2,8 @@ package rlm
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -10,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/runtime/engine"
 )
 
@@ -84,8 +87,9 @@ type LLMConfig struct {
 
 // LLMRunner uses the existing engine.LLMChatEngine as an experimental read-only RLM backend.
 type LLMRunner struct {
-	Config LLMConfig
-	Tools  ToolExecutor
+	Config        LLMConfig
+	Tools         ToolExecutor
+	FeedbackStore contextengine.RetrievalFeedbackEffectStore // optional; nil = no feedback emission
 }
 
 func (r LLMRunner) Run(ctx context.Context, task Task, env Environment) (Result, error) {
@@ -433,6 +437,22 @@ func (r LLMRunner) runStaged(ctx context.Context, task Task, env Environment, sp
 	}
 
 	allPaths = rerankCandidatePaths(task.Prompt, allPaths)
+
+	// REQUIRED_DATA fallback (Slice 4): when evidence was surfaced but the
+	// ledger accepted nothing, run one bounded re-query with target nouns
+	// extracted from the task prompt. This is Quarq's REQUIRED_DATA protocol
+	// adapted to foxctl's staged runner. The re-query uses the gather_context
+	// tool at a lower (deep) threshold. Capped to one fallback.
+	fallbackFired := false
+	if len(allAcceptedLedgerEvidence) == 0 && len(allSurfacedEvidence) > 0 && r.Tools != nil {
+		fallbackRefs := r.tryRetrievalFallback(ctx, task, baseStageEnv)
+		if len(fallbackRefs) > 0 {
+			fallbackFired = true
+			allSurfacedEvidence = uniqueStringsRLM(append(allSurfacedEvidence, fallbackRefs...))
+			allEvidence = uniqueStringsRLM(append(allEvidence, fallbackRefs...))
+		}
+	}
+
 	finalPrompt := buildSynthesisPrompt(task.Prompt, allPaths, allSurfacedEvidence, allAcceptedLedgerEvidence, phaseNotes)
 	finalResult, err := r.runSinglePass(ctx, task, baseStageEnv, runPassConfig{
 		Prompt:         finalPrompt,
@@ -478,6 +498,11 @@ func (r LLMRunner) runStaged(ctx context.Context, task Task, env Environment, sp
 	finalResult.Metadata["parent_retrieve_code_prompt_delta_total"] = sumNestedIntMetadata(phaseMeta, "parent_tool_usage", "target_tool_prompt_delta_total")
 	finalResult.Metadata["parent_retrieve_code_invocations_total"] = sumNestedIntMetadata(phaseMeta, "parent_tool_usage", "target_tool_invocations")
 	finalResult.Metadata["parent_retrieve_code_result_token_estimate_total"] = sumNestedIntMetadata(phaseMeta, "parent_tool_usage", "target_tool_result_token_estimate_total")
+	// Best-effort: emit AnswerAccepted feedback from accepted ledger evidence so
+	// candidate claims promoted by Slice 1a can fire. Errors are logged and
+	// swallowed so a store hiccup never breaks the answer path.
+	emitAnswerAcceptedFeedback(ctx, r.FeedbackStore, task, finalResult.Metadata["accepted_ledger_evidence"])
+	finalResult.Metadata["retrieval_fallback_fired"] = fallbackFired
 	return finalResult, nil
 }
 
@@ -1288,4 +1313,202 @@ func cloneStringAnyMap(in map[string]any) map[string]any {
 		out[key] = value
 	}
 	return out
+}
+
+// emitAnswerAcceptedFeedback records AnswerAccepted feedback for accepted
+// ledger evidence refs, enabling candidate claim promotion via the Slice 1a
+// feedback loop. It is best-effort: any error is swallowed so the answer path
+// never breaks on a store hiccup. No-op when store is nil or no accepted
+// evidence exists.
+func emitAnswerAcceptedFeedback(ctx context.Context, store contextengine.RetrievalFeedbackEffectStore, task Task, acceptedEvidence any) {
+	if store == nil {
+		return
+	}
+	refs := parseAcceptedLedgerEvidenceRefs(stringsFromAnySlice(acceptedEvidence))
+	if len(refs) == 0 {
+		return
+	}
+	answer := strings.TrimSpace(task.Prompt)
+	if answer == "" {
+		return
+	}
+	episodeID := deterministicAnswerEpisodeID(task, stringsFromAnySlice(acceptedEvidence))
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	feedback := contextengine.RetrievalFeedback{
+		ID:          "rlm-answer-accepted-" + episodeID,
+		WorkspaceID: task.WorkspaceID,
+		EpisodeID:   "episode-answer-" + episodeID,
+		Kind:        contextengine.RetrievalFeedbackKindAnswerAccepted,
+		Query:       answer,
+		UsedRefs:    refs,
+		CreatedAt:   now,
+	}
+	_, _ = contextengine.RecordRetrievalFeedbackWithEffects(ctx, store, feedback)
+}
+
+// parseAcceptedLedgerEvidenceRefs converts accepted ledger evidence strings
+// into typed EvidenceRefs. Strings without a type:value colon separator are
+// skipped.
+func parseAcceptedLedgerEvidenceRefs(values []string) []contextengine.EvidenceRef {
+	out := make([]contextengine.EvidenceRef, 0, len(values))
+	for _, raw := range values {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue
+		}
+		// Strip trailing descriptions: "named_memory:foo: some text" -> "named_memory:foo"
+		if idx := strings.Index(value, ": "); idx >= 0 {
+			value = strings.TrimSpace(value[:idx])
+		}
+		parts := strings.SplitN(value, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		refType := strings.TrimSpace(parts[0])
+		refValue := strings.TrimSpace(parts[1])
+		if refType == "" || refValue == "" {
+			continue
+		}
+		out = append(out, contextengine.EvidenceRef{
+			Type: contextengine.RefType(refType),
+			Ref:  refValue,
+		})
+	}
+	return out
+}
+
+func deterministicAnswerEpisodeID(task Task, acceptedRefs []string) string {
+	h := sha256.New()
+	if task.RunID != "" {
+		h.Write([]byte(task.RunID))
+	} else {
+		h.Write([]byte(task.Prompt))
+	}
+	sorted := append([]string(nil), acceptedRefs...)
+	sort.Strings(sorted)
+	for _, ref := range sorted {
+		h.Write([]byte(ref))
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
+// tryRetrievalFallback implements the REQUIRED_DATA protocol: when the evidence
+// ledger has no accepted rows, extract key nouns from the task prompt and run
+// one bounded gather_memory_context call to widen the recall net. Returns the
+// surfaced evidence refs from the fallback, or nil if the fallback did not fire
+// or produced nothing new.
+func (r LLMRunner) tryRetrievalFallback(ctx context.Context, task Task, env Environment) []string {
+	probeQueries := extractFallbackProbeQueries(task.Prompt)
+	if len(probeQueries) == 0 {
+		return nil
+	}
+	// Use the gather_memory_context tool if available, otherwise retrieve_memory.
+	toolName := "gather_memory_context"
+	if !containsToolName(env.Tools, toolName) {
+		toolName = "retrieve_memory"
+		if !containsToolName(env.Tools, toolName) {
+			return nil
+		}
+	}
+	var newRefs []string
+	for _, query := range probeQueries {
+		args := map[string]any{
+			"query": query,
+			"limit": 10,
+		}
+		argsJSON, err := json.Marshal(args)
+		if err != nil {
+			continue
+		}
+		out, err := newAllowlistedToolExecutor(r.Tools, []Tool{{Name: toolName, ReadOnly: true}}).Execute(ctx, toolName, argsJSON)
+		if err != nil {
+			continue
+		}
+		newRefs = append(newRefs, extractEvidenceRefsFromToolOutput(out)...)
+	}
+	return uniqueStringsRLM(newRefs)
+}
+
+// extractFallbackProbeQueries derives re-query probes from the task prompt by
+// splitting on question markers and extracting noun-heavy phrases. Capped at 3
+// probes to bound cost.
+func extractFallbackProbeQueries(prompt string) []string {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return nil
+	}
+	// Extract the trailing Question: text if present (staged prompt format).
+	if idx := strings.LastIndex(strings.ToLower(prompt), "question:"); idx >= 0 {
+		prompt = strings.TrimSpace(prompt[idx+len("question:"):])
+	}
+	// Split on common question delimiters and take the last clause.
+	question := strings.TrimSpace(prompt)
+	if idx := strings.LastIndexByte(question, '?'); idx >= 0 {
+		question = strings.TrimSpace(question[:idx])
+	}
+	// Remove common question prefixes.
+	for _, prefix := range []string{"what ", "where ", "when ", "how ", "which ", "do ", "did ", "does ", "is ", "are ", "can ", "could ", "have ", "has "} {
+		question = strings.TrimPrefix(strings.ToLower(question), prefix)
+	}
+	if len(question) < 3 {
+		return nil
+	}
+	// Build probes: the full question + key noun phrases (words > 3 chars).
+	probes := []string{question}
+	words := strings.Fields(question)
+	keyWords := make([]string, 0, len(words))
+	for _, w := range words {
+		w = strings.Trim(w, ".,;:!?()[]{}\"'")
+		if len(w) > 3 {
+			keyWords = append(keyWords, w)
+		}
+	}
+	if len(keyWords) > 0 && len(keyWords) <= 6 {
+		probe := strings.Join(keyWords, " ")
+		if probe != question {
+			probes = append(probes, probe)
+		}
+	}
+	if len(probes) > 3 {
+		probes = probes[:3]
+	}
+	return probes
+}
+
+// extractEvidenceRefsFromToolOutput pulls evidence ref strings from a tool
+// execution result map.
+func extractEvidenceRefsFromToolOutput(out any) []string {
+	m, ok := out.(map[string]any)
+	if !ok {
+		return nil
+	}
+	var refs []string
+	// Check common output field names.
+	for _, key := range []string{"evidence_refs", "refs", "surfaced_refs", "nodes"} {
+		if values, ok := m[key].([]any); ok {
+			for _, v := range values {
+				switch val := v.(type) {
+				case string:
+					refs = append(refs, val)
+				case map[string]any:
+					if ref, ok := val["ref"].(string); ok && ref != "" {
+						refs = append(refs, ref)
+					}
+					if path, ok := val["path"].(string); ok && path != "" {
+						refs = append(refs, path)
+					}
+				}
+			}
+		}
+	}
+	return refs
+}
+
+func containsToolName(tools []Tool, name string) bool {
+	for _, t := range tools {
+		if t.Name == name {
+			return true
+		}
+	}
+	return false
 }

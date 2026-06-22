@@ -42,7 +42,6 @@ func TestContextEventFromRetrievalFeedback_NonLifecycleFeedbackIsInformational(t
 
 	for _, kind := range []RetrievalFeedbackKind{
 		RetrievalFeedbackKindEvidenceUsed,
-		RetrievalFeedbackKindAnswerAccepted,
 		RetrievalFeedbackKindRetrievalMissed,
 		RetrievalFeedbackKindWrongFileRetrieved,
 		RetrievalFeedbackKindGapCreated,
@@ -70,7 +69,7 @@ func TestRetrievalFeedbackKindHasLifecycleImpact(t *testing.T) {
 		want bool
 	}{
 		{string(RetrievalFeedbackKindEvidenceUsed), false},
-		{string(RetrievalFeedbackKindAnswerAccepted), false},
+		{string(RetrievalFeedbackKindAnswerAccepted), true},
 		{string(RetrievalFeedbackKindAnswerCorrected), true},
 		{string(RetrievalFeedbackKindRetrievalMissed), false},
 		{string(RetrievalFeedbackKindWrongFileRetrieved), false},
@@ -92,6 +91,7 @@ func TestContextEventFromRetrievalFeedback_LifecycleFeedbackWithoutUsedRefsIsInf
 	t.Parallel()
 
 	for _, kind := range []RetrievalFeedbackKind{
+		RetrievalFeedbackKindAnswerAccepted,
 		RetrievalFeedbackKindAnswerCorrected,
 		RetrievalFeedbackKindStaleContextUsed,
 	} {
@@ -176,7 +176,7 @@ func TestRecordRetrievalFeedbackWithEffects_CorrectedCandidateNeedsRevalidation(
 	}
 }
 
-func TestRecordRetrievalFeedbackWithEffects_AcceptedDoesNotPromoteCandidate(t *testing.T) {
+func TestRecordRetrievalFeedbackWithEffects_AcceptedPromotesCandidate(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -197,16 +197,16 @@ func TestRecordRetrievalFeedbackWithEffects_AcceptedDoesNotPromoteCandidate(t *t
 	if err != nil {
 		t.Fatalf("get claim: %v", err)
 	}
-	if got.Status != ClaimStatusCandidate {
-		t.Fatalf("claim status=%q want %q", got.Status, ClaimStatusCandidate)
+	if got.Status != ClaimStatusCurrent {
+		t.Fatalf("claim status=%q want %q (candidate should be promoted by accepted feedback)", got.Status, ClaimStatusCurrent)
 	}
 
 	events, err := store.ListEvents(ctx, EventFilter{WorkspaceID: claim.WorkspaceID})
 	if err != nil {
 		t.Fatalf("list events: %v", err)
 	}
-	if len(events) != 0 {
-		t.Fatalf("accepted feedback should not append lifecycle events, got %d", len(events))
+	if len(events) == 0 {
+		t.Fatalf("accepted feedback with UsedRefs should append a promotion event, got 0 events")
 	}
 }
 

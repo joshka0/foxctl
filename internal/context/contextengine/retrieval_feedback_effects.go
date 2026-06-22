@@ -164,6 +164,8 @@ func feedbackImpactEventKind(kind RetrievalFeedbackKind) (ContextEventKind, bool
 		return EventKindAnswerCorrected, true
 	case RetrievalFeedbackKindStaleContextUsed:
 		return EventKindMemoryClaimRevalidate, true
+	case RetrievalFeedbackKindAnswerAccepted:
+		return EventKindMemoryClaimPromoted, true
 	default:
 		return "", false
 	}
