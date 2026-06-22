@@ -7911,7 +7911,6 @@ func buildEvidenceLedger(input evidenceLedgerInput, loaded []aggregateLoadedEvid
 	requiredTerms := aggregateEvidenceRequiredTerms(aggInput)
 
 	rows := make([]evidenceLedgerRow, 0, len(loaded))
-	anyAccepted := false
 	for _, item := range loaded {
 		text := strings.TrimSpace(item.Text)
 		r := evidenceLedgerRow{
@@ -7925,9 +7924,6 @@ func buildEvidenceLedger(input evidenceLedgerInput, loaded []aggregateLoadedEvid
 			r.matchedSlots = evidenceLedgerAddSemanticSlots(text, slots, r.matchedSlots, input.semanticSlotMatch)
 		}
 		r.status, r.reason = classifyEvidenceLedgerRow(answerType, slots, len(requiredTerms), r.matchedTerms, r.matchedSlots, r.values, item)
-		if r.status == "accept" {
-			anyAccepted = true
-		}
 		rows = append(rows, r)
 	}
 
@@ -7936,8 +7932,11 @@ func buildEvidenceLedger(input evidenceLedgerInput, loaded []aggregateLoadedEvid
 	// states the requested answer value, accept the answer-bearing ref(s) and
 	// credit the sibling refs that supply the anchor coverage. This is what
 	// recovers answers that depend on separated conversational context.
+	// Also run when some refs were accepted by the relaxed slot gate but
+	// rejected refs still carry the answer value — the composition credits
+	// those refs so the answer outline includes all supporting evidence.
 	composedConceptSupport := map[string][]map[string]any{}
-	if !anyAccepted && evidenceLedgerRequiresDirectAnswer(answerType) {
+	if evidenceLedgerRequiresDirectAnswer(answerType) {
 		composeCrossRefEvidence(rows, slots, answerType, input.MaxTextChars, composedConceptSupport)
 	}
 
@@ -8120,6 +8119,16 @@ func classifyEvidenceLedgerRow(answerType string, slots []aggregateEvidenceSlot,
 	strongTermMatch := len(matchedTerms) >= threshold
 	strongSlotMatch := len(conceptMatches) >= evidenceLedgerRequiredConceptThreshold(slots)
 	if evidenceLedgerRequiresDirectAnswer(answerType) && !directAnswer {
+		// The regex-based value extractor missed the answer value. For
+		// location and list types, conversational phrasing commonly
+		// defeats the regex (no preposition, indirect reference). When
+		// the required concept slots are strongly matched, accept based
+		// on slot coverage. For numeric/temporal types (duration, count,
+		// temporal), keep the strict gate — a missing numeric value
+		// genuinely means the answer is absent.
+		if evidenceLedgerSlotRelaxedForMissingValue(answerType) && strongSlotMatch {
+			return "accept", "concept slots covered; answer value present in non-extractable form"
+		}
 		return "reject", "required anchors are present but the requested answer slot is not directly stated"
 	}
 	if evidenceLedgerRequiresDirectAnswer(answerType) {
@@ -8237,6 +8246,22 @@ func evidenceLedgerRequiredConceptThreshold(slots []aggregateEvidenceSlot) int {
 func evidenceLedgerRequiresDirectAnswer(answerType string) bool {
 	switch answerType {
 	case "count", "list", "location", "duration", "temporal":
+		return true
+	default:
+		return false
+	}
+}
+
+// evidenceLedgerSlotRelaxedForMissingValue reports whether the answer type
+// permits accepting a row when the regex value extractor fails to find a
+// direct answer value but concept slots are strongly matched. Location and
+// list types qualify because conversational phrasing commonly defeats the
+// regex (no preposition, indirect reference, named entities in unusual
+// positions). Numeric and temporal types do not qualify: a missing number
+// or date genuinely means the answer is absent.
+func evidenceLedgerSlotRelaxedForMissingValue(answerType string) bool {
+	switch answerType {
+	case "location", "list":
 		return true
 	default:
 		return false
