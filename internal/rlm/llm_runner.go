@@ -821,6 +821,11 @@ func buildSynthesisPrompt(query string, candidatePaths, evidenceRefs, acceptedLe
 	if synthesisQueryIsEnumeration(query) {
 		b.WriteString("\n\nThis question asks for a count or list. Before answering, enumerate each distinct item you find in the evidence. State the total count only after listing all items.")
 	}
+	// Temporal reasoning guidance: for duration/date-arithmetic questions,
+	// instruct the model to extract dates from evidence and compute the interval.
+	if at := classifySynthesisAnswerType(query); at == "temporal" || at == "duration" {
+		b.WriteString("\n\nThis question requires temporal reasoning. Extract any dates or time references from the evidence. If you find two dates, compute the interval between them (in days, weeks, or months as appropriate). Express the answer as a specific number.")
+	}
 	if len(candidatePaths) > 0 {
 		b.WriteString("\nCandidate paths: ")
 		b.WriteString(strings.Join(shortenRefs(candidatePaths, 10), ", "))
@@ -864,6 +869,30 @@ func synthesisQueryIsEnumeration(query string) bool {
 		}
 	}
 	return false
+}
+
+// classifySynthesisAnswerType detects the answer type for prompt enrichment.
+// This is a lightweight local classifier to avoid an import cycle with
+// rlm/env. It is used only for synthesis prompt enrichment, not for routing
+// or evidence-ledger classification.
+func classifySynthesisAnswerType(query string) string {
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" {
+		return "fact"
+	}
+	if strings.Contains(q, "how many days") || strings.Contains(q, "days between") ||
+		strings.Contains(q, "how long ago") || strings.Contains(q, "days passed") ||
+		strings.Contains(q, "how long is") || strings.Contains(q, "how long was") ||
+		strings.Contains(q, "duration of") || strings.Contains(q, "how much time") {
+		return "duration"
+	}
+	if strings.Contains(q, "when did") || strings.Contains(q, "what date") ||
+		strings.Contains(q, "what time") || strings.Contains(q, "which year") ||
+		strings.Contains(q, "what month") || strings.Contains(q, "what year") ||
+		strings.Contains(q, "last time") || strings.Contains(q, "first time") {
+		return "temporal"
+	}
+	return "fact"
 }
 
 func toolSignature(schema json.RawMessage) string {

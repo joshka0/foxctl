@@ -68,6 +68,29 @@ func TestSynthesisQueryIsEnumeration(t *testing.T) {
 	}
 }
 
+func TestClassifySynthesisAnswerType(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		query string
+		want  string
+	}{
+		{"How long ago did I visit MoMA?", "duration"},
+		{"How many days between my MoMA and Met visits?", "duration"},
+		{"How many days passed between my visit to MoMA and the Met?", "duration"},
+		{"When did I graduate?", "temporal"},
+		{"What date did I visit the museum?", "temporal"},
+		{"What coupon did I redeem?", "fact"},
+		{"What degree did I get?", "fact"},
+		{"", "fact"},
+	}
+	for _, tt := range tests {
+		if got := classifySynthesisAnswerType(tt.query); got != tt.want {
+			t.Fatalf("classifySynthesisAnswerType(%q)=%q want %q", tt.query, got, tt.want)
+		}
+	}
+}
+
 func contains(slice []string, value string) bool {
 	for _, s := range slice {
 		if s == value {
