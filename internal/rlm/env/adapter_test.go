@@ -163,17 +163,33 @@ func TestNamedMemoryGatherQueriesAddsCoverageRepairProbes(t *testing.T) {
 			{ID: "vendor", Kind: "concept", Label: "coffee shop", Terms: []string{"receipt", "vendor"}},
 		},
 	})
-	want := []string{"Where is the receipt?", "coffee shop receipt vendor", "receipt", "vendor"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("repair queries=%v want %v", got, want)
+	// HyDE decomposition (Slice 5) adds relational probes before coverage
+	// repair probes. Verify key probes are present (order-independent for
+	// HyDE-added probes, coverage repair probes still appended after).
+	for _, want := range []string{"Where is the receipt?", "receipt", "vendor"} {
+		if !containsString(got, want) {
+			t.Fatalf("repair queries=%v missing %q", got, want)
+		}
+	}
+	// Coverage repair concept probe should still be present.
+	if !containsString(got, "coffee shop receipt vendor") {
+		t.Fatalf("repair queries=%v missing coverage concept probe", got)
 	}
 
+	// Non-repair: HyDE probes are present, but no coverage repair probes.
 	got = namedMemoryGatherQueries("Where is the receipt?", namedMemoryGatherOptions{
 		CoverageRepair:   false,
 		RequiredEvidence: []string{"receipt"},
 	})
-	if !reflect.DeepEqual(got, []string{"Where is the receipt?"}) {
-		t.Fatalf("non-repair queries=%v", got)
+	// Original query is always first.
+	if len(got) == 0 || got[0] != "Where is the receipt?" {
+		t.Fatalf("non-repair queries should start with original, got %v", got)
+	}
+	// Should NOT contain coverage repair probes.
+	for _, g := range got {
+		if strings.Contains(strings.ToLower(g), "coffee shop") {
+			t.Fatalf("non-repair queries should not contain coverage concept probe, got %v", got)
+		}
 	}
 }
 
