@@ -40,6 +40,7 @@ Each row is a committed slice. Score is answer-mode correct/total (1/4 baseline)
 | live-9 | 19-case BM25-dominant (0.25/0.75) | — | — | — | — | 13/19 (68%) | 2026-06-23 |
 | live-10 | 19-case per-turn chunks | — | — | — | — | 11/19 (58%) | 2026-06-23 |
 | live-11 | 19-case turn digest summary | — | — | — | — | 13/19 (68%) | 2026-06-23 |
+| live-12 | 19-case + LLM judge | — | — | — | — | 14/19 (74%) | 2026-06-23 |
 
 ## Scaled Eval Results — 2026-06-23
 
