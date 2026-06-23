@@ -180,7 +180,13 @@ func BuildPlan(cases []Case, opts IngestOptions) (Plan, error) {
 			if sessionID == "" {
 				sessionID = fmt.Sprintf("session-%03d", i)
 			}
-			semanticText := truncateText(renderSession(session), maxText)
+			sessionDate := listValue(c.HaystackDates, i)
+			rendered := renderSession(session)
+			// Prepend session metadata header so the model has temporal context.
+			// This is critical for temporal-reasoning questions (e.g. "how many
+			// days between visits") where the answer depends on knowing when
+			// each conversation occurred.
+			semanticText := truncateText(renderSessionWithMetadata(rendered, sessionDate, sessionID), maxText)
 			if strings.TrimSpace(semanticText) == "" {
 				continue
 			}
@@ -349,6 +355,37 @@ func renderSession(messages []Message) string {
 		parts = append(parts, role+": "+content)
 	}
 	return strings.Join(parts, "\n")
+}
+
+// renderSessionWithMetadata prepends a metadata header to the rendered session
+// text. The header includes the session date (when available) and session ID,
+// giving the model temporal context for temporal-reasoning questions. The
+// metadata is separated from conversation content by a blank line and a
+// "Conversation:" label so the model can distinguish metadata from content.
+//
+// Example output:
+//
+//	[Session date: 2023/01/08 (Sun) 12:49]
+//
+//	Conversation:
+//	user: I just got back from a guided tour at the Museum of Modern Art...
+//	assistant: What a great experience! ...
+func renderSessionWithMetadata(rendered, sessionDate, sessionID string) string {
+	rendered = strings.TrimSpace(rendered)
+	if rendered == "" {
+		return ""
+	}
+	var b strings.Builder
+	// Session date header.
+	date := strings.TrimSpace(sessionDate)
+	if date != "" {
+		b.WriteString("[Session date: ")
+		b.WriteString(date)
+		b.WriteString("]\n\n")
+	}
+	b.WriteString("Conversation:\n")
+	b.WriteString(rendered)
+	return b.String()
 }
 
 func sessionForCase(c Case, sessionID string) []Message {
