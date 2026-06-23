@@ -34,6 +34,7 @@ Each row is a committed slice. Score is answer-mode correct/total (1/4 baseline)
 | live-3 | enumeration + temporal prompts | FAIL | PASS | PASS | FAIL* | 2/4 | 2026-06-22 |
 | live-4 | deterministic date extraction | FAIL* | FAIL* | PASS | FAIL | 1/4* | 2026-06-22 |
 | live-5 | session date metadata + numeric scorer | FAIL | PASS | PASS | PASS | 3/4 | 2026-06-23 |
+| live-6 | temp=0.01 stability (run 1 / run 2) | FAIL | PASS/FAIL | PASS/FAIL | PASS | 2-3/4 | 2026-06-23 |
 
 ## Live Smoke Results
 
