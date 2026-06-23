@@ -35,7 +35,8 @@ Each row is a committed slice. Score is answer-mode correct/total (1/4 baseline)
 | live-4 | deterministic date extraction | FAIL* | FAIL* | PASS | FAIL | 1/4* | 2026-06-22 |
 | live-5 | session date metadata + numeric scorer | FAIL | PASS | PASS | PASS | 3/4 | 2026-06-23 |
 | live-6 | temp=0.01 stability (run 1 / run 2) | FAIL | PASS/FAIL | PASS/FAIL | PASS | 2-3/4 | 2026-06-23 |
-| live-7 | 19-case scaled eval | — | — | — | — | 12/19 (63%) | 2026-06-23 |
+| live-7 | 19-case scaled eval (BM25-only) | — | — | — | — | 12/19 (63%) | 2026-06-23 |
+| live-8 | 19-case with hybrid vectors | — | — | — | — | 6/19 (32%) | 2026-06-23 |
 
 ## Scaled Eval Results — 2026-06-23
 
