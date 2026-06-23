@@ -272,11 +272,17 @@ func recordUnchanged(existing storage.NamedEntry, rec Record) bool {
 
 func CheckLeakage(c Case, rec Record) []LeakageFinding {
 	source := renderSession(sessionForCase(c, rec.SessionID))
+	// For leakage checking, strip the metadata header from atomic_text and
+	// embedding_content. The [Session date: ...] header is structural metadata
+	// from the dataset (haystack_dates), not conversation content. Numeric
+	// answers like "3" can collide with year digits in the date header.
+	atomicTextStripped := stripSessionMetadata(rec.AtomicText)
+	embeddingContentStripped := stripSessionMetadata(rec.EmbeddingInput.Content)
 	fields := map[string]string{
 		"name":              rec.Name,
-		"summary":           rec.Summary,
-		"atomic_text":       rec.AtomicText,
-		"embedding_content": rec.EmbeddingInput.Content,
+		"summary":           stripSessionMetadata(rec.Summary),
+		"atomic_text":       atomicTextStripped,
+		"embedding_content": embeddingContentStripped,
 		"entities":          strings.Join(rec.Entities, " "),
 		"keywords":          strings.Join(rec.Keywords, " "),
 	}
@@ -386,6 +392,23 @@ func renderSessionWithMetadata(rendered, sessionDate, sessionID string) string {
 	b.WriteString("Conversation:\n")
 	b.WriteString(rendered)
 	return b.String()
+}
+
+// stripSessionMetadata removes the [Session date: ...] header and
+// "Conversation:" label added by renderSessionWithMetadata, returning only
+// the conversation content. Used by CheckLeakage to avoid false leakage
+// from date digits colliding with short numeric answers.
+func stripSessionMetadata(text string) string {
+	text = strings.TrimSpace(text)
+	// Remove the leading [Session date: ...] block.
+	if strings.HasPrefix(text, "[Session date:") {
+		if idx := strings.Index(text, "]\n"); idx >= 0 {
+			text = strings.TrimSpace(text[idx+2:])
+		}
+	}
+	// Remove the "Conversation:" label.
+	text = strings.TrimPrefix(text, "Conversation:\n")
+	return strings.TrimSpace(text)
 }
 
 func sessionForCase(c Case, sessionID string) []Message {
