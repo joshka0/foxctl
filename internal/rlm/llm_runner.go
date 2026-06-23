@@ -819,7 +819,7 @@ func buildSynthesisPrompt(query string, candidatePaths, evidenceRefs, acceptedLe
 	// each evidence piece before stating the count. This prevents undercounting
 	// when multiple evidence pieces each carry one item.
 	if synthesisQueryIsEnumeration(query) {
-		b.WriteString("\n\nThis question asks for a count or list. Before answering, enumerate each distinct item you find in the evidence. State the total count only after listing all items.")
+		b.WriteString("\n\nThis question asks for a count or list. Before answering, examine each evidence piece separately. For each piece of evidence, state whether it mentions an item relevant to the question. Cast a wide net: include items you need to pick up, return, exchange, retrieve from someone else, or that are otherwise not currently available to you. State the total count only after listing all items from all evidence pieces.")
 	}
 	// Temporal reasoning guidance: for duration/date-arithmetic questions,
 	// extract dates deterministically from evidence and inject them so the
