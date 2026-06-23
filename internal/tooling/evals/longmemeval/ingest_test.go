@@ -114,22 +114,12 @@ func TestBuildPlanKeepsLateSourceTurnsInAtomicText(t *testing.T) {
 	if len(plan.Leakage) != 0 {
 		t.Fatalf("natural transcript answer text should not be leakage: %#v", plan.Leakage)
 	}
-	// With per-turn-pair chunking, the late answer is in its own chunk.
-	// Search all records for the answer text.
-	found := false
-	for _, record := range plan.Records {
-		if strings.Contains(stripSessionMetadata(record.AtomicText), "Business Administration") {
-			found = true
-			break
-		}
+	record := plan.Records[0]
+	if !strings.Contains(record.AtomicText, "Business Administration") {
+		t.Fatalf("atomic text clipped late source answer: %q", record.AtomicText)
 	}
-	if !found {
-		t.Fatalf("no chunk contains late source answer 'Business Administration'")
-	}
-	for _, record := range plan.Records {
-		assertNotContains(t, "atomic text", record.AtomicText, "answer_280352e9")
-		assertNotContains(t, "embedding content", record.EmbeddingInput.Content, "answer_280352e9")
-	}
+	assertNotContains(t, "atomic text", record.AtomicText, "answer_280352e9")
+	assertNotContains(t, "embedding content", record.EmbeddingInput.Content, "answer_280352e9")
 }
 
 func TestCheckLeakageIgnoresLowInformationAnswerCollisionInSyntheticName(t *testing.T) {

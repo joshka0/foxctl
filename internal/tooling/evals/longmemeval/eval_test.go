@@ -49,9 +49,8 @@ func TestExpectedMemoryNamesMatchBuildPlanHashing(t *testing.T) {
 	caseID := "case-1"
 	sessionIDs := []string{"sharegpt_001", "sharegpt_002"}
 	names := ExpectedMemoryNames(memoryName, workspaceID, caseID, sessionIDs)
-	// 2 sessions x (1 session-level + 20 chunk-level) = 42 names.
-	if len(names) != 42 {
-		t.Fatalf("names=%d want 42", len(names))
+	if len(names) != 2 {
+		t.Fatalf("names=%v want 2", names)
 	}
 	for _, name := range names {
 		if !strings.HasPrefix(name, "longmem://") {
@@ -512,7 +511,7 @@ func TestRunAnswerModeScoresWithFakeRunner(t *testing.T) {
 	if !c.AnswerMatched || c.AnswerScore != 1 || c.Answer != "The marker is decorated." {
 		t.Fatalf("answer scoring=%+v", c)
 	}
-	if !c.HitAt5 || c.ReciprocalRank != 1 || len(c.AnswerMatchedEvidence) < 1 {
+	if !c.HitAt5 || c.ReciprocalRank != 1 || len(c.AnswerMatchedEvidence) != 1 {
 		t.Fatalf("evidence scoring=%+v", c)
 	}
 	if c.ExpectedAnswer != "decorated" || c.AnswerMethod != "fake-answer" || c.AnswerDurationMS != 7 {
