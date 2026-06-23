@@ -289,13 +289,19 @@ func fuseResults(vectorEntries, lexicalEntries []storage.ScoredEntry, limit int)
 		sourceVector:  sourceHitsFromScoredEntries(sourceVector, vectorEntries),
 		sourceLexical: sourceHitsFromScoredEntries(sourceLexical, lexicalEntries),
 	}
+	// BM25-dominant fusion weights: LongMemEval questions are mostly factual
+	// with exact vocabulary overlap between question and evidence. Vector
+	// search adds recall for synonymy but its lower precision on factual
+	// queries causes regressions when weighted equally. BM25-dominant (0.75)
+	// preserves exact-match ranking while still allowing vector results to
+	// break ties and surface semantic near-misses.
 	fused := searchrank.Fuse(sourceHits, searchrank.FuseOptions{
 		Mode: searchrank.FuseModeWeighted,
 		TopK: limit,
 		RRFK: 60,
 		SourceWeights: map[searchrank.SourceID]float64{
-			sourceVector:  0.45,
-			sourceLexical: 0.55,
+			sourceVector:  0.25,
+			sourceLexical: 0.75,
 		},
 		MaxContributors: 2,
 	})
