@@ -347,6 +347,10 @@ func newLongmemRLMAnswerRunner(in longmemRLMAnswerRunnerConfig) longmemeval.Answ
 		llmCfg.RequireToolUse = len(env.Tools) > 0
 		llmCfg.RouteProfile = rlm.NormalizeRouteProfile(routeProfile)
 		llmCfg.PlanMode = rlm.NormalizePlanMode(planMode)
+		// Force near-deterministic sampling for eval reproducibility.
+		// Temperature 0 is the Go zero value and would be skipped by the
+		// runner's "not set" check, so use a tiny non-zero value.
+		llmCfg.Temperature = 0.01
 		runner := rlm.LLMRunner{
 			Config: llmCfg,
 			Tools:  recorder,
