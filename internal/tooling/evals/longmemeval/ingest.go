@@ -182,20 +182,23 @@ func BuildPlan(cases []Case, opts IngestOptions) (Plan, error) {
 			}
 			sessionDate := listValue(c.HaystackDates, i)
 			rendered := renderSession(session)
+			turnDigest := buildTurnDigest(session)
 			// Prepend session metadata header so the model has temporal context.
-			// This is critical for temporal-reasoning questions (e.g. "how many
-			// days between visits") where the answer depends on knowing when
-			// each conversation occurred.
 			semanticText := truncateText(renderSessionWithMetadata(rendered, sessionDate, sessionID), maxText)
 			if strings.TrimSpace(semanticText) == "" {
 				continue
 			}
+			// The summary combines the session date header with the turn digest.
+			// BM25 searches summary, so the digest gives it a concentrated
+			// signal-rich surface while the model sees the full session in
+			// atomic_text during synthesis.
+			summaryText := truncateText(turnDigest, maxSummary)
 			rec := Record{
 				CaseID:             caseID,
 				SessionID:          sessionID,
 				Name:               memoryName(plan.WorkspaceID, caseID, sessionID),
 				Type:               MemoryType,
-				Summary:            truncateText(semanticText, maxSummary),
+				Summary:            summaryText,
 				AtomicText:         semanticText,
 				Entities:           extractEntities(semanticText, 12),
 				Keywords:           extractKeywords(semanticText, 16),
@@ -361,6 +364,58 @@ func renderSession(messages []Message) string {
 		parts = append(parts, role+": "+content)
 	}
 	return strings.Join(parts, "\n")
+}
+
+// buildTurnDigest creates a compact summary of user messages in a session.
+// For each user message, it takes the first sentence (or first ~120 chars if
+// no sentence boundary is found). This concentrates signal-dense facts into
+// a compact field that BM25 can search without the noise of full assistant
+// responses.
+//
+// Example: a 12-message session about jewelry organization where the user
+// mentions "silver necklace my grandma gave me on my 18th birthday" in msg 4
+// produces a digest where that fact appears prominently instead of being
+// buried in 15K chars of assistant advice about jewelry care.
+func buildTurnDigest(messages []Message) string {
+	var parts []string
+	for _, msg := range messages {
+		role := strings.ToLower(strings.TrimSpace(msg.Role))
+		if role != "user" {
+			continue
+		}
+		content := strings.TrimSpace(msg.Content)
+		if content == "" {
+			continue
+		}
+		// Take first sentence or first 120 chars, whichever is shorter.
+		excerpt := firstSentence(content, 120)
+		if excerpt == "" {
+			continue
+		}
+		parts = append(parts, excerpt)
+	}
+	return strings.Join(parts, " ")
+}
+
+// firstSentence returns the first sentence of text, capped at maxChars.
+// Falls back to the first maxChars if no sentence boundary is found.
+func firstSentence(text string, maxChars int) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	// Look for common sentence boundaries.
+	for _, sep := range []string{". ", "? ", "! ", ".\n", "?\n", "!\n"} {
+		if idx := strings.Index(text, sep); idx > 0 && idx < maxChars {
+			return strings.TrimSpace(text[:idx+1])
+		}
+	}
+	// No sentence boundary found — take first maxChars.
+	runes := []rune(text)
+	if len(runes) <= maxChars {
+		return text
+	}
+	return strings.TrimSpace(string(runes[:maxChars])) + "..."
 }
 
 // renderSessionWithMetadata prepends a metadata header to the rendered session
