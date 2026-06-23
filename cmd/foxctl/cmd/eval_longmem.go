@@ -64,6 +64,7 @@ func newEvalLongmemCommandWithDeps(deps longmemeval.Deps, openMemory func(contex
 		answerPlanMode string
 		answerTools    string
 		answerStrategy string
+		answerJudge    bool
 	)
 
 	cmd := &cobra.Command{
@@ -150,6 +151,17 @@ into the workspace memories.
 					ToolProfile:   answerRuntime.ToolProfile,
 					Strategy:      answerRuntime.Strategy,
 				})
+				// Wire LLM judge for semantic answer scoring when requested.
+				if answerJudge {
+					resolvedDeps.JudgeAnswer = longmemeval.JudgeAnswerFunc(longmemeval.NewLLMJudge(longmemeval.LLMJudgeConfig{
+						Provider:  answerProvider,
+						Model:     answerModel,
+						BaseURL:   answerBaseURL,
+						APIKey:    answerAPIKey,
+						Timeout:   30 * time.Second,
+						MaxTokens: 256,
+					}))
+				}
 			}
 			result, err := longmemeval.Run(ctx, longmemeval.EvalOptions{
 				DatasetPath:    datasetPath,
@@ -201,7 +213,8 @@ into the workspace memories.
 	cmd.Flags().StringVar(&answerRoute, "answer-route", "", "Answer-mode RLM route profile (defaults by --answer-strategy)")
 	cmd.Flags().StringVar(&answerPlanMode, "answer-plan-mode", "", "Answer-mode RLM plan mode (defaults by --answer-strategy)")
 	cmd.Flags().StringVar(&answerTools, "answer-tool-profile", "", "Answer-mode RLM tool profile (defaults by --answer-strategy)")
-	cmd.Flags().StringVar(&answerStrategy, "answer-strategy", string(longmemAnswerStrategyRetrieveMemory), "Answer strategy preset: retrieve-memory, gather-memory, gather-mixed, full-debug")
+	cmd.Flags().StringVar(&answerStrategy, "answer-strategy", "retrieve-memory", "Answer-mode strategy: retrieve-memory, gather-memory, gather-mixed, full-debug")
+	cmd.Flags().BoolVar(&answerJudge, "answer-judge", false, "Enable LLM judge for semantic answer scoring (overrides deterministic scorer on FAIL)")
 	return cmd
 }
 

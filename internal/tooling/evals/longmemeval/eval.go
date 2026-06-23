@@ -134,6 +134,11 @@ type CaseResult struct {
 	AnswerMatchedEvidence []string `json:"answer_matched_evidence_memory_names,omitempty"`
 	AnswerIterations      int      `json:"answer_iterations,omitempty"`
 	AnswerDurationMS      int64    `json:"answer_duration_ms,omitempty"`
+	// JudgeAnswerScore is the raw LLM judge verdict (1.0=YES, 0.0=NO). It is
+	// independent of the deterministic AnswerScore and is populated only when
+	// an LLM judge is configured.
+	AnswerJudgeScore  float64 `json:"answer_judge_score,omitempty"`
+	AnswerJudgeReason string  `json:"answer_judge_reason,omitempty"`
 }
 
 // QueueStatus reports the memory embedding queue state for one workspace.
@@ -163,12 +168,15 @@ type Metrics struct {
 	MRR           float64 `json:"mrr"`
 	MeanLatencyMS float64 `json:"mean_latency_ms"`
 	// Answer-mode aggregates (only populated when answer mode runs).
-	AnswerCaseCount     int     `json:"answer_case_count,omitempty"`
-	AnswerFailureCount  int     `json:"answer_failure_count,omitempty"`
-	AnswerMatchedCount  int     `json:"answer_matched_count,omitempty"`
-	AnswerAccuracy      float64 `json:"answer_accuracy,omitempty"`
-	AnswerMeanScore     float64 `json:"answer_mean_score,omitempty"`
-	AnswerMeanLatencyMS float64 `json:"answer_mean_latency_ms,omitempty"`
+	AnswerCaseCount      int     `json:"answer_case_count,omitempty"`
+	AnswerFailureCount   int     `json:"answer_failure_count,omitempty"`
+	AnswerMatchedCount   int     `json:"answer_matched_count,omitempty"`
+	AnswerAccuracy       float64 `json:"answer_accuracy,omitempty"`
+	AnswerMeanScore      float64 `json:"answer_mean_score,omitempty"`
+	AnswerMeanLatencyMS  float64 `json:"answer_mean_latency_ms,omitempty"`
+	AnswerJudgeCaseCount int     `json:"answer_judge_case_count,omitempty"`
+	AnswerJudgeMatched   int     `json:"answer_judge_matched_count,omitempty"`
+	AnswerJudgeAccuracy  float64 `json:"answer_judge_accuracy,omitempty"`
 }
 
 // RunResult is the top-level report emitted by Run.
@@ -198,6 +206,12 @@ type Deps struct {
 	RunAnswer    AnswerRunner
 	Now          func() time.Time
 	MemoryName   func(workspaceID, caseID, sessionID string) string
+	// JudgeAnswer, when set, is called as a secondary LLM binary judge.
+	// It receives the model answer, expected answer, and original question.
+	// It should return 1.0 (YES/semantically equivalent), 0.0 (NO), an
+	// optional reason string, and an error if the judge could not produce a
+	// verdict.
+	JudgeAnswer func(ctx context.Context, question, answer, expected string) (score float64, reason string, err error)
 }
 
 // DefaultDeps returns Deps wired against the package's own loaders and the
@@ -500,6 +514,7 @@ func Run(ctx context.Context, opts EvalOptions, deps Deps) (RunResult, error) {
 		case ModeAnswer:
 			casesOut, err := runAnswer(ctx, answerDeps{
 				Run:         deps.RunAnswer,
+				JudgeAnswer: deps.JudgeAnswer,
 				Now:         now,
 				MemoryName:  memoryNameFn,
 				Leakage:     leakage,
@@ -530,6 +545,7 @@ type retrievalDeps struct {
 
 type answerDeps struct {
 	Run         AnswerRunner
+	JudgeAnswer func(ctx context.Context, question, answer, expected string) (score float64, reason string, err error)
 	Now         func() time.Time
 	MemoryName  func(workspaceID, caseID, sessionID string) string
 	Leakage     map[string]int
@@ -727,6 +743,24 @@ func scoreAnswerCase(ctx context.Context, deps answerDeps, c Case) CaseResult {
 	result.AnswerIterations = resp.Iterations
 	result.AnswerScore = answerMatchScore(result.Answer, c.Answer)
 	result.AnswerMatched = result.AnswerScore > 0
+	result.AnswerMethod = method
+
+	// LLM judge: always record the raw judge verdict when configured.
+	// The judge is used as a lenient secondary metric: it can upgrade a
+	// deterministic FAIL to a PASS (paraphrase), but it never downgrades a
+	// deterministic PASS.
+	if deps.JudgeAnswer != nil {
+		judgeScore, judgeReason, err := deps.JudgeAnswer(ctx, c.Question, result.Answer, c.Answer)
+		if err == nil {
+			result.AnswerJudgeScore = judgeScore
+			result.AnswerJudgeReason = judgeReason
+			if !result.AnswerMatched && judgeScore > 0 {
+				result.AnswerScore = judgeScore
+				result.AnswerMatched = true
+				result.AnswerMethod = method + "-judge"
+			}
+		}
+	}
 
 	ranks := make(map[string]int, len(resp.EvidenceNames))
 	for i, raw := range resp.EvidenceNames {
@@ -998,12 +1032,21 @@ func mergeAnswerMetrics(metrics *Metrics, cases []CaseResult) {
 		}
 		scoreSum += c.AnswerScore
 		latencySum += c.AnswerDurationMS
+		if c.AnswerJudgeScore != 0 || c.AnswerJudgeReason != "" {
+			metrics.AnswerJudgeCaseCount++
+			if c.AnswerJudgeScore > 0 {
+				metrics.AnswerJudgeMatched++
+			}
+		}
 	}
 	denom := float64(metrics.AnswerCaseCount - metrics.AnswerFailureCount)
 	if denom > 0 {
 		metrics.AnswerAccuracy = float64(metrics.AnswerMatchedCount) / denom
 		metrics.AnswerMeanScore = scoreSum / denom
 		metrics.AnswerMeanLatencyMS = float64(latencySum) / denom
+	}
+	if metrics.AnswerJudgeCaseCount > 0 {
+		metrics.AnswerJudgeAccuracy = float64(metrics.AnswerJudgeMatched) / float64(metrics.AnswerJudgeCaseCount)
 	}
 }
 
@@ -1039,6 +1082,8 @@ func mergeCaseResult(base, update CaseResult) CaseResult {
 	base.AnswerMatchedEvidence = update.AnswerMatchedEvidence
 	base.AnswerIterations = update.AnswerIterations
 	base.AnswerDurationMS = update.AnswerDurationMS
+	base.AnswerJudgeScore = update.AnswerJudgeScore
+	base.AnswerJudgeReason = update.AnswerJudgeReason
 	if len(base.RetrievedNames) == 0 {
 		base.RetrievedNames = update.RetrievedNames
 		base.RetrievedRanks = update.RetrievedRanks
