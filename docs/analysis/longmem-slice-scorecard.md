@@ -38,6 +38,7 @@ Each row is a committed slice. Score is answer-mode correct/total (1/4 baseline)
 | live-7 | 19-case scaled eval (BM25-only) | — | — | — | — | 12/19 (63%) | 2026-06-23 |
 | live-8 | 19-case with hybrid vectors (0.45/0.55) | — | — | — | — | 6/19 (32%) | 2026-06-23 |
 | live-9 | 19-case BM25-dominant (0.25/0.75) | — | — | — | — | 13/19 (68%) | 2026-06-23 |
+| live-10 | 19-case per-turn chunks | — | — | — | — | 11/19 (58%) | 2026-06-23 |
 
 ## Scaled Eval Results — 2026-06-23
 
