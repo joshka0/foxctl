@@ -35,6 +35,30 @@ Each row is a committed slice. Score is answer-mode correct/total (1/4 baseline)
 | live-4 | deterministic date extraction | FAIL* | FAIL* | PASS | FAIL | 1/4* | 2026-06-22 |
 | live-5 | session date metadata + numeric scorer | FAIL | PASS | PASS | PASS | 3/4 | 2026-06-23 |
 | live-6 | temp=0.01 stability (run 1 / run 2) | FAIL | PASS/FAIL | PASS/FAIL | PASS | 2-3/4 | 2026-06-23 |
+| live-7 | 19-case scaled eval | — | — | — | — | 12/19 (63%) | 2026-06-23 |
+
+## Scaled Eval Results — 2026-06-23
+
+### 19-case stratified sample (seed=42), glm-5.2, temp=0.01
+
+Ingest: 893 memories saved, 893 queued. Evidence retrieval: hit@5=68%, MRR=0.56.
+
+| Question Type | Pass/Total | Accuracy |
+|---------------|-----------|----------|
+| knowledge-update | 3/3 | 100% |
+| single-session-user | 2/3 | 67% |
+| multi-session | 3/5 | 60% |
+| temporal-reasoning | 3/5 | 60% |
+| single-session-assistant | 1/2 | 50% |
+| single-session-preference | 0/1 | 0% |
+| **Overall** | **12/19** | **63%** |
+
+Mean latency: 18.2s/case. Mean answer score: 0.58.
+
+Key findings: knowledge-update is perfect (exact factual recall works well).
+Temporal reasoning benefits from session date metadata injection. Preference
+questions are the weakest (paraphrase scoring gap). Multi-session questions
+show retrieval misses on some cases.
 
 ## Live Smoke Results
 
