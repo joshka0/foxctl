@@ -955,7 +955,14 @@ func answerExpressesInsufficientEvidence(answer string) bool {
 }
 
 func normalizeAnswerText(value string) string {
-	parts := strings.Fields(strings.ToLower(strings.TrimSpace(value)))
+	value = strings.ToLower(strings.TrimSpace(value))
+	// Strip markdown bold/italic markers that split tokens (e.g. "**7 days**"
+	// would tokenize as ["**7", "days**"] instead of ["7", "days"]).
+	value = strings.ReplaceAll(value, "**", "")
+	value = strings.ReplaceAll(value, "__", "")
+	value = strings.ReplaceAll(value, "*", "")
+	value = strings.ReplaceAll(value, "_", "")
+	parts := strings.Fields(value)
 	if len(parts) == 0 {
 		return ""
 	}
