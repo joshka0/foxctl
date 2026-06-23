@@ -98,11 +98,16 @@ func decodeAnswerText(raw json.RawMessage) (string, error) {
 	}
 }
 
+// IngestOptions controls BuildPlan behaviour.
 type IngestOptions struct {
 	WorkspaceID     string
 	EmbeddingModel  string
 	MaxSummaryChars int
 	MaxTextChars    int
+	// AtomizeFn, when set, is called per session to extract atomic facts
+	// via an LLM. The returned facts are added to the record's entities
+	// and keywords fields, boosting BM25 signal density for buried facts.
+	AtomizeFn func(ctx context.Context, sessionText string) ([]string, error)
 }
 
 type Plan struct {
@@ -154,7 +159,7 @@ func LoadCases(path string) ([]Case, error) {
 	return cases, nil
 }
 
-func BuildPlan(cases []Case, opts IngestOptions) (Plan, error) {
+func BuildPlan(ctx context.Context, cases []Case, opts IngestOptions) (Plan, error) {
 	workspaceID := strings.TrimSpace(opts.WorkspaceID)
 	if workspaceID == "" {
 		return Plan{}, fmt.Errorf("workspace_id is required")
@@ -183,16 +188,22 @@ func BuildPlan(cases []Case, opts IngestOptions) (Plan, error) {
 			sessionDate := listValue(c.HaystackDates, i)
 			rendered := renderSession(session)
 			turnDigest := buildTurnDigest(session)
-			// Prepend session metadata header so the model has temporal context.
 			semanticText := truncateText(renderSessionWithMetadata(rendered, sessionDate, sessionID), maxText)
 			if strings.TrimSpace(semanticText) == "" {
 				continue
 			}
-			// The summary combines the session date header with the turn digest.
-			// BM25 searches summary, so the digest gives it a concentrated
-			// signal-rich surface while the model sees the full session in
-			// atomic_text during synthesis.
 			summaryText := truncateText(turnDigest, maxSummary)
+			entities := extractEntities(semanticText, 12)
+			keywords := extractKeywords(semanticText, 16)
+			// LLM atomization: when an AtomizeFn is configured, extract atomic
+			// facts from the session and merge them into entities and keywords.
+			// This boosts BM25 signal density for buried facts.
+			if opts.AtomizeFn != nil {
+				if atomicFacts, err := opts.AtomizeFn(ctx, rendered); err == nil && len(atomicFacts) > 0 {
+					entities = mergeUnique(entities, atomicFacts, 24)
+					keywords = mergeUnique(keywords, atomicFacts, 32)
+				}
+			}
 			rec := Record{
 				CaseID:             caseID,
 				SessionID:          sessionID,
@@ -200,8 +211,8 @@ func BuildPlan(cases []Case, opts IngestOptions) (Plan, error) {
 				Type:               MemoryType,
 				Summary:            summaryText,
 				AtomicText:         semanticText,
-				Entities:           extractEntities(semanticText, 12),
-				Keywords:           extractKeywords(semanticText, 16),
+				Entities:           entities,
+				Keywords:           keywords,
 				IsExpectedEvidence: expected[sessionID],
 			}
 			rec.Result = resultEnvelope()
@@ -364,6 +375,33 @@ func renderSession(messages []Message) string {
 		parts = append(parts, role+": "+content)
 	}
 	return strings.Join(parts, "\n")
+}
+
+// mergeUnique appends items from extra to base, skipping duplicates, and
+// caps the result at maxLen.
+func mergeUnique(base, extra []string, maxLen int) []string {
+	seen := make(map[string]bool, len(base)+len(extra))
+	out := make([]string, 0, maxLen)
+	for _, item := range base {
+		item = strings.TrimSpace(item)
+		if item == "" || seen[item] {
+			continue
+		}
+		seen[item] = true
+		out = append(out, item)
+	}
+	for _, item := range extra {
+		item = strings.TrimSpace(item)
+		if item == "" || seen[item] {
+			continue
+		}
+		seen[item] = true
+		out = append(out, item)
+		if len(out) >= maxLen {
+			break
+		}
+	}
+	return out
 }
 
 // buildTurnDigest creates a compact summary of user messages in a session.

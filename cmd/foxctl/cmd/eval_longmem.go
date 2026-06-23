@@ -1,9 +1,13 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -65,6 +69,9 @@ func newEvalLongmemCommandWithDeps(deps longmemeval.Deps, openMemory func(contex
 		answerTools    string
 		answerStrategy string
 		answerJudge    bool
+		atomizeModel   string
+		atomizeBaseURL string
+		atomizeAPIKey  string
 	)
 
 	cmd := &cobra.Command{
@@ -113,6 +120,22 @@ into the workspace memories.
 			}
 			if resolvedDeps.OpenQueue == nil {
 				resolvedDeps.OpenQueue = openQueue
+			}
+			// Wrap BuildPlan with LLM atomization when requested.
+			if atomizeModel != "" {
+				atomizeKey := atomizeAPIKey
+				if atomizeKey == "" {
+					atomizeKey = os.Getenv("OPENROUTER_API_TOKEN")
+				}
+				atomizer := newLongmemAtomizer(atomizeModel, atomizeBaseURL, atomizeKey)
+				origBuildPlan := resolvedDeps.BuildPlan
+				if origBuildPlan == nil {
+					origBuildPlan = longmemeval.DefaultDeps(resolvedDeps.OpenMemory, resolvedDeps.OpenQueue).BuildPlan
+				}
+				resolvedDeps.BuildPlan = func(ctx context.Context, cases []longmemeval.Case, opts longmemeval.IngestOptions) (longmemeval.Plan, error) {
+					opts.AtomizeFn = atomizer
+					return origBuildPlan(ctx, cases, opts)
+				}
 			}
 			if resolvedDeps.Now == nil {
 				resolvedDeps.Now = time.Now
@@ -215,6 +238,10 @@ into the workspace memories.
 	cmd.Flags().StringVar(&answerTools, "answer-tool-profile", "", "Answer-mode RLM tool profile (defaults by --answer-strategy)")
 	cmd.Flags().StringVar(&answerStrategy, "answer-strategy", "retrieve-memory", "Answer-mode strategy: retrieve-memory, gather-memory, gather-mixed, full-debug")
 	cmd.Flags().BoolVar(&answerJudge, "answer-judge", false, "Enable LLM judge for semantic answer scoring (overrides deterministic scorer on FAIL)")
+	cmd.Flags().StringVar(&atomizeModel, "atomize-model", "", "LLM model for ingest-time atomic fact extraction (e.g. nvidia/nemotron-3-ultra-550b-a55b:free)")
+	cmd.Flags().StringVar(&atomizeBaseURL, "atomize-base-url", "https://openrouter.ai/api/v1", "LLM base URL for atomization model")
+	cmd.Flags().StringVar(&atomizeAPIKey, "atomize-api-key", "", "API key for atomization model (defaults to OPENROUTER_API_TOKEN)")
+	cmd.AddCommand(newEvalLongmemRescoreCommand())
 	return cmd
 }
 
@@ -779,4 +806,184 @@ func uniqueEvalStrings(values []string) []string {
 		out = append(out, value)
 	}
 	return out
+}
+
+// newEvalLongmemRescoreCommand returns a subcommand that re-scores an
+// existing longmem answer-mode artifact with an LLM judge, without
+// re-running retrieval or answer generation.
+func newEvalLongmemRescoreCommand() *cobra.Command {
+	var (
+		artifactDir   string
+		judgeProvider string
+		judgeModel    string
+		judgeBaseURL  string
+		judgeAPIKey   string
+		judgeTimeout  time.Duration
+	)
+
+	cmd := &cobra.Command{
+		Use:   "rescore",
+		Short: "Re-score existing longmem answer-mode artifacts with an LLM judge",
+		Long: strings.TrimSpace(`Load a report.json produced by 'foxctl eval longmem --mode answer' and
+re-score every answer with an LLM semantic-equivalence judge. The original
+answer text is preserved; only AnswerJudgeScore, AnswerJudgeReason, and (on
+judge YES for previously-failed cases) AnswerScore/AnswerMatched/AnswerMethod
+are updated. Updated report.json and per-case files are written back to the
+same artifact directory.`),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx := cmd.Context()
+			artifactDir = strings.TrimSpace(artifactDir)
+			if artifactDir == "" {
+				return fmt.Errorf("--artifact-dir is required")
+			}
+			reportPath := filepath.Join(artifactDir, "report.json")
+			body, err := os.ReadFile(reportPath)
+			if err != nil {
+				return fmt.Errorf("read report: %w", err)
+			}
+			var result longmemeval.RunResult
+			if err := json.Unmarshal(body, &result); err != nil {
+				return fmt.Errorf("decode report: %w", err)
+			}
+			if judgeTimeout <= 0 {
+				judgeTimeout = 30 * time.Second
+			}
+			judge := longmemeval.NewLLMJudge(longmemeval.LLMJudgeConfig{
+				Provider:  judgeProvider,
+				Model:     judgeModel,
+				BaseURL:   judgeBaseURL,
+				APIKey:    judgeAPIKey,
+				Timeout:   judgeTimeout,
+				MaxTokens: 256,
+			})
+			if err := longmemeval.RescoreReportWithLLMJudge(ctx, &result, judge); err != nil {
+				return fmt.Errorf("rescore: %w", err)
+			}
+			if err := longmemeval.WriteArtifacts(artifactDir, result); err != nil {
+				return fmt.Errorf("write artifacts: %w", err)
+			}
+			data := map[string]any{
+				"artifact_dir": artifactDir,
+				"report_path":  reportPath,
+				"result":       result,
+			}
+			if result.Metrics != nil {
+				data["answer_accuracy"] = result.Metrics.AnswerAccuracy
+				data["answer_judge_accuracy"] = result.Metrics.AnswerJudgeAccuracy
+				data["answer_judge_case_count"] = result.Metrics.AnswerJudgeCaseCount
+			}
+			return protocol.WriteOK(cmd.OutOrStdout(), "eval/longmem/rescore", data, protocol.WithSource("cli"))
+		},
+	}
+
+	cmd.Flags().StringVar(&artifactDir, "artifact-dir", "", "Artifact directory containing report.json (required)")
+	cmd.Flags().StringVar(&judgeProvider, "judge-provider", "", "Judge LLM provider, e.g. lmstudio, openai_compat, or anthropic_compat")
+	cmd.Flags().StringVar(&judgeModel, "judge-model", "", "Judge LLM model")
+	cmd.Flags().StringVar(&judgeBaseURL, "judge-base-url", "", "Judge LLM base URL")
+	cmd.Flags().StringVar(&judgeAPIKey, "judge-api-key", "", "Judge LLM API key")
+	cmd.Flags().DurationVar(&judgeTimeout, "judge-timeout", 30*time.Second, "Judge timeout per case")
+	_ = cmd.MarkFlagRequired("artifact-dir")
+	return cmd
+}
+
+// newLongmemAtomizer creates an AtomizeFn that calls an OpenRouter-compatible
+// LLM to extract atomic facts from a session transcript. The facts are merged
+// into entities and keywords at ingest time, boosting BM25 signal density for
+// buried facts (e.g. "grandma gave me silver necklace on my 18th birthday"
+// buried in a 15K-char jewelry organization conversation).
+func newLongmemAtomizer(model, baseURL, apiKey string) func(ctx context.Context, sessionText string) ([]string, error) {
+	return func(ctx context.Context, sessionText string) ([]string, error) {
+		// Truncate session text to avoid token limits on free-tier models.
+		if len(sessionText) > 8000 {
+			sessionText = sessionText[:8000]
+		}
+
+		prompt := `Extract ALL factual statements from this conversation transcript. Focus on:
+- Personal facts: names, ages, dates, locations, relationships
+- Preferences: likes, dislikes, recommendations, choices
+- Numbers: counts, prices, measurements, durations
+- Events: what happened, when, where
+- Possessions: items owned, lost, given, received
+
+Output one fact per line. Each fact should be a concise standalone statement.
+Do NOT include opinions, filler, or meta-commentary. ONLY facts.
+
+Transcript:
+` + sessionText
+
+		reqBody := struct {
+			Model     string `json:"model"`
+			MaxTokens int    `json:"max_tokens"`
+			Messages  []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}{
+			Model:     model,
+			MaxTokens: 512,
+			Messages: []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			}{
+				{Role: "user", Content: prompt},
+			},
+		}
+
+		bodyBytes, err := json.Marshal(reqBody)
+		if err != nil {
+			return nil, fmt.Errorf("marshal atomize request: %w", err)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/chat/completions", bytes.NewReader(bodyBytes))
+		if err != nil {
+			return nil, fmt.Errorf("create atomize request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+
+		client := &http.Client{Timeout: 60 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("atomize request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != 200 {
+			body, _ := io.ReadAll(resp.Body)
+			return nil, fmt.Errorf("atomize HTTP %d: %s", resp.StatusCode, string(body[:min(len(body), 200)]))
+		}
+
+		var result struct {
+			Choices []struct {
+				Message struct {
+					Content string `json:"content"`
+				} `json:"message"`
+			} `json:"choices"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return nil, fmt.Errorf("decode atomize response: %w", err)
+		}
+
+		if len(result.Choices) == 0 {
+			return nil, fmt.Errorf("atomize: no choices in response")
+		}
+
+		content := strings.TrimSpace(result.Choices[0].Message.Content)
+		if content == "" {
+			return nil, nil
+		}
+
+		// Split into lines, trim each, filter empties.
+		var facts []string
+		for _, line := range strings.Split(content, "\n") {
+			line = strings.TrimSpace(line)
+			// Strip leading bullets/numbering.
+			line = strings.TrimLeft(line, "-*0123456789. ")
+			if line == "" || len(line) < 3 {
+				continue
+			}
+			facts = append(facts, line)
+		}
+		return facts, nil
+	}
 }

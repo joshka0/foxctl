@@ -38,7 +38,7 @@ func TestLoadCasesNormalizesScalarAnswers(t *testing.T) {
 func TestBuildPlanKeepsAnswerAndEvidenceMetadataOutOfSemanticContent(t *testing.T) {
 	cases := []Case{tinyCase()}
 
-	plan, err := BuildPlan(cases, IngestOptions{
+	plan, err := BuildPlan(context.Background(), cases, IngestOptions{
 		WorkspaceID:    "ws-longmem",
 		EmbeddingModel: "text-embedding-qwen3-embedding-8b",
 	})
@@ -74,7 +74,7 @@ func TestBuildPlanKeepsAnswerAndEvidenceMetadataOutOfSemanticContent(t *testing.
 func TestBuildPlanReportsAnswerLeakWhenAnswerNotInSourceTranscript(t *testing.T) {
 	c := tinyCase()
 
-	plan, err := BuildPlan([]Case{c}, IngestOptions{WorkspaceID: "ws-longmem"})
+	plan, err := BuildPlan(context.Background(), []Case{c}, IngestOptions{WorkspaceID: "ws-longmem"})
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestBuildPlanAllowsAnswerTextWhenItComesFromSourceTranscript(t *testing.T) 
 	c := tinyCase()
 	c.HaystackSessions[0][0].Content = "I graduated with a Business Administration degree."
 
-	plan, err := BuildPlan([]Case{c}, IngestOptions{WorkspaceID: "ws-longmem"})
+	plan, err := BuildPlan(context.Background(), []Case{c}, IngestOptions{WorkspaceID: "ws-longmem"})
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestBuildPlanKeepsLateSourceTurnsInAtomicText(t *testing.T) {
 		{Role: "user", Content: "I graduated with a degree in Business Administration."},
 	}
 
-	plan, err := BuildPlan([]Case{c}, IngestOptions{WorkspaceID: "ws-longmem"})
+	plan, err := BuildPlan(context.Background(), []Case{c}, IngestOptions{WorkspaceID: "ws-longmem"})
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestApplyPlanRejectsLeakageBeforeSavingOrQueueing(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = queue.Close() })
 
-	plan, err := BuildPlan([]Case{tinyCase()}, IngestOptions{WorkspaceID: "ws-longmem"})
+	plan, err := BuildPlan(context.Background(), []Case{tinyCase()}, IngestOptions{WorkspaceID: "ws-longmem"})
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestApplyPlanIsIdempotentAndQueuesMemoryJobs(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = queue.Close() })
 
-	plan, err := BuildPlan([]Case{tinyCase()}, IngestOptions{
+	plan, err := BuildPlan(context.Background(), []Case{tinyCase()}, IngestOptions{
 		WorkspaceID:    "ws-longmem",
 		EmbeddingModel: "text-embedding-qwen3-embedding-8b",
 	})
@@ -296,7 +296,7 @@ func TestApplyPlanIsIdempotentAndQueuesMemoryJobs(t *testing.T) {
 }
 
 func TestResultEnvelopeKeepsProvenanceOutsideSemanticFields(t *testing.T) {
-	plan, err := BuildPlan([]Case{tinyCase()}, IngestOptions{WorkspaceID: "ws-longmem"})
+	plan, err := BuildPlan(context.Background(), []Case{tinyCase()}, IngestOptions{WorkspaceID: "ws-longmem"})
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}

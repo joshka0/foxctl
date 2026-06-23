@@ -309,7 +309,7 @@ func TestRunRetrievalOnlyScoresWithFakeStore(t *testing.T) {
 			}},
 		},
 	}
-	plan, err := BuildPlan(cases, IngestOptions{WorkspaceID: workspaceID, EmbeddingModel: "text-embedding-qwen3-embedding-8b"})
+	plan, err := BuildPlan(context.Background(), cases, IngestOptions{WorkspaceID: workspaceID, EmbeddingModel: "text-embedding-qwen3-embedding-8b"})
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}

@@ -198,7 +198,7 @@ type RunResult struct {
 // the CLI supplies real loaders.
 type Deps struct {
 	LoadCases    func(path string) ([]Case, error)
-	BuildPlan    func(cases []Case, opts IngestOptions) (Plan, error)
+	BuildPlan    func(ctx context.Context, cases []Case, opts IngestOptions) (Plan, error)
 	ApplyPlan    func(ctx context.Context, store storage.MemoryStore, queue *embedding.Store, plan Plan) (ApplyResult, error)
 	OpenMemory   func(ctx context.Context, workspaceID string) (storage.MemoryStore, error)
 	OpenQueue    func(ctx context.Context, workspaceID string) (*embedding.Store, error)
@@ -220,8 +220,10 @@ type Deps struct {
 // (vector+lexical) retrieval, use HybridDeps with an embedder.
 func DefaultDeps(openMemory func(context.Context, string) (storage.MemoryStore, error), openQueue func(context.Context, string) (*embedding.Store, error)) Deps {
 	return Deps{
-		LoadCases:  LoadCases,
-		BuildPlan:  BuildPlan,
+		LoadCases: LoadCases,
+		BuildPlan: func(ctx context.Context, cases []Case, opts IngestOptions) (Plan, error) {
+			return BuildPlan(ctx, cases, opts)
+		},
 		ApplyPlan:  ApplyPlan,
 		OpenMemory: openMemory,
 		OpenQueue:  openQueue,
@@ -247,8 +249,10 @@ func HybridDeps(
 	embedFn func(ctx context.Context, query string) ([]float32, error),
 ) Deps {
 	return Deps{
-		LoadCases:  LoadCases,
-		BuildPlan:  BuildPlan,
+		LoadCases: LoadCases,
+		BuildPlan: func(ctx context.Context, cases []Case, opts IngestOptions) (Plan, error) {
+			return BuildPlan(ctx, cases, opts)
+		},
 		ApplyPlan:  ApplyPlan,
 		OpenMemory: openMemory,
 		OpenQueue:  openQueue,
@@ -467,7 +471,7 @@ func Run(ctx context.Context, opts EvalOptions, deps Deps) (RunResult, error) {
 			return result, fmt.Errorf("load dataset: %w", err)
 		}
 		cases = loaded
-		built, err := buildPlan(cases, IngestOptions{
+		built, err := buildPlan(ctx, cases, IngestOptions{
 			WorkspaceID:    workspaceID,
 			EmbeddingModel: strings.TrimSpace(opts.EmbeddingModel),
 		})
@@ -1201,7 +1205,11 @@ func RenderHeadToHeadMarkdown(result RunResult) string {
 
 	b.WriteString("## Limitations\n\n")
 	b.WriteString("- The foxctl raw `memory/query` row is the local retrieval-only equivalent: BM25 named-memory search through `memoryrecall.Search`, not an invoked `memory/query` skill/tool run.\n")
-	b.WriteString("- Answer scoring is deterministic non-refusal exact/answer-contains-expected text matching, not judge-compatible scoring.\n")
+	if result.Metrics != nil && result.Metrics.AnswerJudgeCaseCount > 0 {
+		b.WriteString("- Answer scoring uses deterministic matching with an LLM semantic-equivalence judge as a secondary metric.\n")
+	} else {
+		b.WriteString("- Answer scoring is deterministic non-refusal exact/answer-contains-expected text matching. Add `--answer-judge` to enable LLM semantic-equivalence scoring.\n")
+	}
 	b.WriteString("- The CLI answer-mode default targets RLM `memory_recall`, but this artifact only records answer/evidence output from the configured runner.\n")
 	b.WriteString("- HydraDB or external baseline rows stay `not run` unless real baseline data is attached by a future slice.\n")
 	return b.String()
@@ -1228,9 +1236,20 @@ func renderAnswerReportRow(result RunResult) string {
 	if evidenceCases > 0 {
 		evidence = fmt.Sprintf("evidence-hit %.3f", evidenceHitRate)
 	}
+	answer := fmt.Sprintf("accuracy %.3f; mean score %.3f", m.AnswerAccuracy, m.AnswerMeanScore)
+	if m.AnswerJudgeCaseCount > 0 {
+		answer += fmt.Sprintf("; judge accuracy %.3f", m.AnswerJudgeAccuracy)
+	}
+	notes := "CLI default targets RLM `memory_recall`; artifact records answer/evidence output from the configured runner plus deterministic scoring"
+	if m.AnswerJudgeCaseCount > 0 {
+		notes += " augmented with an LLM semantic-equivalence judge"
+	} else {
+		notes += " (add `--answer-judge` for LLM semantic-equivalence scoring)"
+	}
+	notes += "."
 	return fmt.Sprintf(
-		"| foxctl answer-mode | run | %s | accuracy %.3f; mean score %.3f | mean %.1f ms | %d/%d | CLI default targets RLM `memory_recall`; artifact records only answer/evidence output from the configured runner plus deterministic non-refusal exact/answer-contains-expected scoring. |\n",
-		evidence, m.AnswerAccuracy, m.AnswerMeanScore, m.AnswerMeanLatencyMS, m.AnswerFailureCount, m.AnswerCaseCount,
+		"| foxctl answer-mode | run | %s | %s | mean %.1f ms | %d/%d | %s |\n",
+		evidence, answer, m.AnswerMeanLatencyMS, m.AnswerFailureCount, m.AnswerCaseCount, notes,
 	)
 }
 
