@@ -33,10 +33,25 @@ Each row is a committed slice. Score is answer-mode correct/total (1/4 baseline)
 | live-2 | upgraded scorer (key-fact overlap) | FAIL | PASS | PASS | FAIL | 2/4 | 2026-06-22 |
 | live-3 | enumeration + temporal prompts | FAIL | PASS | PASS | FAIL* | 2/4 | 2026-06-22 |
 | live-4 | deterministic date extraction | FAIL* | FAIL* | PASS | FAIL | 1/4* | 2026-06-22 |
+| live-5 | session date metadata + numeric scorer | FAIL | PASS | PASS | PASS | 3/4 | 2026-06-23 |
 
-## Live Smoke Results — 2026-06-22
+## Live Smoke Results
 
-### Run 4 (deterministic date extraction)
+### Run 5 (session date metadata + numeric fact scoring) — 2026-06-23
+
+Session dates now injected as [Session date: ...] headers into memory
+atomic_text at ingest time. Numeric fact matcher extracts leading number+unit
+from expected answers. Markdown bold/italic stripped before scoring.
+
+| Case | Result | Score | Notes |
+|------|--------|-------|-------|
+| degree (e47becba) | PASS | 1.00 | exact match |
+| video-edit (8a2466db) | PASS | 0.36 | key-fact overlap |
+| MoMA (gpt4_59149c77) | PASS | 1.00 | numeric fact: "7 days" matched after markdown strip |
+| clothing (0a995998) | FAIL | 0.00 | still wrong count (2 vs 3) |
+
+Answer accuracy: 3/4 (75%). Evidence retrieval: 4/4, hit@5=100%, MRR=1.0.
+Remaining failure is a genuine model reasoning error (undercounting items).
 
 Date extraction regex added. However, evidence text stores relative dates
 ("last week", "a few days ago") not absolute dates, so collectSynthesisDates
