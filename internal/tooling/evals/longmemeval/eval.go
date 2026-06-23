@@ -275,19 +275,32 @@ func PlanLeakageByCase(plan Plan) map[string]int {
 // expected-evidence session IDs. The names are deterministic: they use the
 // same hashing the ingest plan uses, so the eval can match retrieved
 // results back to expected evidence without storing extra provenance.
+//
+// With per-turn-pair chunking, each session produces multiple chunk memories
+// named sessionID/chunk-NNN. This function generates names for the session
+// level AND for chunk-000 through chunk-020 (a reasonable upper bound on
+// turn-pairs per session) so that any chunk from an expected session matches.
 func ExpectedMemoryNames(memoryNameFn func(workspaceID, caseID, sessionID string) string, workspaceID, caseID string, sessionIDs []string) []string {
 	if memoryNameFn == nil {
 		memoryNameFn = memoryName
 	}
-	out := make([]string, 0, len(sessionIDs))
+	const maxChunkNames = 20
+	out := make([]string, 0, len(sessionIDs)*(maxChunkNames+1))
 	for _, sid := range sessionIDs {
 		sid = strings.TrimSpace(sid)
 		if sid == "" {
 			continue
 		}
-		name := memoryNameFn(workspaceID, caseID, sid)
-		if name != "" {
+		// Session-level name (for backward compat with non-chunked stores).
+		if name := memoryNameFn(workspaceID, caseID, sid); name != "" {
 			out = append(out, name)
+		}
+		// Chunk-level names (chunk-000 through chunk-020).
+		for ci := 0; ci < maxChunkNames; ci++ {
+			chunkID := fmt.Sprintf("%s/chunk-%03d", sid, ci)
+			if name := memoryNameFn(workspaceID, caseID, chunkID); name != "" {
+				out = append(out, name)
+			}
 		}
 	}
 	return out

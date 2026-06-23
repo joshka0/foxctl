@@ -124,6 +124,10 @@ type Record struct {
 	Result             []byte
 	EmbeddingInput     embedding.MemoryInput
 	IsExpectedEvidence bool
+	// SessionName is the memory name for the parent session (without chunk
+	// suffix). Used by the eval to match chunked memories back to expected
+	// session-level evidence names.
+	SessionName string
 }
 
 type LeakageFinding struct {
@@ -181,35 +185,53 @@ func BuildPlan(cases []Case, opts IngestOptions) (Plan, error) {
 				sessionID = fmt.Sprintf("session-%03d", i)
 			}
 			sessionDate := listValue(c.HaystackDates, i)
-			rendered := renderSession(session)
-			// Prepend session metadata header so the model has temporal context.
-			// This is critical for temporal-reasoning questions (e.g. "how many
-			// days between visits") where the answer depends on knowing when
-			// each conversation occurred.
-			semanticText := truncateText(renderSessionWithMetadata(rendered, sessionDate, sessionID), maxText)
-			if strings.TrimSpace(semanticText) == "" {
+			isExpected := expected[sessionID]
+			sessionName := memoryName(plan.WorkspaceID, caseID, sessionID)
+
+			// Split session into turn-pair chunks for finer-grained retrieval.
+			// Each user+assistant turn-pair becomes its own memory record so
+			// that a critical fact buried in msg 4 of 12 is independently
+			// retrievable instead of drowned in a 15K-char session blob.
+			chunks := chunkSessionByTurnPairs(session)
+			if len(chunks) == 0 {
+				// Fallback: no messages — skip.
 				continue
 			}
-			rec := Record{
-				CaseID:             caseID,
-				SessionID:          sessionID,
-				Name:               memoryName(plan.WorkspaceID, caseID, sessionID),
-				Type:               MemoryType,
-				Summary:            truncateText(semanticText, maxSummary),
-				AtomicText:         semanticText,
-				Entities:           extractEntities(semanticText, 12),
-				Keywords:           extractKeywords(semanticText, 16),
-				IsExpectedEvidence: expected[sessionID],
+			for ci, chunk := range chunks {
+				rendered := renderChunk(chunk)
+				if strings.TrimSpace(rendered) == "" {
+					continue
+				}
+				chunkID := fmt.Sprintf("%s/chunk-%03d", sessionID, ci)
+				semanticText := truncateText(renderSessionWithMetadata(rendered, sessionDate, chunkID), maxText)
+				if strings.TrimSpace(semanticText) == "" {
+					continue
+				}
+				rec := Record{
+					CaseID:             caseID,
+					SessionID:          sessionID,
+					Name:               memoryName(plan.WorkspaceID, caseID, chunkID),
+					Type:               MemoryType,
+					Summary:            truncateText(semanticText, maxSummary),
+					AtomicText:         semanticText,
+					Entities:           extractEntities(semanticText, 12),
+					Keywords:           extractKeywords(semanticText, 16),
+					IsExpectedEvidence: isExpected,
+					SessionName:        sessionName,
+				}
+				rec.Result = resultEnvelope()
+				rec.EmbeddingInput = embedding.MemoryInput{
+					Name:          rec.Name,
+					Type:          rec.Type,
+					Content:       rec.AtomicText,
+					ContentDigest: digestString(rec.AtomicText),
+				}
+				// Leakage check: compare against the session source text,
+				// not just the chunk, to avoid false negatives when the
+				// answer spans multiple turns.
+				plan.Leakage = append(plan.Leakage, CheckLeakage(c, rec)...)
+				plan.Records = append(plan.Records, rec)
 			}
-			rec.Result = resultEnvelope()
-			rec.EmbeddingInput = embedding.MemoryInput{
-				Name:          rec.Name,
-				Type:          rec.Type,
-				Content:       rec.AtomicText,
-				ContentDigest: digestString(rec.AtomicText),
-			}
-			plan.Leakage = append(plan.Leakage, CheckLeakage(c, rec)...)
-			plan.Records = append(plan.Records, rec)
 		}
 	}
 	return plan, nil
@@ -361,6 +383,51 @@ func renderSession(messages []Message) string {
 		parts = append(parts, role+": "+content)
 	}
 	return strings.Join(parts, "\n")
+}
+
+// chunkSessionByTurnPairs splits a session into chunks of user+assistant
+// turn-pairs. Each chunk contains one user message followed by its assistant
+// response (if present). This creates fine-grained memory records where a
+// single critical fact is independently retrievable instead of buried inside
+// a 15K-character monolithic session blob.
+//
+// Chunking strategy:
+//   - Pair each user message with the immediately following assistant message.
+//   - Unpaired trailing messages form their own chunk.
+//   - Empty messages are skipped.
+func chunkSessionByTurnPairs(messages []Message) [][]Message {
+	if len(messages) == 0 {
+		return nil
+	}
+	var chunks [][]Message
+	i := 0
+	for i < len(messages) {
+		msg := messages[i]
+		if strings.TrimSpace(msg.Content) == "" {
+			i++
+			continue
+		}
+		chunk := []Message{msg}
+		// If the next message is from the assistant, pair it.
+		if i+1 < len(messages) {
+			next := messages[i+1]
+			if strings.TrimSpace(next.Content) != "" {
+				chunk = append(chunk, next)
+				i += 2
+				chunks = append(chunks, chunk)
+				continue
+			}
+		}
+		chunks = append(chunks, chunk)
+		i++
+	}
+	return chunks
+}
+
+// renderChunk renders a chunk of messages using the same format as
+// renderSession. Kept separate to allow future per-chunk formatting.
+func renderChunk(messages []Message) string {
+	return renderSession(messages)
 }
 
 // renderSessionWithMetadata prepends a metadata header to the rendered session
