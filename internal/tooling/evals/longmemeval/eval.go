@@ -824,9 +824,15 @@ func numericFactMatchScore(answer, expected string) float64 {
 				return 1
 			}
 		}
-		// Also handle "**7 days**" markdown formatting.
-		if strings.Contains(w, num) && strings.Contains(w, unit) {
-			return 1
+		// Also handle markdown-formatted tokens (e.g. "7days" after ** strip).
+		// Use word-boundary check: the number must be a standalone token, not
+		// a substring of a larger number (e.g. "3" must not match "30days").
+		stripped := strings.Trim(w, ".,;:!?()[]{}")
+		if stripped == num && i+1 < len(answerWords) {
+			next := strings.Trim(answerWords[i+1], ".,;:!?()[]{}")
+			if strings.EqualFold(next, unit) || strings.EqualFold(strings.TrimSuffix(next, "s"), strings.TrimSuffix(unit, "s")) {
+				return 1
+			}
 		}
 	}
 	return 0
@@ -862,11 +868,12 @@ func keyFactOverlapScore(answer, expected string) float64 {
 		}
 	}
 	coverage := float64(matched) / float64(len(expectedPhrases))
-	// Accept at 30% coverage — paraphrased answers share key entities but
-	// rarely share connective phrasing. The insufficiency guard already
-	// filters refusals, and short expected answers use strict matching,
-	// so false positives from topical adjacency are bounded.
-	if coverage >= 0.3 {
+	// Accept at 33% coverage with at least 2 matched phrases. Paraphrased
+	// answers share key entities but rarely share connective phrasing. The
+	// insufficiency guard filters refusals, and short expected answers use
+	// strict matching. The minimum-2-match guard prevents a single shared
+	// entity from triggering a false positive.
+	if coverage >= 0.33 && matched >= 2 {
 		return coverage
 	}
 	return 0
