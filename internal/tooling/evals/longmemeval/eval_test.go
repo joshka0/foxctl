@@ -586,6 +586,38 @@ func TestBidirectionalContainsScore(t *testing.T) {
 	}
 }
 
+func TestNumericFactMatchScoreCatchesVerboseCorrectAnswer(t *testing.T) {
+	t.Parallel()
+
+	// MoMA case: answer is verbose but contains "7 days"
+	answer := "7 days passed between your two museum visits. MoMA visit: January 8, 2023. Met visit: January 15, 2023."
+	expected := "7 days. 8 days (including the last day) is also acceptable."
+	score := answerMatchScore(answer, expected)
+	if score == 0 {
+		t.Fatalf("verbose answer containing '7 days' should match expected '7 days. ...'")
+	}
+}
+
+func TestNumericFactMatchScoreRejectsWrongNumber(t *testing.T) {
+	t.Parallel()
+
+	// Wrong number: answer says 3 days, expected 7 days
+	score := answerMatchScore("3 days passed between visits", "7 days. 8 days (including the last day) is also acceptable.")
+	if score > 0 {
+		t.Fatalf("wrong numeric answer should score 0, got %f", score)
+	}
+}
+
+func TestNumericFactMatchScoreMarkdownFormatting(t *testing.T) {
+	t.Parallel()
+
+	// Answer has markdown bold formatting: "**7 days**"
+	score := answerMatchScore("**7 days** passed between the visits", "7 days")
+	if score == 0 {
+		t.Fatalf("markdown-formatted '7 days' should match expected '7 days'")
+	}
+}
+
 func TestRunAnswerModeRequiresRunner(t *testing.T) {
 	_, err := Run(context.Background(), EvalOptions{
 		DatasetPath: "test://fixture",

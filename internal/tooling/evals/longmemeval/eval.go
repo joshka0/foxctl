@@ -782,6 +782,13 @@ func answerMatchScore(answer, expected string) float64 {
 	if strings.Contains(expected, answer) && len(answer)*2 >= len(expected) {
 		return 1
 	}
+	// Numeric fact match: when the expected answer leads with a number+unit
+	// (e.g. "7 days", "3 items"), check if the answer contains that exact
+	// number near the same unit. This catches long conversational answers
+	// that state the correct value but in a verbose format.
+	if score := numericFactMatchScore(answer, expected); score > 0 {
+		return score
+	}
 	// Semantic key-fact overlap: for longer expected answers, check if
 	// the answer covers the key facts/entities. This catches paraphrased
 	// correct answers that strict substring matching misses.
@@ -789,6 +796,52 @@ func answerMatchScore(answer, expected string) float64 {
 		return score
 	}
 	return 0
+}
+
+// numericFactMatchScore extracts a leading "number + unit" pattern from the
+// expected answer (e.g. "7 days", "3 items", "45 minutes") and checks if the
+// answer contains that number followed by the same unit within a small window.
+// Returns 1 on match, 0 otherwise. This handles short expected answers that
+// contain the key fact at the start but also have additional context.
+func numericFactMatchScore(answer, expected string) float64 {
+	// Extract leading number from expected.
+	expectedWords := strings.Fields(expected)
+	if len(expectedWords) < 2 {
+		return 0
+	}
+	num := strings.Trim(expectedWords[0], ".,;:!?()[]{}")
+	unit := strings.Trim(expectedWords[1], ".,;:!?()[]{}")
+	if !isNumeric(num) || len(unit) < 3 {
+		return 0
+	}
+	// Check if answer contains "num unit" within 3 words of each other.
+	answerWords := strings.Fields(answer)
+	for i, w := range answerWords {
+		w = strings.Trim(w, ".,;:!?()[]{}")
+		if w == num && i+1 < len(answerWords) {
+			next := strings.Trim(answerWords[i+1], ".,;:!?()[]{}")
+			if strings.EqualFold(next, unit) || strings.EqualFold(strings.TrimSuffix(next, "s"), strings.TrimSuffix(unit, "s")) {
+				return 1
+			}
+		}
+		// Also handle "**7 days**" markdown formatting.
+		if strings.Contains(w, num) && strings.Contains(w, unit) {
+			return 1
+		}
+	}
+	return 0
+}
+
+func isNumeric(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // keyFactOverlapScore checks whether the answer covers the key facts from
