@@ -57,7 +57,8 @@ func Example_span() {
 	client, sink := newCaptureClient()
 	defer func() { _ = client.Close() }()
 
-	_, span := client.StartSpan(context.Background(), "db.query",
+	_, span := client.StartSpan(
+		context.Background(), "db.query",
 		foxcular.WithSpanName("SELECT users"),
 		foxcular.WithSpanData("db.system", "postgres"),
 	)
@@ -82,7 +83,8 @@ func Example_nestedSpans() {
 	ctx, parent := client.StartSpan(context.Background(), "request.handle")
 	parent.AddData("handler", "users")
 
-	_, child := client.StartSpan(ctx, "db.query",
+	_, child := client.StartSpan(
+		ctx, "db.query",
 		foxcular.WithSpanName("SELECT users"),
 	)
 	child.AddData("sql", "SELECT * FROM users")

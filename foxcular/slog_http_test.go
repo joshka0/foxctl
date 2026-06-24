@@ -30,7 +30,8 @@ func newSlogTestClient() (*foxcular.Client, *captureDrain, *stubClock, *stubIDs)
 		"trace-002", "span-child-001", "span-slog-001", "span-slog-002",
 	}}
 	drain := &captureDrain{}
-	client := foxcular.NewClient(drain,
+	client := foxcular.NewClient(
+		drain,
 		foxcular.WithClock(clock),
 		foxcular.WithIDGenerator(ids),
 	)
@@ -219,8 +220,10 @@ func TestSlogGroupValuePreservesStructure(t *testing.T) {
 	logger := slog.New(handler)
 
 	// Log with a group value (slog.Group creates a group attribute).
-	logger.Info("nested groups",
-		slog.Group("request",
+	logger.Info(
+		"nested groups",
+		slog.Group(
+			"request",
 			slog.String("method", "GET"),
 			slog.String("path", "/api/users"),
 			slog.String("authorization", "bearer tok_secret"),
@@ -282,7 +285,8 @@ func newHTTPTestClient() (*foxcular.Client, *captureDrain, *stubClock, *stubIDs)
 		"trace-006", "span-006", "trace-007", "span-007",
 	}}
 	drain := &captureDrain{}
-	client := foxcular.NewClient(drain,
+	client := foxcular.NewClient(
+		drain,
 		foxcular.WithClock(clock),
 		foxcular.WithIDGenerator(ids),
 	)

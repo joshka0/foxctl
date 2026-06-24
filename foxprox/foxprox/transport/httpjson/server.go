@@ -371,35 +371,35 @@ func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) terminalText(w http.ResponseWriter, r *http.Request) {
 	s.runTerminal(w, r, func(id string, intent any) (int, error) {
-		t := *(intent.(*intents.TerminalText))
+		t := *intent.(*intents.TerminalText)
 		return s.broker.SubmitText(id, t)
 	}, func() any { return &intents.TerminalText{} })
 }
 
 func (s *Server) terminalKey(w http.ResponseWriter, r *http.Request) {
 	s.runTerminal(w, r, func(id string, intent any) (int, error) {
-		t := *(intent.(*intents.TerminalKey))
+		t := *intent.(*intents.TerminalKey)
 		return s.broker.SubmitKey(id, t)
 	}, func() any { return &intents.TerminalKey{} })
 }
 
 func (s *Server) terminalSubmit(w http.ResponseWriter, r *http.Request) {
 	s.runTerminal(w, r, func(id string, intent any) (int, error) {
-		t := *(intent.(*intents.TerminalSubmit))
+		t := *intent.(*intents.TerminalSubmit)
 		return s.broker.Submit(id, t)
 	}, func() any { return &intents.TerminalSubmit{} })
 }
 
 func (s *Server) terminalPaste(w http.ResponseWriter, r *http.Request) {
 	s.runTerminal(w, r, func(id string, intent any) (int, error) {
-		t := *(intent.(*intents.TerminalPaste))
+		t := *intent.(*intents.TerminalPaste)
 		return s.broker.Paste(id, t)
 	}, func() any { return &intents.TerminalPaste{} })
 }
 
 func (s *Server) terminalWriteBytes(w http.ResponseWriter, r *http.Request) {
 	s.runTerminal(w, r, func(id string, intent any) (int, error) {
-		t := *(intent.(*intents.TerminalWriteBytes))
+		t := *intent.(*intents.TerminalWriteBytes)
 		return s.broker.WriteBytes(id, t)
 	}, func() any { return &intents.TerminalWriteBytes{} })
 }

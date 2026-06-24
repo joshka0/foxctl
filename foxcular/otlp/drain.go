@@ -182,7 +182,8 @@ func mapAttributes(event *foxcular.Event) []log.KeyValue {
 	attrs := make([]log.KeyValue, 0, 16)
 
 	// Core fields.
-	attrs = append(attrs,
+	attrs = append(
+		attrs,
 		log.String("foxcular.operation", event.Operation),
 		log.String("foxcular.status", string(event.Status)),
 	)

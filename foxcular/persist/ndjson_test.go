@@ -170,7 +170,8 @@ func TestNDJSONRedactsBeforeWrite(t *testing.T) {
 	defer func() { _ = sink.Close() }()
 
 	// Create a client with default redaction and the NDJSON sink.
-	client := foxcular.NewClient(sink,
+	client := foxcular.NewClient(
+		sink,
 		foxcular.WithRedaction(foxcular.NewRedactionPolicy()),
 	)
 

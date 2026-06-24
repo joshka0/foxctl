@@ -160,7 +160,8 @@ func newOTLPTestClient() (*foxcular.Client, *fakeExporter, *stubClock, *stubIDs)
 		"trace-001", "span-001", "span-002", "span-003",
 		"trace-002", "span-child-001", "trace-003", "span-003",
 	}}
-	client := foxcular.NewClient(drain,
+	client := foxcular.NewClient(
+		drain,
 		foxcular.WithClock(clock),
 		foxcular.WithIDGenerator(ids),
 	)
@@ -498,7 +499,8 @@ func TestClientFlushCloseWithOTLPDrain(t *testing.T) {
 		"trace-003", "span-003", "trace-004", "span-004",
 		"trace-005", "span-005",
 	}}
-	client := foxcular.NewClient(drain,
+	client := foxcular.NewClient(
+		drain,
 		foxcular.WithClock(clock),
 		foxcular.WithIDGenerator(ids),
 	)
@@ -587,7 +589,8 @@ func TestExporterFailureDoesNotCrashBestEffortPath(t *testing.T) {
 	ts := time.Date(2026, 1, 15, 10, 30, 0, 0, time.UTC)
 	clock := &stubClock{times: []time.Time{ts}}
 	ids := &stubIDs{ids: []string{"t1", "s1"}}
-	client := foxcular.NewClient(fanout,
+	client := foxcular.NewClient(
+		fanout,
 		foxcular.WithClock(clock),
 		foxcular.WithIDGenerator(ids),
 	)
@@ -615,7 +618,8 @@ func TestExporterFailureSurfacedOnSyncEmit(t *testing.T) {
 	ts := time.Date(2026, 1, 15, 10, 30, 0, 0, time.UTC)
 	clock := &stubClock{times: []time.Time{ts}}
 	ids := &stubIDs{ids: []string{"t1", "s1"}}
-	client := foxcular.NewClient(drain,
+	client := foxcular.NewClient(
+		drain,
 		foxcular.WithClock(clock),
 		foxcular.WithIDGenerator(ids),
 	)
@@ -805,7 +809,8 @@ func TestFullClientIntegrationWithOTLPDrain(t *testing.T) {
 	ids := &stubIDs{ids: []string{
 		"trace-001", "span-001", "span-002", "span-003",
 	}}
-	client := foxcular.NewClient(drain,
+	client := foxcular.NewClient(
+		drain,
 		foxcular.WithClock(clock),
 		foxcular.WithIDGenerator(ids),
 	)
@@ -859,12 +864,14 @@ func TestSpanIntegrationWithOTLPDrain(t *testing.T) {
 	ts := time.Date(2026, 1, 15, 10, 30, 0, 0, time.UTC)
 	clock := &stubClock{times: []time.Time{ts, ts.Add(50 * time.Millisecond)}}
 	ids := &stubIDs{ids: []string{"trace-001", "span-001", "span-002"}}
-	client := foxcular.NewClient(drain,
+	client := foxcular.NewClient(
+		drain,
 		foxcular.WithClock(clock),
 		foxcular.WithIDGenerator(ids),
 	)
 
-	_, span := client.StartSpan(context.Background(), "test.op",
+	_, span := client.StartSpan(
+		context.Background(), "test.op",
 		foxcular.WithSpanName("TestOp"),
 		foxcular.WithSpanData("items", 42),
 	)
