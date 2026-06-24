@@ -42,6 +42,7 @@ Each row is a committed slice. Score is answer-mode correct/total (1/4 baseline)
 | live-11 | 19-case turn digest summary | — | — | — | — | 13/19 (68%) | 2026-06-23 |
 | live-12 | 19-case + LLM judge | — | — | — | — | 14/19 (74%) | 2026-06-23 |
 | live-13 | 19-case + nemotron atomize + judge | — | — | — | — | 16/19 (84%) | 2026-06-24 |
+| live-14 | 19-case + purge + atomize + judge + infer | — | — | — | — | 13/19 (68%) | 2026-06-24 |
 
 ## Scaled Eval Results — 2026-06-23
 
