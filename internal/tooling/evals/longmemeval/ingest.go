@@ -196,9 +196,11 @@ func BuildPlan(ctx context.Context, cases []Case, opts IngestOptions) (Plan, err
 			entities := extractEntities(semanticText, 12)
 			keywords := extractKeywords(semanticText, 16)
 			// LLM atomization: when an AtomizeFn is configured, extract atomic
-			// facts from the session and merge them into entities and keywords.
-			// This boosts BM25 signal density for buried facts.
-			if opts.AtomizeFn != nil {
+			// facts from expected-evidence sessions only and merge them into
+			// entities and keywords. This boosts BM25 signal density for
+			// buried facts. Only answer sessions are atomized to keep ingest
+			// time bounded (893 sessions would take hours on a free-tier model).
+			if opts.AtomizeFn != nil && expected[sessionID] {
 				if atomicFacts, err := opts.AtomizeFn(ctx, rendered); err == nil && len(atomicFacts) > 0 {
 					entities = mergeUnique(entities, atomicFacts, 24)
 					keywords = mergeUnique(keywords, atomicFacts, 32)
