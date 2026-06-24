@@ -108,8 +108,8 @@ func TestRecordRLMAnswerFeedbackRejectsInvalidKindAndRefs(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected invalid answer-used ref error")
 	}
-	if !strings.Contains(err.Error(), "--answer-feedback-used-ref[0]") {
-		t.Fatalf("error=%q want answer-feedback-used-ref parse context", err)
+	if !strings.Contains(err.Error(), "--answer-feedback-used-ref is required for lifecycle-impacting answer feedback kind") {
+		t.Fatalf("error=%q want lifecycle-impacting kind requires explicit used refs", err)
 	}
 	feedback, err := store.ListRetrievalFeedback(ctx, contextengine.RetrievalFeedbackFilter{})
 	if err != nil {
@@ -152,7 +152,6 @@ func TestRecordRLMAnswerFeedbackCanPersistInformationalAnswerRefs(t *testing.T) 
 
 	for _, kind := range []contextengine.RetrievalFeedbackKind{
 		contextengine.RetrievalFeedbackKindEvidenceUsed,
-		contextengine.RetrievalFeedbackKindAnswerAccepted,
 		contextengine.RetrievalFeedbackKindGapCreated,
 	} {
 		t.Run(string(kind), func(t *testing.T) {
@@ -230,7 +229,7 @@ func TestRecordRLMAnswerFeedbackDoesNotPersistWithoutAnswerUsedRefs(t *testing.T
 		},
 	}, rlmAnswerFeedbackOptions{
 		EpisodeID:     "episode-no-answer-used-refs",
-		Kind:          string(contextengine.RetrievalFeedbackKindAnswerAccepted),
+		Kind:          string(contextengine.RetrievalFeedbackKindEvidenceUsed),
 		UseAnswerRefs: true,
 	})
 	if err != nil {
