@@ -75,6 +75,11 @@ type EvalOptions struct {
 	EmbeddingModel string
 	// SuiteName labels the run in the report (defaults to "longmem").
 	SuiteName string
+	// PurgeBeforeIngest deletes all longmem:// prefixed memories in the
+	// workspace before ingesting. Use this when re-running eval with
+	// different enrichment (atomization, turn digests, etc.) to avoid
+	// stale records being skipped by dedup.
+	PurgeBeforeIngest bool
 }
 
 // AnswerRequest is the package-level seam for answer-mode execution.
@@ -206,6 +211,9 @@ type Deps struct {
 	RunAnswer    AnswerRunner
 	Now          func() time.Time
 	MemoryName   func(workspaceID, caseID, sessionID string) string
+	// PurgeBeforeIngest deletes existing longmem:// memories before
+	// re-ingesting. Prevents stale records being skipped by dedup.
+	PurgeBeforeIngest bool
 	// JudgeAnswer, when set, is called as a secondary LLM binary judge.
 	// It receives the model answer, expected answer, and original question.
 	// It should return 1.0 (YES/semantically equivalent), 0.0 (NO), an
@@ -448,6 +456,7 @@ func Run(ctx context.Context, opts EvalOptions, deps Deps) (RunResult, error) {
 		}
 	}
 	ingestDeps := deps
+	ingestDeps.PurgeBeforeIngest = opts.PurgeBeforeIngest
 	ingestDeps.ApplyPlan = applyPlan
 
 	var (
@@ -573,6 +582,13 @@ func runIngest(ctx context.Context, deps Deps, plan Plan) (IngestOutcome, error)
 		return IngestOutcome{}, fmt.Errorf("open memory: %w", err)
 	}
 	defer func() { _ = store.Close() }()
+	// Purge existing longmem:// memories before re-ingesting to avoid
+	// stale records being skipped by dedup.
+	if deps.PurgeBeforeIngest {
+		if deleted, err := store.DeleteByNamePrefix(ctx, workspaceID, "longmem://"); err == nil {
+			_ = deleted
+		}
+	}
 	queue, err := deps.OpenQueue(ctx, workspaceID)
 	if err != nil {
 		return IngestOutcome{}, fmt.Errorf("open queue: %w", err)

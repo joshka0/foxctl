@@ -50,28 +50,29 @@ func defaultEvalQueueOpener() func(context.Context, string) (*embedding.Store, e
 
 func newEvalLongmemCommandWithDeps(deps longmemeval.Deps, openMemory func(context.Context, string) (storage.MemoryStore, error), openQueue func(context.Context, string) (*embedding.Store, error)) *cobra.Command {
 	var (
-		datasetPath    string
-		workspaceID    string
-		workspacePath  string
-		modes          []string
-		artifactDir    string
-		limit          int
-		embeddingModel string
-		suiteName      string
-		answerProvider string
-		answerModel    string
-		answerBaseURL  string
-		answerAPIKey   string
-		answerTimeout  time.Duration
-		answerMaxIters int
-		answerRoute    string
-		answerPlanMode string
-		answerTools    string
-		answerStrategy string
-		answerJudge    bool
-		atomizeModel   string
-		atomizeBaseURL string
-		atomizeAPIKey  string
+		datasetPath       string
+		workspaceID       string
+		workspacePath     string
+		modes             []string
+		artifactDir       string
+		limit             int
+		embeddingModel    string
+		suiteName         string
+		answerProvider    string
+		answerModel       string
+		answerBaseURL     string
+		answerAPIKey      string
+		answerTimeout     time.Duration
+		answerMaxIters    int
+		answerRoute       string
+		answerPlanMode    string
+		answerTools       string
+		answerStrategy    string
+		answerJudge       bool
+		purgeBeforeIngest bool
+		atomizeModel      string
+		atomizeBaseURL    string
+		atomizeAPIKey     string
 	)
 
 	cmd := &cobra.Command{
@@ -187,13 +188,14 @@ into the workspace memories.
 				}
 			}
 			result, err := longmemeval.Run(ctx, longmemeval.EvalOptions{
-				DatasetPath:    datasetPath,
-				WorkspaceID:    workspace,
-				Modes:          modeList,
-				ArtifactDir:    artifactDir,
-				Limit:          limit,
-				EmbeddingModel: embeddingModel,
-				SuiteName:      suiteName,
+				DatasetPath:       datasetPath,
+				WorkspaceID:       workspace,
+				Modes:             modeList,
+				ArtifactDir:       artifactDir,
+				Limit:             limit,
+				EmbeddingModel:    embeddingModel,
+				SuiteName:         suiteName,
+				PurgeBeforeIngest: purgeBeforeIngest,
 			}, resolvedDeps)
 			if err != nil {
 				return err
@@ -238,6 +240,7 @@ into the workspace memories.
 	cmd.Flags().StringVar(&answerTools, "answer-tool-profile", "", "Answer-mode RLM tool profile (defaults by --answer-strategy)")
 	cmd.Flags().StringVar(&answerStrategy, "answer-strategy", "retrieve-memory", "Answer-mode strategy: retrieve-memory, gather-memory, gather-mixed, full-debug")
 	cmd.Flags().BoolVar(&answerJudge, "answer-judge", false, "Enable LLM judge for semantic answer scoring (overrides deterministic scorer on FAIL)")
+	cmd.Flags().BoolVar(&purgeBeforeIngest, "purge-ingest", false, "Delete existing longmem:// memories before ingesting (clean re-ingest)")
 	cmd.Flags().StringVar(&atomizeModel, "atomize-model", "", "LLM model for ingest-time atomic fact extraction (e.g. nvidia/nemotron-3-ultra-550b-a55b:free)")
 	cmd.Flags().StringVar(&atomizeBaseURL, "atomize-base-url", "https://openrouter.ai/api/v1", "LLM base URL for atomization model")
 	cmd.Flags().StringVar(&atomizeAPIKey, "atomize-api-key", "", "API key for atomization model (defaults to OPENROUTER_API_TOKEN)")
