@@ -206,10 +206,6 @@ type Deps struct {
 	RunAnswer    AnswerRunner
 	Now          func() time.Time
 	MemoryName   func(workspaceID, caseID, sessionID string) string
-	// ExpandQuery, when set, generates synonym/related terms for the query
-	// to bridge vocabulary gaps (e.g. "accessories" -> "flash, tripod, lens,
-	// battery case"). The returned string is searched alongside the original.
-	ExpandQuery func(ctx context.Context, query string) (string, error)
 	// JudgeAnswer, when set, is called as a secondary LLM binary judge.
 	// It receives the model answer, expected answer, and original question.
 	// It should return 1.0 (YES/semantically equivalent), 0.0 (NO), an
@@ -507,7 +503,6 @@ func Run(ctx context.Context, opts EvalOptions, deps Deps) (RunResult, error) {
 			casesOut, err := runRetrieval(ctx, retrievalDeps{
 				Store:       deps.OpenMemory,
 				Search:      searchFn,
-				ExpandQuery: deps.ExpandQuery,
 				Now:         now,
 				MemoryName:  memoryNameFn,
 				Leakage:     leakage,
@@ -524,7 +519,6 @@ func Run(ctx context.Context, opts EvalOptions, deps Deps) (RunResult, error) {
 			casesOut, err := runAnswer(ctx, answerDeps{
 				Run:         deps.RunAnswer,
 				JudgeAnswer: deps.JudgeAnswer,
-				ExpandQuery: deps.ExpandQuery,
 				Now:         now,
 				MemoryName:  memoryNameFn,
 				Leakage:     leakage,
@@ -546,7 +540,6 @@ func Run(ctx context.Context, opts EvalOptions, deps Deps) (RunResult, error) {
 type retrievalDeps struct {
 	Store       func(context.Context, string) (storage.MemoryStore, error)
 	Search      func(context.Context, storage.MemoryStore, string, string, int) (memoryrecall.QueryResponse, error)
-	ExpandQuery func(ctx context.Context, query string) (string, error)
 	Now         func() time.Time
 	MemoryName  func(workspaceID, caseID, sessionID string) string
 	Leakage     map[string]int
@@ -557,7 +550,6 @@ type retrievalDeps struct {
 type answerDeps struct {
 	Run         AnswerRunner
 	JudgeAnswer func(ctx context.Context, question, answer, expected string) (score float64, reason string, err error)
-	ExpandQuery func(ctx context.Context, query string) (string, error)
 	Now         func() time.Time
 	MemoryName  func(workspaceID, caseID, sessionID string) string
 	Leakage     map[string]int
@@ -653,15 +645,7 @@ func scoreCase(ctx context.Context, deps retrievalDeps, store storage.MemoryStor
 		return result
 	}
 	started := deps.Now()
-	// Query expansion: generate synonyms/related terms to bridge vocabulary
-	// gaps (e.g. "accessories" -> "flash, tripod, lens, battery case").
-	searchQuery := c.Question
-	if deps.ExpandQuery != nil {
-		if expanded, err := deps.ExpandQuery(ctx, c.Question); err == nil && strings.TrimSpace(expanded) != "" {
-			searchQuery = c.Question + " " + expanded
-		}
-	}
-	resp, err := deps.Search(ctx, store, deps.WorkspaceID, searchQuery, deps.Limit)
+	resp, err := deps.Search(ctx, store, deps.WorkspaceID, c.Question, deps.Limit)
 	if err != nil {
 		result.Method = resp.Method
 		result.Error = err.Error()
@@ -735,18 +719,10 @@ func scoreAnswerCase(ctx context.Context, deps answerDeps, c Case) CaseResult {
 		return result
 	}
 	started := deps.Now()
-	// Query expansion: append related terms to the question so the model's
-	// retrieve_memory call has better vocabulary coverage.
-	question := c.Question
-	if deps.ExpandQuery != nil {
-		if expanded, err := deps.ExpandQuery(ctx, c.Question); err == nil && strings.TrimSpace(expanded) != "" {
-			question = c.Question + "\n\nSearch hints: " + expanded
-		}
-	}
 	resp, err := deps.Run(ctx, AnswerRequest{
 		WorkspaceID: deps.WorkspaceID,
 		CaseID:      caseID,
-		Question:    question,
+		Question:    c.Question,
 		Limit:       deps.Limit,
 	})
 	durationMS := deps.Now().Sub(started).Milliseconds()

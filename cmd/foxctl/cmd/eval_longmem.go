@@ -140,14 +140,6 @@ into the workspace memories.
 			if resolvedDeps.Now == nil {
 				resolvedDeps.Now = time.Now
 			}
-			// Query expansion: reuse the atomize model for synonym generation.
-			if atomizeModel != "" {
-				atomizeKey := atomizeAPIKey
-				if atomizeKey == "" {
-					atomizeKey = os.Getenv("OPENROUTER_API_TOKEN")
-				}
-				resolvedDeps.ExpandQuery = newLongmemQueryExpander(atomizeModel, atomizeBaseURL, atomizeKey)
-			}
 			if resolvedDeps.RunAnswer == nil && longmemModesInclude(modeList, longmemeval.ModeAnswer) {
 				answerRuntime, err := resolveLongmemAnswerRuntime(longmemAnswerRuntimeInput{
 					Strategy:            answerStrategy,
@@ -993,70 +985,5 @@ Transcript:
 			facts = append(facts, line)
 		}
 		return facts, nil
-	}
-}
-
-// newLongmemQueryExpander creates an ExpandQueryFn that generates related
-// terms for a question to bridge vocabulary gaps in BM25 retrieval (e.g.
-// "accessories" -> "flash tripod lens battery case filter strap").
-func newLongmemQueryExpander(model, baseURL, apiKey string) func(ctx context.Context, query string) (string, error) {
-	return func(ctx context.Context, query string) (string, error) {
-		prompt := "List 10-15 related words, synonyms, and specific terms that might appear in a conversation about this topic. Output as a space-separated list, nothing else.\n\n" + query
-
-		reqBody := struct {
-			Model     string `json:"model"`
-			MaxTokens int    `json:"max_tokens"`
-			Messages  []struct {
-				Role    string `json:"role"`
-				Content string `json:"content"`
-			} `json:"messages"`
-		}{
-			Model:     model,
-			MaxTokens: 128,
-			Messages: []struct {
-				Role    string `json:"role"`
-				Content string `json:"content"`
-			}{
-				{Role: "user", Content: prompt},
-			},
-		}
-
-		bodyBytes, err := json.Marshal(reqBody)
-		if err != nil {
-			return "", fmt.Errorf("marshal expand request: %w", err)
-		}
-
-		req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/chat/completions", bytes.NewReader(bodyBytes))
-		if err != nil {
-			return "", fmt.Errorf("create expand request: %w", err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+apiKey)
-
-		client := &http.Client{Timeout: 30 * time.Second}
-		resp, err := client.Do(req)
-		if err != nil {
-			return "", fmt.Errorf("expand request: %w", err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != 200 {
-			return "", nil // silent fallback — use original query
-		}
-
-		var result struct {
-			Choices []struct {
-				Message struct {
-					Content string `json:"content"`
-				} `json:"message"`
-			} `json:"choices"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			return "", nil
-		}
-		if len(result.Choices) == 0 {
-			return "", nil
-		}
-		return strings.TrimSpace(result.Choices[0].Message.Content), nil
 	}
 }
