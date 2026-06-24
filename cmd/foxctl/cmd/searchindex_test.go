@@ -23,7 +23,7 @@ func TestSearchIndexStatsCommandReportsPersistentCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open searchindex: %v", err)
 	}
-	workspaceID := workspace.ID(workspaceRoot)
+	workspaceID := workspace.ExplicitID(workspaceRoot)
 	if err := store.Upsert(context.Background(), searchindex.Document{
 		ID:             "search://" + workspaceID + "/symbol/a",
 		WorkspaceID:    workspaceID,

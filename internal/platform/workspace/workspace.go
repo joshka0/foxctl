@@ -32,6 +32,13 @@ func Detect(start string) string {
 	}
 
 	// 3. Walk up looking for markers
+	return DetectFromPath(start)
+}
+
+// DetectFromPath returns the workspace path by walking up from start looking for
+// .git or .foxctl markers. Unlike Detect, it intentionally ignores workspace
+// environment overrides so explicit path arguments stay scoped to that path.
+func DetectFromPath(start string) string {
 	dir := start
 	if dir == "" {
 		if cwd, err := os.Getwd(); err == nil {
@@ -42,9 +49,13 @@ func Detect(start string) string {
 		return ""
 	}
 	dir = filepath.Clean(dir)
+	tempRoot := Normalize(os.TempDir())
 	candidate := dir
 	for {
-		if hasMarker(candidate, ".foxctl") || hasMarker(candidate, ".git") {
+		if hasMarker(candidate, ".git") {
+			return candidate
+		}
+		if hasMarker(candidate, ".foxctl") && !isInheritedTempRootMarker(candidate, dir, tempRoot) {
 			return candidate
 		}
 		parent := filepath.Dir(candidate)
@@ -54,6 +65,20 @@ func Detect(start string) string {
 		candidate = parent
 	}
 	return dir
+}
+
+func isInheritedTempRootMarker(candidate, start, tempRoot string) bool {
+	if candidate == start {
+		return false
+	}
+	if tempRoot != "" && candidate == tempRoot {
+		return true
+	}
+	info, err := os.Stat(candidate)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	return info.Mode().Perm()&0o002 != 0 && info.Mode()&os.ModeSticky != 0
 }
 
 // Normalize cleans the workspace path for display/persistence.
@@ -79,7 +104,7 @@ func FamilyPath(path string) string {
 		}
 		return clean
 	}
-	root := Normalize(Detect(clean))
+	root := Normalize(DetectFromPath(clean))
 	if root == "" {
 		return ""
 	}
@@ -286,6 +311,32 @@ func ID(path string) string {
 		return repo
 	}
 	return PathIdentity(family)
+}
+
+// ExplicitIDOrSelector canonicalizes a user-supplied workspace value while
+// preserving opaque workspace IDs.
+func ExplicitIDOrSelector(input string) string {
+	input = strings.TrimSpace(input)
+	if input == "" || LooksLikeID(input) {
+		return input
+	}
+	if looksLikePathSelector(input) || pathExists(input) {
+		return ExplicitID(input)
+	}
+	return input
+}
+
+// ExplicitID returns the preferred workspace identifier for a user-supplied
+// workspace path without applying environment overrides or ancestor detection.
+func ExplicitID(path string) string {
+	if path == "" {
+		return ""
+	}
+	clean := Normalize(path)
+	if repo := RepoIdentity(clean); repo != "" {
+		return repo
+	}
+	return PathIdentity(clean)
 }
 
 func hasMarker(dir, name string) bool {

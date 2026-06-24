@@ -46,7 +46,7 @@ SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 CGO_SKILLS :=
 OPTIONAL_CGO_SKILLS :=
 
-.PHONY: fmt lint static-analysis install-git-hooks typecheck lsp-check vet test test-race test-race-smoke test-race-shard test-race-impacted test-race-changed test-race-shard-impacted test-integration test-integration-package test-integration-package-impacted test-integration-impacted test-integration-cmd test-integration-cmd-impacted test-integration-golden test-integration-golden-impacted test-integration-rlm test-integration-rlm-impacted mutation-critical mutation-critical-list mutation-critical-dry-run cover check-coverage check-coverage-strict check-doc-links check-large-files check-tech-debt repo-hygiene check-duplication test-timing build build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-impact skills-dependency-audit skills-build-impacted packages-impact test-short-core test-short-core-impacted test-short-skills test-short-skills-impacted test-short-impacted skills-install skills-install-cgo skills-install-all skills-test completions init go-tui-build go-tui-spawn go-tui-agent go-tui go-tui-smoke tui ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean benchmark-manifest bench-go bench-orientation gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-foxctl-package eval-code-search-praze-infra eval-code-search-foxctl-repo-grounded eval-code-search-foxctl-change-impact eval-code-search-foxctl-trace-symbol eval-code-search-foxctl-bridge-esoteric eval-retrieval-foxctl eval-retrieval-foxctl-mixed eval-retrieval-foxctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
+.PHONY: fmt lint static-analysis install-git-hooks typecheck lsp-check vet test test-race test-race-smoke test-race-shard test-race-impacted test-race-changed test-race-shard-impacted test-integration test-integration-package test-integration-package-impacted test-integration-impacted test-integration-cmd test-integration-cmd-impacted test-integration-golden test-integration-golden-impacted test-integration-rlm test-integration-rlm-impacted mutation-critical mutation-critical-list mutation-critical-dry-run cover check-coverage check-coverage-strict check-doc-links check-large-files check-tech-debt repo-hygiene check-duplication test-timing build build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-impact skills-dependency-audit skills-doctor skills-doctor-changed skills-build-impacted packages-impact test-short-core test-short-core-impacted test-short-skills test-short-skills-impacted test-short-impacted skills-install skills-install-cgo skills-install-all skills-test completions init go-tui-build go-tui-spawn go-tui-agent go-tui go-tui-smoke tui ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean benchmark-manifest bench-go bench-orientation gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-foxctl-package eval-code-search-praze-infra eval-code-search-foxctl-repo-grounded eval-code-search-foxctl-change-impact eval-code-search-foxctl-trace-symbol eval-code-search-foxctl-bridge-esoteric eval-retrieval-foxctl eval-retrieval-foxctl-mixed eval-retrieval-foxctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
 
 fmt:
 	@echo "Running gofumpt"
@@ -816,6 +816,32 @@ packages-impact:
 BASE_REF ?=
 HEAD_REF ?= HEAD
 
+skills-doctor: build
+	@bin/$(BINARY) skills doctor
+
+skills-doctor-changed: build
+ifndef BASE_REF
+	$(error BASE_REF is required. Usage: make skills-doctor-changed BASE_REF=origin/main [HEAD_REF=HEAD])
+endif
+	@set -euo pipefail; \
+		skills="$$( git diff --name-only "$(BASE_REF)" "$(HEAD_REF)" -- skills \
+			| sed -n 's#^skills/\([^/][^/]*\)/.*#\1#p' \
+			| sort -u \
+			| while IFS= read -r name; do \
+				if [ -f "skills/$$name/skill.yaml" ]; then \
+					printf '%s\n' "$$name"; \
+				fi; \
+			done \
+			| paste -sd' ' - )"; \
+		if [ -z "$$skills" ]; then \
+			echo "No changed skills"; \
+			exit 0; \
+		fi; \
+		echo "Checking changed skill guides: $$skills"; \
+		for name in $$skills; do \
+			bin/$(BINARY) skills doctor "./skills/$$name" --strict; \
+		done
+
 skills-build-impacted:
 ifndef BASE_REF
 	$(error BASE_REF is required. Usage: make skills-build-impacted BASE_REF=origin/main [HEAD_REF=HEAD])
@@ -1129,56 +1155,3 @@ db-backup-clean:
 		rm -rf "$$dir"; \
 	done; \
 	echo "Cleanup complete"
-
-# LongMem eval harness — per-slice regression tracking.
-# Dataset path and workspace can be overridden from env.
-LONGMEM_DATASET ?= /tmp/foxctl-hydra-longmem/longmemeval_s_cleaned.json
-LONGMEM_WORKSPACE ?= /home/dev/repos/foxctl
-LONGMEM_ARTIFACT_DIR ?= /tmp/foxctl-longmem-artifacts
-LONGMEM_ANSWER_PROVIDER ?= $(shell echo $$LONGMEM_ANSWER_PROVIDER)
-LONGMEM_ANSWER_MODEL ?= $(shell echo $$LONGMEM_ANSWER_MODEL)
-
-.PHONY: longmem-slice-retrieval longmem-slice-answer longmem-slice-test
-
-# Retrieval-only mode: deterministic, no LLM calls. Tests BM25 hit@K + MRR.
-longmem-slice-retrieval:
-	@mkdir -p $(LONGMEM_ARTIFACT_DIR)
-	@echo "Running LongMem retrieval-only eval..."
-	@./bin/foxctl eval longmem \
-		--dataset $(LONGMEM_DATASET) \
-		--workspace $(LONGMEM_WORKSPACE) \
-		--mode ingest \
-		--mode queue-status \
-		--mode retrieval \
-		--artifact-dir $(LONGMEM_ARTIFACT_DIR)/retrieval \
-		--suite "slice-retrieval" \
-		|| { echo "FATAL: longmem retrieval eval failed"; exit 1; }
-	@echo "Artifacts: $(LONGMEM_ARTIFACT_DIR)/retrieval/"
-
-# Answer-mode: requires RLM model config. Tests answer accuracy + evidence.
-longmem-slice-answer:
-	@mkdir -p $(LONGMEM_ARTIFACT_DIR)
-	@test -f $(LONGMEM_DATASET) || { echo "ERROR: dataset not found at $(LONGMEM_DATASET). Set LONGMEM_DATASET."; exit 1; }
-	@echo "Running LongMem answer-mode eval..."
-	@./bin/foxctl eval longmem \
-		--dataset $(LONGMEM_DATASET) \
-		--workspace $(LONGMEM_WORKSPACE) \
-		--mode ingest \
-		--mode queue-status \
-		--mode answer \
-		--artifact-dir $(LONGMEM_ARTIFACT_DIR)/answer \
-		--suite "slice-answer" \
-		--answer-strategy retrieve-memory \
-		$(if $(LONGMEM_ANSWER_PROVIDER),--answer-provider $(LONGMEM_ANSWER_PROVIDER)) \
-		$(if $(LONGMEM_ANSWER_MODEL),--answer-model $(LONGMEM_ANSWER_MODEL)) \
-		|| { echo "FATAL: longmem answer eval failed"; exit 1; }
-	@echo "Artifacts: $(LONGMEM_ARTIFACT_DIR)/answer/"
-
-# Unit-test regression for longmem packages (no external deps).
-longmem-slice-test:
-	@echo "Running longmemeval + memoryrecall + rlm env focused tests..."
-	@$(GO_CMD) test -count=1 \
-		./internal/tooling/evals/longmemeval/... \
-		./internal/intelligence/retrieval/memoryrecall/... \
-		-run 'TestBuildPlan|TestRunAnswerMode|TestApplyPlan|TestSearch|TestScore|TestLeakage|TestEvidence|TestCoupon|TestFeedback' \
-		-v

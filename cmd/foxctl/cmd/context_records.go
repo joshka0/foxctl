@@ -283,7 +283,7 @@ func resolveContextWorkspace(workspacePath string) string {
 	if target == "" {
 		target = ws.Detect("")
 	} else {
-		target = ws.Detect(target)
+		target = ws.Normalize(target)
 	}
 	return ws.Normalize(target)
 }
