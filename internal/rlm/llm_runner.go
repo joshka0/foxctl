@@ -856,6 +856,13 @@ func buildSynthesisPrompt(query string, candidatePaths, evidenceRefs, acceptedLe
 	} else if len(evidenceRefs) > 0 {
 		b.WriteString("\nNo accepted ledger evidence was collected. Do not answer from surfaced or rejected evidence; state that verified evidence is insufficient.")
 	}
+	// Cross-session inference guidance: when evidence spans multiple sources
+	// and the answer requires combining facts (e.g. "age 32" from one session
+	// + "living here 5 years" from another = moved at age 27), explicitly
+	// instruct the model to state each fact and compute the answer.
+	if len(acceptedLedgerEvidence) >= 2 || len(evidenceRefs) >= 2 {
+		b.WriteString("\n\nCross-session reasoning: if the answer requires combining facts from multiple evidence sources, state each fact separately, then show how they combine to produce the answer (e.g. arithmetic, comparison, or aggregation).")
+	}
 	return b.String()
 }
 
