@@ -148,8 +148,9 @@ func parseLLMJudgeVerdict(text string) (float64, string, error) {
 func extractJudgeReason(lines []string) string {
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(strings.ToUpper(line), "REASON:") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "REASON:"))
+		upper := strings.ToUpper(line)
+		if strings.HasPrefix(upper, "REASON:") {
+			return strings.TrimSpace(line[len("REASON:"):])
 		}
 	}
 	return ""
