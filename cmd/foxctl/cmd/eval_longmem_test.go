@@ -486,7 +486,7 @@ func ingestEvalLongmemFixture(
 	if err := os.WriteFile(datasetPath, body, 0o644); err != nil {
 		t.Fatalf("write dataset: %v", err)
 	}
-	plan, err := longmemeval.BuildPlan(cases, longmemeval.IngestOptions{
+	plan, err := longmemeval.BuildPlan(context.Background(), cases, longmemeval.IngestOptions{
 		WorkspaceID:    workspaceID,
 		EmbeddingModel: "text-embedding-qwen3-embedding-8b",
 	})
