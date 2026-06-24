@@ -1259,6 +1259,11 @@ func (s *TursoStore) ListFiltered(ctx context.Context, workspace string, filter 
 		args = append(args, strings.TrimSpace(filter.SessionID))
 	}
 
+	if strings.TrimSpace(filter.NamePrefix) != "" {
+		where = append(where, "name LIKE ? || '%'")
+		args = append(args, strings.TrimSpace(filter.NamePrefix))
+	}
+
 	if len(filter.Types) > 0 {
 		placeholders := make([]string, 0, len(filter.Types))
 		for _, t := range filter.Types {

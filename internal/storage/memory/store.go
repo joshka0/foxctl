@@ -498,6 +498,12 @@ func (s *Store) ListFiltered(ctx context.Context, workspace string, filter ListF
 		args = append(args, strings.TrimSpace(filter.SessionID))
 	}
 
+	if strings.TrimSpace(filter.NamePrefix) != "" {
+		where = append(where, fmt.Sprintf("name LIKE $%d || '%%'", argIdx))
+		argIdx++
+		args = append(args, strings.TrimSpace(filter.NamePrefix))
+	}
+
 	if len(filter.Types) > 0 {
 		placeholders := make([]string, 0, len(filter.Types))
 		for _, t := range filter.Types {

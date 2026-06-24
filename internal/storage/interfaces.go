@@ -208,8 +208,9 @@ type MemoryTelemetryUpdate struct {
 
 // MemoryListFilter provides filter options for listing memories.
 type MemoryListFilter struct {
-	Types     []string
-	SessionID string
+	Types      []string
+	SessionID  string
+	NamePrefix string
 }
 
 // EmbeddingMetadata captures embedding configuration for a workspace.
