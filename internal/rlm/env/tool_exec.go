@@ -222,8 +222,7 @@ func (a *ReadOnlyAdapter) codeSearchFnForTaskWithRequired(limit int, taskType st
 		})
 
 		cheapLimit := codeSearchCandidatePoolLimit(limit, normalizedTaskType, len(required), 0)
-		cheapHits := mergeCodeSearchHitsWithOptions(cheapLimit, options, repoHits, liveHits, repoDocHits, repoCoverageHits, semanticFileHits, coverageHits, nonCodeHits, localHits, buildTargetHits)
-		annotateCodeSearchHitCoverage(cheapHits, required)
+		cheapHits := mergeAndAnnotateCodeSearchHits(cheapLimit, options, required, repoHits, liveHits, repoDocHits, repoCoverageHits, semanticFileHits, coverageHits, nonCodeHits, localHits, buildTargetHits)
 		pathRepairHits := timedRankedCodeSearchProviderNoError(providerTelemetry, "local_required_path_repair", func() []rankedCodeSearchHit {
 			return a.localRequiredPathRepairHits(required, cheapHits, limit)
 		})
@@ -242,8 +241,7 @@ func (a *ReadOnlyAdapter) codeSearchFnForTaskWithRequired(limit int, taskType st
 		routeFamilyHits := timedRankedCodeSearchProviderNoError(providerTelemetry, "local_route_family_closure", func() []rankedCodeSearchHit {
 			return a.localRouteFamilyClosureHits(cheapHits, limit, options)
 		})
-		cheapHits = mergeCodeSearchHitsWithOptions(cheapLimit, options, repoHits, liveHits, repoDocHits, repoCoverageHits, semanticFileHits, coverageHits, nonCodeHits, localHits, buildTargetHits, pathRepairHits, definitionRepairHits, testCoverageHits, routeActionHits, routeFamilyHits)
-		annotateCodeSearchHitCoverage(cheapHits, required)
+		cheapHits = mergeAndAnnotateCodeSearchHits(cheapLimit, options, required, repoHits, liveHits, repoDocHits, repoCoverageHits, semanticFileHits, coverageHits, nonCodeHits, localHits, buildTargetHits, pathRepairHits, definitionRepairHits, testCoverageHits, routeActionHits, routeFamilyHits)
 		needEnsemble := codeSearchNeedsExpensiveFallback(cheapHits, limit, normalizedTaskType, required)
 		var ensembleHits []rankedCodeSearchHit
 		var ensembleErr error
@@ -257,8 +255,7 @@ func (a *ReadOnlyAdapter) codeSearchFnForTaskWithRequired(limit int, taskType st
 			recordCodeSearchProviderSkipped(providerTelemetry, "code_search_ensemble", "cheap providers satisfied coverage")
 		}
 
-		postEnsembleHits := mergeCodeSearchHitsWithOptions(maxInt(limit*6, limit), options, repoHits, liveHits, repoDocHits, repoCoverageHits, semanticFileHits, coverageHits, nonCodeHits, localHits, buildTargetHits, pathRepairHits, definitionRepairHits, testCoverageHits, routeActionHits, routeFamilyHits, ensembleHits)
-		annotateCodeSearchHitCoverage(postEnsembleHits, required)
+		postEnsembleHits := mergeAndAnnotateCodeSearchHits(maxInt(limit*6, limit), options, required, repoHits, liveHits, repoDocHits, repoCoverageHits, semanticFileHits, coverageHits, nonCodeHits, localHits, buildTargetHits, pathRepairHits, definitionRepairHits, testCoverageHits, routeActionHits, routeFamilyHits, ensembleHits)
 		needDeepFallback := codeSearchNeedsDeepFallback(postEnsembleHits, limit, normalizedTaskType, required)
 		var lexicalHits []rankedCodeSearchHit
 		var lexicalErr error
@@ -271,16 +268,14 @@ func (a *ReadOnlyAdapter) codeSearchFnForTaskWithRequired(limit int, taskType st
 			recordCodeSearchProviderSkipped(providerTelemetry, "local_lexical", "candidate set satisfied coverage")
 		}
 
-		wideHits := mergeCodeSearchHitsWithOptions(maxInt(limit*6, limit), options, repoHits, liveHits, repoDocHits, repoCoverageHits, semanticFileHits, coverageHits, nonCodeHits, localHits, buildTargetHits, pathRepairHits, definitionRepairHits, testCoverageHits, routeActionHits, routeFamilyHits, ensembleHits, lexicalHits)
-		annotateCodeSearchHitCoverage(wideHits, required)
+		wideHits := mergeAndAnnotateCodeSearchHits(maxInt(limit*6, limit), options, required, repoHits, liveHits, repoDocHits, repoCoverageHits, semanticFileHits, coverageHits, nonCodeHits, localHits, buildTargetHits, pathRepairHits, definitionRepairHits, testCoverageHits, routeActionHits, routeFamilyHits, ensembleHits, lexicalHits)
 		importClosureHits := timedRankedCodeSearchProviderNoError(providerTelemetry, "local_import_mount_closure", func() []rankedCodeSearchHit {
 			return a.localImportMountClosureHits(ctx, wideHits, limit, options)
 		})
 		moduleEntryHits := timedRankedCodeSearchProviderNoError(providerTelemetry, "local_module_entrypoint_closure", func() []rankedCodeSearchHit {
 			return a.localModuleEntrypointClosureHits(wideHits, limit, options)
 		})
-		wideHits = mergeCodeSearchHitsWithOptions(maxInt(limit*6, limit), options, repoHits, liveHits, repoDocHits, repoCoverageHits, semanticFileHits, coverageHits, nonCodeHits, localHits, buildTargetHits, pathRepairHits, definitionRepairHits, testCoverageHits, routeActionHits, routeFamilyHits, ensembleHits, lexicalHits, importClosureHits, moduleEntryHits)
-		annotateCodeSearchHitCoverage(wideHits, required)
+		wideHits = mergeAndAnnotateCodeSearchHits(maxInt(limit*6, limit), options, required, repoHits, liveHits, repoDocHits, repoCoverageHits, semanticFileHits, coverageHits, nonCodeHits, localHits, buildTargetHits, pathRepairHits, definitionRepairHits, testCoverageHits, routeActionHits, routeFamilyHits, ensembleHits, lexicalHits, importClosureHits, moduleEntryHits)
 		var relatedHits []rankedCodeSearchHit
 		if codeSearchShouldRunRelatedFallback(wideHits, limit, normalizedTaskType, required) {
 			relatedBudget := newLocalProviderBudget(ctx, limit)
@@ -293,8 +288,7 @@ func (a *ReadOnlyAdapter) codeSearchFnForTaskWithRequired(limit int, taskType st
 		companionHits := timedRankedCodeSearchProviderNoError(providerTelemetry, "local_companion_closure", func() []rankedCodeSearchHit {
 			return a.localCompanionClosureHits(query, wideHits, limit, options)
 		})
-		baseHits := mergeCodeSearchHitsWithOptions(limit, options, repoHits, liveHits, repoDocHits, repoCoverageHits, semanticFileHits, coverageHits, nonCodeHits, localHits, buildTargetHits, pathRepairHits, definitionRepairHits, testCoverageHits, routeActionHits, routeFamilyHits, ensembleHits, lexicalHits, importClosureHits, moduleEntryHits, relatedHits, companionHits)
-		annotateCodeSearchHitCoverage(baseHits, required)
+		baseHits := mergeAndAnnotateCodeSearchHits(limit, options, required, repoHits, liveHits, repoDocHits, repoCoverageHits, semanticFileHits, coverageHits, nonCodeHits, localHits, buildTargetHits, pathRepairHits, definitionRepairHits, testCoverageHits, routeActionHits, routeFamilyHits, ensembleHits, lexicalHits, importClosureHits, moduleEntryHits, relatedHits, companionHits)
 		var closureHits []rankedCodeSearchHit
 		if isSubsystemMapTask(normalizedTaskType) && codeSearchNeedsSubsystemClosure(baseHits, limit, required) {
 			closureBudget := newLocalProviderBudget(ctx, limit)
@@ -310,36 +304,22 @@ func (a *ReadOnlyAdapter) codeSearchFnForTaskWithRequired(limit int, taskType st
 			annotateCodeSearchHitCoverage(hits, required)
 			return attachCodeSearchProviderTelemetry(hits, providerTelemetry, candidateLimit), nil
 		}
-		errs := make([]string, 0, 4)
-		if ensembleErr != nil {
-			errs = append(errs, "code search ensemble: "+ensembleErr.Error())
+		providerErrors := []struct {
+			name string
+			err  error
+		}{
+			{"code search ensemble", ensembleErr},
+			{"live overlay", liveErr},
+			{"repo docs", repoDocErr},
+			{"repo index", repoErr},
+			{"repo index coverage", repoCoverageErr},
+			{"semantic file index", semanticFileErr},
+			{"local coverage", coverageErr},
+			{"local probes", localErr},
+			{"local lexical", lexicalErr},
 		}
-		if liveErr != nil {
-			errs = append(errs, "live overlay: "+liveErr.Error())
-		}
-		if repoDocErr != nil {
-			errs = append(errs, "repo docs: "+repoDocErr.Error())
-		}
-		if repoErr != nil {
-			errs = append(errs, "repo index: "+repoErr.Error())
-		}
-		if repoCoverageErr != nil {
-			errs = append(errs, "repo index coverage: "+repoCoverageErr.Error())
-		}
-		if semanticFileErr != nil {
-			errs = append(errs, "semantic file index: "+semanticFileErr.Error())
-		}
-		if coverageErr != nil {
-			errs = append(errs, "local coverage: "+coverageErr.Error())
-		}
-		if localErr != nil {
-			errs = append(errs, "local probes: "+localErr.Error())
-		}
-		if lexicalErr != nil {
-			errs = append(errs, "local lexical: "+lexicalErr.Error())
-		}
-		if len(errs) > 0 {
-			return nil, fmt.Errorf("%s", strings.Join(errs, "; "))
+		if err := joinNamedErrors(providerErrors); err != nil {
+			return nil, err
 		}
 		return nil, nil
 	}
@@ -353,6 +333,28 @@ type codeSearchProviderTelemetryItem struct {
 	Error      string
 	Skipped    bool
 	Budget     map[string]any
+}
+
+func mergeAndAnnotateCodeSearchHits(limit int, options codeSearchRequestOptions, required []string, base []contextengine.CodeSearchHit, ranked ...[]rankedCodeSearchHit) []contextengine.CodeSearchHit {
+	merged := mergeCodeSearchHitsWithOptions(limit, options, base, ranked...)
+	annotateCodeSearchHitCoverage(merged, required)
+	return merged
+}
+
+func joinNamedErrors(namedErrors []struct {
+	name string
+	err  error
+}) error {
+	var errs []string
+	for _, item := range namedErrors {
+		if item.err != nil {
+			errs = append(errs, item.name+": "+item.err.Error())
+		}
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s", strings.Join(errs, "; "))
 }
 
 func newCodeSearchProviderTelemetry() *[]codeSearchProviderTelemetryItem {
