@@ -3962,14 +3962,7 @@ func (a *ReadOnlyAdapter) localCompanionClosureHits(query string, seeds []contex
 		limit = 8
 	}
 	allowTests := requiredEvidenceSuggestsTests([]string{query})
-	type companionCandidate struct {
-		path     string
-		role     string
-		reason   string
-		priority int
-		seedPath string
-	}
-	byPath := map[string]companionCandidate{}
+	byPath := map[string]closureCandidate{}
 	add := func(pathValue string, role string, reason string, priority int, seedPath string) {
 		pathValue = normalizeCodeSearchPath(pathValue)
 		if pathValue == "" || codeSearchPathExcluded(pathValue, options.ExcludedPaths) || !isLikelyLocalProviderCodeFile(pathValue) || isThirdPartyCodeSearchPath(pathValue) {
@@ -3985,7 +3978,7 @@ func (a *ReadOnlyAdapter) localCompanionClosureHits(query string, seeds []contex
 		if ok && current.priority >= priority {
 			return
 		}
-		byPath[pathValue] = companionCandidate{path: pathValue, role: role, reason: reason, priority: priority, seedPath: seedPath}
+		byPath[pathValue] = closureCandidate{path: pathValue, role: role, reason: reason, priority: priority, seedPath: seedPath}
 	}
 	for idx, seed := range seeds {
 		if idx >= maxInt(limit*4, 32) {
@@ -4002,20 +3995,11 @@ func (a *ReadOnlyAdapter) localCompanionClosureHits(query string, seeds []contex
 			add(companion, "test_companion", "test companion for "+seedPath, 91, seedPath)
 		}
 	}
-	candidates := make([]companionCandidate, 0, len(byPath))
+	candidates := make([]closureCandidate, 0, len(byPath))
 	for _, candidate := range byPath {
 		candidates = append(candidates, candidate)
 	}
-	sort.SliceStable(candidates, func(i, j int) bool {
-		if candidates[i].priority != candidates[j].priority {
-			return candidates[i].priority > candidates[j].priority
-		}
-		return candidates[i].path < candidates[j].path
-	})
-	maxHits := maxInt(limit, 12)
-	if len(candidates) > maxHits {
-		candidates = candidates[:maxHits]
-	}
+	candidates = sortAndCapClosureCandidates(candidates, limit)
 	out := make([]rankedCodeSearchHit, 0, len(candidates))
 	for _, candidate := range candidates {
 		excerpt := a.repoFileExcerpt(candidate.path, 1, 0, 8)
@@ -4052,14 +4036,7 @@ func (a *ReadOnlyAdapter) localRouteFamilyClosureHits(seeds []contextengine.Code
 	if limit <= 0 {
 		limit = 8
 	}
-	type candidate struct {
-		path     string
-		role     string
-		reason   string
-		priority int
-		seedPath string
-	}
-	byPath := map[string]candidate{}
+	byPath := map[string]closureCandidate{}
 	add := func(pathValue, role, reason string, priority int, seedPath string) {
 		pathValue = normalizeCodeSearchPath(pathValue)
 		if pathValue == "" || codeSearchPathExcluded(pathValue, options.ExcludedPaths) || !isLikelyLocalProviderCodeFile(pathValue) || isThirdPartyCodeSearchPath(pathValue) {
@@ -4075,7 +4052,7 @@ func (a *ReadOnlyAdapter) localRouteFamilyClosureHits(seeds []contextengine.Code
 		if ok && current.priority >= priority {
 			return
 		}
-		byPath[pathValue] = candidate{path: pathValue, role: role, reason: reason, priority: priority, seedPath: seedPath}
+		byPath[pathValue] = closureCandidate{path: pathValue, role: role, reason: reason, priority: priority, seedPath: seedPath}
 	}
 	for idx, seed := range seeds {
 		if idx >= maxInt(limit*4, 32) {
@@ -4092,20 +4069,11 @@ func (a *ReadOnlyAdapter) localRouteFamilyClosureHits(seeds []contextengine.Code
 	if len(byPath) == 0 {
 		return nil
 	}
-	candidates := make([]candidate, 0, len(byPath))
+	candidates := make([]closureCandidate, 0, len(byPath))
 	for _, candidate := range byPath {
 		candidates = append(candidates, candidate)
 	}
-	sort.SliceStable(candidates, func(i, j int) bool {
-		if candidates[i].priority != candidates[j].priority {
-			return candidates[i].priority > candidates[j].priority
-		}
-		return candidates[i].path < candidates[j].path
-	})
-	maxHits := maxInt(limit, 12)
-	if len(candidates) > maxHits {
-		candidates = candidates[:maxHits]
-	}
+	candidates = sortAndCapClosureCandidates(candidates, limit)
 	out := make([]rankedCodeSearchHit, 0, len(candidates))
 	for _, candidate := range candidates {
 		excerpt := a.repoFileExcerpt(candidate.path, 1, 0, 6)
@@ -4136,11 +4104,33 @@ func (a *ReadOnlyAdapter) localRouteFamilyClosureHits(seeds []contextengine.Code
 	return out
 }
 
+type closureCandidate struct {
+	path     string
+	role     string
+	reason   string
+	priority int
+	seedPath string
+}
+
 type routeFamilyCandidatePath struct {
 	path     string
 	role     string
 	reason   string
 	priority int
+}
+
+func sortAndCapClosureCandidates(candidates []closureCandidate, limit int) []closureCandidate {
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].priority != candidates[j].priority {
+			return candidates[i].priority > candidates[j].priority
+		}
+		return candidates[i].path < candidates[j].path
+	})
+	maxHits := maxInt(limit, 12)
+	if len(candidates) > maxHits {
+		return candidates[:maxHits]
+	}
+	return candidates
 }
 
 func routeFamilyCandidatePaths(seedPath string) []routeFamilyCandidatePath {
