@@ -565,18 +565,8 @@ func (e *Expander) findGoBlock(lines []string, lineIdx int) (int, int, string, s
 		}
 	}
 
-	// If no header found, fall back to blank-line boundaries
-	if header == "" {
-		return e.findGenericBlock(lines, lineIdx)
-	}
-
 	endLine := e.findGoSymbolEnd(lines, headerLine)
-	if lineIdx < startLine || lineIdx > endLine {
-		return e.findGenericBlock(lines, lineIdx)
-	}
-	startLine, endLine = clampRange(startLine, endLine, lineIdx, e.maxBlockLines, headerLine)
-
-	return startLine, endLine, header, symbolName, symbolKind
+	return e.finalizeBlock(lines, lineIdx, startLine, endLine, headerLine, header, symbolName, symbolKind)
 }
 
 func (e *Expander) findGoSymbolEnd(lines []string, headerLine int) int {
@@ -706,18 +696,8 @@ func (e *Expander) findPythonBlock(lines []string, lineIdx int) (int, int, strin
 		}
 	}
 
-	if header == "" {
-		return e.findGenericBlock(lines, lineIdx)
-	}
-
-	// Find end using indentation
 	endLine := e.findIndentEnd(lines, headerLine, defIndent)
-	if lineIdx < startLine || lineIdx > endLine {
-		return e.findGenericBlock(lines, lineIdx)
-	}
-	startLine, endLine = clampRange(startLine, endLine, lineIdx, e.maxBlockLines, headerLine)
-
-	return startLine, endLine, header, symbolName, symbolKind
+	return e.finalizeBlock(lines, lineIdx, startLine, endLine, headerLine, header, symbolName, symbolKind)
 }
 
 // JS/TS patterns
@@ -735,6 +715,28 @@ var (
 	jsStatementStartPattern = regexp.MustCompile(`^\s*(?:const|let|var|class|function|export|interface|type|import|return|if|for|while|switch|try|catch|else|do|throw|break|continue)\b`)
 )
 
+type jstsMatcher struct {
+	pattern     *regexp.Regexp
+	nameIndex   int
+	defaultName string
+	kind        string
+	wantFunc    bool
+	wantClass   bool
+}
+
+var jstsMatchers = []jstsMatcher{
+	{pattern: jsDefaultFuncPattern, nameIndex: 1, defaultName: "default", kind: "function", wantFunc: true},
+	{pattern: jsFuncPattern, nameIndex: 1, kind: "function", wantFunc: true},
+	{pattern: jsArrowParenPattern, nameIndex: 1, kind: "function", wantFunc: true},
+	{pattern: jsArrowNoParenPattern, nameIndex: 1, kind: "function", wantFunc: true},
+	{pattern: jsArrowPattern, nameIndex: 1, kind: "function", wantFunc: true},
+	{pattern: jsArrowPropertyPattern, nameIndex: 2, kind: "method", wantFunc: true},
+	{pattern: jsMethodPattern, nameIndex: 2, kind: "method", wantFunc: true},
+	{pattern: jsClassPattern, nameIndex: 1, kind: "class", wantClass: true},
+	{pattern: jsInterfacePattern, nameIndex: 1, kind: "interface", wantClass: true},
+	{pattern: jsTypePattern, nameIndex: 1, kind: "type", wantClass: true},
+}
+
 func (e *Expander) findJSTSBlock(lines []string, lineIdx int) (int, int, string, string, string) {
 	startLine := lineIdx
 	headerLine := lineIdx
@@ -748,116 +750,37 @@ func (e *Expander) findJSTSBlock(lines []string, lineIdx int) (int, int, string,
 		if trimmed == "" {
 			continue
 		}
-
-		if wantFunctions {
-			// Check for default export function
-			if match := jsDefaultFuncPattern.FindStringSubmatch(trimmed); match != nil {
-				startLine = i
-				headerLine = i
-				header = TrimLine(trimmed, 120)
-				symbolName = match[1]
-				if symbolName == "" {
-					symbolName = "default"
-				}
-				symbolKind = "function"
-				break
-			}
-
-			// Check for function declaration
-			if match := jsFuncPattern.FindStringSubmatch(trimmed); match != nil {
-				startLine = i
-				headerLine = i
-				header = TrimLine(trimmed, 120)
-				symbolName = match[1]
-				symbolKind = "function"
-				break
-			}
-
-			// Check for arrow function assignments
-			if match := jsArrowParenPattern.FindStringSubmatch(trimmed); match != nil {
-				startLine = i
-				headerLine = i
-				header = TrimLine(trimmed, 120)
-				symbolName = match[1]
-				symbolKind = "function"
-				break
-			}
-			if match := jsArrowNoParenPattern.FindStringSubmatch(trimmed); match != nil {
-				startLine = i
-				headerLine = i
-				header = TrimLine(trimmed, 120)
-				symbolName = match[1]
-				symbolKind = "function"
-				break
-			}
-			if match := jsArrowPattern.FindStringSubmatch(trimmed); match != nil {
-				startLine = i
-				headerLine = i
-				header = TrimLine(trimmed, 120)
-				symbolName = match[1]
-				symbolKind = "function"
-				break
-			}
-
-			// Check for class field arrow functions
-			if match := jsArrowPropertyPattern.FindStringSubmatch(trimmed); match != nil {
-				startLine = i
-				headerLine = i
-				header = TrimLine(trimmed, 120)
-				symbolName = match[2]
-				symbolKind = "method"
-				break
-			}
-
-			// Check for method in class/object
-			if match := jsMethodPattern.FindStringSubmatch(lines[i]); match != nil {
-				// Only use method if it is at the match line or before.
-				startLine = i
-				headerLine = i
-				header = TrimLine(trimmed, 120)
-				symbolName = match[2]
-				symbolKind = "method"
-				break
-			}
-		}
-
-		if wantClasses {
-			// Check for class
-			if match := jsClassPattern.FindStringSubmatch(trimmed); match != nil {
-				startLine = i
-				headerLine = i
-				header = TrimLine(trimmed, 120)
-				symbolName = match[1]
-				symbolKind = "class"
-				break
-			}
-
-			// Check for interface (TS)
-			if match := jsInterfacePattern.FindStringSubmatch(trimmed); match != nil {
-				startLine = i
-				headerLine = i
-				header = TrimLine(trimmed, 120)
-				symbolName = match[1]
-				symbolKind = "interface"
-				break
-			}
-
-			// Check for type (TS)
-			if match := jsTypePattern.FindStringSubmatch(trimmed); match != nil {
-				startLine = i
-				headerLine = i
-				header = TrimLine(trimmed, 120)
-				symbolName = match[1]
-				symbolKind = "type"
-				break
-			}
+		if h, name, kind, ok := tryJSTSMatcher(trimmed, wantFunctions, wantClasses); ok {
+			startLine = i
+			headerLine = i
+			header, symbolName, symbolKind = h, name, kind
+			break
 		}
 	}
 
-	if header == "" {
-		return e.findGenericBlock(lines, lineIdx)
-	}
+	endLine := e.findJSTSSymbolEnd(lines, startLine, header, symbolKind)
+	return e.finalizeBlock(lines, lineIdx, startLine, endLine, headerLine, header, symbolName, symbolKind)
+}
 
+func tryJSTSMatcher(trimmed string, wantFunctions, wantClasses bool) (string, string, string, bool) {
+	for _, m := range jstsMatchers {
+		if (m.wantFunc && !wantFunctions) || (m.wantClass && !wantClasses) {
+			continue
+		}
+		match := m.pattern.FindStringSubmatch(trimmed)
+		if match == nil {
+			continue
+		}
+		name := match[m.nameIndex]
+		if name == "" && m.defaultName != "" {
+			name = m.defaultName
+		}
+		return TrimLine(trimmed, 120), name, m.kind, true
+	}
+	return "", "", "", false
+}
+
+func (e *Expander) findJSTSSymbolEnd(lines []string, startLine int, header, symbolKind string) int {
 	endLine := startLine
 	switch symbolKind {
 	case "function", "method", "class", "interface":
@@ -877,13 +800,7 @@ func (e *Expander) findJSTSBlock(lines []string, lineIdx int) (int, int, string,
 			}
 		}
 	}
-
-	if lineIdx < startLine || lineIdx > endLine {
-		return e.findGenericBlock(lines, lineIdx)
-	}
-	startLine, endLine = clampRange(startLine, endLine, lineIdx, e.maxBlockLines, headerLine)
-
-	return startLine, endLine, header, symbolName, symbolKind
+	return endLine
 }
 
 func (e *Expander) findArrowExpressionEnd(lines []string, startLine int) int {
@@ -978,17 +895,8 @@ func (e *Expander) findElixirBlock(lines []string, lineIdx int) (int, int, strin
 		}
 	}
 
-	if header == "" {
-		return e.findGenericBlock(lines, lineIdx)
-	}
-
 	endLine := findBlockDeltaEnd(lines, startLine, e.maxBlockLines, &elixirBlockConfig)
-	if lineIdx < startLine || lineIdx > endLine {
-		return e.findGenericBlock(lines, lineIdx)
-	}
-	startLine, endLine = clampRange(startLine, endLine, lineIdx, e.maxBlockLines, headerLine)
-
-	return startLine, endLine, header, symbolName, symbolKind
+	return e.finalizeBlock(lines, lineIdx, startLine, endLine, headerLine, header, symbolName, symbolKind)
 }
 
 // blockDeltaConfig controls how a language counts block openers and closers
@@ -1263,17 +1171,8 @@ func (e *Expander) findRubyBlock(lines []string, lineIdx int) (int, int, string,
 		}
 	}
 
-	if header == "" {
-		return e.findGenericBlock(lines, lineIdx)
-	}
-
 	endLine := findBlockDeltaEnd(lines, startLine, e.maxBlockLines, &rubyBlockConfig)
-	if lineIdx < startLine || lineIdx > endLine {
-		return e.findGenericBlock(lines, lineIdx)
-	}
-	startLine, endLine = clampRange(startLine, endLine, lineIdx, e.maxBlockLines, headerLine)
-
-	return startLine, endLine, header, symbolName, symbolKind
+	return e.finalizeBlock(lines, lineIdx, startLine, endLine, headerLine, header, symbolName, symbolKind)
 }
 
 var rubyBlockConfig = blockDeltaConfig{
@@ -1344,17 +1243,8 @@ func (e *Expander) findLuaBlock(lines []string, lineIdx int) (int, int, string, 
 		}
 	}
 
-	if header == "" {
-		return e.findGenericBlock(lines, lineIdx)
-	}
-
 	endLine := findBlockDeltaEnd(lines, startLine, e.maxBlockLines, &luaBlockConfig)
-	if lineIdx < startLine || lineIdx > endLine {
-		return e.findGenericBlock(lines, lineIdx)
-	}
-	startLine, endLine = clampRange(startLine, endLine, lineIdx, e.maxBlockLines, headerLine)
-
-	return startLine, endLine, header, symbolName, symbolKind
+	return e.finalizeBlock(lines, lineIdx, startLine, endLine, headerLine, header, symbolName, symbolKind)
 }
 
 // Lua patterns
@@ -1464,19 +1354,8 @@ func (e *Expander) findGDScriptBlock(lines []string, lineIdx int) (int, int, str
 		}
 	}
 
-	if header == "" {
-		return e.findGenericBlock(lines, lineIdx)
-	}
-
-	// Find end using indentation (GDScript uses Python-like indentation)
 	endLine := e.findIndentEnd(lines, headerLine, defIndent)
-	if lineIdx < startLine || lineIdx > endLine {
-		return e.findGenericBlock(lines, lineIdx)
-	}
-
-	startLine, endLine = clampRange(startLine, endLine, lineIdx, e.maxBlockLines, headerLine)
-
-	return startLine, endLine, header, symbolName, symbolKind
+	return e.finalizeBlock(lines, lineIdx, startLine, endLine, headerLine, header, symbolName, symbolKind)
 }
 
 // findGenericBlock uses blank-line boundaries for unknown languages.
@@ -1583,6 +1462,17 @@ func (e *Expander) findIndentEnd(lines []string, startLine int, baseIndent int) 
 	}
 
 	return endLine
+}
+
+// finalizeBlock validates a detected block and clamps it to maxBlockLines.
+// If the header is empty or the match line falls outside the block, it falls
+// back to generic blank-line boundaries.
+func (e *Expander) finalizeBlock(lines []string, lineIdx, startLine, endLine, headerLine int, header, symbolName, symbolKind string) (int, int, string, string, string) {
+	if header == "" || lineIdx < startLine || lineIdx > endLine {
+		return e.findGenericBlock(lines, lineIdx)
+	}
+	startLine, endLine = clampRange(startLine, endLine, lineIdx, e.maxBlockLines, headerLine)
+	return startLine, endLine, header, symbolName, symbolKind
 }
 
 // IndentLevel returns the number of leading whitespace characters.
