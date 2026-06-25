@@ -1328,18 +1328,7 @@ type localLexicalProbeHit struct {
 }
 
 func (a *ReadOnlyAdapter) repoIndexCodeSearch(ctx context.Context, query string, limit int, options codeSearchRequestOptions) ([]contextengine.CodeSearchHit, error) {
-	if strings.TrimSpace(a.cfg.Storage.Root) == "" || strings.TrimSpace(a.workspaceRoot) == "" {
-		return nil, nil
-	}
-	store, err := repoindex.Open(ctx, a.cfg.Storage.Root, a.workspaceRoot)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = store.Close() }()
-	output, err := repoquery.NewQueryService(repoindex.NewQueryEngine(store)).SearchWithProjection(ctx, repoquery.SearchRequest{
-		Query: strings.TrimSpace(query),
-		Limit: limit,
-	})
+	output, err := a.repoIndexSearchProjection(ctx, query, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -1348,15 +1337,17 @@ func (a *ReadOnlyAdapter) repoIndexCodeSearch(ctx context.Context, query string,
 
 func (a *ReadOnlyAdapter) repoIndexCoverageSearchHits(ctx context.Context, requiredEvidence []string, limit int, options codeSearchRequestOptions) ([]rankedCodeSearchHit, error) {
 	requirements := cleanStringList(requiredEvidence)
-	if len(requirements) == 0 || strings.TrimSpace(a.cfg.Storage.Root) == "" || strings.TrimSpace(a.workspaceRoot) == "" {
+	if len(requirements) == 0 {
 		return nil, nil
 	}
-	store, err := repoindex.Open(ctx, a.cfg.Storage.Root, a.workspaceRoot)
+	service, closeFn, err := a.repoIndexQueryService(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = store.Close() }()
-	service := repoquery.NewQueryService(repoindex.NewQueryEngine(store))
+	if service == nil {
+		return nil, nil
+	}
+	defer closeFn()
 	perRequirementLimit := 4
 	if limit > 0 {
 		perRequirementLimit = maxInt(2, minInt(6, limit/2))
@@ -1401,6 +1392,40 @@ func (a *ReadOnlyAdapter) repoIndexCoverageSearchHits(ctx context.Context, requi
 		return nil, fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
 	return out, nil
+}
+
+// repoIndexSearchProjection runs a single query against the repoindex store,
+// handling the missing-store/workspace short-circuit and cleanup.
+// repoIndexSearchProjection runs a single query against the repoindex store,
+// handling the missing-store/workspace short-circuit and cleanup.
+func (a *ReadOnlyAdapter) repoIndexSearchProjection(ctx context.Context, query string, limit int) (repoquery.SearchOutput, error) {
+	service, closeFn, err := a.repoIndexQueryService(ctx)
+	if err != nil {
+		return repoquery.SearchOutput{}, err
+	}
+	if service == nil {
+		return repoquery.SearchOutput{}, nil
+	}
+	defer closeFn()
+	return service.SearchWithProjection(ctx, repoquery.SearchRequest{
+		Query: strings.TrimSpace(query),
+		Limit: limit,
+	})
+}
+
+// repoIndexQueryService opens the repoindex store and returns a query service.
+// The caller is responsible for closing the returned service.
+func (a *ReadOnlyAdapter) repoIndexQueryService(ctx context.Context) (*repoquery.QueryService, func(), error) {
+	if strings.TrimSpace(a.cfg.Storage.Root) == "" || strings.TrimSpace(a.workspaceRoot) == "" {
+		return nil, func() {}, nil
+	}
+	store, err := repoindex.Open(ctx, a.cfg.Storage.Root, a.workspaceRoot)
+	if err != nil {
+		return nil, nil, err
+	}
+	service := repoquery.NewQueryService(repoindex.NewQueryEngine(store))
+	closeFn := func() { _ = store.Close() }
+	return service, closeFn, nil
 }
 
 func (a *ReadOnlyAdapter) repoIndexAnchorsToCodeHits(anchors []repoquery.Anchor, options codeSearchRequestOptions) []contextengine.CodeSearchHit {
@@ -6248,22 +6273,6 @@ func (a *ReadOnlyAdapter) repoAnchorExcerpt(anchor repoquery.Anchor) string {
 	return a.repoFileExcerpt(anchor.Path, anchor.LineHint, 3, 5)
 }
 
-func (a *ReadOnlyAdapter) repoFileExcerpt(path string, line, before, after int) string {
-	if line <= 0 || strings.TrimSpace(path) == "" {
-		return ""
-	}
-	body, err := os.ReadFile(filepath.Join(a.workspaceRoot, filepath.FromSlash(path)))
-	if err != nil {
-		return ""
-	}
-	start := line - before
-	if start < 1 {
-		start = 1
-	}
-	end := line + after
-	return strings.TrimSpace(sliceLines(string(body), start, end))
-}
-
 func repoAnchorScore(score float64) float64 {
 	if score <= 0 {
 		return 0.75
@@ -6297,6 +6306,22 @@ func languageFromPath(path string) string {
 	default:
 		return ""
 	}
+}
+
+func (a *ReadOnlyAdapter) repoFileExcerpt(path string, line, before, after int) string {
+	if line <= 0 || strings.TrimSpace(path) == "" {
+		return ""
+	}
+	body, err := os.ReadFile(filepath.Join(a.workspaceRoot, filepath.FromSlash(path)))
+	if err != nil {
+		return ""
+	}
+	start := line - before
+	if start < 1 {
+		start = 1
+	}
+	end := line + after
+	return strings.TrimSpace(sliceLines(string(body), start, end))
 }
 
 func (a *ReadOnlyAdapter) memoryQueryFnForStatusesAndScope(limit int, statuses []contextengine.ClaimStatus, scope contextengine.MemoryQueryScope) contextengine.MemoryQueryFunc {
