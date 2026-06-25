@@ -1133,7 +1133,7 @@ func probeRequiredEmbeddingProviders(ctx context.Context, kinds []embedqueue.Tas
 	if len(errs) == 0 {
 		return nil
 	}
-	return fmt.Errorf("%s. The embedding server at %s may not be running. Set FOXCTL_EMBEDDING_BASE_URL correctly or start the embedding server.", strings.Join(errs, "; "), baseURL)
+	return fmt.Errorf("%s; the embedding server at %s may not be running. Set FOXCTL_EMBEDDING_BASE_URL correctly or start the embedding server", strings.Join(errs, "; "), baseURL)
 }
 
 func processMemoryEmbeddingJob(ctx context.Context, store *embedding.Store, memoryStore memoryutil.Store, job *embedding.EmbeddingJob, dryRun bool, getEmbedder func() (*semantic.Embedder, int, error)) error {

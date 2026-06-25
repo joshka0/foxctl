@@ -212,11 +212,7 @@ func QueryClassDeep(query string) bool {
 	}
 	// Multi-clause questions (contain "and" joining two distinct question
 	// clauses) are exploratory.
-	clauseCount := strings.Count(q, "?")
-	if clauseCount > 1 {
-		return true
-	}
-	return false
+	return strings.Count(q, "?") > 1
 }
 
 // CandidateThresholdForQuery returns the appropriate candidate threshold

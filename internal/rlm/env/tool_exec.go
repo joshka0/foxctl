@@ -6299,16 +6299,6 @@ func languageFromPath(path string) string {
 	}
 }
 
-// memoryQueryFn returns a MemoryQueryFunc backed by the contextengine claim store.
-// If the SQLite store is unavailable, returns no claims.
-func (a *ReadOnlyAdapter) memoryQueryFn(limit int) contextengine.MemoryQueryFunc {
-	return a.memoryQueryFnForStatuses(limit, nil)
-}
-
-func (a *ReadOnlyAdapter) memoryQueryFnForStatuses(limit int, statuses []contextengine.ClaimStatus) contextengine.MemoryQueryFunc {
-	return a.memoryQueryFnForStatusesAndScope(limit, statuses, contextengine.MemoryQueryScope{})
-}
-
 func (a *ReadOnlyAdapter) memoryQueryFnForStatusesAndScope(limit int, statuses []contextengine.ClaimStatus, scope contextengine.MemoryQueryScope) contextengine.MemoryQueryFunc {
 	return func(ctx context.Context, workspaceID, query string) ([]contextengine.MemoryClaim, error) {
 		effectiveStatuses := contextengine.EffectiveMemoryQueryStatuses(statuses, scope)
