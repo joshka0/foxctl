@@ -2116,19 +2116,8 @@ func (a *ReadOnlyAdapter) localNonCodeConfigDataSearchHits(ctx context.Context, 
 		}
 		return nil
 	})
-	items := make([]*coverageFileCandidate, 0, len(candidates))
-	for _, candidate := range candidates {
-		items = append(items, candidate)
-	}
-	sort.SliceStable(items, func(i, j int) bool {
-		if len(items[i].coverageIDs) != len(items[j].coverageIDs) {
-			return len(items[i].coverageIDs) > len(items[j].coverageIDs)
-		}
-		if items[i].score != items[j].score {
-			return items[i].score > items[j].score
-		}
-		return items[i].path < items[j].path
-	})
+	items := coverageCandidatesFromMap(candidates)
+	sortCoverageFileCandidates(items)
 	maxHits := maxInt(limit*2, limit)
 	if len(items) > maxHits {
 		items = items[:maxHits]
@@ -2138,39 +2127,63 @@ func (a *ReadOnlyAdapter) localNonCodeConfigDataSearchHits(ctx context.Context, 
 		profile := nonCodeConfigDataSourceProfile(candidate.path)
 		role := nonCodeConfigDataCandidateRole(candidate.path)
 		source := "local_non_code_config_data"
-		reason := source
-		if len(candidate.matched) > 0 {
-			reason += ": " + strings.Join(candidate.matched, ", ")
-		}
 		priority := 94
 		if profile == contextengine.SourceProfileRepoCode {
 			priority = 42
 		}
-		out = append(out, rankedCodeSearchHit{
-			Priority: priority,
-			Hit: contextengine.CodeSearchHit{
-				Path:     candidate.path,
-				Snippet:  codeProbeSnippet(reason, candidate.excerpt),
-				Line:     candidate.line,
-				Score:    candidate.score,
-				Language: languageFromPath(candidate.path),
-				Metadata: map[string]any{
-					"candidate_role":           role,
-					"source":                   source,
-					"source_profile":           string(profile),
-					"source_profiles":          contextengineSourceProfilesToStrings(sourceProfiles),
-					"evidence_class":           "non_code_config_data",
-					"coverage_terms":           codeSearchCoverageTerms(candidate.path, strings.Join(candidate.matched, " "), candidate.excerpt),
-					"coverage_requirement_ids": candidate.coverageIDs,
-					"matched_terms":            candidate.matched,
-					"path_family":              filepath.ToSlash(filepath.Dir(candidate.path)),
-					"is_test":                  isTestDataSupportPath(candidate.path),
-				},
-				Sources: []string{source},
-			},
-		})
+		out = append(out, coverageCandidateToRankedHit(candidate, source, "non_code_config_data", priority, role, profile, sourceProfiles))
 	}
 	return out
+}
+
+func coverageCandidatesFromMap(candidates map[string]*coverageFileCandidate) []*coverageFileCandidate {
+	items := make([]*coverageFileCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		items = append(items, candidate)
+	}
+	return items
+}
+
+func sortCoverageFileCandidates(items []*coverageFileCandidate) {
+	sort.SliceStable(items, func(i, j int) bool {
+		if len(items[i].coverageIDs) != len(items[j].coverageIDs) {
+			return len(items[i].coverageIDs) > len(items[j].coverageIDs)
+		}
+		if items[i].score != items[j].score {
+			return items[i].score > items[j].score
+		}
+		return items[i].path < items[j].path
+	})
+}
+
+func coverageCandidateToRankedHit(candidate *coverageFileCandidate, source, evidenceClass string, priority int, role string, profile contextengine.SourceProfile, sourceProfiles []contextengine.SourceProfile) rankedCodeSearchHit {
+	reason := source
+	if len(candidate.matched) > 0 {
+		reason += ": " + strings.Join(candidate.matched, ", ")
+	}
+	return rankedCodeSearchHit{
+		Priority: priority,
+		Hit: contextengine.CodeSearchHit{
+			Path:     candidate.path,
+			Snippet:  codeProbeSnippet(reason, candidate.excerpt),
+			Line:     candidate.line,
+			Score:    candidate.score,
+			Language: languageFromPath(candidate.path),
+			Metadata: map[string]any{
+				"candidate_role":           role,
+				"source":                   source,
+				"source_profile":           string(profile),
+				"source_profiles":          contextengineSourceProfilesToStrings(sourceProfiles),
+				"evidence_class":           evidenceClass,
+				"coverage_terms":           codeSearchCoverageTerms(candidate.path, strings.Join(candidate.matched, " "), candidate.excerpt),
+				"coverage_requirement_ids": candidate.coverageIDs,
+				"matched_terms":            candidate.matched,
+				"path_family":              filepath.ToSlash(filepath.Dir(candidate.path)),
+				"is_test":                  isTestLikeCodeSearchPath(candidate.path),
+			},
+			Sources: []string{source},
+		},
+	}
 }
 
 func sourceProfileListHas(profiles []contextengine.SourceProfile, want contextengine.SourceProfile) bool {
@@ -2406,19 +2419,8 @@ func (a *ReadOnlyAdapter) localCoverageFileSearchHits(ctx context.Context, query
 	if err = budget.cappedError(err); err != nil {
 		return nil, err
 	}
-	items := make([]*coverageFileCandidate, 0, len(candidates))
-	for _, candidate := range candidates {
-		items = append(items, candidate)
-	}
-	sort.SliceStable(items, func(i, j int) bool {
-		if len(items[i].coverageIDs) != len(items[j].coverageIDs) {
-			return len(items[i].coverageIDs) > len(items[j].coverageIDs)
-		}
-		if items[i].score != items[j].score {
-			return items[i].score > items[j].score
-		}
-		return items[i].path < items[j].path
-	})
+	items := coverageCandidatesFromMap(candidates)
+	sortCoverageFileCandidates(items)
 	maxHits := maxInt(limit*2, limit)
 	if docsOnly {
 		maxHits = maxInt(limit, 8)
@@ -2446,33 +2448,7 @@ func (a *ReadOnlyAdapter) localCoverageFileSearchHits(ctx context.Context, query
 			profile = contextengine.SourceProfileRepoDocs
 			priority = 86
 		}
-		reason := source
-		if len(candidate.matched) > 0 {
-			reason += ": " + strings.Join(candidate.matched, ", ")
-		}
-		out = append(out, rankedCodeSearchHit{
-			Priority: priority,
-			Hit: contextengine.CodeSearchHit{
-				Path:     candidate.path,
-				Snippet:  codeProbeSnippet(reason, candidate.excerpt),
-				Line:     candidate.line,
-				Score:    candidate.score,
-				Language: languageFromPath(candidate.path),
-				Metadata: map[string]any{
-					"candidate_role":           role,
-					"source":                   source,
-					"source_profile":           string(profile),
-					"source_profiles":          contextengineSourceProfilesToStrings(sourceProfiles),
-					"evidence_class":           "coverage",
-					"coverage_terms":           codeSearchCoverageTerms(candidate.path, strings.Join(candidate.matched, " "), candidate.excerpt),
-					"coverage_requirement_ids": candidate.coverageIDs,
-					"matched_terms":            candidate.matched,
-					"path_family":              filepath.ToSlash(filepath.Dir(candidate.path)),
-					"is_test":                  isTestLikeCodeSearchPath(candidate.path),
-				},
-				Sources: []string{source},
-			},
-		})
+		out = append(out, coverageCandidateToRankedHit(candidate, source, "coverage", priority, role, profile, sourceProfiles))
 	}
 	return out, nil
 }
