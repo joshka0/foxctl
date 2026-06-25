@@ -1107,8 +1107,9 @@ func TestMemoryQuery_HybridFusesVectorAndLexicalSources(t *testing.T) {
 	})
 
 	err := run(context.Background(), rc, Input{
-		Query: "hydra comparison",
-		Limit: 5,
+		Query:         "hydra comparison",
+		Limit:         5,
+		MinSimilarity: 0.2,
 	})
 	require.NoError(t, err)
 

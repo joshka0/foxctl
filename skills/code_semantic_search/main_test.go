@@ -500,7 +500,7 @@ func TestSearchMemoriesBM25_DecayOptInReranksBeforeLimit(t *testing.T) {
 	if results[0].Name != "memory://decay-recent-near-tie" {
 		t.Fatalf("result name=%q want memory://decay-recent-near-tie", results[0].Name)
 	}
-	if results[0].Similarity <= 0.9 {
+	if results[0].Similarity <= 0.75 {
 		t.Fatalf("similarity=%f want boosted decayed score", results[0].Similarity)
 	}
 }

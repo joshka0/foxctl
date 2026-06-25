@@ -344,7 +344,8 @@ func mergeAndAnnotateCodeSearchHits(limit int, options codeSearchRequestOptions,
 func joinNamedErrors(namedErrors []struct {
 	name string
 	err  error
-}) error {
+},
+) error {
 	var errs []string
 	for _, item := range namedErrors {
 		if item.err != nil {
