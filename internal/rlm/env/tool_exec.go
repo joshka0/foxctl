@@ -7662,24 +7662,7 @@ func (a *ReadOnlyAdapter) aggregateEvidenceRefs(ctx context.Context, args json.R
 	if len(refs) > input.MaxRefs {
 		refs = refs[:input.MaxRefs]
 	}
-	loaded := make([]aggregateLoadedEvidenceRef, 0, len(refs))
-	for _, ref := range refs {
-		out, err := a.loadEvidenceRef(ctx, mustJSON(map[string]any{
-			"ref":        ref,
-			"max_tokens": aggregateEvidenceScanMaxTokens(input.MaxTokensPerRef),
-		}))
-		item := aggregateLoadedEvidenceRef{
-			Ref:     ref,
-			Loaded:  boolFromAnyEnv(out["loaded"]),
-			Error:   strings.TrimSpace(fmt.Sprint(out["error"])),
-			Payload: out,
-		}
-		if err != nil {
-			item.Error = err.Error()
-		}
-		item.Text = aggregateEvidencePayloadTextForQuery(out, input.Query, input.MaxTextChars)
-		loaded = append(loaded, item)
-	}
+	loaded := a.loadEvidenceRefsForAggregation(ctx, refs, input.Query, input.MaxTokensPerRef, input.MaxTextChars, aggregateEvidencePayloadTextForQuery)
 	return aggregateLoadedEvidenceRefs(input, loaded), nil
 }
 
@@ -7721,11 +7704,17 @@ func (a *ReadOnlyAdapter) evidenceLedger(ctx context.Context, args json.RawMessa
 	if len(refs) > input.MaxRefs {
 		refs = refs[:input.MaxRefs]
 	}
+	loaded := a.loadEvidenceRefsForAggregation(ctx, refs, input.Query, input.MaxTokensPerRef, input.MaxTextChars, evidenceLedgerPayloadTextForQuery)
+	input.semanticSlotMatch = a.evidenceLedgerSlotMatcher(ctx)
+	return buildEvidenceLedger(input, loaded, plan), nil
+}
+
+func (a *ReadOnlyAdapter) loadEvidenceRefsForAggregation(ctx context.Context, refs []string, query string, maxTokensPerRef, maxTextChars int, extractText func(map[string]any, string, int) string) []aggregateLoadedEvidenceRef {
 	loaded := make([]aggregateLoadedEvidenceRef, 0, len(refs))
 	for _, ref := range refs {
 		out, err := a.loadEvidenceRef(ctx, mustJSON(map[string]any{
 			"ref":        ref,
-			"max_tokens": aggregateEvidenceScanMaxTokens(input.MaxTokensPerRef),
+			"max_tokens": aggregateEvidenceScanMaxTokens(maxTokensPerRef),
 		}))
 		item := aggregateLoadedEvidenceRef{
 			Ref:     ref,
@@ -7736,11 +7725,10 @@ func (a *ReadOnlyAdapter) evidenceLedger(ctx context.Context, args json.RawMessa
 		if err != nil {
 			item.Error = err.Error()
 		}
-		item.Text = evidenceLedgerPayloadTextForQuery(out, input.Query, input.MaxTextChars)
+		item.Text = extractText(out, query, maxTextChars)
 		loaded = append(loaded, item)
 	}
-	input.semanticSlotMatch = a.evidenceLedgerSlotMatcher(ctx)
-	return buildEvidenceLedger(input, loaded, plan), nil
+	return loaded
 }
 
 // evidenceLedgerSemanticMatchThreshold is the normalized cosine ([0,1])
