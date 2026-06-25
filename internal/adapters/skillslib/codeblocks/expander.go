@@ -331,119 +331,18 @@ func buildGoIndex(lines []string) *goIndex {
 	for _, decl := range file.Decls {
 		switch d := decl.(type) {
 		case *ast.FuncDecl:
-			headerLine := lineForPos(fset, d.Pos()) - 1
-			if headerLine < 0 {
-				continue
-			}
-			startLine := headerLine
-			if d.Doc != nil {
-				if docLine := lineForPos(fset, d.Doc.Pos()) - 1; docLine >= 0 && docLine < startLine {
-					startLine = docLine
-				}
-			}
-			endLine := lineForPos(fset, d.End()) - 1
-			if endLine < headerLine {
-				endLine = headerLine
-			}
-			kind := "function"
-			if d.Recv != nil {
-				kind = "method"
-			}
-			idx.funcs = append(idx.funcs, goCandidate{
-				startLine:  startLine,
-				endLine:    endLine,
-				headerLine: headerLine,
-				symbolName: d.Name.Name,
-				symbolKind: kind,
-			})
+			addGoFuncCandidate(idx, fset, d)
 		case *ast.GenDecl:
-			if d.Tok != token.TYPE {
-				continue
-			}
-			for _, spec := range d.Specs {
-				ts, ok := spec.(*ast.TypeSpec)
-				if !ok {
-					continue
-				}
-				headerLine := lineForPos(fset, ts.Pos()) - 1
-				if headerLine < 0 {
-					continue
-				}
-				startLine := headerLine
-				if ts.Doc != nil {
-					if docLine := lineForPos(fset, ts.Doc.Pos()) - 1; docLine >= 0 && docLine < startLine {
-						startLine = docLine
-					}
-				} else if d.Doc != nil {
-					if docLine := lineForPos(fset, d.Doc.Pos()) - 1; docLine >= 0 && docLine < startLine {
-						startLine = docLine
-					}
-				}
-				endLine := lineForPos(fset, ts.End()) - 1
-				if endLine < headerLine {
-					endLine = headerLine
-				}
-				idx.types = append(idx.types, goCandidate{
-					startLine:  startLine,
-					endLine:    endLine,
-					headerLine: headerLine,
-					symbolName: ts.Name.Name,
-					symbolKind: "type",
-				})
-			}
+			addGoTypeCandidates(idx, fset, d)
 		}
 	}
 
 	ast.Inspect(file, func(node ast.Node) bool {
 		switch n := node.(type) {
 		case *ast.AssignStmt:
-			for i, rhs := range n.Rhs {
-				funcLit, ok := rhs.(*ast.FuncLit)
-				if !ok || i >= len(n.Lhs) {
-					continue
-				}
-				ident, ok := n.Lhs[i].(*ast.Ident)
-				if !ok {
-					continue
-				}
-				headerLine := lineForPos(fset, n.Pos()) - 1
-				if headerLine < 0 {
-					continue
-				}
-				endLine := lineForPos(fset, funcLit.End()) - 1
-				if endLine < headerLine {
-					endLine = headerLine
-				}
-				idx.closures = append(idx.closures, goCandidate{
-					startLine:  headerLine,
-					endLine:    endLine,
-					headerLine: headerLine,
-					symbolName: ident.Name,
-					symbolKind: "closure",
-				})
-			}
+			addGoAssignClosureCandidates(idx, fset, n)
 		case *ast.ValueSpec:
-			for i, val := range n.Values {
-				funcLit, ok := val.(*ast.FuncLit)
-				if !ok || i >= len(n.Names) {
-					continue
-				}
-				headerLine := lineForPos(fset, n.Pos()) - 1
-				if headerLine < 0 {
-					continue
-				}
-				endLine := lineForPos(fset, funcLit.End()) - 1
-				if endLine < headerLine {
-					endLine = headerLine
-				}
-				idx.closures = append(idx.closures, goCandidate{
-					startLine:  headerLine,
-					endLine:    endLine,
-					headerLine: headerLine,
-					symbolName: n.Names[i].Name,
-					symbolKind: "closure",
-				})
-			}
+			addGoValueClosureCandidates(idx, fset, n)
 		}
 		return true
 	})
@@ -453,6 +352,98 @@ func buildGoIndex(lines []string) *goIndex {
 	}
 
 	return idx
+}
+
+func addGoFuncCandidate(idx *goIndex, fset *token.FileSet, d *ast.FuncDecl) {
+	headerLine := lineForPos(fset, d.Pos()) - 1
+	if headerLine < 0 {
+		return
+	}
+	startLine := headerLine
+	if d.Doc != nil {
+		startLine = minInt(startLine, lineForPos(fset, d.Doc.Pos())-1)
+	}
+	endLine := maxInt(headerLine, lineForPos(fset, d.End())-1)
+	kind := "function"
+	if d.Recv != nil {
+		kind = "method"
+	}
+	idx.funcs = append(idx.funcs, goCandidate{
+		startLine:  startLine,
+		endLine:    endLine,
+		headerLine: headerLine,
+		symbolName: d.Name.Name,
+		symbolKind: kind,
+	})
+}
+
+func addGoTypeCandidates(idx *goIndex, fset *token.FileSet, d *ast.GenDecl) {
+	if d.Tok != token.TYPE {
+		return
+	}
+	for _, spec := range d.Specs {
+		ts, ok := spec.(*ast.TypeSpec)
+		if !ok {
+			continue
+		}
+		headerLine := lineForPos(fset, ts.Pos()) - 1
+		if headerLine < 0 {
+			continue
+		}
+		startLine := headerLine
+		if ts.Doc != nil {
+			startLine = minInt(startLine, lineForPos(fset, ts.Doc.Pos())-1)
+		} else if d.Doc != nil {
+			startLine = minInt(startLine, lineForPos(fset, d.Doc.Pos())-1)
+		}
+		endLine := maxInt(headerLine, lineForPos(fset, ts.End())-1)
+		idx.types = append(idx.types, goCandidate{
+			startLine:  startLine,
+			endLine:    endLine,
+			headerLine: headerLine,
+			symbolName: ts.Name.Name,
+			symbolKind: "type",
+		})
+	}
+}
+
+func addGoAssignClosureCandidates(idx *goIndex, fset *token.FileSet, n *ast.AssignStmt) {
+	for i, rhs := range n.Rhs {
+		funcLit, ok := rhs.(*ast.FuncLit)
+		if !ok || i >= len(n.Lhs) {
+			continue
+		}
+		ident, ok := n.Lhs[i].(*ast.Ident)
+		if !ok {
+			continue
+		}
+		addGoClosureCandidate(idx, fset, n.Pos(), funcLit.End(), ident.Name)
+	}
+}
+
+func addGoValueClosureCandidates(idx *goIndex, fset *token.FileSet, n *ast.ValueSpec) {
+	for i, val := range n.Values {
+		funcLit, ok := val.(*ast.FuncLit)
+		if !ok || i >= len(n.Names) {
+			continue
+		}
+		addGoClosureCandidate(idx, fset, n.Pos(), funcLit.End(), n.Names[i].Name)
+	}
+}
+
+func addGoClosureCandidate(idx *goIndex, fset *token.FileSet, pos, end token.Pos, name string) {
+	headerLine := lineForPos(fset, pos) - 1
+	if headerLine < 0 {
+		return
+	}
+	endLine := maxInt(headerLine, lineForPos(fset, end)-1)
+	idx.closures = append(idx.closures, goCandidate{
+		startLine:  headerLine,
+		endLine:    endLine,
+		headerLine: headerLine,
+		symbolName: name,
+		symbolKind: "closure",
+	})
 }
 
 func (idx *goIndex) find(lineIdx int, target Target) (goCandidate, bool) {
@@ -991,7 +982,7 @@ func (e *Expander) findElixirBlock(lines []string, lineIdx int) (int, int, strin
 		return e.findGenericBlock(lines, lineIdx)
 	}
 
-	endLine := findElixirEnd(lines, startLine, e.maxBlockLines)
+	endLine := findBlockDeltaEnd(lines, startLine, e.maxBlockLines, &elixirBlockConfig)
 	if lineIdx < startLine || lineIdx > endLine {
 		return e.findGenericBlock(lines, lineIdx)
 	}
@@ -1000,18 +991,39 @@ func (e *Expander) findElixirBlock(lines []string, lineIdx int) (int, int, strin
 	return startLine, endLine, header, symbolName, symbolKind
 }
 
-type elixirScanState struct {
-	inString     bool
-	stringDelim  byte
-	inHeredoc    bool
-	heredocDelim string
+// blockDeltaConfig controls how a language counts block openers and closers
+// while scanning for the end of an indentation-free block.
+type blockDeltaConfig struct {
+	openers            []string
+	conditionalOpeners []string // only count when isStmtStart returns true
+	closers            []string
+	blockCommentStart  string
+	blockCommentEnd    string
+	longStringStart    string
+	longStringEnd      string
+	heredocStarts      []string
+	lineCommentPrefix  string
+	openerFilter       func(tok, line string, pos int) bool
+	isStmtStart        func(line string, start int) bool
+	isIdentStart       func(b byte) bool
+	isIdentPart        func(b byte) bool
 }
 
-func findElixirEnd(lines []string, startLine int, maxLines int) int {
+// blockScanState tracks string/comment context while scanning source lines.
+type blockScanState struct {
+	inString       bool
+	stringDelim    byte
+	inLongString   bool
+	inBlockComment bool
+	inHeredoc      bool
+	heredocDelim   string
+}
+
+func findBlockDeltaEnd(lines []string, startLine, maxLines int, cfg *blockDeltaConfig) int {
 	endLine := startLine
 	depth := 0
 	sawOpener := false
-	state := elixirScanState{}
+	state := blockScanState{}
 
 	limit := len(lines)
 	if maxLines > 0 && startLine+maxLines < limit {
@@ -1019,7 +1031,7 @@ func findElixirEnd(lines []string, startLine int, maxLines int) int {
 	}
 
 	for i := startLine; i < limit; i++ {
-		openers, closers := elixirBlockDelta(lines[i], &state)
+		openers, closers := blockDelta(lines[i], &state, cfg)
 		if openers > 0 {
 			sawOpener = true
 		}
@@ -1037,18 +1049,40 @@ func findElixirEnd(lines []string, startLine int, maxLines int) int {
 	return startLine
 }
 
-func elixirBlockDelta(line string, state *elixirScanState) (int, int) {
+func blockDelta(line string, state *blockScanState, cfg *blockDeltaConfig) (int, int) {
 	openers := 0
 	closers := 0
 
 	for i := 0; i < len(line); {
 		if state.inHeredoc {
 			if strings.HasPrefix(line[i:], state.heredocDelim) {
+				delimLen := len(state.heredocDelim)
 				state.inHeredoc = false
-				i += len(state.heredocDelim)
-				continue
+				state.heredocDelim = ""
+				i += delimLen
+			} else {
+				i++
 			}
-			i++
+			continue
+		}
+
+		if state.inBlockComment {
+			if cfg.blockCommentEnd != "" && strings.HasPrefix(line[i:], cfg.blockCommentEnd) {
+				state.inBlockComment = false
+				i += len(cfg.blockCommentEnd)
+			} else {
+				i++
+			}
+			continue
+		}
+
+		if state.inLongString {
+			if cfg.longStringEnd != "" && strings.HasPrefix(line[i:], cfg.longStringEnd) {
+				state.inLongString = false
+				i += len(cfg.longStringEnd)
+			} else {
+				i++
+			}
 			continue
 		}
 
@@ -1065,19 +1099,30 @@ func elixirBlockDelta(line string, state *elixirScanState) (int, int) {
 			continue
 		}
 
-		if strings.HasPrefix(line[i:], "\"\"\"") || strings.HasPrefix(line[i:], "'''") {
-			state.inHeredoc = true
-			if strings.HasPrefix(line[i:], "\"\"\"") {
-				state.heredocDelim = "\"\"\""
-			} else {
-				state.heredocDelim = "'''"
+		matched := false
+		for _, delim := range cfg.heredocStarts {
+			if strings.HasPrefix(line[i:], delim) {
+				state.inHeredoc = true
+				state.heredocDelim = delim
+				i += len(delim)
+				matched = true
+				break
 			}
-			i += 3
+		}
+		if matched {
 			continue
 		}
 
-		if line[i] == '#' {
-			break
+		if cfg.blockCommentStart != "" && strings.HasPrefix(line[i:], cfg.blockCommentStart) {
+			state.inBlockComment = true
+			i += len(cfg.blockCommentStart)
+			continue
+		}
+
+		if cfg.longStringStart != "" && strings.HasPrefix(line[i:], cfg.longStringStart) {
+			state.inLongString = true
+			i += len(cfg.longStringStart)
+			continue
 		}
 
 		if line[i] == '"' || line[i] == '\'' {
@@ -1087,21 +1132,26 @@ func elixirBlockDelta(line string, state *elixirScanState) (int, int) {
 			continue
 		}
 
-		if isElixirIdentStart(line[i]) {
+		if cfg.lineCommentPrefix != "" && strings.HasPrefix(line[i:], cfg.lineCommentPrefix) {
+			break
+		}
+
+		if cfg.isIdentStart != nil && cfg.isIdentStart(line[i]) {
 			start := i
 			i++
-			for i < len(line) && isElixirIdentPart(line[i]) {
+			for i < len(line) && cfg.isIdentPart(line[i]) {
 				i++
 			}
 			tok := line[start:i]
-			switch tok {
-			case "do":
-				if !isInlineDo(line, i) {
+			if containsString(cfg.openers, tok) {
+				if cfg.openerFilter == nil || cfg.openerFilter(tok, line, i) {
 					openers++
 				}
-			case "fn":
-				openers++
-			case "end":
+			} else if containsString(cfg.conditionalOpeners, tok) {
+				if cfg.isStmtStart != nil && cfg.isStmtStart(line, start) {
+					openers++
+				}
+			} else if containsString(cfg.closers, tok) {
 				closers++
 			}
 			continue
@@ -1111,6 +1161,30 @@ func elixirBlockDelta(line string, state *elixirScanState) (int, int) {
 	}
 
 	return openers, closers
+}
+
+func containsString(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
+}
+
+var elixirBlockConfig = blockDeltaConfig{
+	openers:           []string{"do", "fn"},
+	closers:           []string{"end"},
+	heredocStarts:     []string{`"""`, `'''`},
+	lineCommentPrefix: "#",
+	isIdentStart:      isElixirIdentStart,
+	isIdentPart:       isElixirIdentPart,
+	openerFilter: func(tok, line string, pos int) bool {
+		if tok == "do" {
+			return !isInlineDo(line, pos)
+		}
+		return true
+	},
 }
 
 func isInlineDo(line string, pos int) bool {
@@ -1193,7 +1267,7 @@ func (e *Expander) findRubyBlock(lines []string, lineIdx int) (int, int, string,
 		return e.findGenericBlock(lines, lineIdx)
 	}
 
-	endLine := findRubyEnd(lines, startLine, e.maxBlockLines)
+	endLine := findBlockDeltaEnd(lines, startLine, e.maxBlockLines, &rubyBlockConfig)
 	if lineIdx < startLine || lineIdx > endLine {
 		return e.findGenericBlock(lines, lineIdx)
 	}
@@ -1202,95 +1276,14 @@ func (e *Expander) findRubyBlock(lines []string, lineIdx int) (int, int, string,
 	return startLine, endLine, header, symbolName, symbolKind
 }
 
-// Ruby block scanning (do/end).
-type rubyScanState struct {
-	inString    bool
-	stringDelim byte
-}
-
-func findRubyEnd(lines []string, startLine int, maxLines int) int {
-	endLine := startLine
-	depth := 0
-	sawOpener := false
-	state := rubyScanState{}
-
-	limit := len(lines)
-	if maxLines > 0 && startLine+maxLines < limit {
-		limit = startLine + maxLines
-	}
-
-	for i := startLine; i < limit; i++ {
-		openers, closers := rubyBlockDelta(lines[i], &state)
-		if openers > 0 {
-			sawOpener = true
-		}
-		depth += openers
-		depth -= closers
-		endLine = i
-		if sawOpener && depth <= 0 {
-			return i
-		}
-	}
-
-	if sawOpener {
-		return endLine
-	}
-	return startLine
-}
-
-func rubyBlockDelta(line string, state *rubyScanState) (int, int) {
-	openers := 0
-	closers := 0
-
-	for i := 0; i < len(line); {
-		if state.inString {
-			if line[i] == '\\' {
-				i += 2
-				continue
-			}
-			if line[i] == state.stringDelim {
-				state.inString = false
-				state.stringDelim = 0
-			}
-			i++
-			continue
-		}
-
-		if line[i] == '#' {
-			break
-		}
-
-		if line[i] == '"' || line[i] == '\'' {
-			state.inString = true
-			state.stringDelim = line[i]
-			i++
-			continue
-		}
-
-		if isRubyIdentStart(line[i]) {
-			start := i
-			i++
-			for i < len(line) && isRubyIdentPart(line[i]) {
-				i++
-			}
-			tok := line[start:i]
-			switch tok {
-			case "def", "class", "module", "case", "begin", "do", "for":
-				openers++
-			case "if", "unless", "while", "until":
-				if isRubyStatementStart(line, start) {
-					openers++
-				}
-			case "end":
-				closers++
-			}
-			continue
-		}
-
-		i++
-	}
-
-	return openers, closers
+var rubyBlockConfig = blockDeltaConfig{
+	openers:            []string{"def", "class", "module", "case", "begin", "do", "for"},
+	conditionalOpeners: []string{"if", "unless", "while", "until"},
+	closers:            []string{"end"},
+	lineCommentPrefix:  "#",
+	isStmtStart:        isRubyStatementStart,
+	isIdentStart:       isRubyIdentStart,
+	isIdentPart:        isRubyIdentPart,
 }
 
 func isRubyStatementStart(line string, start int) bool {
@@ -1317,12 +1310,6 @@ func isRubyIdentStart(b byte) bool {
 func isRubyIdentPart(b byte) bool {
 	return isRubyIdentStart(b) || (b >= '0' && b <= '9')
 }
-
-// Lua patterns
-var (
-	luaFuncPattern       = regexp.MustCompile(`^\s*(?:local\s+)?function\s+([A-Za-z_][\w\.:]*)`)
-	luaAssignFuncPattern = regexp.MustCompile(`^\s*(?:local\s+)?([A-Za-z_][\w\.:]*)\s*=\s*function\b`)
-)
 
 func (e *Expander) findLuaBlock(lines []string, lineIdx int) (int, int, string, string, string) {
 	startLine := lineIdx
@@ -1361,7 +1348,7 @@ func (e *Expander) findLuaBlock(lines []string, lineIdx int) (int, int, string, 
 		return e.findGenericBlock(lines, lineIdx)
 	}
 
-	endLine := findLuaEnd(lines, startLine, e.maxBlockLines)
+	endLine := findBlockDeltaEnd(lines, startLine, e.maxBlockLines, &luaBlockConfig)
 	if lineIdx < startLine || lineIdx > endLine {
 		return e.findGenericBlock(lines, lineIdx)
 	}
@@ -1370,124 +1357,22 @@ func (e *Expander) findLuaBlock(lines []string, lineIdx int) (int, int, string, 
 	return startLine, endLine, header, symbolName, symbolKind
 }
 
-// Lua block scanning (function/end, repeat/until).
-type luaScanState struct {
-	inString       bool
-	stringDelim    byte
-	inLongString   bool
-	inBlockComment bool
-}
+// Lua patterns
+var (
+	luaFuncPattern       = regexp.MustCompile(`^\s*(?:local\s+)?function\s+([A-Za-z_][\w\.:]*)`)
+	luaAssignFuncPattern = regexp.MustCompile(`^\s*(?:local\s+)?([A-Za-z_][\w\.:]*)\s*=\s*function\b`)
+)
 
-func findLuaEnd(lines []string, startLine int, maxLines int) int {
-	endLine := startLine
-	depth := 0
-	sawOpener := false
-	state := luaScanState{}
-
-	limit := len(lines)
-	if maxLines > 0 && startLine+maxLines < limit {
-		limit = startLine + maxLines
-	}
-
-	for i := startLine; i < limit; i++ {
-		openers, closers := luaBlockDelta(lines[i], &state)
-		if openers > 0 {
-			sawOpener = true
-		}
-		depth += openers
-		depth -= closers
-		endLine = i
-		if sawOpener && depth <= 0 {
-			return i
-		}
-	}
-
-	if sawOpener {
-		return endLine
-	}
-	return startLine
-}
-
-func luaBlockDelta(line string, state *luaScanState) (int, int) {
-	openers := 0
-	closers := 0
-
-	for i := 0; i < len(line); {
-		if state.inBlockComment {
-			if strings.HasPrefix(line[i:], "]]") {
-				state.inBlockComment = false
-				i += 2
-				continue
-			}
-			i++
-			continue
-		}
-
-		if state.inLongString {
-			if strings.HasPrefix(line[i:], "]]") {
-				state.inLongString = false
-				i += 2
-				continue
-			}
-			i++
-			continue
-		}
-
-		if state.inString {
-			if line[i] == '\\' {
-				i += 2
-				continue
-			}
-			if line[i] == state.stringDelim {
-				state.inString = false
-				state.stringDelim = 0
-			}
-			i++
-			continue
-		}
-
-		if strings.HasPrefix(line[i:], "--[[") {
-			state.inBlockComment = true
-			i += 4
-			continue
-		}
-		if strings.HasPrefix(line[i:], "--") {
-			break
-		}
-
-		if strings.HasPrefix(line[i:], "[[") {
-			state.inLongString = true
-			i += 2
-			continue
-		}
-
-		if line[i] == '"' || line[i] == '\'' {
-			state.inString = true
-			state.stringDelim = line[i]
-			i++
-			continue
-		}
-
-		if isLuaIdentStart(line[i]) {
-			start := i
-			i++
-			for i < len(line) && isLuaIdentPart(line[i]) {
-				i++
-			}
-			tok := line[start:i]
-			switch tok {
-			case "function", "if", "for", "while", "repeat":
-				openers++
-			case "end", "until":
-				closers++
-			}
-			continue
-		}
-
-		i++
-	}
-
-	return openers, closers
+var luaBlockConfig = blockDeltaConfig{
+	openers:           []string{"function", "if", "for", "while", "repeat"},
+	closers:           []string{"end", "until"},
+	blockCommentStart: "--[[",
+	blockCommentEnd:   "]]",
+	longStringStart:   "[[",
+	longStringEnd:     "]]",
+	lineCommentPrefix: "--",
+	isIdentStart:      isLuaIdentStart,
+	isIdentPart:       isLuaIdentPart,
 }
 
 func isLuaIdentStart(b byte) bool {
