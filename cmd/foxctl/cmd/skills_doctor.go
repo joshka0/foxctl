@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/joshka0/foxctl/internal/domain/skill"
 	"github.com/joshka0/foxctl/internal/platform/config"
@@ -174,7 +175,9 @@ func guideOlderThanManifest(manifestPath, guidePath string) bool {
 	if err != nil {
 		return false
 	}
-	return guideInfo.ModTime().Before(manifestInfo.ModTime())
+	// Use a 1-second tolerance: git checkout in CI pods can set mtimes in
+	// non-deterministic order within the same second, causing false positives.
+	return guideInfo.ModTime().Before(manifestInfo.ModTime().Add(-time.Second))
 }
 
 func guideMentionsCommand(guide, command string) bool {
