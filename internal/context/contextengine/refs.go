@@ -16,6 +16,7 @@ const (
 	RefTypeTask        RefType = "task"
 	RefTypeSession     RefType = "session"
 	RefTypeMemoryClaim RefType = "memory_claim"
+	RefTypeNamedMemory RefType = "named_memory"
 	RefTypeNote        RefType = "note"
 	RefTypeArtifact    RefType = "artifact"
 	RefTypeTrajectory  RefType = "trajectory"
@@ -29,8 +30,8 @@ const (
 func (r RefType) IsValid() bool {
 	switch r {
 	case RefTypePath, RefTypeSymbol, RefTypeTask, RefTypeSession,
-		RefTypeMemoryClaim, RefTypeNote, RefTypeArtifact, RefTypeTrajectory,
-		RefTypeCommit, RefTypeEvent, RefTypeRun, RefTypeToolCall:
+		RefTypeMemoryClaim, RefTypeNamedMemory, RefTypeNote, RefTypeArtifact,
+		RefTypeTrajectory, RefTypeCommit, RefTypeEvent, RefTypeRun, RefTypeToolCall:
 		return true
 	default:
 		return false

@@ -3,11 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedding"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedqueue"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -96,6 +99,156 @@ func TestNormalizeParallelism(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestProbeEmbeddingProvidersUsesMemoryProviderForMemoryKind(t *testing.T) {
+	var symbolCalled bool
+	var memoryCalled bool
+
+	err := probeEmbeddingProviders(
+		context.Background(), embedqueue.TaskKindMemory, "http://embedder",
+		func() (*semantic.Embedder, int, error) {
+			symbolCalled = true
+			return nil, 0, errors.New("symbol should not be probed")
+		},
+		func() (*semantic.Embedder, int, error) {
+			memoryCalled = true
+			return nil, 4096, nil
+		},
+	)
+
+	assert.NoError(t, err)
+	assert.False(t, symbolCalled)
+	assert.True(t, memoryCalled)
+}
+
+func TestProbeEmbeddingProvidersAllKindRequiresBothScopes(t *testing.T) {
+	var memoryCalled bool
+
+	err := probeEmbeddingProviders(
+		context.Background(), "", "http://embedder",
+		func() (*semantic.Embedder, int, error) {
+			return nil, 0, errors.New("symbol setup failed")
+		},
+		func() (*semantic.Embedder, int, error) {
+			memoryCalled = true
+			return nil, 4096, nil
+		},
+	)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "symbol")
+	assert.True(t, memoryCalled)
+}
+
+func TestProbeRequiredEmbeddingProvidersMemoryOnlyAllowsSymbolFailure(t *testing.T) {
+	var symbolCalled bool
+	var memoryCalled bool
+
+	err := probeRequiredEmbeddingProviders(
+		context.Background(), []embedqueue.TaskKind{embedqueue.TaskKindMemory}, "http://embedder",
+		func() (*semantic.Embedder, int, error) {
+			symbolCalled = true
+			return nil, 0, errors.New("symbol setup failed")
+		},
+		func() (*semantic.Embedder, int, error) {
+			memoryCalled = true
+			return nil, 4096, nil
+		},
+	)
+
+	assert.NoError(t, err)
+	assert.False(t, symbolCalled)
+	assert.True(t, memoryCalled)
+}
+
+func TestPendingEmbeddingProviderKindsMemoryOnlyQueue(t *testing.T) {
+	ctx := context.Background()
+	store, err := embedding.OpenStore(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	_, err = store.EnqueueMemories(ctx, embedding.MemoryEnqueueRequest{
+		WorkspaceID: "ws-memory",
+		Memories: []embedding.MemoryInput{{
+			Name:    "decision:embedder",
+			Type:    "decision",
+			Content: "Use the local Qwen embedder for named-memory recall.",
+		}},
+		Model: "text-embedding-qwen3-embedding-8b",
+	})
+	if err != nil {
+		t.Fatalf("EnqueueMemories: %v", err)
+	}
+
+	kinds, err := pendingEmbeddingProviderKinds(ctx, store, "ws-memory", "")
+	assert.NoError(t, err)
+	assert.Equal(t, []embedqueue.TaskKind{embedqueue.TaskKindMemory}, kinds)
+}
+
+func TestPendingEmbeddingProviderKindsEmptyQueueSkipsPreflight(t *testing.T) {
+	ctx := context.Background()
+	store, err := embedding.OpenStore(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	kinds, err := pendingEmbeddingProviderKinds(ctx, store, "", "")
+	assert.NoError(t, err)
+	assert.Empty(t, kinds)
+}
+
+func TestPendingEmbeddingProviderKindsIgnoresFutureMemoryRetry(t *testing.T) {
+	ctx := context.Background()
+	store, err := embedding.OpenStore(ctx, t.TempDir())
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	if _, err := store.EnqueueMemories(ctx, embedding.MemoryEnqueueRequest{
+		WorkspaceID: "ws-mixed",
+		Memories: []embedding.MemoryInput{{
+			Name:    "decision:retry",
+			Type:    "decision",
+			Content: "retry this memory later",
+		}},
+		Model: "model-a",
+	}); err != nil {
+		t.Fatalf("EnqueueMemories: %v", err)
+	}
+	memoryJob, err := store.ClaimNextInWorkspaceKind(ctx, "ws-mixed", embedqueue.TaskKindMemory)
+	if err != nil {
+		t.Fatalf("ClaimNextInWorkspaceKind memory: %v", err)
+	}
+	if memoryJob == nil {
+		t.Fatalf("expected memory job")
+	}
+	if err := store.Fail(ctx, memoryJob.ID, "memory provider unavailable"); err != nil {
+		t.Fatalf("Fail memory job: %v", err)
+	}
+	if _, err := store.Enqueue(ctx, embedding.EnqueueRequest{
+		WorkspaceID: "ws-mixed",
+		Symbols: []embedding.SymbolInput{{
+			SymbolID:   "go:pkg/test::func Handler",
+			FilePath:   "main.go",
+			SymbolName: "Handler",
+			PackageID:  "go:pkg/test",
+			SymbolKey:  "func Handler",
+			MemoryName: "symbol://ws-mixed/go:pkg/test::func Handler",
+			Content:    "func Handler() {}",
+		}},
+		Model: "model-a",
+	}); err != nil {
+		t.Fatalf("Enqueue symbol: %v", err)
+	}
+
+	kinds, err := pendingEmbeddingProviderKinds(ctx, store, "ws-mixed", "")
+	assert.NoError(t, err)
+	assert.Equal(t, []embedqueue.TaskKind{embedqueue.TaskKindSymbol}, kinds)
 }
 
 func TestProcessEmbeddingJobBatchRespectsParallelism(t *testing.T) {

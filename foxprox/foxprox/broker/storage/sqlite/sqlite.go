@@ -270,7 +270,8 @@ func (s *Store) SaveRoom(ctx context.Context, r room.Room) error {
 // joined_at) primary key means a single join writes exactly one row and
 // subsequent LeftAt updates target that row.
 func (s *Store) SaveMember(ctx context.Context, m room.Member) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(
+		ctx, `
 		INSERT INTO foxprox_room_members
 			(room_id, agent_id, session_id, inbox_id, role, role_custom, can_mutate, import_hint, joined_at, left_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

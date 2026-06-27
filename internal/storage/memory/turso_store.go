@@ -629,45 +629,57 @@ func (s *TursoStore) Delete(ctx context.Context, name, workspace string) error {
 	return nil
 }
 
-// Search performs text search on memory names and summaries.
+// Search performs lexical search on memory names, summaries, and atomic fields.
 func (s *TursoStore) Search(ctx context.Context, workspace, query string, limit int) ([]ScoredEntry, error) {
 	if limit <= 0 {
 		limit = 20
 	}
 	workspace = ws.CanonicalID(workspace)
+	terms := memorySearchTerms(query)
+	if len(terms) == 0 {
+		return nil, nil
+	}
 
-	like := "%" + strings.ToLower(query) + "%"
+	args := []any{workspace}
+	termClauses := make([]string, 0, len(terms))
+	for _, term := range terms {
+		termClauses = append(termClauses, `(
+			LOWER(name) LIKE ? OR
+			LOWER(summary) LIKE ? OR
+			LOWER(COALESCE(atomic_text, '')) LIKE ? OR
+			LOWER(COALESCE(entities, '')) LIKE ? OR
+			LOWER(COALESCE(keywords, '')) LIKE ?
+		)`)
+		like := "%" + strings.ToLower(term) + "%"
+		args = append(args, like, like, like, like, like)
+	}
+	args = append(args, memorySearchCandidateWindow(limit))
+
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT `+namedEntrySelectColumns+`
 		FROM named_memory
-		WHERE workspace = ? AND (LOWER(name) LIKE ? OR LOWER(summary) LIKE ?)
+		WHERE workspace = ? AND (`+strings.Join(termClauses, " OR ")+`)
 		ORDER BY updated_at DESC
-		LIMIT ?`, workspace, like, like, limit)
+		LIMIT ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("memory: search: %w", err)
 	}
 	defer func() { errs.Ignore(rows.Close(), "close search rows") }()
 
-	var results []ScoredEntry
+	var entries []NamedEntry
 	for rows.Next() {
 		var entry NamedEntry
 
 		if err := scanEntryValues(rows, &entry); err != nil {
-			continue
+			return nil, fmt.Errorf("memory: search scan: %w", err)
 		}
 
-		results = append(results, ScoredEntry{
-			Entry: entry,
-			Score: scoreEntry(entry),
-		})
+		entries = append(entries, entry)
 	}
-
-	// Sort by score
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Score > results[j].Score
-	})
-
-	return results, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return scoreMemoryLexicalEntries(entries, query, limit), nil
 }
 
 // UpdateEmbedding stores an embedding vector for a named memory entry.
@@ -1245,6 +1257,11 @@ func (s *TursoStore) ListFiltered(ctx context.Context, workspace string, filter 
 	if strings.TrimSpace(filter.SessionID) != "" {
 		where = append(where, "session_id = ?")
 		args = append(args, strings.TrimSpace(filter.SessionID))
+	}
+
+	if strings.TrimSpace(filter.NamePrefix) != "" {
+		where = append(where, "name LIKE ? || '%'")
+		args = append(args, strings.TrimSpace(filter.NamePrefix))
 	}
 
 	if len(filter.Types) > 0 {

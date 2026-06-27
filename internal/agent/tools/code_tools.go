@@ -503,25 +503,32 @@ func pickFocusSymbol(ctx context.Context, store storage.MemoryStore, workspaceID
 }
 
 func gatherCallEdges(ctx context.Context, store storage.MemoryStore, workspaceID, focusID, mode string, limit int) ([]symbol.CallEdge, error) {
-	query := ""
+	var namePrefix string
 	switch mode {
 	case "callees":
-		query = "call://" + workspaceID + "/" + focusID + "->"
+		namePrefix = "call://" + workspaceID + "/" + focusID + "->"
 	case "callers":
-		query = "->" + focusID
+		namePrefix = "call://" + workspaceID + "/"
 	default:
 		return nil, fmt.Errorf("unsupported mode: %s", mode)
 	}
-	results, err := store.Search(ctx, workspaceID, query, limit)
+
+	// Use a prefix query for exact edge lookup instead of fuzzy lexical search,
+	// which tokenizes punctuation and cannot match the canonical call:// name.
+	candidateLimit := limit
+	if candidateLimit < 1000 {
+		candidateLimit = 1000
+	}
+	entries, _, err := store.ListFiltered(ctx, workspaceID, storage.MemoryListFilter{
+		Types:      []string{symbol.CallEdgeType},
+		NamePrefix: namePrefix,
+	}, candidateLimit, 0)
 	if err != nil {
 		return nil, err
 	}
+
 	var edges []symbol.CallEdge
-	for _, scored := range results {
-		entry := scored.Entry
-		if entry.Type != symbol.CallEdgeType {
-			continue
-		}
+	for _, entry := range entries {
 		var edge symbol.CallEdge
 		if err := json.Unmarshal(entry.Result, &edge); err != nil {
 			continue
@@ -540,6 +547,9 @@ func gatherCallEdges(ctx context.Context, store storage.MemoryStore, workspaceID
 		}
 		return edges[i].TargetID < edges[j].TargetID
 	})
+	if limit > 0 && len(edges) > limit {
+		edges = edges[:limit]
+	}
 	return edges, nil
 }
 

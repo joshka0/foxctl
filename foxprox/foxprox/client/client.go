@@ -162,11 +162,11 @@ func (c *Client) SessionScreen(ctx context.Context, id string) (vtscreen.Snapsho
 // TerminalSubmitRequest is the JSON body for POST /v1/terminal/submit.
 // The session_id field lives alongside the intent fields (same flat object).
 type TerminalSubmitRequest struct {
-	SessionID  string `json:"session_id"`
-	Text       string `json:"text"`
-	SubmitKey  string `json:"submit_key,omitempty"`
-	Mode       string `json:"mode,omitempty"`
-	LeaseID    string `json:"lease_id,omitempty"`
+	SessionID string `json:"session_id"`
+	Text      string `json:"text"`
+	SubmitKey string `json:"submit_key,omitempty"`
+	Mode      string `json:"mode,omitempty"`
+	LeaseID   string `json:"lease_id,omitempty"`
 }
 
 // TerminalSubmitResponse mirrors the TerminalResponse from the server.

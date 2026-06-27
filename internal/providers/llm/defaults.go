@@ -43,7 +43,7 @@ func DefaultModelForProvider(provider string) string {
 			return model
 		}
 		return "gpt-4.1-mini"
-	case "anthropic":
+	case "anthropic", "anthropic_compat", "anthropic-compatible", "anthropic-messages":
 		if model := os.Getenv("ANTHROPIC_MODEL"); model != "" {
 			return model
 		}

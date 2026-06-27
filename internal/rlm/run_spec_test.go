@@ -51,11 +51,15 @@ func TestResolveRunSpecBuildsCanonicalPlanAndPolicy(t *testing.T) {
 	t.Parallel()
 
 	allTools := []Tool{
+		{Name: "plan_context_query", ReadOnly: true},
 		{Name: "gather_context", ReadOnly: true},
+		{Name: "gather_memory_context", ReadOnly: true},
 		{Name: "gather_test_context", ReadOnly: true},
 		{Name: "gather_docs_context", ReadOnly: true},
 		{Name: "expand_context_graph", ReadOnly: true},
 		{Name: "load_evidence_ref", ReadOnly: true},
+		{Name: "aggregate_evidence_refs", ReadOnly: true},
+		{Name: "evidence_ledger", ReadOnly: true},
 		{Name: "code_search_ensemble", ReadOnly: true},
 		{Name: "retrieve_code", ReadOnly: true},
 		{Name: "retrieve_memory", ReadOnly: true},
@@ -91,8 +95,8 @@ func TestResolveRunSpecBuildsCanonicalPlanAndPolicy(t *testing.T) {
 	if spec.ToolPolicy.Profile != ToolProfileDefault {
 		t.Fatalf("policy.profile=%s", spec.ToolPolicy.Profile)
 	}
-	if len(spec.ToolPolicy.Tools) != 5 {
-		t.Fatalf("policy.tools=%d want 5", len(spec.ToolPolicy.Tools))
+	if len(spec.ToolPolicy.Tools) != 9 {
+		t.Fatalf("policy.tools=%d want 9", len(spec.ToolPolicy.Tools))
 	}
 }
 
@@ -100,11 +104,15 @@ func TestResolveToolPolicyDefaultReturnsMiniSurface(t *testing.T) {
 	t.Parallel()
 
 	allTools := []Tool{
+		{Name: "plan_context_query", ReadOnly: true},
 		{Name: "gather_context", ReadOnly: true},
+		{Name: "gather_memory_context", ReadOnly: true},
 		{Name: "gather_test_context", ReadOnly: true},
 		{Name: "gather_docs_context", ReadOnly: true},
 		{Name: "expand_context_graph", ReadOnly: true},
 		{Name: "load_evidence_ref", ReadOnly: true},
+		{Name: "aggregate_evidence_refs", ReadOnly: true},
+		{Name: "evidence_ledger", ReadOnly: true},
 		{Name: "code_search_ensemble", ReadOnly: true},
 		{Name: "retrieve_code", ReadOnly: true},
 		{Name: "retrieve_memory", ReadOnly: true},
@@ -116,10 +124,10 @@ func TestResolveToolPolicyDefaultReturnsMiniSurface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveToolPolicy() error = %v", err)
 	}
-	if len(policy.Tools) != 5 {
-		t.Fatalf("default tools=%d want 5", len(policy.Tools))
+	if len(policy.Tools) != 9 {
+		t.Fatalf("default tools=%d want 9", len(policy.Tools))
 	}
-	wantNames := []string{"gather_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref"}
+	wantNames := []string{"plan_context_query", "gather_context", "gather_memory_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref", "aggregate_evidence_refs", "evidence_ledger"}
 	if got := names(policy.Tools); !reflect.DeepEqual(got, wantNames) {
 		t.Fatalf("default tool names=%v want %v", got, wantNames)
 	}
@@ -129,11 +137,15 @@ func TestResolveToolPolicyNativeExplorerReturnsGatherFirstSurface(t *testing.T) 
 	t.Parallel()
 
 	allTools := []Tool{
+		{Name: "plan_context_query", ReadOnly: true},
 		{Name: "gather_context", ReadOnly: true},
+		{Name: "gather_memory_context", ReadOnly: true},
 		{Name: "gather_test_context", ReadOnly: true},
 		{Name: "gather_docs_context", ReadOnly: true},
 		{Name: "expand_context_graph", ReadOnly: true},
 		{Name: "load_evidence_ref", ReadOnly: true},
+		{Name: "aggregate_evidence_refs", ReadOnly: true},
+		{Name: "evidence_ledger", ReadOnly: true},
 		{Name: "code_search_ensemble", ReadOnly: true},
 		{Name: "retrieve_code", ReadOnly: true},
 		{Name: "retrieve_memory", ReadOnly: true},
@@ -145,7 +157,7 @@ func TestResolveToolPolicyNativeExplorerReturnsGatherFirstSurface(t *testing.T) 
 	if err != nil {
 		t.Fatalf("ResolveToolPolicy() error = %v", err)
 	}
-	wantNames := []string{"gather_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref"}
+	wantNames := []string{"plan_context_query", "gather_context", "gather_memory_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref", "aggregate_evidence_refs", "evidence_ledger"}
 	if got := names(policy.Tools); !reflect.DeepEqual(got, wantNames) {
 		t.Fatalf("native-explorer tool names=%v want %v", got, wantNames)
 	}
@@ -155,11 +167,15 @@ func TestResolveToolPolicyCodeIntelReturnsCodeTools(t *testing.T) {
 	t.Parallel()
 
 	allTools := []Tool{
+		{Name: "plan_context_query", ReadOnly: true},
 		{Name: "gather_context", ReadOnly: true},
+		{Name: "gather_memory_context", ReadOnly: true},
 		{Name: "gather_test_context", ReadOnly: true},
 		{Name: "gather_docs_context", ReadOnly: true},
 		{Name: "expand_context_graph", ReadOnly: true},
 		{Name: "load_evidence_ref", ReadOnly: true},
+		{Name: "aggregate_evidence_refs", ReadOnly: true},
+		{Name: "evidence_ledger", ReadOnly: true},
 		{Name: "code_search_ensemble", ReadOnly: true},
 		{Name: "retrieve_code", ReadOnly: true},
 		{Name: "retrieve_memory", ReadOnly: true},
@@ -171,7 +187,7 @@ func TestResolveToolPolicyCodeIntelReturnsCodeTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveToolPolicy() error = %v", err)
 	}
-	wantNames := []string{"gather_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref", "code_search_ensemble", "retrieve_code"}
+	wantNames := []string{"plan_context_query", "gather_context", "gather_memory_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref", "aggregate_evidence_refs", "evidence_ledger", "code_search_ensemble", "retrieve_code"}
 	if got := names(policy.Tools); !reflect.DeepEqual(got, wantNames) {
 		t.Fatalf("code-intel tool names=%v want %v", got, wantNames)
 	}
@@ -181,11 +197,15 @@ func TestResolveToolPolicyGatherContextReturnsBundleTools(t *testing.T) {
 	t.Parallel()
 
 	allTools := []Tool{
+		{Name: "plan_context_query", ReadOnly: true},
 		{Name: "gather_context", ReadOnly: true},
+		{Name: "gather_memory_context", ReadOnly: true},
 		{Name: "gather_test_context", ReadOnly: true},
 		{Name: "gather_docs_context", ReadOnly: true},
 		{Name: "expand_context_graph", ReadOnly: true},
 		{Name: "load_evidence_ref", ReadOnly: true},
+		{Name: "aggregate_evidence_refs", ReadOnly: true},
+		{Name: "evidence_ledger", ReadOnly: true},
 		{Name: "retrieve_code", ReadOnly: true},
 		{Name: "retrieve_memory", ReadOnly: true},
 		{Name: "retrieve_context", ReadOnly: true},
@@ -196,7 +216,7 @@ func TestResolveToolPolicyGatherContextReturnsBundleTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveToolPolicy() error = %v", err)
 	}
-	wantNames := []string{"gather_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref"}
+	wantNames := []string{"plan_context_query", "gather_context", "gather_memory_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref", "aggregate_evidence_refs", "evidence_ledger"}
 	if got := names(policy.Tools); !reflect.DeepEqual(got, wantNames) {
 		t.Fatalf("gather-context tool names=%v want %v", got, wantNames)
 	}
@@ -206,11 +226,15 @@ func TestResolveToolPolicyMemoryRecallReturnsMemoryTools(t *testing.T) {
 	t.Parallel()
 
 	allTools := []Tool{
+		{Name: "plan_context_query", ReadOnly: true},
 		{Name: "gather_context", ReadOnly: true},
+		{Name: "gather_memory_context", ReadOnly: true},
 		{Name: "gather_test_context", ReadOnly: true},
 		{Name: "gather_docs_context", ReadOnly: true},
 		{Name: "expand_context_graph", ReadOnly: true},
 		{Name: "load_evidence_ref", ReadOnly: true},
+		{Name: "aggregate_evidence_refs", ReadOnly: true},
+		{Name: "evidence_ledger", ReadOnly: true},
 		{Name: "retrieve_code", ReadOnly: true},
 		{Name: "retrieve_memory", ReadOnly: true},
 		{Name: "retrieve_context", ReadOnly: true},
@@ -221,7 +245,7 @@ func TestResolveToolPolicyMemoryRecallReturnsMemoryTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveToolPolicy() error = %v", err)
 	}
-	wantNames := []string{"gather_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref", "retrieve_memory", "retrieve_context"}
+	wantNames := []string{"plan_context_query", "gather_context", "gather_memory_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref", "aggregate_evidence_refs", "evidence_ledger", "retrieve_memory", "retrieve_context"}
 	if got := names(policy.Tools); !reflect.DeepEqual(got, wantNames) {
 		t.Fatalf("memory-recall tool names=%v want %v", got, wantNames)
 	}
@@ -231,11 +255,15 @@ func TestResolveToolPolicyProfilesExposeOnlyExpectedSurfaces(t *testing.T) {
 	t.Parallel()
 
 	allTools := []Tool{
+		{Name: "plan_context_query", ReadOnly: true},
 		{Name: "gather_context", ReadOnly: true},
+		{Name: "gather_memory_context", ReadOnly: true},
 		{Name: "gather_test_context", ReadOnly: true},
 		{Name: "gather_docs_context", ReadOnly: true},
 		{Name: "expand_context_graph", ReadOnly: true},
 		{Name: "load_evidence_ref", ReadOnly: true},
+		{Name: "aggregate_evidence_refs", ReadOnly: true},
+		{Name: "evidence_ledger", ReadOnly: true},
 		{Name: "code_search_ensemble", ReadOnly: true},
 		{Name: "retrieve_code", ReadOnly: true},
 		{Name: "retrieve_memory", ReadOnly: true},
@@ -250,15 +278,15 @@ func TestResolveToolPolicyProfilesExposeOnlyExpectedSurfaces(t *testing.T) {
 		profile ToolProfile
 		want    []string
 	}{
-		{profile: ToolProfileDefault, want: []string{"gather_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref"}},
-		{profile: ToolProfileGatherContext, want: []string{"gather_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref"}},
-		{profile: ToolProfileLambdaRepo, want: []string{"gather_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref"}},
-		{profile: ToolProfileNativeExplorer, want: []string{"gather_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref"}},
-		{profile: ToolProfileCodeDebug, want: []string{"gather_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref", "code_search_ensemble", "retrieve_code"}},
-		{profile: ToolProfileCodeIntel, want: []string{"gather_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref", "code_search_ensemble", "retrieve_code"}},
-		{profile: ToolProfileMemoryContext, want: []string{"gather_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref", "retrieve_memory", "retrieve_context"}},
-		{profile: ToolProfileMemoryRecall, want: []string{"gather_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref", "retrieve_memory", "retrieve_context"}},
-		{profile: ToolProfileFullDebug, want: []string{"gather_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref", "code_search_ensemble", "retrieve_code", "retrieve_memory", "retrieve_context", "retrieve_task", "retrieve_mixed", "memory_ensemble_retrieve"}},
+		{profile: ToolProfileDefault, want: []string{"plan_context_query", "gather_context", "gather_memory_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref", "aggregate_evidence_refs", "evidence_ledger"}},
+		{profile: ToolProfileGatherContext, want: []string{"plan_context_query", "gather_context", "gather_memory_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref", "aggregate_evidence_refs", "evidence_ledger"}},
+		{profile: ToolProfileLambdaRepo, want: []string{"plan_context_query", "gather_context", "gather_memory_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref", "aggregate_evidence_refs", "evidence_ledger"}},
+		{profile: ToolProfileNativeExplorer, want: []string{"plan_context_query", "gather_context", "gather_memory_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref", "aggregate_evidence_refs", "evidence_ledger"}},
+		{profile: ToolProfileCodeDebug, want: []string{"plan_context_query", "gather_context", "gather_memory_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref", "aggregate_evidence_refs", "evidence_ledger", "code_search_ensemble", "retrieve_code"}},
+		{profile: ToolProfileCodeIntel, want: []string{"plan_context_query", "gather_context", "gather_memory_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref", "aggregate_evidence_refs", "evidence_ledger", "code_search_ensemble", "retrieve_code"}},
+		{profile: ToolProfileMemoryContext, want: []string{"plan_context_query", "gather_context", "gather_memory_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref", "aggregate_evidence_refs", "evidence_ledger", "retrieve_memory", "retrieve_context"}},
+		{profile: ToolProfileMemoryRecall, want: []string{"plan_context_query", "gather_context", "gather_memory_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref", "aggregate_evidence_refs", "evidence_ledger", "retrieve_memory", "retrieve_context"}},
+		{profile: ToolProfileFullDebug, want: []string{"plan_context_query", "gather_context", "gather_memory_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref", "aggregate_evidence_refs", "evidence_ledger", "code_search_ensemble", "retrieve_code", "retrieve_memory", "retrieve_context", "retrieve_task", "retrieve_mixed", "memory_ensemble_retrieve"}},
 		{profile: ToolProfileLongCoTNoModelTools, want: nil},
 	} {
 		policy, err := ResolveToolPolicy(allTools, string(tc.profile))
@@ -281,11 +309,15 @@ func TestResolveToolPolicyNeverExposesWritableTools(t *testing.T) {
 	t.Parallel()
 
 	writableAllowedTools := []Tool{
+		{Name: "plan_context_query", ReadOnly: false},
 		{Name: "gather_context", ReadOnly: false},
+		{Name: "gather_memory_context", ReadOnly: false},
 		{Name: "gather_test_context", ReadOnly: false},
 		{Name: "gather_docs_context", ReadOnly: false},
 		{Name: "expand_context_graph", ReadOnly: false},
 		{Name: "load_evidence_ref", ReadOnly: false},
+		{Name: "aggregate_evidence_refs", ReadOnly: false},
+		{Name: "evidence_ledger", ReadOnly: false},
 		{Name: "code_search_ensemble", ReadOnly: false},
 		{Name: "retrieve_code", ReadOnly: false},
 		{Name: "retrieve_memory", ReadOnly: false},
@@ -437,11 +469,15 @@ func toolPolicyProfiles() []ToolProfile {
 
 func toolPolicyToolNames() []string {
 	return []string{
+		"plan_context_query",
 		"gather_context",
+		"gather_memory_context",
 		"gather_test_context",
 		"gather_docs_context",
 		"expand_context_graph",
 		"load_evidence_ref",
+		"aggregate_evidence_refs",
+		"evidence_ledger",
 		"code_search_ensemble",
 		"retrieve_code",
 		"retrieve_memory",

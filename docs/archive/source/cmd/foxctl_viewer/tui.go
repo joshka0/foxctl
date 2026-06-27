@@ -1161,7 +1161,8 @@ func (m model) View() string {
 	// Add status bar at the bottom
 	statusBar := m.renderStatusBar()
 
-	return lipgloss.JoinVertical(lipgloss.Left,
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
 		lipgloss.JoinHorizontal(lipgloss.Top, sidebar, mainContent),
 		statusBar,
 	)
@@ -1452,7 +1453,8 @@ func (m model) renderInsights() string {
 		titleStyle.MarginBottom(0).Render("Overview"),
 		len(m.insights.Nodes),
 		len(m.insights.Cycles),
-		len(m.insights.TopologicalOrder))) + "\n")
+		len(m.insights.TopologicalOrder),
+	)) + "\n")
 
 	if len(m.insights.Nodes) > 0 {
 		var keystones strings.Builder
@@ -2181,7 +2183,8 @@ func (m model) renderSQLiteData(labelStyle lipgloss.Style) string {
 
 	var b strings.Builder
 	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214")).Render(
-		fmt.Sprintf("%s > %s", db.getFriendlyName(), table.Name)) + "\n")
+		fmt.Sprintf("%s > %s", db.getFriendlyName(), table.Name),
+	) + "\n")
 	b.WriteString(labelStyle.Render(fmt.Sprintf("%d rows", table.RowCount)) + "\n\n")
 
 	if m.loading {

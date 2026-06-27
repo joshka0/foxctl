@@ -84,7 +84,8 @@ const namedEntrySelectColumns = `
 	lifecycle_state, pinned, review_status, superseded_by, review_notes,
 	last_used_at, last_validated_at,
 	selected_count, use_count, success_count, failure_count, patch_count, restore_count,
-	last_selected_at, last_succeeded_at, last_failed_at, last_patched_at, last_restored_at`
+	last_selected_at, last_succeeded_at, last_failed_at, last_patched_at, last_restored_at,
+	atomic_text, entities, keywords`
 
 // Connection pool defaults for SQLite file-based storage
 // These values provide reasonable defaults for typical workloads with moderate concurrency
@@ -497,6 +498,12 @@ func (s *Store) ListFiltered(ctx context.Context, workspace string, filter ListF
 		args = append(args, strings.TrimSpace(filter.SessionID))
 	}
 
+	if strings.TrimSpace(filter.NamePrefix) != "" {
+		where = append(where, fmt.Sprintf("name LIKE $%d || '%%'", argIdx))
+		argIdx++
+		args = append(args, strings.TrimSpace(filter.NamePrefix))
+	}
+
 	if len(filter.Types) > 0 {
 		placeholders := make([]string, 0, len(filter.Types))
 		for _, t := range filter.Types {
@@ -826,19 +833,39 @@ CREATE INDEX IF NOT EXISTS idx_named_memory_ws_updated ON named_memory(workspace
 	return nil
 }
 
-// Search finds entries whose name or summary contain the query string.
+// Search finds entries whose lexical memory text matches the query.
 func (s *Store) Search(ctx context.Context, workspace, query string, limit int) ([]ScoredEntry, error) {
 	workspace = ws.CanonicalID(workspace)
 	if limit <= 0 {
 		limit = 20
 	}
-	like := "%" + strings.ToLower(query) + "%"
+	terms := memorySearchTerms(query)
+	if len(terms) == 0 {
+		return nil, nil
+	}
+
+	args := []any{workspace}
+	termClauses := make([]string, 0, len(terms))
+	for i, term := range terms {
+		placeholder := fmt.Sprintf("$%d", i+2)
+		termClauses = append(termClauses, fmt.Sprintf(`(
+			LOWER(name) LIKE %s OR
+			LOWER(summary) LIKE %s OR
+			LOWER(COALESCE(atomic_text, '')) LIKE %s OR
+			LOWER(COALESCE(entities, '')) LIKE %s OR
+			LOWER(COALESCE(keywords, '')) LIKE %s
+		)`, placeholder, placeholder, placeholder, placeholder, placeholder))
+		args = append(args, "%"+strings.ToLower(term)+"%")
+	}
+	args = append(args, memorySearchCandidateWindow(limit))
+	limitPlaceholder := fmt.Sprintf("$%d", len(args))
+
 	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
 		SELECT %s
 		FROM named_memory
-		WHERE workspace = $1 AND (LOWER(name) LIKE $2 OR LOWER(summary) LIKE $3)
+		WHERE workspace = $1 AND (%s)
 		ORDER BY updated_at DESC
-		LIMIT $4`, namedEntrySelectColumns), workspace, like, like, limit)
+		LIMIT %s`, namedEntrySelectColumns, strings.Join(termClauses, " OR "), limitPlaceholder), args...)
 	if err != nil {
 		return nil, fmt.Errorf("memory: search: %w", err)
 	}
@@ -849,23 +876,7 @@ func (s *Store) Search(ctx context.Context, workspace, query string, limit int) 
 	if err != nil {
 		return nil, err
 	}
-	var scored []ScoredEntry
-	for _, entry := range entries {
-		scored = append(scored, ScoredEntry{
-			Entry: entry,
-			Score: scoreEntry(entry),
-		})
-	}
-	sort.Slice(scored, func(i, j int) bool {
-		if scored[i].Score == scored[j].Score {
-			return scored[i].Entry.UpdatedAt.After(scored[j].Entry.UpdatedAt)
-		}
-		return scored[i].Score > scored[j].Score
-	})
-	if len(scored) > limit {
-		scored = scored[:limit]
-	}
-	return scored, nil
+	return scoreMemoryLexicalEntries(entries, query, limit), nil
 }
 
 // ExistsByNameSuffix checks if any entry exists with a name ending in the given suffix.
@@ -1807,6 +1818,7 @@ func scanEntryValues(scanner entryScanner, entry *NamedEntry, extra ...any) erro
 	var lifecycleState, reviewStatus, supersededBy, reviewNotes sql.NullString
 	var lastUsedAt, lastValidatedAt sql.NullString
 	var lastSelectedAt, lastSucceededAt, lastFailedAt, lastPatchedAt, lastRestoredAt sql.NullString
+	var atomicText, entities, keywords sql.NullString
 	var pinned int
 	dest := []any{
 		&entry.ID,
@@ -1839,6 +1851,9 @@ func scanEntryValues(scanner entryScanner, entry *NamedEntry, extra ...any) erro
 		&lastFailedAt,
 		&lastPatchedAt,
 		&lastRestoredAt,
+		&atomicText,
+		&entities,
+		&keywords,
 	}
 	dest = append(dest, extra...)
 	if err := scanner.Scan(dest...); err != nil {
@@ -1849,6 +1864,19 @@ func scanEntryValues(scanner entryScanner, entry *NamedEntry, extra ...any) erro
 	}
 	if err := sqlutil.ScanJSON(digests, &entry.Digests); err != nil {
 		return fmt.Errorf("scan digests: %w", err)
+	}
+	if atomicText.Valid {
+		entry.AtomicText = atomicText.String
+	}
+	if entities.Valid {
+		if err := sqlutil.ScanJSON(entities.String, &entry.Entities); err != nil {
+			return fmt.Errorf("scan entities: %w", err)
+		}
+	}
+	if keywords.Valid {
+		if err := sqlutil.ScanJSON(keywords.String, &entry.Keywords); err != nil {
+			return fmt.Errorf("scan keywords: %w", err)
+		}
 	}
 	var err error
 	entry.CreatedAt, err = sqlutil.ScanTimestamp(created)

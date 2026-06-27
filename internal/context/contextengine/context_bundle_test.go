@@ -1141,6 +1141,44 @@ func TestCertifyContextBundleRejectsInvalidSourceContract(t *testing.T) {
 	}
 }
 
+func TestCertifyContextBundleAcceptsNamedMemoryEvidence(t *testing.T) {
+	t.Parallel()
+
+	pack := EvidencePack{
+		ID:          "pack-1",
+		WorkspaceID: "ws-1",
+		Query:       "named memory",
+		Lane:        LaneMemory,
+		Nodes: []EvidenceNode{{
+			ID:          "node-1",
+			WorkspaceID: "ws-1",
+			NodeType:    EvidenceNodeTypeMemory,
+			Ref:         EvidenceRef{Type: RefTypeNamedMemory, Ref: "rlm-atomic-memory"},
+			Statement:   "Named memory is loadable evidence.",
+			Confidence:  0.8,
+			Grounding:   GroundingIndexed,
+			Metadata:    map[string]any{"source": "named_memory"},
+		}},
+	}
+	bundle, err := ReduceEvidenceToBundle(pack, BundleReductionOptions{IDGen: defaultContextIDGen("test"), Clock: fixedClock})
+	if err != nil {
+		t.Fatalf("ReduceEvidenceToBundle: %v", err)
+	}
+	cert, err := CertifyContextBundle(bundle, nil, CertificationOptions{IDGen: defaultContextIDGen("cert"), Clock: fixedClock})
+	if err != nil {
+		t.Fatalf("CertifyContextBundle: %v", err)
+	}
+	if cert.Status != ContextCertificateStatusCertified {
+		t.Fatalf("cert status=%s want certified", cert.Status)
+	}
+	if len(cert.UnloadableRefs) > 0 {
+		t.Fatalf("unloadable refs=%v", cert.UnloadableRefs)
+	}
+	if len(cert.UnsupportedFacts) > 0 {
+		t.Fatalf("unsupported facts=%v", cert.UnsupportedFacts)
+	}
+}
+
 func TestCertifyContextBundleWarnsOnNeedsRevalidationMemory(t *testing.T) {
 	t.Parallel()
 

@@ -2,6 +2,8 @@ package rlm
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -10,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/runtime/engine"
 )
 
@@ -84,8 +87,9 @@ type LLMConfig struct {
 
 // LLMRunner uses the existing engine.LLMChatEngine as an experimental read-only RLM backend.
 type LLMRunner struct {
-	Config LLMConfig
-	Tools  ToolExecutor
+	Config        LLMConfig
+	Tools         ToolExecutor
+	FeedbackStore contextengine.RetrievalFeedbackEffectStore // optional; nil = no feedback emission
 }
 
 func (r LLMRunner) Run(ctx context.Context, task Task, env Environment) (Result, error) {
@@ -219,24 +223,30 @@ func (r LLMRunner) runSinglePass(ctx context.Context, task Task, env Environment
 		}
 		return Result{}, fmt.Errorf("rlm llm runner: empty assistant response")
 	}
+	surfacedEvidence := collectSurfacedToolEvidenceRefs(output.ToolCalls, output.ToolResults)
+	answerUsedEvidence := collectAnswerUsedEvidenceRefs(answer, surfacedEvidence)
+	acceptedLedgerEvidence := collectAcceptedLedgerEvidenceRows(output.ToolCalls, output.ToolResults)
 	evidence := collectEvidenceRefs(env)
 	retrievedPaths := collectRetrievedPaths(output.ToolResults, task.WorkspaceRoot, answer)
 	gatherSurface := collectGatherContextSurfaceMetadata(output.ToolCalls, output.ToolResults, task.WorkspaceRoot)
 	parentUsage := summarizeParentToolUsage(output.Iterations, "retrieve_code")
 	metadata := map[string]any{
-		"stop_reason":            output.StopReason,
-		"provider":               llmCfg.Provider,
-		"model":                  llmCfg.Model,
-		"tool_calls":             len(output.ToolCalls),
-		"tool_names":             toolCallNames(output.ToolCalls),
-		"llm_error":              output.Error,
-		"require_tool_use":       pass.RequireToolUse,
-		"retrieved_paths":        retrievedPaths,
-		"parent_input_tokens":    output.Tokens.InputTokens,
-		"parent_output_tokens":   output.Tokens.OutputTokens,
-		"parent_total_tokens":    output.Tokens.TotalTokens,
-		"parent_iteration_count": len(output.Iterations),
-		"parent_tool_usage":      parentUsage,
+		"stop_reason":                 output.StopReason,
+		"provider":                    llmCfg.Provider,
+		"model":                       llmCfg.Model,
+		"tool_calls":                  len(output.ToolCalls),
+		"tool_names":                  toolCallNames(output.ToolCalls),
+		"llm_error":                   output.Error,
+		"require_tool_use":            pass.RequireToolUse,
+		"tool_surfaced_evidence_refs": surfacedEvidence,
+		"answer_used_evidence_refs":   answerUsedEvidence,
+		"accepted_ledger_evidence":    acceptedLedgerEvidence,
+		"retrieved_paths":             retrievedPaths,
+		"parent_input_tokens":         output.Tokens.InputTokens,
+		"parent_output_tokens":        output.Tokens.OutputTokens,
+		"parent_total_tokens":         output.Tokens.TotalTokens,
+		"parent_iteration_count":      len(output.Iterations),
+		"parent_tool_usage":           parentUsage,
 	}
 	for key, value := range gatherSurface {
 		metadata[key] = value
@@ -268,6 +278,7 @@ func BuildLLMSystemPrompt(env Environment, task Task) string {
 		b.WriteString("\n")
 	}
 	b.WriteString("Cite exact relative repo file paths you inspected. Do not cite .foxctl or .claude runtime files as repository evidence.\n")
+	b.WriteString("When relying on a surfaced non-path evidence handle such as memory_claim:<id>, cite the exact ref string.\n")
 	b.WriteString("Return a concise synthesis with supporting evidence.\n")
 	if len(env.Tools) > 0 {
 		b.WriteString("\nAllowed read-only tools:\n")
@@ -316,6 +327,8 @@ func (r LLMRunner) runStaged(ctx context.Context, task Task, env Environment, sp
 	baseStageEnv := routeStageEnvironment(env, spec.RouteProfile)
 	allPaths := make([]string, 0, 16)
 	allEvidence := make([]string, 0, 16)
+	allSurfacedEvidence := make([]string, 0, 16)
+	allAcceptedLedgerEvidence := make([]string, 0, 16)
 	phaseNotes := make([]string, 0, len(plan.Phases))
 	phaseMeta := make([]map[string]any, 0, len(plan.Phases))
 	totalToolCalls := 0
@@ -331,7 +344,7 @@ func (r LLMRunner) runStaged(ctx context.Context, task Task, env Environment, sp
 		promptEnv.Tools = append([]Tool(nil), phaseTools...)
 		phasePrompt := buildPhasePrompt(task.Prompt, phase, rankedPaths, phaseNotes)
 		phaseSystemPrompt := buildPhaseSystemPrompt(BuildLLMSystemPrompt(promptEnv, task), task.Prompt, phase, rankedPaths, phaseNotes)
-		phaseResult, err := r.runSinglePass(ctx, task, phaseEnv, runPassConfig{
+		phaseResult, err := r.runSinglePass(ctx, task, baseStageEnv, runPassConfig{
 			Prompt:         phasePrompt,
 			Tools:          phaseTools,
 			SystemPrompt:   phaseSystemPrompt,
@@ -350,11 +363,28 @@ func (r LLMRunner) runStaged(ctx context.Context, task Task, env Environment, sp
 		}
 		toolNames := stringsFromAnySlice(phaseResult.Metadata["tool_names"])
 		if len(phase.RequireOneOf) > 0 && !containsAnyToolName(toolNames, phase.RequireOneOf) {
+			if containsString(phase.RequireOneOf, "evidence_ledger") {
+				if ledgerResult, ok := r.tryDeterministicEvidenceLedgerPhase(ctx, task, phase, phaseResult, allSurfacedEvidence); ok {
+					phaseResult = ledgerResult
+					toolNames = stringsFromAnySlice(phaseResult.Metadata["tool_names"])
+				}
+			}
+		}
+		if containsString(phase.RequireOneOf, "evidence_ledger") &&
+			containsString(toolNames, "evidence_ledger") &&
+			len(stringsFromAnySlice(phaseResult.Metadata["accepted_ledger_evidence"])) == 0 {
+			if ledgerResult, ok := r.tryDeterministicEvidenceLedgerPhase(ctx, task, phase, phaseResult, allSurfacedEvidence); ok &&
+				len(stringsFromAnySlice(ledgerResult.Metadata["accepted_ledger_evidence"])) > 0 {
+				phaseResult = ledgerResult
+				toolNames = stringsFromAnySlice(phaseResult.Metadata["tool_names"])
+			}
+		}
+		if len(phase.RequireOneOf) > 0 && !containsAnyToolName(toolNames, phase.RequireOneOf) {
 			requiredTools := filterToolsByNames(phaseEnv.Tools, phase.RequireOneOf)
 			if len(requiredTools) == 0 {
 				return Result{}, fmt.Errorf("rlm llm runner: %s phase did not use any required tools", phase.Name)
 			}
-			retryResult, retryErr := r.runSinglePass(ctx, task, phaseEnv, runPassConfig{
+			retryResult, retryErr := r.runSinglePass(ctx, task, baseStageEnv, runPassConfig{
 				Prompt:         phasePrompt + "\n\nRetry this phase now. Only the required tools are available.",
 				Tools:          requiredTools,
 				SystemPrompt:   phaseSystemPrompt + "\nRequired tool retry: only the required tools are available in this retry.",
@@ -381,6 +411,10 @@ func (r LLMRunner) runStaged(ctx context.Context, task Task, env Environment, sp
 		allPaths = rerankCandidatePaths(task.Prompt, append(allPaths, phaseResult.RetrievedPaths...))
 		allPaths = shortenRefs(allPaths, 8)
 		allEvidence = uniqueStringsRLM(append(allEvidence, phaseResult.EvidenceRefs...))
+		phaseSurfacedEvidence := stringsFromAnySlice(phaseResult.Metadata["tool_surfaced_evidence_refs"])
+		allSurfacedEvidence = uniqueStringsRLM(append(allSurfacedEvidence, phaseSurfacedEvidence...))
+		phaseAcceptedLedgerEvidence := stringsFromAnySlice(phaseResult.Metadata["accepted_ledger_evidence"])
+		allAcceptedLedgerEvidence = uniqueStringsRLM(append(allAcceptedLedgerEvidence, phaseAcceptedLedgerEvidence...))
 		if summary := strings.TrimSpace(phaseResult.Answer); summary != "" {
 			phaseNotes = append(phaseNotes, phase.Name+": "+truncateRLMText(summary, 320))
 			if len(phaseNotes) > 3 {
@@ -388,24 +422,42 @@ func (r LLMRunner) runStaged(ctx context.Context, task Task, env Environment, sp
 			}
 		}
 		phaseMeta = append(phaseMeta, map[string]any{
-			"name":                 phase.Name,
-			"tool_names":           toolNames,
-			"retrieved_paths":      append([]string(nil), phaseResult.RetrievedPaths...),
-			"answer":               phaseResult.Answer,
-			"parent_input_tokens":  intFromAny(phaseResult.Metadata["parent_input_tokens"]),
-			"parent_output_tokens": intFromAny(phaseResult.Metadata["parent_output_tokens"]),
-			"parent_total_tokens":  intFromAny(phaseResult.Metadata["parent_total_tokens"]),
-			"parent_tool_usage":    phaseResult.Metadata["parent_tool_usage"],
+			"name":                        phase.Name,
+			"tool_names":                  toolNames,
+			"tool_surfaced_evidence_refs": append([]string(nil), phaseSurfacedEvidence...),
+			"answer_used_evidence_refs":   stringsFromAnySlice(phaseResult.Metadata["answer_used_evidence_refs"]),
+			"accepted_ledger_evidence":    append([]string(nil), phaseAcceptedLedgerEvidence...),
+			"retrieved_paths":             append([]string(nil), phaseResult.RetrievedPaths...),
+			"answer":                      phaseResult.Answer,
+			"parent_input_tokens":         intFromAny(phaseResult.Metadata["parent_input_tokens"]),
+			"parent_output_tokens":        intFromAny(phaseResult.Metadata["parent_output_tokens"]),
+			"parent_total_tokens":         intFromAny(phaseResult.Metadata["parent_total_tokens"]),
+			"parent_tool_usage":           phaseResult.Metadata["parent_tool_usage"],
 		})
 	}
 
 	allPaths = rerankCandidatePaths(task.Prompt, allPaths)
-	finalEnv := enrichEnvironmentWithPaths(baseStageEnv, allPaths)
-	finalPrompt := buildSynthesisPrompt(task.Prompt, allPaths, phaseNotes)
-	finalResult, err := r.runSinglePass(ctx, task, finalEnv, runPassConfig{
+
+	// REQUIRED_DATA fallback (Slice 4): when evidence was surfaced but the
+	// ledger accepted nothing, run one bounded re-query with target nouns
+	// extracted from the task prompt. This is Quarq's REQUIRED_DATA protocol
+	// adapted to foxctl's staged runner. The re-query uses the gather_context
+	// tool at a lower (deep) threshold. Capped to one fallback.
+	fallbackFired := false
+	if len(allAcceptedLedgerEvidence) == 0 && len(allSurfacedEvidence) > 0 && r.Tools != nil {
+		fallbackRefs := r.tryRetrievalFallback(ctx, task, baseStageEnv)
+		if len(fallbackRefs) > 0 {
+			fallbackFired = true
+			allSurfacedEvidence = uniqueStringsRLM(append(allSurfacedEvidence, fallbackRefs...))
+			allEvidence = uniqueStringsRLM(append(allEvidence, fallbackRefs...))
+		}
+	}
+
+	finalPrompt := buildSynthesisPrompt(task.Prompt, allPaths, allSurfacedEvidence, allAcceptedLedgerEvidence, phaseNotes)
+	finalResult, err := r.runSinglePass(ctx, task, baseStageEnv, runPassConfig{
 		Prompt:         finalPrompt,
 		Tools:          nil,
-		SystemPrompt:   buildSynthesisSystemPrompt(BuildLLMSystemPrompt(finalEnv, task), plan, allPaths, phaseNotes),
+		SystemPrompt:   buildSynthesisSystemPrompt(BuildLLMSystemPrompt(baseStageEnv, task), plan, allPaths, phaseNotes),
 		RequireToolUse: false,
 		MaxIterations:  1,
 		Metadata: map[string]any{
@@ -431,6 +483,11 @@ func (r LLMRunner) runStaged(ctx context.Context, task Task, env Environment, sp
 	finalResult.Metadata["route_profile"] = spec.RouteProfile
 	finalResult.Metadata["tool_policy_profile"] = spec.ToolPolicy.Profile
 	finalResult.Metadata["allowed_tools"] = append([]string(nil), spec.ToolPolicy.AllowedTools...)
+	finalSurfacedEvidence := uniqueStringsRLM(append(stringsFromAnySlice(finalResult.Metadata["tool_surfaced_evidence_refs"]), allSurfacedEvidence...))
+	sort.Strings(finalSurfacedEvidence)
+	finalResult.Metadata["tool_surfaced_evidence_refs"] = finalSurfacedEvidence
+	finalResult.Metadata["answer_used_evidence_refs"] = collectAnswerUsedEvidenceRefs(finalResult.Answer, finalSurfacedEvidence)
+	finalResult.Metadata["accepted_ledger_evidence"] = append([]string(nil), allAcceptedLedgerEvidence...)
 	finalResult.Metadata["phase_count"] = len(plan.Phases)
 	finalResult.Metadata["phases"] = phaseMeta
 	finalResult.Metadata["tool_calls"] = totalToolCalls
@@ -441,7 +498,137 @@ func (r LLMRunner) runStaged(ctx context.Context, task Task, env Environment, sp
 	finalResult.Metadata["parent_retrieve_code_prompt_delta_total"] = sumNestedIntMetadata(phaseMeta, "parent_tool_usage", "target_tool_prompt_delta_total")
 	finalResult.Metadata["parent_retrieve_code_invocations_total"] = sumNestedIntMetadata(phaseMeta, "parent_tool_usage", "target_tool_invocations")
 	finalResult.Metadata["parent_retrieve_code_result_token_estimate_total"] = sumNestedIntMetadata(phaseMeta, "parent_tool_usage", "target_tool_result_token_estimate_total")
+	// Best-effort: emit AnswerAccepted feedback from accepted ledger evidence so
+	// candidate claims promoted by Slice 1a can fire. Errors are logged and
+	// swallowed so a store hiccup never breaks the answer path.
+	emitAnswerAcceptedFeedback(ctx, r.FeedbackStore, task, finalResult.Metadata["accepted_ledger_evidence"])
+	finalResult.Metadata["retrieval_fallback_fired"] = fallbackFired
 	return finalResult, nil
+}
+
+func (r LLMRunner) tryDeterministicEvidenceLedgerPhase(ctx context.Context, task Task, phase Phase, phaseResult Result, priorSurfacedEvidence []string) (Result, bool) {
+	refs := deterministicEvidenceLedgerRefs(priorSurfacedEvidence, stringsFromAnySlice(phaseResult.Metadata["tool_surfaced_evidence_refs"]))
+	if len(refs) == 0 {
+		return Result{}, false
+	}
+	args := map[string]any{
+		"query":              evidenceLedgerQueryFromTaskPrompt(task.Prompt),
+		"refs":               refs,
+		"max_refs":           len(refs),
+		"max_tokens_per_ref": 1200,
+	}
+	argsJSON, err := json.Marshal(args)
+	if err != nil {
+		return Result{}, false
+	}
+	out, err := newAllowlistedToolExecutor(r.Tools, []Tool{{Name: "evidence_ledger", ReadOnly: true}}).Execute(ctx, "evidence_ledger", argsJSON)
+	if err != nil {
+		return Result{}, false
+	}
+	content, err := json.Marshal(out)
+	if err != nil {
+		return Result{}, false
+	}
+	callID := "deterministic-" + phase.Name + "-evidence-ledger"
+	calls := []engine.ToolCall{{
+		ID:        callID,
+		Name:      "evidence_ledger",
+		Arguments: argsJSON,
+	}}
+	results := []engine.ToolResult{{
+		ToolCallID: callID,
+		Content:    string(content),
+	}}
+	surfacedEvidence := collectSurfacedToolEvidenceRefs(calls, results)
+	acceptedLedgerEvidence := collectAcceptedLedgerEvidenceRows(calls, results)
+	answer := deterministicEvidenceLedgerPhaseAnswer(out)
+	return Result{
+		Answer:         answer,
+		RetrievedPaths: collectRetrievedPaths(results, task.WorkspaceRoot, answer),
+		Subcalls:       1,
+		Iterations:     1,
+		Metadata: map[string]any{
+			"stop_reason":                  engine.StopReasonEndTurn,
+			"tool_calls":                   1,
+			"tool_names":                   []string{"evidence_ledger"},
+			"require_tool_use":             true,
+			"tool_surfaced_evidence_refs":  surfacedEvidence,
+			"answer_used_evidence_refs":    collectAnswerUsedEvidenceRefs(answer, surfacedEvidence),
+			"accepted_ledger_evidence":     acceptedLedgerEvidence,
+			"retrieved_paths":              collectRetrievedPaths(results, task.WorkspaceRoot, answer),
+			"parent_input_tokens":          0,
+			"parent_output_tokens":         0,
+			"parent_total_tokens":          0,
+			"parent_iteration_count":       0,
+			"parent_tool_usage":            map[string]any{},
+			"deterministic_tool_fallback":  "evidence_ledger",
+			"deterministic_fallback_refs":  refs,
+			"deterministic_fallback_phase": phase.Name,
+		},
+	}, true
+}
+
+func deterministicEvidenceLedgerRefs(groups ...[]string) []string {
+	out := []string{}
+	for _, group := range groups {
+		for _, ref := range group {
+			ref = strings.TrimSpace(ref)
+			if ref == "" {
+				continue
+			}
+			out = uniqueStringsRLM(append(out, ref))
+			if len(out) >= 12 {
+				return out
+			}
+		}
+	}
+	return out
+}
+
+func evidenceLedgerQueryFromTaskPrompt(prompt string) string {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return ""
+	}
+	lower := strings.ToLower(prompt)
+	marker := "question:"
+	if idx := strings.LastIndex(lower, marker); idx >= 0 {
+		question := strings.TrimSpace(prompt[idx+len(marker):])
+		if question != "" {
+			return question
+		}
+	}
+	return prompt
+}
+
+func deterministicEvidenceLedgerPhaseAnswer(out map[string]any) string {
+	accepted := stringsFromAny(out["accepted_refs"])
+	rejected := stringsFromAny(out["rejected_refs"])
+	missing := stringsFromAny(nestedMapValue(out, []string{"answer_outline", "missing_slots"}))
+	var b strings.Builder
+	b.WriteString("Evidence ledger built.")
+	if boolFromRLMAny(out["needs_fallback"]) {
+		b.WriteString(" The ledger is not ready; do not answer from rejected refs without accepted rows.")
+	}
+	if len(accepted) > 0 {
+		b.WriteString(" Accepted refs: ")
+		b.WriteString(strings.Join(shortenRefs(accepted, 8), ", "))
+		b.WriteString(".")
+	}
+	if len(rejected) > 0 {
+		b.WriteString(" Rejected refs: ")
+		b.WriteString(strings.Join(shortenRefs(rejected, 8), ", "))
+		b.WriteString(".")
+	}
+	if len(missing) > 0 {
+		b.WriteString(" Missing slots: ")
+		b.WriteString(strings.Join(shortenRefs(missing, 8), ", "))
+		b.WriteString(".")
+	}
+	if len(accepted) == 0 && len(rejected) == 0 && len(missing) == 0 {
+		b.WriteString(" No accepted or rejected refs were returned.")
+	}
+	return b.String()
 }
 
 func buildPhaseSystemPrompt(base, query string, phase Phase, candidatePaths, phaseNotes []string) string {
@@ -489,7 +676,15 @@ func buildPhasePrompt(query string, phase Phase, candidatePaths, phaseNotes []st
 		b.WriteString(guidance)
 	}
 	if phase.Name == "inspection" || phase.Name == "verification" {
-		b.WriteString("\nYou must load at least one candidate evidence reference with load_evidence_ref before you finish.")
+		if containsString(phase.RequireOneOf, "evidence_ledger") {
+			b.WriteString("\nYou must build an evidence_ledger from candidate refs before you finish. If it reports needs_fallback=true, run one targeted gather fallback when a gather tool is available, then rebuild or update the ledger before finalizing this phase.")
+		} else if containsString(phase.AllowedTools, "evidence_ledger") {
+			b.WriteString("\nPrefer evidence_ledger for count, list, duration, location, or exact personal-memory answers; otherwise aggregate or load at least one candidate evidence reference before you finish.")
+		} else if containsString(phase.AllowedTools, "aggregate_evidence_refs") {
+			b.WriteString("\nYou must aggregate or load at least one candidate evidence reference before you finish.")
+		} else {
+			b.WriteString("\nYou must load at least one candidate evidence reference with load_evidence_ref before you finish.")
+		}
 	}
 	if len(candidatePaths) > 0 {
 		b.WriteString("\nFocus on these candidate paths if they seem relevant: ")
@@ -515,6 +710,12 @@ func toolSurfaceGuidance(tools []Tool) string {
 	}
 
 	var guidance []string
+	if has("gather_memory_context") {
+		guidance = append(guidance, "Use gather_memory_context for explicit long-term memory recall; it applies memory-lane defaults and bounded coverage repair before returning evidence_digest, answer_seed, and path_set refs.")
+	}
+	if has("plan_context_query") && has("gather_context") {
+		guidance = append(guidance, "For ambiguous recall, code, task, or mixed-context questions, call plan_context_query before gather_context and copy its required_evidence, coverage_requirements, lanes, and fallback probes into the gather flow.")
+	}
 	if has("gather_context") {
 		text := gatherContextModelGuidance(false)
 		if has("load_evidence_ref") {
@@ -522,11 +723,20 @@ func toolSurfaceGuidance(tools []Tool) string {
 		}
 		guidance = append(guidance, text)
 	}
+	if has("aggregate_evidence_refs") {
+		guidance = append(guidance, "Use aggregate_evidence_refs after gather surfaces when several refs may jointly answer; pass the smallest candidate ref set from evidence_digest.load_refs, path_set, or load_queue, then synthesize from answer_outline.supported_claims and slots before loading more refs.")
+	}
+	if has("evidence_ledger") {
+		guidance = append(guidance, "Use evidence_ledger before final answers that require exact evidence binding, especially long-term memory questions with counts, lists, durations, locations, state updates, or possible near-miss evidence. Treat accepted_rows as the only facts you may answer from, rejected_rows as banned direct answers, and fallback_queries as the next gather probes when needs_fallback=true.")
+	}
 	if has("expand_context_graph") {
 		guidance = append(guidance, "When gather_context reports graph.recommended_next_tool=\"expand_context_graph\" or trust.next_action=\"expand_context_graph\", call expand_context_graph with graph.root_refs before making dependency, integration, change-impact, or subsystem completeness claims.")
 	}
 	if has("gather_test_context") || has("gather_docs_context") {
 		var surfaces []string
+		if has("gather_memory_context") {
+			surfaces = append(surfaces, "gather_memory_context for explicit long-term memory recall")
+		}
 		if has("gather_test_context") {
 			surfaces = append(surfaces, "gather_test_context for explicit test/spec/fixture/mocking questions")
 		}
@@ -568,6 +778,7 @@ func toolSurfaceGuidance(tools []Tool) string {
 func gatherContextModelGuidance(hasLoadEvidenceRef bool) string {
 	var b strings.Builder
 	b.WriteString("For production code, memory, task, or mixed context questions, start with gather_context using response_mode=\"answer_surface\". It is production-code biased: tests and docs are separate explicit surfaces when available.")
+	b.WriteString(" Read evidence_digest first for compact supported claims, covered/missing slots, and load_refs before deciding whether more evidence is needed.")
 	b.WriteString(" Deterministic gather trust policy: for file_locate and symbol/definition lookup, if answerable=true, certificate.status is not failed, certificate.required_evidence_ok is not false, answer_seed has paths or categories, and gaps/conflicts are empty, copy answer_seed.paths, answer_seed.categories, and answer_seed.facts directly as the final answer seed. Do not spend extra tool/model turns re-ranking those paths.")
 	b.WriteString(" For execution_trace, change_impact, architecture_map, subsystem_map, and integration_surface tasks, first inspect the graph/trust metadata; when graph expansion is recommended, call expand_context_graph before claiming dependency or subsystem completeness.")
 	b.WriteString(" Fall back to verification or broader retrieval for package-owner/package-anchor questions without categories, broad synthesis beyond the returned map, stale/conflicting evidence, empty answer_seed, required evidence misses, graph gaps, or obvious wrong-scope paths.")
@@ -600,15 +811,144 @@ func buildSynthesisSystemPrompt(base string, plan Plan, candidatePaths, phaseNot
 	return b.String()
 }
 
-func buildSynthesisPrompt(query string, candidatePaths, phaseNotes []string) string {
+func buildSynthesisPrompt(query string, candidatePaths, evidenceRefs, acceptedLedgerEvidence, phaseNotes []string) string {
 	var b strings.Builder
 	b.WriteString(strings.TrimSpace(query))
 	b.WriteString("\n\nWrite the final answer using only the verified evidence from the staged phases.")
+	// Enumeration guidance for count/list questions: the model must enumerate
+	// each evidence piece before stating the count. This prevents undercounting
+	// when multiple evidence pieces each carry one item.
+	if synthesisQueryIsEnumeration(query) {
+		b.WriteString("\n\nThis question asks for a count or list. Before answering, examine each evidence piece separately. For each piece of evidence, state whether it mentions an item relevant to the question. Cast a wide net: include items you need to pick up, return, exchange, retrieve from someone else, or that are otherwise not currently available to you. State the total count only after listing all items from all evidence pieces.")
+	}
+	// Temporal reasoning guidance: for duration/date-arithmetic questions,
+	// extract dates deterministically from evidence and inject them so the
+	// model only does arithmetic, not date parsing.
+	if at := classifySynthesisAnswerType(query); at == "temporal" || at == "duration" {
+		dates := collectSynthesisDates(acceptedLedgerEvidence)
+		if len(dates) > 0 {
+			b.WriteString("\n\nThis question requires temporal reasoning. The following dates were extracted from the evidence:\n")
+			for _, d := range dates {
+				b.WriteString("- ")
+				b.WriteString(d)
+				b.WriteString("\n")
+			}
+			b.WriteString("Compute the interval between the relevant dates. Express the answer as a specific number of days.")
+		} else {
+			b.WriteString("\n\nThis question requires temporal reasoning. Extract any dates or time references from the evidence. If you find two dates, compute the interval between them (in days, weeks, or months as appropriate). Express the answer as a specific number.")
+		}
+	}
 	if len(candidatePaths) > 0 {
 		b.WriteString("\nCandidate paths: ")
 		b.WriteString(strings.Join(shortenRefs(candidatePaths, 10), ", "))
 	}
+	if len(evidenceRefs) > 0 {
+		b.WriteString("\nDiagnostic surfaced evidence refs, not standalone factual support: ")
+		b.WriteString(strings.Join(shortenRefs(evidenceRefs, 12), ", "))
+	}
+	if len(acceptedLedgerEvidence) > 0 {
+		b.WriteString("\nAccepted ledger evidence:\n")
+		for _, row := range acceptedLedgerEvidence {
+			b.WriteString("- ")
+			b.WriteString(truncateRLMText(row, 320))
+			b.WriteString("\n")
+		}
+	} else if len(evidenceRefs) > 0 {
+		b.WriteString("\nNo accepted ledger evidence was collected. Do not answer from surfaced or rejected evidence; state that verified evidence is insufficient.")
+	}
+	// Cross-session inference guidance: when evidence spans multiple sources
+	// and the answer requires combining facts (e.g. "age 32" from one session
+	// + "living here 5 years" from another = moved at age 27), explicitly
+	// instruct the model to state each fact and compute the answer.
+	if len(acceptedLedgerEvidence) >= 2 || len(evidenceRefs) >= 2 {
+		b.WriteString("\n\nCross-session reasoning: if the answer requires combining facts from multiple evidence sources, state each fact separately, then show how they combine to produce the answer (e.g. arithmetic, comparison, or aggregation).")
+	}
 	return b.String()
+}
+
+// synthesisQueryIsEnumeration detects whether a question asks for a count or
+// list of items, requiring enumeration before answering. This is a prompt
+// enrichment signal, not a routing/classification heuristic — the answer type
+// classification lives in context_query_plan.go.
+func synthesisQueryIsEnumeration(query string) bool {
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" {
+		return false
+	}
+	// Check for count-style questions.
+	for _, marker := range []string{"how many", "how much", "number of", "count of", "total number"} {
+		if strings.Contains(q, marker) {
+			return true
+		}
+	}
+	// Check for list-style questions.
+	for _, marker := range []string{"list all", "what items", "which items", "what are all"} {
+		if strings.Contains(q, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// classifySynthesisAnswerType detects the answer type for prompt enrichment.
+// This is a lightweight local classifier to avoid an import cycle with
+// rlm/env. It is used only for synthesis prompt enrichment, not for routing
+// or evidence-ledger classification.
+func classifySynthesisAnswerType(query string) string {
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" {
+		return "fact"
+	}
+	if strings.Contains(q, "how many days") || strings.Contains(q, "days between") ||
+		strings.Contains(q, "how long ago") || strings.Contains(q, "days passed") ||
+		strings.Contains(q, "how long is") || strings.Contains(q, "how long was") ||
+		strings.Contains(q, "duration of") || strings.Contains(q, "how much time") {
+		return "duration"
+	}
+	if strings.Contains(q, "when did") || strings.Contains(q, "what date") ||
+		strings.Contains(q, "what time") || strings.Contains(q, "which year") ||
+		strings.Contains(q, "what month") || strings.Contains(q, "what year") ||
+		strings.Contains(q, "last time") || strings.Contains(q, "first time") {
+		return "temporal"
+	}
+	return "fact"
+}
+
+// synthesisDatePattern matches common date formats in conversational evidence:
+//   - "October 15, 2024" / "Oct 15, 2024" / "October 15 2024"
+//   - "15 October 2024" / "15 Oct 2024"
+//   - "2024-10-15" / "10/15/2024" / "15/10/2024"
+//   - "October 15th" / "Oct 15th"
+var synthesisDatePattern = regexp.MustCompile(`(?i)\b(?:` +
+	`(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s*\d{4}` + // "October 15, 2024"
+	`|\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{4}` + // "15 October 2024"
+	`|\d{4}-\d{1,2}-\d{1,2}` + // "2024-10-15"
+	`|\d{1,2}/\d{1,2}/\d{4}` + // "10/15/2024"
+	`|(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s*\d{4})?` + // "October 15th" (no year)
+	`)\b`)
+
+// collectSynthesisDates extracts date strings from accepted ledger evidence
+// text. Returns deduplicated dates in order of first appearance. Used to
+// inject dates into the synthesis prompt so the model does arithmetic, not
+// date parsing.
+func collectSynthesisDates(rows []string) []string {
+	seen := make(map[string]struct{})
+	out := make([]string, 0, len(rows)*2)
+	for _, row := range rows {
+		for _, match := range synthesisDatePattern.FindAllString(row, -1) {
+			match = strings.TrimSpace(match)
+			if match == "" {
+				continue
+			}
+			key := strings.ToLower(match)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, match)
+		}
+	}
+	return out
 }
 
 func toolSignature(schema json.RawMessage) string {
@@ -959,6 +1299,17 @@ func intFromAny(value any) int {
 	}
 }
 
+func boolFromRLMAny(value any) bool {
+	switch v := value.(type) {
+	case bool:
+		return v
+	case string:
+		return strings.EqualFold(strings.TrimSpace(v), "true")
+	default:
+		return false
+	}
+}
+
 func sumIntMetadata(items []map[string]any, key string) int {
 	total := 0
 	for _, item := range items {
@@ -1007,9 +1358,9 @@ func phaseGuidance(phaseName string) string {
 	case "inspection":
 		return "Do not do another broad search if candidate paths already exist. Open the 1-2 strongest candidates directly."
 	case "verification":
-		return "Re-open or literal-check the single strongest inspected path and confirm it really matches the query."
+		return "Build an accept/reject ledger or literal-check the strongest evidence, then confirm accepted rows really match the query before final synthesis."
 	case "recall":
-		return "Retrieve the most relevant memory and context entries first. Use load_evidence_ref to verify specific entries."
+		return "Retrieve the most relevant memory and context entries first. Use ledger-ready refs from evidence_digest or path_set for verification."
 	case "audit":
 		return "Cross-check evidence from multiple lanes. Look for consistency across sources."
 	default:
@@ -1077,4 +1428,202 @@ func cloneStringAnyMap(in map[string]any) map[string]any {
 		out[key] = value
 	}
 	return out
+}
+
+// emitAnswerAcceptedFeedback records AnswerAccepted feedback for accepted
+// ledger evidence refs, enabling candidate claim promotion via the Slice 1a
+// feedback loop. It is best-effort: any error is swallowed so the answer path
+// never breaks on a store hiccup. No-op when store is nil or no accepted
+// evidence exists.
+func emitAnswerAcceptedFeedback(ctx context.Context, store contextengine.RetrievalFeedbackEffectStore, task Task, acceptedEvidence any) {
+	if store == nil {
+		return
+	}
+	refs := parseAcceptedLedgerEvidenceRefs(stringsFromAnySlice(acceptedEvidence))
+	if len(refs) == 0 {
+		return
+	}
+	answer := strings.TrimSpace(task.Prompt)
+	if answer == "" {
+		return
+	}
+	episodeID := deterministicAnswerEpisodeID(task, stringsFromAnySlice(acceptedEvidence))
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	feedback := contextengine.RetrievalFeedback{
+		ID:          "rlm-answer-accepted-" + episodeID,
+		WorkspaceID: task.WorkspaceID,
+		EpisodeID:   "episode-answer-" + episodeID,
+		Kind:        contextengine.RetrievalFeedbackKindAnswerAccepted,
+		Query:       answer,
+		UsedRefs:    refs,
+		CreatedAt:   now,
+	}
+	_, _ = contextengine.RecordRetrievalFeedbackWithEffects(ctx, store, feedback)
+}
+
+// parseAcceptedLedgerEvidenceRefs converts accepted ledger evidence strings
+// into typed EvidenceRefs. Strings without a type:value colon separator are
+// skipped.
+func parseAcceptedLedgerEvidenceRefs(values []string) []contextengine.EvidenceRef {
+	out := make([]contextengine.EvidenceRef, 0, len(values))
+	for _, raw := range values {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue
+		}
+		// Strip trailing descriptions: "named_memory:foo: some text" -> "named_memory:foo"
+		if idx := strings.Index(value, ": "); idx >= 0 {
+			value = strings.TrimSpace(value[:idx])
+		}
+		parts := strings.SplitN(value, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		refType := strings.TrimSpace(parts[0])
+		refValue := strings.TrimSpace(parts[1])
+		if refType == "" || refValue == "" {
+			continue
+		}
+		out = append(out, contextengine.EvidenceRef{
+			Type: contextengine.RefType(refType),
+			Ref:  refValue,
+		})
+	}
+	return out
+}
+
+func deterministicAnswerEpisodeID(task Task, acceptedRefs []string) string {
+	h := sha256.New()
+	if task.RunID != "" {
+		h.Write([]byte(task.RunID))
+	} else {
+		h.Write([]byte(task.Prompt))
+	}
+	sorted := append([]string(nil), acceptedRefs...)
+	sort.Strings(sorted)
+	for _, ref := range sorted {
+		h.Write([]byte(ref))
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
+// tryRetrievalFallback implements the REQUIRED_DATA protocol: when the evidence
+// ledger has no accepted rows, extract key nouns from the task prompt and run
+// one bounded gather_memory_context call to widen the recall net. Returns the
+// surfaced evidence refs from the fallback, or nil if the fallback did not fire
+// or produced nothing new.
+func (r LLMRunner) tryRetrievalFallback(ctx context.Context, task Task, env Environment) []string {
+	probeQueries := extractFallbackProbeQueries(task.Prompt)
+	if len(probeQueries) == 0 {
+		return nil
+	}
+	// Use the gather_memory_context tool if available, otherwise retrieve_memory.
+	toolName := "gather_memory_context"
+	if !containsToolName(env.Tools, toolName) {
+		toolName = "retrieve_memory"
+		if !containsToolName(env.Tools, toolName) {
+			return nil
+		}
+	}
+	var newRefs []string
+	for _, query := range probeQueries {
+		args := map[string]any{
+			"query": query,
+			"limit": 10,
+		}
+		argsJSON, err := json.Marshal(args)
+		if err != nil {
+			continue
+		}
+		out, err := newAllowlistedToolExecutor(r.Tools, []Tool{{Name: toolName, ReadOnly: true}}).Execute(ctx, toolName, argsJSON)
+		if err != nil {
+			continue
+		}
+		newRefs = append(newRefs, extractEvidenceRefsFromToolOutput(out)...)
+	}
+	return uniqueStringsRLM(newRefs)
+}
+
+// extractFallbackProbeQueries derives re-query probes from the task prompt by
+// splitting on question markers and extracting noun-heavy phrases. Capped at 3
+// probes to bound cost.
+func extractFallbackProbeQueries(prompt string) []string {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return nil
+	}
+	// Extract the trailing Question: text if present (staged prompt format).
+	if idx := strings.LastIndex(strings.ToLower(prompt), "question:"); idx >= 0 {
+		prompt = strings.TrimSpace(prompt[idx+len("question:"):])
+	}
+	// Split on common question delimiters and take the last clause.
+	question := strings.TrimSpace(prompt)
+	if idx := strings.LastIndexByte(question, '?'); idx >= 0 {
+		question = strings.TrimSpace(question[:idx])
+	}
+	// Remove common question prefixes.
+	for _, prefix := range []string{"what ", "where ", "when ", "how ", "which ", "do ", "did ", "does ", "is ", "are ", "can ", "could ", "have ", "has "} {
+		question = strings.TrimPrefix(strings.ToLower(question), prefix)
+	}
+	if len(question) < 3 {
+		return nil
+	}
+	// Build probes: the full question + key noun phrases (words > 3 chars).
+	probes := []string{question}
+	words := strings.Fields(question)
+	keyWords := make([]string, 0, len(words))
+	for _, w := range words {
+		w = strings.Trim(w, ".,;:!?()[]{}\"'")
+		if len(w) > 3 {
+			keyWords = append(keyWords, w)
+		}
+	}
+	if len(keyWords) > 0 && len(keyWords) <= 6 {
+		probe := strings.Join(keyWords, " ")
+		if probe != question {
+			probes = append(probes, probe)
+		}
+	}
+	if len(probes) > 3 {
+		probes = probes[:3]
+	}
+	return probes
+}
+
+// extractEvidenceRefsFromToolOutput pulls evidence ref strings from a tool
+// execution result map.
+func extractEvidenceRefsFromToolOutput(out any) []string {
+	m, ok := out.(map[string]any)
+	if !ok {
+		return nil
+	}
+	var refs []string
+	// Check common output field names.
+	for _, key := range []string{"evidence_refs", "refs", "surfaced_refs", "nodes"} {
+		if values, ok := m[key].([]any); ok {
+			for _, v := range values {
+				switch val := v.(type) {
+				case string:
+					refs = append(refs, val)
+				case map[string]any:
+					if ref, ok := val["ref"].(string); ok && ref != "" {
+						refs = append(refs, ref)
+					}
+					if path, ok := val["path"].(string); ok && path != "" {
+						refs = append(refs, path)
+					}
+				}
+			}
+		}
+	}
+	return refs
+}
+
+func containsToolName(tools []Tool, name string) bool {
+	for _, t := range tools {
+		if t.Name == name {
+			return true
+		}
+	}
+	return false
 }

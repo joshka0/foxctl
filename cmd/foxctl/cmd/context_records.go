@@ -1,13 +1,17 @@
 package cmd
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/context/contextplane"
 	"github.com/joshka0/foxctl/internal/domain/envelope"
 	ws "github.com/joshka0/foxctl/internal/platform/workspace"
+	contextstore "github.com/joshka0/foxctl/internal/storage/contextengine"
 	"github.com/spf13/cobra"
 )
 
@@ -207,6 +211,73 @@ func newTensionCommand() *cobra.Command {
 	return cmd
 }
 
+func newRetrievalFeedbackCommand() *cobra.Command {
+	var workspacePath string
+	var feedbackID string
+	var episodeID string
+	var kind string
+	var query string
+	var usedRefs []string
+	var gapStmt string
+	var correctionStmt string
+	var dryRun bool
+
+	cmd := &cobra.Command{
+		Use:   "retrieval-feedback",
+		Short: "Record retrieval feedback and apply claim lifecycle effects",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			var store contextengine.RetrievalFeedbackEffectStore
+			if !dryRun {
+				cfg, err := loadConfig(cmd.Context())
+				if err != nil {
+					return err
+				}
+				opened, err := contextstore.Open(cmd.Context(), cfg.Storage.Root)
+				if err != nil {
+					return fmt.Errorf("open contextengine store: %w", err)
+				}
+				defer opened.Close()
+				store = opened
+			}
+			record, err := recordRetrievalFeedbackCLI(cmd.Context(), store, retrievalFeedbackCLIInput{
+				WorkspacePath:  workspacePath,
+				ID:             feedbackID,
+				EpisodeID:      episodeID,
+				Kind:           kind,
+				Query:          query,
+				UsedRefs:       usedRefs,
+				UsedRefFlag:    "used-ref",
+				GapStmt:        gapStmt,
+				CorrectionStmt: correctionStmt,
+				DryRun:         dryRun,
+			})
+			if err != nil {
+				return fmt.Errorf("record retrieval feedback: %w", err)
+			}
+
+			env := envelope.OK("context/retrieval_feedback", map[string]any{
+				"workspace_path": record.WorkspacePath,
+				"workspace_id":   record.WorkspaceID,
+				"feedback":       record.Feedback,
+				"applied":        record.Applied,
+				"dry_run":        record.DryRun,
+			}, envelope.WithMeta(envelope.Meta{Source: "cli"}))
+			return envelope.Write(cmd.OutOrStdout(), env)
+		},
+	}
+
+	cmd.Flags().StringVar(&workspacePath, "workspace", "", "Workspace path (default: auto-detect from cwd)")
+	cmd.Flags().StringVar(&feedbackID, "id", "", "Feedback ID (default: deterministic from feedback content)")
+	cmd.Flags().StringVar(&episodeID, "episode-id", "", "Retrieval episode ID")
+	cmd.Flags().StringVar(&kind, "kind", string(contextengine.RetrievalFeedbackKindEvidenceUsed), "Feedback kind")
+	cmd.Flags().StringVar(&query, "query", "", "Original retrieval query")
+	cmd.Flags().StringSliceVar(&usedRefs, "used-ref", nil, "Evidence ref used in the answer (repeatable)")
+	cmd.Flags().StringVar(&gapStmt, "gap", "", "Gap statement for gap_created feedback")
+	cmd.Flags().StringVar(&correctionStmt, "correction", "", "Correction statement for answer_corrected feedback")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview feedback without persisting it")
+	return cmd
+}
+
 func resolveContextWorkspace(workspacePath string) string {
 	target := strings.TrimSpace(workspacePath)
 	if target == "" {
@@ -215,6 +286,38 @@ func resolveContextWorkspace(workspacePath string) string {
 		target = ws.Normalize(target)
 	}
 	return ws.Normalize(target)
+}
+
+func deterministicRetrievalFeedbackID(feedback contextengine.RetrievalFeedback) string {
+	refs := make([]string, 0, len(feedback.UsedRefs))
+	for _, ref := range feedback.UsedRefs {
+		formatted := strings.TrimSpace(contextengine.FormatEvidenceRef(ref))
+		if formatted != "" {
+			refs = append(refs, formatted)
+		}
+	}
+	sort.Strings(refs)
+	hash := sha256.Sum256([]byte(strings.Join([]string{
+		strings.TrimSpace(feedback.WorkspaceID),
+		strings.TrimSpace(feedback.EpisodeID),
+		string(feedback.Kind),
+		strings.TrimSpace(feedback.Query),
+		strings.Join(refs, "\x1f"),
+		strings.TrimSpace(feedback.GapStmt),
+		strings.TrimSpace(feedback.CorrectionStmt),
+	}, "\x00")))
+	return "retrieval-feedback-" + hex.EncodeToString(hash[:])
+}
+
+func sortEvidenceRefsByIdentity(refs []contextengine.EvidenceRef) []contextengine.EvidenceRef {
+	if len(refs) == 0 {
+		return nil
+	}
+	out := append([]contextengine.EvidenceRef(nil), refs...)
+	sort.SliceStable(out, func(i, j int) bool {
+		return contextengine.FormatEvidenceRef(out[i]) < contextengine.FormatEvidenceRef(out[j])
+	})
+	return out
 }
 
 func defaultString(value, fallback string) string {
@@ -240,8 +343,24 @@ func parseEvidenceRefs(raw []string) []contextengine.EvidenceRef {
 	return out
 }
 
+func parseEvidenceRefsStrict(flagName string, raw []string) ([]contextengine.EvidenceRef, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	out := make([]contextengine.EvidenceRef, 0, len(raw))
+	for i, s := range raw {
+		ref, err := contextengine.ParseEvidenceRef(strings.TrimSpace(s))
+		if err != nil {
+			return nil, fmt.Errorf("--%s[%d]: %w", flagName, i, err)
+		}
+		out = append(out, ref)
+	}
+	return out, nil
+}
+
 func init() {
 	rootCmd.AddCommand(newCaptureCommand())
 	rootCmd.AddCommand(newObserveCommand())
 	rootCmd.AddCommand(newTensionCommand())
+	rootCmd.AddCommand(newRetrievalFeedbackCommand())
 }

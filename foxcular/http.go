@@ -33,7 +33,8 @@ func HTTPMiddleware(client *Client, opts *HTTPMiddlewareOptions) func(http.Handl
 			start := client.clock.Now()
 
 			// Start a span for this request.
-			ctx, span := client.StartSpan(r.Context(), opts.Operation,
+			ctx, span := client.StartSpan(
+				r.Context(), opts.Operation,
 				WithSpanName(r.Method+" "+r.URL.RequestURI()),
 				WithSpanData("http.method", r.Method),
 				WithSpanData("http.path", r.URL.RequestURI()),

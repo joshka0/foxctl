@@ -24,7 +24,8 @@ func newSamplingClient(sampler foxcular.Sampler) (*foxcular.Client, *captureDrai
 	ts := time.Date(2026, 1, 15, 10, 30, 0, 0, time.UTC)
 	clock := &stubClock{times: []time.Time{ts, ts.Add(50 * time.Millisecond)}}
 	ids := &stubIDs{ids: []string{"t1", "s1", "t2", "s2", "t3", "s3"}}
-	client := foxcular.NewClient(drain,
+	client := foxcular.NewClient(
+		drain,
 		foxcular.WithClock(clock),
 		foxcular.WithIDGenerator(ids),
 		foxcular.WithSampler(sampler),
@@ -40,7 +41,8 @@ func newRedactionClient() (*foxcular.Client, *captureDrain) {
 	ts := time.Date(2026, 1, 15, 10, 30, 0, 0, time.UTC)
 	clock := &stubClock{times: []time.Time{ts, ts.Add(50 * time.Millisecond)}}
 	ids := &stubIDs{ids: []string{"t1", "s1", "t2", "s2", "t3", "s3", "t4", "s4", "t5", "s5"}}
-	client := foxcular.NewClient(drain,
+	client := foxcular.NewClient(
+		drain,
 		foxcular.WithClock(clock),
 		foxcular.WithIDGenerator(ids),
 		foxcular.WithRedaction(foxcular.NewRedactionPolicy()),
@@ -222,7 +224,8 @@ func TestDeliveredEventsAreRedacted(t *testing.T) {
 	ts := time.Date(2026, 1, 15, 10, 30, 0, 0, time.UTC)
 	clock := &stubClock{times: []time.Time{ts}}
 	ids := &stubIDs{ids: []string{"t1", "s1"}}
-	client := foxcular.NewClient(drain,
+	client := foxcular.NewClient(
+		drain,
 		foxcular.WithClock(clock),
 		foxcular.WithIDGenerator(ids),
 		foxcular.WithSampler(foxcular.AlwaysSample{}),
@@ -251,7 +254,8 @@ func TestRedactionRunsBeforeEveryDrain(t *testing.T) {
 	ts := time.Date(2026, 1, 15, 10, 30, 0, 0, time.UTC)
 	clock := &stubClock{times: []time.Time{ts}}
 	ids := &stubIDs{ids: []string{"t1", "s1"}}
-	client := foxcular.NewClient(fanout,
+	client := foxcular.NewClient(
+		fanout,
 		foxcular.WithClock(clock),
 		foxcular.WithIDGenerator(ids),
 		foxcular.WithRedaction(foxcular.NewRedactionPolicy()),
@@ -471,7 +475,8 @@ func TestCustomRedactionPolicyIsApplied(t *testing.T) {
 		foxcular.WithCustomKeys("my_field"),
 		foxcular.WithCustomValuePatterns(customPattern),
 	)
-	client := foxcular.NewClient(drain,
+	client := foxcular.NewClient(
+		drain,
 		foxcular.WithClock(clock),
 		foxcular.WithIDGenerator(ids),
 		foxcular.WithRedaction(policy),

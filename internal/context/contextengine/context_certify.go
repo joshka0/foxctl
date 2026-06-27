@@ -470,7 +470,7 @@ func certifyEvidenceSourceContracts(bundle ContextBundle) sourceContractDiagnost
 				warn++
 			}
 		case EvidenceNodeTypeMemory:
-			if node.Ref.Type != RefTypeMemoryClaim {
+			if node.Ref.Type != RefTypeMemoryClaim && node.Ref.Type != RefTypeNamedMemory {
 				markBad(node)
 			}
 			if statusText := stringMetadata(node.Metadata, "status"); statusText != "" {
@@ -489,13 +489,13 @@ func certifyEvidenceSourceContracts(bundle ContextBundle) sourceContractDiagnost
 			}
 		case EvidenceNodeTypeContext:
 			switch node.Ref.Type {
-			case RefTypeNote, RefTypeSession, RefTypeEvent, RefTypeTask, RefTypePath, RefTypeMemoryClaim:
+			case RefTypeNote, RefTypeSession, RefTypeEvent, RefTypeTask, RefTypePath, RefTypeMemoryClaim, RefTypeNamedMemory:
 			default:
 				markBad(node)
 			}
 		case EvidenceNodeTypeRetrieval:
 			switch node.Ref.Type {
-			case RefTypeNote, RefTypeSession, RefTypeEvent, RefTypeTask, RefTypePath, RefTypeSymbol, RefTypeMemoryClaim, RefTypeArtifact, RefTypeTrajectory, RefTypeRun, RefTypeToolCall:
+			case RefTypeNote, RefTypeSession, RefTypeEvent, RefTypeTask, RefTypePath, RefTypeSymbol, RefTypeMemoryClaim, RefTypeNamedMemory, RefTypeArtifact, RefTypeTrajectory, RefTypeRun, RefTypeToolCall:
 			default:
 				markBad(node)
 			}

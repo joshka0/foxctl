@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -950,6 +952,37 @@ func TestMemoryQuery_PaginationOffset(t *testing.T) {
 	assert.Len(t, records, 3) // 10 - 7 = 3
 }
 
+func TestMemoryQuery_QueryPaginationFetchesPastOversampleWindow(t *testing.T) {
+	var buf bytes.Buffer
+	rc, cleanup := newTestContext(t, &buf)
+	defer cleanup()
+
+	store := openMemoryStore(t, rc)
+	for i := 0; i < 40; i++ {
+		seedMemory(t, store, rc.Workspace, &seedOpts{
+			Name:    "query-page-memory-" + strconv.Itoa(i),
+			Type:    "semantic_fact",
+			Summary: "shared pagination keyword " + strconv.Itoa(i),
+		})
+	}
+
+	err := run(context.Background(), rc, Input{
+		Query:  "shared pagination keyword",
+		Limit:  5,
+		Offset: 35,
+	})
+	require.NoError(t, err)
+
+	env := decodeEnvelope(t, &buf)
+	assertOK(t, env)
+	data := getData(t, env)
+	pagination := data["pagination"].(map[string]any)
+	assert.Equal(t, float64(35), pagination["offset"])
+	assert.False(t, pagination["has_more"].(bool))
+	records := data["records"].([]any)
+	assert.Len(t, records, 5)
+}
+
 func TestMemoryQuery_LimitCapped(t *testing.T) {
 	var buf bytes.Buffer
 	rc, cleanup := newTestContext(t, &buf)
@@ -1001,9 +1034,100 @@ func TestMemoryQuery_BM25Fallback(t *testing.T) {
 
 	stats := data["stats"].(map[string]any)
 	// Without a configured embedding endpoint, should fall back to BM25
-	// Either "bm25" or "vector" is valid - we just want success
-	method := stats["search_method"].(string)
-	assert.True(t, method == "bm25" || method == "vector")
+	assert.Equal(t, "bm25", stats["search_method"])
+}
+
+func TestMemoryQuery_BM25FallbackUsesAtomicFields(t *testing.T) {
+	var buf bytes.Buffer
+	rc, cleanup := newTestContext(t, &buf)
+	defer cleanup()
+
+	store := openMemoryStore(t, rc)
+	seedMemory(t, store, rc.Workspace, &seedOpts{
+		Name:    "atomic-query-memory",
+		Type:    "semantic_fact",
+		Summary: "Generic summary without the query terms",
+	})
+	require.NoError(t, store.UpdateAtomic(
+		context.Background(), "atomic-query-memory", rc.Workspace,
+		"Use the local Qwen embedder for LongMem retrieval checks.",
+		[]string{"LongMemEval", "Qwen"},
+		[]string{"hydra", "reranker"},
+	))
+
+	err := run(context.Background(), rc, Input{
+		Query: "qwen reranker",
+		Limit: 3,
+	})
+	require.NoError(t, err)
+
+	env := decodeEnvelope(t, &buf)
+	assertOK(t, env)
+	data := getData(t, env)
+	records := data["records"].([]any)
+	require.NotEmpty(t, records)
+	assert.Equal(t, "atomic-query-memory", records[0].(map[string]any)["source_id"])
+	summary := strings.ToLower(records[0].(map[string]any)["summary"].(string))
+	assert.Contains(t, summary, "qwen")
+	assert.Contains(t, summary, "reranker")
+}
+
+func TestMemoryQuery_HybridFusesVectorAndLexicalSources(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1/embeddings", r.URL.Path)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{"index": 0, "embedding": []float32{1, 0}},
+			},
+		})
+	}))
+	defer server.Close()
+
+	var buf bytes.Buffer
+	rc, cleanup := newTestContext(t, &buf)
+	defer cleanup()
+
+	rc.Config.Embedding.Provider = "openai_compat"
+	rc.Config.Embedding.Model = "text-embedding-embeddinggemma-300m-qat"
+	rc.Config.Embedding.BaseURL = server.URL + "/v1"
+	rc.Config.Embedding.APIKey = "test-key"
+
+	store := openMemoryStore(t, rc)
+	seedMemory(t, store, rc.Workspace, &seedOpts{
+		Name:    "vector-only-memory",
+		Type:    "semantic_fact",
+		Summary: "Vector-only answer text that does not contain the literal lexical query",
+	})
+	require.NoError(t, store.UpdateEmbedding(context.Background(), "vector-only-memory", rc.Workspace, []float32{1, 0}))
+
+	seedMemory(t, store, rc.Workspace, &seedOpts{
+		Name:    "lexical-only-memory",
+		Type:    "semantic_fact",
+		Summary: "This record contains the literal hydra comparison phrase for lexical recall",
+	})
+
+	err := run(context.Background(), rc, Input{
+		Query:         "hydra comparison",
+		Limit:         5,
+		MinSimilarity: 0.2,
+	})
+	require.NoError(t, err)
+
+	env := decodeEnvelope(t, &buf)
+	assertOK(t, env)
+	data := getData(t, env)
+	stats := data["stats"].(map[string]any)
+	assert.Equal(t, "hybrid", stats["search_method"])
+
+	records := data["records"].([]any)
+	require.GreaterOrEqual(t, len(records), 2)
+	sourceIDs := map[string]bool{}
+	for _, item := range records {
+		record := item.(map[string]any)
+		sourceIDs[record["source_id"].(string)] = true
+	}
+	assert.True(t, sourceIDs["vector-only-memory"])
+	assert.True(t, sourceIDs["lexical-only-memory"])
 }
 
 func TestMemoryQuery_VectorTimeoutFallsBackToBM25(t *testing.T) {

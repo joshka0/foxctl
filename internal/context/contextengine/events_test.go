@@ -21,6 +21,7 @@ func TestContextEventKind_IsValid(t *testing.T) {
 		EventKindAnswerCorrected,
 		EventKindMemoryClaimProposed,
 		EventKindMemoryClaimPromoted,
+		EventKindMemoryClaimRevalidate,
 		EventKindMemoryClaimInvalidated,
 		EventKindProjectionGenerated,
 	}
@@ -161,6 +162,7 @@ func TestContextEventKind_AllValues(t *testing.T) {
 		EventKindAnswerCorrected,
 		EventKindMemoryClaimProposed,
 		EventKindMemoryClaimPromoted,
+		EventKindMemoryClaimRevalidate,
 		EventKindMemoryClaimInvalidated,
 		EventKindProjectionGenerated,
 	}

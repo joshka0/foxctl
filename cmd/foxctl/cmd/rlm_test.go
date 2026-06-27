@@ -9,12 +9,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/platform/config"
+	ws "github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/protocol"
 	"github.com/joshka0/foxctl/internal/rlm"
 	rlmenv "github.com/joshka0/foxctl/internal/rlm/env"
 	"github.com/joshka0/foxctl/internal/rlm/optdata"
 	rlmruntime "github.com/joshka0/foxctl/internal/rlm/runtime"
+	contextstore "github.com/joshka0/foxctl/internal/storage/contextengine"
 )
 
 func TestRLMRunCommandBootstrapsEnvironment(t *testing.T) {
@@ -74,6 +77,202 @@ func TestRLMRunCommandBootstrapsEnvironment(t *testing.T) {
 	}
 	if len(payload.Environment.Tools) == 0 {
 		t.Fatalf("expected non-empty tool surface")
+	}
+}
+
+func TestRLMRunCommandAnswerFeedbackFlags(t *testing.T) {
+	t.Parallel()
+
+	cmd := newRLMRunCommand()
+	for _, name := range []string{
+		"answer-feedback-id",
+		"answer-feedback-episode-id",
+		"answer-feedback-kind",
+		"answer-feedback-query",
+		"answer-feedback-used-ref",
+		"answer-feedback-use-answer-refs",
+		"answer-feedback-gap",
+		"answer-feedback-correction",
+		"answer-feedback-dry-run",
+	} {
+		if cmd.Flags().Lookup(name) == nil {
+			t.Fatalf("missing flag %q", name)
+		}
+	}
+}
+
+func TestRLMRunCommandDoesNotEmitAnswerFeedbackWithoutOptIn(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	var cfg config.Config
+	cfg.Storage.Root = t.TempDir()
+
+	cmd := newRLMRunCommand()
+	cmd.SetArgs([]string{
+		"--prompt", "inspect auth flow",
+		"--workspace", workspace,
+	})
+	cmd.SetContext(config.WithContext(context.Background(), cfg))
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+	env, err := protocol.DecodeEnvelope(stdout.Bytes())
+	if err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if env.Command != "rlm/run" {
+		t.Fatalf("command=%q want rlm/run", env.Command)
+	}
+	if env.Meta.Source != "cli" {
+		t.Fatalf("meta.source=%q want cli", env.Meta.Source)
+	}
+	if env.Meta.Workspace != resolveContextWorkspace(workspace) {
+		t.Fatalf("meta.workspace=%q want resolved workspace", env.Meta.Workspace)
+	}
+	raw, err := json.Marshal(env.Data)
+	if err != nil {
+		t.Fatalf("marshal data: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal data: %v", err)
+	}
+	if _, ok := payload["answer_feedback"]; ok {
+		t.Fatalf("answer_feedback present without opt-in: %#v", payload["answer_feedback"])
+	}
+	if _, ok := payload["run_spec"]; !ok {
+		t.Fatalf("run_spec missing from payload: %#v", payload)
+	}
+
+	store, err := contextstore.Open(context.Background(), cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open contextengine store: %v", err)
+	}
+	defer store.Close()
+	feedback, err := store.ListRetrievalFeedback(context.Background(), contextengine.RetrievalFeedbackFilter{
+		WorkspaceID: ws.CanonicalID(workspace),
+	})
+	if err != nil {
+		t.Fatalf("list feedback: %v", err)
+	}
+	if len(feedback) != 0 {
+		t.Fatalf("feedback rows=%#v want none without answer-feedback flags", feedback)
+	}
+}
+
+func TestRLMRunCommandRecordsExplicitAnswerFeedback(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	cfg := config.Config{}
+	cfg.Storage.Root = t.TempDir()
+	workspacePath := t.TempDir()
+	workspaceID := ws.CanonicalID(workspacePath)
+
+	store, err := contextstore.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open contextengine store: %v", err)
+	}
+	claim := contextengine.MemoryClaim{
+		ID:          "claim-rlm-command-feedback",
+		WorkspaceID: workspaceID,
+		ClaimType:   "semantic_fact",
+		Status:      contextengine.ClaimStatusCurrent,
+		Summary:     "RLM command feedback should revalidate this explicit claim.",
+	}
+	if _, err := store.UpsertClaim(ctx, claim); err != nil {
+		t.Fatalf("upsert claim: %v", err)
+	}
+	episode := contextengine.RetrievalEpisode{
+		ID:          "episode-rlm-command-feedback",
+		WorkspaceID: workspaceID,
+		Query:       "which claim was wrong",
+		Lane:        contextengine.LaneMemory,
+	}
+	if _, err := store.RecordRetrievalEpisode(ctx, episode); err != nil {
+		t.Fatalf("record episode: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close seeded store: %v", err)
+	}
+
+	cmd := newRLMRunCommand()
+	cmd.SetArgs([]string{
+		"--prompt", "inspect auth flow",
+		"--workspace", workspacePath,
+		"--answer-feedback-episode-id", episode.ID,
+		"--answer-feedback-kind", string(contextengine.RetrievalFeedbackKindAnswerCorrected),
+		"--answer-feedback-query", episode.Query,
+		"--answer-feedback-used-ref", "memory_claim:" + claim.ID,
+		"--answer-feedback-correction", "The claim was contradicted by the answer outcome.",
+	})
+	cmd.SetContext(config.WithContext(ctx, cfg))
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute: %v (stderr=%s)", err, stderr.String())
+	}
+
+	env, err := protocol.DecodeEnvelope(stdout.Bytes())
+	if err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	raw, err := json.Marshal(env.Data)
+	if err != nil {
+		t.Fatalf("marshal data: %v", err)
+	}
+	var payload struct {
+		AnswerFeedback struct {
+			Enabled  bool     `json:"enabled"`
+			Applied  bool     `json:"applied"`
+			DryRun   bool     `json:"dry_run"`
+			Source   string   `json:"source"`
+			Refs     []string `json:"refs"`
+			Feedback struct {
+				ID        string `json:"id"`
+				EpisodeID string `json:"episode_id"`
+				Kind      string `json:"kind"`
+				Query     string `json:"query"`
+			} `json:"feedback"`
+		} `json:"answer_feedback"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if !payload.AnswerFeedback.Enabled || !payload.AnswerFeedback.Applied || payload.AnswerFeedback.DryRun {
+		t.Fatalf("answer feedback output=%+v want applied", payload.AnswerFeedback)
+	}
+	if payload.AnswerFeedback.Source != "answer_feedback_used_ref" {
+		t.Fatalf("source=%q want explicit used-ref source", payload.AnswerFeedback.Source)
+	}
+	if len(payload.AnswerFeedback.Refs) != 1 || payload.AnswerFeedback.Refs[0] != "memory_claim:"+claim.ID {
+		t.Fatalf("refs=%v want explicit claim ref", payload.AnswerFeedback.Refs)
+	}
+	if payload.AnswerFeedback.Feedback.EpisodeID != episode.ID ||
+		payload.AnswerFeedback.Feedback.Kind != string(contextengine.RetrievalFeedbackKindAnswerCorrected) ||
+		payload.AnswerFeedback.Feedback.Query != episode.Query {
+		t.Fatalf("feedback=%+v", payload.AnswerFeedback.Feedback)
+	}
+
+	store, err = contextstore.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("reopen contextengine store: %v", err)
+	}
+	defer store.Close()
+	got, err := store.GetClaim(ctx, claim.ID)
+	if err != nil {
+		t.Fatalf("get claim: %v", err)
+	}
+	if got.Status != contextengine.ClaimStatusNeedsRevalidation {
+		t.Fatalf("claim status=%q want %q", got.Status, contextengine.ClaimStatusNeedsRevalidation)
 	}
 }
 

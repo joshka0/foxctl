@@ -14,8 +14,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var fixedTime = time.Unix(1700000000, 0)
-var fixedClock = func() time.Time { return fixedTime }
+var (
+	fixedTime  = time.Unix(1700000000, 0)
+	fixedClock = func() time.Time { return fixedTime }
+)
 
 func newIDGenerator(prefix string) func() string {
 	counter := 0
@@ -63,7 +65,8 @@ func TestSender_SendAsk(t *testing.T) {
 		workspace := "/test/project"
 		correlation := "corr-456"
 
-		askID, err := sender.SendAsk(ctx, "agent:b", "Complex question",
+		askID, err := sender.SendAsk(
+			ctx, "agent:b", "Complex question",
 			agent.WithAskKind("question"),
 			agent.WithAskSession(sessionID),
 			agent.WithAskWorkspace(workspace),
@@ -160,7 +163,8 @@ func TestSender_SendCmd(t *testing.T) {
 	sender := agent.NewSender(store, "agent:a", agent.WithSenderClock(fixedClock), agent.WithSenderIDGenerator(idGen))
 
 	t.Run("send command", func(t *testing.T) {
-		cmdID, err := sender.SendCmd(ctx, "agent:builder", "build",
+		cmdID, err := sender.SendCmd(
+			ctx, "agent:builder", "build",
 			map[string]any{
 				"target": "all",
 				"clean":  false,
@@ -204,7 +208,8 @@ func TestSender_SendEvent(t *testing.T) {
 	sender := agent.NewSender(store, "agent:monitor", agent.WithSenderClock(fixedClock), agent.WithSenderIDGenerator(idGen))
 
 	t.Run("send event", func(t *testing.T) {
-		err := sender.SendEvent(ctx, "build_complete",
+		err := sender.SendEvent(
+			ctx, "build_complete",
 			map[string]any{
 				"duration_ms": 1500,
 				"success":     true,

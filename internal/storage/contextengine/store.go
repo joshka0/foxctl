@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -256,6 +257,10 @@ func (s *sqliteStore) ListEvents(ctx context.Context, filter EventFilter) ([]con
 	if filter.WorkspaceID != "" {
 		query += " AND workspace_id = ?"
 		args = append(args, filter.WorkspaceID)
+	}
+	if filter.ID != "" {
+		query += " AND id = ?"
+		args = append(args, filter.ID)
 	}
 	if filter.Kind != "" {
 		query += " AND kind = ?"
@@ -587,7 +592,11 @@ func (s *sqliteStore) UpsertClaim(ctx context.Context, claim contextengine.Memor
 			created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
+			claim_type = excluded.claim_type,
 			status = excluded.status, summary = excluded.summary,
+			scope_path = excluded.scope_path,
+			scope_task_id = excluded.scope_task_id,
+			scope_session_id = excluded.scope_session_id,
 			confidence = excluded.confidence, blast_radius = excluded.blast_radius,
 			source_refs = excluded.source_refs, source_event_id = excluded.source_event_id,
 			superseded_by = excluded.superseded_by, reason = excluded.reason,
@@ -633,7 +642,15 @@ func (s *sqliteStore) ListClaims(ctx context.Context, filter ClaimFilter) ([]con
 		query += " AND status = ?"
 		args = append(args, string(filter.Status))
 	}
-	query += " ORDER BY updated_at DESC"
+	if filter.TaskID != "" {
+		query += " AND scope_task_id = ?"
+		args = append(args, filter.TaskID)
+	}
+	if filter.SessionID != "" {
+		query += " AND scope_session_id = ?"
+		args = append(args, filter.SessionID)
+	}
+	query += " ORDER BY updated_at DESC, id ASC"
 
 	if filter.Limit > 0 {
 		query += " LIMIT ?"
@@ -1341,17 +1358,25 @@ func (s *sqliteStore) ListRetrievalFeedback(ctx context.Context, filter Retrieva
 // --- ExplainQueryPlan (testing utility) ---
 
 func (s *sqliteStore) ExplainQueryPlan(ctx context.Context, query string, args ...any) (string, error) {
-	row := s.db.QueryRowContext(ctx, "EXPLAIN QUERY PLAN "+query, args...)
-	var plan string
-	var unused1, unused2 any
-	if err := row.Scan(&unused1, &unused2, &unused1, &plan); err != nil {
-		// Try alternate scan for different sqlite driver versions
-		row2 := s.db.QueryRowContext(ctx, "EXPLAIN QUERY PLAN "+query, args...)
-		if err2 := row2.Scan(&plan); err2 != nil {
-			return "", fmt.Errorf("contextengine: explain: %w (original: %v)", err2, err)
-		}
+	rows, err := s.db.QueryContext(ctx, "EXPLAIN QUERY PLAN "+query, args...)
+	if err != nil {
+		return "", fmt.Errorf("contextengine: explain: %w", err)
 	}
-	return plan, nil
+	defer func() { _ = rows.Close() }()
+
+	var details []string
+	for rows.Next() {
+		var id, parent, notUsed int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notUsed, &detail); err != nil {
+			return "", fmt.Errorf("contextengine: explain scan: %w", err)
+		}
+		details = append(details, detail)
+	}
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("contextengine: explain rows: %w", err)
+	}
+	return strings.Join(details, " | "), nil
 }
 
 // Errors.

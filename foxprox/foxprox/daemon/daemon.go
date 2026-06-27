@@ -141,7 +141,8 @@ func (d *Daemon) Start() error {
 		d.serveErr <- ls.Serve()
 	}()
 
-	d.logger.Info("foxprox daemon started",
+	d.logger.Info(
+		"foxprox daemon started",
 		slog.String("socket", d.opts.SocketPath),
 	)
 	return nil

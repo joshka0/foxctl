@@ -20,6 +20,8 @@ type ImpactGraph interface {
 	ReverseEdges(ref EvidenceRef) []ImpactEdge
 	// ClaimsForRef returns claims whose SourceRefs contain the given ref.
 	ClaimsForRef(ref EvidenceRef) []MemoryClaim
+	// ClaimByID returns a claim by ID when a ref targets a claim directly.
+	ClaimByID(id string) (MemoryClaim, bool)
 	// AllClaims returns all claims in the workspace.
 	AllClaims() []MemoryClaim
 }
@@ -70,7 +72,7 @@ func ComputeImpact(event ContextEvent, graph ImpactGraph, opts ...ComputeImpactO
 	case EventKindCodeValidated:
 		edges, markers = computeValidatedImpact(event, graph, now, options)
 
-	case EventKindAnswerCorrected:
+	case EventKindAnswerCorrected, EventKindMemoryClaimRevalidate:
 		edges, markers = computeCorrectionImpact(event, graph, now, options)
 
 	case EventKindMemoryClaimPromoted:
@@ -157,15 +159,14 @@ func computeValidatedImpact(event ContextEvent, graph ImpactGraph, now time.Time
 	return edges, nil
 }
 
-// computeCorrectionImpact handles answer.corrected events.
+// computeCorrectionImpact handles answer.corrected and claim revalidation events.
 // Creates needs_revalidation markers for implicated claims.
 func computeCorrectionImpact(event ContextEvent, graph ImpactGraph, now time.Time, options *ComputeImpactOptions) ([]ImpactEdge, []StalenessMarker) {
 	var edges []ImpactEdge
 	var markers []StalenessMarker
 
 	for _, ref := range event.Refs {
-		// Find claims generated from this ref
-		claims := graph.ClaimsForRef(ref)
+		claims := claimsForRefIncludingDirectClaim(ref, graph)
 		for _, claim := range claims {
 			if claim.Status == ClaimStatusCurrent || claim.Status == ClaimStatusCandidate {
 				// Create invalidates edge
@@ -196,6 +197,28 @@ func computeCorrectionImpact(event ContextEvent, graph ImpactGraph, now time.Tim
 	}
 
 	return edges, markers
+}
+
+func claimsForRefIncludingDirectClaim(ref EvidenceRef, graph ImpactGraph) []MemoryClaim {
+	claims := graph.ClaimsForRef(ref)
+	if ref.Type != RefTypeMemoryClaim {
+		return claims
+	}
+
+	claim, ok := graph.ClaimByID(ref.Ref)
+	if ok && !containsClaimID(claims, claim.ID) {
+		claims = append(claims, claim)
+	}
+	return claims
+}
+
+func containsClaimID(claims []MemoryClaim, id string) bool {
+	for _, claim := range claims {
+		if claim.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // computePromotionImpact handles memory.claim_promoted events.
@@ -304,8 +327,13 @@ func traverseImpact(
 	visited[key] = true
 
 	// Find claims sourced from this ref
-	claims := graph.ClaimsForRef(ref)
+	claims := claimsForRefIncludingDirectClaim(ref, graph)
 	for _, claim := range claims {
+		claimKey := "claim:" + claim.ID
+		if visited[claimKey] {
+			continue
+		}
+		visited[claimKey] = true
 		if claim.Status == ClaimStatusCurrent {
 			edgeID := fmt.Sprintf("edge-%s-invalidates-claim-%s", event.ID, claim.ID)
 			*edges = append(*edges, ImpactEdge{
@@ -316,6 +344,17 @@ func traverseImpact(
 				Kind:          ImpactEdgeKindInvalidates,
 				SourceEventID: event.ID,
 				CreatedAt:     now,
+			})
+
+			markerID := fmt.Sprintf("staleness-%s-claim-%s", event.ID, claim.ID)
+			*markers = append(*markers, StalenessMarker{
+				ID:             markerID,
+				WorkspaceID:    event.WorkspaceID,
+				TargetRef:      EvidenceRef{Type: RefTypeMemoryClaim, Ref: claim.ID},
+				Status:         StalenessStatusNeedsRevalidation,
+				CausedByEvents: []string{event.ID},
+				CreatedAt:      now,
+				UpdatedAt:      now,
 			})
 		}
 	}
@@ -342,7 +381,6 @@ type InvalidationStore interface {
 	GetStaleness(ctx context.Context, id string) (StalenessMarker, error)
 	GetClaim(ctx context.Context, id string) (MemoryClaim, error)
 	ListClaims(ctx context.Context, filter ClaimFilter) ([]MemoryClaim, error)
-	AppendEvent(ctx context.Context, event ContextEvent) (ContextEvent, error)
 }
 
 // ApplyInvalidation computes and persists impact edges and staleness markers
@@ -500,7 +538,7 @@ func ApplyInvalidation(ctx context.Context, store InvalidationStore, event Conte
 			}
 		}
 
-	case EventKindAnswerCorrected:
+	case EventKindAnswerCorrected, EventKindMemoryClaimRevalidate:
 		// Transition implicated claims to needs_revalidation (not immediate rejection)
 		for _, marker := range markers {
 			if marker.TargetRef.Type == RefTypeMemoryClaim {
@@ -509,18 +547,46 @@ func ApplyInvalidation(ctx context.Context, store InvalidationStore, event Conte
 					continue
 				}
 				if claim.Status == ClaimStatusCurrent || claim.Status == ClaimStatusCandidate {
-					updated, err := ApplyClaimTransition(claim, ClaimStatusNeedsRevalidation, "user correction: "+event.ID, now)
-					if err == nil {
-						if _, upsertErr := store.UpsertClaim(ctx, updated); upsertErr != nil {
-							_ = upsertErr // best-effort
-						}
+					updated, err := ApplyClaimTransition(claim, ClaimStatusNeedsRevalidation, revalidationReason(event), now)
+					if err != nil {
+						return fmt.Errorf("transition claim %s for event %s: %w", claim.ID, event.ID, err)
+					}
+					if _, upsertErr := store.UpsertClaim(ctx, updated); upsertErr != nil {
+						return fmt.Errorf("upsert claim %s for event %s: %w", claim.ID, event.ID, upsertErr)
 					}
 				}
 			}
 		}
 
 	case EventKindMemoryClaimPromoted:
-		// Supersede old claims
+		// Promote candidate claims referenced directly by the event, then
+		// supersede old current claims surfaced via impact markers.
+		for _, ref := range event.Refs {
+			if ref.Type != RefTypeMemoryClaim {
+				continue
+			}
+			claim, err := store.GetClaim(ctx, ref.Ref)
+			if err != nil {
+				continue
+			}
+			switch claim.Status {
+			case ClaimStatusCandidate:
+				promoted, err := ApplyClaimTransition(claim, ClaimStatusCurrent, "promoted by accepted evidence: "+event.ID, now)
+				if err != nil {
+					continue
+				}
+				if _, upsertErr := store.UpsertClaim(ctx, promoted); upsertErr != nil {
+					_ = upsertErr // best-effort
+				}
+			case ClaimStatusCurrent:
+				// Already current; nothing to do for this ref.
+			default:
+				// Skip non-candidate, non-current claims (needs_revalidation,
+				// stale, superseded, rejected). Let them be handled by their
+				// own lifecycle paths — promotion should not supersede them.
+			}
+		}
+		// Also process impact markers (claims surfaced via graph traversal).
 		for _, marker := range markers {
 			if marker.TargetRef.Type == RefTypeMemoryClaim {
 				claim, err := store.GetClaim(ctx, marker.TargetRef.Ref)
@@ -559,6 +625,15 @@ func ApplyInvalidation(ctx context.Context, store InvalidationStore, event Conte
 	}
 
 	return nil
+}
+
+func revalidationReason(event ContextEvent) string {
+	switch event.Kind {
+	case EventKindMemoryClaimRevalidate:
+		return "revalidation requested: " + event.ID
+	default:
+		return "user correction: " + event.ID
+	}
 }
 
 // ResolveStaleness resolves a staleness marker by transitioning it to a resolved
@@ -659,6 +734,14 @@ func (g *storeImpactGraph) ClaimsForRef(ref EvidenceRef) []MemoryClaim {
 		}
 	}
 	return result
+}
+
+func (g *storeImpactGraph) ClaimByID(id string) (MemoryClaim, bool) {
+	claim, err := g.store.GetClaim(g.ctx, id)
+	if err != nil || claim.WorkspaceID != g.ws {
+		return MemoryClaim{}, false
+	}
+	return claim, true
 }
 
 func (g *storeImpactGraph) AllClaims() []MemoryClaim {

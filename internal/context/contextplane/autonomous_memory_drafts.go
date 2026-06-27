@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -64,6 +65,7 @@ type AutonomousMemoryDraftRunReport struct {
 	DraftsPlanned     int      `json:"drafts_planned"`
 	DraftsWritten     int      `json:"drafts_written"`
 	ProposalsRecorded int      `json:"proposals_recorded"`
+	ClaimsRecorded    int      `json:"claims_recorded"`
 	Skipped           int      `json:"skipped"`
 	Errors            int      `json:"errors"`
 	BlurWithAgent     bool     `json:"blur_with_agent,omitempty"`
@@ -143,6 +145,72 @@ func (d AutonomousMemoryDraft) MemoryProposal() MemoryProposal {
 		proposal.ProposedChange["mechanism_tags"] = d.Blur.MechanismTags
 	}
 	return proposal
+}
+
+// MemoryClaim returns the candidate contextengine claim corresponding to this
+// review-gated draft. It is evidence-only until the normal lifecycle promotes it.
+func (d AutonomousMemoryDraft) MemoryClaim() contextengine.MemoryClaim {
+	createdAt := d.CreatedAt.UTC()
+	sourceRefs := compactEvidenceRefs(append(append([]contextengine.EvidenceRef(nil), d.SourceRefs...), d.EvidenceRefs...))
+	return contextengine.MemoryClaim{
+		ID:          memoryDraftClaimID(d.DedupeKey),
+		WorkspaceID: strings.TrimSpace(d.WorkspaceID),
+		ClaimType:   firstNonEmpty(strings.TrimSpace(d.MemoryKind), string(memorycore.KindSemanticFact)),
+		Status:      contextengine.ClaimStatusCandidate,
+		Scope:       claimScopeFromRefs(sourceRefs),
+		Summary:     firstNonEmpty(strings.TrimSpace(d.Summary), strings.TrimSpace(d.Statement)),
+		Confidence:  0.7,
+		BlastRadius: "medium",
+		SourceRefs:  sourceRefs,
+		SourceEventID: firstNonEmpty(
+			eventSourceID("retrieval_feedback", d.FeedbackID),
+			eventSourceID("retrieval_episode", d.EpisodeID),
+		),
+		Reason:    "prepared autonomous memory draft; review required",
+		CreatedAt: createdAt,
+		UpdatedAt: createdAt,
+	}
+}
+
+func claimScopeFromRefs(refs []contextengine.EvidenceRef) contextengine.ClaimScope {
+	var scope contextengine.ClaimScope
+	for _, ref := range refs {
+		switch ref.Type {
+		case contextengine.RefTypePath:
+			if strings.TrimSpace(scope.Path) == "" {
+				scope.Path = strings.TrimSpace(ref.Ref)
+			}
+		case contextengine.RefTypeTask:
+			if strings.TrimSpace(scope.TaskID) == "" {
+				scope.TaskID = strings.TrimSpace(ref.Ref)
+			}
+		case contextengine.RefTypeSession:
+			if strings.TrimSpace(scope.SessionID) == "" {
+				scope.SessionID = strings.TrimSpace(ref.Ref)
+			}
+		}
+	}
+	return scope
+}
+
+func memoryDraftClaimID(dedupeKey string) string {
+	key := strings.TrimSpace(dedupeKey)
+	if key == "" {
+		return ""
+	}
+	if strings.HasPrefix(key, "memory_draft:") {
+		return "claim-memory-draft-" + strings.TrimPrefix(key, "memory_draft:")
+	}
+	hash := sha256.Sum256([]byte(key))
+	return "claim-memory-draft-" + hex.EncodeToString(hash[:])
+}
+
+func eventSourceID(kind, id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ""
+	}
+	return strings.TrimSpace(kind) + ":" + id
 }
 
 // PlanAutonomousMemoryDrafts converts typed retrieval feedback into deterministic
@@ -321,8 +389,38 @@ func RunAutonomousMemoryDrafts(ctx context.Context, opts AutonomousMemoryDraftRu
 			continue
 		}
 		report.ProposalsRecorded++
+		recorded, err := recordMemoryDraftClaim(ctx, ctxStore, draft)
+		if err != nil {
+			report.Errors++
+			report.ErrorMessages = append(report.ErrorMessages, fmt.Sprintf("record claim for %s: %v", draft.DraftPath, err))
+			continue
+		}
+		if recorded {
+			report.ClaimsRecorded++
+		}
 	}
 	return report, nil
+}
+
+func recordMemoryDraftClaim(ctx context.Context, store contextstore.Store, draft AutonomousMemoryDraft) (bool, error) {
+	claim := draft.MemoryClaim()
+	if strings.TrimSpace(claim.ID) == "" {
+		return false, fmt.Errorf("memory draft claim: missing id")
+	}
+	existing, err := store.GetClaim(ctx, claim.ID)
+	if err == nil {
+		if strings.TrimSpace(existing.WorkspaceID) != strings.TrimSpace(claim.WorkspaceID) {
+			return false, fmt.Errorf("memory draft claim %q exists in workspace %q", claim.ID, existing.WorkspaceID)
+		}
+		return false, nil
+	}
+	if !errors.Is(err, contextstore.ErrNotFound) {
+		return false, err
+	}
+	if _, err := store.UpsertClaim(ctx, claim); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func planMemoryDraftForFeedback(now time.Time, workspaceID, workspaceSlug string, feedback contextengine.RetrievalFeedback, episode contextengine.RetrievalEpisode) (AutonomousMemoryDraft, bool) {
@@ -344,10 +442,6 @@ func planMemoryDraftForFeedback(now time.Time, workspaceID, workspaceSlug string
 	}
 	title := firstNonEmpty(titleForMemoryDraft(feedback.Kind, query), "Context memory draft")
 	summary := fmt.Sprintf("%s: %s", classification, statement)
-	dedupeKey := memoryDraftDedupeKey(workspaceID, feedback.Kind, query, statement)
-	draftSlug := safeMemorySlug(title + " " + dedupeKey[len(dedupeKey)-12:])
-	draftPath := filepath.ToSlash(filepath.Join("inbox/drafted-from-foxctl/memory", workspaceSlug, createdAt.Format("2006-01-02"), draftSlug+".md"))
-	targetPath := filepath.ToSlash(filepath.Join("notes/memory", workspaceSlug+".md"))
 	sourceRefs := []contextengine.EvidenceRef{
 		{Type: contextengine.RefTypeEvent, Ref: "retrieval_feedback:" + feedback.ID},
 	}
@@ -358,6 +452,10 @@ func planMemoryDraftForFeedback(now time.Time, workspaceID, workspaceSlug string
 	if len(evidenceRefs) == 0 {
 		evidenceRefs = append(evidenceRefs, sourceRefs...)
 	}
+	dedupeKey := memoryDraftDedupeKey(workspaceID, feedback.Kind, query, statement, feedback.UsedRefs)
+	draftSlug := safeMemorySlug(title + " " + dedupeKey[len(dedupeKey)-12:])
+	draftPath := filepath.ToSlash(filepath.Join("inbox/drafted-from-foxctl/memory", workspaceSlug, createdAt.Format("2006-01-02"), draftSlug+".md"))
+	targetPath := filepath.ToSlash(filepath.Join("notes/memory", workspaceSlug+".md"))
 
 	draft := AutonomousMemoryDraft{
 		DedupeKey:     dedupeKey,
@@ -660,14 +758,31 @@ func formatEvidenceRefs(refs []contextengine.EvidenceRef) []string {
 	return out
 }
 
-func memoryDraftDedupeKey(workspaceID string, kind contextengine.RetrievalFeedbackKind, query, statement string) string {
+func memoryDraftDedupeKey(workspaceID string, kind contextengine.RetrievalFeedbackKind, query, statement string, refs []contextengine.EvidenceRef) string {
 	hash := sha256.Sum256([]byte(strings.Join([]string{
 		strings.TrimSpace(workspaceID),
 		string(kind),
 		strings.TrimSpace(query),
 		strings.TrimSpace(statement),
+		memoryDraftScopeDedupeKey(refs),
 	}, "\x00")))
 	return "memory_draft:" + hex.EncodeToString(hash[:])
+}
+
+func memoryDraftScopeDedupeKey(refs []contextengine.EvidenceRef) string {
+	var parts []string
+	for _, ref := range refs {
+		value := strings.TrimSpace(ref.Ref)
+		if value == "" {
+			continue
+		}
+		switch ref.Type {
+		case contextengine.RefTypePath, contextengine.RefTypeTask, contextengine.RefTypeSession:
+			parts = append(parts, string(ref.Type)+":"+value)
+		}
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "\x1f")
 }
 
 func workspaceMemorySlug(workspacePath, workspaceID string) string {

@@ -50,11 +50,15 @@ func BenchmarkResolveRunSpecAutoMixedDefaultPolicy(b *testing.B) {
 
 func benchmarkAllTools() []Tool {
 	return []Tool{
+		{Name: "plan_context_query", ReadOnly: true},
 		{Name: "gather_context", ReadOnly: true},
+		{Name: "gather_memory_context", ReadOnly: true},
 		{Name: "gather_test_context", ReadOnly: true},
 		{Name: "gather_docs_context", ReadOnly: true},
 		{Name: "expand_context_graph", ReadOnly: true},
 		{Name: "load_evidence_ref", ReadOnly: true},
+		{Name: "aggregate_evidence_refs", ReadOnly: true},
+		{Name: "evidence_ledger", ReadOnly: true},
 		{Name: "code_search_ensemble", ReadOnly: true},
 		{Name: "retrieve_code", ReadOnly: true},
 		{Name: "retrieve_memory", ReadOnly: true},

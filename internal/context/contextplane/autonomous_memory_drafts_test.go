@@ -2,12 +2,15 @@ package contextplane
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/context/memorycore"
+	contextstore "github.com/joshka0/foxctl/internal/storage/contextengine"
 )
 
 func TestPlanAutonomousMemoryDraftsFromCorrectedFeedback(t *testing.T) {
@@ -71,6 +74,58 @@ func TestPlanAutonomousMemoryDraftsFromCorrectedFeedback(t *testing.T) {
 	}
 }
 
+func TestPlanAutonomousMemoryDraftsDedupeIsScopeAware(t *testing.T) {
+	now := time.Date(2026, 5, 21, 8, 0, 0, 0, time.UTC)
+	feedback := func(id, taskID, sessionID string) contextengine.RetrievalFeedback {
+		return contextengine.RetrievalFeedback{
+			ID:             id,
+			WorkspaceID:    "ws-foxctl",
+			EpisodeID:      "ep-scope",
+			Kind:           contextengine.RetrievalFeedbackKindAnswerCorrected,
+			Query:          "how should scoped memory drafts work",
+			CorrectionStmt: "Scoped memory drafts must remain visible to their task.",
+			UsedRefs: []contextengine.EvidenceRef{
+				{Type: contextengine.RefTypePath, Ref: "internal/context/contextplane/autonomous_memory_drafts.go"},
+				{Type: contextengine.RefTypeTask, Ref: taskID},
+				{Type: contextengine.RefTypeSession, Ref: sessionID},
+			},
+			CreatedAt: now,
+		}
+	}
+
+	plan := PlanAutonomousMemoryDrafts(AutonomousMemoryDraftInput{
+		WorkspaceID:   "ws-foxctl",
+		WorkspacePath: "/home/dev/repos/foxctl",
+		Now:           now,
+		Feedback: []contextengine.RetrievalFeedback{
+			feedback("fb-scope-1", "task-1", "session-1"),
+			feedback("fb-scope-2", "task-2", "session-2"),
+			feedback("fb-scope-1-duplicate", "task-1", "session-1"),
+		},
+		Episodes: []contextengine.RetrievalEpisode{
+			{ID: "ep-scope", WorkspaceID: "ws-foxctl", Query: "how should scoped memory drafts work", Lane: contextengine.LaneMixed, CreatedAt: now},
+		},
+	})
+
+	if len(plan.Drafts) != 2 || plan.Skipped != 1 {
+		t.Fatalf("drafts=%d skipped=%d want 2 drafts and 1 same-scope duplicate", len(plan.Drafts), plan.Skipped)
+	}
+	if plan.Drafts[0].DedupeKey == plan.Drafts[1].DedupeKey {
+		t.Fatalf("different task/session scopes shared dedupe key %q", plan.Drafts[0].DedupeKey)
+	}
+	firstClaim := plan.Drafts[0].MemoryClaim()
+	secondClaim := plan.Drafts[1].MemoryClaim()
+	if firstClaim.ID == secondClaim.ID {
+		t.Fatalf("different task/session scopes shared claim id %q", firstClaim.ID)
+	}
+	if firstClaim.Scope.TaskID != "task-1" || firstClaim.Scope.SessionID != "session-1" {
+		t.Fatalf("first claim scope=%#v", firstClaim.Scope)
+	}
+	if secondClaim.Scope.TaskID != "task-2" || secondClaim.Scope.SessionID != "session-2" {
+		t.Fatalf("second claim scope=%#v", secondClaim.Scope)
+	}
+}
+
 func TestRunAutonomousMemoryDraftsCanBlurPlannedDrafts(t *testing.T) {
 	now := time.Date(2026, 5, 21, 8, 0, 0, 0, time.UTC)
 	feedback := contextengine.RetrievalFeedback{
@@ -105,6 +160,153 @@ func TestRunAutonomousMemoryDraftsCanBlurPlannedDrafts(t *testing.T) {
 	proposal := draft.MemoryProposal()
 	if proposal.ProposedChange["agent_blurred"] != true {
 		t.Fatalf("proposal missing agent_blurred: %#v", proposal.ProposedChange)
+	}
+}
+
+func TestRunAutonomousMemoryDraftsRecordsContextEngineClaim(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 5, 21, 8, 0, 0, 0, time.UTC)
+	storageRoot := t.TempDir()
+	workspacePath := filepath.Join(t.TempDir(), "workspace")
+	vaultPath := filepath.Join(t.TempDir(), "vault")
+
+	ctxStore, err := contextstore.Open(ctx, storageRoot)
+	if err != nil {
+		t.Fatalf("open contextengine store: %v", err)
+	}
+	episode := contextengine.RetrievalEpisode{
+		ID:          "ep-apply",
+		WorkspaceID: "ws-foxctl",
+		Query:       "how should retrieval feedback become durable memory",
+		Lane:        contextengine.LaneMixed,
+		PackID:      "pack-apply",
+		CreatedAt:   now,
+	}
+	if _, err := ctxStore.RecordRetrievalEpisode(ctx, episode); err != nil {
+		t.Fatalf("record episode: %v", err)
+	}
+	feedback := contextengine.RetrievalFeedback{
+		ID:             "fb-apply",
+		WorkspaceID:    "ws-foxctl",
+		EpisodeID:      episode.ID,
+		Kind:           contextengine.RetrievalFeedbackKindAnswerCorrected,
+		Query:          episode.Query,
+		CorrectionStmt: "Applied memory drafts should create candidate context claims.",
+		UsedRefs: []contextengine.EvidenceRef{
+			{Type: contextengine.RefTypePath, Ref: "internal/context/contextplane/autonomous_memory_drafts.go"},
+			{Type: contextengine.RefTypeTask, Ref: "task-apply"},
+			{Type: contextengine.RefTypeSession, Ref: "session-apply"},
+		},
+		CreatedAt: now,
+	}
+	if _, err := ctxStore.RecordRetrievalFeedback(ctx, feedback); err != nil {
+		t.Fatalf("record feedback: %v", err)
+	}
+	if err := ctxStore.Close(); err != nil {
+		t.Fatalf("close seeded contextengine store: %v", err)
+	}
+
+	report, err := RunAutonomousMemoryDrafts(ctx, AutonomousMemoryDraftRunOptions{
+		StorageRoot:   storageRoot,
+		WorkspaceID:   "ws-foxctl",
+		WorkspacePath: workspacePath,
+		VaultPath:     vaultPath,
+		Now:           now.Add(time.Minute),
+		Lookback:      time.Hour,
+		Limit:         5,
+		ApplyDrafts:   true,
+		DryRun:        false,
+	})
+	if err != nil {
+		t.Fatalf("RunAutonomousMemoryDrafts: %v", err)
+	}
+	if report.Errors != 0 || report.DraftsWritten != 1 || report.ProposalsRecorded != 1 || report.ClaimsRecorded != 1 {
+		t.Fatalf("unexpected report: %#v", report)
+	}
+	if _, err := os.Stat(filepath.Join(vaultPath, filepath.FromSlash(report.DraftPaths[0]))); err != nil {
+		t.Fatalf("expected draft note to be written: %v", err)
+	}
+
+	proposals, err := NewWorkspaceStore(workspacePath).ListMemoryProposals(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListMemoryProposals: %v", err)
+	}
+	if len(proposals) != 1 {
+		t.Fatalf("proposals=%d want 1", len(proposals))
+	}
+
+	ctxStore, err = contextstore.Open(ctx, storageRoot)
+	if err != nil {
+		t.Fatalf("reopen contextengine store: %v", err)
+	}
+	claims, err := ctxStore.ListClaims(ctx, contextstore.ClaimFilter{
+		WorkspaceID: "ws-foxctl",
+		Status:      contextengine.ClaimStatusCandidate,
+	})
+	if err != nil {
+		t.Fatalf("ListClaims: %v", err)
+	}
+	if len(claims) != 1 {
+		t.Fatalf("claims=%d want 1", len(claims))
+	}
+	claim := claims[0]
+	if claim.ClaimType != string(memorycore.KindSemanticFact) {
+		t.Fatalf("claim type=%q want %q", claim.ClaimType, memorycore.KindSemanticFact)
+	}
+	if claim.Summary != "Retrieval correction: Applied memory drafts should create candidate context claims." {
+		t.Fatalf("claim summary=%q", claim.Summary)
+	}
+	if claim.SourceEventID != "retrieval_feedback:fb-apply" {
+		t.Fatalf("source event=%q", claim.SourceEventID)
+	}
+	if claim.Scope.Path != "internal/context/contextplane/autonomous_memory_drafts.go" ||
+		claim.Scope.TaskID != "task-apply" ||
+		claim.Scope.SessionID != "session-apply" {
+		t.Fatalf("claim scope=%#v", claim.Scope)
+	}
+	if len(claim.SourceRefs) != 5 {
+		t.Fatalf("source refs=%#v want feedback, episode, and used evidence", claim.SourceRefs)
+	}
+
+	promoted := claim
+	promoted.Status = contextengine.ClaimStatusCurrent
+	promoted.Reason = "reviewed by memory curator"
+	if _, err := ctxStore.UpsertClaim(ctx, promoted); err != nil {
+		t.Fatalf("promote claim: %v", err)
+	}
+	if err := ctxStore.Close(); err != nil {
+		t.Fatalf("close contextengine store before rerun: %v", err)
+	}
+
+	secondReport, err := RunAutonomousMemoryDrafts(ctx, AutonomousMemoryDraftRunOptions{
+		StorageRoot:   storageRoot,
+		WorkspaceID:   "ws-foxctl",
+		WorkspacePath: workspacePath,
+		VaultPath:     vaultPath,
+		Now:           now.Add(time.Minute),
+		Lookback:      time.Hour,
+		Limit:         5,
+		ApplyDrafts:   true,
+		DryRun:        false,
+	})
+	if err != nil {
+		t.Fatalf("second RunAutonomousMemoryDrafts: %v", err)
+	}
+	if secondReport.Errors != 0 || secondReport.ClaimsRecorded != 0 {
+		t.Fatalf("unexpected second report: %#v", secondReport)
+	}
+
+	ctxStore, err = contextstore.Open(ctx, storageRoot)
+	if err != nil {
+		t.Fatalf("reopen contextengine store after rerun: %v", err)
+	}
+	defer ctxStore.Close()
+	got, err := ctxStore.GetClaim(ctx, claim.ID)
+	if err != nil {
+		t.Fatalf("GetClaim after rerun: %v", err)
+	}
+	if got.Status != contextengine.ClaimStatusCurrent || got.Reason != "reviewed by memory curator" {
+		t.Fatalf("rerun changed reviewed claim: status=%q reason=%q", got.Status, got.Reason)
 	}
 }
 

@@ -96,11 +96,15 @@ func TestIndexEditedFileRejectsEscapingPath(t *testing.T) {
 }
 
 func TestDiagnoseEditedFileFormatsGoDiagnostics(t *testing.T) {
+	t.Setenv("FOXCTL_WORKSPACE", "")
+	t.Setenv("CLAUDE_PROJECT_DIR", "")
+
 	tmp := t.TempDir()
 	filePath := tmp + "/main.go"
 	if err := osWriteFile(filePath, "package main\n"); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
+	called := false
 	deps := Dependencies{
 		LookPath: func(name string) (string, error) {
 			if name == "gopls" {
@@ -109,6 +113,7 @@ func TestDiagnoseEditedFileFormatsGoDiagnostics(t *testing.T) {
 			return "", errors.New("missing")
 		},
 		ExecCmd: func(ctx context.Context, dir, name string, args ...string) (string, error) {
+			called = true
 			return filePath + ":7:14-16: undefined: os\n", errors.New("exit 1")
 		},
 	}
@@ -119,11 +124,14 @@ func TestDiagnoseEditedFileFormatsGoDiagnostics(t *testing.T) {
 			ToolInput: struct {
 				FilePath string `json:"file_path,omitempty"`
 				Path     string `json:"path,omitempty"`
-			}{FilePath: "main.go"},
+			}{FilePath: filePath},
 		},
 	})
 	if err != nil {
 		t.Fatalf("DiagnoseEditedFile: %v", err)
+	}
+	if !called {
+		t.Fatalf("expected diagnostics command to be called")
 	}
 	if len(resp.Diagnostics) != 1 || !strings.Contains(resp.Diagnostics[0], "undefined: os") {
 		t.Fatalf("unexpected diagnostics: %#v", resp.Diagnostics)

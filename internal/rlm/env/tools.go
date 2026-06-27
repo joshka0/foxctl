@@ -10,8 +10,32 @@ import (
 func DefaultTools() []rlm.Tool {
 	return []rlm.Tool{
 		{
+			Name:        "plan_context_query",
+			Description: "Plan a context-gathering query before retrieval. Returns answer type, required evidence anchors, coverage requirements, a gather_context call shape, fallback probes, and sufficiency checks. Use before gather_context when the question needs targeted memory, context, task, or mixed evidence rather than a broad keyword search.",
+			Parameters: objectSchema(map[string]any{
+				"question": map[string]any{
+					"type":        "string",
+					"description": "User question or task to answer from gathered context.",
+				},
+				"goal": map[string]any{
+					"type":        "string",
+					"description": "Optional context goal. Defaults to recall.",
+				},
+				"lanes": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional lane subset to pass through to gather_context: code, memory, context, task.",
+				},
+				"limit": map[string]any{
+					"type":        "integer",
+					"description": "Optional reduced context fact limit. Defaults to 10.",
+				},
+			}, "question"),
+			ReadOnly: true,
+		},
+		{
 			Name:        "gather_context",
-			Description: "Gather bounded context across code, memory, context, and task lanes. Defaults to response_mode=answer_surface for a reduced answer seed/path_set surface. Graph-sensitive tasks include graph recommendation metadata by default; set graph_mode=summary to attach compact graph confidence/gaps/roots/top nodes. Use response_mode=full only for eval/debug bundle inspection. Prefer copying answer_seed.paths and answer_seed.facts, using path_set.must/load_ref for verification before inferring from raw evidence.",
+			Description: "Gather bounded context across code, memory, context, and task lanes. Defaults to response_mode=answer_surface for a reduced answer seed/path_set/evidence_digest surface. Graph-sensitive tasks include graph recommendation metadata by default; set graph_mode=summary to attach compact graph confidence/gaps/roots/top nodes. Use response_mode=full only for eval/debug bundle inspection. Prefer evidence_digest claims/slots and answer_seed facts, using path_set.must/load_ref for verification before inferring from raw evidence.",
 			Parameters: objectSchema(map[string]any{
 				"query": map[string]any{
 					"type":        "string",
@@ -76,11 +100,6 @@ func DefaultTools() []rlm.Tool {
 					"items":       map[string]any{"type": "string"},
 					"description": "Optional repo-relative paths, prefixes, or glob patterns to suppress from repo_code results, such as node_modules, dist, build, generated, or nested worktrees.",
 				},
-				"memory_statuses": map[string]any{
-					"type":        "array",
-					"items":       map[string]any{"type": "string"},
-					"description": "Optional memory claim statuses to include, such as current, candidate, needs_revalidation, stale, superseded, or rejected. Defaults to current.",
-				},
 				"lanes": map[string]any{
 					"type":        "array",
 					"items":       map[string]any{"type": "string"},
@@ -92,12 +111,66 @@ func DefaultTools() []rlm.Tool {
 				},
 				"response_mode": map[string]any{
 					"type":        "string",
-					"description": "Optional response shape: defaults to answer_surface. Use full only for eval/debug bundle inspection; answer_surface or compact returns answer_seed/path_set/facts without raw evidence.",
+					"description": "Optional response shape: defaults to answer_surface. Use full only for eval/debug bundle inspection; answer_surface or compact returns answer_seed/path_set/evidence_digest/facts without raw evidence.",
 				},
 				"graph_mode": map[string]any{
 					"type":        "string",
 					"enum":        []string{"", "none", "summary"},
 					"description": "Optional context graph attachment mode: empty or none only emits graph recommendation metadata; summary attaches compact context_graph confidence, gaps, roots, and top nodes only for answer_surface/compact responses.",
+				},
+			}, "query"),
+			ReadOnly: true,
+		},
+		{
+			Name:        "gather_memory_context",
+			Description: "Gather bounded long-term memory context for recall questions. Defaults to memory lane, goal=recall, response_mode=answer_surface, derives required evidence/coverage when omitted, and runs bounded coverage-repair memory probes before reducing. Prefer evidence_digest claims/slots before loading more refs. Prefer this over broad gather_context when the source intent is long-term memory.",
+			Parameters: objectSchema(map[string]any{
+				"query": map[string]any{
+					"type":        "string",
+					"description": "Memory recall question.",
+				},
+				"goal": map[string]any{
+					"type":        "string",
+					"description": "Optional context goal. Defaults to recall.",
+				},
+				"required_evidence": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional terms, entities, or claims the returned memory evidence should cover. Derived from query when omitted.",
+				},
+				"coverage_requirements": map[string]any{
+					"type": "array",
+					"items": map[string]any{
+						"type":                 "object",
+						"additionalProperties": false,
+						"properties": map[string]any{
+							"id":              map[string]any{"type": "string"},
+							"kind":            map[string]any{"type": "string"},
+							"label":           map[string]any{"type": "string"},
+							"terms":           map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+							"required":        map[string]any{"type": "boolean"},
+							"min_paths":       map[string]any{"type": "integer"},
+							"weight":          map[string]any{"type": "number"},
+							"source_profiles": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+						},
+					},
+					"description": "Optional structured memory coverage slots. Derived from query when omitted.",
+				},
+				"limit": map[string]any{
+					"type":        "integer",
+					"description": "Maximum reduced memory facts. Defaults to 10.",
+				},
+				"task_id": map[string]any{
+					"type":        "string",
+					"description": "Optional task scope for scoped memory claims.",
+				},
+				"max_context_chars": map[string]any{
+					"type":        "integer",
+					"description": "Optional downstream context character budget. Defaults to a bounded recall budget for this tool.",
+				},
+				"response_mode": map[string]any{
+					"type":        "string",
+					"description": "Optional response shape: defaults to answer_surface.",
 				},
 			}, "query"),
 			ReadOnly: true,
@@ -267,13 +340,115 @@ func DefaultTools() []rlm.Tool {
 			Parameters: objectSchema(map[string]any{
 				"ref": map[string]any{
 					"type":        "string",
-					"description": "Typed evidence ref identifier such as path:internal/foo.go, symbol:Bar, task:abc, or memory_claim:xyz.",
+					"description": "Typed evidence ref identifier such as path:internal/foo.go, symbol:Bar, task:abc, memory_claim:xyz, or named_memory:xyz.",
 				},
 				"max_tokens": map[string]any{
 					"type":        "integer",
 					"description": "Maximum output tokens. Defaults to 4096.",
 				},
 			}, "ref"),
+			ReadOnly: true,
+		},
+		{
+			Name:        "aggregate_evidence_refs",
+			Description: "Aggregate a small set of typed evidence refs into compact supported claims, covered/missing slots, and load refs. Use after gather_context or gather_memory_context when multiple refs may jointly answer a question, before loading many refs one by one.",
+			Parameters: objectSchema(map[string]any{
+				"query": map[string]any{
+					"type":        "string",
+					"description": "Question or task the refs should support.",
+				},
+				"refs": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Typed evidence refs, usually evidence_digest.load_refs, path_set load_ref values, or named_memory/memory_claim refs.",
+				},
+				"required_evidence": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional terms, entities, or claims the aggregate should cover. Derived from query when omitted.",
+				},
+				"coverage_requirements": map[string]any{
+					"type": "array",
+					"items": map[string]any{
+						"type":                 "object",
+						"additionalProperties": false,
+						"properties": map[string]any{
+							"id":              map[string]any{"type": "string"},
+							"kind":            map[string]any{"type": "string"},
+							"label":           map[string]any{"type": "string"},
+							"terms":           map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+							"required":        map[string]any{"type": "boolean"},
+							"min_paths":       map[string]any{"type": "integer"},
+							"weight":          map[string]any{"type": "number"},
+							"source_profiles": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+						},
+					},
+					"description": "Optional structured answer/evidence slots. Derived from query when omitted.",
+				},
+				"max_refs": map[string]any{
+					"type":        "integer",
+					"description": "Maximum refs to load and aggregate. Defaults to 12.",
+				},
+				"max_text_chars": map[string]any{
+					"type":        "integer",
+					"description": "Maximum characters per aggregate claim text. Defaults to 480.",
+				},
+				"max_tokens_per_ref": map[string]any{
+					"type":        "integer",
+					"description": "Maximum load_evidence_ref tokens per ref. Defaults to 1200.",
+				},
+			}, "query", "refs"),
+			ReadOnly: true,
+		},
+		{
+			Name:        "evidence_ledger",
+			Description: "Build an ACCEPT/REJECT evidence ledger from a small set of typed refs for a question. Use after gather_memory_context/gather_context and aggregate_evidence_refs before final answers that require exact slot binding, counts, durations, locations, or list aggregation.",
+			Parameters: objectSchema(map[string]any{
+				"query": map[string]any{
+					"type":        "string",
+					"description": "Question or task the ledger must answer from evidence.",
+				},
+				"refs": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Typed evidence refs, usually evidence_digest.load_refs, path_set load_ref values, aggregate refs, or named_memory/memory_claim refs.",
+				},
+				"required_evidence": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional terms, entities, or claims each accepted row should try to cover. Derived from query when omitted.",
+				},
+				"coverage_requirements": map[string]any{
+					"type": "array",
+					"items": map[string]any{
+						"type":                 "object",
+						"additionalProperties": false,
+						"properties": map[string]any{
+							"id":              map[string]any{"type": "string"},
+							"kind":            map[string]any{"type": "string"},
+							"label":           map[string]any{"type": "string"},
+							"terms":           map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+							"required":        map[string]any{"type": "boolean"},
+							"min_paths":       map[string]any{"type": "integer"},
+							"weight":          map[string]any{"type": "number"},
+							"source_profiles": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+						},
+					},
+					"description": "Optional structured answer/evidence slots. Derived from query when omitted.",
+				},
+				"max_refs": map[string]any{
+					"type":        "integer",
+					"description": "Maximum refs to load and classify. Defaults to 12.",
+				},
+				"max_text_chars": map[string]any{
+					"type":        "integer",
+					"description": "Maximum characters per ledger row text. Defaults to 480.",
+				},
+				"max_tokens_per_ref": map[string]any{
+					"type":        "integer",
+					"description": "Maximum load_evidence_ref tokens per ref. Defaults to 1200.",
+				},
+			}, "query", "refs"),
 			ReadOnly: true,
 		},
 		{
@@ -333,6 +508,14 @@ func DefaultTools() []rlm.Tool {
 					"type":        "integer",
 					"description": "Maximum number of evidence nodes to return. Defaults to 10.",
 				},
+				"task_id": map[string]any{
+					"type":        "string",
+					"description": "Optional task scope. Scoped claims are eligible even when their text does not match the query.",
+				},
+				"session_id": map[string]any{
+					"type":        "string",
+					"description": "Optional session scope. Scoped claims are eligible even when their text does not match the query.",
+				},
 			}, "query"),
 			ReadOnly: true,
 		},
@@ -363,6 +546,10 @@ func DefaultTools() []rlm.Tool {
 					"type":        "integer",
 					"description": "Maximum number of evidence nodes to return. Defaults to 10.",
 				},
+				"task_id": map[string]any{
+					"type":        "string",
+					"description": "Optional task ID to retrieve one task context and its typed related evidence refs.",
+				},
 			}, "query"),
 			ReadOnly: true,
 		},
@@ -377,6 +564,14 @@ func DefaultTools() []rlm.Tool {
 				"limit": map[string]any{
 					"type":        "integer",
 					"description": "Maximum number of fused evidence nodes to return. Defaults to 10.",
+				},
+				"task_id": map[string]any{
+					"type":        "string",
+					"description": "Optional task scope for task lane retrieval and scoped memory claims.",
+				},
+				"session_id": map[string]any{
+					"type":        "string",
+					"description": "Optional session scope for memory claims.",
 				},
 			}, "query"),
 			ReadOnly: true,

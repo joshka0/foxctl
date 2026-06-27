@@ -208,7 +208,8 @@ func runInsightsView(workspace string) {
 		titleStyle.Render("Overview"),
 		len(insights.Nodes),
 		len(insights.Cycles),
-		len(insights.TopologicalOrder))))
+		len(insights.TopologicalOrder),
+	)))
 	fmt.Println()
 
 	if len(insights.Nodes) > 0 {
@@ -240,7 +241,8 @@ func runInsightsView(workspace string) {
 		fmt.Println(panelStyle.Render(fmt.Sprintf(
 			"%s\n  %d circular dependencies detected!",
 			lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196")).Render("Cycles"),
-			len(insights.Cycles))))
+			len(insights.Cycles),
+		)))
 	}
 }
 

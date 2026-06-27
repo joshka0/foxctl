@@ -74,6 +74,10 @@ See [Rooms](/collaboration/rooms/) for the full room protocol.
 | Get task history summary | `foxctl context task-history-summary` |
 | Recall relevant sessions | `foxctl context session-recall --query "auth debugging"` |
 | Get session timeline | `foxctl context session-timeline --session-id <id>` |
+| Preview transcript dream sources | `foxctl dream scan --dry-run` |
+| Run one bounded dream batch | `foxctl dream run-once --vault-path "/path/to/vault" --write-dream-notes` |
+| Run dream watch loop | `foxctl dream watch --interval 10m --duration 1h` |
+| Blur dream notes through a real agent | `foxctl dream run-once --blur-dreams --blur-agent pi --vault-path "/path/to/vault"` |
 
 See [Memory and continuity](/memory/continuity/) for the full memory API.
 

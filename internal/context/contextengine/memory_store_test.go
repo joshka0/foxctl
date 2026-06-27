@@ -56,6 +56,9 @@ func (s *MemoryStore) ListEvents(_ context.Context, filter EventFilter) ([]Conte
 	defer s.mu.Unlock()
 	var result []ContextEvent
 	for _, e := range s.events {
+		if filter.ID != "" && e.ID != filter.ID {
+			continue
+		}
 		if filter.WorkspaceID != "" && e.WorkspaceID != filter.WorkspaceID {
 			continue
 		}

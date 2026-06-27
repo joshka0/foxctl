@@ -19,7 +19,6 @@ import (
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/embedqueue"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
 	"github.com/joshka0/foxctl/internal/intelligence/turbovec"
-	"github.com/joshka0/foxctl/internal/storage"
 	"github.com/joshka0/foxctl/internal/storage/annotations"
 	"github.com/joshka0/foxctl/internal/storage/sessions"
 	"github.com/joshka0/foxctl/internal/storage/vector"
@@ -153,6 +152,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if in.MaxDuration <= 0 {
 		in.MaxDuration = defaultMaxDur
 	}
+	kind, err := normalizeTaskKind(in.Kind)
+	if err != nil {
+		return err
+	}
 	parallelism, err := normalizeParallelism(in.Parallelism, in.BatchSize)
 	if err != nil {
 		return err
@@ -284,40 +287,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		}
 	}()
 
-	// Pre-flight: check that at least one embedding provider is reachable.
-	// This prevents claiming and failing the entire batch when the embedding
-	// server is down (e.g., local GPU server not started).
-	if !in.DryRun {
-		embedder, _, probeErr := getSymbolEmbedder()
-		if probeErr != nil {
-			return skillout.Emit(rc, command, Output{
-				Status:    "error",
-				LastError: fmt.Sprintf("embedding provider setup failed: %v", probeErr),
-				Message:   fmt.Sprintf("Embedding provider setup failed: %v. Ensure the embedding server is running and FOXCTL_EMBEDDING_BASE_URL is set correctly.", probeErr),
-			})
-		}
-		// Probe the embedding endpoint with a tiny request to verify connectivity.
-		if embedder != nil {
-			probeCtx, probeCancel := context.WithTimeout(ctx, 5*time.Second)
-			_, probeErr = embedder.Embed(probeCtx, "health check")
-			probeCancel()
-			if probeErr != nil {
-				return skillout.Emit(rc, command, Output{
-					Status:    "error",
-					LastError: fmt.Sprintf("embedding provider unreachable: %v", probeErr),
-					Remaining: -1, // signal that we didn't check the queue
-					Message:   fmt.Sprintf("Embedding provider probe failed: %v. The embedding server at %s may not be running. Set FOXCTL_EMBEDDING_BASE_URL correctly or start the embedding server.", probeErr, rc.Config.Embedding.BaseURL),
-				})
-			}
-		}
-	}
-
 	embeddingDBPath := filepath.Join(rc.Config.Paths.Cache, "embedding_queue.db")
 	workspaceID := strings.TrimSpace(in.WorkspaceID)
-	kind, err := normalizeTaskKind(in.Kind)
-	if err != nil {
-		return err
-	}
 	recoveredStale := int64(0)
 	if in.RecoverStaleAfterSeconds < 0 {
 		return skillerr.Arg("recover_stale_after_seconds must be >= 0")
@@ -347,6 +318,23 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 				logEvent = logEvent.Str("kind", string(kind))
 			}
 			logEvent.Msg("recovered stale embedding jobs")
+		}
+	}
+	if !in.DryRun {
+		requiredProviderKinds, providerKindErr := pendingEmbeddingProviderKinds(ctx, store, workspaceID, kind)
+		if providerKindErr != nil {
+			return skillerr.IO("inspect embedding queue providers", skillerr.WithCause(providerKindErr))
+		}
+		if len(requiredProviderKinds) > 0 {
+			probeErr := probeRequiredEmbeddingProviders(ctx, requiredProviderKinds, rc.Config.Embedding.BaseURL, getSymbolEmbedder, getMemoryEmbedder)
+			if probeErr != nil {
+				return skillout.Emit(rc, command, Output{
+					Status:    "error",
+					LastError: probeErr.Error(),
+					Remaining: -1, // signal that no jobs were claimed
+					Message:   probeErr.Error(),
+				})
+			}
 		}
 	}
 	syncTargets := make(map[string]map[string]struct{})
@@ -966,6 +954,31 @@ func embeddingQueueStats(ctx context.Context, store *embedding.Store, workspaceI
 	return store.StatsInWorkspace(ctx, workspaceID)
 }
 
+func pendingEmbeddingProviderKinds(ctx context.Context, store *embedding.Store, workspaceID string, kind embedqueue.TaskKind) ([]embedqueue.TaskKind, error) {
+	if kind != "" {
+		count, err := store.ClaimableCountInWorkspaceKind(ctx, workspaceID, kind)
+		if err != nil {
+			return nil, err
+		}
+		if count > 0 {
+			return []embedqueue.TaskKind{kind}, nil
+		}
+		return nil, nil
+	}
+
+	required := make([]embedqueue.TaskKind, 0, 2)
+	for _, candidate := range []embedqueue.TaskKind{embedqueue.TaskKindSymbol, embedqueue.TaskKindMemory} {
+		count, err := store.ClaimableCountInWorkspaceKind(ctx, workspaceID, candidate)
+		if err != nil {
+			return nil, err
+		}
+		if count > 0 {
+			required = append(required, candidate)
+		}
+	}
+	return required, nil
+}
+
 type embeddingSyncTarget struct {
 	WorkspaceID string
 	SymbolID    string
@@ -1065,65 +1078,116 @@ func normalizeParallelism(raw, batchSize int) (int, error) {
 	return raw, nil
 }
 
-func processMemoryEmbeddingJob(
-	ctx context.Context,
-	store *embedding.Store,
-	memoryStore memoryutil.Store,
-	job *embedding.EmbeddingJob,
-	dryRun bool,
-	getEmbedder func() (*semantic.Embedder, int, error),
-) error {
-	if strings.TrimSpace(job.MemoryName) == "" {
-		return fmt.Errorf("memory_name is required")
+func probeEmbeddingProviders(ctx context.Context, kind embedqueue.TaskKind, baseURL string, getSymbolEmbedder, getMemoryEmbedder func() (*semantic.Embedder, int, error)) error {
+	return probeRequiredEmbeddingProviders(ctx, providerKindsForScope(kind), baseURL, getSymbolEmbedder, getMemoryEmbedder)
+}
+
+func providerKindsForScope(kind embedqueue.TaskKind) []embedqueue.TaskKind {
+	switch kind {
+	case embedqueue.TaskKindMemory:
+		return []embedqueue.TaskKind{embedqueue.TaskKindMemory}
+	case embedqueue.TaskKindSymbol:
+		return []embedqueue.TaskKind{embedqueue.TaskKindSymbol}
+	default:
+		return []embedqueue.TaskKind{embedqueue.TaskKindSymbol, embedqueue.TaskKindMemory}
 	}
-	if strings.TrimSpace(job.WorkspaceID) == "" {
-		return fmt.Errorf("workspace_id is required")
+}
+
+func probeRequiredEmbeddingProviders(ctx context.Context, kinds []embedqueue.TaskKind, baseURL string, getSymbolEmbedder, getMemoryEmbedder func() (*semantic.Embedder, int, error)) error {
+	type providerProbe struct {
+		name        string
+		getEmbedder func() (*semantic.Embedder, int, error)
+	}
+	probes := make([]providerProbe, 0, len(kinds))
+	seen := make(map[embedqueue.TaskKind]struct{})
+	for _, kind := range kinds {
+		if _, ok := seen[kind]; ok {
+			continue
+		}
+		seen[kind] = struct{}{}
+		switch kind {
+		case embedqueue.TaskKindSymbol:
+			probes = append(probes, providerProbe{name: "symbol", getEmbedder: getSymbolEmbedder})
+		case embedqueue.TaskKindMemory:
+			probes = append(probes, providerProbe{name: "memory", getEmbedder: getMemoryEmbedder})
+		}
+	}
+
+	errs := make([]string, 0, len(probes))
+	for _, probe := range probes {
+		embedder, _, err := probe.getEmbedder()
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s embedding provider setup failed: %v", probe.name, err))
+			continue
+		}
+		if embedder == nil {
+			continue
+		}
+		probeCtx, probeCancel := context.WithTimeout(ctx, 5*time.Second)
+		_, err = embedder.Embed(probeCtx, "health check")
+		probeCancel()
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s embedding provider probe failed: %v", probe.name, err))
+		}
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s; the embedding server at %s may not be running. Set FOXCTL_EMBEDDING_BASE_URL correctly or start the embedding server", strings.Join(errs, "; "), baseURL)
+}
+
+func processMemoryEmbeddingJob(ctx context.Context, store *embedding.Store, memoryStore memoryutil.Store, job *embedding.EmbeddingJob, dryRun bool, getEmbedder func() (*semantic.Embedder, int, error)) error {
+	processor := &embedding.MemoryJobProcessor{
+		Store:  store,
+		Memory: memoryStore,
+		DryRun: dryRun,
 	}
 	if dryRun {
-		return store.CompleteJob(ctx, job.ID)
-	}
-	if memoryStore == nil {
-		return fmt.Errorf("memory store unavailable")
+		return processor.Process(ctx, job)
 	}
 	embedder, expectedDims, err := getEmbedder()
 	if err != nil {
 		return fmt.Errorf("memory embedding provider: %w", err)
 	}
-	if embedder == nil {
-		return fmt.Errorf("memory embedding provider not available")
+	processor.Embedder = semanticMemoryEmbedder{embedder: embedder}
+	processor.ExpectedDimensions = expectedDims
+	return processor.Process(ctx, job)
+}
+
+type semanticMemoryEmbedder struct {
+	embedder *semantic.Embedder
+}
+
+func (e semanticMemoryEmbedder) Embed(ctx context.Context, text string) (embedding.MemoryEmbedding, error) {
+	if e.embedder == nil {
+		return embedding.MemoryEmbedding{}, fmt.Errorf("memory embedding provider not available")
 	}
-	result, err := embedder.Embed(ctx, job.Content)
+	result, err := e.embedder.Embed(ctx, text)
 	if err != nil {
-		return fmt.Errorf("embed memory: %w", err)
+		return embedding.MemoryEmbedding{}, err
 	}
-	if expectedDims > 0 && len(result.Vec) != expectedDims {
-		return fmt.Errorf("memory dimension mismatch: got %d, expected %d", len(result.Vec), expectedDims)
+	return embedding.MemoryEmbedding{Vec: result.Vec, Model: result.Model}, nil
+}
+
+func (e semanticMemoryEmbedder) Provider() string {
+	if e.embedder == nil {
+		return ""
 	}
-	if err := memoryStore.ValidateEmbeddingDimensions(ctx, job.WorkspaceID, len(result.Vec)); err != nil {
-		return err
+	return e.embedder.Provider()
+}
+
+func (e semanticMemoryEmbedder) Model() string {
+	if e.embedder == nil {
+		return ""
 	}
-	now := time.Now().UTC()
-	createdAt := job.CreatedAt
-	if createdAt.IsZero() {
-		createdAt = now
+	return e.embedder.Model()
+}
+
+func (e semanticMemoryEmbedder) Dimensions() int {
+	if e.embedder == nil {
+		return 0
 	}
-	if err := memoryStore.SetEmbeddingMetadata(ctx, storage.EmbeddingMetadata{
-		Workspace:  job.WorkspaceID,
-		Provider:   embedder.Provider(),
-		Model:      result.Model,
-		Dimensions: len(result.Vec),
-		CreatedAt:  createdAt,
-		UpdatedAt:  now,
-	}); err != nil {
-		return fmt.Errorf("set memory embedding metadata: %w", err)
-	}
-	if err := memoryStore.UpdateEmbedding(ctx, job.MemoryName, job.WorkspaceID, result.Vec); err != nil {
-		return fmt.Errorf("update memory embedding: %w", err)
-	}
-	if err := store.CompleteJob(ctx, job.ID); err != nil {
-		return fmt.Errorf("complete memory job: %w", err)
-	}
-	return nil
+	return e.embedder.Dimensions()
 }
 
 func symbolMemoryEntryName(job *embedding.EmbeddingJob) string {

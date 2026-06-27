@@ -12,8 +12,8 @@ Machine-friendly reference for named memory persistence and retrieval.
 | Field | Value |
 |------|-------|
 | Status | Current |
-| Canonical packages | `internal/storage/memory`, `cmd/foxctl/cmd/memory*`, `skills/session_*` |
-| Last reviewed | 2026-05-05 |
+| Canonical packages | `internal/storage/memory`, `internal/intelligence/retrieval/memoryrecall`, `cmd/foxctl/cmd/memory*`, `skills/session_*` |
+| Last reviewed | 2026-06-02 |
 
 ## Scope
 
@@ -51,7 +51,8 @@ Source: `cmd/foxctl/cmd/memory.go`.
 |--------|---------|
 | `session/summarize` + related session hooks | Extract and persist learnings |
 | hook scripts (for example `configs/hooks/memory-detector.sh`, `configs/hooks/memory-recall.sh`) | Prompt/capture/recall workflow |
-| `memory/query` | Canonical record retrieval with kind, source lane, trust, lifecycle, telemetry, and usage labels |
+| `memory/query` | Canonical record retrieval through shared named-memory recall with kind, source lane, trust, lifecycle, telemetry, and usage labels |
+| RLM `retrieve_memory` | RLM recall surface using the same named-memory retrieval semantics as `memory/query` |
 | `memory/curator_report` | Deterministic curator report/apply workflow for lifecycle hygiene |
 | `code/semantic_search` with scope `memories` | Semantic retrieval path |
 
@@ -75,9 +76,26 @@ Important `named_memory` constraints:
 
 | Mode | Command path | Notes |
 |-----|---------------|-------|
-| Lexical | `foxctl memory search --query ...` | String match in memory store |
+| Lexical | `foxctl memory search --query ...` | Stop-word-filtered string match over named-memory fields |
 | Canonical records | `foxctl run memory/query --input ...` | Returns typed memorycore records with lifecycle/trust/provenance labels |
+| RLM recall | RLM `retrieve_memory` | Uses shared named-memory recall and returns evidence-backed memory records |
 | Semantic | `foxctl run code/semantic_search --input '{"query":"...","scope":["memories"]}'` | Uses embedding-backed retrieval pipeline |
+
+### Named-Memory Recall
+
+Shared named-memory recall lives in
+`internal/intelligence/retrieval/memoryrecall`. It combines lexical search,
+vector search, result fusion, lifecycle policy, and evidence shaping for
+`memory/query` and RLM `retrieve_memory`.
+
+Lexical recall searches summary, atomic text, entities, and keywords. Query
+stop words are filtered before matching so common terms do not crowd out
+specific entities, actions, and decisions.
+
+For LongMem-style ingestion, searchable and embedded fields should contain only
+conversation-derived memory content. Expected answers, evidence labels, case
+IDs, and eval metadata must stay in provenance or artifact fields, not in
+summary, atomic text, entities, keywords, or embedding input.
 
 ### Memory Decay
 
@@ -107,6 +125,16 @@ Defaults and overrides come from config + semantic provider logic.
 | `FOXCTL_EMBEDDING_MODEL_TEXT` | Text-scope fallback override |
 | `FOXCTL_EMBEDDING_RATE_LIMIT` | Provider-side request rate control |
 
+Named-memory embedding jobs are processed by the shared processor in
+`internal/intelligence/indexing/embedding/processor.go`. LongMem ingestion
+should enqueue work with the configured provider/model/dimension metadata and
+let that processor validate and write embeddings. Do not add direct ingestion
+embedder calls for benchmark records.
+
+Daemon poll ticks also drain a bounded batch of `kind=memory` embedding jobs for
+the daemon workspace through the same processor. This is an operational drain
+for queued named-memory jobs, not a LongMemEval scoring command.
+
 ## Operational Examples
 
 ```bash
@@ -126,6 +154,7 @@ foxctl run code/semantic_search --input '{"query":"oauth gotcha","scope":["memor
 | Workspace canonicalization on all queries | Prevents duplicate/missed entries across path variants |
 | Unique `(name, workspace)` key | Stable upsert/get behavior |
 | Embedding dimension validation | Prevents mixed-model vector corruption |
+| Benchmark metadata excluded from searchable memory fields | Prevents LongMem expected-answer or evidence-label leakage |
 | Envelope payloads stored as memory result blobs | Preserves replayable command context |
 
 ## Failure Modes

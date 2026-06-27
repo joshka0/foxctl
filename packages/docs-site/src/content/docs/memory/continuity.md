@@ -163,6 +163,54 @@ Large continuity packs are persisted to CAS and returned as an artifact digest.
 This keeps prompt-sized surfaces small while preserving a stable pointer to the
 full pack for later expansion.
 
+## Detached transcript dream worker
+
+The `foxctl dream` command family turns stable agent transcripts from Codex,
+Claude, Pi, and Hermes source roots into durable, reviewable memory. It is
+distinct from the curator maintenance loop (`FOXCTL_CURATOR_*` env vars) and
+from the retrieval-feedback memory-draft lane.
+
+Subcommands:
+
+| Subcommand | Purpose |
+|---|---|
+| `foxctl dream scan` | Preview transcript sources without consuming dream work (always dry-run) |
+| `foxctl dream run-once` | Scan, process one bounded batch, persist named-memory records, and (optionally) write Obsidian dream notes |
+| `foxctl dream watch` | Run the same pipeline on a ticker until canceled or `--duration` elapses |
+
+Source roots are configured with `--codex-home`, `--claude-dir`, `--pi-root`,
+and `--hermes-root`. Stability, dedupe, and retry bounds are enforced through
+the shared transcript ledger; only stable files (unchanged across the quiet
+window) are processed.
+
+Output surfaces:
+
+- Named-memory records written through the shared history persistence seam.
+- Obsidian dream notes under
+  `inbox/drafted-from-foxctl/dreams/<project>/<YYYY-MM-DD>/` when
+  `--vault-path` is set with `--write-dream-notes`.
+- An optional incremental index update when `--index-dream-notes` is enabled
+  (default true once `--write-dream-notes` is on).
+- An optional memory blur pass through a real agent when `--blur-dreams` is set
+  with `--vault-path`; supported backends are `pi` (default), `hermes`, `claude`,
+  `foxctl`, or a custom `--blur-agent-command`.
+
+Example: bounded dry run followed by an Obsidian write with blur.
+
+```bash
+foxctl dream scan --dry-run
+foxctl dream run-once \
+  --vault-path "$HOME/vault" \
+  --write-dream-notes \
+  --blur-dreams \
+  --blur-agent pi
+```
+
+Idempotency: re-running the worker does not duplicate named-memory records,
+dream notes, or processed-source ledger rows. Raw transcript content is never
+written to Obsidian notes by default — only distilled summaries, blurred
+mechanisms, source references, and review metadata.
+
 ## Named memory
 
 Named memory is a typed evidence layer stored in `memory.db`. It provides

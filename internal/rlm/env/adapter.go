@@ -36,6 +36,7 @@ import (
 type ReadOnlyAdapter struct {
 	cfg           config.Config
 	workspaceRoot string
+	workspaceID   string
 	vaultPath     string
 	companionDB   *sql.DB
 	environment   rlm.Environment
@@ -54,6 +55,13 @@ func NewReadOnlyAdapter(cfg config.Config, workspaceRoot, vaultPath string, comp
 		companionDB:   companionDB,
 		environment:   env,
 	}
+}
+
+// SetWorkspaceID overrides the workspace ID used by lane retrieval tools.
+// This is needed by eval tenants that are keyed by an opaque workspace ID
+// rather than by the filesystem path passed as WorkspaceRoot.
+func (a *ReadOnlyAdapter) SetWorkspaceID(workspaceID string) {
+	a.workspaceID = strings.TrimSpace(workspaceID)
 }
 
 // SetContextEngineStore wires the contextengine SQLite store used by the
@@ -203,6 +211,8 @@ func (a *ReadOnlyAdapter) executeInternal(ctx context.Context, name string, args
 		return a.memoryEnsembleRetrieve(ctx, args)
 	case "code_search_ensemble":
 		return a.codeSearchEnsemble(ctx, args)
+	case "plan_context_query":
+		return a.planContextQuery(ctx, args)
 	case "search_scenes":
 		return a.searchScenes(ctx, args)
 	case "get_scene":
@@ -219,6 +229,8 @@ func (a *ReadOnlyAdapter) executeInternal(ctx context.Context, name string, args
 		return a.retrieveTask(ctx, args)
 	case "gather_context":
 		return a.gatherContext(ctx, args)
+	case "gather_memory_context":
+		return a.gatherMemoryContext(ctx, args)
 	case "gather_test_context":
 		return a.gatherTestContext(ctx, args)
 	case "gather_docs_context":
@@ -229,6 +241,10 @@ func (a *ReadOnlyAdapter) executeInternal(ctx context.Context, name string, args
 		return a.retrieveMixed(ctx, args)
 	case "load_evidence_ref":
 		return a.loadEvidenceRef(ctx, args)
+	case "aggregate_evidence_refs":
+		return a.aggregateEvidenceRefs(ctx, args)
+	case "evidence_ledger":
+		return a.evidenceLedger(ctx, args)
 	default:
 		return nil, fmt.Errorf("rlm env adapter: unknown tool %q", name)
 	}

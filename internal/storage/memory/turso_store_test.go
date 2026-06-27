@@ -495,6 +495,80 @@ func TestTursoLocalSearchResultsProjectToCanonicalMemoryRecord(t *testing.T) {
 	assertCanonicalSearchRecord(t, record)
 }
 
+func TestTursoLocalSearchIgnoresStopWordOnlyQuery(t *testing.T) {
+	ctx := context.Background()
+	store := openLocalTursoOrSkip(t, ctx)
+	defer func() { _ = store.Close() }()
+
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2026-05-04T12:00:00Z"},"error":{}}`)
+	if _, err := store.SaveFromResult(ctx, "common-token-memory", "semantic_fact", "ws", "Works with existing recall records.", result); err != nil {
+		t.Fatalf("save memory: %v", err)
+	}
+
+	results, err := store.Search(ctx, "ws", "with", 10)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("Search returned %d results for stop-word-only query, want 0: %#v", len(results), results)
+	}
+}
+
+func TestTursoLocalSearchUsesAtomicTextEntitiesAndKeywords(t *testing.T) {
+	ctx := context.Background()
+	store := openLocalTursoOrSkip(t, ctx)
+	defer func() { _ = store.Close() }()
+
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2026-05-04T12:00:00Z"},"error":{}}`)
+	if _, err := store.SaveFromResult(ctx, "plain-memory", "semantic_fact", "ws", "plain summary", result); err != nil {
+		t.Fatalf("save plain memory: %v", err)
+	}
+	if _, err := store.SaveFromResult(ctx, "atomic-memory", "semantic_fact", "ws", "generic summary", result); err != nil {
+		t.Fatalf("save atomic memory: %v", err)
+	}
+	if err := store.UpdateAtomic(
+		ctx, "atomic-memory", "ws",
+		"Use the local embedder for repository retrieval checks.",
+		[]string{"RepositoryMemory", "Embedder"},
+		[]string{"retrieval", "reranker"},
+	); err != nil {
+		t.Fatalf("update atomic: %v", err)
+	}
+
+	results, err := store.Search(ctx, "ws", "embedder reranker", 10)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("Search returned %d results, want 1: %#v", len(results), results)
+	}
+	entry := results[0].Entry
+	if entry.Name != "atomic-memory" {
+		t.Fatalf("Search returned %q, want atomic-memory", entry.Name)
+	}
+	if entry.AtomicText == "" || !containsString(entry.Entities, "Embedder") || !containsString(entry.Keywords, "reranker") {
+		t.Fatalf("atomic fields were not projected in search result: %#v", entry)
+	}
+}
+
+func TestTursoLocalSearchRejectsCorruptAtomicJSON(t *testing.T) {
+	ctx := context.Background()
+	store := openLocalTursoOrSkip(t, ctx)
+	defer func() { _ = store.Close() }()
+
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2026-05-04T12:00:00Z"},"error":{}}`)
+	if _, err := store.SaveFromResult(ctx, "corrupt-atomic", "semantic_fact", "ws", "search summary", result); err != nil {
+		t.Fatalf("save corrupt atomic: %v", err)
+	}
+	if _, err := store.db.ExecContext(ctx, `UPDATE named_memory SET entities = ? WHERE name = ? AND workspace = ?`, `["search"`, "corrupt-atomic", "ws"); err != nil {
+		t.Fatalf("corrupt entities: %v", err)
+	}
+
+	if _, err := store.Search(ctx, "ws", "search", 10); err == nil || !strings.Contains(err.Error(), "scan entities") {
+		t.Fatalf("Search() error=%v, want scan entities error", err)
+	}
+}
+
 func TestTursoLocalVectorSearchResultsProjectToCanonicalMemoryRecord(t *testing.T) {
 	ctx := context.Background()
 	store := openLocalTursoOrSkip(t, ctx)

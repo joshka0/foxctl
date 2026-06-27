@@ -135,7 +135,8 @@ func newTestClient() (*foxcular.Client, *captureDrain, *stubClock, *stubIDs) {
 	clock := &stubClock{times: []time.Time{ts, ts.Add(50 * time.Millisecond)}}
 	ids := &stubIDs{ids: []string{"trace-001", "span-001", "span-002", "span-003", "trace-002", "span-child-001"}}
 	drain := &captureDrain{}
-	client := foxcular.NewClient(drain,
+	client := foxcular.NewClient(
+		drain,
 		foxcular.WithClock(clock),
 		foxcular.WithIDGenerator(ids),
 	)
@@ -394,7 +395,8 @@ func TestMultipleDrainsAreIsolated(t *testing.T) {
 	ts := time.Date(2026, 1, 15, 10, 30, 0, 0, time.UTC)
 	clock := &stubClock{times: []time.Time{ts}}
 	ids := &stubIDs{ids: []string{"t1", "s1"}}
-	client := foxcular.NewClient(fanout,
+	client := foxcular.NewClient(
+		fanout,
 		foxcular.WithClock(clock),
 		foxcular.WithIDGenerator(ids),
 	)
@@ -437,7 +439,8 @@ func TestBestEffortDrainFailureDoesNotCrash(t *testing.T) {
 	ts := time.Date(2026, 1, 15, 10, 30, 0, 0, time.UTC)
 	clock := &stubClock{times: []time.Time{ts}}
 	ids := &stubIDs{ids: []string{"t1", "s1"}}
-	client := foxcular.NewClient(fanout,
+	client := foxcular.NewClient(
+		fanout,
 		foxcular.WithClock(clock),
 		foxcular.WithIDGenerator(ids),
 	)
@@ -468,7 +471,8 @@ func TestSynchronousEmitSurfacesErrors(t *testing.T) {
 	ts := time.Date(2026, 1, 15, 10, 30, 0, 0, time.UTC)
 	clock := &stubClock{times: []time.Time{ts}}
 	ids := &stubIDs{ids: []string{"t1", "s1"}}
-	client := foxcular.NewClient(drain,
+	client := foxcular.NewClient(
+		drain,
 		foxcular.WithClock(clock),
 		foxcular.WithIDGenerator(ids),
 	)
@@ -516,7 +520,8 @@ func TestCloseIsSafeAndIdempotent(t *testing.T) {
 	ts := time.Date(2026, 1, 15, 10, 30, 0, 0, time.UTC)
 	clock := &stubClock{times: []time.Time{ts}}
 	ids := &stubIDs{ids: []string{"t1", "s1"}}
-	client := foxcular.NewClient(drain,
+	client := foxcular.NewClient(
+		drain,
 		foxcular.WithClock(clock),
 		foxcular.WithIDGenerator(ids),
 	)
@@ -542,7 +547,8 @@ func TestContextCancellationBoundsBlockingOperations(t *testing.T) {
 	ts := time.Date(2026, 1, 15, 10, 30, 0, 0, time.UTC)
 	clock := &stubClock{times: []time.Time{ts}}
 	ids := &stubIDs{ids: []string{"t1", "s1"}}
-	client := foxcular.NewClient(drain,
+	client := foxcular.NewClient(
+		drain,
 		foxcular.WithClock(clock),
 		foxcular.WithIDGenerator(ids),
 	)
@@ -575,7 +581,8 @@ func TestContextCancellationBoundsBlockingOperations(t *testing.T) {
 func TestStartSpanAddsActiveSpanToContext(t *testing.T) {
 	client, _, _, _ := newTestClient()
 
-	ctx, span := client.StartSpan(context.Background(), "test.op",
+	ctx, span := client.StartSpan(
+		context.Background(), "test.op",
 		foxcular.WithSpanName("TestOp"),
 	)
 
