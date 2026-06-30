@@ -1,0 +1,18 @@
+apiVersion: foxctl/v1
+kind: Skill
+metadata:
+  name: sandbox/echo
+  description: Echo skill that runs inside a k8s sandbox pod
+  version: 0.1.0
+  author: foxctl
+  tags: [sandbox, test, k8s]
+distribution:
+  type: k8s-sandbox
+  exec:
+    entry: >-
+      printf '{"version":1,"status":"ok","command":"sandbox/echo","data":{"echoed":"hello"},"meta":{"ts":"2026-01-01T00:00:00Z"}}'
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: sandbox/echo
