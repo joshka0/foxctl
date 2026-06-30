@@ -3,21 +3,19 @@
 // Each agent session gets its own sandbox pod. The sandbox is created when
 // the session starts and reused for all skill executions within that session.
 // On session end, the sandbox is deleted (or hibernated if configured).
-package sandbox
+package k8ssandbox
 
 import (
 	"context"
 	"fmt"
 	"sync"
 	"time"
-
-	"github.com/joshka0/foxctl/internal/runtime/execution/k8ssandbox"
 )
 
 // SessionManager manages per-session sandbox lifecycle.
 // Each agent session maps to one sandbox pod that persists across skill calls.
 type SessionManager struct {
-	cfg      k8ssandbox.Config
+	cfg      Config
 	mu       sync.Mutex
 	sessions map[string]*SessionSandbox
 }
@@ -25,14 +23,14 @@ type SessionManager struct {
 // SessionSandbox wraps a k8s sandbox runner for a specific agent session.
 type SessionSandbox struct {
 	SessionID string
-	Runner    *k8ssandbox.Runner
+	Runner    *Runner
 	CreatedAt time.Time
 	LastUsed  time.Time
 	apiURL    string
 }
 
 // NewSessionManager creates a session-level sandbox manager.
-func NewSessionManager(cfg k8ssandbox.Config) *SessionManager {
+func NewSessionManager(cfg Config) *SessionManager {
 	return &SessionManager{
 		cfg:      cfg,
 		sessions: make(map[string]*SessionSandbox),
@@ -54,7 +52,7 @@ func (m *SessionManager) GetOrCreate(ctx context.Context, sessionID string) (*Se
 	// In direct mode, the APIURL is shared (pointing to the warm pool pod).
 	// In gateway mode, each session would get its own pod via SandboxClaim.
 	cfg := m.cfg
-	runner, err := k8ssandbox.NewRunner(ctx, cfg)
+	runner, err := NewRunner(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("session sandbox: create runner: %w", err)
 	}
@@ -71,7 +69,7 @@ func (m *SessionManager) GetOrCreate(ctx context.Context, sessionID string) (*Se
 }
 
 // Execute runs a command in the session's sandbox.
-func (ss *SessionSandbox) Execute(ctx context.Context, command string, input []byte, env []string) (*k8ssandbox.RawResult, error) {
+func (ss *SessionSandbox) Execute(ctx context.Context, command string, input []byte, env []string) (*RawResult, error) {
 	ss.LastUsed = time.Now()
 	return ss.Runner.ExecuteRaw(ctx, command, input, env)
 }

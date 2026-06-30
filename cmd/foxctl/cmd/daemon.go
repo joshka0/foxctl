@@ -171,6 +171,7 @@ func runDaemonStart(cmd *cobra.Command, background bool, workspace string) error
 	// Foreground mode - run the daemon
 	svc, err := daemon.NewService(cfg, daemon.ServiceOptions{
 		Workspace: workspace,
+		Sandbox:   daemon.SandboxFromEnv(),
 	})
 	if err != nil {
 		return fmt.Errorf("create service: %w", err)
