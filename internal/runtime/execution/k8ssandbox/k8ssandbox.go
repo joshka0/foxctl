@@ -39,7 +39,7 @@ func NewRunner(ctx context.Context, cfg Config) (*Runner, error) {
 		cfg.CommandTimeout = 5 * time.Minute
 	}
 
-	opts := sandbox.Options{}
+	opts := sandbox.Options{WarmPoolName: cfg.WarmPool}
 	switch strings.ToLower(cfg.Mode) {
 	case "gateway":
 		opts.GatewayName = cfg.GatewayName
