@@ -173,7 +173,10 @@ func TestStateComponent_PersistsAppliedWorkerState(t *testing.T) {
 
 func waitForPersistedWorker(t *testing.T, store *Store, workerID string) {
 	t.Helper()
-	deadline := time.Now().Add(500 * time.Millisecond)
+	// Use 5s deadline: the Run loop processes events asynchronously and may
+	// take longer under CI load (shared runners, memory pressure). The original
+	// 500ms timeout caused flakes in CI when the runner was under load.
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		record, err := store.Worker(context.Background(), coreworker.LookupRequest{WorkerID: workerID})
 		if err == nil && record.WorkerID == workerID {

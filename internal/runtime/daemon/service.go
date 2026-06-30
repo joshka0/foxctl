@@ -36,6 +36,7 @@ import (
 	ws "github.com/joshka0/foxctl/internal/platform/workspace"
 	llmproviders "github.com/joshka0/foxctl/internal/providers/llm"
 	"github.com/joshka0/foxctl/internal/runtime/curator"
+	"github.com/joshka0/foxctl/internal/runtime/execution/k8ssandbox"
 	"github.com/joshka0/foxctl/internal/runtime/execution/runner"
 	"github.com/joshka0/foxctl/internal/runtime/flow"
 	"github.com/joshka0/foxctl/internal/runtime/hooks"
@@ -61,6 +62,33 @@ import (
 type ServiceOptions struct {
 	// Workspace to pre-warm (optional).
 	Workspace string
+	// Sandbox configures k8s sandbox execution for skills.
+	// When set, the daemon routes k8s-sandbox skills through a session
+	// sandbox manager instead of local subprocess execution.
+	Sandbox *SandboxConfig
+}
+
+// SandboxConfig configures k8s agent-sandbox execution for the daemon.
+type SandboxConfig struct {
+	WarmPool  string
+	Namespace string
+	Mode      string // "direct", "port-forward", "gateway"
+	APIURL    string
+}
+
+// SandboxFromEnv builds SandboxConfig from FOXCTL_K8S_SANDBOX_* env vars.
+// Returns nil if sandbox execution is not configured.
+func SandboxFromEnv() *SandboxConfig {
+	warmPool := os.Getenv("FOXCTL_K8S_SANDBOX_WARMPOOL")
+	if warmPool == "" {
+		return nil
+	}
+	return &SandboxConfig{
+		WarmPool:  warmPool,
+		Namespace: os.Getenv("FOXCTL_K8S_SANDBOX_NAMESPACE"),
+		Mode:      os.Getenv("FOXCTL_K8S_SANDBOX_MODE"),
+		APIURL:    os.Getenv("FOXCTL_K8S_SANDBOX_API_URL"),
+	}
 }
 
 // Service is the main daemon service.
@@ -74,6 +102,9 @@ type Service struct {
 
 	// Skill resolution
 	skillResolver *SkillResolver
+
+	// K8s sandbox session manager (nil if sandbox mode is not configured)
+	sessionSandbox *k8ssandbox.SessionManager
 
 	// Shared resources
 	dbPool *sqliteutil.Pool
@@ -201,6 +232,16 @@ func NewService(cfg config.Config, opts ServiceOptions) (*Service, error) {
 	if opts.Workspace != "" {
 		svc.wg.Add(1)
 		go svc.warmWorkspace(opts.Workspace)
+	}
+
+	// Initialize k8s sandbox session manager if configured
+	if opts.Sandbox != nil {
+		svc.sessionSandbox = k8ssandbox.NewSessionManager(k8ssandbox.Config{
+			WarmPool:  opts.Sandbox.WarmPool,
+			Namespace: opts.Sandbox.Namespace,
+			Mode:      opts.Sandbox.Mode,
+			APIURL:    opts.Sandbox.APIURL,
+		})
 	}
 
 	return svc, nil
@@ -3258,7 +3299,7 @@ func (s *Service) startFlowEngine(ctx context.Context) error {
 	// Build the executor registry. Start with a skill executor that routes
 	// through the daemon's skill resolver (the same path as `foxctl run`).
 	executors := map[flow.NodeKind]flow.NodeExecutor{
-		flow.NodeSkill:     &daemonSkillExecutor{resolver: s.skillResolver, cfg: s.cfg, workspace: s.opts.Workspace},
+		flow.NodeSkill:     &daemonSkillExecutor{resolver: s.skillResolver, cfg: s.cfg, workspace: s.opts.Workspace, sessionSandbox: s.sessionSandbox},
 		flow.NodeTransform: &flow.TransformExecutor{},
 		flow.NodeAgent: &flow.AgentExecutor{
 			Spawner:   s.selectAgentSpawner(s.opts.Workspace),
@@ -3385,7 +3426,7 @@ func (s *Service) resolveFlowEngine(ctx context.Context, workspace string) (*flo
 
 	// Build executors for the workspace engine.
 	executors := map[flow.NodeKind]flow.NodeExecutor{
-		flow.NodeSkill:     &daemonSkillExecutor{resolver: s.skillResolver, cfg: s.cfg, workspace: absWS},
+		flow.NodeSkill:     &daemonSkillExecutor{resolver: s.skillResolver, cfg: s.cfg, workspace: absWS, sessionSandbox: s.sessionSandbox},
 		flow.NodeTransform: &flow.TransformExecutor{},
 		flow.NodeAgent: &flow.AgentExecutor{
 			Spawner:   s.selectAgentSpawner(absWS),
@@ -3473,9 +3514,10 @@ func (s *Service) resolveFlowEngineForFlowID(flowID string) (*flow.Engine, bool)
 // daemonSkillExecutor executes skill nodes by delegating to the daemon's
 // skill resolver and runner pipeline.
 type daemonSkillExecutor struct {
-	resolver  *SkillResolver
-	cfg       config.Config
-	workspace string
+	resolver       *SkillResolver
+	cfg            config.Config
+	workspace      string
+	sessionSandbox *k8ssandbox.SessionManager
 }
 
 func (e *daemonSkillExecutor) Execute(ctx context.Context, node flow.FlowNode, input any) (flow.NodeOutput, error) {

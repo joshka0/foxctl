@@ -29,6 +29,14 @@ func ResolveArtifactPath(dir string, manifest Manifest, opts ArtifactOptions) (s
 		if isFile(path) {
 			return path, nil
 		}
+	case "k8s-sandbox":
+		// k8s-sandbox skills don't have a local binary artifact.
+		// The command to execute inside the sandbox is derived from
+		// the skill binary name or a default entry point.
+		if manifest.Distribution.Exec != nil && manifest.Distribution.Exec.Entry != "" {
+			return manifest.Distribution.Exec.Entry, nil
+		}
+		return filepath.Join(dir, "bin"), nil
 	default:
 		return "", fmt.Errorf("unsupported distribution %q", manifest.Distribution.Type)
 	}

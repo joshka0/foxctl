@@ -208,6 +208,12 @@ func validateManifest(m Manifest) error {
 		if m.Distribution.WASI == nil || m.Distribution.WASI.Module == "" {
 			return fmt.Errorf("wasi module required")
 		}
+	case "k8s-sandbox":
+		// k8s-sandbox uses the exec.entry as the command to run inside
+		// the sandbox pod. No local binary is needed.
+		if m.Distribution.Exec == nil || m.Distribution.Exec.Entry == "" {
+			return fmt.Errorf("exec entry required (command for sandbox)")
+		}
 	default:
 		return fmt.Errorf("unknown distribution type %q", m.Distribution.Type)
 	}

@@ -1,0 +1,18 @@
+apiVersion: foxctl/v1
+kind: Skill
+metadata:
+  name: sandbox/echo
+  description: Echo skill that runs inside a k8s sandbox pod
+  version: 0.1.0
+  author: foxctl
+  tags: [sandbox, test, k8s]
+distribution:
+  type: k8s-sandbox
+  exec:
+    entry: >-
+      python3 -c "import json,subprocess; r=subprocess.run(['go','test','-count=1','-timeout','60s','./internal/domain/skill/...'],cwd='/workspace/repo',capture_output=True,text=True); print(json.dumps({'version':1,'status':'ok','command':'go-test','data':{'exit_code':r.returncode,'passed':r.returncode==0,'last_line':r.stdout.strip().split(chr(10))[-1] if r.stdout else ''},'meta':{'ts':'2026-01-01T00:00:00Z'}}))"
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: sandbox/echo
