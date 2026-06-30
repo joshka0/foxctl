@@ -4,67 +4,29 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
-	"github.com/joshka0/foxctl/internal/runtime/execution"
 	"github.com/joshka0/foxctl/internal/runtime/execution/k8ssandbox"
-	sandbox "sigs.k8s.io/agent-sandbox/clients/go/sandbox"
 )
 
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	// Direct mode: connect straight to the sandbox runtime HTTP server.
-	// Bypasses sandbox-router-svc discovery which requires a stable service selector.
-	opts := sandbox.Options{
-		WarmPoolName: "foxctl-test-pool",
-		APIURL:       "http://10.42.0.13:8888",
+	// Direct mode with pod IP from env or arg
+	podIP := os.Getenv("SANDBOX_POD_IP")
+	if podIP == "" {
+		podIP = "10.42.0.116"
 	}
+	apiURL := fmt.Sprintf("http://%s:8888", podIP)
+	fmt.Printf("Connecting to: %s\n", apiURL)
 
-	client, err := sandbox.NewClient(ctx, opts)
-	if err != nil {
-		log.Fatalf("NewClient: %v", err)
-	}
-
-	sb, err := client.CreateSandbox(ctx, "foxctl-test-pool", "agent-sandbox-demo")
-	if err != nil {
-		log.Fatalf("CreateSandbox: %v", err)
-	}
-	defer sb.Close(ctx)
-
-	// Test 1: Simple echo command
-	result, err := sb.Run(ctx, "echo 'Hello from agent-sandbox!'")
-	if err != nil {
-		log.Fatalf("Run(echo): %v", err)
-	}
-	fmt.Printf("Test 1 - echo:\n  ExitCode: %d\n  Stdout: %s\n", result.ExitCode, result.Stdout)
-
-	// Test 2: Write a file then read it back
-	err = sb.Write(ctx, "test.txt", []byte("sandbox file content"))
-	if err != nil {
-		log.Fatalf("Write: %v", err)
-	}
-	data, err := sb.Read(ctx, "test.txt")
-	if err != nil {
-		log.Fatalf("Read: %v", err)
-	}
-	fmt.Printf("Test 2 - file I/O:\n  Written: 'sandbox file content'\n  Read back: '%s'\n", string(data))
-
-	// Test 3: Run a Python one-liner (python-runtime-sandbox image has python3)
-	result, err = sb.Run(ctx, "python3 -c \"print(2+2)\"")
-	if err != nil {
-		log.Fatalf("Run(python): %v", err)
-	}
-	fmt.Printf("Test 3 - python3:\n  ExitCode: %d\n  Stdout: %s\n", result.ExitCode, result.Stdout)
-
-	// Test 4: Execute via the k8ssandbox Runner (tests our SkillExecutor impl)
-	fmt.Println("\n--- Testing k8ssandbox.Runner ---")
 	runner, err := k8ssandbox.NewRunner(ctx, k8ssandbox.Config{
 		WarmPool:       "foxctl-test-pool",
 		Namespace:      "agent-sandbox-demo",
 		Mode:           "direct",
-		APIURL:         "http://10.42.0.13:8888",
+		APIURL:         apiURL,
 		CommandTimeout: 30 * time.Second,
 	})
 	if err != nil {
@@ -72,13 +34,33 @@ func main() {
 	}
 	defer runner.Close(ctx)
 
-	execResult, err := runner.Execute(ctx, execution.ExecuteOptions{
-		ArtifactPath: "echo 'Skill execution via k8ssandbox runner!'",
-	})
+	// Test echo
+	result, err := runner.ExecuteRaw(ctx, "echo 'Hello via k8ssandbox runner!'", nil, nil)
 	if err != nil {
-		log.Fatalf("Runner.Execute: %v", err)
+		log.Fatalf("ExecuteRaw: %v", err)
 	}
-	fmt.Printf("Test 4 - Runner:\n  ExitCode: %d\n  Stdout: %s\n", execResult.ExitCode, execResult.Stdout)
+	fmt.Printf("ExitCode: %d\nStdout: %s\n", result.ExitCode, result.Stdout)
+
+	// Test python
+	result2, err := runner.ExecuteRaw(ctx, "python3 -c \"print(2+2)\"", nil, nil)
+	if err != nil {
+		log.Fatalf("ExecuteRaw(python): %v", err)
+	}
+	fmt.Printf("Python 2+2: %s\n", result2.Stdout)
+
+	// Test env vars
+	result3, err := runner.ExecuteRaw(ctx, "echo $MY_VAR", nil, []string{"MY_VAR=hello_from_foxctl"})
+	if err != nil {
+		log.Fatalf("ExecuteRaw(env): %v", err)
+	}
+	fmt.Printf("Env var: %s\n", result3.Stdout)
+
+	// Test file I/O via stdin
+	result4, err := runner.ExecuteRaw(ctx, "cat input.json", []byte(`{"test":"data"}`), nil)
+	if err != nil {
+		log.Fatalf("ExecuteRaw(file): %v", err)
+	}
+	fmt.Printf("File read: %s\n", result4.Stdout)
 
 	fmt.Println("\nAll tests passed!")
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/joshka0/foxctl/internal/platform/env"
 	"github.com/joshka0/foxctl/internal/platform/workspace"
 	execrunner "github.com/joshka0/foxctl/internal/runtime/execution/exec"
+	k8ssandbox "github.com/joshka0/foxctl/internal/runtime/execution/k8ssandbox"
 	wasirunner "github.com/joshka0/foxctl/internal/runtime/execution/wasi"
 )
 
@@ -113,6 +114,32 @@ func RunWithOptions(ctx context.Context, opts RunOptions) ([]byte, []byte, error
 		// Set working directory to workspace so skills can detect git repo, etc.
 		r.Options.WorkDir = workDir
 		return r.Run(ctx, opts.Input)
+	case "k8s-sandbox":
+		// k8s-sandbox runs commands inside a Kubernetes agent-sandbox pod.
+		// Config is read from FOXCTL_K8S_SANDBOX_* environment variables.
+		sbRunner, err := k8ssandbox.NewRunner(ctx, k8ssandbox.Config{
+			WarmPool:         os.Getenv("FOXCTL_K8S_SANDBOX_WARMPOOL"),
+			Namespace:        os.Getenv("FOXCTL_K8S_SANDBOX_NAMESPACE"),
+			Mode:             os.Getenv("FOXCTL_K8S_SANDBOX_MODE"),
+			APIURL:           os.Getenv("FOXCTL_K8S_SANDBOX_API_URL"),
+			GatewayName:      os.Getenv("FOXCTL_K8S_SANDBOX_GATEWAY"),
+			GatewayNamespace: os.Getenv("FOXCTL_K8S_SANDBOX_GATEWAY_NS"),
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("k8s-sandbox runner init: %w", err)
+		}
+		defer sbRunner.Close(ctx)
+		// ArtifactPath is the command to execute inside the sandbox.
+		command := opts.ArtifactPath
+		if command == "" {
+			return nil, nil, fmt.Errorf("k8s-sandbox requires artifact_path (command to execute)")
+		}
+		// The sandbox runner implements the SkillExecutor interface.
+		sbResult, err := sbRunner.ExecuteRaw(ctx, command, opts.Input, append(buildSkillEnv(nil, ws, true), opts.ExtraEnv...))
+		if err != nil {
+			return nil, nil, fmt.Errorf("k8s-sandbox execute: %w", err)
+		}
+		return sbResult.Stdout, sbResult.Stderr, nil
 	default:
 		return nil, nil, fmt.Errorf("unsupported distribution type %q", opts.Manifest.Distribution.Type)
 	}

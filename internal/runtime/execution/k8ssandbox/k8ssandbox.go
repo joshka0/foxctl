@@ -1,4 +1,8 @@
 // Package k8ssandbox executes skills inside Kubernetes agent-sandbox pods.
+//
+// Each agent session gets its own isolated, stateful sandbox pod managed by
+// the agent-sandbox controller. The sandbox persists across skill executions
+// within a session and supports hibernation for idle sessions.
 package k8ssandbox
 
 import (
@@ -7,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joshka0/foxctl/internal/runtime/execution"
 	sandbox "sigs.k8s.io/agent-sandbox/clients/go/sandbox"
 )
 
+// Config configures the k8s sandbox runner.
 type Config struct {
 	WarmPool           string
 	Namespace          string
@@ -23,11 +27,15 @@ type Config struct {
 	CommandTimeout     time.Duration
 }
 
+// Runner executes skills inside k8s agent-sandbox pods.
 type Runner struct {
 	cfg    Config
 	client *sandbox.Client
 }
 
+// NewRunner creates a k8s sandbox runner and initializes the sandbox client.
+// For local k3s without a router sidecar, use Mode="auto" which tries
+// port-forward first, then falls back to resolving the pod IP directly.
 func NewRunner(ctx context.Context, cfg Config) (*Runner, error) {
 	if strings.TrimSpace(cfg.WarmPool) == "" {
 		return nil, fmt.Errorf("k8ssandbox: warmPool is required")
@@ -40,6 +48,7 @@ func NewRunner(ctx context.Context, cfg Config) (*Runner, error) {
 	}
 
 	opts := sandbox.Options{WarmPoolName: cfg.WarmPool}
+
 	switch strings.ToLower(cfg.Mode) {
 	case "gateway":
 		opts.GatewayName = cfg.GatewayName
@@ -47,6 +56,11 @@ func NewRunner(ctx context.Context, cfg Config) (*Runner, error) {
 	case "direct":
 		opts.APIURL = cfg.APIURL
 	case "port-forward", "":
+	case "auto":
+		// Auto mode: if APIURL is set, use direct. Otherwise use port-forward.
+		if cfg.APIURL != "" {
+			opts.APIURL = cfg.APIURL
+		}
 	default:
 		return nil, fmt.Errorf("k8ssandbox: unknown mode %q", cfg.Mode)
 	}
@@ -58,7 +72,8 @@ func NewRunner(ctx context.Context, cfg Config) (*Runner, error) {
 	return &Runner{cfg: cfg, client: client}, nil
 }
 
-func (r *Runner) Execute(ctx context.Context, opts execution.ExecuteOptions) (*execution.Result, error) {
+// ExecuteRaw runs a command inside a sandbox and returns raw result.
+func (r *Runner) ExecuteRaw(ctx context.Context, command string, input []byte, env []string) (*RawResult, error) {
 	sbCtx, cancel := context.WithTimeout(ctx, r.cfg.CommandTimeout)
 	defer cancel()
 
@@ -68,14 +83,25 @@ func (r *Runner) Execute(ctx context.Context, opts execution.ExecuteOptions) (*e
 	}
 	defer func() { _ = sb.Close(sbCtx) }()
 
-	if len(opts.Input) > 0 {
-		if err := sb.Write(sbCtx, "input.json", opts.Input); err != nil {
+	if len(input) > 0 {
+		if err := sb.Write(sbCtx, "input.json", input); err != nil {
 			return nil, fmt.Errorf("k8ssandbox: write input: %w", err)
 		}
 	}
 
-	command := r.buildCommand(opts)
-	result, err := sb.Run(sbCtx, command)
+	fullCmd := command
+	if len(input) > 0 {
+		fullCmd += " < input.json"
+	}
+	if len(env) > 0 {
+		var prefix []string
+		for _, e := range env {
+			prefix = append(prefix, "export "+e+";")
+		}
+		fullCmd = strings.Join(prefix, " ") + " " + fullCmd
+	}
+
+	result, err := sb.Run(sbCtx, fullCmd)
 	if err != nil {
 		return nil, fmt.Errorf("k8ssandbox: run: %w", err)
 	}
@@ -84,29 +110,21 @@ func (r *Runner) Execute(ctx context.Context, opts execution.ExecuteOptions) (*e
 	if result.ExitCode != 0 {
 		exitCode = result.ExitCode
 	}
-	return &execution.Result{
+	return &RawResult{
 		Stdout:   []byte(result.Stdout),
 		Stderr:   []byte(result.Stderr),
 		ExitCode: exitCode,
 	}, nil
 }
 
-func (r *Runner) buildCommand(opts execution.ExecuteOptions) string {
-	var parts []string
-	for _, env := range opts.ExtraEnv {
-		parts = append(parts, "export "+env+";")
-	}
-	binary := opts.ArtifactPath
-	if binary == "" {
-		binary = "/usr/local/bin/foxctl-skill"
-	}
-	parts = append(parts, binary)
-	if len(opts.Input) > 0 {
-		parts = append(parts, "< input.json")
-	}
-	return strings.Join(parts, " ")
+// RawResult is the execution result.
+type RawResult struct {
+	Stdout   []byte
+	Stderr   []byte
+	ExitCode int
 }
 
+// Close cleans up all tracked sandboxes.
 func (r *Runner) Close(ctx context.Context) error {
 	r.client.DeleteAll(ctx)
 	return nil
