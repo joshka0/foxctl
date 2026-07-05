@@ -199,7 +199,9 @@ func TestReadConsoleEventStreamPropagatesContextCancellation(t *testing.T) {
 
 	select {
 	case <-canceled:
-	case <-time.After(1 * time.Second):
+	// Generous failsafe: the happy path fires in ~20ms. A tight bound flakes
+	// only when the scheduler is starved under a full parallel test run.
+	case <-time.After(10 * time.Second):
 		t.Fatal("handler context was not canceled")
 	}
 }

@@ -457,10 +457,41 @@ Notes:
 # Standard workflow
 git checkout -b feat/my-feature
 # ... make changes ...
-make check  # fmt, lint, vet, test
+task ready  # build -> reindex -> check (fmt, lint, vet, test, coverage, doc links)
 git push -u origin feat/my-feature
 gh pr create
 ```
+
+---
+
+## Developer Workflow (Taskfile)
+
+Day-to-day work goes through the **Taskfile** (`task ...`), which makes the
+repo-index refresh a first-class, hard-to-forget step. Code changes that are not
+paired with a reindex silently rot `index repo search` / `smart_search` (a stale
+index returns fuzzy misses instead of the symbol you changed).
+
+Install the runner once: `go install github.com/go-task/task/v3/cmd/task@latest`
+(needs `go` on PATH, e.g. `/usr/local/go/bin`). Then:
+
+| Command | Purpose |
+|---------|---------|
+| `task build` | Compile binaries **and** refresh the index (the everyday build) |
+| `task ready` | The deliberate "I changed code" gate: `build` → `reindex` → `check` |
+| `task reindex` | Incremental index refresh (fast; changed files only) |
+| `task reindex:full` | Full index rebuild (after a schema change or a stale index) |
+| `task index:check` | Warn when the index is stale vs the working tree |
+| `task check` | Local gate: fmt, vet, lint, test, coverage, doc links, hygiene, index freshness |
+| `task hooks:install` | Install git hooks (pre-commit + auto-reindex on merge/checkout) |
+| `task make -- <target>` | Escape hatch to any Makefile target (gepa-*, eval-*, ts-*, gui-*, the full test matrix) |
+
+The **Makefile remains the source of truth** for the long tail; the Taskfile
+only owns the core daily loop and delegates the rest via `task make -- <target>`.
+After `task hooks:install`, `post-merge` / `post-checkout` hooks auto-reindex in
+the background so pulls and branch switches keep search current.
+
+- Getting a stale-index miss? Run `task reindex` (or `task reindex:full` if the
+  index predates a builder change).
 
 ---
 
@@ -662,9 +693,13 @@ when you don't have specific files.
 # Find and extract code about a topic
 foxctl run code/smart_search --input '{"query": "how does session restore work"}'
 
-# With file pattern filter
-foxctl run code/smart_search --input '{"query": "error types", "glob": "*.go"}'
+# Restrict the candidate sources (default: ["symbols", "ripgrep"])
+foxctl run code/smart_search --input '{"question": "error types", "sources": ["symbols", "ripgrep"]}'
 ```
+
+`smart_search` has no path/glob filter — scope it via `sources` and
+`repo_index_mode` (`off` | `search` | `dag`). `query` is accepted as an alias
+for `question`; the canonical field is `question`.
 
 **Output:** Extracted snippets with full context (function bodies, surrounding
 code).
@@ -683,15 +718,17 @@ foxctl run code/snippet_extract --input '{
   ]
 }'
 
-# With masked mode (structure only)
+# Force full inline output instead of a CAS artifact for large results
 foxctl run code/snippet_extract --input '{
-  "query": "API endpoints",
+  "question": "API endpoints",
   "candidates": [{"path": "cmd/server/routes.go"}],
-  "mode": "masked"
+  "inline_mode": "full"
 }'
 ```
 
-**Modes:** `snippets` (default), `masked` (structure), `flow` (control flow).
+`question` is the canonical field (`query` is accepted as an alias). Output
+verbosity is controlled by `inline_mode`: `auto` (default), `full`, `preview`,
+or `artifact_only`.
 
 ### codemap/get — Retrieve Stored Codemap
 
@@ -739,7 +776,7 @@ foxctl run code/context_ripgrep --input '{"pattern": "func.*Handle", "path": "."
 foxctl run code/context_ripgrep --input '{
   "pattern": "class.*Service",
   "path": "src/",
-  "glob": "*.py"
+  "glob": ["*.py"]
 }'
 ```
 

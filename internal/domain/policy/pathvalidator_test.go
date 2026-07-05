@@ -146,6 +146,40 @@ func TestPathValidator_AllowedRoots(t *testing.T) {
 	assert.ErrorIs(t, err, policy.ErrPathEscape)
 }
 
+// A vanished/un-canonicalizable additional allowed root (e.g. a transient
+// /tmp/foxctl-* dir removed between the caller's glob and construction) must be
+// skipped rather than aborting the validator — additional roots are best-effort
+// and skipping is fail-closed. The valid workspace must still work.
+func TestPathValidator_SkipsUnresolvableAllowedRoots(t *testing.T) {
+	workspace := t.TempDir()
+	shared := t.TempDir()
+	missing := filepath.Join(t.TempDir(), "was-removed")
+
+	validator, err := policy.NewPathValidator(workspace, []string{missing, shared})
+	require.NoError(t, err)
+
+	resolved, err := validator.ValidatePath(filepath.Join("notes", "todo.txt"))
+	require.NoError(t, err)
+	assertPathWithin(t, validator.Workspace(), resolved)
+
+	// The surviving allowed root is still honored.
+	resolved, err = validator.ValidatePath(filepath.Join(shared, "shared.txt"))
+	require.NoError(t, err)
+	assertPathWithinAllowedRoots(t, validator.AllowedRoots(), resolved)
+
+	// The missing root conferred no access, so paths under it are rejected.
+	_, err = validator.ValidatePath(filepath.Join(missing, "leak.txt"))
+	require.Error(t, err)
+}
+
+// The primary workspace remains a hard requirement even after the allowed-root
+// tolerance above.
+func TestPathValidator_MissingWorkspaceStillErrors(t *testing.T) {
+	missingWorkspace := filepath.Join(t.TempDir(), "does-not-exist")
+	_, err := policy.NewPathValidator(missingWorkspace, nil)
+	require.Error(t, err)
+}
+
 func TestPathValidator_PartialMatchPrevention(t *testing.T) {
 	base := t.TempDir()
 	workspace := filepath.Join(base, "workspace")
