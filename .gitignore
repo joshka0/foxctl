@@ -144,3 +144,6 @@ sha256:*
 go.work
 go.work.sum
 bench-turbovec-real
+
+# go-task checksum cache
+/.task/

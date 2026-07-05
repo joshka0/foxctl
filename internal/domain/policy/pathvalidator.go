@@ -56,12 +56,18 @@ func NewPathValidator(workspace string, allowedRoots []string) (*PathValidator, 
 
 		absRoot, err := filepath.Abs(root)
 		if err != nil {
-			return nil, fmt.Errorf("resolve root %q: %w", root, err)
+			// Additional allowed roots are best-effort extra permissions (often
+			// glob-derived and racy). Skipping one is fail-closed — it only makes
+			// the validator more restrictive — so never abort construction over it.
+			// The primary workspace above remains a hard requirement.
+			continue
 		}
 
 		canonicalRoot, err := filepath.EvalSymlinks(absRoot)
 		if err != nil {
-			return nil, fmt.Errorf("canonicalize root %q: %w", root, err)
+			// Root vanished or is otherwise un-canonicalizable (e.g. a transient
+			// /tmp/foxctl-* dir removed between the caller's glob and now). Skip it.
+			continue
 		}
 		canonicalRoot = filepath.Clean(canonicalRoot)
 

@@ -151,9 +151,22 @@ func (b *Builder) buildDeltaGraphPatch(ctx context.Context, graph repoGraphBuild
 		if !srcAffected && !dstAffected {
 			continue
 		}
+		// Both endpoints must resolve to nodes in the freshly built graph.
+		// Otherwise inserting this edge would reference a node that is neither
+		// in the patch's upsert set nor guaranteed to exist in the store, which
+		// trips the edges->nodes foreign key and aborts the entire delta build.
+		// The unaffected endpoint is added to the upsert set so it is (re)written
+		// before the edge, which also self-heals stale rows left by an older
+		// index whose node IDs no longer match the current builder.
+		if _, ok := newNodesByID[edge.Src]; !ok {
+			continue
+		}
+		if _, ok := newNodesByID[edge.Dst]; !ok {
+			continue
+		}
 		upsertEdges = append(upsertEdges, edge)
-		addPatchEndpointNode(upsertNodeIDs, newNodesByID, edge.Src)
-		addPatchEndpointNode(upsertNodeIDs, newNodesByID, edge.Dst)
+		upsertNodeIDs[edge.Src] = struct{}{}
+		upsertNodeIDs[edge.Dst] = struct{}{}
 	}
 
 	upsertNodes := make([]Node, 0, len(upsertNodeIDs))
@@ -177,17 +190,6 @@ func (b *Builder) buildDeltaGraphPatch(ctx context.Context, graph repoGraphBuild
 		RemoveLocatorFiles:  changedPaths,
 		UpsertLocatorValues: locators,
 	}, nil
-}
-
-func addPatchEndpointNode(ids map[string]struct{}, nodes map[string]Node, id string) {
-	node, ok := nodes[id]
-	if !ok {
-		return
-	}
-	switch node.Kind {
-	case NodeConcept, NodePackage:
-		ids[id] = struct{}{}
-	}
 }
 
 func deltaChangedPaths(delta WorkspaceDelta) []string {

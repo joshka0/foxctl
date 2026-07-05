@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Auto-refresh the repo graph index after a merge/pull so `index repo search`
+# and `smart_search` stay current without anyone remembering to reindex.
+# Fire-and-forget: never block or fail the git operation.
+set -euo pipefail
+
+for candidate in /usr/local/go/bin "$HOME/go/bin" "$HOME/.local/bin"; do
+    case ":${PATH}:" in
+        *":$candidate:"*) ;;
+        *) export PATH="$candidate:$PATH" ;;
+    esac
+done
+
+root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+[ -n "$root" ] || exit 0
+[ -x "$root/bin/foxctl" ] || exit 0
+
+( cd "$root" && ./bin/foxctl index repo build --workspace . --go --typescript --elixir \
+    >/tmp/foxctl-reindex.log 2>&1 & ) || true
+exit 0

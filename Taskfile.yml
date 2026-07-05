@@ -1,0 +1,187 @@
+# Taskfile for foxctl — the deliberate daily developer loop.
+#
+# Why this exists alongside the Makefile: code changes must be paired with a
+# repo-index refresh, otherwise `index repo search` / `smart_search` silently go
+# stale (see the 2026-07-03 FK bug that froze the index). This Taskfile makes
+# reindexing a first-class, hard-to-forget step:
+#   * `task build`      compiles AND refreshes the index
+#   * `task ready`      the "I changed code" gate: build -> reindex -> check
+#   * `task check`      warns when the index is stale
+#   * git hooks         auto-reindex after merge/checkout (task hooks:install)
+#
+# The Makefile remains the source of truth for the long tail (gepa-*, eval-*,
+# ts-*, gui-*, skills-*, the full test matrix). Reach it via:
+#   task make -- <target> [args]
+#
+# Install the runner once:  go install github.com/go-task/task/v3/cmd/task@latest
+version: '3'
+
+vars:
+  BINARY: foxctl
+  # Languages indexed for this repo. Drop flags for non-matching repos.
+  INDEX_LANGS: --go --typescript --elixir
+  # Mirror the Makefile's toolchain hygiene: pin CGO off, ignore a stale GOROOT,
+  # and find go on PATH or at the standard system install.
+  GOCMD:
+    sh: |
+      go=$(command -v go 2>/dev/null || true)
+      if [ -z "$go" ] && [ -x /usr/local/go/bin/go ]; then go=/usr/local/go/bin/go; fi
+      [ -n "$go" ] || go=go
+      echo "env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=0 $go"
+
+env:
+  # Keep go/gofumpt/golangci-lint reachable no matter how the caller's PATH looks.
+  PATH:
+    sh: echo "/usr/local/go/bin:$HOME/go/bin:$HOME/.local/bin:$PATH"
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  # ---- everyday build ------------------------------------------------------
+
+  build:
+    desc: Compile binaries and refresh the repo index (the everyday build)
+    cmds:
+      - task: build:bin
+      - task: reindex
+
+  build:bin:
+    desc: Compile the foxctl binaries only (no reindex)
+    cmds:
+      - |
+        set -euo pipefail
+        VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
+        COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+        DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        {{.GOCMD}} build -trimpath \
+          -ldflags="-s -w \
+          -X github.com/joshka0/foxctl/internal/platform/buildinfo.Version=$VERSION \
+          -X github.com/joshka0/foxctl/internal/platform/buildinfo.Commit=$COMMIT \
+          -X github.com/joshka0/foxctl/internal/platform/buildinfo.Date=$DATE" \
+          -o bin/{{.BINARY}} ./cmd/foxctl
+        {{.GOCMD}} build -trimpath -ldflags="-s -w" -o bin/foxctl-mail ./cmd/foxctl-mail
+    sources:
+      - cmd/**/*.go
+      - internal/**/*.go
+      - skills/**/*.go
+      - go.mod
+      - go.sum
+    generates:
+      - bin/{{.BINARY}}
+      - bin/foxctl-mail
+
+  # ---- repo index ----------------------------------------------------------
+
+  reindex:
+    desc: Incrementally refresh the repo graph index (fast; only changed files)
+    preconditions:
+      - sh: test -x ./bin/{{.BINARY}}
+        msg: "bin/{{.BINARY}} missing — run `task build:bin` first"
+    cmds:
+      - ./bin/{{.BINARY}} index repo build --workspace . {{.INDEX_LANGS}}
+
+  reindex:full:
+    desc: Full rebuild of the repo graph index (after a schema change or stale index)
+    preconditions:
+      - sh: test -x ./bin/{{.BINARY}}
+        msg: "bin/{{.BINARY}} missing — run `task build:bin` first"
+    cmds:
+      - ./bin/{{.BINARY}} index repo build --workspace . {{.INDEX_LANGS}} --incremental=false
+
+  index:check:
+    desc: Warn (non-fatal) when the repo index is stale relative to the working tree
+    cmds:
+      - |
+        set -euo pipefail
+        if [ ! -x ./bin/{{.BINARY}} ]; then
+          echo "index:check — bin/{{.BINARY}} missing, skipping"; exit 0
+        fi
+        level=$(./bin/{{.BINARY}} index repo status --workspace . 2>/dev/null \
+          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['freshness']['level'])" 2>/dev/null || echo unknown)
+        if [ "$level" = "current" ]; then
+          echo "index:check — index is current"
+        else
+          echo "WARN index:check — repo index is '${level}'; run \`task reindex\` (or \`task ready\`)"
+        fi
+
+  # ---- the deliberate change flow -----------------------------------------
+
+  ready:
+    desc: "Deliberate 'I changed code' gate: build -> reindex -> full check"
+    cmds:
+      - task: build:bin
+      - task: reindex
+      - task: check
+
+  check:
+    desc: Local gate — fmt, vet, lint, tests, coverage, doc links, hygiene, index freshness
+    cmds:
+      - task: fmt
+      - task: vet
+      - task: lint
+      - task: test
+      - make check-coverage
+      - task: doc-links
+      - make repo-hygiene
+      - task: build:bin
+      - task: index:check
+
+  # ---- native core tasks ---------------------------------------------------
+
+  fmt:
+    desc: Format Go code with gofumpt
+    cmds:
+      - gofumpt -w $(find cmd internal skills -name '*.go')
+
+  vet:
+    desc: go vet all packages
+    cmds:
+      - "{{.GOCMD}} vet ./..."
+
+  lint:
+    desc: Run golangci-lint over all packages
+    cmds:
+      - GOFLAGS=-buildvcs=false golangci-lint run --timeout 10m ./...
+
+  test:
+    desc: Run unit tests
+    cmds:
+      - "{{.GOCMD}} test ./..."
+
+  test:race:
+    desc: Run tests with the race detector
+    cmds:
+      - "{{.GOCMD}} test ./... -race"
+
+  typecheck:
+    desc: Type-check all packages (go build ./...)
+    cmds:
+      - "{{.GOCMD}} build ./..."
+
+  tidy:
+    desc: go mod tidy
+    cmds:
+      - "{{.GOCMD}} mod tidy"
+
+  doc-links:
+    desc: Validate documentation links
+    cmds:
+      - bash scripts/check_doc_links.sh
+
+  # ---- setup & escape hatch -------------------------------------------------
+
+  hooks:install:
+    desc: Install git hooks (pre-commit + auto-reindex on merge/checkout)
+    cmds:
+      - git config core.hooksPath scripts/hooks
+      - chmod +x scripts/hooks/pre-commit scripts/hooks/post-merge scripts/hooks/post-checkout
+      - echo "Installed git hooks (core.hooksPath=scripts/hooks)"
+
+  make:
+    desc: "Run any underlying Makefile target: task make -- <target> [args]"
+    cmds:
+      - make {{.CLI_ARGS}}

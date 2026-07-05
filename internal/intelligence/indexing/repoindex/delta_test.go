@@ -255,6 +255,108 @@ func TestBuilderBuildDeltaFallsBackWithoutIndexedFileState(t *testing.T) {
 	}
 }
 
+// TestBuilderBuildDeltaSurvivesMissingEndpointNode reproduces the foreign-key
+// abort that froze the repo index: a delta rebuild emits an edge from a changed
+// file into a symbol in an unchanged file, but that endpoint node is absent from
+// the store (as happens when the existing index was written by an older builder
+// whose node IDs no longer match, or was only partially persisted). Before the
+// fix the delta patch skipped re-writing the unaffected symbol endpoint, so the
+// edge insert tripped the edges->nodes foreign key and rolled back the whole
+// build. The delta must now re-write the endpoint and succeed.
+func TestBuilderBuildDeltaSurvivesMissingEndpointNode(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	storageRoot := filepath.Join(root, "storage")
+	repoRoot := filepath.Join(root, "repo")
+	if err := os.MkdirAll(filepath.Join(repoRoot, "lib"), 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "go.mod"), []byte("module example.com/drift\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "lib", "lib.go"), []byte("package lib\n\nfunc Lib() {}\n"), 0o644); err != nil {
+		t.Fatalf("write lib.go: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "main.go"), []byte("package main\n\nimport \"example.com/drift/lib\"\n\nfunc main() { lib.Lib() }\n"), 0o644); err != nil {
+		t.Fatalf("write main.go: %v", err)
+	}
+
+	store, err := Open(ctx, storageRoot, repoRoot)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	builder := NewBuilder(store, repoRoot)
+	if _, err := builder.Build(ctx, BuildOptions{
+		RepoRoot:  repoRoot,
+		IncludeGo: true,
+		Patterns:  []string{"./..."},
+	}); err != nil {
+		t.Fatalf("initial build: %v", err)
+	}
+
+	// Locate the lib.Lib symbol node produced by the initial build.
+	libNodes, err := store.ListNodesByFiles(ctx, []string{"lib/lib.go"})
+	if err != nil {
+		t.Fatalf("list lib nodes: %v", err)
+	}
+	var libID string
+	for _, node := range libNodes {
+		if node.Kind == NodeSymbol && node.Name == "Lib" {
+			libID = node.ID
+			break
+		}
+	}
+	if libID == "" {
+		t.Fatalf("lib.Lib symbol node not indexed: %+v", libNodes)
+	}
+
+	// The reproduction requires an edge from the changed file into lib.Lib.
+	var edgesIntoLib int
+	if err := store.db.QueryRowContext(ctx, `SELECT count(*) FROM edges WHERE dst = ?`, libID).Scan(&edgesIntoLib); err != nil {
+		t.Fatalf("count edges into lib: %v", err)
+	}
+	if edgesIntoLib == 0 {
+		t.Fatalf("expected an edge into lib.Lib to set up the regression")
+	}
+
+	// Simulate a store that is missing the unchanged endpoint node (older/partial
+	// index). Inbound edges cascade away, matching a consistent-but-stale store.
+	if _, err := store.db.ExecContext(ctx, `DELETE FROM nodes WHERE id = ?`, libID); err != nil {
+		t.Fatalf("delete lib node: %v", err)
+	}
+
+	// Change only main.go while it still calls lib.Lib.
+	if err := os.WriteFile(filepath.Join(repoRoot, "main.go"), []byte("package main\n\nimport \"example.com/drift/lib\"\n\nfunc main() { lib.Lib() }\n\nfunc Extra() {}\n"), 0o644); err != nil {
+		t.Fatalf("rewrite main.go: %v", err)
+	}
+	delta, err := store.ComputeDelta(ctx)
+	if err != nil {
+		t.Fatalf("compute delta: %v", err)
+	}
+	if !containsDeltaPath(delta.Modified, "main.go") {
+		t.Fatalf("modified=%v missing main.go", delta.Modified)
+	}
+
+	if _, err := builder.BuildDelta(ctx, BuildOptions{
+		RepoRoot:  repoRoot,
+		IncludeGo: true,
+		Patterns:  []string{"./..."},
+	}, delta); err != nil {
+		t.Fatalf("build delta must not fail on missing endpoint node: %v", err)
+	}
+
+	// The endpoint node is re-written, so it is searchable again.
+	hits, err := store.SearchFTS(ctx, "Lib", 10)
+	if err != nil {
+		t.Fatalf("search Lib: %v", err)
+	}
+	if len(hits) == 0 {
+		t.Fatalf("expected lib.Lib to be re-indexed after delta")
+	}
+}
+
 func containsDeltaPath(paths []string, want string) bool {
 	for _, path := range paths {
 		if path == want {
