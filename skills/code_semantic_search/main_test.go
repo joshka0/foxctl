@@ -1076,3 +1076,28 @@ func TestSearchPathFallbackSkipsDependencyAndBuildDirs(t *testing.T) {
 		}
 	}
 }
+
+// resultsToFileEntries must surface Similarity (a real 0-1 relevance) as the
+// tree display score, not the tiny RRF-based FinalScore that renders as a flat
+// 0%. FinalScore is only a fallback for non-semantic entries with no similarity.
+func TestResultsToFileEntries_UsesSimilarityForDisplayScore(t *testing.T) {
+	results := []Result{
+		{Path: "a.go", Similarity: 0.76, FinalScore: 0.0082},
+		{Path: "b.go", Similarity: 0.60, FinalScore: 0.0081},
+		{Path: "c.go", Similarity: 0.0, FinalScore: 0.0079}, // non-semantic: fall back
+	}
+	entries := resultsToFileEntries(results)
+	byPath := map[string]retrieval.FileEntry{}
+	for _, e := range entries {
+		byPath[e.Path] = e
+	}
+	if got := byPath["a.go"].Score; got != 0.76 {
+		t.Fatalf("a.go score = %v, want 0.76 (similarity)", got)
+	}
+	if got := byPath["b.go"].Score; got != 0.60 {
+		t.Fatalf("b.go score = %v, want 0.60 (similarity)", got)
+	}
+	if got := byPath["c.go"].Score; got != 0.0079 {
+		t.Fatalf("c.go score = %v, want 0.0079 (FinalScore fallback)", got)
+	}
+}
