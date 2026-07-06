@@ -2,6 +2,7 @@ package turbovec
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +15,21 @@ const (
 	// DefaultBitWidth is the default quantization bit width (4 = 16 buckets per coordinate).
 	DefaultBitWidth = 4
 )
+
+// ErrDimMismatch is returned when a vector's length does not match the index
+// dimension. Sending such a vector to the sidecar makes turbovecd panic
+// ("dim must be a multiple of 8"), which crashes the daemon out-of-process and
+// triggers a restart loop, so all vectors are dimension-checked at this boundary.
+var ErrDimMismatch = errors.New("turbovec: vector dimension mismatch")
+
+// checkDim guards the sidecar from vectors whose length does not match the
+// index dimension.
+func (vi *VectorIndex) checkDim(v []float32) error {
+	if len(v) != int(vi.dim) {
+		return fmt.Errorf("%w: got %d, want %d", ErrDimMismatch, len(v), vi.dim)
+	}
+	return nil
+}
 
 // VectorIndex manages a turbovec sidecar connection for a single workspace's
 // vector search. It handles index lifecycle (create/load/save), adding vectors
@@ -131,6 +147,9 @@ func (vi *VectorIndex) EnsureConnected() error {
 
 // AddVector adds a single vector for a document ID.
 func (vi *VectorIndex) AddVector(docID string, embedding []float32) error {
+	if err := vi.checkDim(embedding); err != nil {
+		return err
+	}
 	if err := vi.EnsureConnected(); err != nil {
 		return err
 	}
@@ -173,6 +192,9 @@ type SearchResult struct {
 
 // Search queries the vector index and returns scored document IDs.
 func (vi *VectorIndex) Search(query []float32, k int) ([]SearchResult, error) {
+	if err := vi.checkDim(query); err != nil {
+		return nil, err
+	}
 	if err := vi.EnsureConnected(); err != nil {
 		return nil, err
 	}
@@ -203,6 +225,9 @@ func (vi *VectorIndex) Search(query []float32, k int) ([]SearchResult, error) {
 
 // SearchFiltered queries restricted to the given document IDs.
 func (vi *VectorIndex) SearchFiltered(query []float32, k int, docIDs []string) ([]SearchResult, error) {
+	if err := vi.checkDim(query); err != nil {
+		return nil, err
+	}
 	if err := vi.EnsureConnected(); err != nil {
 		return nil, err
 	}

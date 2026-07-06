@@ -128,7 +128,9 @@ func (s *turbovecStore) Upsert(ctx context.Context, doc Document) error {
 		return err
 	}
 
-	// Add to turbovec index if we have an embedding.
+	// Add to turbovec index if we have an embedding. The sidecar client rejects
+	// vectors whose dimension does not match the index (see VectorIndex.AddVector),
+	// so a malformed embedding can no longer crash the daemon here.
 	if len(doc.Embedding) > 0 {
 		// SQL remains the source of truth; the compressed sidecar is best-effort.
 		_ = s.vec.AddVector(doc.ID, doc.Embedding)
