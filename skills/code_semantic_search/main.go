@@ -3515,9 +3515,14 @@ func resultsToFileEntries(results []Result) []retrieval.FileEntry {
 		}
 		seen[r.Path] = true
 
-		score := r.FinalScore
+		// retrieval.FileEntry.Score is a 0-1 relevance used for tree display and
+		// directory aggregation. Prefer Similarity, which has real spread across
+		// results; FinalScore is an RRF/PageRank ranking score (~0.008) that
+		// renders as a misleading flat 0%. Fall back to FinalScore only for
+		// non-semantic entries that carry no similarity.
+		score := r.Similarity
 		if score <= 0 {
-			score = r.Similarity
+			score = r.FinalScore
 		}
 		entries = append(entries, retrieval.FileEntry{
 			Path:    r.Path,
