@@ -107,9 +107,11 @@ func (vi *VectorIndex) EnsureConnected() error {
 	vi.mu.Lock()
 	defer vi.mu.Unlock()
 
-	if vi.connected {
+	// Redial if a prior roundtrip dropped the connection (timeout / desync).
+	if vi.connected && vi.client != nil && vi.client.Connected() {
 		return nil
 	}
+	vi.connected = false
 
 	client, err := Dial(vi.socketPath)
 	if err != nil {
