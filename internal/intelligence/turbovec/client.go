@@ -22,7 +22,15 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
+
+// roundtripTimeout bounds every request/response exchange with the sidecar.
+// Legitimate operations (load of a small index, a query) complete in well under
+// a second; an unbounded read otherwise hangs the caller indefinitely if the
+// daemon wedges or the framed stream desyncs under concurrent load. On timeout
+// the connection is dropped and the caller falls back (e.g. to exact SQL search).
+const roundtripTimeout = 15 * time.Second
 
 // Protocol command bytes — must match turbovec-server/src/protocol.rs.
 const (
@@ -79,7 +87,27 @@ func Dial(socketPath string) (*Client, error) {
 
 // Close closes the connection to the sidecar.
 func (c *Client) Close() error {
-	return c.conn.Close()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.dropConnLocked()
+}
+
+// Connected reports whether the client still holds a live connection. After a
+// failed roundtrip the connection is dropped and callers should redial.
+func (c *Client) Connected() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.conn != nil
+}
+
+// dropConnLocked closes and clears the connection. Caller must hold c.mu.
+func (c *Client) dropConnLocked() error {
+	if c.conn == nil {
+		return nil
+	}
+	err := c.conn.Close()
+	c.conn = nil
+	return err
 }
 
 // Ping checks liveness of the sidecar.
@@ -288,14 +316,27 @@ func (c *Client) roundtrip(cmd uint8, payload []byte) ([]byte, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if c.conn == nil {
+		return nil, errors.New("turbovec: connection closed")
+	}
+
+	// Bound the exchange so a wedged daemon or a desynced stream cannot hang the
+	// caller forever. Any failure leaves the framed stream in an unknown state,
+	// so drop the connection; the next use redials.
+	_ = c.conn.SetDeadline(time.Now().Add(roundtripTimeout))
+
 	if err := writeFrame(c.conn, cmd, payload); err != nil {
+		_ = c.dropConnLocked()
 		return nil, fmt.Errorf("turbovec: write: %w", err)
 	}
 
 	respCmd, respPayload, err := readFrame(c.conn)
 	if err != nil {
+		_ = c.dropConnLocked()
 		return nil, fmt.Errorf("turbovec: read: %w", err)
 	}
+
+	_ = c.conn.SetDeadline(time.Time{}) // clear deadline on success
 
 	// Response uses same command byte.
 	_ = respCmd
