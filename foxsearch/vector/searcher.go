@@ -3,7 +3,7 @@ package vector
 import (
 	"context"
 
-	"github.com/joshka0/foxctl/internal/intelligence/turbovec"
+	"github.com/joshka0/foxsearch/turbovec"
 )
 
 // ScoredID is a string ID ranked by similarity score.

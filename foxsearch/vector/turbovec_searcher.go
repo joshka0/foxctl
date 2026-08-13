@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/joshka0/foxctl/internal/intelligence/turbovec"
+	"github.com/joshka0/foxsearch/turbovec"
 )
 
 // TurbovecSearcher uses the turbovec sidecar for approximate nearest-neighbor

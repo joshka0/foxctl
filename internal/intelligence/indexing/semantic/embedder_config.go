@@ -3,17 +3,19 @@ package semantic
 import (
 	"strings"
 
+	"github.com/joshka0/foxsearch/embed"
+
 	"github.com/joshka0/foxctl/internal/platform/config"
 )
 
 // DetectProviderForConfig resolves the effective embedding provider for a repo/workspace config.
 // Priority: explicit provider > model family > base URL/API key shape > Gemini key > local default.
 func DetectProviderForConfig(cfg config.Config, geminiKey string) string {
-	provider := normalizeEmbeddingProviderName(cfg.Embedding.Provider)
+	provider := embed.NormalizeProviderName(cfg.Embedding.Provider)
 	if provider != "" {
 		return provider
 	}
-	if inferred := providerFromModel(ResolveModelForScope(ScopeDefault, cfg)); inferred != "" {
+	if inferred := embed.ProviderFromModel(ResolveModelForScope(ScopeDefault, cfg)); inferred != "" {
 		return inferred
 	}
 	if strings.TrimSpace(cfg.Embedding.BaseURL) != "" || strings.TrimSpace(cfg.Embedding.APIKey) != "" {
@@ -60,7 +62,7 @@ func NewProviderForScope(scope EmbeddingScope, cfg config.Config, opts ...Embedd
 	if err != nil {
 		return nil, err
 	}
-	return embedder.provider, nil
+	return embedder.EmbeddingProvider(), nil
 }
 
 // NewProviderForModel creates an EmbeddingProvider for an explicit model.
@@ -76,13 +78,13 @@ func NewProviderForModel(model string, cfg config.Config, opts ...EmbedderOption
 	if err != nil {
 		return nil, err
 	}
-	return embedder.provider, nil
+	return embedder.EmbeddingProvider(), nil
 }
 
 func applyProviderPreference(model string, cfg config.Config, opts []EmbedderOption) []EmbedderOption {
-	provider := providerFromModel(model)
+	provider := embed.ProviderFromModel(model)
 	if provider == "" {
-		provider = normalizeEmbeddingProviderName(cfg.Embedding.Provider)
+		provider = embed.NormalizeProviderName(cfg.Embedding.Provider)
 	}
 	if provider == "" && strings.TrimSpace(cfg.Embedding.BaseURL) != "" {
 		provider = "openai_compat"
@@ -96,25 +98,4 @@ func applyProviderPreference(model string, cfg config.Config, opts []EmbedderOpt
 		opts = append(opts, WithGeminiKey(""))
 	}
 	return opts
-}
-
-func providerFromModel(model string) string {
-	lower := strings.ToLower(strings.TrimSpace(model))
-	switch {
-	case strings.HasPrefix(lower, "gemini-"):
-		return "gemini"
-	case strings.HasPrefix(lower, "text-embedding-"), strings.HasPrefix(lower, "nomic-embed-"), strings.Contains(lower, "embeddinggemma"):
-		return "openai_compat"
-	default:
-		return ""
-	}
-}
-
-func normalizeEmbeddingProviderName(provider string) string {
-	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "openai_compat", "openai-compatible", "lmstudio":
-		return "openai_compat"
-	default:
-		return strings.ToLower(strings.TrimSpace(provider))
-	}
 }

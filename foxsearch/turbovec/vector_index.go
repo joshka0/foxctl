@@ -7,8 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-
-	"github.com/joshka0/foxctl/internal/platform/workspace"
 )
 
 const (
@@ -72,9 +70,10 @@ type IndexConfig struct {
 }
 
 // NewVectorIndex creates a new VectorIndex for the given workspace.
-// The sidecar connection is established lazily on first use.
+// The workspaceID is used verbatim — callers that need path canonicalization
+// must canonicalize before calling. The sidecar connection is established
+// lazily on first use.
 func NewVectorIndex(workspaceID string, dim int, cfg IndexConfig) *VectorIndex {
-	workspaceID = workspace.CanonicalID(workspaceID)
 	socketPath := cfg.SocketPath
 	if socketPath == "" {
 		socketPath = DefaultSocketPath()
@@ -336,6 +335,11 @@ func (vi *VectorIndex) Healthy(ctx context.Context) error {
 		return fmt.Errorf("turbovec: not connected")
 	}
 	return vi.client.Ping()
+}
+
+// Workspace returns the workspace ID this index is bound to.
+func (vi *VectorIndex) Workspace() string {
+	return vi.workspace
 }
 
 // indexName returns the sidecar index name for this workspace.

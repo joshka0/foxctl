@@ -4,22 +4,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
-
-	"github.com/joshka0/foxctl/internal/platform/workspace"
 )
-
-func TestNewVectorIndexCanonicalizesWorkspacePath(t *testing.T) {
-	repoPath := filepath.Join(t.TempDir(), "repo")
-	vi := NewVectorIndex(repoPath, 3, IndexConfig{DataDir: t.TempDir()})
-
-	want := workspace.CanonicalID(repoPath)
-	if vi.workspace != want {
-		t.Fatalf("workspace = %q, want %q", vi.workspace, want)
-	}
-	if got := filepath.Base(vi.indexFilePath()); got != want+".tvim" {
-		t.Fatalf("indexFilePath base = %q, want %q", got, want+".tvim")
-	}
-}
 
 // A vector whose length does not match the index dimension must be rejected at
 // the client boundary (ErrDimMismatch) before it ever reaches the sidecar. This
@@ -29,7 +14,6 @@ func TestVectorIndex_RejectsDimMismatch(t *testing.T) {
 	vi := NewVectorIndex("ws-dim", 4096, IndexConfig{SocketPath: filepath.Join(t.TempDir(), "nope.sock")})
 
 	bad := make([]float32, 100) // 100 != 4096
-
 	if err := vi.AddVector("doc", bad); !errorsIs(err) {
 		t.Fatalf("AddVector(bad dim) err = %v, want ErrDimMismatch", err)
 	}

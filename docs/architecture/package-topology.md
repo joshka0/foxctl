@@ -49,6 +49,28 @@ Prefer adding new packages under one of these stable families:
 | `internal/interfaces/web`, `internal/interfaces/gateway`, `internal/interfaces/chatadapter`, `internal/interfaces/openapi` | Interface and transport layers | current interface family |
 | `internal/tooling` | Runtime-neutral tooling, eval harnesses, and reusable standalone tools | `tooling/evals`, `tooling/skillrun`, `tooling/tools/*` |
 
+### Submodule Boundary: `foxsearch/`
+
+`foxsearch/` is a separate Go module (`github.com/joshka0/foxsearch`, linked
+via a `replace` directive in `go.mod`) holding the extracted semantic-search
+kernel: `embed` (embedding providers + facade), `vector` (exact/brute-force
+search), `turbovec` (ANN sidecar client), and `searchrank` (RRF fusion). It
+must have **zero** `foxctl/internal` imports; host concerns are injected
+through `embed.SetObserver`, `embed.SetDefaultDimensionsFunc`, and
+caller-side workspace canonicalization.
+
+The former foxctl packages (`internal/intelligence/searchrank`,
+`internal/storage/vector`, `internal/intelligence/turbovec`, and the provider
+layer of `internal/intelligence/indexing/semantic`) are now thin re-export
+shims so existing consumers keep their import paths. Foxctl-specific wiring
+(foxcular observability events, `FOXCTL_VECTOR_DIMS`, config-based provider
+selection, the memory-record indexing pipeline) stays in
+`internal/intelligence/indexing/semantic`.
+
+Retrieval *orchestration* (hybrid BM25+vector recall, query enrichment, the
+semantic file indexer) remains in `internal/intelligence/*` — only the
+storage-agnostic kernel moved.
+
 ## Target Shape
 
 This is the intended logical grouping. It is not a command to rename everything immediately.

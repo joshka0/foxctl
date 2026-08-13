@@ -1,4 +1,4 @@
-package semantic
+package embed
 
 import (
 	"context"
@@ -133,9 +133,9 @@ func NewEmbedder(scope EmbeddingScope, opts ...EmbedderOption) (*Embedder, error
 		model = cfg.modelOverride
 	}
 
-	preferredProvider := normalizeEmbeddingProviderName(cfg.provider)
+	preferredProvider := NormalizeProviderName(cfg.provider)
 	if preferredProvider == "" {
-		if inferred := providerFromModel(model); inferred != "" {
+		if inferred := ProviderFromModel(model); inferred != "" {
 			preferredProvider = inferred
 		} else if strings.TrimSpace(cfg.baseURL) != "" {
 			preferredProvider = "openai_compat"
@@ -322,6 +322,11 @@ func (e *Embedder) EmbedBatch(ctx context.Context, texts []string) ([]EmbedResul
 // Provider returns the name of the underlying provider.
 func (e *Embedder) Provider() string {
 	return e.providerName
+}
+
+// EmbeddingProvider returns the underlying provider instance.
+func (e *Embedder) EmbeddingProvider() EmbeddingProvider {
+	return e.provider
 }
 
 // Model returns the model identifier.

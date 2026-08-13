@@ -1,17 +1,52 @@
-package semantic
+package embed
 
 import (
 	"strings"
-
-	"github.com/joshka0/foxctl/internal/storage/dbdriver"
+	"sync/atomic"
 )
+
+// BuiltInDefaultDimensions is the fallback embedding dimension when no
+// model-specific dimension is known and no default has been configured.
+// Common sizes: 384 (MiniLM), 768 (BERT), 1536/3072 (OpenAI), 3072 (Gemini), 4096 (Qwen).
+const BuiltInDefaultDimensions = 4096
+
+var defaultDimensionsFunc atomic.Value // holds func() int
+
+// SetDefaultDimensionsFunc installs a resolver for the default vector
+// dimensions (e.g. a host config or environment lookup). Passing nil restores
+// the built-in default.
+func SetDefaultDimensionsFunc(f func() int) {
+	if f == nil {
+		defaultDimensionsFunc.Store(func() int { return BuiltInDefaultDimensions })
+		return
+	}
+	defaultDimensionsFunc.Store(f)
+}
+
+// SetDefaultDimensions sets a fixed default vector dimension.
+func SetDefaultDimensions(n int) {
+	if n <= 0 {
+		n = BuiltInDefaultDimensions
+	}
+	SetDefaultDimensionsFunc(func() int { return n })
+}
+
+// DefaultDimensions returns the configured default vector dimensions.
+func DefaultDimensions() int {
+	if f, ok := defaultDimensionsFunc.Load().(func() int); ok && f != nil {
+		if dims := f(); dims > 0 {
+			return dims
+		}
+	}
+	return BuiltInDefaultDimensions
+}
 
 // DimensionsForModel returns the expected embedding dimensions for a model.
 func DimensionsForModel(model string) int {
 	if dims, ok := knownDimensionsForModel(model); ok {
 		return dims
 	}
-	return dbdriver.GetDefaultVectorDimensions()
+	return DefaultDimensions()
 }
 
 func knownDimensionsForModel(model string) (int, bool) {
@@ -60,5 +95,5 @@ func ResolveDimensionsForModel(model string, configured int) int {
 	if configured > 0 {
 		return configured
 	}
-	return dbdriver.GetDefaultVectorDimensions()
+	return DefaultDimensions()
 }

@@ -1,4 +1,4 @@
-package semantic
+package embed
 
 import (
 	"bytes"
@@ -9,9 +9,6 @@ import (
 	"net/http"
 	"os"
 	"time"
-
-	"github.com/joshka0/foxctl/internal/platform/observability"
-	"github.com/oklog/ulid/v2"
 )
 
 // Mistral embedding pricing (per 1M tokens, as of Dec 2024)
@@ -150,13 +147,13 @@ func (p *MistralProvider) EmbedBatch(ctx context.Context, texts []string) ([][]f
 
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
-		p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, observability.StatusError, err)
+		p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, StatusError, err)
 		return nil, fmt.Errorf("mistral: marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
 	if err != nil {
-		p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, observability.StatusError, err)
+		p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, StatusError, err)
 		return nil, fmt.Errorf("mistral: create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -164,14 +161,14 @@ func (p *MistralProvider) EmbedBatch(ctx context.Context, texts []string) ([][]f
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, observability.StatusError, err)
+		p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, StatusError, err)
 		return nil, fmt.Errorf("mistral: request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, observability.StatusError, err)
+		p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, StatusError, err)
 		return nil, fmt.Errorf("mistral: read response: %w", err)
 	}
 
@@ -179,23 +176,23 @@ func (p *MistralProvider) EmbedBatch(ctx context.Context, texts []string) ([][]f
 		var errResp mistralErrorResponse
 		if json.Unmarshal(respBody, &errResp) == nil && errResp.Message != "" {
 			err := fmt.Errorf("mistral: API error %d: %s", resp.StatusCode, errResp.Message)
-			p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, observability.StatusError, err)
+			p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, StatusError, err)
 			return nil, err
 		}
 		err := fmt.Errorf("mistral: API returned status %d: %s", resp.StatusCode, string(respBody))
-		p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, observability.StatusError, err)
+		p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, StatusError, err)
 		return nil, err
 	}
 
 	var embedResp mistralEmbedResponse
 	if err := json.Unmarshal(respBody, &embedResp); err != nil {
-		p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, observability.StatusError, err)
+		p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, StatusError, err)
 		return nil, fmt.Errorf("mistral: unmarshal response: %w", err)
 	}
 
 	if len(embedResp.Data) != len(texts) {
 		err := fmt.Errorf("mistral: expected %d embeddings, got %d", len(texts), len(embedResp.Data))
-		p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, observability.StatusError, err)
+		p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, StatusError, err)
 		return nil, err
 	}
 
@@ -204,7 +201,7 @@ func (p *MistralProvider) EmbedBatch(ctx context.Context, texts []string) ([][]f
 	for _, emb := range embedResp.Data {
 		if emb.Index < 0 || emb.Index >= len(texts) {
 			err := fmt.Errorf("mistral: invalid embedding index %d", emb.Index)
-			p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, observability.StatusError, err)
+			p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, StatusError, err)
 			return nil, err
 		}
 		result[emb.Index] = emb.Embedding
@@ -214,7 +211,7 @@ func (p *MistralProvider) EmbedBatch(ctx context.Context, texts []string) ([][]f
 	actualTokens := int64(embedResp.Usage.TotalTokens)
 	costUSD := float64(actualTokens) * MistralEmbedPricePerMillionTokens / 1_000_000
 	p.tracker.record(1, textsCount, estimatedTokens, actualTokens, costUSD)
-	p.emitEvent(ctx, start, textsCount, estimatedTokens, actualTokens, observability.StatusOK, nil)
+	p.emitEvent(ctx, start, textsCount, estimatedTokens, actualTokens, StatusOK, nil)
 
 	return result, nil
 }
@@ -239,40 +236,23 @@ func (p *MistralProvider) ResetUsage() {
 	p.tracker.reset()
 }
 
-// emitEvent emits a foxcular event for observability.
-func (p *MistralProvider) emitEvent(ctx context.Context, start time.Time, textsCount int, estimatedTokens, actualTokens int64, status observability.Status, err error) {
-	duration := time.Since(start)
-
+// emitEvent reports the outcome of an API call to the registered observer.
+func (p *MistralProvider) emitEvent(ctx context.Context, start time.Time, textsCount int, estimatedTokens, actualTokens int64, status Status, err error) {
 	costUSD := 0.0
 	if actualTokens > 0 {
 		costUSD = float64(actualTokens) * MistralEmbedPricePerMillionTokens / 1_000_000
 	}
 
-	event := &observability.Event{
-		Timestamp: time.Now().UTC(),
-		TraceID:   observability.TraceIDFromContext(ctx),
-		SpanID:    ulid.Make().String(),
-		Operation: "embedding.generate",
-		Name:      "mistral",
-		Status:    status,
-		Duration:  duration,
-		Data: map[string]any{
-			observability.DataKeyService:   "foxctl",
-			observability.DataKeyComponent: observability.ComponentSkill,
-			observability.DataKeySubtype:   p.model,
-			"provider":                     "mistral",
-			"model":                        p.model,
-			"texts_count":                  textsCount,
-			"tokens_estimated":             estimatedTokens,
-			"tokens_actual":                actualTokens,
-			"dimensions":                   p.dimensions,
-			"cost_usd":                     costUSD,
-		},
-	}
-
-	if err != nil {
-		event.ErrorMessage = err.Error()
-	}
-
-	observability.Emit(ctx, event)
+	emitObserverEvent(ctx, &Event{
+		Provider:        "mistral",
+		Model:           p.model,
+		TextsCount:      textsCount,
+		TokensEstimated: estimatedTokens,
+		TokensActual:    actualTokens,
+		Dimensions:      p.dimensions,
+		CostUSD:         costUSD,
+		Duration:        time.Since(start),
+		Status:          status,
+		Err:             err,
+	})
 }

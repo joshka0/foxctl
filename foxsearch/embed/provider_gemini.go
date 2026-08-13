@@ -1,4 +1,4 @@
-package semantic
+package embed
 
 import (
 	"bytes"
@@ -9,12 +9,8 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
-
-	"github.com/joshka0/foxctl/internal/platform/observability"
-	"github.com/oklog/ulid/v2"
 )
 
 // Gemini embedding pricing (per 1M tokens, as of Dec 2024)
@@ -248,7 +244,7 @@ func (p *GeminiProvider) Embed(ctx context.Context, text string) ([]float32, err
 
 	// Wait for rate limit slot
 	if err := p.waitForRateLimit(ctx); err != nil {
-		p.emitEvent(ctx, start, 1, estimatedTokens, observability.StatusError, err)
+		p.emitEvent(ctx, start, 1, estimatedTokens, StatusError, err)
 		return nil, err
 	}
 
@@ -264,13 +260,13 @@ func (p *GeminiProvider) Embed(ctx context.Context, text string) ([]float32, err
 
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
-		p.emitEvent(ctx, start, 1, estimatedTokens, observability.StatusError, err)
+		p.emitEvent(ctx, start, 1, estimatedTokens, StatusError, err)
 		return nil, fmt.Errorf("gemini: marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
 	if err != nil {
-		p.emitEvent(ctx, start, 1, estimatedTokens, observability.StatusError, err)
+		p.emitEvent(ctx, start, 1, estimatedTokens, StatusError, err)
 		return nil, fmt.Errorf("gemini: create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -278,14 +274,14 @@ func (p *GeminiProvider) Embed(ctx context.Context, text string) ([]float32, err
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		p.emitEvent(ctx, start, 1, estimatedTokens, observability.StatusError, err)
+		p.emitEvent(ctx, start, 1, estimatedTokens, StatusError, err)
 		return nil, fmt.Errorf("gemini: request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		p.emitEvent(ctx, start, 1, estimatedTokens, observability.StatusError, err)
+		p.emitEvent(ctx, start, 1, estimatedTokens, StatusError, err)
 		return nil, fmt.Errorf("gemini: read response: %w", err)
 	}
 
@@ -294,11 +290,11 @@ func (p *GeminiProvider) Embed(ctx context.Context, text string) ([]float32, err
 		var errResp geminiEmbedResponse
 		if json.Unmarshal(respBody, &errResp) == nil && errResp.Error != nil {
 			err := fmt.Errorf("gemini: rate limited (429): %s", errResp.Error.Message)
-			p.emitEvent(ctx, start, 1, estimatedTokens, observability.StatusError, err)
+			p.emitEvent(ctx, start, 1, estimatedTokens, StatusError, err)
 			return nil, err
 		}
 		err := fmt.Errorf("gemini: rate limited (429)")
-		p.emitEvent(ctx, start, 1, estimatedTokens, observability.StatusError, err)
+		p.emitEvent(ctx, start, 1, estimatedTokens, StatusError, err)
 		return nil, err
 	}
 
@@ -306,30 +302,30 @@ func (p *GeminiProvider) Embed(ctx context.Context, text string) ([]float32, err
 		var errResp geminiEmbedResponse
 		if json.Unmarshal(respBody, &errResp) == nil && errResp.Error != nil {
 			err := fmt.Errorf("gemini: API error %d (%s): %s", errResp.Error.Code, errResp.Error.Status, errResp.Error.Message)
-			p.emitEvent(ctx, start, 1, estimatedTokens, observability.StatusError, err)
+			p.emitEvent(ctx, start, 1, estimatedTokens, StatusError, err)
 			return nil, err
 		}
 		err := fmt.Errorf("gemini: API returned status %d: %s", resp.StatusCode, string(respBody))
-		p.emitEvent(ctx, start, 1, estimatedTokens, observability.StatusError, err)
+		p.emitEvent(ctx, start, 1, estimatedTokens, StatusError, err)
 		return nil, err
 	}
 
 	var embedResp geminiEmbedResponse
 	if err := json.Unmarshal(respBody, &embedResp); err != nil {
-		p.emitEvent(ctx, start, 1, estimatedTokens, observability.StatusError, err)
+		p.emitEvent(ctx, start, 1, estimatedTokens, StatusError, err)
 		return nil, fmt.Errorf("gemini: unmarshal response: %w", err)
 	}
 
 	if len(embedResp.Embedding.Values) == 0 {
 		err := fmt.Errorf("gemini: empty embedding returned")
-		p.emitEvent(ctx, start, 1, estimatedTokens, observability.StatusError, err)
+		p.emitEvent(ctx, start, 1, estimatedTokens, StatusError, err)
 		return nil, err
 	}
 
 	// Track successful usage
 	costUSD := float64(estimatedTokens) * GeminiEmbeddingPricePerMillionTokens / 1_000_000
 	p.tracker.record(1, 1, estimatedTokens, 0, costUSD)
-	p.emitEvent(ctx, start, 1, estimatedTokens, observability.StatusOK, nil)
+	p.emitEvent(ctx, start, 1, estimatedTokens, StatusOK, nil)
 
 	return embedResp.Embedding.Values, nil
 }
@@ -352,7 +348,7 @@ func (p *GeminiProvider) EmbedBatch(ctx context.Context, texts []string) ([][]fl
 
 	// Wait for rate limit slot (batch counts as one request)
 	if err := p.waitForRateLimit(ctx); err != nil {
-		p.emitEvent(ctx, start, textsCount, estimatedTokens, observability.StatusError, err)
+		p.emitEvent(ctx, start, textsCount, estimatedTokens, StatusError, err)
 		return nil, err
 	}
 
@@ -372,13 +368,13 @@ func (p *GeminiProvider) EmbedBatch(ctx context.Context, texts []string) ([][]fl
 	reqBody := geminiBatchEmbedRequest{Requests: requests}
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
-		p.emitEvent(ctx, start, textsCount, estimatedTokens, observability.StatusError, err)
+		p.emitEvent(ctx, start, textsCount, estimatedTokens, StatusError, err)
 		return nil, fmt.Errorf("gemini: marshal batch request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
 	if err != nil {
-		p.emitEvent(ctx, start, textsCount, estimatedTokens, observability.StatusError, err)
+		p.emitEvent(ctx, start, textsCount, estimatedTokens, StatusError, err)
 		return nil, fmt.Errorf("gemini: create batch request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -386,14 +382,14 @@ func (p *GeminiProvider) EmbedBatch(ctx context.Context, texts []string) ([][]fl
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		p.emitEvent(ctx, start, textsCount, estimatedTokens, observability.StatusError, err)
+		p.emitEvent(ctx, start, textsCount, estimatedTokens, StatusError, err)
 		return nil, fmt.Errorf("gemini: batch request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		p.emitEvent(ctx, start, textsCount, estimatedTokens, observability.StatusError, err)
+		p.emitEvent(ctx, start, textsCount, estimatedTokens, StatusError, err)
 		return nil, fmt.Errorf("gemini: read batch response: %w", err)
 	}
 
@@ -402,11 +398,11 @@ func (p *GeminiProvider) EmbedBatch(ctx context.Context, texts []string) ([][]fl
 		var errResp geminiBatchEmbedResponse
 		if json.Unmarshal(respBody, &errResp) == nil && errResp.Error != nil {
 			err := fmt.Errorf("gemini: batch rate limited (429): %s", errResp.Error.Message)
-			p.emitEvent(ctx, start, textsCount, estimatedTokens, observability.StatusError, err)
+			p.emitEvent(ctx, start, textsCount, estimatedTokens, StatusError, err)
 			return nil, err
 		}
 		err := fmt.Errorf("gemini: batch rate limited (429)")
-		p.emitEvent(ctx, start, textsCount, estimatedTokens, observability.StatusError, err)
+		p.emitEvent(ctx, start, textsCount, estimatedTokens, StatusError, err)
 		return nil, err
 	}
 
@@ -414,23 +410,23 @@ func (p *GeminiProvider) EmbedBatch(ctx context.Context, texts []string) ([][]fl
 		var errResp geminiBatchEmbedResponse
 		if json.Unmarshal(respBody, &errResp) == nil && errResp.Error != nil {
 			err := fmt.Errorf("gemini: batch API error %d: %s", errResp.Error.Code, errResp.Error.Message)
-			p.emitEvent(ctx, start, textsCount, estimatedTokens, observability.StatusError, err)
+			p.emitEvent(ctx, start, textsCount, estimatedTokens, StatusError, err)
 			return nil, err
 		}
 		err := fmt.Errorf("gemini: batch API returned status %d: %s", resp.StatusCode, string(respBody))
-		p.emitEvent(ctx, start, textsCount, estimatedTokens, observability.StatusError, err)
+		p.emitEvent(ctx, start, textsCount, estimatedTokens, StatusError, err)
 		return nil, err
 	}
 
 	var batchResp geminiBatchEmbedResponse
 	if err := json.Unmarshal(respBody, &batchResp); err != nil {
-		p.emitEvent(ctx, start, textsCount, estimatedTokens, observability.StatusError, err)
+		p.emitEvent(ctx, start, textsCount, estimatedTokens, StatusError, err)
 		return nil, fmt.Errorf("gemini: unmarshal batch response: %w", err)
 	}
 
 	if len(batchResp.Embeddings) != len(texts) {
 		err := fmt.Errorf("gemini: expected %d embeddings, got %d", len(texts), len(batchResp.Embeddings))
-		p.emitEvent(ctx, start, textsCount, estimatedTokens, observability.StatusError, err)
+		p.emitEvent(ctx, start, textsCount, estimatedTokens, StatusError, err)
 		return nil, err
 	}
 
@@ -442,7 +438,7 @@ func (p *GeminiProvider) EmbedBatch(ctx context.Context, texts []string) ([][]fl
 	// Track successful usage (batch uses lower pricing)
 	costUSD := float64(estimatedTokens) * GeminiEmbeddingBatchPricePerMillionTokens / 1_000_000
 	p.tracker.record(1, textsCount, estimatedTokens, 0, costUSD)
-	p.emitEvent(ctx, start, textsCount, estimatedTokens, observability.StatusOK, nil)
+	p.emitEvent(ctx, start, textsCount, estimatedTokens, StatusOK, nil)
 
 	return result, nil
 }
@@ -467,10 +463,8 @@ func (p *GeminiProvider) ResetUsage() {
 	p.tracker.reset()
 }
 
-// emitEvent emits a foxcular event for observability.
-func (p *GeminiProvider) emitEvent(ctx context.Context, start time.Time, textsCount int, estimatedTokens int64, status observability.Status, err error) {
-	duration := time.Since(start)
-
+// emitEvent reports the outcome of an API call to the registered observer.
+func (p *GeminiProvider) emitEvent(ctx context.Context, start time.Time, textsCount int, estimatedTokens int64, status Status, err error) {
 	// Calculate cost for this operation
 	var costUSD float64
 	if textsCount > 1 {
@@ -479,44 +473,15 @@ func (p *GeminiProvider) emitEvent(ctx context.Context, start time.Time, textsCo
 		costUSD = float64(estimatedTokens) * GeminiEmbeddingPricePerMillionTokens / 1_000_000
 	}
 
-	event := &observability.Event{
-		Timestamp: time.Now().UTC(),
-		TraceID:   observability.TraceIDFromContext(ctx),
-		SpanID:    ulid.Make().String(),
-		Operation: "embedding.generate",
-		Name:      "gemini",
-		Status:    status,
-		Duration:  duration,
-		Data: map[string]any{
-			observability.DataKeyService:   "foxctl",
-			observability.DataKeyComponent: observability.ComponentSkill,
-			observability.DataKeySubtype:   p.model,
-			"provider":                     "gemini",
-			"model":                        p.model,
-			"texts_count":                  textsCount,
-			"tokens_estimated":             estimatedTokens,
-			"dimensions":                   p.dimensions,
-			"cost_usd":                     costUSD,
-		},
-	}
-
-	if err != nil {
-		event.ErrorMessage = err.Error()
-		if status == observability.StatusError {
-			// Classify error type
-			errMsg := err.Error()
-			switch {
-			case strings.Contains(errMsg, "rate limit"):
-				event.ErrorType = "rate_limit"
-			case strings.Contains(errMsg, "timeout"):
-				event.ErrorType = "timeout"
-			case strings.Contains(errMsg, "API error"):
-				event.ErrorType = "api_error"
-			default:
-				event.ErrorType = "unknown"
-			}
-		}
-	}
-
-	observability.Emit(ctx, event)
+	emitObserverEvent(ctx, &Event{
+		Provider:        "gemini",
+		Model:           p.model,
+		TextsCount:      textsCount,
+		TokensEstimated: estimatedTokens,
+		Dimensions:      p.dimensions,
+		CostUSD:         costUSD,
+		Duration:        time.Since(start),
+		Status:          status,
+		Err:             err,
+	})
 }
