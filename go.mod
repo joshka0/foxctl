@@ -293,7 +293,7 @@ require (
 	github.com/jingyugao/rowserrcheck v1.1.1 // indirect
 	github.com/jjti/go-spancheck v0.6.4 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
-	github.com/joshka0/foxsearch v0.0.0
+	github.com/joshka0/foxsearch v0.1.0
 	github.com/julz/importas v0.2.0 // indirect
 	github.com/karamaru-alpha/copyloopvar v1.2.1 // indirect
 	github.com/kisielk/errcheck v1.9.0 // indirect
@@ -432,5 +432,3 @@ replace github.com/tree-sitter/tree-sitter-elixir => github.com/elixir-lang/tree
 replace github.com/joshka/foxprox => ./foxprox
 
 replace github.com/joshka0/foxcular => ./foxcular
-
-replace github.com/joshka0/foxsearch => ./foxsearch

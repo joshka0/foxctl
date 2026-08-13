@@ -49,10 +49,10 @@ Prefer adding new packages under one of these stable families:
 | `internal/interfaces/web`, `internal/interfaces/gateway`, `internal/interfaces/chatadapter`, `internal/interfaces/openapi` | Interface and transport layers | current interface family |
 | `internal/tooling` | Runtime-neutral tooling, eval harnesses, and reusable standalone tools | `tooling/evals`, `tooling/skillrun`, `tooling/tools/*` |
 
-### Submodule Boundary: `foxsearch/`
+### External Module Boundary: `foxsearch`
 
-`foxsearch/` is a separate Go module (`github.com/joshka0/foxsearch`, linked
-via a `replace` directive in `go.mod`) holding the extracted semantic-search
+`github.com/joshka0/foxsearch` is a standalone public Go module (consumed as a
+versioned dependency, currently v0.1.0) holding the extracted semantic-search
 kernel: `embed` (embedding providers + facade), `vector` (exact/brute-force
 search), `turbovec` (ANN sidecar client), and `searchrank` (RRF fusion). It
 must have **zero** `foxctl/internal` imports; host concerns are injected
