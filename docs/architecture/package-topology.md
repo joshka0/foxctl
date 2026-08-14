@@ -52,9 +52,11 @@ Prefer adding new packages under one of these stable families:
 ### External Module Boundary: `foxsearch`
 
 `github.com/joshka0/foxsearch` is a standalone public Go module (consumed as a
-versioned dependency, currently v0.1.0) holding the extracted semantic-search
+versioned dependency, currently v0.2.0) holding the extracted semantic-search
 kernel: `embed` (embedding providers + facade), `vector` (exact/brute-force
-search), `turbovec` (ANN sidecar client), and `searchrank` (RRF fusion). It
+search), `turbovec` (ANN sidecar client), `searchrank` (RRF fusion),
+`embeddingtext` (embedding text construction/digests), and `circuitbreaker`
+(resilient external calls). The module
 must have **zero** `foxctl/internal` imports; host concerns are injected
 through `embed.SetObserver`, `embed.SetDefaultDimensionsFunc`, and
 caller-side workspace canonicalization.
