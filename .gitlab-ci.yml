@@ -284,6 +284,10 @@ unit-tests-core:
   rules: *go_change_rules
   variables:
     CGO_ENABLED: "0"
+    KUBERNETES_MEMORY_REQUEST: "1Gi"
+    KUBERNETES_MEMORY_LIMIT: "4Gi"
+    KUBERNETES_HELPER_MEMORY_REQUEST: "128Mi"
+    KUBERNETES_HELPER_MEMORY_LIMIT: "256Mi"
   script:
     - |
       base_ref=""
@@ -304,6 +308,10 @@ unit-tests-skills:
   rules: *skill_change_rules
   variables:
     CGO_ENABLED: "0"
+    KUBERNETES_MEMORY_REQUEST: "1Gi"
+    KUBERNETES_MEMORY_LIMIT: "4Gi"
+    KUBERNETES_HELPER_MEMORY_REQUEST: "128Mi"
+    KUBERNETES_HELPER_MEMORY_LIMIT: "256Mi"
   script:
     - |
       base_ref=""
@@ -325,6 +333,10 @@ skill-guide-drift:
   variables:
     CGO_ENABLED: "0"
     GOFLAGS: "-buildvcs=false -p=2"
+    KUBERNETES_MEMORY_REQUEST: "256Mi"
+    KUBERNETES_MEMORY_LIMIT: "1Gi"
+    KUBERNETES_HELPER_MEMORY_REQUEST: "128Mi"
+    KUBERNETES_HELPER_MEMORY_LIMIT: "256Mi"
   script:
     - |
       base_ref=""
