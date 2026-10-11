@@ -97,7 +97,7 @@ func newSessionsDeriveMemoryGroupCommand() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringSliceVar(&sourceFiles, "source-file", nil, "Path(s) to source session JSONL")
+	cmd.Flags().StringSliceVar(&sourceFiles, "source-file", nil, "Path(s) to source session JSONL/JSON")
 	cmd.Flags().StringVar(&actorID, "actor-id", "actor:system:source-import", "Actor ID for synthesized turns")
 	cmd.Flags().StringVar(&workspace, "workspace", "", "Workspace path hint (used by Claude locate)")
 	cmd.Flags().IntVar(&frameLimit, "frame-limit", 20, "Maximum anchored frames per grouped conversation")

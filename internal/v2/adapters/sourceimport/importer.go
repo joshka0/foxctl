@@ -24,6 +24,12 @@ const (
 
 // DetectProviderFromFile inspects the first parseable line and returns the source provider.
 func DetectProviderFromFile(path string) (Provider, error) {
+	if strings.EqualFold(filepath.Ext(path), ".json") {
+		if raw, err := os.ReadFile(path); err == nil && LooksLikeHermesSessionJSON(raw) {
+			return ProviderHermes, nil
+		}
+	}
+
 	f, err := os.Open(path)
 	if err != nil {
 		return ProviderAuto, fmt.Errorf("detect provider: open %s: %w", path, err)

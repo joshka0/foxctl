@@ -20,7 +20,7 @@ Sessions capture agent/user interaction history, lineage edges, context windows,
 |--------|---------|
 | `list`, `show`, `search`, `stats` | Inspect stored sessions |
 | `capture`, `import`, `summarize`, `windows`, `export` | Capture and process session data |
-| `resynthesize-v2` | Parse Claude/Codex source logs and backfill v2 turns + artifacts |
+| `resynthesize-v2` | Parse Claude/Codex/Hermes source logs and backfill v2 turns + artifacts |
 | `new`, `resume`, `fork`, `chain`, `close` | Manage active lineage and session state |
 
 Notable contract details:
@@ -38,6 +38,7 @@ Supported sources:
 
 1. Claude JSONL sessions
 2. Codex JSONL sessions
+3. Hermes Agent JSON sessions from `~/.hermes/sessions/session_*.json`
 
 Behavior:
 
@@ -45,6 +46,12 @@ Behavior:
 2. Derive deterministic artifacts (`annotation`, `classification`, `learning`, optional `embedding`).
 3. Optionally include Claude todos as additional classification/learning context.
 4. Persist into the v2 turns/artifact store (or report counts in `--dry-run` mode).
+
+For Hermes Agent sessions, use `--provider hermes --source-file
+~/.hermes/sessions/session_<id>.json`, or omit `--source-file` to use the most
+recent Hermes session when auto-location is appropriate. The same provider is
+accepted by transcript-derived memory commands such as `sessions derive-memory`
+and `sessions consolidate-doctrine`.
 
 ## Skill Contracts
 

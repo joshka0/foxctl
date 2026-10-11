@@ -18,9 +18,9 @@ func ResolveAndParseTranscript(provider, sourceFile, sessionID, workspace, actor
 		resolvedProvider = sourceimport.ProviderAuto
 	}
 	switch resolvedProvider {
-	case sourceimport.ProviderAuto, sourceimport.ProviderClaude, sourceimport.ProviderCodex:
+	case sourceimport.ProviderAuto, sourceimport.ProviderClaude, sourceimport.ProviderCodex, sourceimport.ProviderHermes:
 	default:
-		return sourceimport.ParsedSession{}, fmt.Errorf("--provider must be one of: auto, claude, codex")
+		return sourceimport.ParsedSession{}, fmt.Errorf("--provider must be one of: auto, claude, codex, hermes")
 	}
 
 	resolvedSourcePath := strings.TrimSpace(sourceFile)
@@ -52,6 +52,14 @@ func ResolveAndParseTranscript(provider, sourceFile, sessionID, workspace, actor
 				resolvedSourcePath = strings.TrimSpace(path)
 				resolvedSessionID = firstNonEmpty(resolvedSessionID, strings.TrimSpace(sid))
 			}
+		case sourceimport.ProviderHermes:
+			if resolvedSessionID != "" {
+				resolvedSourcePath = sourceimport.LocateHermesSessionJSON(resolvedSessionID)
+			} else {
+				path, sid := sourceimport.LocateMostRecentHermesSessionJSON()
+				resolvedSourcePath = strings.TrimSpace(path)
+				resolvedSessionID = firstNonEmpty(resolvedSessionID, strings.TrimSpace(sid))
+			}
 		case sourceimport.ProviderAuto:
 			if resolvedSessionID != "" {
 				if path := claudejsonl.LocateSessionJSONL(resolvedWorkspace, resolvedSessionID); path != "" {
@@ -60,6 +68,9 @@ func ResolveAndParseTranscript(provider, sourceFile, sessionID, workspace, actor
 				} else if path := codexjsonl.LocateSessionJSONL(resolvedSessionID); path != "" {
 					resolvedSourcePath = path
 					resolvedProvider = sourceimport.ProviderCodex
+				} else if path := sourceimport.LocateHermesSessionJSON(resolvedSessionID); path != "" {
+					resolvedSourcePath = path
+					resolvedProvider = sourceimport.ProviderHermes
 				}
 			}
 			if resolvedSourcePath == "" {
@@ -68,11 +79,18 @@ func ResolveAndParseTranscript(provider, sourceFile, sessionID, workspace, actor
 					resolvedProvider = sourceimport.ProviderCodex
 					resolvedSessionID = firstNonEmpty(resolvedSessionID, strings.TrimSpace(sid))
 				}
+				if resolvedSourcePath == "" {
+					if path, sid := sourceimport.LocateMostRecentHermesSessionJSON(); path != "" {
+						resolvedSourcePath = strings.TrimSpace(path)
+						resolvedProvider = sourceimport.ProviderHermes
+						resolvedSessionID = firstNonEmpty(resolvedSessionID, strings.TrimSpace(sid))
+					}
+				}
 			}
 		}
 	}
 	if strings.TrimSpace(resolvedSourcePath) == "" {
-		return sourceimport.ParsedSession{}, fmt.Errorf("source session JSONL could not be resolved")
+		return sourceimport.ParsedSession{}, fmt.Errorf("source session file could not be resolved")
 	}
 	if resolvedWorkspace == "" && strings.TrimSpace(sourceFile) == "" {
 		resolvedWorkspace = ws.Detect("")
@@ -87,6 +105,12 @@ func ResolveAndParseTranscript(provider, sourceFile, sessionID, workspace, actor
 		return backfillParsedSessionWorkspace(parsed, resolvedSourcePath, resolvedWorkspace), nil
 	case sourceimport.ProviderCodex:
 		parsed, err := sourceimport.ParseCodexFile(resolvedSourcePath, resolvedSessionID, resolvedWorkspace, actorID)
+		if err != nil {
+			return sourceimport.ParsedSession{}, err
+		}
+		return backfillParsedSessionWorkspace(parsed, resolvedSourcePath, resolvedWorkspace), nil
+	case sourceimport.ProviderHermes:
+		parsed, err := sourceimport.ParseHermesFile(resolvedSourcePath, resolvedSessionID, resolvedWorkspace, actorID)
 		if err != nil {
 			return sourceimport.ParsedSession{}, err
 		}

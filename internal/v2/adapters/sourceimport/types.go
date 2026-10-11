@@ -16,6 +16,7 @@ const (
 	ProviderAuto   Provider = "auto"
 	ProviderClaude Provider = "claude"
 	ProviderCodex  Provider = "codex"
+	ProviderHermes Provider = "hermes"
 )
 
 // ParsedSession is one normalized source conversation.

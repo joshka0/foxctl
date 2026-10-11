@@ -69,8 +69,8 @@ func newSessionsConsolidateDoctrineCommand() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&provider, "provider", "auto", "Source provider: auto, claude, codex")
-	cmd.Flags().StringVar(&sourceFile, "source-file", "", "Path to source session JSONL")
+	cmd.Flags().StringVar(&provider, "provider", "auto", "Source provider: auto, claude, codex, hermes")
+	cmd.Flags().StringVar(&sourceFile, "source-file", "", "Path to source session JSONL/JSON")
 	cmd.Flags().StringVar(&sessionID, "session-id", "", "Source session ID (for auto-locate)")
 	cmd.Flags().StringVar(&workspace, "workspace", "", "Workspace path hint")
 	cmd.Flags().StringVar(&actorID, "actor-id", "actor:system:source-import", "Actor ID for synthesized turns")

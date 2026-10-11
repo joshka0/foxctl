@@ -483,7 +483,7 @@ func newSessionsResynthesizeV2Command() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "resynthesize-v2",
 		Short: "Backfill source conversations into v2 turn/artifact stores",
-		Long: `Read source conversation logs (Claude/Codex JSONL) and resynthesize
+		Long: `Read source conversation logs (Claude/Codex JSONL or Hermes JSON) and resynthesize
 deterministic v2 turn/artifact records.
 
 This command writes directly to the v2 turns store (Turso/SQLite) and
@@ -495,13 +495,13 @@ does not require running the legacy v1 runtime path.`,
 					resolvedProvider = sourceimport.ProviderAuto
 				}
 				switch resolvedProvider {
-				case sourceimport.ProviderAuto, sourceimport.ProviderClaude, sourceimport.ProviderCodex:
+				case sourceimport.ProviderAuto, sourceimport.ProviderClaude, sourceimport.ProviderCodex, sourceimport.ProviderHermes:
 				default:
 					return sessionscmd.WriteArgError(
 						cmd.OutOrStdout(),
 						"foxctl.sessions.resynthesize_v2",
-						"--provider must be one of: auto, claude, codex",
-						"Set --provider to auto, claude, or codex.",
+						"--provider must be one of: auto, claude, codex, hermes",
+						"Set --provider to auto, claude, codex, or hermes.",
 					)
 				}
 
@@ -539,6 +539,16 @@ does not require running the legacy v1 runtime path.`,
 								resolvedSessionID = strings.TrimSpace(sid)
 							}
 						}
+					case sourceimport.ProviderHermes:
+						if resolvedSessionID != "" {
+							resolvedSourcePath = sourceimport.LocateHermesSessionJSON(resolvedSessionID)
+						} else {
+							path, sid := sourceimport.LocateMostRecentHermesSessionJSON()
+							resolvedSourcePath = strings.TrimSpace(path)
+							if resolvedSessionID == "" {
+								resolvedSessionID = strings.TrimSpace(sid)
+							}
+						}
 					case sourceimport.ProviderAuto:
 						if resolvedSessionID != "" {
 							if path := claudejsonl.LocateSessionJSONL(resolvedWorkspace, resolvedSessionID); path != "" {
@@ -547,12 +557,22 @@ does not require running the legacy v1 runtime path.`,
 							} else if path := codexjsonl.LocateSessionJSONL(resolvedSessionID); path != "" {
 								resolvedSourcePath = path
 								resolvedProvider = sourceimport.ProviderCodex
+							} else if path := sourceimport.LocateHermesSessionJSON(resolvedSessionID); path != "" {
+								resolvedSourcePath = path
+								resolvedProvider = sourceimport.ProviderHermes
 							}
 						} else {
 							if path, sid := codexjsonl.LocateMostRecentSessionJSONL(); path != "" {
 								resolvedSourcePath = strings.TrimSpace(path)
 								resolvedProvider = sourceimport.ProviderCodex
 								resolvedSessionID = strings.TrimSpace(sid)
+							}
+							if resolvedSourcePath == "" {
+								if path, sid := sourceimport.LocateMostRecentHermesSessionJSON(); path != "" {
+									resolvedSourcePath = strings.TrimSpace(path)
+									resolvedProvider = sourceimport.ProviderHermes
+									resolvedSessionID = strings.TrimSpace(sid)
+								}
 							}
 						}
 					}
@@ -562,7 +582,7 @@ does not require running the legacy v1 runtime path.`,
 					return sessionscmd.WriteArgError(
 						cmd.OutOrStdout(),
 						"foxctl.sessions.resynthesize_v2",
-						"source session JSONL could not be resolved",
+						"source session file could not be resolved",
 						"Pass --source-file directly, or provide --provider + --session-id.",
 					)
 				}
@@ -584,6 +604,13 @@ does not require running the legacy v1 runtime path.`,
 					)
 				case sourceimport.ProviderCodex:
 					parsed, err = sourceimport.ParseCodexFile(
+						resolvedSourcePath,
+						resolvedSessionID,
+						resolvedWorkspace,
+						actorID,
+					)
+				case sourceimport.ProviderHermes:
+					parsed, err = sourceimport.ParseHermesFile(
 						resolvedSourcePath,
 						resolvedSessionID,
 						resolvedWorkspace,
@@ -821,8 +848,8 @@ does not require running the legacy v1 runtime path.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&provider, "provider", "auto", "Source provider: auto, claude, codex")
-	cmd.Flags().StringVar(&sourceFile, "source-file", "", "Path to source session JSONL")
+	cmd.Flags().StringVar(&provider, "provider", "auto", "Source provider: auto, claude, codex, hermes")
+	cmd.Flags().StringVar(&sourceFile, "source-file", "", "Path to source session JSONL/JSON")
 	cmd.Flags().StringVar(&sessionID, "session-id", "", "Source session ID (for auto-locate)")
 	cmd.Flags().StringVar(&workspace, "workspace", "", "Workspace path hint (used by Claude locate)")
 	cmd.Flags().StringVar(&actorID, "actor-id", "actor:system:source-import", "Actor ID for synthesized turns")
