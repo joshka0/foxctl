@@ -14,7 +14,6 @@
     "noEmit": true,
     "tsBuildInfoFile": "./node_modules/.cache/tsconfig.tsbuildinfo",
     "types": ["bun-types"],
-    "baseUrl": ".",
     "paths": {
       "@foxctl/data": ["../data/src/index.ts"],
       "@foxctl/data/client": ["../data/src/client.ts"],

@@ -697,7 +697,7 @@ ts-build: ts-install
 ts-typecheck: ts-install
 	@bun run typecheck
 
-# Fast TypeScript check using tsgo (10x faster than tsc)
+# Fast TypeScript check using tsrs
 ts-typecheck-fast: ts-install
 	@bun run typecheck:fast
 

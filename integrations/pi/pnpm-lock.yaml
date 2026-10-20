@@ -21,9 +21,9 @@ importers:
         specifier: 1.1.38
         version: 1.1.38
     devDependencies:
-      typescript:
-        specifier: 5.9.3
-        version: 5.9.3
+      tsrs:
+        specifier: 0.14.0-ts7.1.0-dev.20260929
+        version: 0.14.0-ts7.1.0-dev.20260929
 
 packages:
 
@@ -307,6 +307,40 @@ packages:
     resolution: {integrity: sha512-R8Rdn8Hy72KKcebgLiv8jQcQkXoLMOGGv5uI1/k0l+snqkOzQ1R0ChUBCxWMlBsFMekWjq0wRudIweFs7sKT5A==}
     engines: {node: '>=14.0.0'}
 
+  '@ts-rs/darwin-arm64@0.14.0-ts7.1.0-dev.20260929':
+    resolution: {integrity: sha512-4vZxPrQ5Jl4r+FJm76HOlhLU7Th+AWlRqllb9FrLIhzeBTTK/UP69UFPehpcljr7WGp5kJtnc54t2NPZUVIbjw==}
+    engines: {node: '>=16.20.0'}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@ts-rs/linux-arm64-gnu@0.14.0-ts7.1.0-dev.20260929':
+    resolution: {integrity: sha512-PTni2YTRTDqGQWHA7jAtJ8fWm3lq7acd0BDtgHuyq+3bvsKHy3m/ZlGLPF9vXXEKjkCivcwujEgpA1huKv6eHA==}
+    engines: {node: '>=16.20.0'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  '@ts-rs/linux-arm64-musl@0.14.0-ts7.1.0-dev.20260929':
+    resolution: {integrity: sha512-ZK5pznasjPAepHXLYWX8ARux5pU/4xU03WTDqcamKkNsEhONlVstR0B7nuiSgfl2fq901dIwuvrGLmVzYIk5jg==}
+    engines: {node: '>=16.20.0'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [musl]
+
+  '@ts-rs/linux-x64-gnu@0.14.0-ts7.1.0-dev.20260929':
+    resolution: {integrity: sha512-E3NZNL78vL9lVRZNDP3PJOYlGiNA8tlM2N4inBM/ILT2AHLaJLF8G98jRjpmbrjsFVzRktJirs3awy1ftbiu5A==}
+    engines: {node: '>=16.20.0'}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  '@ts-rs/linux-x64-musl@0.14.0-ts7.1.0-dev.20260929':
+    resolution: {integrity: sha512-KUt4bVZsJPbCevGec2o3lHk2Ob5JEmAR3GDVMwIRhMQr70cOpxbe/E3VefcUUgsiqImm6sBu7+wvnw/IaUv44A==}
+    engines: {node: '>=16.20.0'}
+    cpu: [x64]
+    os: [linux]
+    libc: [musl]
+
   '@types/node@25.9.0':
     resolution: {integrity: sha512-AOQwYUNolgy3VosiRqXrACUXTN8nJUtPl7FJXMqZVyxiiCLhQuG3jXKvCS1ALr+Y2OmZhzzLVlYPEqJaiqkaJQ==}
 
@@ -553,13 +587,13 @@ packages:
   tslib@2.8.1:
     resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
 
+  tsrs@0.14.0-ts7.1.0-dev.20260929:
+    resolution: {integrity: sha512-f0JrD08O2mHO4p9hehBrxj80VIAr46dZMhEByJ17v2ctnPRUUQTA8Azteb/Q1E6Q9IQ3Gl4wV8NQBep4DvtsyQ==}
+    engines: {node: '>=16.20.0'}
+    hasBin: true
+
   typebox@1.1.38:
     resolution: {integrity: sha512-pZ0aQPmMmXoUvSbeuWf/Hzsc+avNw/Zd6VeE8CFgkVGWyuHPJvqeJJDeJqLve+K70LvjYIoleGcoJHPT17cWoA==}
-
-  typescript@5.9.3:
-    resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
-    engines: {node: '>=14.17'}
-    hasBin: true
 
   undici-types@7.24.6:
     resolution: {integrity: sha512-WRNW+sJgj5OBN4/0JpHFqtqzhpbnV0GuB+OozA9gCL7a993SmU+1JBZCzLNxYsbMfIeDL+lTsphD5jN5N+n0zg==}
@@ -1039,6 +1073,21 @@ snapshots:
       '@smithy/util-buffer-from': 2.2.0
       tslib: 2.8.1
 
+  '@ts-rs/darwin-arm64@0.14.0-ts7.1.0-dev.20260929':
+    optional: true
+
+  '@ts-rs/linux-arm64-gnu@0.14.0-ts7.1.0-dev.20260929':
+    optional: true
+
+  '@ts-rs/linux-arm64-musl@0.14.0-ts7.1.0-dev.20260929':
+    optional: true
+
+  '@ts-rs/linux-x64-gnu@0.14.0-ts7.1.0-dev.20260929':
+    optional: true
+
+  '@ts-rs/linux-x64-musl@0.14.0-ts7.1.0-dev.20260929':
+    optional: true
+
   '@types/node@25.9.0':
     dependencies:
       undici-types: 7.24.6
@@ -1276,9 +1325,15 @@ snapshots:
 
   tslib@2.8.1: {}
 
-  typebox@1.1.38: {}
+  tsrs@0.14.0-ts7.1.0-dev.20260929:
+    optionalDependencies:
+      '@ts-rs/darwin-arm64': 0.14.0-ts7.1.0-dev.20260929
+      '@ts-rs/linux-arm64-gnu': 0.14.0-ts7.1.0-dev.20260929
+      '@ts-rs/linux-arm64-musl': 0.14.0-ts7.1.0-dev.20260929
+      '@ts-rs/linux-x64-gnu': 0.14.0-ts7.1.0-dev.20260929
+      '@ts-rs/linux-x64-musl': 0.14.0-ts7.1.0-dev.20260929
 
-  typescript@5.9.3: {}
+  typebox@1.1.38: {}
 
   undici-types@7.24.6: {}
 

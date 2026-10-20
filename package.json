@@ -1,7 +1,9 @@
 {
   "name": "foxctl-ts",
   "private": true,
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "factory:model:add": "bun scripts/factory-model-add.ts",
     "dev:tui": "echo 'The TypeScript TUI is archived under docs/archive/source/packages/tui-agent. Use: make go-tui-agent'",
@@ -20,7 +22,7 @@
     "bench:go": "scripts/run-go-benchmarks.sh",
     "build": "bun run --filter '*' build",
     "typecheck": "bun run --filter '*' typecheck",
-    "typecheck:fast": "tsgo --noEmit",
+    "typecheck:fast": "tsrs --noEmit",
     "check:frontend": "bun run --cwd packages/data typecheck && bun run --cwd packages/gui-agent lint && bun run --cwd packages/gui-agent build && bun run --cwd packages/gui-agent test && bun run --cwd packages/foxterm typecheck && bun run --cwd packages/gui-auth-gateway typecheck",
     "unused:frontend": "bun run check:frontend && bun run lint && bun run dead:frontend",
     "dead:frontend": "bun scripts/check-frontend-dead-exports.ts --strict",
@@ -31,8 +33,8 @@
   },
   "devDependencies": {
     "@redwoodjs/agent-ci": "0.7.1",
-    "@typescript/native-preview": "7.0.0-dev.20260103.1",
-    "oxlint": "1.36.0"
+    "oxlint": "1.36.0",
+    "tsrs": "0.14.0-ts7.1.0-dev.20260929"
   },
   "overrides": {
     "defu": "6.1.7",

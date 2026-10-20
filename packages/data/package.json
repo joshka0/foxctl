@@ -12,10 +12,10 @@
     "./types": "./src/types.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
-    "build": "tsc"
+    "typecheck": "tsrs --noEmit",
+    "build": "tsrs"
   },
   "devDependencies": {
-    "typescript": "^5.9.3"
+    "tsrs": "0.14.0-ts7.1.0-dev.20260929"
   }
 }

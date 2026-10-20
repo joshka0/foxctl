@@ -8,8 +8,8 @@
   },
   "scripts": {
     "dev": "bun run src/index.tsx",
-    "typecheck": "tsc --noEmit",
-    "build": "tsc --noEmit"
+    "typecheck": "tsrs --noEmit",
+    "build": "tsrs --noEmit"
   },
   "dependencies": {
     "@foxctl/data": "workspace:*",
@@ -19,6 +19,6 @@
   },
   "devDependencies": {
     "@types/bun": "^1.2.22",
-    "typescript": "^5.9.3"
+    "tsrs": "0.14.0-ts7.1.0-dev.20260929"
   }
 }

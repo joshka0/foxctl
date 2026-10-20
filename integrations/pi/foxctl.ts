@@ -18,7 +18,7 @@
  */
 
 import { StringEnum } from "@earendil-works/pi-ai";
-import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { defineTool, type ExtensionAPI, type Theme } from "@earendil-works/pi-coding-agent";
 import { Key, SelectList, truncateToWidth, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
@@ -676,7 +676,7 @@ class EpicStatusWidget implements Component {
 
 	constructor(
 		private data: EpicWidgetData,
-		private theme: { fg: (color: string, text: string) => string },
+		private theme: Pick<Theme, "fg">,
 	) {}
 
 	update(data: EpicWidgetData): void {
@@ -815,7 +815,7 @@ async function refreshEpicWidget(pi: ExtensionAPI, ctx: { signal?: AbortSignal }
 	} catch { /* non-fatal */ }
 }
 
-function buildSelectListTheme(theme: { fg: (color: string, text: string) => string }) {
+function buildSelectListTheme(theme: Pick<Theme, "fg">) {
 	return {
 		selectedPrefix: (s: string) => theme.fg("accent", s),
 		selectedText: (s: string) => theme.fg("accent", s),
