@@ -32,7 +32,7 @@
   "devDependencies": {
     "@redwoodjs/agent-ci": "0.7.1",
     "@typescript/native-preview": "7.0.0-dev.20260103.1",
-    "oxlint": "1.36.0"
+    "oxlint": "1.94.0"
   },
   "overrides": {
     "defu": "6.1.7",
